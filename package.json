@@ -1,0 +1,45 @@
+{
+  "name": "edusmart-rtdb-supabase",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.81.1",
+    "appwrite": "^21.4.0",
+    "browser-image-compression": "^2.0.2",
+    "clsx": "^2.1.1",
+    "date-fns": "^4.1.0",
+    "exceljs": "^4.4.0",
+    "jspdf": "^3.0.4",
+    "jspdf-autotable": "^5.0.2",
+    "lucide-react": "^0.554.0",
+    "react": "^18.3.1",
+    "react-barcode": "^1.6.1",
+    "react-dom": "^18.3.1",
+    "react-dropzone": "^14.3.8",
+    "react-qr-reader": "^3.0.0-beta-1",
+    "react-query": "^3.39.3",
+    "react-router-dom": "^6.30.2",
+    "react-to-print": "^3.2.0",
+    "uuid": "^9.0.1",
+    "xlsx": "^0.18.5",
+    "zustand": "^4.5.7"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^5.1.0",
+    "autoprefixer": "^10.4.20",
+    "envify": "^4.1.0",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.14",
+    "terser": "^5.44.1",
+    "uglifyify": "^5.0.2",
+    "vite": "^5.4.10"
+  }
+}

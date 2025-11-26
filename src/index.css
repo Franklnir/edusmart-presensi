@@ -1,0 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Basis Reset: Menghilangkan margin dan padding default 
+  dari browser pada elemen HTML dan Body. 
+  Ini memastikan layout merapat sempurna ke pinggir.
+*/
+html, body {
+  /* Hapus margin dan padding bawaan */
+  @apply m-0 p-0; 
+  /* Pastikan lebar penuh */
+  @apply w-full h-full;
+  /* Atur warna latar belakang dan teks default */
+  @apply bg-gray-50 text-gray-900;
+  /* Terapkan font system yang cepat dan modern */
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
+  /* Cegah scrollbar horizontal yang tidak perlu */
+  overflow-x: hidden;
+  /* Atur box model secara global */
+  box-sizing: border-box;
+}
+
+/* Reset Box-Sizing: Memastikan box-sizing: border-box 
+  diterapkan ke semua elemen, mempermudah perhitungan layout. 
+*/
+*,
+*::before,
+*::after {
+  box-sizing: inherit;
+}

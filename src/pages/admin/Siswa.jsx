@@ -1,0 +1,1942 @@
+import React, { useEffect, useState, useMemo } from 'react'
+import { supabase } from '../../lib/supabase'
+import { useUIStore } from '../../store/useUIStore'
+
+/* ===== Utils ===== */
+function initials(name = '?') {
+  const parts = (name || '').trim().split(/\s+/).slice(0, 2)
+  return parts.map(p => p[0]?.toUpperCase() || '').join('')
+}
+
+const JK_LABEL = (jk) => {
+  if (!jk) return '—'
+  const s = String(jk).toLowerCase()
+  if (['l', 'laki', 'laki-laki', 'male'].includes(s)) return 'Laki-laki'
+  if (['p', 'perempuan', 'female'].includes(s)) return 'Perempuan'
+  return jk
+}
+
+const GRADE_REGEX = /^\s*(XII|XI|X|IX|VIII|VII|VI|V|IV|III|II|I|\d+)/i
+function getGradeRaw(kelasId = '') {
+  const m = String(kelasId || '').toUpperCase().match(GRADE_REGEX)
+  return m ? m[1] : ''
+}
+
+const NUM2ROMAN = {
+  '1': 'I', '2': 'II', '3': 'III', '4': 'IV',
+  '5': 'V', '6': 'VI', '7': 'VII', '8': 'VIII',
+  '9': 'IX', '10': 'X', '11': 'XI', '12': 'XII'
+}
+function canonGrade(x) {
+  if (!x) return ''
+  const s = String(x).toUpperCase().trim()
+  if (/^\d+$/.test(s)) return NUM2ROMAN[s] || s
+  return s
+}
+
+function getGradeLabel(kelasId = '') {
+  return canonGrade(getGradeRaw(kelasId))
+}
+
+function getKelasDisplayName(kelasObj) {
+  if (!kelasObj) return ''
+  return kelasObj.nama || kelasObj.id || ''
+}
+
+/* ===== Komponen Loading ===== */
+function LoadingSpinner({ size = 'md', text = 'Memuat...' }) {
+  const sizes = { sm: 'h-4 w-4', md: 'h-6 w-6', lg: 'h-8 w-8' }
+  return (
+    <div className="flex items-center justify-center space-x-2">
+      <div className={`animate-spin rounded-full border-2 border-blue-600 border-t-transparent ${sizes[size]}`} />
+      {text && <span className="text-gray-600 text-sm">{text}</span>}
+    </div>
+  )
+}
+
+/* ===== Komponen UI ===== */
+function Card({ children, className = '' }) {
+  return (
+    <div className={`bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden ${className}`}>
+      {children}
+    </div>
+  )
+}
+
+function Badge({ children, variant = 'default', className = '' }) {
+  const variants = {
+    default: 'bg-gray-100 text-gray-800',
+    primary: 'bg-blue-100 text-blue-800',
+    success: 'bg-green-100 text-green-800',
+    warning: 'bg-yellow-100 text-yellow-800',
+    danger: 'bg-red-100 text-red-800',
+    info: 'bg-indigo-100 text-indigo-800'
+  }
+  return (
+    <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${variants[variant]} ${className}`}>
+      {children}
+    </span>
+  )
+}
+
+function Button({
+  children,
+  variant = 'primary',
+  size = 'md',
+  loading = false,
+  disabled = false,
+  className = '',
+  ...props
+}) {
+  const baseClasses = 'inline-flex items-center justify-center font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed'
+
+  const variants = {
+    primary: 'bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500',
+    secondary: 'bg-gray-100 text-gray-700 hover:bg-gray-200 focus:ring-gray-500 border border-gray-300',
+    success: 'bg-green-600 text-white hover:bg-green-700 focus:ring-green-500',
+    danger: 'bg-red-600 text-white hover:bg-red-700 focus:ring-red-500',
+    warning: 'bg-yellow-600 text-white hover:bg-yellow-700 focus:ring-yellow-500'
+  }
+
+  const sizes = {
+    sm: 'px-3 py-1.5 text-sm',
+    md: 'px-4 py-2 text-sm',
+    lg: 'px-6 py-3 text-base'
+  }
+
+  return (
+    <button
+      className={`${baseClasses} ${variants[variant]} ${sizes[size]} ${className}`}
+      disabled={disabled || loading}
+      {...props}
+    >
+      {loading && (
+        <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2" />
+      )}
+      {children}
+    </button>
+  )
+}
+
+function Input({ label, error, className = '', ...props }) {
+  return (
+    <div className="space-y-1">
+      {label && (
+        <label className="block text-sm font-medium text-gray-700">
+          {label}
+        </label>
+      )}
+      <input
+        className={`block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-white ${className}`}
+        {...props}
+      />
+      {error && <p className="text-red-600 text-sm">{error}</p>}
+    </div>
+  )
+}
+
+function Select({ label, error, options = [], className = '', ...props }) {
+  return (
+    <div className="space-y-1">
+      {label && (
+        <label className="block text-sm font-medium text-gray-700">
+          {label}
+        </label>
+      )}
+      <select
+        className={`block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-white ${className}`}
+        {...props}
+      >
+        {options.map(option => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      {error && <p className="text-red-600 text-sm">{error}</p>}
+    </div>
+  )
+}
+
+function StatCard({ label, value, icon, color = 'blue', description }) {
+  const colorClasses = {
+    blue: 'bg-blue-500',
+    green: 'bg-green-500',
+    purple: 'bg-purple-500',
+    orange: 'bg-orange-500',
+    indigo: 'bg-indigo-500'
+  }
+
+  return (
+    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+      <div className="flex items-center justify-between">
+        <div className="flex-1">
+          <p className="text-sm font-medium text-gray-600 mb-1">{label}</p>
+          <p className="text-2xl font-bold text-gray-900">{value}</p>
+          {description && (
+            <p className="text-xs text-gray-500 mt-1">{description}</p>
+          )}
+        </div>
+        {icon && (
+          <div className={`text-xl text-white p-2 rounded-lg ${colorClasses[color]}`}>
+            {icon}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/* =======================================================================
+   MAIN COMPONENT - SISWA
+   ======================================================================= */
+export default function ASiswa() {
+  const { pushToast } = useUIStore()
+  const [loadingInit, setLoadingInit] = useState(true)
+
+  // Data states
+  const [siswaRaw, setSiswaRaw] = useState([])
+  const [siswa, setSiswa] = useState([])
+  const [kelasList, setKelasList] = useState([])
+  const [strukturKelas, setStrukturKelas] = useState({})
+
+  // Search fields
+  const [qNama, setQNama] = useState('')
+  const [qNIK, setQNIK] = useState('')
+  const [qKelas, setQKelas] = useState('')
+  const [qHasRfid, setQHasRfid] = useState('')
+  const [qStatus, setQStatus] = useState('')
+  const [isSearching, setIsSearching] = useState(false)
+
+  // Detail modal state
+  const [detailOpen, setDetailOpen] = useState(false)
+  const [detailUser, setDetailUser] = useState(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+
+  // Organisasi & OSIS
+  const [orgAll, setOrgAll] = useState([])
+  const [orgMember, setOrgMember] = useState([])
+  const [osisRow, setOsisRow] = useState(null)
+
+  // Pindah kelas
+  const [moveKelas, setMoveKelas] = useState('')
+  const [moveGrade, setMoveGrade] = useState('')
+
+  // Form tambah siswa
+  const [form, setForm] = useState({
+    email: '',
+    nama: '',
+    kelas: '',
+    nik: '',
+    jk: '',
+    usia: '',
+    agama: '',
+    alamat: '',
+    telp: '',
+    password: '',
+    confirmPassword: ''
+  })
+  const [formErrors, setFormErrors] = useState({})
+  const [showAddForm, setShowAddForm] = useState(false)
+  const [addingSiswa, setAddingSiswa] = useState(false)
+
+  // Hapus akun siswa
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [siswaToDelete, setSiswaToDelete] = useState(null)
+  const [deletingSiswa, setDeletingSiswa] = useState(false)
+
+  // RFID
+  const [rfidInput, setRfidInput] = useState('')
+  const [rfidEnrolling, setRfidEnrolling] = useState(false)
+  const [rfidLastScan, setRfidLastScan] = useState(null)
+  const [rfidChannel, setRfidChannel] = useState(null)
+
+  // Nonaktifkan siswa
+  const [nonaktifModalOpen, setNonaktifModalOpen] = useState(false)
+  const [alasanNonaktif, setAlasanNonaktif] = useState('')
+  const [siswaToNonaktif, setSiswaToNonaktif] = useState(null)
+
+  // Aktifkan siswa
+  const [aktifkanModalOpen, setAktifkanModalOpen] = useState(false)
+  const [siswaToAktifkan, setSiswaToAktifkan] = useState(null)
+
+  // Cleanup channel
+  useEffect(() => {
+    return () => {
+      if (rfidChannel) {
+        supabase.removeChannel(rfidChannel)
+      }
+    }
+  }, [rfidChannel])
+
+  /* ===== Load initial data ===== */
+  useEffect(() => {
+    loadAllData()
+  }, [])
+
+  const loadAllData = async () => {
+    try {
+      setLoadingInit(true)
+      await Promise.all([
+        loadSiswaRaw(),
+        loadKelasList(),
+        loadStrukturKelas()
+      ])
+    } catch (error) {
+      console.error('Error loading data:', error)
+      pushToast('error', 'Gagal memuat data')
+    } finally {
+      setLoadingInit(false)
+    }
+  }
+
+  const loadSiswaRaw = async () => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('role', 'siswa')
+      .order('kelas')
+      .order('nama')
+
+    if (error) throw error
+    setSiswaRaw(data || [])
+    setSiswa(data || [])
+  }
+
+  const loadKelasList = async () => {
+    const { data, error } = await supabase
+      .from('kelas')
+      .select('*')
+      .order('grade')
+      .order('suffix')
+
+    if (error) throw error
+    setKelasList(data || [])
+  }
+
+  const loadStrukturKelas = async () => {
+    const { data, error } = await supabase
+      .from('kelas_struktur')
+      .select('*')
+
+    if (error) throw error
+
+    const struktur = {}
+    data?.forEach(item => {
+      struktur[item.kelas_id] = item
+    })
+    setStrukturKelas(struktur)
+  }
+
+  // Opsi kelas untuk Select
+  const kelasOptions = useMemo(() => {
+    return kelasList.map(kelas => ({
+      value: kelas.id,
+      label: getKelasDisplayName(kelas),
+      grade: kelas.grade
+    }))
+  }, [kelasList])
+
+  const getNamaKelas = (kelasId) => {
+    const kelas = kelasList.find(k => k.id === kelasId)
+    return getKelasDisplayName(kelas) || kelasId || '—'
+  }
+
+  // Cek ketua kelas
+  const isKetuaKelas = (siswaId) => {
+    return Object.values(strukturKelas).some(
+      struktur => struktur.ketua_siswa_id === siswaId
+    )
+  }
+
+  const getKelasKetua = (siswaId) => {
+    const struktur = Object.values(strukturKelas).find(
+      s => s.ketua_siswa_id === siswaId
+    )
+    return struktur ? getNamaKelas(struktur.kelas_id) : null
+  }
+
+  /* ===== Statistik dashboard ===== */
+  const stats = useMemo(() => {
+    const totalSiswa = siswaRaw.length
+    const aktifSiswa = siswaRaw.filter(s => s.status === 'active').length
+    const nonaktifSiswa = siswaRaw.filter(s => s.status === 'nonaktif').length
+    const ketuaKelas = siswaRaw.filter(s => isKetuaKelas(s.id)).length
+
+    return {
+      totalSiswa,
+      aktifSiswa,
+      nonaktifSiswa,
+      ketuaKelas
+    }
+  }, [siswaRaw, strukturKelas])
+
+  /* ===== Filter ===== */
+  function applyFilter() {
+    setIsSearching(true)
+    setTimeout(() => {
+      const namaNeedle = qNama.trim().toLowerCase()
+      const nikNeedle = qNIK.trim().toLowerCase()
+      const kelasNeedle = qKelas.trim().toLowerCase()
+      const hasRfidNeedle = qHasRfid
+      const statusNeedle = qStatus
+
+      const res = siswaRaw.filter(s => {
+        const okNama = namaNeedle
+          ? (String(s.nama || '').toLowerCase().includes(namaNeedle) ||
+            String(s.email || '').toLowerCase().includes(namaNeedle))
+          : true
+
+        const okNik = nikNeedle
+          ? (String(s.nik || '').toLowerCase().includes(nikNeedle))
+          : true
+
+        const okKls = kelasNeedle
+          ? (String(s.kelas || '').toLowerCase() === kelasNeedle)
+          : true
+
+        const hasRfid = !!s.rfid_uid
+        const okRfid =
+          hasRfidNeedle === ''
+            ? true
+            : hasRfidNeedle === 'yes'
+              ? hasRfid
+              : !hasRfid
+
+        const okStatus = statusNeedle === '' 
+          ? true 
+          : s.status === statusNeedle
+
+        return okNama && okNik && okKls && okRfid && okStatus
+      })
+
+      setSiswa(res)
+      setIsSearching(false)
+    }, 250)
+  }
+
+  function resetFilter() {
+    setQNama('')
+    setQNIK('')
+    setQKelas('')
+    setQHasRfid('')
+    setQStatus('')
+    setSiswa(siswaRaw)
+  }
+
+  // Auto apply filter ketika state berubah
+  useEffect(() => {
+    applyFilter()
+  }, [qNama, qNIK, qKelas, qHasRfid, qStatus])
+
+  /* ===== Grade helpers ===== */
+  const DEFAULT_GRADES = ['VII', 'VIII', 'IX', 'X', 'XI', 'XII']
+  const gradeLabels = useMemo(() => {
+    const s = new Set(DEFAULT_GRADES)
+    for (const k of kelasList) {
+      const g = getGradeLabel(k.id)
+      if (g) s.add(g)
+    }
+    const order = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII']
+    return [...s].sort((a, b) => order.indexOf(a) - order.indexOf(b))
+  }, [kelasList])
+
+  function kelasByGrade(g) {
+    const G = canonGrade(g)
+    if (!G) return []
+    return kelasList.filter(k => getGradeLabel(k.id) === G)
+  }
+
+  /* ===== Detail modal ===== */
+  async function openDetail(u) {
+    setRfidInput((u.rfid_uid || '').toUpperCase())
+    setRfidLastScan(null)
+    setRfidEnrolling(false)
+    if (rfidChannel) {
+      supabase.removeChannel(rfidChannel)
+      setRfidChannel(null)
+    }
+
+    setDetailUser(u)
+    setMoveKelas(u.kelas || '')
+    setMoveGrade(getGradeLabel(u.kelas || '') || '')
+    setDetailLoading(true)
+    setDetailOpen(true)
+
+    try {
+      // Organisasi dengan jabatan
+      const { data: orgData, error: orgError } = await supabase
+        .from('organisasi')
+        .select('*')
+
+      if (orgError) throw orgError
+
+      const all = orgData?.map(o => ({ id: o.id, nama: o.nama || o.id })) || []
+      setOrgAll(all)
+
+      // Load organisasi anggota dengan jabatan
+      const { data: orgAnggotaData, error: orgAnggotaError } = await supabase
+        .from('organisasi_anggota')
+        .select('*')
+        .eq('siswa_id', u.id)
+
+      if (orgAnggotaError) throw orgAnggotaError
+
+      const mine = orgAnggotaData?.map(a => ({
+        orgId: a.organisasi_id,
+        orgNama: all.find(o => o.id === a.organisasi_id)?.nama || a.organisasi_id,
+        status: a.status || 'aktif',
+        bagian: a.bagian || '',
+        jabatan: a.jabatan || 'Anggota'
+      })) || []
+
+      setOrgMember(mine)
+
+      // OSIS
+      const { data: osisData, error: osisError } = await supabase
+        .from('osis_anggota')
+        .select('*')
+        .eq('siswa_id', u.id)
+        .single()
+
+      if (osisError && osisError.code !== 'PGRST116') throw osisError
+
+      const row = osisData ? {
+        status: osisData.status || 'aktif',
+        bagian: osisData.bagian || '',
+        jabatan: osisData.jabatan || 'Anggota'
+      } : null
+      setOsisRow(row)
+
+    } catch (error) {
+      console.error('Error loading detail:', error)
+      pushToast('error', 'Gagal memuat detail siswa')
+    } finally {
+      setDetailLoading(false)
+    }
+  }
+
+  // Auto pilih kelas ketika grade dipilih
+  useEffect(() => {
+    if (!detailOpen) return
+    const currentGrade = getGradeLabel(detailUser?.kelas || '')
+    if (currentGrade) return
+    if (!moveGrade) return
+    const opts = kelasByGrade(moveGrade)
+    if (!opts.length) return
+    if (!moveKelas) setMoveKelas(opts[0].id)
+  }, [detailOpen, moveGrade, kelasList, detailUser, moveKelas])
+
+  function closeDetailModal() {
+    setDetailOpen(false)
+    setDetailUser(null)
+    setRfidInput('')
+    setRfidLastScan(null)
+    setRfidEnrolling(false)
+    if (rfidChannel) {
+      supabase.removeChannel(rfidChannel)
+      setRfidChannel(null)
+    }
+  }
+
+  /* ===== Detail: actions (kelas & status) ===== */
+  async function simpanPindahKelas() {
+    const user = detailUser
+    const target = moveKelas || ''
+    if (!user || !target) return
+
+    const currentGrade = getGradeLabel(user.kelas || '')
+    const targetGrade = getGradeLabel(target || '')
+    const chosenGrade = moveGrade || currentGrade
+
+    if (currentGrade ? (targetGrade !== currentGrade) : (chosenGrade && targetGrade !== chosenGrade)) {
+      pushToast('error', 'Hanya boleh pindah ke kelas dalam tingkatan (grade) yang sama.')
+      return
+    }
+
+    const konfirmasi = window.confirm(
+      `Yakin ingin mengubah kelas siswa?\n\n` +
+      `Siswa: ${user.nama}\n` +
+      `Dari: ${getNamaKelas(user.kelas) || 'Tidak ada kelas'}\n` +
+      `Ke: ${getNamaKelas(target)}\n\n` +
+      `Dampak perubahan:\n` +
+      `• Data absensi akan mengikuti kelas baru\n` +
+      `• Data organisasi tetap sama\n` +
+      `• Data tugas dan nilai tetap sama\n` +
+      `• Status ketua kelas akan direset jika ada`
+    )
+
+    if (!konfirmasi) return
+
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ kelas: target })
+        .eq('id', user.id)
+
+      if (error) throw error
+
+      // Reset ketua kelas jika siswa ini adalah ketua di kelas lama
+      if (isKetuaKelas(user.id)) {
+        const strukturLama = Object.values(strukturKelas).find(
+          s => s.ketua_siswa_id === user.id
+        )
+        if (strukturLama) {
+          await supabase
+            .from('kelas_struktur')
+            .update({ 
+              ketua_siswa_id: null, 
+              ketua_siswa_nama: null 
+            })
+            .eq('kelas_id', strukturLama.kelas_id)
+        }
+      }
+
+      pushToast('success', 'Kelas berhasil diupdate')
+      setDetailUser(prev => prev ? ({ ...prev, kelas: target }) : prev)
+      loadSiswaRaw()
+      loadStrukturKelas()
+    } catch (error) {
+      console.error('Error updating kelas:', error)
+      pushToast('error', 'Gagal mengupdate kelas')
+    }
+  }
+
+  async function kosongkanKelas() {
+    const user = detailUser
+    if (!user) return
+    if (!window.confirm(`Yakin mau dikosongkan kelas untuk ${user.nama || user.email || user.id}?`)) return
+
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ kelas: '' })
+        .eq('id', user.id)
+
+      if (error) throw error
+
+      pushToast('success', 'Kelas berhasil dikosongkan')
+      setMoveKelas('')
+      setDetailUser(prev => prev ? ({ ...prev, kelas: '' }) : prev)
+      loadSiswaRaw()
+    } catch (error) {
+      console.error('Error clearing kelas:', error)
+      pushToast('error', 'Gagal mengosongkan kelas')
+    }
+  }
+
+  /* ===== Nonaktifkan & Aktifkan Siswa ===== */
+  const openNonaktifModal = (siswa) => {
+    setSiswaToNonaktif(siswa)
+    setAlasanNonaktif('')
+    setNonaktifModalOpen(true)
+  }
+
+  const openAktifkanModal = (siswa) => {
+    setSiswaToAktifkan(siswa)
+    setAktifkanModalOpen(true)
+  }
+
+  async function nonaktifkanSiswa() {
+    if (!siswaToNonaktif) return
+
+    if (!alasanNonaktif.trim()) {
+      pushToast('error', 'Harap masukkan alasan penonaktifan')
+      return
+    }
+
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          status: 'nonaktif',
+          alasan_nonaktif: alasanNonaktif,
+          disabled_at: new Date().toISOString()
+        })
+        .eq('id', siswaToNonaktif.id)
+
+      if (error) throw error
+
+      pushToast('success', 'Siswa berhasil dinonaktifkan')
+      
+      if (detailUser && detailUser.id === siswaToNonaktif.id) {
+        setDetailUser(prev => prev ? ({ 
+          ...prev, 
+          status: 'nonaktif', 
+          alasan_nonaktif: alasanNonaktif 
+        }) : prev)
+      }
+      
+      setNonaktifModalOpen(false)
+      setAlasanNonaktif('')
+      setSiswaToNonaktif(null)
+      loadSiswaRaw()
+    } catch (error) {
+      console.error('Error nonaktifkan siswa:', error)
+      pushToast('error', 'Gagal menonaktifkan siswa')
+    }
+  }
+
+  async function aktifkanSiswa() {
+    if (!siswaToAktifkan) return
+
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          status: 'active',
+          alasan_nonaktif: null,
+          disabled_at: null
+        })
+        .eq('id', siswaToAktifkan.id)
+
+      if (error) throw error
+
+      pushToast('success', 'Siswa berhasil diaktifkan')
+      
+      if (detailUser && detailUser.id === siswaToAktifkan.id) {
+        setDetailUser(prev => prev ? ({ 
+          ...prev, 
+          status: 'active', 
+          alasan_nonaktif: null 
+        }) : prev)
+      }
+      
+      setAktifkanModalOpen(false)
+      setSiswaToAktifkan(null)
+      loadSiswaRaw()
+    } catch (error) {
+      console.error('Error mengaktifkan siswa:', error)
+      pushToast('error', 'Gagal mengaktifkan siswa')
+    }
+  }
+
+  /* ===== RFID ===== */
+  function toggleRfidListen() {
+    if (rfidEnrolling) {
+      if (rfidChannel) {
+        supabase.removeChannel(rfidChannel)
+        setRfidChannel(null)
+      }
+      setRfidEnrolling(false)
+      pushToast('info', 'Mode scan RFID dimatikan')
+      return
+    }
+
+    const channel = supabase
+      .channel('rfid-scans-detail')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'rfid_scans' },
+        (payload) => {
+          const uid = (payload.new.card_uid || '').toUpperCase().replace(/\s+/g, '')
+          setRfidInput(uid)
+          setRfidLastScan(payload.new)
+          pushToast('success', `UID RFID terdeteksi: ${uid}`)
+        }
+      )
+      .subscribe()
+
+    setRfidChannel(channel)
+    setRfidEnrolling(true)
+    pushToast('info', 'Mode scan aktif. Silakan tap kartu di reader.')
+  }
+
+  async function saveRfid() {
+    if (!detailUser) return
+    const raw = (rfidInput || '').trim()
+    const cleaned = raw.toUpperCase().replace(/\s+/g, '')
+
+    if (!cleaned) {
+      pushToast('error', 'UID RFID tidak boleh kosong')
+      return
+    }
+
+    if (!/^[0-9A-F]{8,14}$/.test(cleaned)) {
+      pushToast('error', 'Format UID RFID tidak valid. Harus 8-14 karakter hexadecimal (0-9, A-F)')
+      return
+    }
+
+    try {
+      const { data: existingRows, error: exError } = await supabase
+        .from('profiles')
+        .select('id, nama, email')
+        .eq('rfid_uid', cleaned)
+        .neq('id', detailUser.id)
+
+      if (exError) throw exError
+      if (existingRows && existingRows.length > 0) {
+        const other = existingRows[0]
+        pushToast('error', 
+          `UID ${cleaned} sudah terdaftar untuk siswa:\n` +
+          `${other.nama || 'Tanpa nama'} (${other.email || 'Tanpa email'})`
+        )
+        return
+      }
+
+      const { error } = await supabase
+        .from('profiles')
+        .update({ rfid_uid: cleaned })
+        .eq('id', detailUser.id)
+
+      if (error) throw error
+
+      pushToast('success', 'UID RFID berhasil disimpan')
+      setDetailUser(prev => prev ? { ...prev, rfid_uid: cleaned } : prev)
+      setSiswaRaw(prev => prev.map(s => s.id === detailUser.id ? { ...s, rfid_uid: cleaned } : s))
+      setSiswa(prev => prev.map(s => s.id === detailUser.id ? { ...s, rfid_uid: cleaned } : s))
+    } catch (err) {
+      console.error('Error saving RFID:', err)
+      pushToast('error', 'Gagal menyimpan UID RFID')
+    }
+  }
+
+  async function clearRfid() {
+    if (!detailUser) return
+    if (!detailUser.rfid_uid && !rfidInput) return
+
+    if (!window.confirm('Yakin ingin mengosongkan UID RFID untuk siswa ini?')) return
+
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ rfid_uid: null })
+        .eq('id', detailUser.id)
+
+      if (error) throw error
+
+      pushToast('success', 'UID RFID dikosongkan')
+      setRfidInput('')
+      setDetailUser(prev => prev ? { ...prev, rfid_uid: null } : prev)
+      setSiswaRaw(prev => prev.map(s => s.id === detailUser.id ? { ...s, rfid_uid: null } : s))
+      setSiswa(prev => prev.map(s => s.id === detailUser.id ? { ...s, rfid_uid: null } : s))
+    } catch (err) {
+      console.error('Error clearing RFID:', err)
+      pushToast('error', 'Gagal mengosongkan UID RFID')
+    }
+  }
+
+  /* ===== Organisasi / OSIS ===== */
+  async function hapusOrg(orgId) {
+    const u = detailUser
+    if (!u) return
+    if (!window.confirm('Yakin mau dihapus dari organisasi ini?')) return
+
+    try {
+      const { error } = await supabase
+        .from('organisasi_anggota')
+        .delete()
+        .eq('organisasi_id', orgId)
+        .eq('siswa_id', u.id)
+
+      if (error) throw error
+
+      pushToast('success', 'Berhasil dihapus dari organisasi')
+      setOrgMember(prev => prev.filter(x => x.orgId !== orgId))
+    } catch (error) {
+      console.error('Error deleting org:', error)
+      pushToast('error', 'Gagal menghapus dari organisasi')
+    }
+  }
+
+  async function hapusOsis() {
+    const u = detailUser
+    if (!u) return
+    if (!window.confirm('Yakin mau dihapus dari OSIS?')) return
+
+    try {
+      const { error } = await supabase
+        .from('osis_anggota')
+        .delete()
+        .eq('siswa_id', u.id)
+
+      if (error) throw error
+
+      pushToast('success', 'Berhasil dihapus dari OSIS')
+      setOsisRow(null)
+    } catch (error) {
+      console.error('Error deleting OSIS:', error)
+      pushToast('error', 'Gagal menghapus dari OSIS')
+    }
+  }
+
+  /* ===== Hapus Akun Siswa ===== */
+  function openDeleteConfirm(siswa) {
+    setSiswaToDelete(siswa)
+    setDeleteConfirmOpen(true)
+  }
+
+  function closeDeleteConfirm() {
+    setDeleteConfirmOpen(false)
+    setSiswaToDelete(null)
+  }
+
+  async function hapusAkunSiswa() {
+    if (!siswaToDelete) return
+
+    try {
+      setDeletingSiswa(true)
+
+      // Hapus dari semua tabel terkait
+      await supabase.from('organisasi_anggota').delete().eq('siswa_id', siswaToDelete.id)
+      await supabase.from('osis_anggota').delete().eq('siswa_id', siswaToDelete.id)
+      await supabase.from('ekskul_anggota').delete().eq('user_id', siswaToDelete.id)
+      await supabase.from('anggota_ekskul').delete().eq('user_id', siswaToDelete.id)
+      await supabase.from('tugas_jawaban').delete().eq('user_id', siswaToDelete.id)
+      await supabase.from('absensi').delete().eq('uid', siswaToDelete.id)
+      await supabase.from('absensi_ajuan').delete().eq('uid', siswaToDelete.id)
+      
+      // Reset ketua kelas jika siswa ini adalah ketua
+      await supabase
+        .from('kelas_struktur')
+        .update({ ketua_siswa_id: null, ketua_siswa_nama: null })
+        .eq('ketua_siswa_id', siswaToDelete.id)
+
+      // Hapus dari profiles table
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .delete()
+        .eq('id', siswaToDelete.id)
+
+      if (profileError) throw profileError
+
+      // HAPUS DARI AUTHENTICATION - menggunakan Admin API
+      try {
+        const { error: authError } = await supabase.auth.admin.deleteUser(
+          siswaToDelete.id
+        )
+        
+        if (authError) {
+          console.warn('Gagal menghapus dari authentication, tetapi lanjutkan:', authError)
+          // Tetap lanjutkan karena data utama sudah dihapus
+          pushToast('warning', 'Akun siswa dihapus, tetapi ada masalah dengan authentication. Silakan coba lagi nanti.')
+        } else {
+          pushToast('success', 'Akun siswa berhasil dihapus sepenuhnya')
+        }
+      } catch (authErr) {
+        console.warn('Error saat menghapus dari auth:', authErr)
+        pushToast('warning', 'Akun siswa dihapus dari database, tetapi ada masalah dengan authentication.')
+      }
+
+      closeDeleteConfirm()
+      if (detailOpen) closeDetailModal()
+      loadAllData()
+    } catch (error) {
+      console.error('Error deleting siswa:', error)
+      pushToast('error', 'Gagal menghapus akun siswa: ' + (error.message || 'Unknown error'))
+    } finally {
+      setDeletingSiswa(false)
+    }
+  }
+
+  /* ===== Tambah Siswa ===== */
+  const validateForm = () => {
+    const errors = {}
+    
+    if (!form.email.trim()) errors.email = 'Email harus diisi'
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errors.email = 'Format email tidak valid'
+    
+    if (!form.nama.trim()) errors.nama = 'Nama lengkap harus diisi'
+    if (!form.password) errors.password = 'Password harus diisi'
+    else if (form.password.length < 6) errors.password = 'Password minimal 6 karakter'
+    
+    if (form.password !== form.confirmPassword) errors.confirmPassword = 'Password dan konfirmasi tidak sama'
+    if (form.nik && !/^\d+$/.test(form.nik)) errors.nik = 'NIK harus berupa angka'
+    if (form.usia && (form.usia < 5 || form.usia > 25)) errors.usia = 'Usia harus antara 5-25 tahun'
+    if (form.telp && !/^[\d\s\+-]+$/.test(form.telp)) errors.telp = 'Format telepon tidak valid'
+
+    setFormErrors(errors)
+    return Object.keys(errors).length === 0
+  }
+
+  const handleChange = (e) => {
+    const { name, value } = e.target
+    setForm(prev => ({ ...prev, [name]: value }))
+    
+    if (formErrors[name]) {
+      setFormErrors(prev => ({ ...prev, [name]: '' }))
+    }
+  }
+
+  const resetForm = () => {
+    setForm({
+      email: '',
+      nama: '',
+      kelas: '',
+      nik: '',
+      jk: '',
+      usia: '',
+      agama: '',
+      alamat: '',
+      telp: '',
+      password: '',
+      confirmPassword: ''
+    })
+    setFormErrors({})
+  }
+
+  const handleAdd = async () => {
+    if (!validateForm()) return
+
+    try {
+      setAddingSiswa(true)
+
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: form.email.trim().toLowerCase(),
+        password: form.password,
+        options: {
+          data: {
+            nama: form.nama.trim(),
+            role: 'siswa'
+          }
+        }
+      })
+
+      if (authError) {
+        if (authError.message.includes('User already registered')) {
+          throw new Error('Email sudah terdaftar')
+        }
+        throw authError
+      }
+
+      const { error } = await supabase.from('profiles').insert({
+        id: authData.user.id,
+        email: form.email.trim().toLowerCase(),
+        nama: form.nama.trim(),
+        kelas: form.kelas || '',
+        nik: form.nik || '',
+        jk: form.jk || '',
+        usia: form.usia ? parseInt(form.usia) : null,
+        agama: form.agama || '',
+        alamat: form.alamat || '',
+        telp: form.telp || '',
+        role: 'siswa',
+        status: 'active',
+        created_at: new Date().toISOString()
+      })
+
+      if (error) throw error
+
+      pushToast('success', 'Siswa berhasil didaftarkan')
+      resetForm()
+      setShowAddForm(false)
+      loadSiswaRaw()
+    } catch (error) {
+      console.error(error)
+      pushToast('error', 'Gagal mendaftarkan siswa: ' + (error.message || 'Unknown error'))
+    } finally {
+      setAddingSiswa(false)
+    }
+  }
+
+  /* ===== Render ===== */
+  return (
+    <div className="min-h-screen bg-gray-50 p-4">
+      <div className="max-w-7xl mx-auto space-y-6">
+        {/* Header */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-blue-100 rounded-lg">
+                <span className="text-2xl text-blue-600">👨‍🎓</span>
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900 mb-1">Manajemen Siswa</h1>
+                <p className="text-gray-600">
+                  Kelola data siswa, kelas, organisasi, OSIS, dan kartu RFID
+                </p>
+              </div>
+            </div>
+            <button
+              className="mt-4 lg:mt-0 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 font-medium"
+              onClick={() => setShowAddForm(!showAddForm)}
+            >
+              {showAddForm ? '✕ Tutup Form' : '➕ Tambah Siswa'}
+            </button>
+          </div>
+        </div>
+
+        {/* Dashboard Statistics */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatCard
+            label="Total Siswa"
+            value={stats.totalSiswa}
+            icon="👨‍🎓"
+            color="blue"
+            description="Semua siswa terdaftar"
+          />
+          <StatCard
+            label="Siswa Aktif"
+            value={stats.aktifSiswa}
+            icon="✅"
+            color="green"
+            description="Sedang aktif belajar"
+          />
+          <StatCard
+            label="Siswa Nonaktif"
+            value={stats.nonaktifSiswa}
+            icon="⏸️"
+            color="orange"
+            description="Tidak aktif sementara"
+          />
+          <StatCard
+            label="Ketua Kelas"
+            value={stats.ketuaKelas}
+            icon="👑"
+            color="indigo"
+            description="Siswa yang menjadi ketua"
+          />
+        </div>
+
+        {/* Form Tambah Siswa */}
+        {showAddForm && (
+          <Card className="mb-6">
+            <div className="bg-blue-50 border-b border-blue-200 p-4">
+              <h3 className="text-lg font-semibold text-blue-900 flex items-center gap-2">
+                <span>➕</span>
+                Tambah Siswa Baru
+              </h3>
+            </div>
+            <div className="p-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <Input
+                  label="Email *"
+                  name="email"
+                  value={form.email}
+                  onChange={handleChange}
+                  placeholder="email@sekolah.sch.id"
+                  type="email"
+                  error={formErrors.email}
+                  required
+                />
+                <Input
+                  label="Nama Lengkap *"
+                  name="nama"
+                  value={form.nama}
+                  onChange={handleChange}
+                  placeholder="Nama lengkap siswa"
+                  error={formErrors.nama}
+                  required
+                />
+                <Select
+                  label="Kelas"
+                  name="kelas"
+                  value={form.kelas}
+                  onChange={handleChange}
+                  options={[
+                    { value: '', label: 'Pilih kelas' },
+                    ...kelasOptions.map(k => ({ value: k.value, label: k.label }))
+                  ]}
+                />
+                <Input
+                  label="NIK"
+                  name="nik"
+                  value={form.nik}
+                  onChange={handleChange}
+                  placeholder="Nomor Induk Siswa"
+                  error={formErrors.nik}
+                />
+                <Select
+                  label="Jenis Kelamin"
+                  name="jk"
+                  value={form.jk}
+                  onChange={handleChange}
+                  options={[
+                    { value: '', label: 'Pilih jenis kelamin' },
+                    { value: 'L', label: 'Laki-laki' },
+                    { value: 'P', label: 'Perempuan' }
+                  ]}
+                />
+                <Input
+                  label="Usia"
+                  name="usia"
+                  value={form.usia}
+                  onChange={handleChange}
+                  placeholder="Usia dalam tahun"
+                  type="number"
+                  min="5"
+                  max="25"
+                  error={formErrors.usia}
+                />
+                <Input
+                  label="Agama"
+                  name="agama"
+                  value={form.agama}
+                  onChange={handleChange}
+                  placeholder="Agama"
+                />
+                <Input
+                  label="Telepon"
+                  name="telp"
+                  value={form.telp}
+                  onChange={handleChange}
+                  placeholder="Nomor telepon"
+                  error={formErrors.telp}
+                />
+                <div className="md:col-span-2 lg:col-span-3">
+                  <Input
+                    label="Alamat"
+                    name="alamat"
+                    value={form.alamat}
+                    onChange={handleChange}
+                    placeholder="Alamat lengkap"
+                  />
+                </div>
+                <Input
+                  label="Password *"
+                  name="password"
+                  value={form.password}
+                  onChange={handleChange}
+                  placeholder="Password minimal 6 karakter"
+                  type="password"
+                  error={formErrors.password}
+                  required
+                />
+                <Input
+                  label="Konfirmasi Password *"
+                  name="confirmPassword"
+                  value={form.confirmPassword}
+                  onChange={handleChange}
+                  placeholder="Ulangi password"
+                  type="password"
+                  error={formErrors.confirmPassword}
+                  required
+                />
+              </div>
+
+              <div className="flex justify-end space-x-3 mt-4 pt-4 border-t border-gray-200">
+                <Button
+                  variant="secondary"
+                  onClick={resetForm}
+                >
+                  🔄 Reset
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => setShowAddForm(false)}
+                >
+                  ✕ Batal
+                </Button>
+                <Button
+                  onClick={handleAdd}
+                  loading={addingSiswa}
+                  disabled={
+                    !form.email ||
+                    !form.nama ||
+                    !form.password ||
+                    form.password !== form.confirmPassword
+                  }
+                >
+                  👨‍🎓 Daftarkan
+                </Button>
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {/* Filter Section */}
+        <Card>
+          <div className="bg-gray-50 border-b border-gray-200 p-4">
+            <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+              <span>🔍</span>
+              Filter Pencarian
+            </h3>
+          </div>
+          <div className="p-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+              <Input
+                label="Nama / Email"
+                placeholder="Cari nama atau email"
+                value={qNama}
+                onChange={e => setQNama(e.target.value)}
+              />
+              <Input
+                label="NIK"
+                placeholder="Cari NIK"
+                value={qNIK}
+                onChange={e => setQNIK(e.target.value)}
+              />
+              <Select
+                label="Kelas"
+                value={qKelas}
+                onChange={e => setQKelas(e.target.value)}
+                options={[
+                  { value: '', label: 'Semua Kelas' },
+                  ...kelasOptions.map(k => ({ value: k.value, label: k.label }))
+                ]}
+              />
+              <Select
+                label="Status RFID"
+                value={qHasRfid}
+                onChange={e => setQHasRfid(e.target.value)}
+                options={[
+                  { value: '', label: 'Semua' },
+                  { value: 'yes', label: 'Sudah punya RFID' },
+                  { value: 'no', label: 'Belum punya RFID' }
+                ]}
+              />
+              <Select
+                label="Status Akun"
+                value={qStatus}
+                onChange={e => setQStatus(e.target.value)}
+                options={[
+                  { value: '', label: 'Semua Status' },
+                  { value: 'active', label: 'Aktif' },
+                  { value: 'nonaktif', label: 'Nonaktif' }
+                ]}
+              />
+            </div>
+            <div className="flex justify-end space-x-3 mt-4">
+              <Button
+                onClick={applyFilter}
+                loading={isSearching}
+              >
+                Cari
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={resetFilter}
+              >
+                🔄 Reset
+              </Button>
+            </div>
+          </div>
+        </Card>
+
+        {/* Tabel Siswa */}
+        <Card>
+          <div className="bg-gray-50 border-b border-gray-200 p-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                <span>📊</span>
+                Daftar Siswa
+              </h3>
+              <span className="text-sm text-gray-600">
+                {siswa.length} dari {siswaRaw.length} siswa
+              </span>
+            </div>
+          </div>
+          
+          <div className="overflow-x-auto">
+            {loadingInit ? (
+              <div className="p-8 space-y-4">
+                {[...Array(5)].map((_, i) => (
+                  <div key={i} className="animate-pulse flex space-x-4 items-center">
+                    <div className="rounded-full bg-gray-200 h-10 w-10" />
+                    <div className="flex-1 space-y-2">
+                      <div className="h-4 bg-gray-200 rounded w-3/4" />
+                      <div className="h-3 bg-gray-200 rounded w-1/2" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <table className="w-full">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                      No
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                      Siswa
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                      Kelas
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                      NIK
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                      JK
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                      RFID
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                      Status
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                      Aksi
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {siswa.map((s, index) => {
+                    const foto = s.photo_url || s.foto_url || s.foto || ''
+                    const isKetua = isKetuaKelas(s.id)
+                    const kelasKetua = getKelasKetua(s.id)
+
+                    return (
+                      <tr key={s.id} className="hover:bg-gray-50">
+                        {/* Kolom Nomor Urut */}
+                        <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 text-center">
+                          {index + 1}
+                        </td>
+                        
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <div className="flex items-center">
+                            <div className="flex-shrink-0 h-10 w-10">
+                              {foto ? (
+                                <img
+                                  src={foto}
+                                  alt={s.nama || 'foto'}
+                                  className="h-10 w-10 rounded-full object-cover border border-gray-200"
+                                />
+                              ) : (
+                                <div className="h-10 w-10 rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center text-sm font-medium text-blue-600">
+                                  {initials(s.nama)}
+                                </div>
+                              )}
+                            </div>
+                            <div className="ml-3">
+                              <div className="text-sm font-medium text-gray-900">
+                                {s.nama || '—'}
+                                {isKetua && (
+                                  <Badge variant="warning" className="ml-2 text-xs">
+                                    👑 Ketua
+                                  </Badge>
+                                )}
+                              </div>
+                              <div className="text-sm text-gray-500">
+                                {s.email || '—'}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-900">
+                          {getNamaKelas(s.kelas)}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-900">
+                          {s.nik || '—'}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-900">
+                          {JK_LABEL(s.jk)}
+                        </td>
+                        <td className="px-4 py-3 text-sm">
+                          {s.rfid_uid ? (
+                            <Badge variant="info" className="text-xs">
+                              {(s.rfid_uid || '').toUpperCase()}
+                            </Badge>
+                          ) : (
+                            <span className="text-gray-400">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          {s.status === 'nonaktif' ? (
+                            <Badge variant="danger" className="text-xs">
+                              ⏸️ Nonaktif
+                            </Badge>
+                          ) : (
+                            <Badge variant="success" className="text-xs">
+                              ✅ Aktif
+                            </Badge>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-medium space-x-1">
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={() => openDetail(s)}
+                          >
+                            Detail
+                          </Button>
+                          {s.status === 'active' ? (
+                            <Button
+                              variant="warning"
+                              size="sm"
+                              onClick={() => openNonaktifModal(s)}
+                            >
+                              Nonaktif
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="success"
+                              size="sm"
+                              onClick={() => openAktifkanModal(s)}
+                            >
+                              Aktifkan
+                            </Button>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                  {!siswa.length && (
+                    <tr>
+                      <td colSpan="8" className="px-4 py-8 text-center">
+                        <div className="flex flex-col items-center justify-center">
+                          <div className="text-gray-300 text-4xl mb-2">👨‍🎓</div>
+                          <p className="text-gray-500 font-medium mb-1">Tidak ada data siswa</p>
+                          <p className="text-gray-400 text-sm">Coba ubah filter pencarian</p>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </Card>
+
+        {/* Modal Konfirmasi Hapus Akun */}
+        {deleteConfirmOpen && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg p-6 w-full max-w-md">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2 bg-red-100 text-red-600 rounded-lg">
+                  <span className="text-xl">🗑️</span>
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">Hapus Akun Siswa</h3>
+                  <p className="text-gray-600 text-sm">Tindakan ini tidak dapat dibatalkan</p>
+                </div>
+              </div>
+
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+                <p className="text-red-800 text-sm font-medium mb-2">
+                  Apakah Anda yakin ingin menghapus akun siswa ini?
+                </p>
+                <p className="text-red-700 text-sm">
+                  <strong>{siswaToDelete?.nama}</strong> ({siswaToDelete?.email})
+                </p>
+                <p className="text-red-700 text-sm mt-2">
+                  Data akan dihapus dari:
+                </p>
+                <ul className="text-red-700 text-sm list-disc list-inside mt-1">
+                  <li>Database profiles dan tabel terkait</li>
+                  <li>Authentication system</li>
+                  <li>Data absensi, organisasi, dan tugas</li>
+                </ul>
+              </div>
+
+              <div className="flex justify-end space-x-3">
+                <Button
+                  variant="secondary"
+                  onClick={closeDeleteConfirm}
+                >
+                  ✕ Batal
+                </Button>
+                <Button
+                  variant="danger"
+                  onClick={hapusAkunSiswa}
+                  loading={deletingSiswa}
+                >
+                  🗑️ Ya, Hapus
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal Nonaktifkan Siswa */}
+        {nonaktifModalOpen && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg p-6 w-full max-w-md">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2 bg-orange-100 text-orange-600 rounded-lg">
+                  <span className="text-xl">⏸️</span>
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">Nonaktifkan Siswa</h3>
+                  <p className="text-gray-600 text-sm">Siswa tidak akan bisa login</p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Alasan Penonaktifan *
+                  </label>
+                  <textarea
+                    value={alasanNonaktif}
+                    onChange={(e) => setAlasanNonaktif(e.target.value)}
+                    placeholder="Masukkan alasan menonaktifkan siswa..."
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 bg-white resize-none"
+                    rows={3}
+                  />
+                </div>
+
+                <div className="flex justify-end space-x-3">
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      setNonaktifModalOpen(false)
+                      setAlasanNonaktif('')
+                      setSiswaToNonaktif(null)
+                    }}
+                  >
+                    ✕ Batal
+                  </Button>
+                  <Button
+                    variant="warning"
+                    onClick={nonaktifkanSiswa}
+                    disabled={!alasanNonaktif.trim()}
+                  >
+                    ⏸️ Nonaktifkan
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal Aktifkan Siswa */}
+        {aktifkanModalOpen && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg p-6 w-full max-w-md">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2 bg-green-100 text-green-600 rounded-lg">
+                  <span className="text-xl">✅</span>
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">Aktifkan Siswa</h3>
+                  <p className="text-gray-600 text-sm">Siswa akan bisa login kembali</p>
+                </div>
+              </div>
+
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
+                <p className="text-green-800 text-sm font-medium mb-2">
+                  Apakah Anda yakin ingin mengaktifkan siswa ini?
+                </p>
+                <p className="text-green-700 text-sm">
+                  <strong>{siswaToAktifkan?.nama}</strong> ({siswaToAktifkan?.email})
+                </p>
+              </div>
+
+              <div className="flex justify-end space-x-3">
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setAktifkanModalOpen(false)
+                    setSiswaToAktifkan(null)
+                  }}
+                >
+                  ✕ Batal
+                </Button>
+                <Button
+                  variant="success"
+                  onClick={aktifkanSiswa}
+                >
+                  ✅ Ya, Aktifkan
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal Detail Siswa */}
+        {detailOpen && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
+              {/* Header */}
+              <div className="px-6 py-4 border-b bg-gray-50 flex items-start justify-between">
+                <div className="flex items-center space-x-4">
+                  <div className="flex-shrink-0 h-12 w-12">
+                    {detailUser?.photo_url ? (
+                      <img
+                        src={detailUser.photo_url}
+                        alt={detailUser.nama || 'foto'}
+                        className="h-12 w-12 rounded-full object-cover border border-gray-200"
+                      />
+                    ) : (
+                      <div className="h-12 w-12 rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center text-base font-semibold text-blue-600">
+                        {initials(detailUser?.nama)}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <h3 className="text-lg font-semibold text-gray-900">
+                        {detailUser?.nama || detailUser?.email}
+                      </h3>
+                      {isKetuaKelas(detailUser?.id) && (
+                        <Badge variant="warning" className="text-xs">
+                          👑 Ketua {getKelasKetua(detailUser?.id)}
+                        </Badge>
+                      )}
+                      {detailUser?.status === 'nonaktif' && (
+                        <Badge variant="danger" className="text-xs">
+                          ⏸️ Nonaktif
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="text-gray-600 text-sm mt-1">
+                      {detailUser?.email || '—'} • NIK: {detailUser?.nik || '—'}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center space-x-2">
+                  {detailUser?.status === 'active' ? (
+                    <Button
+                      variant="warning"
+                      size="sm"
+                      onClick={() => openNonaktifModal(detailUser)}
+                    >
+                      ⏸️ Nonaktif
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="success"
+                      size="sm"
+                      onClick={() => openAktifkanModal(detailUser)}
+                    >
+                      ✅ Aktifkan
+                    </Button>
+                  )}
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={() => openDeleteConfirm(detailUser)}
+                  >
+                    🗑️ Hapus
+                  </Button>
+                  <button
+                    className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"
+                    onClick={closeDetailModal}
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              {/* Content */}
+              <div className="p-6 space-y-6 overflow-y-auto flex-1">
+                {detailLoading ? (
+                  <div className="space-y-4">
+                    <div className="animate-pulse h-16 bg-gray-200 rounded-lg" />
+                    <div className="animate-pulse h-24 bg-gray-200 rounded-lg" />
+                    <div className="animate-pulse h-20 bg-gray-200 rounded-lg" />
+                  </div>
+                ) : (
+                  <>
+                    {/* Kelas & Status */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      <div className="bg-white border border-gray-200 rounded-lg p-4">
+                        <h4 className="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                          <span>🏫</span>
+                          Kelas & Status
+                        </h4>
+                        <div className="space-y-3">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <Select
+                              label="Tingkatan"
+                              value={moveGrade}
+                              onChange={e => { setMoveGrade(e.target.value); setMoveKelas('') }}
+                              options={[
+                                { value: '', label: 'Pilih tingkatan' },
+                                ...gradeLabels.map(g => ({ value: g, label: g }))
+                              ]}
+                            />
+                            <Select
+                              label="Kelas"
+                              value={moveKelas}
+                              onChange={e => setMoveKelas(e.target.value)}
+                              options={(() => {
+                                const baseGrade = getGradeLabel(detailUser?.kelas || '') || moveGrade
+                                const options = kelasByGrade(baseGrade)
+
+                                if (!baseGrade) {
+                                  return [{ value: '', label: 'Pilih tingkatan dulu' }]
+                                }
+                                if (options.length === 0) {
+                                  return [{ value: '', label: 'Tidak ada kelas pada tingkatan ini' }]
+                                }
+                                return [
+                                  { value: '', label: 'Pilih kelas' },
+                                  ...options.map(k => ({ value: k.id, label: getKelasDisplayName(k) }))
+                                ]
+                              })()}
+                            />
+                          </div>
+                          
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-3 border-t">
+                            <div className="text-sm">
+                              <span className="text-gray-600">Status: </span>
+                              <span className={detailUser?.status === 'nonaktif' ? 'text-red-600 font-medium' : 'text-green-600 font-medium'}>
+                                {detailUser?.status === 'nonaktif' ? 'Nonaktif' : 'Aktif'}
+                              </span>
+                            </div>
+                            <div className="flex gap-2">
+                              <Button
+                                onClick={simpanPindahKelas}
+                                disabled={!moveKelas || moveKelas === detailUser?.kelas}
+                                size="sm"
+                              >
+                                💾 Simpan
+                              </Button>
+                              <Button
+                                variant="secondary"
+                                onClick={kosongkanKelas}
+                                size="sm"
+                              >
+                                🗑️ Kosongkan
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Kartu RFID */}
+                      <div className="bg-white border border-gray-200 rounded-lg p-4">
+                        <h4 className="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                          <span>💳</span>
+                          Kartu RFID
+                        </h4>
+
+                        <div className="space-y-3">
+                          <div>
+                            <Input
+                              label="UID RFID"
+                              value={rfidInput}
+                              onChange={e => setRfidInput(e.target.value.toUpperCase())}
+                              placeholder="Tap kartu atau isi manual"
+                            />
+                            {detailUser?.rfid_uid && (
+                              <p className="text-xs text-gray-500 mt-1">
+                                UID tersimpan: <span className="font-mono font-medium">{(detailUser.rfid_uid || '').toUpperCase()}</span>
+                              </p>
+                            )}
+                          </div>
+                          
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                            <Button
+                              variant={rfidEnrolling ? 'warning' : 'primary'}
+                              size="sm"
+                              onClick={toggleRfidListen}
+                            >
+                              {rfidEnrolling ? '⏹️ Stop' : '🎫 Scan'}
+                            </Button>
+                            <Button
+                              variant="success"
+                              size="sm"
+                              onClick={saveRfid}
+                              disabled={!rfidInput}
+                            >
+                              💾 Simpan
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={clearRfid}
+                              disabled={!detailUser?.rfid_uid && !rfidInput}
+                            >
+                              🗑️ Hapus
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Organisasi & OSIS */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      {/* Organisasi */}
+                      <div className="bg-white border border-gray-200 rounded-lg p-4">
+                        <h4 className="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                          <span>👥</span>
+                          Organisasi ({orgMember.length})
+                        </h4>
+                        <div className="space-y-2 max-h-40 overflow-y-auto">
+                          {orgMember.map(row => (
+                            <div key={row.orgId} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
+                              <div>
+                                <p className="text-sm font-medium text-gray-900">{row.orgNama}</p>
+                                <p className="text-xs text-gray-500">{row.jabatan} • {row.bagian || '-'}</p>
+                              </div>
+                              <Button
+                                variant="danger"
+                                size="sm"
+                                onClick={() => hapusOrg(row.orgId)}
+                              >
+                                🗑️
+                              </Button>
+                            </div>
+                          ))}
+                          {!orgMember.length && (
+                            <p className="text-gray-500 text-sm text-center py-4">Belum terdaftar di organisasi</p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* OSIS */}
+                      <div className="bg-white border border-gray-200 rounded-lg p-4">
+                        <h4 className="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                          <span>🌟</span>
+                          OSIS
+                        </h4>
+                        {osisRow ? (
+                          <div className="space-y-3">
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <p className="text-sm font-medium text-gray-700">Status</p>
+                                <Badge variant={osisRow.status === 'aktif' ? 'success' : 'danger'} className="text-xs">
+                                  {osisRow.status}
+                                </Badge>
+                              </div>
+                              <div>
+                                <p className="text-sm font-medium text-gray-700">Jabatan</p>
+                                <p className="text-sm text-gray-900">{osisRow.jabatan}</p>
+                              </div>
+                            </div>
+                            {osisRow.bagian && (
+                              <div>
+                                <p className="text-sm font-medium text-gray-700">Bagian</p>
+                                <p className="text-sm text-gray-900">{osisRow.bagian}</p>
+                              </div>
+                            )}
+                            <div className="flex justify-end">
+                              <Button
+                                variant="danger"
+                                size="sm"
+                                onClick={hapusOsis}
+                              >
+                                🗑️ Hapus
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="text-gray-500 text-sm text-center py-4">Belum terdaftar di OSIS</p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Informasi Tambahan */}
+                    <div className="bg-white border border-gray-200 rounded-lg p-4">
+                      <h4 className="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                        <span>📋</span>
+                        Informasi Tambahan
+                      </h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <div>
+                          <p className="text-sm font-medium text-gray-700">Jenis Kelamin</p>
+                          <p className="text-sm text-gray-900">{JK_LABEL(detailUser?.jk)}</p>
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-gray-700">Usia</p>
+                          <p className="text-sm text-gray-900">{detailUser?.usia ? `${detailUser.usia} tahun` : '—'}</p>
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-gray-700">Agama</p>
+                          <p className="text-sm text-gray-900">{detailUser?.agama || '—'}</p>
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-gray-700">Telepon</p>
+                          <p className="text-sm text-gray-900">{detailUser?.telp || '—'}</p>
+                        </div>
+                        <div className="md:col-span-2 lg:col-span-1">
+                          <p className="text-sm font-medium text-gray-700">Alamat</p>
+                          <p className="text-sm text-gray-900">{detailUser?.alamat || '—'}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
