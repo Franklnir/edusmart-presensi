@@ -28,7 +28,7 @@ import AKelas from './pages/admin/Kelas'
 import AGuru from './pages/admin/Guru'
 import ASiswa from './pages/admin/Siswa'
 import AScan from './pages/admin/Scan'
-import APengaturan from './pages/admin/Pengaturan'
+import APengaturan from './pages/admin/pengaturan'
 
 
 const AppRoutes = () => {
