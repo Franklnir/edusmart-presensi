@@ -20,7 +20,7 @@ import GJadwal from './pages/guru/JadwalGuru'
 import GAbsensi from './pages/guru/AbsensiGuru'
 import GTugas from './pages/guru/TugasGuru'
 import GLaporan from './pages/guru/Laporan'
-import GProfile from './pages/guru/Profile'
+import GProfile from './pages/guru/profile'
 
 // Admin
 import AHome from './pages/admin/Home'
