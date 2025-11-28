@@ -105,10 +105,10 @@ const Login = () => {
           <div className="w-full md:w-1/2 px-6 sm:px-8 lg:px-9 py-4 md:py-5 flex flex-col justify-center">
             <div className="mb-4 md:mb-5">
               <h1 className="text-3xl md:text-4xl font-black text-slate-900 tracking-tight">
-             Login
+                Login
               </h1>
               <p className="text-sm md:text-base text-slate-500 mt-2">
-               Selamat datang di sistem absensi.
+                Selamat datang di sistem absensi.
               </p>
             </div>
 
@@ -227,6 +227,16 @@ const Login = () => {
                     )}
                   </button>
                 </div>
+
+                {/* ⬇️ Tambahan: link Lupa Password */}
+                <div className="flex justify-end mt-1">
+                  <Link
+                    to="/forgot-password"
+                    className="text-xs text-indigo-600 hover:text-indigo-700 font-semibold"
+                  >
+                    Lupa password?
+                  </Link>
+                </div>
               </div>
 
               <button
@@ -284,7 +294,7 @@ const Login = () => {
           <div className="w-full md:w-1/2 bg-gradient-to-br from-indigo-50 via-sky-50 to-slate-50 flex items-center justify-center px-6 py-4 md:py-5">
             <div className="w-full">
               {/* RASIO DI SINI: semakin kecil angka pt[...] semakin pendek & melebar */}
-                <div className="relative w-full rounded-2xl bg-white shadow-lg overflow-hidden pt-[110%] mx-auto max-w-[330px]">
+              <div className="relative w-full rounded-2xl bg-white shadow-lg overflow-hidden pt-[110%] mx-auto max-w-[330px]">
                 {logoUrl ? (
                   <img
                     src={logoUrl}
@@ -299,10 +309,9 @@ const Login = () => {
                   </div>
                 )}
               </div>
-
-           
             </div>
           </div>
+
         </div>
       </div>
     </div>

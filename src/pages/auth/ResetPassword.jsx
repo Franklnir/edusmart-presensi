@@ -3,11 +3,21 @@ import React, { useEffect, useState } from 'react'
 import { useLocation, useNavigate, Link } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 
-function parseHashParams(hash) {
+/**
+ * Parse string param (hash/query) seperti:
+ * #access_token=xxx&refresh_token=yyy
+ * ?access_token=xxx&refresh_token=yyy
+ */
+function parseParams(str) {
   const result = {}
-  const clean = hash.startsWith('#') ? hash.substring(1) : hash
-  const pairs = clean.split('&')
+  if (!str) return result
 
+  const clean =
+    str.startsWith('#') || str.startsWith('?') ? str.substring(1) : str
+
+  if (!clean) return result
+
+  const pairs = clean.split('&')
   for (const part of pairs) {
     const [key, value] = part.split('=')
     if (!key) continue
@@ -33,9 +43,9 @@ const ResetPassword = () => {
   useEffect(() => {
     const bootstrapSession = async () => {
       try {
-        const { hash } = location
+        const { hash, search } = location
 
-        if (!hash) {
+        if ((!hash || hash.length <= 1) && (!search || search.length <= 1)) {
           setSessionError(
             'Link reset password tidak valid atau sudah kadaluarsa. Silakan minta link baru dari halaman login.'
           )
@@ -43,7 +53,10 @@ const ResetPassword = () => {
           return
         }
 
-        const params = parseHashParams(hash)
+        // Prioritas: hash (#...), jika kosong baru pakai query (?...)
+        const params =
+          hash && hash.length > 1 ? parseParams(hash) : parseParams(search)
+
         const access_token = params['access_token']
         const refresh_token = params['refresh_token']
 
@@ -85,6 +98,7 @@ const ResetPassword = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+
     if (!password || !confirmPassword) {
       setError('Password baru dan konfirmasi harus diisi.')
       return
@@ -114,7 +128,9 @@ const ResetPassword = () => {
         setError(error.message || 'Gagal mengubah password.')
       } else {
         console.log('✅ Password updated:', data)
-        setSuccess('Password berhasil diubah. Kamu akan diarahkan ke halaman login.')
+        setSuccess(
+          'Password berhasil diubah. Kamu akan diarahkan ke halaman login.'
+        )
         setTimeout(() => {
           navigate('/login', { replace: true })
         }, 2000)
@@ -127,6 +143,7 @@ const ResetPassword = () => {
     }
   }
 
+  // Saat lagi verifikasi link
   if (checking) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-sky-50 via-indigo-50 to-slate-100 px-4">
@@ -140,6 +157,7 @@ const ResetPassword = () => {
     )
   }
 
+  // Kalau token/link bermasalah
   if (sessionError) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-sky-50 via-indigo-50 to-slate-100 px-4">
@@ -159,6 +177,7 @@ const ResetPassword = () => {
     )
   }
 
+  // Form ganti password
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-sky-50 via-indigo-50 to-slate-100 px-4 py-8">
       <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-xl p-6 w-full max-w-md border border-slate-100">

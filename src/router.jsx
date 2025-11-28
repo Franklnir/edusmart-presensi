@@ -6,11 +6,11 @@ import RoleGate from './components/RoleGate'
 
 import Login from './pages/auth/Login'
 import Register from './pages/auth/Register'
-
+import ForgotPassword from './pages/auth/ForgotPassword'
+import ResetPassword from './pages/auth/ResetPassword'
 
 // Siswa
 import SHome from './pages/siswa/Home'
-
 import SAbsensi from './pages/siswa/Absensi'
 import STugas from './pages/siswa/Tugas'
 import SEditProfile from './pages/siswa/EditProfile'
@@ -30,14 +30,14 @@ import ASiswa from './pages/admin/Siswa'
 import AScan from './pages/admin/Scan'
 import APengaturan from './pages/admin/pengaturan'
 
-
 const AppRoutes = () => {
   return (
     <Routes>
-      {/* Auth */}
+      {/* Auth (tidak butuh login) */}
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
-      
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
 
       {/* SISWA */}
       <Route
@@ -47,7 +47,6 @@ const AppRoutes = () => {
           </ProtectedRoute>
         }
       >
-        {/* Tambahkan redirect default untuk siswa */}
         <Route path="/siswa/home" element={<SHome />} />
         <Route path="/siswa/absensi" element={<SAbsensi />} />
         <Route path="/siswa/tugas" element={<STugas />} />
@@ -85,7 +84,7 @@ const AppRoutes = () => {
         <Route path="/admin/pengaturan" element={<APengaturan />} />
       </Route>
 
-      {/* Default - Redirect berdasarkan role jika sudah login */}
+      {/* Default - Redirect ke login */}
       <Route path="/" element={<Navigate to="/login" replace />} />
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
