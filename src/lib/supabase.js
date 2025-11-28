@@ -9,8 +9,10 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
-    persistSession: true
-  }
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true, // PENTING utk reset password / magic link
+  },
 })
 
 export const ASSIGNMENT_BUCKET = import.meta.env.VITE_SUPABASE_BUCKET
