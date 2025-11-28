@@ -1,20 +1,29 @@
+// src/App.jsx
 import React from 'react'
 import { useLocation } from 'react-router-dom'
 import Navbar from './components/Navbar'
 import AppRoutes from './router'
 import { useAuthStore } from './store/useAuthStore'
 
+const AUTH_PATHS = [
+  '/login',
+  '/register',
+  '/forgot-password',
+  '/reset-password'
+]
+
 const App = () => {
   const location = useLocation()
   const { user } = useAuthStore()
-  const isAuthPage =
-    location.pathname.startsWith('/login') ||
-    location.pathname.startsWith('/register')
+
+  const isAuthPage = AUTH_PATHS.some((p) =>
+    location.pathname.startsWith(p)
+  )
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Halaman dengan navbar (hanya kalau bukan halaman auth DAN user sudah login) */}
       {!isAuthPage && user ? (
-        // Layout dengan sidebar untuk halaman yang membutuhkan navbar
         <div className="flex min-h-screen">
           <Navbar />
           <main className="flex-1 w-full overflow-auto py-4">
@@ -26,7 +35,7 @@ const App = () => {
           </main>
         </div>
       ) : (
-        // Layout tanpa sidebar untuk halaman auth
+        // Layout polos untuk login / register / forgot-password / reset-password
         <main className="w-full min-h-screen">
           <div className="w-full h-full p-0">
             <div className="w-full bg-white min-h-screen">
