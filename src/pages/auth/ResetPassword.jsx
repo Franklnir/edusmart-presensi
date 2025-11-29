@@ -1,9 +1,34 @@
 // src/pages/auth/ResetPassword.jsx
 import React, { useEffect, useState } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import { useLocation, useNavigate, Link } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 
+/**
+ * Parse string param (hash/query) seperti:
+ * #access_token=xxx&refresh_token=yyy
+ * ?access_token=xxx&refresh_token=yyy
+ */
+function parseParams(str) {
+  const result = {}
+  if (!str) return result
+
+  const clean =
+    str.startsWith('#') || str.startsWith('?') ? str.substring(1) : str
+
+  if (!clean) return result
+
+  const pairs = clean.split('&')
+  for (const part of pairs) {
+    const [key, value] = part.split('=')
+    if (!key) continue
+    result[decodeURIComponent(key)] = decodeURIComponent(value || '')
+  }
+
+  return result
+}
+
 const ResetPassword = () => {
+  const location = useLocation()
   const navigate = useNavigate()
 
   const [checking, setChecking] = useState(true)
@@ -15,34 +40,61 @@ const ResetPassword = () => {
   const [success, setSuccess] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  // Cek apakah ada sesi user dari link recovery
   useEffect(() => {
-    const checkRecoverySession = async () => {
+    const bootstrapSession = async () => {
       try {
-        const { data, error } = await supabase.auth.getUser()
+        const { hash, search } = location
 
-        if (error || !data?.user) {
+        if ((!hash || hash.length <= 1) && (!search || search.length <= 1)) {
           setSessionError(
-            'Sesi reset password tidak ditemukan.\n\n' +
-              'Pastikan kamu membuka link reset password langsung dari email ' +
-              'yang paling terbaru. Jika link sudah pernah dipakai atau sudah ' +
-              'terlalu lama, silakan minta link baru dari halaman Lupa Password.'
+            'Link reset password tidak valid atau sudah kadaluarsa. Silakan minta link baru dari halaman login.'
           )
+          setChecking(false)
+          return
+        }
+
+        // Prioritas: hash (#...), jika kosong baru pakai query (?...)
+        const params =
+          hash && hash.length > 1 ? parseParams(hash) : parseParams(search)
+
+        const access_token = params['access_token']
+        const refresh_token = params['refresh_token']
+
+        if (!access_token || !refresh_token) {
+          setSessionError(
+            'Token reset tidak ditemukan. Silakan minta link reset password yang baru.'
+          )
+          setChecking(false)
+          return
+        }
+
+        const { error } = await supabase.auth.setSession({
+          access_token,
+          refresh_token
+        })
+
+        if (error) {
+          console.error('setSession error:', error)
+          setSessionError(
+            error.message ||
+              'Gagal memverifikasi link reset password. Silakan minta link baru.'
+          )
+        } else {
+          console.log('✅ Session from recovery link is set')
         }
       } catch (err) {
-        console.error('checkRecoverySession error:', err)
+        console.error('Error bootstrap session:', err)
         setSessionError(
-          err?.message ||
-            'Terjadi kesalahan saat memeriksa sesi reset password. ' +
-            'Silakan minta link baru dari halaman Lupa Password.'
+          err.message ||
+            'Terjadi kesalahan saat memproses link reset password.'
         )
       } finally {
         setChecking(false)
       }
     }
 
-    checkRecoverySession()
-  }, [])
+    bootstrapSession()
+  }, [location])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -52,19 +104,8 @@ const ResetPassword = () => {
       return
     }
 
-    // Validasi password yang lebih ketat
     if (password.length < 6) {
       setError('Password minimal 6 karakter.')
-      return
-    }
-
-    if (!/(?=.*[A-Z])/.test(password)) {
-      setError('Password harus mengandung minimal 1 huruf besar.')
-      return
-    }
-
-    if (!/(?=.*\d)/.test(password)) {
-      setError('Password harus mengandung minimal 1 angka.')
       return
     }
 
@@ -78,20 +119,13 @@ const ResetPassword = () => {
     setSuccess('')
 
     try {
-      const { data, error } = await supabase.auth.updateUser({ password })
+      const { data, error } = await supabase.auth.updateUser({
+        password
+      })
 
       if (error) {
         console.error('updateUser error:', error)
-
-        const msg = error.message?.toLowerCase() || ''
-        if (msg.includes('jwt expired') || msg.includes('session')) {
-          setError(
-            'Sesi reset password sudah kedaluwarsa atau tidak valid.\n' +
-              'Silakan minta link reset password yang baru dari halaman Lupa Password.'
-          )
-        } else {
-          setError(error.message || 'Gagal mengubah password.')
-        }
+        setError(error.message || 'Gagal mengubah password.')
       } else {
         console.log('✅ Password updated:', data)
         setSuccess(
@@ -109,21 +143,21 @@ const ResetPassword = () => {
     }
   }
 
-  // 1) Saat masih cek sesi dari URL
+  // Saat lagi verifikasi link
   if (checking) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-sky-50 via-indigo-50 to-slate-100 px-4">
         <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-xl p-6 w-full max-w-md border border-slate-100 flex flex-col items-center">
           <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-3" />
           <p className="text-slate-600 text-sm">
-            Menyiapkan halaman reset password...
+            Memverifikasi link reset password...
           </p>
         </div>
       </div>
     )
   }
 
-  // 2) Kalau tidak ada sesi (link invalid / expired / sudah dipakai)
+  // Kalau token/link bermasalah
   if (sessionError) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-sky-50 via-indigo-50 to-slate-100 px-4">
@@ -131,31 +165,19 @@ const ResetPassword = () => {
           <h1 className="text-lg font-semibold text-red-700 mb-2">
             Link Reset Tidak Valid
           </h1>
-          <p className="text-sm text-red-600 mb-4 whitespace-pre-line">
-            {sessionError}
-          </p>
-
+          <p className="text-sm text-red-600 mb-4">{sessionError}</p>
           <Link
-            to="/forgot-password"
+            to="/login"
             className="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold"
           >
-            Minta Link Reset Password Baru
+            Kembali ke halaman login
           </Link>
-
-          <div className="mt-4 text-center">
-            <Link
-              to="/login"
-              className="text-xs text-slate-500 hover:text-slate-700"
-            >
-              Kembali ke halaman login
-            </Link>
-          </div>
         </div>
       </div>
     )
   }
 
-  // 3) Form ganti password (sesi recovery valid)
+  // Form ganti password
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-sky-50 via-indigo-50 to-slate-100 px-4 py-8">
       <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-xl p-6 w-full max-w-md border border-slate-100">
@@ -193,7 +215,7 @@ const ResetPassword = () => {
                 if (error) setError('')
               }}
               className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white"
-              placeholder="Minimal 6 karakter, 1 huruf besar, 1 angka"
+              placeholder="Minimal 6 karakter"
               disabled={isSubmitting}
               required
             />
