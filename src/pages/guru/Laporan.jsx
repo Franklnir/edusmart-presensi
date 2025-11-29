@@ -1,5 +1,11 @@
 // src/pages/guru/LaporanRekap.jsx
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo
+} from 'react'
 import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
@@ -28,7 +34,7 @@ const getNamaKelasFromList = (kelasId, kelasList) => {
   return getKelasDisplayName(kelas) || kelasId || '—'
 }
 
-// Helper untuk mengambil tanggal dari ARRAY bulan yang dipilih
+// Helper untuk mengambil tanggal dari ARRAY bulan yang dipilih (semua hari)
 const getDatesInPeriod = (year, selectedMonths) => {
   if (!selectedMonths || selectedMonths.length === 0) return []
 
@@ -55,7 +61,7 @@ const isSunday = (dateString) => {
   return d.getDay() === 0
 }
 
-// Map hari Indonesia → JS getDay()
+// Mapping nama hari → index JavaScript (0 = Minggu, 1 = Senin, dst)
 const HARI_MAP = {
   Minggu: 0,
   Senin: 1,
@@ -66,9 +72,10 @@ const HARI_MAP = {
   Sabtu: 6
 }
 
-// Tanggal khusus untuk eskul: hanya hari yang sama dengan hari eskul
+// Ambil hanya tanggal-tanggal yang jatuh di hari ekskul
 const getEskulDatesInPeriod = (year, selectedMonths, hariEskul) => {
   if (!selectedMonths || selectedMonths.length === 0 || !hariEskul) return []
+
   const targetDay = HARI_MAP[hariEskul]
   if (typeof targetDay !== 'number') return []
 
@@ -154,19 +161,19 @@ export default function LaporanRekap() {
   const { pushToast, setLoading } = useUIStore()
 
   // -- UI State --
-  const [activeTab, setActiveTab] = useState('absensi')
+  const [activeTab, setActiveTab] = useState('absensi') // 'absensi' | 'tugas' | 'ekskul'
   const [showBulanDropdown, setShowBulanDropdown] = useState(false)
   const dropdownRef = useRef(null)
 
-  // -- Data Filter State --
+  // -- Data Master --
   const [kelasList, setKelasList] = useState([])
   const [jadwalGuru, setJadwalGuru] = useState([])
   const [mapelList, setMapelList] = useState([])
 
-  // Ekskul (pembina)
-  const [ekskulList, setEkskulList] = useState([])
+  // Ekskul
+  const [ekskulList, setEkskulList] = useState([]) // semua ekskul yg dibina guru
+  const [ekskulOptionsForClass, setEkskulOptionsForClass] = useState([]) // ekskul yg punya anggota di kelas terpilih
   const [selectedEkskul, setSelectedEkskul] = useState('')
-  const [eskulData, setEskulData] = useState(null)
 
   // -- Selection State (Default Kosong) --
   const [selectedKelas, setSelectedKelas] = useState('')
@@ -177,6 +184,7 @@ export default function LaporanRekap() {
   // -- Data Result State --
   const [absensiData, setAbsensiData] = useState(null)
   const [tugasData, setTugasData] = useState(null)
+  const [eskulData, setEskulData] = useState(null)
   const [editingNilai, setEditingNilai] = useState(null)
   const [excelReady, setExcelReady] = useState(false)
 
@@ -201,7 +209,10 @@ export default function LaporanRekap() {
     const load = async () => {
       if (!user?.id) return
       try {
-        const { data } = await supabase.from('jadwal').select('*').eq('guru_id', user.id)
+        const { data } = await supabase
+          .from('jadwal')
+          .select('*')
+          .eq('guru_id', user.id)
         setJadwalGuru(data || [])
       } catch (e) {
         console.error(e)
@@ -210,6 +221,7 @@ export default function LaporanRekap() {
     load()
   }, [user?.id])
 
+  // Kelas yang diampu dari jadwal
   useEffect(() => {
     const load = async () => {
       if (!jadwalGuru.length) {
@@ -241,6 +253,7 @@ export default function LaporanRekap() {
     load()
   }, [jadwalGuru, selectedKelas])
 
+  // Mapel untuk kelas terpilih
   useEffect(() => {
     if (!selectedKelas || !jadwalGuru.length) {
       setMapelList([])
@@ -257,7 +270,7 @@ export default function LaporanRekap() {
     else if (!mapels.length) setSelectedMapel('')
   }, [selectedKelas, jadwalGuru, selectedMapel])
 
-  // Load daftar ekskul yang dibina oleh guru ini
+  // Load semua ekskul yang dibina guru ini
   useEffect(() => {
     const loadEkskul = async () => {
       if (!user?.id) return
@@ -270,15 +283,70 @@ export default function LaporanRekap() {
 
         if (error) throw error
         setEkskulList(data || [])
-        if (data && data.length && !selectedEkskul) {
-          setSelectedEkskul(data[0].id)
-        }
       } catch (e) {
-        console.error(e)
+        console.error('Gagal load ekskul:', e)
       }
     }
     loadEkskul()
-  }, [user?.id, selectedEkskul])
+  }, [user?.id])
+
+  // Filter ekskul: hanya ekskul yang punya anggota dari kelas yang dipilih
+  useEffect(() => {
+    const loadEkskulForClass = async () => {
+      if (!selectedKelas || !ekskulList.length) {
+        setEkskulOptionsForClass([])
+        setSelectedEkskul('')
+        return
+      }
+
+      try {
+        // 1) ambil semua siswa di kelas ini
+        const { data: siswaData, error: siswaErr } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('kelas', selectedKelas)
+          .eq('role', 'siswa')
+
+        if (siswaErr) throw siswaErr
+
+        const siswaIds = (siswaData || []).map((s) => s.id)
+        if (!siswaIds.length) {
+          setEkskulOptionsForClass([])
+          setSelectedEkskul('')
+          return
+        }
+
+        // 2) cek ekskul_anggota untuk siswa-siswa ini
+        const { data: anggotaRows, error: anggotaErr } = await supabase
+          .from('ekskul_anggota')
+          .select('ekskul_id, user_id')
+          .in('user_id', siswaIds)
+
+        if (anggotaErr) throw anggotaErr
+
+        const ekskulIdSet = new Set(
+          (anggotaRows || []).map((a) => a.ekskul_id).filter(Boolean)
+        )
+
+        // 3) hanya ekskul yang dibina guru ini dan punya anggota dari kelas ini
+        const filtered = ekskulList.filter((eks) => ekskulIdSet.has(eks.id))
+
+        setEkskulOptionsForClass(filtered)
+
+        if (filtered.length) {
+          if (!selectedEkskul || !filtered.some((e) => e.id === selectedEkskul)) {
+            setSelectedEkskul(filtered[0].id)
+          }
+        } else {
+          setSelectedEkskul('')
+        }
+      } catch (e) {
+        console.error('Gagal filter ekskul untuk kelas:', e)
+      }
+    }
+
+    loadEkskulForClass()
+  }, [selectedKelas, ekskulList, selectedEkskul])
 
   // Toggle Checkbox Bulan
   const handleToggleBulan = (val) => {
@@ -456,9 +524,9 @@ export default function LaporanRekap() {
     }
   }, [selectedKelas, selectedMapel, selectedBulan, tahun, setLoading, pushToast])
 
-  // === REKAP ESKUL: hanya anggota eskul & tanggal di hari eskul ===
+  // Rekap kehadiran ekskul (per kelas, per ekskul, per bulan)
   const loadRekapEskul = useCallback(async () => {
-    // Harus pilih kelas, ekskul, dan minimal 1 bulan
+    // butuh: kelas, ekskul, dan minimal 1 bulan
     if (!selectedKelas || !selectedEkskul || selectedBulan.length === 0) {
       setEskulData(null)
       return
@@ -467,104 +535,91 @@ export default function LaporanRekap() {
     try {
       setLoading(true)
 
-      // Cari info ekskul (nama + hari)
-      let eks = ekskulList.find((e) => e.id === selectedEkskul)
-      if (!eks) {
-        const { data } = await supabase
-          .from('ekskul')
-          .select('id, nama, hari')
-          .eq('id', selectedEkskul)
-          .maybeSingle()
-        eks = data
-      }
+      // Detail ekskul (nama + hari)
+      const { data: eks, error: eksErr } = await supabase
+        .from('ekskul')
+        .select('id, nama, hari')
+        .eq('id', selectedEkskul)
+        .maybeSingle()
 
+      if (eksErr) throw eksErr
       if (!eks) {
         setEskulData(null)
         return
       }
 
-      const hariEskul = eks.hari
-      const dateStrings = getEskulDatesInPeriod(tahun, selectedBulan, hariEskul)
+      // Semua tanggal di bulan terpilih yang jatuh di hari ekskul
+      const dateStrings = getEskulDatesInPeriod(tahun, selectedBulan, eks.hari)
 
       const namaBulanTerpilih = selectedBulan
         .map((b) => bulanList.find((bl) => bl.value === b)?.label)
         .join(', ')
 
-      if (dateStrings.length === 0) {
-        setEskulData({
-          siswa: [],
-          dateStrings,
-          periode: `${namaBulanTerpilih} ${tahun}`,
-          ekskulName: eks.nama,
-          hari: hariEskul
-        })
-        return
-      }
-
-      // Ambil anggota ekskul
-      const { data: anggotaRows, error: anggotaErr } = await supabase
-        .from('ekskul_anggota')
-        .select('user_id')
-        .eq('ekskul_id', selectedEkskul)
-
-      if (anggotaErr) throw anggotaErr
-
-      const anggotaIds =
-        anggotaRows?.map((a) => a.user_id).filter(Boolean) || []
-
-      if (!anggotaIds.length) {
-        setEskulData({
-          siswa: [],
-          dateStrings,
-          periode: `${namaBulanTerpilih} ${tahun}`,
-          ekskulName: eks.nama,
-          hari: hariEskul
-        })
-        return
-      }
-
-      // Filter anggota berdasarkan kelas + role siswa
+      // Ambil semua siswa di kelas ini
       const { data: siswaData, error: siswaErr } = await supabase
         .from('profiles')
-        .select('id, nama, nik, kelas, role')
-        .in('id', anggotaIds)
+        .select('id, nama, nik')
         .eq('kelas', selectedKelas)
         .eq('role', 'siswa')
         .order('nama')
 
       if (siswaErr) throw siswaErr
 
-      if (!siswaData || !siswaData.length) {
+      const siswaIds = (siswaData || []).map((s) => s.id)
+
+      if (!siswaIds.length) {
         setEskulData({
           siswa: [],
           dateStrings,
           periode: `${namaBulanTerpilih} ${tahun}`,
           ekskulName: eks.nama,
-          hari: hariEskul
+          hari: eks.hari
         })
         return
       }
 
-      const { data: absEskulRows, error: absEskulErr } = await supabase
-        .from('absensi_eskul')
-        .select('*')
+      // Cek siapa saja yang anggota ekskul ini di kelas ini
+      const { data: anggotaRows, error: anggotaErr } = await supabase
+        .from('ekskul_anggota')
+        .select('user_id')
         .eq('ekskul_id', selectedEkskul)
-        .in(
-          'user_id',
-          siswaData.map((s) => s.id)
-        )
-        .gte('tanggal', dateStrings[0])
-        .lte('tanggal', dateStrings[dateStrings.length - 1])
+        .in('user_id', siswaIds)
 
-      if (absEskulErr) throw absEskulErr
+      if (anggotaErr) throw anggotaErr
 
-      const formatted = siswaData.map((s) => {
-        const absS = absEskulRows?.filter((a) => a.user_id === s.id) || []
+      const anggotaIds = new Set(
+        (anggotaRows || []).map((a) => a.user_id).filter(Boolean)
+      )
+
+      // Ambil absensi_eskul hanya untuk anggota
+      let absEskulRows = []
+      if (dateStrings.length && anggotaIds.size) {
+        const { data: absRows, error: absErr } = await supabase
+          .from('absensi_eskul')
+          .select('user_id, tanggal, status')
+          .eq('ekskul_id', selectedEkskul)
+          .in('user_id', Array.from(anggotaIds))
+          .gte('tanggal', dateStrings[0])
+          .lte('tanggal', dateStrings[dateStrings.length - 1])
+
+        if (absErr) throw absErr
+        absEskulRows = absRows || []
+      }
+
+      // Bentuk row per siswa di kelas
+      const formatted = (siswaData || []).map((s) => {
+        const isAnggota = anggotaIds.has(s.id)
         const total = { Hadir: 0, Izin: 0, Alpha: 0 }
         const absensiPerTanggal = {}
 
         dateStrings.forEach((dateStr) => {
-          const found = absS.find((a) => a.tanggal === dateStr)
+          if (!isAnggota) {
+            absensiPerTanggal[dateStr] = null
+            return
+          }
+          const found = absEskulRows.find(
+            (a) => a.user_id === s.id && a.tanggal === dateStr
+          )
           if (found) {
             absensiPerTanggal[dateStr] = found.status
             if (['Hadir', 'Izin', 'Alpha'].includes(found.status)) {
@@ -579,6 +634,7 @@ export default function LaporanRekap() {
           id: s.id,
           nama: s.nama,
           nik: s.nik,
+          isAnggota,
           total,
           absensiPerTanggal
         }
@@ -589,42 +645,24 @@ export default function LaporanRekap() {
         dateStrings,
         periode: `${namaBulanTerpilih} ${tahun}`,
         ekskulName: eks.nama,
-        hari: hariEskul
+        hari: eks.hari
       })
     } catch (e) {
       console.error(e)
-      pushToast('error', 'Gagal memuat absensi eskul')
+      pushToast('error', 'Gagal memuat rekap eskul')
     } finally {
       setLoading(false)
     }
-  }, [
-    selectedKelas,
-    selectedEkskul,
-    selectedBulan,
-    tahun,
-    setLoading,
-    pushToast,
-    ekskulList
-  ])
+  }, [selectedKelas, selectedEkskul, selectedBulan, tahun, setLoading, pushToast])
 
-  // REALTIME TRIGGER
+  // REALTIME TRIGGER: Absensi & Tugas
   useEffect(() => {
     if (selectedKelas && selectedMapel) {
-      if (activeTab === 'absensi') {
-        loadRekapAbsensi()
-      } else {
-        // tab tugas
-        loadRekapTugas()
-        if (selectedEkskul) {
-          loadRekapEskul()
-        } else {
-          setEskulData(null)
-        }
-      }
+      if (activeTab === 'absensi') loadRekapAbsensi()
+      else if (activeTab === 'tugas') loadRekapTugas()
     } else {
       setAbsensiData(null)
       setTugasData(null)
-      setEskulData(null)
     }
   }, [
     selectedKelas,
@@ -633,9 +671,25 @@ export default function LaporanRekap() {
     tahun,
     activeTab,
     loadRekapAbsensi,
-    loadRekapTugas,
-    loadRekapEskul,
-    selectedEkskul
+    loadRekapTugas
+  ])
+
+  // REALTIME TRIGGER: Rekap Eskul
+  useEffect(() => {
+    if (activeTab !== 'ekskul') return
+
+    if (selectedKelas && selectedEkskul && selectedBulan.length > 0) {
+      loadRekapEskul()
+    } else {
+      setEskulData(null)
+    }
+  }, [
+    activeTab,
+    selectedKelas,
+    selectedEkskul,
+    selectedBulan,
+    tahun,
+    loadRekapEskul
   ])
 
   // ==============================
@@ -727,13 +781,7 @@ export default function LaporanRekap() {
     }
   }, [eskulData])
 
-  // Map cepat untuk cari rekap eskul per siswa
-  const eskulMap = useMemo(() => {
-    if (!eskulData) return new Map()
-    return new Map(eskulData.siswa.map((s) => [s.id, s]))
-  }, [eskulData])
-
-  // Filter siswa berdasarkan pencarian nama / NIK (Absensi)
+  // Filter siswa berdasarkan pencarian nama / NIK
   const filteredAbsensiSiswa = useMemo(() => {
     if (!absensiData) return []
     if (!searchNama.trim()) return absensiData.siswa
@@ -1049,6 +1097,21 @@ export default function LaporanRekap() {
           .map((t) => s.nilaiTugas[t.id]?.nilai ?? '')
           .join(sep)
         csv += `${i + 1}${sep}"${s.nama}"${sep}'${s.nik}'${sep}${vals}${sep}${s.rataRata}${sep}"${s.grade}"\n`
+      })
+    } else if (type === 'ekskul' && eskulData) {
+      const dateHeaders = eskulData.dateStrings
+        .map((ds) => parseInt(ds.split('-')[2]))
+        .join(sep)
+      csv += `No${sep}Nama${sep}NIK${sep}Status Ekskul${sep}${dateHeaders}${sep}I${sep}A${sep}Hadir\n`
+
+      eskulData.siswa.forEach((s, i) => {
+        const daily = eskulData.dateStrings
+          .map((ds) => {
+            const st = s.absensiPerTanggal[ds]
+            return s.isAnggota && st ? st.charAt(0) : ''
+          })
+          .join(sep)
+        csv += `${i + 1}${sep}"${s.nama}"${sep}'${s.nik}'${sep}"${s.isAnggota ? 'Anggota' : 'Bukan Anggota'}"${sep}${daily}${sep}${s.total.Izin}${sep}${s.total.Alpha}${sep}${s.total.Hadir}\n`
       })
     }
 
@@ -1418,12 +1481,7 @@ export default function LaporanRekap() {
       headerNilai.font = { bold: true }
       headerNilai.eachCell((cell) => {
         cell.alignment = { horizontal: 'center' }
-        cell.border = {
-          top: { style: 'thin' },
-          left: { style: 'thin' },
-          bottom: { style: 'thin' },
-          right: { style: 'thin' }
-        }
+        cell.border = borderAll
       })
 
       tugasData.tugas.forEach((t, i) => {
@@ -1449,12 +1507,7 @@ export default function LaporanRekap() {
         row.getCell(5).value = status
 
         row.eachCell((cell, col) => {
-          cell.border = {
-            top: { style: 'thin' },
-            left: { style: 'thin' },
-            bottom: { style: 'thin' },
-            right: { style: 'thin' }
-          }
+          cell.border = borderAll
           if (col === 2) {
             cell.alignment = { horizontal: 'left' }
           } else {
@@ -1483,6 +1536,164 @@ export default function LaporanRekap() {
     saveBlob(buf, `Laporan_${safeName}_${mapelName || 'mapel'}.xlsx`)
   }
 
+  // === ESKUL – DETAIL (per pertemuan) ===
+  const exportEskulToExcel = async () => {
+    if (!eskulData) return
+    if (!excelReady) {
+      pushToast('error', 'Library Excel belum siap, coba beberapa detik lagi')
+      return
+    }
+
+    const wb = new ExcelJS.Workbook()
+    const ws = wb.addWorksheet('Rekap Eskul')
+
+    const borderAll = {
+      top: { style: 'thin' },
+      left: { style: 'thin' },
+      bottom: { style: 'thin' },
+      right: { style: 'thin' }
+    }
+
+    const kelasName = getNamaKelasFromList(selectedKelas, kelasList)
+
+    ws.mergeCells(1, 1, 1, 4 + eskulData.dateStrings.length + 3)
+    const t = ws.getCell(1, 1)
+    t.value = `REKAP KEHADIRAN ESKUL ${eskulData.ekskulName} - ${kelasName}`
+    t.font = { bold: true, size: 12 }
+    t.alignment = { horizontal: 'center' }
+
+    ws.mergeCells(2, 1, 2, 4 + eskulData.dateStrings.length + 3)
+    const sub = ws.getCell(2, 1)
+    sub.value = `${eskulData.hari || '-'} · ${eskulData.periode}`
+    sub.font = { bold: true, size: 10 }
+    sub.alignment = { horizontal: 'center' }
+
+    const headers = ['No', 'Nama Siswa', 'NIK', 'Status Ekskul']
+    eskulData.dateStrings.forEach((ds) =>
+      headers.push(parseInt(ds.split('-')[2]))
+    )
+    headers.push('I', 'A', 'Hadir')
+
+    const r = ws.getRow(3)
+    r.values = headers
+    r.font = { bold: true }
+    r.eachCell((cell) => {
+      cell.border = borderAll
+      cell.alignment = { horizontal: 'center' }
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFD1D5DB' }
+      }
+    })
+
+    eskulData.siswa.forEach((s, i) => {
+      const rowVals = [
+        i + 1,
+        s.nama,
+        s.nik,
+        s.isAnggota ? 'Anggota' : 'Bukan Anggota'
+      ]
+      eskulData.dateStrings.forEach((ds) => {
+        const st = s.absensiPerTanggal[ds]
+        rowVals.push(s.isAnggota && st ? st.charAt(0) : '')
+      })
+      rowVals.push(s.total.Izin, s.total.Alpha, s.total.Hadir)
+
+      const row = ws.addRow(rowVals)
+      row.eachCell((cell, col) => {
+        cell.border = borderAll
+        cell.alignment = { horizontal: 'center' }
+        if (col === 2) cell.alignment = { horizontal: 'left' }
+      })
+    })
+
+    ws.getColumn(1).width = 5
+    ws.getColumn(2).width = 30
+    ws.getColumn(3).width = 15
+    ws.getColumn(4).width = 18
+    for (let c = 5; c < 5 + eskulData.dateStrings.length; c++) {
+      ws.getColumn(c).width = 3
+    }
+
+    const safeEks = eskulData.ekskulName?.replace(/[^\w\d]+/g, '_') || 'Eskul'
+    const buf = await wb.xlsx.writeBuffer()
+    saveBlob(buf, `Eskul_${safeEks}_${kelasName}.xlsx`)
+  }
+
+  // === ESKUL – RINGKAS (H/I/A per siswa) ===
+  const exportEskulSummaryToExcel = async () => {
+    if (!eskulData) return
+    if (!excelReady) {
+      pushToast('error', 'Library Excel belum siap, coba beberapa detik lagi')
+      return
+    }
+
+    const wb = new ExcelJS.Workbook()
+    const ws = wb.addWorksheet('Rekap Eskul HIA')
+
+    const borderAll = {
+      top: { style: 'thin' },
+      left: { style: 'thin' },
+      bottom: { style: 'thin' },
+      right: { style: 'thin' }
+    }
+
+    const kelasName = getNamaKelasFromList(selectedKelas, kelasList)
+
+    const title = ws.addRow([
+      `REKAP ESKUL (H/I/A) – ${eskulData.ekskulName} – ${kelasName}`
+    ])
+    title.font = { bold: true, size: 12 }
+    ws.mergeCells(1, 1, 1, 6)
+    title.alignment = { horizontal: 'center' }
+
+    const sub = ws.addRow([`${eskulData.hari || '-'} · ${eskulData.periode}`])
+    ws.mergeCells(2, 1, 2, 6)
+    sub.alignment = { horizontal: 'center' }
+
+    const header = ws.addRow(['No', 'Nama', 'Status Ekskul', 'Hadir', 'Izin', 'Alpha'])
+    header.font = { bold: true }
+    header.eachCell((cell) => {
+      cell.border = borderAll
+      cell.alignment = { horizontal: 'center' }
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFD1D5DB' }
+      }
+    })
+
+    eskulData.siswa.forEach((s, i) => {
+      const row = ws.addRow([
+        i + 1,
+        s.nama,
+        s.isAnggota ? 'Anggota' : 'Bukan Anggota',
+        s.total.Hadir,
+        s.total.Izin,
+        s.total.Alpha
+      ])
+      row.getCell(2).alignment = { horizontal: 'left' }
+      row.eachCell((cell) => {
+        cell.border = borderAll
+        if (!cell.alignment || !cell.alignment.horizontal) {
+          cell.alignment = { horizontal: 'center' }
+        }
+      })
+    })
+
+    ws.getColumn(1).width = 5
+    ws.getColumn(2).width = 30
+    ws.getColumn(3).width = 18
+    ws.getColumn(4).width = 10
+    ws.getColumn(5).width = 10
+    ws.getColumn(6).width = 10
+
+    const safeEks = eskulData.ekskulName?.replace(/[^\w\d]+/g, '_') || 'Eskul'
+    const buf = await wb.xlsx.writeBuffer()
+    saveBlob(buf, `Eskul_ringkas_${safeEks}_${kelasName}.xlsx`)
+  }
+
   // ==============================
   // ===== RENDER UI ==============
   // ==============================
@@ -1490,7 +1701,7 @@ export default function LaporanRekap() {
     <div className="min-h-screen bg-gray-50 p-4 print:bg-white print:p-0">
       <div className="max-w-7xl mx-auto space-y-6">
         {/* === CONTROLS === */}
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 grid grid-cols-1 md:grid-cols-4 gap-4 print:hidden">
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 grid grid-cols-1 md:grid-cols-5 gap-4 print:hidden">
           {/* Kelas */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1522,6 +1733,29 @@ export default function LaporanRekap() {
               {mapelList.map((m) => (
                 <option key={m} value={m}>
                   {m}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Ekskul (khusus tab Rekap Eskul) */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Ekskul (Rekap Eskul)
+            </label>
+            <select
+              className="w-full border rounded-lg p-2.5"
+              value={selectedEkskul}
+              onChange={(e) => setSelectedEkskul(e.target.value)}
+            >
+              <option value="">
+                {ekskulOptionsForClass.length
+                  ? 'Pilih ekskul...'
+                  : 'Belum ada ekskul untuk kelas ini'}
+              </option>
+              {ekskulOptionsForClass.map((eks) => (
+                <option key={eks.id} value={eks.id}>
+                  {eks.nama}
                 </option>
               ))}
             </select>
@@ -1611,14 +1845,9 @@ export default function LaporanRekap() {
             <button
               className="w-full bg-blue-600 text-white py-2.5 rounded-lg font-medium hover:bg-blue-700 transition flex items-center justify-center gap-2"
               onClick={() => {
-                if (activeTab === 'absensi') {
-                  loadRekapAbsensi()
-                } else {
-                  loadRekapTugas()
-                  if (selectedEkskul) {
-                    loadRekapEskul()
-                  }
-                }
+                if (activeTab === 'absensi') loadRekapAbsensi()
+                else if (activeTab === 'tugas') loadRekapTugas()
+                else if (activeTab === 'ekskul') loadRekapEskul()
               }}
             >
               <span>🔄</span> Muat Ulang
@@ -1648,6 +1877,16 @@ export default function LaporanRekap() {
           >
             Nilai Tugas
           </button>
+          <button
+            className={`px-4 py-2 rounded-md text-sm font-medium transition ${
+              activeTab === 'ekskul'
+                ? 'bg-white shadow text-blue-700'
+                : 'text-gray-600 hover:bg-gray-300'
+            }`}
+            onClick={() => setActiveTab('ekskul')}
+          >
+            Rekap Eskul
+          </button>
         </div>
 
         {/* === EMPTY STATES === */}
@@ -1662,6 +1901,16 @@ export default function LaporanRekap() {
           <div className="text-center py-12 bg-white rounded-xl border border-dashed border-gray-300">
             <p className="text-gray-500">
               Silakan pilih Kelas, Mapel, dan checklist Bulan untuk melihat data nilai.
+            </p>
+          </div>
+        )}
+        {!eskulData && activeTab === 'ekskul' && (
+          <div className="text-center py-12 bg-white rounded-xl border border-dashed border-gray-300">
+            <p className="text-gray-500">
+              Pilih <span className="font-semibold">Kelas</span>,{' '}
+              <span className="font-semibold">Ekskul</span>, dan checklist{' '}
+              <span className="font-semibold">Bulan</span> untuk melihat rekap kehadiran
+              ekskul (hanya tanggal di hari ekskul).
             </p>
           </div>
         )}
@@ -1877,7 +2126,166 @@ export default function LaporanRekap() {
           </div>
         )}
 
-        {/* === TABLE TUGAS + REKAP ESKUL === */}
+        {/* === TABLE REKAP ESKUL === */}
+        {activeTab === 'ekskul' && eskulData && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            <div className="p-4 border-b border-gray-200 flex flex-wrap gap-3 justify-between items-center bg-gray-50 print:bg-white">
+              <h3 className="font-bold text-gray-700">
+                Rekap Kehadiran Ekskul – {eskulData.ekskulName}{' '}
+                <span className="text-sm font-normal text-gray-500">
+                  ({getNamaKelasFromList(selectedKelas, kelasList)} ·{' '}
+                  {eskulData.hari || '-'} · {eskulData.periode})
+                </span>
+              </h3>
+              <div className="flex flex-wrap gap-2 print:hidden">
+                <button
+                  onClick={exportEskulToExcel}
+                  className="text-xs bg-green-600 text-white px-3 py-2 rounded hover:bg-green-700"
+                >
+                  Excel Detail
+                </button>
+                <button
+                  onClick={exportEskulSummaryToExcel}
+                  className="text-xs bg-emerald-600 text-white px-3 py-2 rounded hover:bg-emerald-700"
+                >
+                  Excel Ringkas (H/I/A)
+                </button>
+                <button
+                  onClick={() => exportToGoogleSheets('ekskul')}
+                  className="text-xs bg-blue-600 text-white px-3 py-2 rounded hover:bg-blue-700"
+                >
+                  Google Sheets
+                </button>
+                <button
+                  onClick={handlePrint}
+                  className="text-xs bg-gray-700 text-white px-3 py-2 rounded hover:bg-gray-800"
+                >
+                  Cetak
+                </button>
+              </div>
+            </div>
+
+            {eskulSummary && (
+              <div className="px-4 py-3 bg-white border-b border-gray-100 text-sm flex flex-wrap gap-4 items-center">
+                <div>
+                  <span className="font-semibold text-gray-700">
+                    Total siswa di kelas:
+                  </span>{' '}
+                  {eskulSummary.totalSiswa}
+                </div>
+                <div>
+                  <span className="font-semibold text-gray-700">
+                    Total pertemuan ekskul:
+                  </span>{' '}
+                  {eskulSummary.totalPertemuan}
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-green-50 text-xs font-semibold text-green-700">
+                    H {eskulSummary.totalHadir}
+                  </span>
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-blue-50 text-xs font-semibold text-blue-700">
+                    I {eskulSummary.totalIzin}
+                  </span>
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-red-50 text-xs font-semibold text-red-700">
+                    A {eskulSummary.totalAlpha}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm text-left">
+                <thead className="bg-gray-100 text-gray-700 uppercase font-bold text-xs">
+                  <tr>
+                    <th className="px-3 py-3 w-10">No</th>
+                    <th className="px-3 py-3 min-w-[200px]">Nama</th>
+                    <th className="px-3 py-3 text-center min-w-[140px]">
+                      Status Ekskul
+                    </th>
+                    {eskulData.dateStrings.map((ds) => {
+                      const dateNum = parseInt(ds.split('-')[2])
+                      return (
+                        <th
+                          key={ds}
+                          className="px-1 py-3 text-center w-8 border-l border-gray-200"
+                        >
+                          {dateNum}
+                        </th>
+                      )
+                    })}
+                    <th className="px-2 py-3 text-center border-l bg-blue-50">
+                      I
+                    </th>
+                    <th className="px-2 py-3 text-center bg-red-50">A</th>
+                    <th className="px-2 py-3 text-center bg-green-50 font-bold">
+                      H
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {eskulData.siswa.map((s, idx) => (
+                    <tr
+                      key={s.id}
+                      className={`hover:bg-gray-50 ${
+                        s.isAnggota ? '' : 'opacity-70'
+                      }`}
+                    >
+                      <td className="px-3 py-2 text-center">{idx + 1}</td>
+                      <td className="px-3 py-2 font-medium text-gray-900">
+                        {s.nama}
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        {s.isAnggota ? (
+                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            ✓ Anggota ekskul ini
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-gray-50 text-gray-500 border border-gray-200">
+                            Bukan anggota ekskul ini
+                          </span>
+                        )}
+                      </td>
+                      {eskulData.dateStrings.map((ds) => {
+                        const st = s.absensiPerTanggal[ds]
+                        return (
+                          <td
+                            key={ds}
+                            className="px-1 py-2 text-center border-l border-gray-100"
+                          >
+                            {s.isAnggota && st ? (
+                              <span
+                                className={`font-bold ${
+                                  st === 'Hadir'
+                                    ? 'text-green-600'
+                                    : st === 'Izin'
+                                    ? 'text-blue-600'
+                                    : 'text-red-600'
+                                }`}
+                              >
+                                {st.charAt(0)}
+                              </span>
+                            ) : null}
+                          </td>
+                        )
+                      })}
+                      <td className="px-2 py-2 text-center bg-blue-50/50 font-bold">
+                        {s.total.Izin}
+                      </td>
+                      <td className="px-2 py-2 text-center bg-red-50/50 font-bold">
+                        {s.total.Alpha}
+                      </td>
+                      <td className="px-2 py-2 text-center bg-green-50/50 text-green-700 font-bold">
+                        {s.total.Hadir}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* === TABLE TUGAS === */}
         {activeTab === 'tugas' && tugasData && (
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
             <div className="p-4 border-b border-gray-200 flex flex-wrap gap-3 justify-between items-center bg-gray-50 print:bg-white">
@@ -1921,7 +2329,7 @@ export default function LaporanRekap() {
               </div>
             </div>
 
-            {/* Legend Grade */}
+            {/* Legend Grade + Ringkasan Kelas Tugas */}
             <div className="px-4 pt-3 pb-2 bg-white border-b border-gray-100 text-xs text-gray-600 flex flex-wrap items-center gap-4">
               <div className="flex items-center gap-2">
                 <span className="font-semibold text-gray-700 text-sm">
@@ -1946,7 +2354,6 @@ export default function LaporanRekap() {
               </div>
             </div>
 
-            {/* Ringkasan Nilai Tugas */}
             {tugasSummary && (
               <div className="px-4 pb-3 bg-white border-b border-gray-100 text-sm flex flex-wrap gap-4">
                 <div>
@@ -1976,72 +2383,6 @@ export default function LaporanRekap() {
               </div>
             )}
 
-            {/* Filter & Ringkasan Eskul (di samping nilai tugas) */}
-            {ekskulList.length > 0 && (
-              <div className="px-4 pb-3 bg-white border-b border-gray-100 text-sm flex flex-wrap items-center gap-3">
-                <div className="font-semibold text-gray-700">
-                  Rekap Kehadiran Eskul (opsional)
-                </div>
-                <select
-                  className="border rounded-lg px-2 py-1 text-sm"
-                  value={selectedEkskul}
-                  onChange={(e) => setSelectedEkskul(e.target.value)}
-                >
-                  <option value="">Pilih ekskul...</option>
-                  {ekskulList.map((eks) => (
-                    <option key={eks.id} value={eks.id}>
-                      {eks.nama}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={loadRekapEskul}
-                  className="text-xs bg-indigo-600 text-white px-3 py-1.5 rounded hover:bg-indigo-700"
-                >
-                  Muat Rekap Eskul
-                </button>
-
-                {eskulData && (
-                  <div className="flex flex-wrap items-center gap-3 text-xs text-gray-600">
-                    <span>
-                      Ekskul:{' '}
-                      <span className="font-semibold text-gray-800">
-                        {eskulData.ekskulName}
-                      </span>
-                    </span>
-                    {eskulData.hari && (
-                      <span>
-                        Hari:{' '}
-                        <span className="font-semibold text-gray-800">
-                          {eskulData.hari}
-                        </span>
-                      </span>
-                    )}
-                    <span>
-                      Pertemuan:{' '}
-                      <span className="font-semibold text-gray-800">
-                        {eskulData.dateStrings.length}
-                      </span>
-                    </span>
-                    {eskulSummary && (
-                      <>
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-green-50 text-[11px] font-semibold text-green-700">
-                          H {eskulSummary.totalHadir}
-                        </span>
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-blue-50 text-[11px] font-semibold text-blue-700">
-                          I {eskulSummary.totalIzin}
-                        </span>
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-red-50 text-[11px] font-semibold text-red-700">
-                          A {eskulSummary.totalAlpha}
-                        </span>
-                      </>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
             <div className="overflow-x-auto">
               <table className="w-full text-sm text-left">
                 <thead className="bg-gray-100 text-gray-700 uppercase font-bold text-xs">
@@ -2061,109 +2402,78 @@ export default function LaporanRekap() {
                     <th className="px-4 py-3 text-center bg-purple-50">
                       Grade
                     </th>
-                    {eskulData && (
-                      <>
-                        <th className="px-4 py-3 text-center bg-green-50">
-                          Eskul H
-                        </th>
-                        <th className="px-4 py-3 text-center bg-blue-50">
-                          Eskul I
-                        </th>
-                        <th className="px-4 py-3 text-center bg-red-50">
-                          Eskul A
-                        </th>
-                      </>
-                    )}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {tugasData.siswa.map((s, idx) => {
-                    const esk = eskulMap.get(s.id)
-                    return (
-                      <tr key={s.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-2 text-center">{idx + 1}</td>
-                        <td className="px-4 py-2 font-medium">{s.nama}</td>
-                        {tugasData.tugas.map((t) => {
-                          const nilaiSiswa = s.nilaiTugas[t.id]?.nilai
-                          const isNilaiRendah =
-                            nilaiSiswa !== null &&
-                            nilaiSiswa !== undefined &&
-                            nilaiSiswa !== '-' &&
-                            !Number.isNaN(Number(nilaiSiswa)) &&
-                            Number(nilaiSiswa) < 70
-                          return (
-                            <td key={t.id} className="px-1 py-1 text-center">
-                              {editingNilai?.siswaId === s.id &&
-                              editingNilai?.tugasId === t.id ? (
-                                <input
-                                  autoFocus
-                                  className={`w-12 text-center border-2 rounded px-1 outline-none ${
-                                    isNilaiRendah
-                                      ? 'border-red-500 text-red-700'
-                                      : 'border-blue-500'
-                                  }`}
-                                  defaultValue={nilaiSiswa ?? ''}
-                                  onBlur={(e) =>
-                                    updateNilaiTugas(
-                                      s.id,
-                                      t.id,
-                                      e.target.value
-                                    )
-                                  }
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter') e.target.blur()
-                                  }}
-                                />
-                              ) : (
-                                <div
-                                  className={`cursor-pointer rounded px-2 py-1 mx-auto w-fit transition ${getColorClass(
-                                    nilaiSiswa
-                                  )} hover:brightness-95`}
-                                  onClick={() =>
-                                    setEditingNilai({
-                                      siswaId: s.id,
-                                      tugasId: t.id
-                                    })
-                                  }
-                                >
-                                  {nilaiSiswa ?? '-'}
-                                </div>
-                              )}
-                            </td>
-                          )
-                        })}
-                        <td className="px-4 py-2 text-center font-bold bg-blue-50/50">
-                          {s.rataRata}
-                        </td>
+                  {tugasData.siswa.map((s, idx) => (
+                    <tr key={s.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-2 text-center">{idx + 1}</td>
+                      <td className="px-4 py-2 font-medium">{s.nama}</td>
+                      {tugasData.tugas.map((t) => {
+                        const nilaiSiswa = s.nilaiTugas[t.id]?.nilai
+                        const isNilaiRendah =
+                          nilaiSiswa !== null &&
+                          nilaiSiswa !== undefined &&
+                          nilaiSiswa !== '-' &&
+                          !Number.isNaN(Number(nilaiSiswa)) &&
+                          Number(nilaiSiswa) < 70
+                        return (
+                          <td key={t.id} className="px-1 py-1 text-center">
+                            {editingNilai?.siswaId === s.id &&
+                            editingNilai?.tugasId === t.id ? (
+                              <input
+                                autoFocus
+                                className={`w-12 text-center border-2 rounded px-1 outline-none ${
+                                  isNilaiRendah
+                                    ? 'border-red-500 text-red-700'
+                                    : 'border-blue-500'
+                                }`}
+                                defaultValue={nilaiSiswa ?? ''}
+                                onBlur={(e) =>
+                                  updateNilaiTugas(
+                                    s.id,
+                                    t.id,
+                                    e.target.value
+                                  )
+                                }
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') e.target.blur()
+                                }}
+                              />
+                            ) : (
+                              <div
+                                className={`cursor-pointer rounded px-2 py-1 mx-auto w-fit transition ${getColorClass(
+                                  nilaiSiswa
+                                )} hover:brightness-95`}
+                                onClick={() =>
+                                  setEditingNilai({
+                                    siswaId: s.id,
+                                    tugasId: t.id
+                                  })
+                                }
+                              >
+                                {nilaiSiswa ?? '-'}
+                              </div>
+                            )}
+                          </td>
+                        )
+                      })}
+                      <td className="px-4 py-2 text-center font-bold bg-blue-50/50">
+                        {s.rataRata}
+                      </td>
 
-                        {/* Grade dengan Warna */}
-                        <td className="p-2 text-center">
-                          <span
-                            className={`px-3 py-1 rounded-full text-xs shadow-sm border ${getColorClass(
-                              s.grade
-                            )}`}
-                          >
-                            {s.grade}
-                          </span>
-                        </td>
-
-                        {/* Rekap Eskul per siswa (H/I/A) di samping nilai tugas */}
-                        {eskulData && (
-                          <>
-                            <td className="px-4 py-2 text-center bg-green-50/40 font-semibold text-green-700">
-                              {esk ? esk.total.Hadir : '-'}
-                            </td>
-                            <td className="px-4 py-2 text-center bg-blue-50/40 font-semibold text-blue-700">
-                              {esk ? esk.total.Izin : '-'}
-                            </td>
-                            <td className="px-4 py-2 text-center bg-red-50/40 font-semibold text-red-700">
-                              {esk ? esk.total.Alpha : '-'}
-                            </td>
-                          </>
-                        )}
-                      </tr>
-                    )
-                  })}
+                      {/* Grade dengan Warna */}
+                      <td className="p-2 text-center">
+                        <span
+                          className={`px-3 py-1 rounded-full text-xs shadow-sm border ${getColorClass(
+                            s.grade
+                          )}`}
+                        >
+                          {s.grade}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
