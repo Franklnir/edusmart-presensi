@@ -28,6 +28,7 @@ import AKelas from './pages/admin/Kelas'
 import AGuru from './pages/admin/Guru'
 import ASiswa from './pages/admin/Siswa'
 import AScan from './pages/admin/Scan'
+import Sertifikat from './pages/admin/Sertifikat'
 import APengaturan from './pages/admin/pengaturan'
 
 const AppRoutes = () => {
@@ -81,6 +82,7 @@ const AppRoutes = () => {
         <Route path="/admin/guru" element={<AGuru />} />
         <Route path="/admin/siswa" element={<ASiswa />} />
         <Route path="/admin/scan" element={<AScan />} />
+        <Route path="/admin/sertifikat" element={<Sertifikat />} />
         <Route path="/admin/pengaturan" element={<APengaturan />} />
       </Route>
 

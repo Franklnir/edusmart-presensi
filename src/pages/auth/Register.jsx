@@ -1,382 +1,582 @@
-import React, { useState, useEffect } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
-import { useAuthStore } from '../../store/useAuthStore'
-import { useUIStore } from '../../store/useUIStore'
+// src/pages/auth/Register.jsx
+import React, { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
+import { Link, useNavigate } from 'react-router-dom'
+import '../../styles/Login.css'
 
-const Register = () => {
-  const { register, settings, initialized, refreshSettings } = useAuthStore()
-  const { loading, setLoading } = useUIStore()
+const initialSettings = {
+  nama_sekolah: '',
+  logo_url: '',
+  registrasi_siswa_aktif: true,
+  registrasi_guru_aktif: true,
+  registrasi_admin_aktif: false
+}
+
+const initialForm = {
+  nama: '',
+  email: '',
+  password: '',
+  confirmPassword: '',
+  kelas: '',
+  jk: '',
+  telp: ''
+}
+
+export default function Register() {
   const nav = useNavigate()
 
-  const [role, setRole] = useState('')
-  const [nama, setNama] = useState('')
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [confirm, setConfirm] = useState('')
-  const [showPassword, setShowPassword] = useState(false)
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
-  const [isLoadingSettings, setIsLoadingSettings] = useState(true)
+  /* ====== STATE PENGATURAN ====== */
+  const [settings, setSettings] = useState(initialSettings)
+  const [settingsId, setSettingsId] = useState(null)
+  const [loadingSettings, setLoadingSettings] = useState(true)
 
-  // Load settings dengan fallback
+  /* ====== STATE REGISTRASI ====== */
+  const [selectedRole, setSelectedRole] = useState(null)
+  const [form, setForm] = useState(initialForm)
+  const [submitting, setSubmitting] = useState(false)
+  const [errorMessage, setErrorMessage] = useState('')
+  const [successMessage, setSuccessMessage] = useState('')
+
+  /* ====== DATA KELAS (kalau nanti dipakai) ====== */
+  const [kelasList, setKelasList] = useState([])
+  const [loadingKelas, setLoadingKelas] = useState(true)
+
+  // ========= LOAD SETTINGS =========
   useEffect(() => {
-    const loadSettingsWithFallback = async () => {
+    let isCancelled = false
+
+    async function loadSettings() {
+      setLoadingSettings(true)
       try {
-        if (initialized && !settings) {
-          await refreshSettings()
+        let { data, error } = await supabase
+          .from('settings')
+          .select('*')
+          .order('id', { ascending: true })
+          .limit(1)
+          .single()
+
+        if (error && error.code === 'PGRST116') {
+          data = null
+        } else if (error) {
+          throw error
         }
 
-        if (!settings) {
-          const { data, error } = await supabase
-            .from('settings')
-            .select('*')
-            .limit(1)
-            .single()
-
-          if (!error && data) {
-            useAuthStore.setState({ settings: data })
-          }
+        if (!isCancelled && data) {
+          setSettingsId(data.id)
+          setSettings({
+            nama_sekolah: data.nama_sekolah || '',
+            logo_url: data.logo_url || '',
+            registrasi_siswa_aktif: data.registrasi_siswa_aktif ?? true,
+            registrasi_guru_aktif: data.registrasi_guru_aktif ?? true,
+            registrasi_admin_aktif: data.registrasi_admin_aktif ?? false
+          })
         }
-      } catch (error) {
-        console.error('Error in settings loading fallback:', error)
+      } catch (err) {
+        if (!isCancelled) {
+          console.error('Gagal load settings:', err)
+        }
       } finally {
-        setIsLoadingSettings(false)
+        if (!isCancelled) {
+          setLoadingSettings(false)
+        }
       }
     }
 
-    loadSettingsWithFallback()
-  }, [initialized, settings, refreshSettings])
+    loadSettings()
+    return () => {
+      isCancelled = true
+    }
+  }, [])
 
-  // Status buka/tutup dari settings
-  const isSiswaOpen = settings?.registrasi_siswa_aktif !== false
-  const isGuruOpen = settings?.registrasi_guru_aktif !== false
-  const isAdminOpen = settings?.registrasi_admin_aktif !== false
-
-  const availableRoles = []
-  if (isSiswaOpen) availableRoles.push({ value: 'siswa', label: 'Siswa' })
-  if (isGuruOpen) availableRoles.push({ value: 'guru', label: 'Guru' })
-  if (isAdminOpen) availableRoles.push({ value: 'admin', label: 'Admin' })
-
-  const allClosed = availableRoles.length === 0
-
-  // Set role otomatis jika hanya ada satu pilihan
+  // ========= REALTIME LISTENER SETTINGS =========
   useEffect(() => {
-    if (availableRoles.length === 1 && !role) {
-      setRole(availableRoles[0].value)
-    }
-  }, [availableRoles, role])
+    if (!settingsId) return
 
-  // Validasi password
-  const validatePassword = (password) => {
-    if (password.length < 6) {
-      return 'Password minimal 6 karakter'
+    const channel = supabase
+      .channel('register_settings_realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'settings',
+          filter: `id=eq.${settingsId}`
+        },
+        (payload) => {
+          const row = payload.new
+          if (!row) return
+
+          setSettings({
+            nama_sekolah: row.nama_sekolah || '',
+            logo_url: row.logo_url || '',
+            registrasi_siswa_aktif: row.registrasi_siswa_aktif ?? true,
+            registrasi_guru_aktif: row.registrasi_guru_aktif ?? true,
+            registrasi_admin_aktif: row.registrasi_admin_aktif ?? false
+          })
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
     }
-    if (!/(?=.*[A-Z])/.test(password)) {
-      return 'Password harus mengandung minimal satu huruf besar'
+  }, [settingsId])
+
+  // ========= LOAD DATA KELAS (optional) =========
+  useEffect(() => {
+    let isCancelled = false
+
+    async function loadKelas() {
+      setLoadingKelas(true)
+      try {
+        const { data, error } = await supabase
+          .from('kelas')
+          .select('id, nama, grade, suffix')
+          .order('grade', { ascending: true })
+          .order('nama', { ascending: true })
+
+        if (error) throw error
+
+        if (!isCancelled && data) {
+          setKelasList(data)
+        }
+      } catch (err) {
+        if (!isCancelled) {
+          console.error('Gagal load kelas:', err)
+        }
+      } finally {
+        if (!isCancelled) {
+          setLoadingKelas(false)
+        }
+      }
     }
-    if (!/(?=.*\d)/.test(password)) {
-      return 'Password harus mengandung minimal satu angka'
+
+    loadKelas()
+    return () => {
+      isCancelled = true
     }
+  }, [])
+
+  /* ====== LOGIKA BANTUAN ====== */
+  const allDisabled =
+    !settings.registrasi_siswa_aktif &&
+    !settings.registrasi_guru_aktif &&
+    !settings.registrasi_admin_aktif
+
+  const handleSelectRole = (role) => {
+    setSelectedRole(role)
+    setErrorMessage('')
+    setSuccessMessage('')
+    // reset form tapi pertahankan email kalau sudah diisi
+    setForm(prev => ({
+      ...initialForm,
+      email: prev.email
+    }))
+  }
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target
+    setForm(prev => ({
+      ...prev,
+      [name]: value
+    }))
+  }
+
+  const validateForm = () => {
+    if (!selectedRole) return 'Silakan pilih jenis akun terlebih dahulu.'
+    if (!form.nama.trim()) return 'Nama lengkap wajib diisi.'
+    if (!form.email.trim()) return 'Email wajib diisi.'
+    if (!form.password) return 'Password wajib diisi.'
+    
+    // Validasi password yang lebih ketat
+    if (form.password.length < 6) {
+      return 'Password minimal 6 karakter.'
+    }
+    
+    if (!/(?=.*[A-Z])/.test(form.password)) {
+      return 'Password harus mengandung minimal 1 huruf besar.'
+    }
+    
+    if (!/(?=.*\d)/.test(form.password)) {
+      return 'Password harus mengandung minimal 1 angka.'
+    }
+    
+    if (form.password !== form.confirmPassword) return 'Konfirmasi password tidak sama.'
     return null
   }
 
-  // Handle submit
-  const onSubmit = async (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
+    setErrorMessage('')
+    setSuccessMessage('')
 
-    if (allClosed) {
-      alert('Pendaftaran akun baru saat ini ditutup oleh Admin.')
-      return
-    }
-
-    if (!role) {
-      alert('Silakan pilih role pendaftaran.')
-      return
-    }
-
-    const passwordError = validatePassword(password)
-    if (passwordError) {
-      alert(passwordError)
-      return
-    }
-
-    if (password !== confirm) {
-      alert('Konfirmasi password tidak cocok')
-      return
-    }
-
-    if (!nama.trim()) {
-      alert('Silakan isi nama lengkap.')
+    const validationError = validateForm()
+    if (validationError) {
+      setErrorMessage(validationError)
       return
     }
 
     try {
-      setLoading(true)
+      setSubmitting(true)
 
-      const result = await register({
-        email,
-        password,
-        role,
-        profile: {
-          email: email,
-          role: role,
-          nama: nama.trim()
+      // Buat user di Auth
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+        email: form.email.trim(),
+        password: form.password,
+        options: {
+          data: {
+            nama: form.nama.trim(),
+            role: selectedRole,
+            kelas: null,
+            jk: null,
+            telp: null
+          }
         }
       })
 
-      if (result.error) {
-        throw new Error(result.error)
+      if (signUpError) {
+        setErrorMessage(signUpError.message || 'Gagal mendaftar. Coba lagi.')
+        return
       }
 
-      alert('Pendaftaran berhasil! Silakan login.')
-      nav('/login')
+      const user = signUpData?.user
+      if (!user) {
+        setErrorMessage(
+          'Registrasi berhasil dibuat, namun user belum tersedia. Cek email verifikasi terlebih dahulu.'
+        )
+        return
+      }
+
+      // Insert ke tabel profiles
+      const profilePayload = {
+        id: user.id,
+        email: user.email,
+        nama: form.nama.trim(),
+        role: selectedRole,
+        kelas: null,
+        jk: null,
+        telp: null,
+        status: 'active'
+      }
+
+      const { error: profileError } = await supabase.from('profiles').insert(profilePayload)
+      if (profileError) {
+        console.warn('Gagal insert profiles:', profileError)
+      }
+
+      setSuccessMessage('Berhasil mendaftar! Mengarahkan ke halaman login...')
+      setTimeout(() => {
+        nav('/login')
+      }, 2000)
     } catch (err) {
-      console.error('Error saat pendaftaran:', err)
-      alert(`Gagal mendaftar: ${err.message || 'Silakan coba lagi.'}`)
+      console.error('Error submit:', err)
+      setErrorMessage('Terjadi kesalahan saat mendaftar. Coba beberapa saat lagi.')
     } finally {
-      setLoading(false)
+      setSubmitting(false)
     }
   }
 
-  if (isLoadingSettings) {
+  /* ====== RENDER ====== */
+  if (loadingSettings) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-sky-50 via-indigo-50 to-slate-100 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto" />
-          <p className="mt-4 text-gray-600">Memuat pengaturan registrasi...</p>
-        </div>
+      <div className="login-loading">
+        <div className="login-spinner"></div>
       </div>
     )
   }
 
-  const schoolName = settings?.nama_sekolah || 'Sekolah'
-  const logoUrl = settings?.logo_url || settings?.logourl || settings?.logoUrl
+  const schoolName = settings.nama_sekolah || 'bapak penabur'
+  const logoUrl = settings.logo_url
+  const address = settings.alamat || 'jl. kasuarieewd'
+  const phone = settings.telepon || '0895318323655'
+  const emailSekolah = settings.email || 'milertr26@gmail.com'
 
-  const disabledSubmit = loading || allClosed || !role
+  const socials = [
+    { key: 'facebook', href: settings?.link_facebook, icon: 'ri-facebook-fill' },
+    { key: 'tiktok', href: settings?.link_tiktok, icon: 'ri-tiktok-fill' },
+    { key: 'instagram', href: settings?.link_instagram, icon: 'ri-instagram-fill' },
+    { key: 'youtube', href: settings?.link_youtube, icon: 'ri-youtube-fill' }
+  ].filter(social => social.href)
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-sky-50 via-indigo-50 to-slate-100 px-4 py-8">
-      <div className="w-full max-w-3xl">
-        <div className="bg-white/90 backdrop-blur-sm rounded-[32px] shadow-2xl border border-slate-100 w-full overflow-hidden flex flex-col md:flex-row">
-          
-          {/* KIRI: Form Register - Lebih Compact */}
-          <div className="w-full md:w-1/2 px-6 sm:px-8 py-5 md:py-6 flex flex-col justify-center">
-            
-            {/* Header - Lebih Kecil */}
-            <div className="mb-4">
-              <h1 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight">
-                Daftar Akun
-              </h1>
-              <p className="text-xs text-slate-500 mt-1">
-                Buat akun baru untuk {schoolName}
+    <div className="login">
+      {/* Background Elements */}
+      <div className="login__bg">
+        <div className="login__bg-grid"></div>
+        <div className="login__bg-blur-1"></div>
+        <div className="login__bg-blur-2"></div>
+      </div>
+
+      <div className="login__container">
+        {/* Brand Section - kiri (sama seperti Login) */}
+        <div className="login__brand">
+          <div className="login__brand-content">
+            <div className="login__school-info">
+              {logoUrl && (
+                <img src={logoUrl} alt={schoolName} className="login__logo" />
+              )}
+              <div className="login__school-text">
+                <h1 className="login__school-name">{schoolName}</h1>
+                <p className="login__system-name">Sistem Absensi & Tugas Digital</p>
+              </div>
+            </div>
+
+            <div className="login__features">
+              <div className="login__feature-item">
+                <i className="ri-shield-check-fill"></i>
+                <span>Terpercaya</span>
+              </div>
+              <div className="login__feature-item">
+                <i className="ri-time-fill"></i>
+                <span>Real-time</span>
+              </div>
+              <div className="login__feature-item">
+                <i className="ri-smartphone-fill"></i>
+                <span>Responsive</span>
+              </div>
+            </div>
+
+            {socials.length > 0 && (
+              <div className="login__social">
+                <div className="login__social-links">
+                  {socials.map(social => (
+                    <a
+                      key={social.key}
+                      href={social.href}
+                      target="_blank"
+                      rel="noopener"
+                      className="login__social-link"
+                    >
+                      <i className={social.icon}></i>
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="login__contact-info">
+              <p className="login__address">{address}</p>
+              <p className="login__contact-details">
+                {phone} • {emailSekolah}
               </p>
             </div>
-
-            <form onSubmit={onSubmit} className="space-y-3">
-              
-              {/* Pilihan Role - Lebih Compact */}
-              {availableRoles.length > 1 && (
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
-                    Daftar Sebagai:
-                  </label>
-                  <div className="flex gap-1.5">
-                    {availableRoles.map((r) => (
-                      <label
-                        key={r.value}
-                        className={`flex-1 text-center p-1.5 border rounded-lg cursor-pointer transition-all text-xs ${
-                          role === r.value
-                            ? 'border-indigo-500 bg-indigo-50 text-indigo-700 font-semibold'
-                            : 'border-slate-200 hover:border-slate-300 text-slate-600'
-                        }`}
-                      >
-                        <input
-                          type="radio"
-                          name="role"
-                          value={r.value}
-                          checked={role === r.value}
-                          onChange={(e) => setRole(e.target.value)}
-                          className="hidden"
-                        />
-                        {r.label}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Role jika hanya 1 pilihan */}
-              {availableRoles.length === 1 && role && (
-                <div className="p-2 bg-indigo-50 border border-indigo-200 rounded-lg text-center mb-1">
-                  <p className="text-indigo-700 font-medium text-xs">
-                    Mendaftar sebagai: <span className="font-bold">{availableRoles[0].label}</span>
-                  </p>
-                </div>
-              )}
-
-              {/* Data Pribadi - Lebih Compact */}
-              <div className="space-y-2.5">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1 uppercase tracking-wide">
-                    Nama Lengkap
-                  </label>
-                  <div className="relative">
-                    <input
-                      className="w-full pl-8 pr-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-slate-50 transition-colors text-sm"
-                      value={nama}
-                      onChange={e => setNama(e.target.value)}
-                      required
-                      placeholder="Masukkan nama lengkap"
-                      disabled={allClosed}
-                    />
-                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs">
-                      👤
-                    </span>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1 uppercase tracking-wide">
-                    Email
-                  </label>
-                  <div className="relative">
-                    <input
-                      className="w-full pl-8 pr-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-slate-50 transition-colors text-sm"
-                      value={email}
-                      onChange={e => setEmail(e.target.value)}
-                      required
-                      type="email"
-                      placeholder="nama@example.com"
-                      disabled={allClosed}
-                    />
-                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs">
-                      ✉️
-                    </span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 gap-2.5">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1 uppercase tracking-wide">
-                      Password
-                    </label>
-                    <div className="relative">
-                      <input
-                        className="w-full pl-8 pr-8 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-slate-50 transition-colors text-sm"
-                        value={password}
-                        onChange={e => setPassword(e.target.value)}
-                        required
-                        type={showPassword ? 'text' : 'password'}
-                        placeholder="Minimal 6 karakter"
-                        minLength="6"
-                        disabled={allClosed}
-                      />
-                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs">
-                        🔒
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs"
-                        disabled={allClosed}
-                      >
-                        {showPassword ? '🙈' : '👁️'}
-                      </button>
-                    </div>
-                    <p className="text-xs text-slate-500 mt-1">
-                      Min. 6 karakter, huruf besar & angka
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1 uppercase tracking-wide">
-                      Konfirmasi Password
-                    </label>
-                    <div className="relative">
-                      <input
-                        className="w-full pl-8 pr-8 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-slate-50 transition-colors text-sm"
-                        value={confirm}
-                        onChange={e => setConfirm(e.target.value)}
-                        required
-                        type={showConfirmPassword ? 'text' : 'password'}
-                        placeholder="Ketik ulang password"
-                        disabled={allClosed}
-                      />
-                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs">
-                        🔒
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs"
-                        disabled={allClosed}
-                      >
-                        {showConfirmPassword ? '🙈' : '👁️'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Tombol Submit */}
-              <div className="pt-1">
-                <button
-                  type="submit"
-                  className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-semibold py-2 px-4 rounded-lg transition-colors flex items-center justify-center gap-2 shadow-md shadow-indigo-600/30 text-sm"
-                  disabled={disabledSubmit}
-                >
-                  {loading ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      Memproses...
-                    </>
-                  ) : allClosed ? (
-                    'Pendaftaran Ditutup'
-                  ) : (
-                    'Daftar Sekarang'
-                  )}
-                </button>
-
-                <div className="mt-3 text-center">
-                  <p className="text-xs text-slate-500">
-                    Sudah punya akun?{' '}
-                    <Link
-                      to="/login"
-                      className="text-indigo-600 font-semibold hover:text-indigo-700 text-xs"
-                    >
-                      Login di sini
-                    </Link>
-                  </p>
-                </div>
-              </div>
-            </form>
           </div>
+        </div>
 
-          {/* KANAN: Panel Logo - Sama seperti Login tapi lebih kecil */}
-          <div className="w-full md:w-1/2 bg-gradient-to-br from-indigo-50 via-sky-50 to-slate-50 flex items-center justify-center px-5 py-5 md:py-6">
-            <div className="w-full text-center">
-              <div className="relative w-full rounded-2xl bg-white shadow-lg overflow-hidden pt-[110%] mx-auto max-w-[330px]">
-                {logoUrl ? (
-                  <img
-                    src={logoUrl}
-                    alt={`Logo ${schoolName}`}
-                    className="absolute inset-0 w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="absolute inset-0 flex items-center justify-center bg-indigo-100">
-                    <span className="text-4xl md:text-5xl font-extrabold text-indigo-600">
-                      {schoolName[0]?.toUpperCase() || 'S'}
-                    </span>
+        {/* Form Section - kanan */}
+        <div className="login__form-section">
+          <div className="login__form-wrapper">
+            <div className="login__form-header">
+              <h2>Buat Akun</h2>
+              <p>Portal registrasi untuk {schoolName}</p>
+            </div>
+
+            {allDisabled ? (
+              <div className="login__error login__error--warning">
+                <i className="ri-alert-fill"></i>
+                <div className="login__error-content">
+                  <strong>Registrasi Ditutup</strong>
+                  <span>
+                    Registrasi akun sedang tidak dibuka. Silakan hubungi admin sekolah.
+                  </span>
+                  <Link to="/login" className="login__link">
+                    Kembali ke halaman login
+                  </Link>
+                </div>
+              </div>
+            ) : (
+              <>
+                {errorMessage && (
+                  <div className="login__error">
+                    <i className="ri-alert-fill"></i>
+                    <span>{errorMessage}</span>
                   </div>
                 )}
-              </div>
-              
-            </div>
+                {successMessage && (
+                  <div className="login__success">
+                    <i className="ri-checkbox-circle-fill"></i>
+                    <span>{successMessage}</span>
+                  </div>
+                )}
+
+                {/* Pilih Role */}
+                <div className="login__role-selection">
+                  <p className="login__role-title">Pilih Jenis Akun</p>
+
+                  {settings.registrasi_siswa_aktif && (
+                    <button
+                      type="button"
+                      onClick={() => handleSelectRole('siswa')}
+                      className={`login__role-btn ${
+                        selectedRole === 'siswa' ? 'login__role-btn--active' : ''
+                      }`}
+                    >
+                      <div className="login__role-content">
+                        <i className="ri-user-fill"></i>
+                        <div className="login__role-text">
+                          <span className="login__role-name">Siswa</span>
+                          <span className="login__role-desc">Akses absensi dan tugas</span>
+                        </div>
+                      </div>
+                      <span
+                        className={
+                          'login__role-badge ' +
+                          (selectedRole === 'siswa'
+                            ? 'login__role-badge--selected'
+                            : 'login__role-badge--active')
+                        }
+                      >
+                        {selectedRole === 'siswa' ? 'Dipilih' : 'Dibuka'}
+                      </span>
+                    </button>
+                  )}
+
+                  {settings.registrasi_guru_aktif && (
+                    <button
+                      type="button"
+                      onClick={() => handleSelectRole('guru')}
+                      className={`login__role-btn ${
+                        selectedRole === 'guru' ? 'login__role-btn--active' : ''
+                      }`}
+                    >
+                      <div className="login__role-content">
+                        <i className="ri-user-star-fill"></i>
+                        <div className="login__role-text">
+                          <span className="login__role-name">Guru</span>
+                          <span className="login__role-desc">Kelola kelas dan tugas</span>
+                        </div>
+                      </div>
+                      <span
+                        className={
+                          'login__role-badge ' +
+                          (selectedRole === 'guru'
+                            ? 'login__role-badge--selected'
+                            : 'login__role-badge--active')
+                        }
+                      >
+                        {selectedRole === 'guru' ? 'Dipilih' : 'Dibuka'}
+                      </span>
+                    </button>
+                  )}
+
+                  {settings.registrasi_admin_aktif && (
+                    <button
+                      type="button"
+                      onClick={() => handleSelectRole('admin')}
+                      className={`login__role-btn ${
+                        selectedRole === 'admin' ? 'login__role-btn--active' : ''
+                      }`}
+                    >
+                      <div className="login__role-content">
+                        <i className="ri-shield-keyhole-fill"></i>
+                        <div className="login__role-text">
+                          <span className="login__role-name">Admin</span>
+                          <span className="login__role-desc">Lingkungan pengembangan</span>
+                        </div>
+                      </div>
+                      <span
+                        className={
+                          'login__role-badge ' +
+                          (selectedRole === 'admin'
+                            ? 'login__role-badge--selected'
+                            : 'login__role-badge--warning')
+                        }
+                      >
+                        {selectedRole === 'admin' ? 'Dipilih' : 'Resiko Tinggi'}
+                      </span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Form Register */}
+                {selectedRole && (
+                  <form onSubmit={handleSubmit} className="login__form">
+                    <div className="login__input-group">
+                      <div className="login__input-field">
+                        <i className="ri-user-3-fill"></i>
+                        <input
+                          type="text"
+                          name="nama"
+                          placeholder="Nama Lengkap"
+                          value={form.nama}
+                          onChange={handleInputChange}
+                          required
+                        />
+                      </div>
+
+                      <div className="login__input-field">
+                        <i className="ri-mail-fill"></i>
+                        <input
+                          type="email"
+                          name="email"
+                          placeholder="Email"
+                          value={form.email}
+                          onChange={handleInputChange}
+                          required
+                        />
+                      </div>
+
+                      <div className="login__input-row">
+                        <div className="login__input-field">
+                          <i className="ri-lock-password-fill"></i>
+                          <input
+                            type="password"
+                            name="password"
+                            placeholder="Password"
+                            value={form.password}
+                            onChange={handleInputChange}
+                            required
+                          />
+                        </div>
+
+                        <div className="login__input-field">
+                          <i className="ri-lock-password-fill"></i>
+                          <input
+                            type="password"
+                            name="confirmPassword"
+                            placeholder="Konfirmasi Password"
+                            value={form.confirmPassword}
+                            onChange={handleInputChange}
+                            required
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={submitting}
+                      className="login__submit-btn"
+                    >
+                      {submitting ? (
+                        <>
+                          <div className="login__spinner"></div>
+                          Mendaftarkan...
+                        </>
+                      ) : (
+                        <>
+                          <i className="ri-user-add-fill"></i>
+                          Daftar Sekarang
+                        </>
+                      )}
+                    </button>
+
+                    <div className="login__form-footer">
+                      <p>
+                        Sudah punya akun?
+                        <Link to="/login" className="login__link">
+                          {' '}
+                          Masuk di sini
+                        </Link>
+                      </p>
+                    </div>
+                  </form>
+                )}
+              </>
+            )}
           </div>
         </div>
       </div>
     </div>
   )
 }
-
-export default Register

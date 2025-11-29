@@ -8,34 +8,84 @@ const Navbar = () => {
   const navigate = useNavigate()
   const location = useLocation()
   const { user, profile, logout } = useAuthStore()
+
   const [settings, setSettings] = useState({})
+  const [settingsId, setSettingsId] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isCollapsed, setIsCollapsed] = useState(false)
 
-  // Load settings
+  // ========== LOAD SETTINGS SEKALI DI AWAL ==========
   useEffect(() => {
+    let isCancelled = false
+
     const loadSettings = async () => {
       try {
-        const { data, error } = await supabase
+        let { data, error } = await supabase
           .from('settings')
           .select('*')
+          .order('id', { ascending: true })
           .limit(1)
           .single()
 
-        if (error) {
-          console.error('Error loading settings:', error)
-        } else {
+        // PGRST116 = tidak ada row
+        if (error && error.code === 'PGRST116') {
+          data = null
+        } else if (error) {
+          throw error
+        }
+
+        if (!isCancelled && data) {
           setSettings(data || {})
+          setSettingsId(data.id)
         }
       } catch (error) {
-        console.error('Error:', error)
+        if (!isCancelled) {
+          console.error('Error loading settings:', error)
+        }
       } finally {
-        setIsLoading(false)
+        if (!isCancelled) {
+          setIsLoading(false)
+        }
       }
     }
 
     loadSettings()
+
+    return () => {
+      isCancelled = true
+    }
   }, [])
+
+  // ========== REALTIME UPDATE SETTINGS ==========
+  useEffect(() => {
+    if (!settingsId) return
+
+    const channel = supabase
+      .channel('navbar_settings_realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'settings',
+          filter: `id=eq.${settingsId}`
+        },
+        (payload) => {
+          const row = payload.new
+          if (!row) return
+
+          setSettings(prev => ({
+            ...prev,
+            ...row
+          }))
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [settingsId])
 
   const handleLogout = async () => {
     await logout()
@@ -72,6 +122,7 @@ const Navbar = () => {
       { to: '/admin/scan', label: 'Scan', icon: '📱' },
       { to: '/admin/guru', label: 'Guru', icon: '👨‍🏫' },
       { to: '/admin/siswa', label: 'Siswa', icon: '👨‍🎓' },
+      { to: '/admin/sertifikat', label: 'Sertifikat', icon: '📜' },
       { to: '/admin/pengaturan', label: 'Pengaturan', icon: '⚙️' }
     ]
   }
@@ -123,9 +174,22 @@ const Navbar = () => {
             <span className="text-sm font-semibold text-slate-900 truncate">
               {userName}
             </span>
-            <span className="text-xs text-slate-500 truncate">
-              {user?.email}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-500 truncate">
+                {user?.email}
+              </span>
+
+              {/* Tombol logout kecil (ADMIN ONLY) */}
+              {role === 'admin' && (
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="text-[10px] px-2 py-0.5 rounded-full border border-red-200 text-red-500 hover:bg-red-50 hover:border-red-300 flex-shrink-0"
+                >
+                  Logout
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -134,9 +198,11 @@ const Navbar = () => {
 
   // Desktop Sidebar Component
   const DesktopSidebar = () => (
-    <aside className={`hidden md:flex flex-col h-screen sticky top-0 bg-white border-r border-slate-200 shadow-sm transition-all duration-300 ${
-      isCollapsed ? 'w-20' : 'w-64'
-    }`}>
+    <aside
+      className={`hidden md:flex flex-col h-screen sticky top-0 bg-white border-r border-slate-200 shadow-sm transition-all duration-300 ${
+        isCollapsed ? 'w-20' : 'w-64'
+      }`}
+    >
       {/* Header */}
       <div className="px-4 pt-6 pb-4 border-b border-slate-100">
         <div className="flex items-center justify-between gap-2">
@@ -182,9 +248,7 @@ const Navbar = () => {
               <span className={`text-lg flex-shrink-0 ${isActive ? 'opacity-100' : 'opacity-80'}`}>
                 {link.icon}
               </span>
-              {!isCollapsed && (
-                <span className="ml-3 truncate">{link.label}</span>
-              )}
+              {!isCollapsed && <span className="ml-3 truncate">{link.label}</span>}
             </Link>
           )
         })}

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useUIStore } from '../../store/useUIStore'
+import { useAuthStore } from '../../store/useAuthStore'
 
 /* ===== Utils ===== */
 const FORBIDDEN = /[.#$/[\]]/
@@ -17,7 +18,21 @@ const slug = (s = '') =>
 const confirmDelete = (msg = 'Yakin mau dihapus?') => window.confirm(msg)
 const HARI_OPTS = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']
 
-// Komponen Stat Card yang Diperbarui
+// helper parse/format hari ekskul (multi hari, disimpan sebagai string "Senin, Rabu")
+const parseEskulDays = (hariText = '') => {
+  if (!hariText) return []
+  return hariText
+    .split(',')
+    .map((h) => h.trim())
+    .filter(Boolean)
+}
+
+const formatEskulDays = (hariArray = []) => {
+  if (!Array.isArray(hariArray)) return ''
+  return hariArray.join(', ')
+}
+
+// Komponen Stat Card
 const StatCard = ({ label, value, icon, color = 'blue' }) => {
   const colorClasses = {
     blue: 'from-blue-500 to-blue-600',
@@ -36,12 +51,14 @@ const StatCard = ({ label, value, icon, color = 'blue' }) => {
           <p className="text-3xl font-bold text-gray-900">{value}</p>
         </div>
         {icon && (
-          <div className={`text-2xl bg-gradient-to-br ${colorClasses[color]} text-white p-3 rounded-xl`}>
+          <div
+            className={`text-2xl bg-gradient-to-br ${colorClasses[color]} text-white p-3 rounded-xl`}
+          >
             {icon}
           </div>
         )}
       </div>
-      <div className="mt-4 h-1 bg-gradient-to-r from-transparent via-gray-200 to-transparent"></div>
+      <div className="mt-4 h-1 bg-gradient-to-r from-transparent via-gray-200 to-transparent" />
     </div>
   )
 }
@@ -51,12 +68,12 @@ const LoadingSkeleton = () => (
   <div className="animate-pulse">
     <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-6">
       {[...Array(6)].map((_, i) => (
-        <div key={i} className="bg-gray-200 rounded-2xl h-24"></div>
+        <div key={i} className="bg-gray-200 rounded-2xl h-24" />
       ))}
     </div>
     <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
       {[...Array(2)].map((_, i) => (
-        <div key={i} className="bg-gray-200 rounded-2xl h-96"></div>
+        <div key={i} className="bg-gray-200 rounded-2xl h-96" />
       ))}
     </div>
   </div>
@@ -67,20 +84,27 @@ const LoadingSkeleton = () => (
 // ===================================================================
 export default function AHome() {
   const { pushToast } = useUIStore()
+  const { user, profile } = useAuthStore()
+
   const [isLoading, setIsLoading] = useState(true)
 
   /* --- Statistics --- */
   const [stats, setStats] = useState({
     siswa: 0,
     guru: 0,
+    admin: 0,
     kelas: 0,
     absensi: 0,
     pengumuman: 0,
     eskul: 0
   })
 
+  /* --- Monitoring Admin --- */
+  const [adminList, setAdminList] = useState([])
+
   useEffect(() => {
     loadAllData()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const loadAllData = async () => {
@@ -90,7 +114,8 @@ export default function AHome() {
         loadStatistics(),
         loadGuruDanSiswa(),
         loadPengumuman(),
-        loadEskulList()
+        loadEskulList(),
+        loadAdminList()
       ])
     } catch (error) {
       console.error('Error loading data:', error)
@@ -104,13 +129,24 @@ export default function AHome() {
       const [
         { count: siswa },
         { count: guru },
+        { count: admin },
         { count: kelas },
         { count: absensi },
         { count: pengumuman },
         { count: eskul }
       ] = await Promise.all([
-        supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'siswa'),
-        supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'guru'),
+        supabase
+          .from('profiles')
+          .select('*', { count: 'exact', head: true })
+          .eq('role', 'siswa'),
+        supabase
+          .from('profiles')
+          .select('*', { count: 'exact', head: true })
+          .eq('role', 'guru'),
+        supabase
+          .from('profiles')
+          .select('*', { count: 'exact', head: true })
+          .eq('role', 'admin'),
         supabase.from('kelas').select('*', { count: 'exact', head: true }),
         supabase.from('absensi').select('*', { count: 'exact', head: true }),
         supabase.from('pengumuman').select('*', { count: 'exact', head: true }),
@@ -120,6 +156,7 @@ export default function AHome() {
       setStats({
         siswa: siswa || 0,
         guru: guru || 0,
+        admin: admin || 0,
         kelas: kelas || 0,
         absensi: absensi || 0,
         pengumuman: pengumuman || 0,
@@ -127,6 +164,30 @@ export default function AHome() {
       })
     } catch (error) {
       console.error('Error loading statistics:', error)
+    }
+  }
+
+  const loadAdminList = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, nama, email, status')
+        .eq('role', 'admin')
+        .order('nama')
+
+      if (error) throw error
+
+      setAdminList(
+        (data || []).map((a) => ({
+          id: a.id,
+          nama: a.nama || a.email || 'Tanpa Nama',
+          email: a.email || '-',
+          status: a.status || 'active'
+        }))
+      )
+    } catch (error) {
+      console.error('Error loading admin list:', error)
+      pushToast('error', 'Gagal memuat data admin')
     }
   }
 
@@ -144,9 +205,11 @@ export default function AHome() {
         .order('nama')
 
       if (!guruError && guruData) {
-        const formattedGuru = guruData.map(guru => ({
+        const formattedGuru = guruData.map((guru) => ({
           id: guru.id,
-          name: `${guru.nama || 'Tanpa Nama'}${guru.email ? ` (${guru.email})` : ''}`
+          name: `${guru.nama || 'Tanpa Nama'}${
+            guru.email ? ` (${guru.email})` : ''
+          }`
         }))
         setGuruList(formattedGuru)
       }
@@ -160,7 +223,7 @@ export default function AHome() {
         .order('nama')
 
       if (!siswaError && siswaData) {
-        const formattedSiswa = siswaData.map(siswa => ({
+        const formattedSiswa = siswaData.map((siswa) => ({
           uid: siswa.id,
           nama: siswa.nama || siswa.email || 'Tanpa Nama',
           kelas: siswa.kelas || '',
@@ -188,7 +251,7 @@ export default function AHome() {
   const [pForm, setPForm] = useState({
     judul: '',
     keterangan: '',
-    target: 'semua',
+    target: 'semua'
   })
   const [pEditId, setPEditId] = useState(null)
   const [loadingPengumuman, setLoadingPengumuman] = useState(false)
@@ -221,7 +284,7 @@ export default function AHome() {
       judul: judul.trim(),
       keterangan: keterangan.trim(),
       target: target || 'semua',
-      updated_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
     }
 
     try {
@@ -235,7 +298,7 @@ export default function AHome() {
         pushToast('success', 'Pengumuman diperbarui!')
       } else {
         const id = slug(payload.judul) || Date.now().toString()
-        
+
         // Check if exists
         const { data: existing } = await supabase
           .from('pengumuman')
@@ -248,13 +311,11 @@ export default function AHome() {
           return
         }
 
-        const { error } = await supabase
-          .from('pengumuman')
-          .insert({
-            ...payload,
-            id,
-            created_at: new Date().toISOString(),
-          })
+        const { error } = await supabase.from('pengumuman').insert({
+          ...payload,
+          id,
+          created_at: new Date().toISOString()
+        })
 
         if (error) throw error
         pushToast('success', 'Pengumuman disimpan!')
@@ -272,7 +333,7 @@ export default function AHome() {
 
   async function hapusPengumuman(id) {
     if (!confirmDelete('Hapus pengumuman ini?')) return
-    
+
     try {
       const { error } = await supabase
         .from('pengumuman')
@@ -294,7 +355,7 @@ export default function AHome() {
     setPForm({
       judul: p.judul,
       keterangan: p.keterangan,
-      target: p.target || 'semua',
+      target: p.target || 'semua'
     })
   }
 
@@ -312,18 +373,17 @@ export default function AHome() {
     hari: '',
     jam_mulai: '',
     jam_selesai: '',
-    pembina_guru_id: '',
+    pembina_guru_id: ''
   })
   const [eskulAnggota, setEskulAnggota] = useState([])
+  // statistik absensi eskul per anggota (Hadir & Izin) untuk semua bulan
+  const [eskulAbsensiStats, setEskulAbsensiStats] = useState({})
   const [addMemberUid, setAddMemberUid] = useState('')
   const [loadingEskul, setLoadingEskul] = useState(false)
 
   const loadEskulList = async () => {
     try {
-      const { data, error } = await supabase
-        .from('ekskul')
-        .select('*')
-        .order('nama')
+      const { data, error } = await supabase.from('ekskul').select('*').order('nama')
 
       if (error) throw error
       setEskulList(data || [])
@@ -341,14 +401,16 @@ export default function AHome() {
         hari: '',
         jam_mulai: '',
         jam_selesai: '',
-        pembina_guru_id: '',
+        pembina_guru_id: ''
       })
       setEskulAnggota([])
+      setEskulAbsensiStats({})
       return
     }
 
     loadEskulDetail()
     loadEskulAnggota()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eskulSel])
 
   const loadEskulDetail = async () => {
@@ -367,7 +429,7 @@ export default function AHome() {
           hari: data.hari || '',
           jam_mulai: data.jam_mulai || '',
           jam_selesai: data.jam_selesai || '',
-          pembina_guru_id: data.pembina_guru_id || '',
+          pembina_guru_id: data.pembina_guru_id || ''
         })
       }
     } catch (error) {
@@ -376,6 +438,8 @@ export default function AHome() {
   }
 
   const loadEskulAnggota = async () => {
+    if (!eskulSel) return
+
     try {
       const { data, error } = await supabase
         .from('ekskul_anggota')
@@ -383,29 +447,87 @@ export default function AHome() {
         .eq('ekskul_id', eskulSel)
 
       if (error) throw error
-      setEskulAnggota(data || [])
+      const anggota = data || []
+      setEskulAnggota(anggota)
+
+      // Ambil statistik absensi eskul (Hadir & Izin) untuk SEMUA bulan
+      const userIds = anggota.map((a) => a.user_id).filter(Boolean)
+
+      if (userIds.length === 0) {
+        setEskulAbsensiStats({})
+        return
+      }
+
+      const { data: absData, error: absError } = await supabase
+        .from('absensi_eskul')
+        .select('user_id, status')
+        .eq('ekskul_id', eskulSel)
+        .in('user_id', userIds)
+        .in('status', ['Hadir', 'Izin'])
+
+      if (absError) throw absError
+
+      const stats = {}
+      ;(absData || []).forEach((row) => {
+        const uid = row.user_id
+        if (!stats[uid]) {
+          stats[uid] = { hadir: 0, izin: 0 }
+        }
+        if (row.status === 'Hadir') {
+          stats[uid].hadir += 1
+        } else if (row.status === 'Izin') {
+          stats[uid].izin += 1
+        }
+      })
+
+      setEskulAbsensiStats(stats)
     } catch (error) {
       console.error('Error loading eskul anggota:', error)
     }
   }
 
-  // Gabungkan data anggota dengan data siswa (nama + kelas)
+  // daftar hari yang sedang dipilih (multi hari)
+  const selectedHariValues = useMemo(
+    () => parseEskulDays(eskulForm.hari),
+    [eskulForm.hari]
+  )
+
+  // Gabungkan data anggota dengan data siswa (nama + kelas + statistik hadir/izin)
   const anggotaDisplay = useMemo(() => {
     const rows = eskulAnggota.map((a) => {
       const s = siswaMap[a.user_id] || {}
+      const stat = eskulAbsensiStats[a.user_id] || { hadir: 0, izin: 0 }
       return {
         uid: a.user_id,
         id: a.id,
         nama: s.nama || a.user_id,
         kelas: s.kelas || '—',
+        hadirCount: stat.hadir,
+        izinCount: stat.izin
       }
     })
     return rows.sort(
       (a, b) =>
         (a.kelas || '').localeCompare(b.kelas || '', 'id') ||
-        (a.nama || '').localeCompare(b.nama || '', 'id'),
+        (a.nama || '').localeCompare(b.nama || '', 'id')
     )
-  }, [eskulAnggota, siswaMap])
+  }, [eskulAnggota, siswaMap, eskulAbsensiStats])
+
+  // toggle hari (checkbox di dropdown)
+  const handleToggleHari = (hariValue) => {
+    setEskulForm((prev) => {
+      const current = parseEskulDays(prev.hari)
+      const exists = current.includes(hariValue)
+      const next = exists
+        ? current.filter((h) => h !== hariValue)
+        : [...current, hariValue]
+
+      return {
+        ...prev,
+        hari: formatEskulDays(next)
+      }
+    })
+  }
 
   async function simpanEskul() {
     const nama = (eskulForm.nama || '').trim()
@@ -420,11 +542,12 @@ export default function AHome() {
     const payload = {
       nama,
       keterangan: eskulForm.keterangan || '',
+      // simpan hari sebagai string "Senin, Rabu" (multi hari)
       hari: eskulForm.hari || '',
       jam_mulai: eskulForm.jam_mulai || '',
       jam_selesai: eskulForm.jam_selesai || '',
       pembina_guru_id: pembinaId || null,
-      updated_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
     }
 
     try {
@@ -438,7 +561,7 @@ export default function AHome() {
         pushToast('success', 'Eskul diperbarui!')
       } else {
         const id = slug(nama)
-        
+
         // Check if exists
         const { data: existing } = await supabase
           .from('ekskul')
@@ -451,13 +574,11 @@ export default function AHome() {
           return
         }
 
-        const { error } = await supabase
-          .from('ekskul')
-          .insert({
-            ...payload,
-            id,
-            created_at: new Date().toISOString(),
-          })
+        const { error } = await supabase.from('ekskul').insert({
+          ...payload,
+          id,
+          created_at: new Date().toISOString()
+        })
 
         if (error) throw error
         pushToast('success', 'Eskul disimpan!')
@@ -475,7 +596,9 @@ export default function AHome() {
 
   async function hapusEskul() {
     if (!eskulSel) return
-    if (!confirmDelete(`Hapus eskul "${eskulForm.nama || eskulSel}" beserta anggotanya?`))
+    if (
+      !confirmDelete(`Hapus eskul "${eskulForm.nama || eskulSel}" beserta anggotanya?`)
+    )
       return
 
     try {
@@ -509,13 +632,11 @@ export default function AHome() {
     if (!eskulSel || !addMemberUid) return
 
     try {
-      const { error } = await supabase
-        .from('ekskul_anggota')
-        .insert({
-          ekskul_id: eskulSel,
-          user_id: addMemberUid,
-          created_at: new Date().toISOString(),
-        })
+      const { error } = await supabase.from('ekskul_anggota').insert({
+        ekskul_id: eskulSel,
+        user_id: addMemberUid,
+        created_at: new Date().toISOString()
+      })
 
       if (error) throw error
       pushToast('success', 'Anggota berhasil ditambahkan!')
@@ -558,140 +679,173 @@ export default function AHome() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 py-6">
-      {/* Hapus max-width dan gunakan w-full untuk container utama */}
       <div className="w-full space-y-8 px-4 sm:px-6 lg:px-8">
-        
-        {/* Header - Lebarkan */}
+        {/* Header */}
         <div className="text-center">
-          <h1 className="text-4xl font-bold text-gray-900 mb-3">Dashboard Admin</h1>
-    
+  
         </div>
 
         {/* --- DASHBOARD STATISTICS --- */}
-        {/* Gunakan grid yang lebih lebar */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
           <StatCard label="Total Siswa" value={stats.siswa} icon="👨‍🎓" color="blue" />
           <StatCard label="Total Guru" value={stats.guru} icon="👨‍🏫" color="green" />
+          {/* Card Total Admin DIHAPUS sesuai permintaan */}
           <StatCard label="Kelas" value={stats.kelas} icon="🏫" color="purple" />
-          <StatCard label="Data Absensi" value={stats.absensi} icon="📊" color="orange" />
-          <StatCard label="Pengumuman" value={stats.pengumuman} icon="📢" color="red" />
-          <StatCard label="Ekstrakurikuler" value={stats.eskul} icon="⚽" color="indigo" />
+          <StatCard label="Absensi" value={stats.absensi} icon="📊" color="orange" />
+          <StatCard
+            label="Informasi"
+            value={stats.pengumuman}
+            icon="📢"
+            color="red"
+          />
+          <StatCard
+            label="Eskul"
+            value={stats.eskul}
+            icon="⚽"
+            color="green"
+          />
         </div>
 
-        {/* Grid utama untuk form - gunakan full width */}
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          {/* --- CARD PENGUMUMAN --- */}
-          <div className="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden transition-all duration-300 hover:shadow-2xl">
-            <div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-6">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-white/20 rounded-xl">
-                    <span className="text-2xl text-white">📢</span>
+        {/* --- FORM PENGUMUMAN & ESKUL --- */}
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
+          {/* === KOLOM PENGUMUMAN === */}
+          <div className="space-y-6">
+            {/* --- CARD FORM PENGUMUMAN --- */}
+            <div className="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden transition-all duration-300 hover:shadow-2xl">
+              <div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-white/20 rounded-xl">
+                      <span className="text-2xl text-white">📢</span>
+                    </div>
+                    <div>
+                      <h2 className="text-2xl font-bold text-white">
+                        Kelola Pengumuman
+                      </h2>
+                      <p className="text-blue-100 mt-1">
+                        Tambah atau edit pengumuman untuk guru & siswa
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <h2 className="text-2xl font-bold text-white">Kelola Pengumuman</h2>
-                    <p className="text-blue-100 mt-1">{pengumumanList.length} pengumuman aktif</p>
+                  <div className="px-4 py-2 bg-white/20 text-white rounded-full text-sm font-medium">
+                    📋 Admin
                   </div>
                 </div>
-                <div className="px-4 py-2 bg-white/20 text-white rounded-full text-sm font-medium">
-                  📋 Admin
-                </div>
+              </div>
+
+              <div className="p-6">
+                <form className="space-y-6" onSubmit={simpanPengumuman}>
+                  <div className="grid grid-cols-1 gap-4">
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-3">
+                        <span className="flex items-center gap-2">
+                          <span className="w-2 h-2 bg-blue-500 rounded-full" />
+                          Judul Pengumuman
+                        </span>
+                      </label>
+                      <input
+                        className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                        placeholder="Cth: Libur Nasional, Rapat Guru"
+                        value={pForm.judul}
+                        onChange={(e) =>
+                          setPForm((f) => ({ ...f, judul: e.target.value }))
+                        }
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-3">
+                        <span className="flex items-center gap-2">
+                          <span className="w-2 h-2 bg-green-500 rounded-full" />
+                          Keterangan / Isi
+                        </span>
+                      </label>
+                      <textarea
+                        className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[120px] transition-all duration-200"
+                        placeholder="Isi pengumuman..."
+                        value={pForm.keterangan}
+                        onChange={(e) =>
+                          setPForm((f) => ({ ...f, keterangan: e.target.value }))
+                        }
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-3">
+                        <span className="flex items-center gap-2">
+                          <span className="w-2 h-2 bg-purple-500 rounded-full" />
+                          Tampilkan ke
+                        </span>
+                      </label>
+                      <select
+                        className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                        value={pForm.target}
+                        onChange={(e) =>
+                          setPForm((f) => ({ ...f, target: e.target.value }))
+                        }
+                      >
+                        <option value="semua">Semua (Guru & Siswa)</option>
+                        <option value="siswa">Siswa Saja</option>
+                        <option value="guru">Guru Saja</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-3 pt-6 border-t border-gray-200">
+                    {pEditId && (
+                      <button
+                        type="button"
+                        className="px-6 py-3 text-sm font-semibold text-gray-700 bg-white border-2 border-gray-300 rounded-xl hover:bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 hover:shadow-md"
+                        onClick={cancelEditPengumuman}
+                      >
+                        ✕ Batal Edit
+                      </button>
+                    )}
+                    <button
+                      type="submit"
+                      className="px-6 py-3 text-sm font-semibold text-white bg-gradient-to-r from-blue-600 to-indigo-700 rounded-xl hover:from-blue-700 hover:to-indigo-800 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                      disabled={loadingPengumuman}
+                    >
+                      {loadingPengumuman ? (
+                        <span className="flex items-center gap-2">
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          Menyimpan...
+                        </span>
+                      ) : pEditId ? (
+                        '💾 Simpan Perubahan'
+                      ) : (
+                        '📝 Tambah Pengumuman'
+                      )}
+                    </button>
+                  </div>
+                </form>
               </div>
             </div>
 
-            <div className="p-6">
-              <form className="space-y-6" onSubmit={simpanPengumuman}>
-                <div className="grid grid-cols-1 gap-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-3">
-                      <span className="flex items-center gap-2">
-                        <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
-                        Judul Pengumuman
-                      </span>
-                    </label>
-                    <input
-                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
-                      placeholder="Cth: Libur Nasional, Rapat Guru"
-                      value={pForm.judul}
-                      onChange={(e) =>
-                        setPForm((f) => ({ ...f, judul: e.target.value }))
-                      }
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-3">
-                      <span className="flex items-center gap-2">
-                        <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-                        Keterangan / Isi
-                      </span>
-                    </label>
-                    <textarea
-                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[120px] transition-all duration-200"
-                      placeholder="Isi pengumuman..."
-                      value={pForm.keterangan}
-                      onChange={(e) =>
-                        setPForm((f) => ({ ...f, keterangan: e.target.value }))
-                      }
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-3">
-                      <span className="flex items-center gap-2">
-                        <span className="w-2 h-2 bg-purple-500 rounded-full"></span>
-                        Tampilkan ke
-                      </span>
-                    </label>
-                    <select
-                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
-                      value={pForm.target}
-                      onChange={(e) =>
-                        setPForm((f) => ({ ...f, target: e.target.value }))
-                      }
-                    >
-                      <option value="semua">Semua (Guru & Siswa)</option>
-                      <option value="siswa">Siswa Saja</option>
-                      <option value="guru">Guru Saja</option>
-                    </select>
-                  </div>
-                </div>
-                <div className="flex justify-end gap-3 pt-6 border-t border-gray-200">
-                  {pEditId && (
-                    <button
-                      type="button"
-                      className="px-6 py-3 text-sm font-semibold text-gray-700 bg-white border-2 border-gray-300 rounded-xl hover:bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 hover:shadow-md"
-                      onClick={cancelEditPengumuman}
-                    >
-                      ✕ Batal Edit
-                    </button>
-                  )}
-                  <button 
-                    type="submit" 
-                    className="px-6 py-3 text-sm font-semibold text-white bg-gradient-to-r from-blue-600 to-indigo-700 rounded-xl hover:from-blue-700 hover:to-indigo-800 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
-                    disabled={loadingPengumuman}
-                  >
-                    {loadingPengumuman ? (
-                      <span className="flex items-center gap-2">
-                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                        Menyimpan...
-                      </span>
-                    ) : pEditId ? (
-                      '💾 Simpan Perubahan'
-                    ) : (
-                      '📝 Tambah Pengumuman'
-                    )}
-                  </button>
-                </div>
-              </form>
-
-              <div className="mt-8 border-t pt-8">
-                <h3 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-3">
+            {/* --- CARD DAFTAR PENGUMUMAN --- */}
+            <div className="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden transition-all duration-300 hover:shadow-2xl">
+              <div className="px-6 py-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50 flex items-center justify-between">
+                <div className="flex items-center gap-3">
                   <span className="p-2 bg-blue-100 text-blue-600 rounded-lg">📋</span>
-                  Daftar Pengumuman
-                </h3>
-                <div className="space-y-4 max-h-96 overflow-y-auto pr-2">
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-900">
+                      Daftar Pengumuman
+                    </h3>
+                    <p className="text-xs text-gray-500">
+                      {pengumumanList.length} pengumuman tersimpan
+                    </p>
+                  </div>
+                </div>
+                {pengumumanList.length > 0 && (
+                  <span className="px-3 py-1 text-xs font-semibold rounded-full bg-white/70 text-blue-700">
+                    Terbaru di atas
+                  </span>
+                )}
+              </div>
+
+              <div className="p-6">
+                {/* max-h disamakan dengan daftar anggota eskul (max-h-80) supaya scroll rapi */}
+                <div className="space-y-4 max-h-80 overflow-y-auto pr-2">
                   {pengumumanList.map((p, index) => (
-                    <div 
-                      key={p.id} 
+                    <div
+                      key={p.id}
                       className="flex items-center justify-between p-5 border-2 border-gray-200 rounded-xl hover:border-blue-300 hover:bg-blue-50 transition-all duration-200 group"
                     >
                       <div className="flex-1">
@@ -709,19 +863,26 @@ export default function AHome() {
                           {p.keterangan}
                         </div>
                         <div className="flex items-center gap-4 mt-3 text-xs">
-                          <span className={`px-3 py-1 rounded-full font-medium ${
-                            p.target === 'siswa' ? 'bg-orange-100 text-orange-800' :
-                            p.target === 'guru' ? 'bg-purple-100 text-purple-800' :
-                            'bg-blue-100 text-blue-800'
-                          }`}>
+                          <span
+                            className={`px-3 py-1 rounded-full font-medium ${
+                              p.target === 'siswa'
+                                ? 'bg-orange-100 text-orange-800'
+                                : p.target === 'guru'
+                                ? 'bg-purple-100 text-purple-800'
+                                : 'bg-blue-100 text-blue-800'
+                            }`}
+                          >
                             👥 {p.target || 'semua'}
                           </span>
                           <span className="text-gray-500">
-                            📅 {new Date(p.created_at).toLocaleDateString('id-ID', {
-                              day: 'numeric',
-                              month: 'long',
-                              year: 'numeric'
-                            })}
+                            📅{' '}
+                            {p.created_at
+                              ? new Date(p.created_at).toLocaleDateString('id-ID', {
+                                  day: 'numeric',
+                                  month: 'long',
+                                  year: 'numeric'
+                                })
+                              : '-'}
                           </span>
                         </div>
                       </div>
@@ -744,8 +905,12 @@ export default function AHome() {
                   {pengumumanList.length === 0 && (
                     <div className="text-center py-12">
                       <div className="text-gray-300 text-6xl mb-4">📢</div>
-                      <p className="text-gray-500 text-lg font-medium">Belum ada pengumuman</p>
-                      <p className="text-gray-400 mt-2">Mulai dengan membuat pengumuman pertama</p>
+                      <p className="text-gray-500 text-lg font-medium">
+                        Belum ada pengumuman
+                      </p>
+                      <p className="text-gray-400 mt-2">
+                        Mulai dengan membuat pengumuman pertama
+                      </p>
                     </div>
                   )}
                 </div>
@@ -753,7 +918,7 @@ export default function AHome() {
             </div>
           </div>
 
-          {/* --- CARD EKSTRAKURIKULER --- */}
+          {/* === KOLOM EKSTRAKURIKULER === */}
           <div className="space-y-6">
             {/* Form utama eskul */}
             <div className="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden transition-all duration-300 hover:shadow-2xl">
@@ -764,8 +929,12 @@ export default function AHome() {
                       <span className="text-2xl text-white">⚽</span>
                     </div>
                     <div>
-                      <h2 className="text-2xl font-bold text-white">Kelola Ekstrakurikuler</h2>
-                      <p className="text-orange-100 mt-1">Atur data ekskul, jadwal, dan pembina</p>
+                      <h2 className="text-2xl font-bold text-white">
+                        Kelola Ekstrakurikuler
+                      </h2>
+                      <p className="text-orange-100 mt-1">
+                        Atur data ekskul, jadwal, dan pembina
+                      </p>
                     </div>
                   </div>
                   <div className="px-4 py-2 bg-white/20 text-white rounded-full text-sm font-medium">
@@ -779,7 +948,7 @@ export default function AHome() {
                   <div className="flex-1">
                     <label className="block text-sm font-semibold text-gray-700 mb-3">
                       <span className="flex items-center gap-2">
-                        <span className="w-2 h-2 bg-orange-500 rounded-full"></span>
+                        <span className="w-2 h-2 bg-orange-500 rounded-full" />
                         Pilih Eskul
                       </span>
                     </label>
@@ -798,21 +967,21 @@ export default function AHome() {
                   </div>
                   <div className="flex gap-3 ml-6">
                     {eskulSel && (
-                      <button 
+                      <button
                         className="px-6 py-3 text-sm font-semibold text-red-600 bg-red-50 border-2 border-red-200 rounded-xl hover:bg-red-100 focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-all duration-200 hover:shadow-md"
                         onClick={hapusEskul}
                       >
                         🗑️ Hapus
                       </button>
                     )}
-                    <button 
+                    <button
                       className="px-6 py-3 text-sm font-semibold text-white bg-gradient-to-r from-orange-600 to-amber-700 rounded-xl hover:from-orange-700 hover:to-amber-800 focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 transition-all duration-200 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
                       onClick={simpanEskul}
                       disabled={loadingEskul}
                     >
                       {loadingEskul ? (
                         <span className="flex items-center gap-2">
-                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                           Menyimpan...
                         </span>
                       ) : eskulSel ? (
@@ -825,11 +994,11 @@ export default function AHome() {
                 </div>
 
                 {/* Form detail eskul */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-y-6 md:gap-x-10 items-start">
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-3">
                       <span className="flex items-center gap-2">
-                        <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
+                        <span className="w-2 h-2 bg-blue-500 rounded-full" />
                         Nama Eskul
                       </span>
                     </label>
@@ -842,10 +1011,11 @@ export default function AHome() {
                       }
                     />
                   </div>
+
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-3">
                       <span className="flex items-center gap-2">
-                        <span className="w-2 h-2 bg-green-500 rounded-full"></span>
+                        <span className="w-2 h-2 bg-green-500 rounded-full" />
                         Pembina (Guru)
                       </span>
                     </label>
@@ -855,7 +1025,7 @@ export default function AHome() {
                       onChange={(e) =>
                         setEskulForm((f) => ({
                           ...f,
-                          pembina_guru_id: e.target.value,
+                          pembina_guru_id: e.target.value
                         }))
                       }
                     >
@@ -867,32 +1037,59 @@ export default function AHome() {
                       ))}
                     </select>
                   </div>
+
+                  {/* Hari */}
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-3">
                       <span className="flex items-center gap-2">
-                        <span className="w-2 h-2 bg-purple-500 rounded-full"></span>
+                        <span className="w-2 h-2 bg-purple-500 rounded-full" />
                         Hari
                       </span>
                     </label>
-                    <select
-                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all duration-200"
-                      value={eskulForm.hari}
-                      onChange={(e) =>
-                        setEskulForm((f) => ({ ...f, hari: e.target.value }))
-                      }
-                    >
-                      <option value="">— Pilih hari —</option>
-                      {HARI_OPTS.map((h) => (
-                        <option key={h} value={h}>
-                          {h}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="space-y-2">
+                      {/* Dropdown + checkbox multi-hari */}
+                      <details className="group relative">
+                        <summary className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500 transition-all duration-200 flex items-center justify-between cursor-pointer list-none">
+                          <span className="text-sm text-gray-700">
+                            {selectedHariValues.length === 0
+                              ? 'Pilih hari'
+                              : selectedHariValues.join(', ')}
+                          </span>
+                          <span className="ml-2 text-xs text-gray-500 group-open:rotate-180 transform transition-transform">
+                            ▾
+                          </span>
+                        </summary>
+                        <div className="mt-2 absolute z-20 w-full bg-white border-2 border-purple-100 rounded-xl shadow-lg p-3 max-h-48 overflow-y-auto">
+                          {HARI_OPTS.map((h) => {
+                            const checked = selectedHariValues.includes(h)
+                            return (
+                              <label
+                                key={h}
+                                className="flex items-center gap-2 py-1 px-2 rounded-lg hover:bg-purple-50 cursor-pointer"
+                              >
+                                <input
+                                  type="checkbox"
+                                  className="rounded text-purple-600 focus:ring-purple-500"
+                                  checked={checked}
+                                  onChange={() => handleToggleHari(h)}
+                                />
+                                <span className="text-sm text-gray-700">{h}</span>
+                              </label>
+                            )
+                          })}
+                        </div>
+                      </details>
+                      <p className="text-xs text-gray-400">
+                        Bisa pilih lebih dari satu hari untuk jadwal ekskul.
+                      </p>
+                    </div>
                   </div>
+
+                  {/* Jadwal (Mulai) */}
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-3">
                       <span className="flex items-center gap-2">
-                        <span className="w-2 h-2 bg-orange-500 rounded-full"></span>
+                        <span className="w-2 h-2 bg-orange-500 rounded-full" />
                         Jadwal (Mulai)
                       </span>
                     </label>
@@ -905,10 +1102,12 @@ export default function AHome() {
                       }
                     />
                   </div>
+
+                  {/* Jadwal selesai */}
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-3">
                       <span className="flex items-center gap-2">
-                        <span className="w-2 h-2 bg-red-500 rounded-full"></span>
+                        <span className="w-2 h-2 bg-red-500 rounded-full" />
                         Jadwal (Selesai)
                       </span>
                     </label>
@@ -917,14 +1116,18 @@ export default function AHome() {
                       className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-200"
                       value={eskulForm.jam_selesai}
                       onChange={(e) =>
-                        setEskulForm((f) => ({ ...f, jam_selesai: e.target.value }))
+                        setEskulForm((f) => ({
+                          ...f,
+                          jam_selesai: e.target.value
+                        }))
                       }
                     />
                   </div>
+
                   <div className="md:col-span-2">
                     <label className="block text-sm font-semibold text-gray-700 mb-3">
                       <span className="flex items-center gap-2">
-                        <span className="w-2 h-2 bg-indigo-500 rounded-full"></span>
+                        <span className="w-2 h-2 bg-indigo-500 rounded-full" />
                         Keterangan
                       </span>
                     </label>
@@ -934,7 +1137,7 @@ export default function AHome() {
                       onChange={(e) =>
                         setEskulForm((f) => ({
                           ...f,
-                          keterangan: e.target.value,
+                          keterangan: e.target.value
                         }))
                       }
                     />
@@ -972,7 +1175,7 @@ export default function AHome() {
                     <div className="md:col-span-2">
                       <label className="block text-sm font-semibold text-gray-700 mb-3">
                         <span className="flex items-center gap-2">
-                          <span className="w-2 h-2 bg-emerald-500 rounded-full"></span>
+                          <span className="w-2 h-2 bg-emerald-500 rounded-full" />
                           Tambah Anggota (Siswa)
                         </span>
                       </label>
@@ -1002,12 +1205,18 @@ export default function AHome() {
 
                   <div className="border-t pt-8">
                     <h4 className="text-lg font-bold text-gray-900 mb-6 flex items-center gap-3">
-                      <span className="p-2 bg-emerald-100 text-emerald-600 rounded-lg">📊</span>
+                      <span className="p-2 bg-emerald-100 text-emerald-600 rounded-lg">
+                        📊
+                      </span>
                       Daftar Anggota
                     </h4>
+                    {/* max-h-80: disamakan dengan daftar pengumuman */}
                     <div className="space-y-4 max-h-80 overflow-y-auto pr-2">
                       {anggotaDisplay.map((a) => (
-                        <div key={a.id} className="flex items-center justify-between p-4 border-2 border-gray-200 rounded-xl hover:border-emerald-300 hover:bg-emerald-50 transition-all duration-200 group">
+                        <div
+                          key={a.id}
+                          className="flex items-center justify-between p-4 border-2 border-gray-200 rounded-xl hover:border-emerald-300 hover:bg-emerald-50 transition-all duration-200 group"
+                        >
                           <div className="flex items-center gap-4">
                             <div className="p-3 bg-emerald-100 text-emerald-600 rounded-lg group-hover:bg-emerald-200 transition-colors">
                               👤
@@ -1017,7 +1226,19 @@ export default function AHome() {
                                 {a.nama}
                               </div>
                               <div className="text-sm text-gray-500 mt-1">
-                                Kelas: <span className="font-medium">{a.kelas}</span>
+                                Kelas:{' '}
+                                <span className="font-medium">{a.kelas}</span>
+                              </div>
+                              {/* Status kehadiran & izin (total semua bulan) */}
+                              <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                                <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 font-semibold">
+                                  ✅ Hadir:
+                                  <span className="ml-1">{a.hadirCount}</span>
+                                </span>
+                                <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 font-semibold">
+                                  📝 Izin:
+                                  <span className="ml-1">{a.izinCount}</span>
+                                </span>
                               </div>
                             </div>
                           </div>
@@ -1032,8 +1253,12 @@ export default function AHome() {
                       {anggotaDisplay.length === 0 && (
                         <div className="text-center py-12">
                           <div className="text-gray-300 text-6xl mb-4">👥</div>
-                          <p className="text-gray-500 text-lg font-medium">Belum ada anggota</p>
-                          <p className="text-gray-400 mt-2">Tambahkan siswa ke ekskul ini</p>
+                          <p className="text-gray-500 text-lg font-medium">
+                            Belum ada anggota
+                          </p>
+                          <p className="text-gray-400 mt-2">
+                            Tambahkan siswa ke ekskul ini
+                          </p>
                         </div>
                       )}
                     </div>
@@ -1043,6 +1268,91 @@ export default function AHome() {
             )}
           </div>
         </div>
+
+        {/* --- MONITORING ADMIN (DI BAWAH SEMUA) --- */}
+        {adminList.length > 0 && (
+          <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-gray-900 flex items-center gap-3">
+                <span className="p-2 bg-indigo-100 text-indigo-600 rounded-lg">
+                  🛡️
+                </span>
+                Monitoring Admin
+              </h2>
+              <span className="px-4 py-1 text-xs font-semibold rounded-full bg-indigo-50 text-indigo-700">
+                {adminList.length} admin terdaftar
+              </span>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-gray-50">
+                    <th className="text-left py-3 px-3 font-semibold text-gray-700">
+                      Nama
+                    </th>
+                    <th className="text-left py-3 px-3 font-semibold text-gray-700">
+                      Email
+                    </th>
+                    <th className="text-left py-3 px-3 font-semibold text-gray-700">
+                      Status Login
+                    </th>
+                    <th className="text-left py-3 px-3 font-semibold text-gray-700">
+                      Status Akun
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {adminList.map((a) => {
+                    const isCurrentAdmin =
+                      (profile && a.id === profile.id) || (user && a.id === user.id)
+                    const isActiveAccount = (a.status || 'active') === 'active'
+
+                    return (
+                      <tr
+                        key={a.id}
+                        className="border-b last:border-0 hover:bg-indigo-50/40 transition-colors"
+                      >
+                        <td className="py-3 px-3 text-gray-900 font-medium">
+                          {a.nama}
+                          {isCurrentAdmin && (
+                            <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-semibold">
+                              Anda
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 px-3 text-gray-600">{a.email}</td>
+                        <td className="py-3 px-3">
+                          <span
+                            className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${
+                              isCurrentAdmin
+                                ? 'bg-emerald-100 text-emerald-700'
+                                : 'bg-gray-100 text-gray-600'
+                            }`}
+                          >
+                            <span className="w-2 h-2 rounded-full mr-2 bg-current" />
+                            {isCurrentAdmin ? 'Online sekarang' : 'Offline'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3">
+                          <span
+                            className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${
+                              isActiveAccount
+                                ? 'bg-blue-100 text-blue-700'
+                                : 'bg-red-100 text-red-700'
+                            }`}
+                          >
+                            {isActiveAccount ? 'Akun aktif' : 'Akun nonaktif'}
+                          </span>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

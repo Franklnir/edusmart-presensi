@@ -2,6 +2,92 @@ import React, { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useUIStore } from '../../store/useUIStore'
 
+/* ===== Password Modal Component ===== */
+function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Password", loading = false }) {
+  const [password, setPassword] = useState('')
+
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    if (password.trim()) {
+      onConfirm(password)
+      setPassword('')
+    }
+  }
+
+  const handleClose = () => {
+    setPassword('')
+    onClose()
+  }
+
+  if (!isOpen) return null
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4">
+        <h3 className="text-lg font-bold text-gray-900 mb-2">{title}</h3>
+        <p className="text-gray-600 text-sm mb-4">
+          Untuk melanjutkan, masukkan password Anda:
+        </p>
+        
+        <form onSubmit={handleSubmit}>
+          <input
+            type="password"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 mb-4"
+            placeholder="Masukkan password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            autoFocus
+          />
+          
+          <div className="flex justify-end space-x-3">
+            <button
+              type="button"
+              className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors duration-200"
+              onClick={handleClose}
+              disabled={loading}
+            >
+              Batal
+            </button>
+            <button
+              type="submit"
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={loading || !password.trim()}
+            >
+              {loading ? 'Memverifikasi...' : 'Konfirmasi'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+/* ===== Password Verification Utility ===== */
+const verifyPassword = async (password) => {
+  try {
+    // Get current user
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+      throw new Error('User tidak ditemukan')
+    }
+
+    // Try to sign in with the provided password
+    const { error } = await supabase.auth.signInWithPassword({
+      email: user.email,
+      password: password
+    })
+
+    if (error) {
+      throw new Error('Password salah')
+    }
+
+    return true
+  } catch (error) {
+    throw error
+  }
+}
+
 /* ===== Utils ===== */
 function initials(name = '?') {
   const parts = (name || '').trim().split(/\s+/).slice(0, 2)
@@ -194,6 +280,14 @@ export default function ASiswa() {
   const { pushToast } = useUIStore()
   const [loadingInit, setLoadingInit] = useState(true)
 
+  /* ===== Password Modal State ===== */
+  const [passwordModal, setPasswordModal] = useState({
+    isOpen: false,
+    title: '',
+    action: null,
+    loading: false
+  })
+
   // Data states
   const [siswaRaw, setSiswaRaw] = useState([])
   const [siswa, setSiswa] = useState([])
@@ -268,6 +362,34 @@ export default function ASiswa() {
       }
     }
   }, [rfidChannel])
+
+  /* ===== Password Modal Functions ===== */
+  const openPasswordModal = (title, action) => {
+    setPasswordModal({
+      isOpen: true,
+      title,
+      action,
+      loading: false
+    })
+  }
+
+  const handlePasswordConfirm = async (password) => {
+    setPasswordModal(prev => ({ ...prev, loading: true }))
+    
+    try {
+      await verifyPassword(password)
+      await passwordModal.action()
+      setPasswordModal({ isOpen: false, title: '', action: null, loading: false })
+    } catch (error) {
+      console.error('Password verification failed:', error)
+      pushToast('error', error.message || 'Password salah')
+      setPasswordModal(prev => ({ ...prev, loading: false }))
+    }
+  }
+
+  const closePasswordModal = () => {
+    setPasswordModal({ isOpen: false, title: '', action: null, loading: false })
+  }
 
   /* ===== Load initial data ===== */
   useEffect(() => {
@@ -448,72 +570,77 @@ export default function ASiswa() {
   }
 
   /* ===== Detail modal ===== */
-  async function openDetail(u) {
-    setRfidInput((u.rfid_uid || '').toUpperCase())
-    setRfidLastScan(null)
-    setRfidEnrolling(false)
-    if (rfidChannel) {
-      supabase.removeChannel(rfidChannel)
-      setRfidChannel(null)
-    }
+  const openDetail = (u) => {
+    openPasswordModal(
+      'Konfirmasi Lihat Detail Siswa',
+      async () => {
+        setRfidInput((u.rfid_uid || '').toUpperCase())
+        setRfidLastScan(null)
+        setRfidEnrolling(false)
+        if (rfidChannel) {
+          supabase.removeChannel(rfidChannel)
+          setRfidChannel(null)
+        }
 
-    setDetailUser(u)
-    setMoveKelas(u.kelas || '')
-    setMoveGrade(getGradeLabel(u.kelas || '') || '')
-    setDetailLoading(true)
-    setDetailOpen(true)
+        setDetailUser(u)
+        setMoveKelas(u.kelas || '')
+        setMoveGrade(getGradeLabel(u.kelas || '') || '')
+        setDetailLoading(true)
+        setDetailOpen(true)
 
-    try {
-      // Organisasi dengan jabatan
-      const { data: orgData, error: orgError } = await supabase
-        .from('organisasi')
-        .select('*')
+        try {
+          // Organisasi dengan jabatan
+          const { data: orgData, error: orgError } = await supabase
+            .from('organisasi')
+            .select('*')
 
-      if (orgError) throw orgError
+          if (orgError) throw orgError
 
-      const all = orgData?.map(o => ({ id: o.id, nama: o.nama || o.id })) || []
-      setOrgAll(all)
+          const all = orgData?.map(o => ({ id: o.id, nama: o.nama || o.id })) || []
+          setOrgAll(all)
 
-      // Load organisasi anggota dengan jabatan
-      const { data: orgAnggotaData, error: orgAnggotaError } = await supabase
-        .from('organisasi_anggota')
-        .select('*')
-        .eq('siswa_id', u.id)
+          // Load organisasi anggota dengan jabatan
+          const { data: orgAnggotaData, error: orgAnggotaError } = await supabase
+            .from('organisasi_anggota')
+            .select('*')
+            .eq('siswa_id', u.id)
 
-      if (orgAnggotaError) throw orgAnggotaError
+          if (orgAnggotaError) throw orgAnggotaError
 
-      const mine = orgAnggotaData?.map(a => ({
-        orgId: a.organisasi_id,
-        orgNama: all.find(o => o.id === a.organisasi_id)?.nama || a.organisasi_id,
-        status: a.status || 'aktif',
-        bagian: a.bagian || '',
-        jabatan: a.jabatan || 'Anggota'
-      })) || []
+          const mine = orgAnggotaData?.map(a => ({
+            orgId: a.organisasi_id,
+            orgNama: all.find(o => o.id === a.organisasi_id)?.nama || a.organisasi_id,
+            status: a.status || 'aktif',
+            bagian: a.bagian || '',
+            jabatan: a.jabatan || 'Anggota'
+          })) || []
 
-      setOrgMember(mine)
+          setOrgMember(mine)
 
-      // OSIS
-      const { data: osisData, error: osisError } = await supabase
-        .from('osis_anggota')
-        .select('*')
-        .eq('siswa_id', u.id)
-        .single()
+          // OSIS
+          const { data: osisData, error: osisError } = await supabase
+            .from('osis_anggota')
+            .select('*')
+            .eq('siswa_id', u.id)
+            .single()
 
-      if (osisError && osisError.code !== 'PGRST116') throw osisError
+          if (osisError && osisError.code !== 'PGRST116') throw osisError
 
-      const row = osisData ? {
-        status: osisData.status || 'aktif',
-        bagian: osisData.bagian || '',
-        jabatan: osisData.jabatan || 'Anggota'
-      } : null
-      setOsisRow(row)
+          const row = osisData ? {
+            status: osisData.status || 'aktif',
+            bagian: osisData.bagian || '',
+            jabatan: osisData.jabatan || 'Anggota'
+          } : null
+          setOsisRow(row)
 
-    } catch (error) {
-      console.error('Error loading detail:', error)
-      pushToast('error', 'Gagal memuat detail siswa')
-    } finally {
-      setDetailLoading(false)
-    }
+        } catch (error) {
+          console.error('Error loading detail:', error)
+          pushToast('error', 'Gagal memuat detail siswa')
+        } finally {
+          setDetailLoading(false)
+        }
+      }
+    )
   }
 
   // Auto pilih kelas ketika grade dipilih
@@ -627,17 +754,27 @@ export default function ASiswa() {
 
   /* ===== Nonaktifkan & Aktifkan Siswa ===== */
   const openNonaktifModal = (siswa) => {
-    setSiswaToNonaktif(siswa)
-    setAlasanNonaktif('')
-    setNonaktifModalOpen(true)
+    openPasswordModal(
+      'Konfirmasi Nonaktifkan Siswa',
+      () => {
+        setSiswaToNonaktif(siswa)
+        setAlasanNonaktif('')
+        setNonaktifModalOpen(true)
+      }
+    )
   }
 
   const openAktifkanModal = (siswa) => {
-    setSiswaToAktifkan(siswa)
-    setAktifkanModalOpen(true)
+    openPasswordModal(
+      'Konfirmasi Aktifkan Siswa',
+      () => {
+        setSiswaToAktifkan(siswa)
+        setAktifkanModalOpen(true)
+      }
+    )
   }
 
-  async function nonaktifkanSiswa() {
+  const nonaktifkanSiswa = () => {
     if (!siswaToNonaktif) return
 
     if (!alasanNonaktif.trim()) {
@@ -645,70 +782,80 @@ export default function ASiswa() {
       return
     }
 
-    try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({
-          status: 'nonaktif',
-          alasan_nonaktif: alasanNonaktif,
-          disabled_at: new Date().toISOString()
-        })
-        .eq('id', siswaToNonaktif.id)
+    openPasswordModal(
+      'Konfirmasi Akhir Nonaktifkan Siswa',
+      async () => {
+        try {
+          const { error } = await supabase
+            .from('profiles')
+            .update({
+              status: 'nonaktif',
+              alasan_nonaktif: alasanNonaktif,
+              disabled_at: new Date().toISOString()
+            })
+            .eq('id', siswaToNonaktif.id)
 
-      if (error) throw error
+          if (error) throw error
 
-      pushToast('success', 'Siswa berhasil dinonaktifkan')
-      
-      if (detailUser && detailUser.id === siswaToNonaktif.id) {
-        setDetailUser(prev => prev ? ({ 
-          ...prev, 
-          status: 'nonaktif', 
-          alasan_nonaktif: alasanNonaktif 
-        }) : prev)
+          pushToast('success', 'Siswa berhasil dinonaktifkan')
+          
+          if (detailUser && detailUser.id === siswaToNonaktif.id) {
+            setDetailUser(prev => prev ? ({ 
+              ...prev, 
+              status: 'nonaktif', 
+              alasan_nonaktif: alasanNonaktif 
+            }) : prev)
+          }
+          
+          setNonaktifModalOpen(false)
+          setAlasanNonaktif('')
+          setSiswaToNonaktif(null)
+          loadSiswaRaw()
+        } catch (error) {
+          console.error('Error nonaktifkan siswa:', error)
+          pushToast('error', 'Gagal menonaktifkan siswa')
+        }
       }
-      
-      setNonaktifModalOpen(false)
-      setAlasanNonaktif('')
-      setSiswaToNonaktif(null)
-      loadSiswaRaw()
-    } catch (error) {
-      console.error('Error nonaktifkan siswa:', error)
-      pushToast('error', 'Gagal menonaktifkan siswa')
-    }
+    )
   }
 
-  async function aktifkanSiswa() {
+  const aktifkanSiswa = () => {
     if (!siswaToAktifkan) return
 
-    try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({
-          status: 'active',
-          alasan_nonaktif: null,
-          disabled_at: null
-        })
-        .eq('id', siswaToAktifkan.id)
+    openPasswordModal(
+      'Konfirmasi Akhir Aktifkan Siswa',
+      async () => {
+        try {
+          const { error } = await supabase
+            .from('profiles')
+            .update({
+              status: 'active',
+              alasan_nonaktif: null,
+              disabled_at: null
+            })
+            .eq('id', siswaToAktifkan.id)
 
-      if (error) throw error
+          if (error) throw error
 
-      pushToast('success', 'Siswa berhasil diaktifkan')
-      
-      if (detailUser && detailUser.id === siswaToAktifkan.id) {
-        setDetailUser(prev => prev ? ({ 
-          ...prev, 
-          status: 'active', 
-          alasan_nonaktif: null 
-        }) : prev)
+          pushToast('success', 'Siswa berhasil diaktifkan')
+          
+          if (detailUser && detailUser.id === siswaToAktifkan.id) {
+            setDetailUser(prev => prev ? ({ 
+              ...prev, 
+              status: 'active', 
+              alasan_nonaktif: null 
+            }) : prev)
+          }
+          
+          setAktifkanModalOpen(false)
+          setSiswaToAktifkan(null)
+          loadSiswaRaw()
+        } catch (error) {
+          console.error('Error mengaktifkan siswa:', error)
+          pushToast('error', 'Gagal mengaktifkan siswa')
+        }
       }
-      
-      setAktifkanModalOpen(false)
-      setSiswaToAktifkan(null)
-      loadSiswaRaw()
-    } catch (error) {
-      console.error('Error mengaktifkan siswa:', error)
-      pushToast('error', 'Gagal mengaktifkan siswa')
-    }
+    )
   }
 
   /* ===== RFID ===== */
@@ -862,8 +1009,13 @@ export default function ASiswa() {
 
   /* ===== Hapus Akun Siswa ===== */
   function openDeleteConfirm(siswa) {
-    setSiswaToDelete(siswa)
-    setDeleteConfirmOpen(true)
+    openPasswordModal(
+      'Konfirmasi Hapus Akun Siswa',
+      () => {
+        setSiswaToDelete(siswa)
+        setDeleteConfirmOpen(true)
+      }
+    )
   }
 
   function closeDeleteConfirm() {
@@ -871,62 +1023,67 @@ export default function ASiswa() {
     setSiswaToDelete(null)
   }
 
-  async function hapusAkunSiswa() {
+  const hapusAkunSiswa = () => {
     if (!siswaToDelete) return
 
-    try {
-      setDeletingSiswa(true)
+    openPasswordModal(
+      'Konfirmasi Akhir Hapus Akun Siswa',
+      async () => {
+        try {
+          setDeletingSiswa(true)
 
-      // Hapus dari semua tabel terkait
-      await supabase.from('organisasi_anggota').delete().eq('siswa_id', siswaToDelete.id)
-      await supabase.from('osis_anggota').delete().eq('siswa_id', siswaToDelete.id)
-      await supabase.from('ekskul_anggota').delete().eq('user_id', siswaToDelete.id)
-      await supabase.from('anggota_ekskul').delete().eq('user_id', siswaToDelete.id)
-      await supabase.from('tugas_jawaban').delete().eq('user_id', siswaToDelete.id)
-      await supabase.from('absensi').delete().eq('uid', siswaToDelete.id)
-      await supabase.from('absensi_ajuan').delete().eq('uid', siswaToDelete.id)
-      
-      // Reset ketua kelas jika siswa ini adalah ketua
-      await supabase
-        .from('kelas_struktur')
-        .update({ ketua_siswa_id: null, ketua_siswa_nama: null })
-        .eq('ketua_siswa_id', siswaToDelete.id)
+          // Hapus dari semua tabel terkait
+          await supabase.from('organisasi_anggota').delete().eq('siswa_id', siswaToDelete.id)
+          await supabase.from('osis_anggota').delete().eq('siswa_id', siswaToDelete.id)
+          await supabase.from('ekskul_anggota').delete().eq('user_id', siswaToDelete.id)
+          await supabase.from('anggota_ekskul').delete().eq('user_id', siswaToDelete.id)
+          await supabase.from('tugas_jawaban').delete().eq('user_id', siswaToDelete.id)
+          await supabase.from('absensi').delete().eq('uid', siswaToDelete.id)
+          await supabase.from('absensi_ajuan').delete().eq('uid', siswaToDelete.id)
+          
+          // Reset ketua kelas jika siswa ini adalah ketua
+          await supabase
+            .from('kelas_struktur')
+            .update({ ketua_siswa_id: null, ketua_siswa_nama: null })
+            .eq('ketua_siswa_id', siswaToDelete.id)
 
-      // Hapus dari profiles table
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .delete()
-        .eq('id', siswaToDelete.id)
+          // Hapus dari profiles table
+          const { error: profileError } = await supabase
+            .from('profiles')
+            .delete()
+            .eq('id', siswaToDelete.id)
 
-      if (profileError) throw profileError
+          if (profileError) throw profileError
 
-      // HAPUS DARI AUTHENTICATION - menggunakan Admin API
-      try {
-        const { error: authError } = await supabase.auth.admin.deleteUser(
-          siswaToDelete.id
-        )
-        
-        if (authError) {
-          console.warn('Gagal menghapus dari authentication, tetapi lanjutkan:', authError)
-          // Tetap lanjutkan karena data utama sudah dihapus
-          pushToast('warning', 'Akun siswa dihapus, tetapi ada masalah dengan authentication. Silakan coba lagi nanti.')
-        } else {
-          pushToast('success', 'Akun siswa berhasil dihapus sepenuhnya')
+          // HAPUS DARI AUTHENTICATION - menggunakan Admin API
+          try {
+            const { error: authError } = await supabase.auth.admin.deleteUser(
+              siswaToDelete.id
+            )
+            
+            if (authError) {
+              console.warn('Gagal menghapus dari authentication, tetapi lanjutkan:', authError)
+              // Tetap lanjutkan karena data utama sudah dihapus
+              pushToast('warning', 'Akun siswa dihapus, tetapi ada masalah dengan authentication. Silakan coba lagi nanti.')
+            } else {
+              pushToast('success', 'Akun siswa berhasil dihapus sepenuhnya')
+            }
+          } catch (authErr) {
+            console.warn('Error saat menghapus dari auth:', authErr)
+            pushToast('warning', 'Akun siswa dihapus dari database, tetapi ada masalah dengan authentication.')
+          }
+
+          closeDeleteConfirm()
+          if (detailOpen) closeDetailModal()
+          loadAllData()
+        } catch (error) {
+          console.error('Error deleting siswa:', error)
+          pushToast('error', 'Gagal menghapus akun siswa: ' + (error.message || 'Unknown error'))
+        } finally {
+          setDeletingSiswa(false)
         }
-      } catch (authErr) {
-        console.warn('Error saat menghapus dari auth:', authErr)
-        pushToast('warning', 'Akun siswa dihapus dari database, tetapi ada masalah dengan authentication.')
       }
-
-      closeDeleteConfirm()
-      if (detailOpen) closeDetailModal()
-      loadAllData()
-    } catch (error) {
-      console.error('Error deleting siswa:', error)
-      pushToast('error', 'Gagal menghapus akun siswa: ' + (error.message || 'Unknown error'))
-    } finally {
-      setDeletingSiswa(false)
-    }
+    )
   }
 
   /* ===== Tambah Siswa ===== */
@@ -1033,6 +1190,15 @@ export default function ASiswa() {
   return (
     <div className="min-h-screen bg-gray-50 p-4">
       <div className="max-w-7xl mx-auto space-y-6">
+        {/* Password Modal */}
+        <PasswordModal
+          isOpen={passwordModal.isOpen}
+          onClose={closePasswordModal}
+          onConfirm={handlePasswordConfirm}
+          title={passwordModal.title}
+          loading={passwordModal.loading}
+        />
+
         {/* Header */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between">

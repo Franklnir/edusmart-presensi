@@ -2,6 +2,92 @@ import React, { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useUIStore } from '../../store/useUIStore'
 
+/* ===== Password Modal Component ===== */
+function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Password", loading = false }) {
+  const [password, setPassword] = useState('')
+
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    if (password.trim()) {
+      onConfirm(password)
+      setPassword('')
+    }
+  }
+
+  const handleClose = () => {
+    setPassword('')
+    onClose()
+  }
+
+  if (!isOpen) return null
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4">
+        <h3 className="text-lg font-bold text-gray-900 mb-2">{title}</h3>
+        <p className="text-gray-600 text-sm mb-4">
+          Untuk melanjutkan, masukkan password Anda:
+        </p>
+        
+        <form onSubmit={handleSubmit}>
+          <input
+            type="password"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 mb-4"
+            placeholder="Masukkan password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            autoFocus
+          />
+          
+          <div className="flex justify-end space-x-3">
+            <button
+              type="button"
+              className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors duration-200"
+              onClick={handleClose}
+              disabled={loading}
+            >
+              Batal
+            </button>
+            <button
+              type="submit"
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={loading || !password.trim()}
+            >
+              {loading ? 'Memverifikasi...' : 'Konfirmasi'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+/* ===== Password Verification Utility ===== */
+const verifyPassword = async (password) => {
+  try {
+    // Get current user
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+      throw new Error('User tidak ditemukan')
+    }
+
+    // Try to sign in with the provided password
+    const { error } = await supabase.auth.signInWithPassword({
+      email: user.email,
+      password: password
+    })
+
+    if (error) {
+      throw new Error('Password salah')
+    }
+
+    return true
+  } catch (error) {
+    throw error
+  }
+}
+
 /* ===== Helpers ===== */
 function initials(name = '?') {
   const parts = (name || '').trim().split(/\s+/).slice(0, 2)
@@ -202,6 +288,14 @@ export default function AGuru() {
   const { pushToast } = useUIStore()
   const [loadingInit, setLoadingInit] = useState(true)
 
+  /* ===== Password Modal State ===== */
+  const [passwordModal, setPasswordModal] = useState({
+    isOpen: false,
+    title: '',
+    action: null,
+    loading: false
+  })
+
   const [guruRaw, setGuruRaw] = useState([])
   const [guru, setGuru] = useState([])
   const [jadwalAll, setJadwalAll] = useState({})
@@ -234,6 +328,35 @@ export default function AGuru() {
   // Hapus guru
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [guruToDelete, setGuruToDelete] = useState(null)
+  const [deletingGuru, setDeletingGuru] = useState(false)
+
+  /* ===== Password Modal Functions ===== */
+  const openPasswordModal = (title, action) => {
+    setPasswordModal({
+      isOpen: true,
+      title,
+      action,
+      loading: false
+    })
+  }
+
+  const handlePasswordConfirm = async (password) => {
+    setPasswordModal(prev => ({ ...prev, loading: true }))
+    
+    try {
+      await verifyPassword(password)
+      await passwordModal.action()
+      setPasswordModal({ isOpen: false, title: '', action: null, loading: false })
+    } catch (error) {
+      console.error('Password verification failed:', error)
+      pushToast('error', error.message || 'Password salah')
+      setPasswordModal(prev => ({ ...prev, loading: false }))
+    }
+  }
+
+  const closePasswordModal = () => {
+    setPasswordModal({ isOpen: false, title: '', action: null, loading: false })
+  }
 
   // Load data
   useEffect(() => {
@@ -524,32 +647,47 @@ export default function AGuru() {
 
   /* ===== Status Guru ===== */
   function openNonaktif(u) {
-    setDisableUID(u.id)
-    setAlasanNonaktif('')
+    openPasswordModal(
+      'Konfirmasi Nonaktifkan Guru',
+      () => {
+        setDisableUID(u.id)
+        setAlasanNonaktif('')
+      }
+    )
   }
 
-  async function simpanNonaktif() {
+  const simpanNonaktif = () => {
     if (!disableUID) return
 
-    try {
-      await supabase
-        .from('profiles')
-        .update({
-          status: 'nonaktif',
-          alasan_nonaktif: alasanNonaktif || '-',
-          disabled_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', disableUID)
-
-      pushToast('success', 'Guru berhasil dinonaktifkan')
-      setDisableUID(null)
-      setAlasanNonaktif('')
-      loadGuruRaw()
-    } catch (error) {
-      console.error('Error disabling guru:', error)
-      pushToast('error', 'Gagal menonaktifkan guru')
+    if (!alasanNonaktif.trim()) {
+      pushToast('error', 'Harap masukkan alasan penonaktifan')
+      return
     }
+
+    openPasswordModal(
+      'Konfirmasi Akhir Nonaktifkan Guru',
+      async () => {
+        try {
+          await supabase
+            .from('profiles')
+            .update({
+              status: 'nonaktif',
+              alasan_nonaktif: alasanNonaktif || '-',
+              disabled_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', disableUID)
+
+          pushToast('success', 'Guru berhasil dinonaktifkan')
+          setDisableUID(null)
+          setAlasanNonaktif('')
+          loadGuruRaw()
+        } catch (error) {
+          console.error('Error disabling guru:', error)
+          pushToast('error', 'Gagal menonaktifkan guru')
+        }
+      }
+    )
   }
 
   function batalNonaktif() {
@@ -557,30 +695,40 @@ export default function AGuru() {
     setAlasanNonaktif('')
   }
 
-  async function aktif(u) {
-    try {
-      await supabase
-        .from('profiles')
-        .update({
-          status: 'active',
-          alasan_nonaktif: null,
-          disabled_at: null,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', u.id)
+  const aktif = (u) => {
+    openPasswordModal(
+      'Konfirmasi Aktifkan Guru',
+      async () => {
+        try {
+          await supabase
+            .from('profiles')
+            .update({
+              status: 'active',
+              alasan_nonaktif: null,
+              disabled_at: null,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', u.id)
 
-      pushToast('success', 'Guru berhasil diaktifkan')
-      loadGuruRaw()
-    } catch (error) {
-      console.error('Error activating guru:', error)
-      pushToast('error', 'Gagal mengaktifkan guru')
-    }
+          pushToast('success', 'Guru berhasil diaktifkan')
+          loadGuruRaw()
+        } catch (error) {
+          console.error('Error activating guru:', error)
+          pushToast('error', 'Gagal mengaktifkan guru')
+        }
+      }
+    )
   }
 
   /* ===== Hapus Akun Guru ===== */
   function openDeleteConfirm(guru) {
-    setGuruToDelete(guru)
-    setDeleteConfirmOpen(true)
+    openPasswordModal(
+      'Konfirmasi Hapus Akun Guru',
+      () => {
+        setGuruToDelete(guru)
+        setDeleteConfirmOpen(true)
+      }
+    )
   }
 
   function closeDeleteConfirm() {
@@ -588,59 +736,68 @@ export default function AGuru() {
     setGuruToDelete(null)
   }
 
-  async function hapusAkunGuru() {
+  const hapusAkunGuru = () => {
     if (!guruToDelete) return
 
-    try {
-      // Hapus data terkait terlebih dahulu
-      await supabase
-        .from('jadwal')
-        .delete()
-        .eq('guru_id', guruToDelete.id)
+    openPasswordModal(
+      'Konfirmasi Akhir Hapus Akun Guru',
+      async () => {
+        try {
+          setDeletingGuru(true)
 
-      await supabase
-        .from('kelas_struktur')
-        .delete()
-        .eq('wali_guru_id', guruToDelete.id)
+          // Hapus data terkait terlebih dahulu
+          await supabase
+            .from('jadwal')
+            .delete()
+            .eq('guru_id', guruToDelete.id)
 
-      await supabase
-        .from('struktur_sekolah')
-        .delete()
-        .eq('guru_id', guruToDelete.id)
+          await supabase
+            .from('kelas_struktur')
+            .update({ wali_guru_id: null, wali_guru_nama: null })
+            .eq('wali_guru_id', guruToDelete.id)
 
-      // Hapus dari tabel profiles
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .delete()
-        .eq('id', guruToDelete.id)
+          await supabase
+            .from('struktur_sekolah')
+            .delete()
+            .eq('guru_id', guruToDelete.id)
 
-      if (profileError) throw profileError
+          // Hapus dari tabel profiles
+          const { error: profileError } = await supabase
+            .from('profiles')
+            .delete()
+            .eq('id', guruToDelete.id)
 
-      // Hapus user dari authentication (membutuhkan admin privileges)
-      try {
-        const { error: authError } = await supabase.auth.admin.deleteUser(
-          guruToDelete.id
-        )
+          if (profileError) throw profileError
 
-        if (authError) {
-          console.warn('Tidak bisa menghapus dari auth, mungkin tidak ada akses admin:', authError)
-          pushToast('warning', 'Akun guru dihapus tetapi mungkin masih ada di sistem authentication')
-        } else {
-          pushToast('success', 'Akun guru berhasil dihapus dari sistem')
+          // Hapus user dari authentication (membutuhkan admin privileges)
+          try {
+            const { error: authError } = await supabase.auth.admin.deleteUser(
+              guruToDelete.id
+            )
+
+            if (authError) {
+              console.warn('Tidak bisa menghapus dari auth, mungkin tidak ada akses admin:', authError)
+              pushToast('warning', 'Akun guru dihapus tetapi mungkin masih ada di sistem authentication')
+            } else {
+              pushToast('success', 'Akun guru berhasil dihapus dari sistem')
+            }
+          } catch (authError) {
+            console.warn('Error menghapus dari auth:', authError)
+            pushToast('warning', 'Akun guru dihapus tetapi mungkin masih ada di sistem authentication')
+          }
+
+          pushToast('success', 'Akun guru berhasil dihapus')
+          closeDeleteConfirm()
+          if (detailModalOpen) closeDetailModal()
+          loadAllData()
+        } catch (error) {
+          console.error('Error deleting guru:', error)
+          pushToast('error', 'Gagal menghapus akun guru: ' + (error.message || 'Unknown error'))
+        } finally {
+          setDeletingGuru(false)
         }
-      } catch (authError) {
-        console.warn('Error menghapus dari auth:', authError)
-        pushToast('warning', 'Akun guru dihapus tetapi mungkin masih ada di sistem authentication')
       }
-
-      pushToast('success', 'Akun guru berhasil dihapus')
-      closeDeleteConfirm()
-      if (detailModalOpen) closeDetailModal()
-      loadAllData()
-    } catch (error) {
-      console.error('Error deleting guru:', error)
-      pushToast('error', 'Gagal menghapus akun guru: ' + (error.message || 'Unknown error'))
-    }
+    )
   }
 
   /* ===== Modal Detail Guru ===== */
@@ -679,6 +836,15 @@ export default function AGuru() {
   return (
     <div className="min-h-screen bg-gray-50 p-4">
       <div className="max-w-7xl mx-auto space-y-6">
+        {/* Password Modal */}
+        <PasswordModal
+          isOpen={passwordModal.isOpen}
+          onClose={closePasswordModal}
+          onConfirm={handlePasswordConfirm}
+          title={passwordModal.title}
+          loading={passwordModal.loading}
+        />
+
         {/* Header */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between">
@@ -1036,13 +1202,14 @@ export default function AGuru() {
               
               <div className="mb-4">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Alasan Penonaktifan
+                  Alasan Penonaktifan *
                 </label>
                 <textarea
                   className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 min-h-[100px]"
                   placeholder="Contoh: Cuti panjang..."
                   value={alasanNonaktif}
                   onChange={e => setAlasanNonaktif(e.target.value)}
+                  required
                 />
               </div>
               
@@ -1055,8 +1222,9 @@ export default function AGuru() {
                 </Button>
                 <Button
                   onClick={simpanNonaktif}
+                  disabled={!alasanNonaktif.trim()}
                 >
-                  💾 Simpan
+                  ⏸️ Nonaktifkan
                 </Button>
               </div>
             </div>
@@ -1088,6 +1256,8 @@ export default function AGuru() {
                   • Akun akan dihapus dari database dan authentication
                   <br />
                   • Semua data terkait (jadwal, struktur) akan dihapus
+                  <br />
+                  • Tindakan ini PERMANEN dan tidak dapat dikembalikan
                 </p>
               </div>
 
@@ -1101,6 +1271,7 @@ export default function AGuru() {
                 <Button
                   variant="danger"
                   onClick={hapusAkunGuru}
+                  loading={deletingGuru}
                 >
                   🗑️ Ya, Hapus
                 </Button>

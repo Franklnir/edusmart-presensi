@@ -107,7 +107,7 @@ const getDayName = (tglString) => {
   try {
     const date = new Date(tglString + 'T12:00:00Z')
     const dayIndex = date.getUTCDay()
-    const HARI_MAP = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabru']
+    const HARI_MAP = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']
     return HARI_MAP[dayIndex]
   } catch (error) {
     console.error('Error getting day name:', error)
