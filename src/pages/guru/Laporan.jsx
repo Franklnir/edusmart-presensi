@@ -72,9 +72,12 @@ const getColorClass = (val) => {
 
   // 1. Cek jika input adalah Huruf (Grade A, B, C, D, E)
   if (typeof val === 'string' && isNaN(Number(val))) {
-    if (val === 'A') return 'bg-green-100 text-green-700 font-bold border border-green-200'
-    if (val === 'C') return 'bg-yellow-100 text-yellow-800 font-bold border border-yellow-200'
-    if (val === 'D' || val === 'E') return 'bg-red-100 text-red-700 font-bold border border-red-200'
+    if (val === 'A')
+      return 'bg-green-100 text-green-700 font-bold border border-green-200'
+    if (val === 'C')
+      return 'bg-yellow-100 text-yellow-800 font-bold border border-yellow-200'
+    if (val === 'D' || val === 'E')
+      return 'bg-red-100 text-red-700 font-bold border border-red-200'
     return 'text-gray-700' // B atau lainnya standar
   }
 
@@ -89,12 +92,18 @@ const getColorClass = (val) => {
 }
 
 const bulanList = [
-  { value: '01', label: 'Januari' }, { value: '02', label: 'Februari' },
-  { value: '03', label: 'Maret' }, { value: '04', label: 'April' },
-  { value: '05', label: 'Mei' }, { value: '06', label: 'Juni' },
-  { value: '07', label: 'Juli' }, { value: '08', label: 'Agustus' },
-  { value: '09', label: 'September' }, { value: '10', label: 'Oktober' },
-  { value: '11', label: 'November' }, { value: '12', label: 'Desember' }
+  { value: '01', label: 'Januari' },
+  { value: '02', label: 'Februari' },
+  { value: '03', label: 'Maret' },
+  { value: '04', label: 'April' },
+  { value: '05', label: 'Mei' },
+  { value: '06', label: 'Juni' },
+  { value: '07', label: 'Juli' },
+  { value: '08', label: 'Agustus' },
+  { value: '09', label: 'September' },
+  { value: '10', label: 'Oktober' },
+  { value: '11', label: 'November' },
+  { value: '12', label: 'Desember' }
 ]
 
 const KKM_NILAI_TUGAS = 75
@@ -366,7 +375,7 @@ export default function LaporanRekap() {
       })
 
       const namaBulanTerpilih = selectedBulan
-        .map((b) => bulanList.find((bl) => bl.value === b)?.label)
+        .map((b) => bulanList.find((bl) => b === bl.value)?.label)
         .join(', ')
       setTugasData({
         siswa: formatted,
@@ -390,7 +399,15 @@ export default function LaporanRekap() {
       setAbsensiData(null)
       setTugasData(null)
     }
-  }, [selectedKelas, selectedMapel, selectedBulan, tahun, activeTab, loadRekapAbsensi, loadRekapTugas])
+  }, [
+    selectedKelas,
+    selectedMapel,
+    selectedBulan,
+    tahun,
+    activeTab,
+    loadRekapAbsensi,
+    loadRekapTugas
+  ])
 
   // ==============================
   // ===== SUMMARY (RINGKASAN) ====
@@ -576,8 +593,20 @@ export default function LaporanRekap() {
     a.click()
   }
 
+  const handlePrint = () => {
+    if (typeof window !== 'undefined') {
+      window.print()
+    }
+  }
+
+  // === ABSENSI – DETAIL (per hari) ===
   const exportAbsensiToExcel = async () => {
-    if (!absensiData || !excelReady) return
+    if (!absensiData) return
+    if (!excelReady) {
+      pushToast('error', 'Library Excel belum siap, coba beberapa detik lagi')
+      return
+    }
+
     const wb = new ExcelJS.Workbook()
     const ws = wb.addWorksheet('Rekap Absensi')
 
@@ -661,6 +690,77 @@ export default function LaporanRekap() {
     saveBlob(buf, `Absensi_${selectedMapel}.xlsx`)
   }
 
+  // === ABSENSI – RINGKAS (No, Nama, Hadir, Izin, Alpha) ===
+  const exportAbsensiSummaryToExcel = async () => {
+    if (!absensiData) return
+    if (!excelReady) {
+      pushToast('error', 'Library Excel belum siap, coba beberapa detik lagi')
+      return
+    }
+
+    const wb = new ExcelJS.Workbook()
+    const ws = wb.addWorksheet('Rekap HIA')
+
+    const borderAll = {
+      top: { style: 'thin' },
+      left: { style: 'thin' },
+      bottom: { style: 'thin' },
+      right: { style: 'thin' }
+    }
+
+    const title = ws.addRow([
+      `REKAP ABSENSI (H/I/A) – ${selectedMapel} – ${getNamaKelasFromList(
+        selectedKelas,
+        kelasList
+      )}`
+    ])
+    title.font = { bold: true, size: 12 }
+    ws.mergeCells(1, 1, 1, 5)
+    title.alignment = { horizontal: 'center' }
+
+    const sub = ws.addRow([absensiData.periode])
+    ws.mergeCells(2, 1, 2, 5)
+    sub.alignment = { horizontal: 'center' }
+
+    const header = ws.addRow(['No', 'Nama', 'Hadir', 'Izin', 'Alpha'])
+    header.font = { bold: true }
+    header.eachCell((cell) => {
+      cell.border = borderAll
+      cell.alignment = { horizontal: 'center' }
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFD1D5DB' }
+      }
+    })
+
+    absensiData.siswa.forEach((s, i) => {
+      const row = ws.addRow([
+        i + 1,
+        s.nama,
+        s.total.Hadir,
+        s.total.Izin,
+        s.total.Alpha
+      ])
+      row.getCell(2).alignment = { horizontal: 'left' }
+      row.eachCell((cell) => {
+        cell.border = borderAll
+        if (!cell.alignment || !cell.alignment.horizontal) {
+          cell.alignment = { horizontal: 'center' }
+        }
+      })
+    })
+
+    ws.getColumn(1).width = 5
+    ws.getColumn(2).width = 30
+    ws.getColumn(3).width = 10
+    ws.getColumn(4).width = 10
+    ws.getColumn(5).width = 10
+
+    const buf = await wb.xlsx.writeBuffer()
+    saveBlob(buf, `Absensi_ringkas_${selectedMapel}.xlsx`)
+  }
+
   const exportToGoogleSheets = (type) => {
     let csv = ''
     const sep = ';'
@@ -702,8 +802,14 @@ export default function LaporanRekap() {
     a.click()
   }
 
+  // === TUGAS – DETAIL (per tugas) ===
   const exportTugasToExcel = async () => {
-    if (!tugasData || !excelReady) return
+    if (!tugasData) return
+    if (!excelReady) {
+      pushToast('error', 'Library Excel belum siap, coba beberapa detik lagi')
+      return
+    }
+
     const wb = new ExcelJS.Workbook()
     const ws = wb.addWorksheet('Nilai Tugas')
 
@@ -755,14 +861,368 @@ export default function LaporanRekap() {
     saveBlob(buf, `Nilai_${selectedMapel}.xlsx`)
   }
 
+  // === TUGAS – RINGKAS (No, Nama, Rata-rata, Grade) ===
+  const exportTugasSummaryToExcel = async () => {
+    if (!tugasData) return
+    if (!excelReady) {
+      pushToast('error', 'Library Excel belum siap, coba beberapa detik lagi')
+      return
+    }
+
+    const wb = new ExcelJS.Workbook()
+    const ws = wb.addWorksheet('Rekap Nilai')
+
+    const borderAll = {
+      top: { style: 'thin' },
+      left: { style: 'thin' },
+      bottom: { style: 'thin' },
+      right: { style: 'thin' }
+    }
+
+    const title = ws.addRow([
+      `REKAP NILAI TUGAS – ${selectedMapel} – ${getNamaKelasFromList(
+        selectedKelas,
+        kelasList
+      )}`
+    ])
+    title.font = { bold: true, size: 12 }
+    ws.mergeCells(1, 1, 1, 4)
+    title.alignment = { horizontal: 'center' }
+
+    const sub = ws.addRow([tugasData.periode])
+    ws.mergeCells(2, 1, 2, 4)
+    sub.alignment = { horizontal: 'center' }
+
+    const header = ws.addRow(['No', 'Nama', 'Rata-rata', 'Grade'])
+    header.font = { bold: true }
+    header.eachCell((cell) => {
+      cell.border = borderAll
+      cell.alignment = { horizontal: 'center' }
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFD1D5DB' }
+      }
+    })
+
+    tugasData.siswa.forEach((s, i) => {
+      const row = ws.addRow([
+        i + 1,
+        s.nama,
+        typeof s.rataRata === 'number' ? s.rataRata : null,
+        s.grade
+      ])
+      row.getCell(2).alignment = { horizontal: 'left' }
+      row.eachCell((cell, col) => {
+        cell.border = borderAll
+        if (col !== 2) {
+          cell.alignment = { horizontal: 'center' }
+        }
+      })
+    })
+
+    ws.getColumn(1).width = 5
+    ws.getColumn(2).width = 30
+    ws.getColumn(3).width = 12
+    ws.getColumn(4).width = 10
+
+    const buf = await wb.xlsx.writeBuffer()
+    saveBlob(buf, `Nilai_ringkas_${selectedMapel}.xlsx`)
+  }
+
+  // === GABUNGAN: Nilai + Absensi (No, Nama, Rata-rata, Grade, Hadir, Izin, Alpha) ===
+  const exportCombinedSummaryToExcel = async () => {
+    if (!tugasData || !absensiData) {
+      pushToast(
+        'error',
+        'Data absensi dan nilai harus sudah dimuat. Buka tab Absensi & Nilai Tugas, lalu muat ulang.'
+      )
+      return
+    }
+    if (!excelReady) {
+      pushToast('error', 'Library Excel belum siap, coba beberapa detik lagi')
+      return
+    }
+
+    const wb = new ExcelJS.Workbook()
+    const ws = wb.addWorksheet('Nilai+Absensi')
+
+    const borderAll = {
+      top: { style: 'thin' },
+      left: { style: 'thin' },
+      bottom: { style: 'thin' },
+      right: { style: 'thin' }
+    }
+
+    const title = ws.addRow([
+      `REKAP NILAI + ABSENSI – ${selectedMapel} – ${getNamaKelasFromList(
+        selectedKelas,
+        kelasList
+      )}`
+    ])
+    title.font = { bold: true, size: 12 }
+    ws.mergeCells(1, 1, 1, 7)
+    title.alignment = { horizontal: 'center' }
+
+    const periodeGabungan = absensiData.periode || tugasData.periode
+    const sub = ws.addRow([periodeGabungan])
+    ws.mergeCells(2, 1, 2, 7)
+    sub.alignment = { horizontal: 'center' }
+
+    const header = ws.addRow([
+      'No',
+      'Nama',
+      'Rata-rata',
+      'Grade',
+      'Hadir',
+      'Izin',
+      'Alpha'
+    ])
+    header.font = { bold: true }
+    header.eachCell((cell) => {
+      cell.border = borderAll
+      cell.alignment = { horizontal: 'center' }
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFD1D5DB' }
+      }
+    })
+
+    const nilaiMap = new Map(
+      tugasData.siswa.map((s) => [s.id, { rataRata: s.rataRata, grade: s.grade }])
+    )
+
+    absensiData.siswa.forEach((s, i) => {
+      const n = nilaiMap.get(s.id)
+      const row = ws.addRow([
+        i + 1,
+        s.nama,
+        n && typeof n.rataRata === 'number' ? n.rataRata : null,
+        n?.grade ?? '-',
+        s.total.Hadir,
+        s.total.Izin,
+        s.total.Alpha
+      ])
+      row.getCell(2).alignment = { horizontal: 'left' }
+      row.eachCell((cell, col) => {
+        cell.border = borderAll
+        if (col !== 2) {
+          cell.alignment = { horizontal: 'center' }
+        }
+      })
+    })
+
+    ws.getColumn(1).width = 5
+    ws.getColumn(2).width = 30
+    ws.getColumn(3).width = 12
+    ws.getColumn(4).width = 10
+    ws.getColumn(5).width = 10
+    ws.getColumn(6).width = 10
+    ws.getColumn(7).width = 10
+
+    const buf = await wb.xlsx.writeBuffer()
+    saveBlob(buf, `Rekap_nilai_absensi_${selectedMapel}.xlsx`)
+  }
+
+  // === Export 1 siswa: Absensi + Nilai (Laporan Orang Tua) ===
+  const exportSingleStudentReport = async () => {
+    if (!singleStudentAbsensiSummary || !absensiData) {
+      pushToast('error', 'Pilih satu siswa dulu lewat kolom pencarian.')
+      return
+    }
+    if (!excelReady) {
+      pushToast('error', 'Library Excel belum siap, coba beberapa detik lagi')
+      return
+    }
+
+    const siswaAbs = filteredAbsensiSiswa[0]
+    if (!siswaAbs) {
+      pushToast('error', 'Data siswa tidak ditemukan.')
+      return
+    }
+
+    const kelasName = getNamaKelasFromList(selectedKelas, kelasList)
+    const mapelName = selectedMapel || ''
+    const periode = absensiData.periode
+
+    const wb = new ExcelJS.Workbook()
+
+    // ===== Sheet 1: Absensi =====
+    const wsAbs = wb.addWorksheet('Absensi')
+
+    const borderAll = {
+      top: { style: 'thin' },
+      left: { style: 'thin' },
+      bottom: { style: 'thin' },
+      right: { style: 'thin' }
+    }
+
+    wsAbs.mergeCells(1, 1, 1, 5)
+    const titleAbs = wsAbs.getCell(1, 1)
+    titleAbs.value = 'LAPORAN ABSENSI SISWA'
+    titleAbs.font = { bold: true, size: 14 }
+    titleAbs.alignment = { horizontal: 'center' }
+
+    const metaRows = [
+      ['Nama', siswaAbs.nama],
+      ['NIK', siswaAbs.nik || '-'],
+      ['Kelas', kelasName],
+      ['Mapel', mapelName],
+      ['Periode', periode]
+    ]
+    metaRows.forEach((row, idx) => {
+      const r = wsAbs.getRow(3 + idx)
+      r.getCell(1).value = row[0]
+      r.getCell(1).font = { bold: true }
+      r.getCell(2).value = row[1]
+    })
+
+    const headerRowIndex = 3 + metaRows.length + 1 // setelah meta + 1 baris kosong
+    const headerAbs = wsAbs.getRow(headerRowIndex)
+    headerAbs.values = ['No', 'Tanggal', 'Status', 'Kode', 'Keterangan']
+    headerAbs.font = { bold: true }
+    headerAbs.eachCell((cell) => {
+      cell.alignment = { horizontal: 'center' }
+      cell.border = borderAll
+    })
+
+    const kerjaDates = absensiData.dateStrings.filter((d) => !isSunday(d))
+    kerjaDates.forEach((ds, i) => {
+      const row = wsAbs.getRow(headerRowIndex + 1 + i)
+      const st = siswaAbs.absensiPerTanggal[ds]
+      let ket = ''
+      if (st === 'Hadir') ket = 'Masuk'
+      else if (st === 'Izin') ket = 'Izin'
+      else if (st === 'Alpha') ket = 'Tidak Hadir'
+
+      row.getCell(1).value = i + 1
+      row.getCell(2).value = ds
+      row.getCell(3).value = st || '-'
+      row.getCell(4).value = st ? st.charAt(0) : ''
+      row.getCell(5).value = ket
+
+      row.eachCell((cell) => {
+        cell.border = borderAll
+        cell.alignment = { horizontal: 'center' }
+      })
+      row.getCell(2).alignment = { horizontal: 'left' }
+    })
+
+    // Ringkasan di bawah tabel
+    const summaryRowIndex = headerRowIndex + 2 + kerjaDates.length
+    const sumRow = wsAbs.getRow(summaryRowIndex)
+    sumRow.getCell(1).value = 'Ringkasan'
+    sumRow.getCell(1).font = { bold: true }
+    sumRow.getCell(2).value =
+      `Hadir: ${singleStudentAbsensiSummary.totalHadir}  | ` +
+      `Izin: ${singleStudentAbsensiSummary.totalIzin}  | ` +
+      `Alpha: ${singleStudentAbsensiSummary.totalAlpha}  | ` +
+      `Hari Efektif: ${singleStudentAbsensiSummary.totalHariKerja}  | ` +
+      `Persentase Hadir: ${singleStudentAbsensiSummary.persenHadir}%`
+
+    wsAbs.getColumn(1).width = 5
+    wsAbs.getColumn(2).width = 15
+    wsAbs.getColumn(3).width = 12
+    wsAbs.getColumn(4).width = 8
+    wsAbs.getColumn(5).width = 20
+
+    // ===== Sheet 2: Nilai Tugas =====
+    const wsNilai = wb.addWorksheet('Nilai Tugas')
+    wsNilai.mergeCells(1, 1, 1, 5)
+    const titleNilai = wsNilai.getCell(1, 1)
+    titleNilai.value = 'LAPORAN NILAI TUGAS'
+    titleNilai.font = { bold: true, size: 14 }
+    titleNilai.alignment = { horizontal: 'center' }
+
+    metaRows.forEach((row, idx) => {
+      const r = wsNilai.getRow(3 + idx)
+      r.getCell(1).value = row[0]
+      r.getCell(1).font = { bold: true }
+      r.getCell(2).value = row[1]
+    })
+    const kkmRow = wsNilai.getRow(3 + metaRows.length)
+    kkmRow.getCell(1).value = 'KKM'
+    kkmRow.getCell(1).font = { bold: true }
+    kkmRow.getCell(2).value = KKM_NILAI_TUGAS
+
+    const siswaNilai =
+      tugasData?.siswa?.find((s) => s.id === siswaAbs.id) || null
+
+    if (!tugasData || !tugasData.tugas || tugasData.tugas.length === 0 || !siswaNilai) {
+      const infoRow = wsNilai.getRow(3 + metaRows.length + 2)
+      infoRow.getCell(1).value =
+        'Belum ada data nilai tugas untuk periode ini. Buka tab "Nilai Tugas" lalu muat ulang jika ingin laporan lengkap.'
+    } else {
+      const headerNilaiIdx = 3 + metaRows.length + 2
+      const headerNilai = wsNilai.getRow(headerNilaiIdx)
+      headerNilai.values = ['No', 'Judul Tugas', 'Nilai', 'Grade', 'Status']
+      headerNilai.font = { bold: true }
+      headerNilai.eachCell((cell) => {
+        cell.alignment = { horizontal: 'center' }
+        cell.border = borderAll
+      })
+
+      tugasData.tugas.forEach((t, i) => {
+        const row = wsNilai.getRow(headerNilaiIdx + 1 + i)
+        const info = siswaNilai.nilaiTugas[t.id]
+        const nilai = info?.nilai
+        const isAngka =
+          nilai !== null &&
+          nilai !== undefined &&
+          nilai !== '-' &&
+          !Number.isNaN(Number(nilai))
+        const nAngka = isAngka ? Number(nilai) : null
+        const grade = isAngka ? getGrade(nAngka) : '-'
+        let status = 'Belum dinilai'
+        if (isAngka) {
+          status = nAngka >= KKM_NILAI_TUGAS ? 'Lulus' : 'Perlu Remedial'
+        }
+
+        row.getCell(1).value = i + 1
+        row.getCell(2).value = t.judul
+        row.getCell(3).value = isAngka ? nAngka : null
+        row.getCell(4).value = grade
+        row.getCell(5).value = status
+
+        row.eachCell((cell, col) => {
+          cell.border = borderAll
+          if (col === 2) {
+            cell.alignment = { horizontal: 'left' }
+          } else {
+            cell.alignment = { horizontal: 'center' }
+          }
+        })
+      })
+
+      // Ringkasan akhir di bawah
+      const footerRowIdx = headerNilaiIdx + 2 + tugasData.tugas.length
+      const footerRow = wsNilai.getRow(footerRowIdx)
+      footerRow.getCell(1).value = 'Ringkasan'
+      footerRow.getCell(1).font = { bold: true }
+      footerRow.getCell(2).value =
+        `Rata-rata: ${siswaNilai.rataRata ?? '-'}  | Grade: ${siswaNilai.grade ?? '-'}`
+
+      wsNilai.getColumn(1).width = 5
+      wsNilai.getColumn(2).width = 35
+      wsNilai.getColumn(3).width = 10
+      wsNilai.getColumn(4).width = 10
+      wsNilai.getColumn(5).width = 18
+    }
+
+    const buf = await wb.xlsx.writeBuffer()
+    const safeName = siswaAbs.nama?.replace(/[^\w\d]+/g, '_') || 'siswa'
+    saveBlob(buf, `Laporan_${safeName}_${mapelName || 'mapel'}.xlsx`)
+  }
+
   // ==============================
   // ===== RENDER UI ==============
   // ==============================
   return (
-    <div className="min-h-screen bg-gray-50 p-4">
+    <div className="min-h-screen bg-gray-50 p-4 print:bg-white print:p-0">
       <div className="max-w-7xl mx-auto space-y-6">
         {/* === CONTROLS === */}
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 grid grid-cols-1 md:grid-cols-4 gap-4 print:hidden">
           {/* Kelas */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -893,7 +1353,7 @@ export default function LaporanRekap() {
         </div>
 
         {/* === TABS === */}
-        <div className="flex space-x-1 bg-gray-200 p-1 rounded-lg w-fit">
+        <div className="flex space-x-1 bg-gray-200 p-1 rounded-lg w-fit print:hidden">
           <button
             className={`px-4 py-2 rounded-md text-sm font-medium transition ${
               activeTab === 'absensi'
@@ -935,22 +1395,37 @@ export default function LaporanRekap() {
         {/* === TABLE ABSENSI === */}
         {activeTab === 'absensi' && absensiData && (
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-            <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
+            <div className="p-4 border-b border-gray-200 flex flex-wrap gap-3 justify-between items-center bg-gray-50 print:bg-white">
               <h3 className="font-bold text-gray-700">
-                Rekap Absensi ({absensiData.periode})
+                Rekap Absensi – {getNamaKelasFromList(selectedKelas, kelasList)} / {selectedMapel}{' '}
+                <span className="text-sm font-normal text-gray-500">
+                  ({absensiData.periode})
+                </span>
               </h3>
-              <div className="flex space-x-2">
+              <div className="flex flex-wrap gap-2 print:hidden">
                 <button
                   onClick={exportAbsensiToExcel}
                   className="text-xs bg-green-600 text-white px-3 py-2 rounded hover:bg-green-700"
                 >
-                  Download Excel
+                  Excel Detail
+                </button>
+                <button
+                  onClick={exportAbsensiSummaryToExcel}
+                  className="text-xs bg-emerald-600 text-white px-3 py-2 rounded hover:bg-emerald-700"
+                >
+                  Excel Ringkas (H/I/A)
                 </button>
                 <button
                   onClick={() => exportToGoogleSheets('absensi')}
                   className="text-xs bg-blue-600 text-white px-3 py-2 rounded hover:bg-blue-700"
                 >
                   Google Sheets
+                </button>
+                <button
+                  onClick={handlePrint}
+                  className="text-xs bg-gray-700 text-white px-3 py-2 rounded hover:bg-gray-800"
+                >
+                  Cetak
                 </button>
               </div>
             </div>
@@ -991,7 +1466,7 @@ export default function LaporanRekap() {
             )}
 
             {/* Pencarian nama / NIK siswa */}
-            <div className="px-4 pt-2 pb-3 bg-white border-b border-gray-100 flex flex-wrap gap-3 items-center">
+            <div className="px-4 pt-2 pb-3 bg-white border-b border-gray-100 flex flex-wrap gap-3 items-center print:hidden">
               <div className="text-sm text-gray-600">
                 Cari siswa (nama / NIK):
               </div>
@@ -1037,6 +1512,13 @@ export default function LaporanRekap() {
                     <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-100 text-xs font-semibold text-emerald-700">
                       % Hadir: {singleStudentAbsensiSummary.persenHadir}%
                     </span>
+                    {/* Tombol Export Laporan Orang Tua */}
+                    <button
+                      onClick={exportSingleStudentReport}
+                      className="print:hidden text-xs bg-emerald-600 text-white px-3 py-1.5 rounded-md hover:bg-emerald-700"
+                    >
+                      Export Laporan Siswa (Excel)
+                    </button>
                   </div>
                 </div>
               </div>
@@ -1124,22 +1606,43 @@ export default function LaporanRekap() {
         {/* === TABLE TUGAS === */}
         {activeTab === 'tugas' && tugasData && (
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-            <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
+            <div className="p-4 border-b border-gray-200 flex flex-wrap gap-3 justify-between items-center bg-gray-50 print:bg-white">
               <h3 className="font-bold text-gray-700">
-                Tabel Nilai Tugas ({tugasData.periode})
+                Tabel Nilai Tugas – {getNamaKelasFromList(selectedKelas, kelasList)} / {selectedMapel}{' '}
+                <span className="text-sm font-normal text-gray-500">
+                  ({tugasData.periode})
+                </span>
               </h3>
-              <div className="flex space-x-2">
+              <div className="flex flex-wrap gap-2 print:hidden">
                 <button
                   onClick={exportTugasToExcel}
                   className="text-xs bg-green-600 text-white px-3 py-2 rounded hover:bg-green-700"
                 >
-                  Download Excel
+                  Excel Detail
+                </button>
+                <button
+                  onClick={exportTugasSummaryToExcel}
+                  className="text-xs bg-emerald-600 text-white px-3 py-2 rounded hover:bg-emerald-700"
+                >
+                  Excel Ringkas (Rata²)
+                </button>
+                <button
+                  onClick={exportCombinedSummaryToExcel}
+                  className="text-xs bg-purple-600 text-white px-3 py-2 rounded hover:bg-purple-700"
+                >
+                  Excel Gabungan (Nilai + Absensi)
                 </button>
                 <button
                   onClick={() => exportToGoogleSheets('tugas')}
                   className="text-xs bg-blue-600 text-white px-3 py-2 rounded hover:bg-blue-700"
                 >
                   Google Sheets
+                </button>
+                <button
+                  onClick={handlePrint}
+                  className="text-xs bg-gray-700 text-white px-3 py-2 rounded hover:bg-gray-800"
+                >
+                  Cetak
                 </button>
               </div>
             </div>
