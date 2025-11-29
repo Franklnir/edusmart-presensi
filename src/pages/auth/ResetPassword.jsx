@@ -27,15 +27,19 @@ const ResetPassword = () => {
 
     setIsSubmitting(true)
     try {
+      // Supabase akan pakai session dari token di URL (recovery)
       const { error } = await supabase.auth.updateUser({ password })
 
       if (error) {
+        console.error(error)
         setError(error.message || 'Gagal mengubah password.')
       } else {
         setSuccess('Password berhasil diubah. Kamu bisa login kembali.')
+        // kasih delay dikit biar user baca pesan
         setTimeout(() => navigate('/login'), 2000)
       }
     } catch (err) {
+      console.error(err)
       setError(err.message || 'Terjadi kesalahan.')
     } finally {
       setIsSubmitting(false)
