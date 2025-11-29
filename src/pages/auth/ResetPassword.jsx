@@ -1,192 +1,60 @@
 // src/pages/auth/ResetPassword.jsx
-import React, { useEffect, useState } from 'react'
-import { useLocation, useNavigate, Link } from 'react-router-dom'
+import React, { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 
-/**
- * Parse string param (hash/query) seperti:
- * #access_token=xxx&refresh_token=yyy
- * ?access_token=xxx&refresh_token=yyy
- */
-function parseParams(str) {
-  const result = {}
-  if (!str) return result
-
-  const clean =
-    str.startsWith('#') || str.startsWith('?') ? str.substring(1) : str
-
-  if (!clean) return result
-
-  const pairs = clean.split('&')
-  for (const part of pairs) {
-    const [key, value] = part.split('=')
-    if (!key) continue
-    result[decodeURIComponent(key)] = decodeURIComponent(value || '')
-  }
-
-  return result
-}
-
 const ResetPassword = () => {
-  const location = useLocation()
-  const navigate = useNavigate()
-
-  const [checking, setChecking] = useState(true)
-  const [sessionError, setSessionError] = useState('')
-
   const [password, setPassword] = useState('')
-  const [confirmPassword, setConfirmPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
-
-  useEffect(() => {
-    const bootstrapSession = async () => {
-      try {
-        const { hash, search } = location
-
-        if ((!hash || hash.length <= 1) && (!search || search.length <= 1)) {
-          setSessionError(
-            'Link reset password tidak valid atau sudah kadaluarsa. Silakan minta link baru dari halaman login.'
-          )
-          setChecking(false)
-          return
-        }
-
-        // Prioritas: hash (#...), jika kosong baru pakai query (?...)
-        const params =
-          hash && hash.length > 1 ? parseParams(hash) : parseParams(search)
-
-        const access_token = params['access_token']
-        const refresh_token = params['refresh_token']
-
-        if (!access_token || !refresh_token) {
-          setSessionError(
-            'Token reset tidak ditemukan. Silakan minta link reset password yang baru.'
-          )
-          setChecking(false)
-          return
-        }
-
-        const { error } = await supabase.auth.setSession({
-          access_token,
-          refresh_token
-        })
-
-        if (error) {
-          console.error('setSession error:', error)
-          setSessionError(
-            error.message ||
-              'Gagal memverifikasi link reset password. Silakan minta link baru.'
-          )
-        } else {
-          console.log('✅ Session from recovery link is set')
-        }
-      } catch (err) {
-        console.error('Error bootstrap session:', err)
-        setSessionError(
-          err.message ||
-            'Terjadi kesalahan saat memproses link reset password.'
-        )
-      } finally {
-        setChecking(false)
-      }
-    }
-
-    bootstrapSession()
-  }, [location])
+  const navigate = useNavigate()
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    setError('')
+    setSuccess('')
 
-    if (!password || !confirmPassword) {
-      setError('Password baru dan konfirmasi harus diisi.')
+    if (!password || !confirm) {
+      setError('Password dan konfirmasi wajib diisi.')
       return
     }
-
-    if (password.length < 6) {
-      setError('Password minimal 6 karakter.')
-      return
-    }
-
-    if (password !== confirmPassword) {
+    if (password !== confirm) {
       setError('Konfirmasi password tidak sama.')
       return
     }
 
     setIsSubmitting(true)
-    setError('')
-    setSuccess('')
-
     try {
-      const { data, error } = await supabase.auth.updateUser({
-        password
-      })
+      // Supabase akan pakai session dari token di URL (recovery)
+      const { error } = await supabase.auth.updateUser({ password })
 
       if (error) {
-        console.error('updateUser error:', error)
+        console.error(error)
         setError(error.message || 'Gagal mengubah password.')
       } else {
-        console.log('✅ Password updated:', data)
-        setSuccess(
-          'Password berhasil diubah. Kamu akan diarahkan ke halaman login.'
-        )
-        setTimeout(() => {
-          navigate('/login', { replace: true })
-        }, 2000)
+        setSuccess('Password berhasil diubah. Kamu bisa login kembali.')
+        // kasih delay dikit biar user baca pesan
+        setTimeout(() => navigate('/login'), 2000)
       }
     } catch (err) {
-      console.error('updateUser error:', err)
-      setError(err.message || 'Terjadi kesalahan saat mengubah password.')
+      console.error(err)
+      setError(err.message || 'Terjadi kesalahan.')
     } finally {
       setIsSubmitting(false)
     }
   }
 
-  // Saat lagi verifikasi link
-  if (checking) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-sky-50 via-indigo-50 to-slate-100 px-4">
-        <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-xl p-6 w-full max-w-md border border-slate-100 flex flex-col items-center">
-          <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-3" />
-          <p className="text-slate-600 text-sm">
-            Memverifikasi link reset password...
-          </p>
-        </div>
-      </div>
-    )
-  }
-
-  // Kalau token/link bermasalah
-  if (sessionError) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-sky-50 via-indigo-50 to-slate-100 px-4">
-        <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-xl p-6 w-full max-w-md border border-red-100">
-          <h1 className="text-lg font-semibold text-red-700 mb-2">
-            Link Reset Tidak Valid
-          </h1>
-          <p className="text-sm text-red-600 mb-4">{sessionError}</p>
-          <Link
-            to="/login"
-            className="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold"
-          >
-            Kembali ke halaman login
-          </Link>
-        </div>
-      </div>
-    )
-  }
-
-  // Form ganti password
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-sky-50 via-indigo-50 to-slate-100 px-4 py-8">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-sky-50 via-indigo-50 to-slate-100 px-4">
       <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-xl p-6 w-full max-w-md border border-slate-100">
         <div className="text-center mb-6">
           <h1 className="text-2xl font-bold text-slate-800">
             Atur Ulang Password
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Silakan masukkan password baru untuk akun kamu.
+            Masukkan password baru untuk akunmu.
           </p>
         </div>
 
@@ -210,13 +78,8 @@ const ResetPassword = () => {
             <input
               type="password"
               value={password}
-              onChange={(e) => {
-                setPassword(e.target.value)
-                if (error) setError('')
-              }}
+              onChange={(e) => setPassword(e.target.value)}
               className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white"
-              placeholder="Minimal 6 karakter"
-              disabled={isSubmitting}
               required
             />
           </div>
@@ -227,14 +90,9 @@ const ResetPassword = () => {
             </label>
             <input
               type="password"
-              value={confirmPassword}
-              onChange={(e) => {
-                setConfirmPassword(e.target.value)
-                if (error) setError('')
-              }}
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
               className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white"
-              placeholder="Ulangi password baru"
-              disabled={isSubmitting}
               required
             />
           </div>
@@ -247,27 +105,13 @@ const ResetPassword = () => {
             {isSubmitting ? (
               <>
                 <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                Menyimpan password...
+                Menyimpan...
               </>
             ) : (
               'Simpan Password Baru'
             )}
           </button>
         </form>
-
-        <p className="text-xs text-center mt-4 text-slate-500">
-          Jika kamu tidak meminta reset password, abaikan email dan jangan
-          bagikan link ini kepada siapapun.
-        </p>
-
-        <div className="mt-6 text-center">
-          <Link
-            to="/login"
-            className="text-xs text-indigo-600 hover:text-indigo-700 font-semibold"
-          >
-            Kembali ke halaman login
-          </Link>
-        </div>
       </div>
     </div>
   )
