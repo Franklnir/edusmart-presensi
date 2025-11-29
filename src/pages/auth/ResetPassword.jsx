@@ -52,8 +52,19 @@ const ResetPassword = () => {
       return
     }
 
+    // Validasi password yang lebih ketat
     if (password.length < 6) {
       setError('Password minimal 6 karakter.')
+      return
+    }
+
+    if (!/(?=.*[A-Z])/.test(password)) {
+      setError('Password harus mengandung minimal 1 huruf besar.')
+      return
+    }
+
+    if (!/(?=.*\d)/.test(password)) {
+      setError('Password harus mengandung minimal 1 angka.')
       return
     }
 
@@ -182,7 +193,7 @@ const ResetPassword = () => {
                 if (error) setError('')
               }}
               className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white"
-              placeholder="Minimal 6 karakter"
+              placeholder="Minimal 6 karakter, 1 huruf besar, 1 angka"
               disabled={isSubmitting}
               required
             />
