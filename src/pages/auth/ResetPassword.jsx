@@ -45,55 +45,29 @@ const ResetPassword = () => {
       try {
         const { hash, search } = location
 
-        // tidak ada hash maupun query sama sekali
         if ((!hash || hash.length <= 1) && (!search || search.length <= 1)) {
           setSessionError(
-            'Link reset password tidak valid atau sudah kadaluarsa. Silakan minta link baru dari halaman Lupa Password.'
+            'Link reset password tidak valid atau sudah kadaluarsa. Silakan minta link baru dari halaman login.'
           )
           setChecking(false)
           return
         }
 
-        // Gabungkan: prioritas hash (#...), kalau kosong pakai query (?...).
-        const raw = hash && hash.length > 1 ? hash : search
-        const params = parseParams(raw)
+        // Prioritas: hash (#...), jika kosong baru pakai query (?...)
+        const params =
+          hash && hash.length > 1 ? parseParams(hash) : parseParams(search)
 
-        // 1) TANGANI ERROR DARI SUPABASE DI URL
-        // Contoh: #error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired
-        if (params.error) {
-          console.log('Supabase recovery error:', params)
-
-          let message =
-            'Link reset password tidak lagi berlaku. Silakan minta link baru dari halaman Lupa Password.'
-
-          if (params.error_code === 'otp_expired') {
-            message =
-              'Link reset password sudah kedaluwarsa atau tidak valid. Silakan minta link reset password yang baru dari halaman Lupa Password.'
-          }
-
-          if (params.error_description) {
-            const detail = params.error_description.replace(/\+/g, ' ')
-            message += `\n\nDetail: ${detail}`
-          }
-
-          setSessionError(message)
-          setChecking(false)
-          return
-        }
-
-        // 2) JIKA TIDAK ADA ERROR, AMBIL access_token & refresh_token
         const access_token = params['access_token']
         const refresh_token = params['refresh_token']
 
         if (!access_token || !refresh_token) {
           setSessionError(
-            'Token reset tidak ditemukan. Silakan minta link reset password yang baru dari halaman Lupa Password.'
+            'Token reset tidak ditemukan. Silakan minta link reset password yang baru.'
           )
           setChecking(false)
           return
         }
 
-        // 3) SET SESSION DARI LINK RECOVERY
         const { error } = await supabase.auth.setSession({
           access_token,
           refresh_token
@@ -103,7 +77,7 @@ const ResetPassword = () => {
           console.error('setSession error:', error)
           setSessionError(
             error.message ||
-              'Gagal memverifikasi link reset password. Silakan minta link baru dari halaman Lupa Password.'
+              'Gagal memverifikasi link reset password. Silakan minta link baru.'
           )
         } else {
           console.log('✅ Session from recovery link is set')
@@ -183,7 +157,7 @@ const ResetPassword = () => {
     )
   }
 
-  // Kalau token/link bermasalah (expired / invalid / error code dari Supabase)
+  // Kalau token/link bermasalah
   if (sessionError) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-sky-50 via-indigo-50 to-slate-100 px-4">
@@ -191,24 +165,13 @@ const ResetPassword = () => {
           <h1 className="text-lg font-semibold text-red-700 mb-2">
             Link Reset Tidak Valid
           </h1>
-          <p className="text-sm text-red-600 mb-4 whitespace-pre-line">
-            {sessionError}
-          </p>
+          <p className="text-sm text-red-600 mb-4">{sessionError}</p>
           <Link
-            to="/forgot-password"
+            to="/login"
             className="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold"
           >
-            Minta Link Reset Password Baru
+            Kembali ke halaman login
           </Link>
-
-          <div className="mt-4 text-center">
-            <Link
-              to="/login"
-              className="text-xs text-slate-500 hover:text-slate-700"
-            >
-              Kembali ke halaman login
-            </Link>
-          </div>
         </div>
       </div>
     )
