@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
+import * as XLSX from 'xlsx'
 
 // --- HELPER FUNCTIONS ---
 
@@ -464,6 +465,201 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
       }
     }
 
+    // Fungsi untuk export ke Excel
+    const exportToExcel = () => {
+      try {
+        // Group by kelas dan hitung statistik
+        const kelasStats = {}
+        
+        anggotaEskul.forEach(anggota => {
+          const stats = calculateStats(anggota.user_id)
+          
+          if (!kelasStats[anggota.kelas]) {
+            kelasStats[anggota.kelas] = {
+              kelas: anggota.kelas,
+              totalSiswa: 0,
+              totalHadir: 0,
+              totalIzin: 0,
+              totalAlpha: 0
+            }
+          }
+          
+          kelasStats[anggota.kelas].totalSiswa++
+          kelasStats[anggota.kelas].totalHadir += stats.hadir
+          kelasStats[anggota.kelas].totalIzin += stats.izin
+          kelasStats[anggota.kelas].totalAlpha += stats.alpha
+        })
+
+        // Konversi ke array dan urutkan berdasarkan kelas
+        const dataRekap = Object.values(kelasStats).sort((a, b) => {
+          // Urutkan berdasarkan: angka kelas -> jurusan -> nomor kelas
+          const extractKelasInfo = (kelasStr) => {
+            const match = kelasStr.match(/(\d+)\s*([A-Za-z]+)?\s*(\d+)?/)
+            return {
+              angka: parseInt(match?.[1] || 0),
+              jurusan: match?.[2] || '',
+              nomor: parseInt(match?.[3] || 0)
+            }
+          }
+
+          const aInfo = extractKelasInfo(a.kelas)
+          const bInfo = extractKelasInfo(b.kelas)
+
+          if (aInfo.angka !== bInfo.angka) return aInfo.angka - bInfo.angka
+          if (aInfo.jurusan !== bInfo.jurusan) return aInfo.jurusan.localeCompare(bInfo.jurusan)
+          return aInfo.nomor - bInfo.nomor
+        })
+
+        // Format data untuk Excel
+        const excelData = [
+          // Header
+          ['REKAP ABSENSI EKSKUL', '', '', '', ''],
+          [`Ekskul: ${eskul.nama}`, '', '', '', ''],
+          [`Bulan: ${new Date(selectedYear, selectedMonth).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}`, '', '', '', ''],
+          [`Total Pertemuan: ${eskulDates.length}`, '', '', '', ''],
+          ['', '', '', '', ''],
+          // Kolom header
+          ['No', 'Kelas', 'Jumlah Siswa', 'Total Kehadiran', 'Total Izin', 'Total Alpha'],
+          // Data
+          ...dataRekap.map((item, index) => [
+            index + 1,
+            item.kelas,
+            item.totalSiswa,
+            item.totalHadir,
+            item.totalIzin,
+            item.totalAlpha
+          ]),
+          // Total
+          ['', 'TOTAL', 
+            dataRekap.reduce((sum, item) => sum + item.totalSiswa, 0),
+            dataRekap.reduce((sum, item) => sum + item.totalHadir, 0),
+            dataRekap.reduce((sum, item) => sum + item.totalIzin, 0),
+            dataRekap.reduce((sum, item) => sum + item.totalAlpha, 0)
+          ]
+        ]
+
+        // Buat workbook dan worksheet
+        const wb = XLSX.utils.book_new()
+        const ws = XLSX.utils.aoa_to_sheet(excelData)
+
+        // Styling untuk Excel
+        // Merge cells untuk judul
+        if (!ws['!merges']) ws['!merges'] = []
+        ws['!merges'].push({ s: { r: 0, c: 0 }, e: { r: 0, c: 5 } })
+        ws['!merges'].push({ s: { r: 1, c: 0 }, e: { r: 1, c: 5 } })
+        ws['!merges'].push({ s: { r: 2, c: 0 }, e: { r: 2, c: 5 } })
+        ws['!merges'].push({ s: { r: 3, c: 0 }, e: { r: 3, c: 5 } })
+
+        // Set column widths
+        ws['!cols'] = [
+          { wch: 5 },  // No
+          { wch: 15 }, // Kelas
+          { wch: 12 }, // Jumlah Siswa
+          { wch: 15 }, // Total Kehadiran
+          { wch: 10 }, // Total Izin
+          { wch: 12 }  // Total Alpha
+        ]
+
+        // Tambahkan worksheet ke workbook
+        XLSX.utils.book_append_sheet(wb, ws, 'Rekap Absensi')
+
+        // Export ke Excel
+        const fileName = `Rekap_Absensi_${eskul.nama}_${selectedMonth + 1}_${selectedYear}.xlsx`
+        XLSX.writeFile(wb, fileName)
+
+        pushToast('success', 'Rekap berhasil diexport ke Excel')
+      } catch (error) {
+        console.error('Error exporting to Excel:', error)
+        pushToast('error', 'Gagal mengexport rekap')
+      }
+    }
+
+    // Fungsi untuk export ke Google Sheets (format CSV)
+    const exportToGoogleSheets = () => {
+      try {
+        // Group by kelas dan hitung statistik (sama seperti Excel)
+        const kelasStats = {}
+        
+        anggotaEskul.forEach(anggota => {
+          const stats = calculateStats(anggota.user_id)
+          
+          if (!kelasStats[anggota.kelas]) {
+            kelasStats[anggota.kelas] = {
+              kelas: anggota.kelas,
+              totalSiswa: 0,
+              totalHadir: 0,
+              totalIzin: 0,
+              totalAlpha: 0
+            }
+          }
+          
+          kelasStats[anggota.kelas].totalSiswa++
+          kelasStats[anggota.kelas].totalHadir += stats.hadir
+          kelasStats[anggota.kelas].totalIzin += stats.izin
+          kelasStats[anggota.kelas].totalAlpha += stats.alpha
+        })
+
+        // Konversi ke array dan urutkan
+        const dataRekap = Object.values(kelasStats).sort((a, b) => {
+          const extractKelasInfo = (kelasStr) => {
+            const match = kelasStr.match(/(\d+)\s*([A-Za-z]+)?\s*(\d+)?/)
+            return {
+              angka: parseInt(match?.[1] || 0),
+              jurusan: match?.[2] || '',
+              nomor: parseInt(match?.[3] || 0)
+            }
+          }
+
+          const aInfo = extractKelasInfo(a.kelas)
+          const bInfo = extractKelasInfo(b.kelas)
+
+          if (aInfo.angka !== bInfo.angka) return aInfo.angka - bInfo.angka
+          if (aInfo.jurusan !== bInfo.jurusan) return aInfo.jurusan.localeCompare(bInfo.jurusan)
+          return aInfo.nomor - bInfo.nomor
+        })
+
+        // Buat CSV content
+        let csvContent = 'REKAP ABSENSI EKSKUL\n'
+        csvContent += `Ekskul: ${eskul.nama}\n`
+        csvContent += `Bulan: ${new Date(selectedYear, selectedMonth).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}\n`
+        csvContent += `Total Pertemuan: ${eskulDates.length}\n\n`
+        
+        // Header CSV
+        csvContent += 'No,Kelas,Jumlah Siswa,Total Kehadiran,Total Izin,Total Alpha\n'
+        
+        // Data
+        dataRekap.forEach((item, index) => {
+          csvContent += `${index + 1},${item.kelas},${item.totalSiswa},${item.totalHadir},${item.totalIzin},${item.totalAlpha}\n`
+        })
+
+        // Total
+        const totalSiswa = dataRekap.reduce((sum, item) => sum + item.totalSiswa, 0)
+        const totalHadir = dataRekap.reduce((sum, item) => sum + item.totalHadir, 0)
+        const totalIzin = dataRekap.reduce((sum, item) => sum + item.totalIzin, 0)
+        const totalAlpha = dataRekap.reduce((sum, item) => sum + item.totalAlpha, 0)
+        
+        csvContent += `,TOTAL,${totalSiswa},${totalHadir},${totalIzin},${totalAlpha}\n`
+
+        // Buat blob dan download
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+        const link = document.createElement('a')
+        const url = URL.createObjectURL(blob)
+        
+        link.setAttribute('href', url)
+        link.setAttribute('download', `Rekap_Absensi_${eskul.nama}_${selectedMonth + 1}_${selectedYear}.csv`)
+        link.style.visibility = 'hidden'
+        
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+
+        pushToast('success', 'Rekap berhasil diexport ke CSV (Google Sheets)')
+      } catch (error) {
+        console.error('Error exporting to CSV:', error)
+        pushToast('error', 'Gagal mengexport rekap')
+      }
+    }
+
     const getStatusColor = (status) => {
       switch (status) {
         case 'Hadir': return 'bg-green-100 text-green-800 border-green-200'
@@ -662,12 +858,37 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
                 <span>Alpha</span>
               </div>
             </div>
-            <button
-              onClick={onClose}
-              className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-semibold transition-colors"
-            >
-              Tutup
-            </button>
+            
+            <div className="flex gap-3">
+              {/* Tombol Export Excel */}
+              <button
+                onClick={exportToExcel}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold transition-colors flex items-center gap-2"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                Export Excel
+              </button>
+
+              {/* Tombol Export Google Sheets */}
+              <button
+                onClick={exportToGoogleSheets}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition-colors flex items-center gap-2"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                Export Google Sheets
+              </button>
+
+              <button
+                onClick={onClose}
+                className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-semibold transition-colors"
+              >
+                Tutup
+              </button>
+            </div>
           </div>
         </div>
       </div>
