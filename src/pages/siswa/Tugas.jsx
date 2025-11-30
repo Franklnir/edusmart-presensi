@@ -33,8 +33,8 @@ const formatDateTime = (dateString) => {
 
 const formatDate = (dateStringOrDate) => {
   if (!dateStringOrDate) return '-'
-  const d = typeof dateStringOrDate === 'string' 
-    ? new Date(dateStringOrDate) 
+  const d = typeof dateStringOrDate === 'string'
+    ? new Date(dateStringOrDate)
     : dateStringOrDate
   return d.toLocaleDateString('id-ID', {
     day: '2-digit',
@@ -54,49 +54,39 @@ const formatFileSize = (bytes) => {
 
 /**
  * Kompresi gambar menggunakan Canvas API
- * @param {File} file - File gambar yang akan dikompresi
- * @param {number} maxSizeKB - Ukuran maksimal dalam KB (default: 200KB)
- * @param {number} initialQuality - Kualitas awal (0-1)
- * @returns {Promise<File>} File yang sudah dikompresi
  */
 const compressImage = async (file, maxSizeKB = 200, initialQuality = 0.9) => {
   return new Promise((resolve, reject) => {
-    // Validasi tipe file
     if (!file.type.startsWith('image/')) {
       reject(new Error('File bukan gambar'))
       return
     }
 
-    // Jika file sudah di bawah batas, return langsung
     if (file.size <= maxSizeKB * 1024) {
       resolve(file)
       return
     }
 
     const reader = new FileReader()
-    
+
     reader.onload = (event) => {
       const img = new Image()
       img.onload = () => {
         const canvas = document.createElement('canvas')
         const ctx = canvas.getContext('2d')
-        
+
         let width = img.width
         let height = img.height
         let quality = initialQuality
-        
+
         console.log(`Kompresi gambar: ${file.name} (${formatFileSize(file.size)})`)
         console.log(`Dimensi awal: ${width}x${height}`)
 
         const compressIteration = () => {
-          // Set canvas dimensions
           canvas.width = width
           canvas.height = height
-          
-          // Draw image on canvas
           ctx.drawImage(img, 0, 0, width, height)
-          
-          // Convert to blob
+
           canvas.toBlob(
             (blob) => {
               if (!blob) {
@@ -107,14 +97,11 @@ const compressImage = async (file, maxSizeKB = 200, initialQuality = 0.9) => {
               const currentSizeKB = blob.size / 1024
               console.log(`Ukuran saat ini: ${currentSizeKB.toFixed(2)}KB, Kualitas: ${quality.toFixed(2)}`)
 
-              // Jika masih terlalu besar dan masih bisa dikompresi lebih lanjut
               if (currentSizeKB > maxSizeKB && quality > 0.3) {
-                // Kurangi kualitas dan ukuran
                 quality -= 0.1
                 width = Math.floor(width * 0.85)
                 height = Math.floor(height * 0.85)
-                
-                // Pastikan dimensi minimal
+
                 if (width < 100 || height < 100) {
                   const compressedFile = new File([blob], file.name, {
                     type: file.type,
@@ -124,7 +111,7 @@ const compressImage = async (file, maxSizeKB = 200, initialQuality = 0.9) => {
                   resolve(compressedFile)
                   return
                 }
-                
+
                 compressIteration()
               } else {
                 const compressedFile = new File([blob], file.name, {
@@ -139,127 +126,75 @@ const compressImage = async (file, maxSizeKB = 200, initialQuality = 0.9) => {
             quality
           )
         }
-        
+
         compressIteration()
       }
-      
+
       img.onerror = () => {
         reject(new Error('Gagal memuat gambar'))
       }
-      
+
       img.src = event.target.result
     }
-    
+
     reader.onerror = () => {
       reject(new Error('Gagal membaca file'))
     }
-    
+
     reader.readAsDataURL(file)
   })
 }
 
-/**
- * Validasi dan kompresi file PDF
- * @param {File} file - File PDF
- * @param {number} maxSizeMB - Ukuran maksimal dalam MB
- * @returns {Promise<File>}
- */
 const compressPDF = async (file, maxSizeMB = 2) => {
   const maxSizeBytes = maxSizeMB * 1024 * 1024
-  
-  if (file.size <= maxSizeBytes) {
-    return file
-  }
-  
+  if (file.size <= maxSizeBytes) return file
   throw new Error(`File PDF terlalu besar (${formatFileSize(file.size)}). Maksimal ${maxSizeMB}MB.`)
 }
 
-/**
- * Validasi dan kompresi file presentasi (PPT/PPTX)
- * @param {File} file - File presentasi
- * @param {number} maxSizeMB - Ukuran maksimal dalam MB
- * @returns {Promise<File>}
- */
 const compressPPT = async (file, maxSizeMB = 3) => {
   const maxSizeBytes = maxSizeMB * 1024 * 1024
-  
-  if (file.size <= maxSizeBytes) {
-    return file
-  }
-  
+  if (file.size <= maxSizeBytes) return file
   throw new Error(`File presentasi terlalu besar (${formatFileSize(file.size)}). Maksimal ${maxSizeMB}MB.`)
 }
 
-/**
- * Validasi dan kompresi file dokumen (DOC/DOCX/ODT)
- * @param {File} file - File dokumen
- * @param {number} maxSizeMB - Ukuran maksimal dalam MB
- * @returns {Promise<File>}
- */
 const compressDocument = async (file, maxSizeMB = 2) => {
   const maxSizeBytes = maxSizeMB * 1024 * 1024
-  
-  if (file.size <= maxSizeBytes) {
-    return file
-  }
-  
+  if (file.size <= maxSizeBytes) return file
   throw new Error(`File dokumen terlalu besar (${formatFileSize(file.size)}). Maksimal ${maxSizeMB}MB.`)
 }
 
-/**
- * Validasi file lainnya
- * @param {File} file - File lainnya
- * @param {number} maxSizeMB - Ukuran maksimal dalam MB
- * @returns {Promise<File>}
- */
 const compressOtherFile = async (file, maxSizeMB = 5) => {
   const maxSizeBytes = maxSizeMB * 1024 * 1024
-  
-  if (file.size <= maxSizeBytes) {
-    return file
-  }
-  
+  if (file.size <= maxSizeBytes) return file
   throw new Error(`File terlalu besar (${formatFileSize(file.size)}). Maksimal ${maxSizeMB}MB.`)
 }
 
 /**
  * Fungsi utama untuk kompresi file sebelum upload
- * @param {File} file - File yang akan dikompresi
- * @returns {Promise<File>} File yang sudah dikompresi
  */
 const compressFileBeforeUpload = async (file) => {
   const fileType = file.type
   const fileName = file.name.toLowerCase()
-  
+
   console.log(`Memulai kompresi file: ${file.name} (${formatFileSize(file.size)})`)
 
   try {
-    // Kompresi gambar
     if (fileType.startsWith('image/')) {
       console.log('File adalah gambar, memulai kompresi...')
-      const compressed = await compressImage(file, 200) // 200KB max
+      const compressed = await compressImage(file, 200)
       console.log(`Kompresi gambar selesai: ${compressed.name} (${formatFileSize(compressed.size)})`)
       return compressed
-    }
-    
-    // Kompresi PDF
-    else if (fileType === 'application/pdf' || fileName.endsWith('.pdf')) {
+    } else if (fileType === 'application/pdf' || fileName.endsWith('.pdf')) {
       console.log('Validasi ukuran PDF...')
-      return await compressPDF(file, 2) // 2MB max
-    }
-    
-    // Kompresi PowerPoint
-    else if (
-      fileType.includes('presentation') || 
-      fileName.endsWith('.ppt') || 
+      return await compressPDF(file, 2)
+    } else if (
+      fileType.includes('presentation') ||
+      fileName.endsWith('.ppt') ||
       fileName.endsWith('.pptx')
     ) {
       console.log('Validasi ukuran PPT...')
-      return await compressPPT(file, 3) // 3MB max
-    }
-    
-    // Kompresi dokumen (Word, dll)
-    else if (
+      return await compressPPT(file, 3)
+    } else if (
       fileType.includes('document') ||
       fileName.endsWith('.doc') ||
       fileName.endsWith('.docx') ||
@@ -267,15 +202,11 @@ const compressFileBeforeUpload = async (file) => {
       fileName.endsWith('.rtf')
     ) {
       console.log('Validasi ukuran dokumen...')
-      return await compressDocument(file, 2) // 2MB max
-    }
-    
-    // File lainnya
-    else {
+      return await compressDocument(file, 2)
+    } else {
       console.log('Validasi ukuran file lainnya...')
-      return await compressOtherFile(file, 5) // 5MB max
+      return await compressOtherFile(file, 5)
     }
-    
   } catch (error) {
     console.error('Error dalam kompresi file:', error)
     throw error
@@ -284,7 +215,6 @@ const compressFileBeforeUpload = async (file) => {
 
 /* ================ Status & Deadline Helpers ================ */
 
-// Status tugas per siswa
 const getStatusInfo = (tugas, jawaban) => {
   const now = new Date()
   const deadline = new Date(tugas.deadline)
@@ -328,7 +258,6 @@ const getStatusInfo = (tugas, jawaban) => {
   }
 }
 
-// Info deadline untuk badge di tabel
 const getDeadlineInfo = (deadline) => {
   const now = new Date()
   const deadlineDate = new Date(deadline)
@@ -357,13 +286,13 @@ const getDeadlineInfo = (deadline) => {
       bgColor: 'bg-yellow-100',
       urgent: true
     }
-  } else {
-    return {
-      text: formatDateTime(deadline),
-      color: 'text-slate-600',
-      bgColor: 'bg-slate-100',
-      urgent: false
-    }
+  }
+
+  return {
+    text: formatDateTime(deadline),
+    color: 'text-slate-600',
+    bgColor: 'bg-slate-100',
+    urgent: false
   }
 }
 
@@ -371,9 +300,9 @@ const getDeadlineInfo = (deadline) => {
 const getWeekRange = () => {
   const today = new Date()
   const startOfWeek = new Date(today)
-  startOfWeek.setDate(today.getDate() - today.getDay()) // Minggu
+  startOfWeek.setDate(today.getDate() - today.getDay())
   const endOfWeek = new Date(today)
-  endOfWeek.setDate(today.getDate() + (6 - today.getDay())) // Sabtu
+  endOfWeek.setDate(today.getDate() + (6 - today.getDay()))
 
   return {
     start: startOfWeek.toISOString().split('T')[0],
@@ -393,10 +322,6 @@ const getTimeFilterLabel = (value) => {
 
 /* ================ File Management ================ */
 
-/**
- * Hapus file lama dari Supabase Storage
- * @param {string} fileUrl - URL file yang akan dihapus
- */
 const deleteFileFromStorage = async (fileUrl) => {
   if (!fileUrl) {
     console.log('Tidak ada file URL yang diberikan')
@@ -405,25 +330,25 @@ const deleteFileFromStorage = async (fileUrl) => {
 
   try {
     console.log('Menghapus file lama:', fileUrl)
-    
-    // Method 1: Parse URL dengan URL constructor
+
+    // Method 1: URL constructor
     try {
       const url = new URL(fileUrl)
       const pathParts = url.pathname.split('/')
       const bucketIndex = pathParts.indexOf(ASSIGNMENT_BUCKET)
-      
+
       if (bucketIndex !== -1) {
         const filePath = pathParts.slice(bucketIndex + 1).join('/')
-        
+
         console.log('Menghapus file dengan path:', filePath)
-        
+
         const { error } = await supabase.storage
           .from(ASSIGNMENT_BUCKET)
           .remove([filePath])
 
         if (error) {
           console.error('Error deleting file (method 1):', error)
-          throw error // Lanjut ke method 2
+          throw error
         } else {
           console.log('File berhasil dihapus (method 1):', filePath)
           return
@@ -433,7 +358,7 @@ const deleteFileFromStorage = async (fileUrl) => {
       console.log('Method 1 gagal, mencoba method 2...')
     }
 
-    // Method 2: Simple parsing (fallback)
+    // Method 2: simple parsing
     const urlParts = fileUrl.split('/')
     const fileName = urlParts[urlParts.length - 1]
     const tugasId = urlParts[urlParts.length - 2]
@@ -441,7 +366,7 @@ const deleteFileFromStorage = async (fileUrl) => {
     if (fileName && tugasId) {
       const filePath = `${tugasId}/${fileName}`
       console.log('Menghapus file dengan path (method 2):', filePath)
-      
+
       const { error } = await supabase.storage
         .from(ASSIGNMENT_BUCKET)
         .remove([filePath])
@@ -455,7 +380,6 @@ const deleteFileFromStorage = async (fileUrl) => {
     }
 
     console.warn('Tidak dapat menentukan path file untuk dihapus')
-    
   } catch (error) {
     console.error('Error dalam deleteFileFromStorage:', error)
   }
@@ -466,26 +390,23 @@ export default function TugasSiswa() {
   const { user, profile } = useAuthStore()
   const { pushToast, setLoading } = useUIStore()
 
-  /* ---------- State Management ---------- */
+  // ---------- State ----------
   const [tugasList, setTugasList] = useState([])
   const [jawabanMap, setJawabanMap] = useState({})
   const [selectedTugas, setSelectedTugas] = useState(null)
 
-  /* ---------- Filter State ---------- */
   const [selectedMapel, setSelectedMapel] = useState('semua')
   const [timeFilter, setTimeFilter] = useState('all')
 
-  /* ---------- Form State ---------- */
   const [file, setFile] = useState(null)
   const [link, setLink] = useState('')
   const [uploadedFileSize, setUploadedFileSize] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [compressionProgress, setCompressionProgress] = useState(null)
 
-  /* ---------- Preview State ---------- */
   const [previewFile, setPreviewFile] = useState(null)
 
-  /* ========== Data Loading Functions ========== */
+  /* ========== Data Loading ========== */
 
   const loadTugas = async () => {
     if (!profile?.kelas) return
@@ -493,7 +414,7 @@ export default function TugasSiswa() {
     try {
       setLoading(true)
       console.log('Memuat data tugas untuk kelas:', profile.kelas)
-      
+
       const { data, error } = await supabase
         .from('tugas')
         .select('*')
@@ -504,7 +425,7 @@ export default function TugasSiswa() {
         console.error('Error dari Supabase:', error)
         throw error
       }
-      
+
       console.log('Data tugas berhasil dimuat:', data?.length || 0, 'tugas')
       setTugasList(data || [])
     } catch (error) {
@@ -520,7 +441,7 @@ export default function TugasSiswa() {
 
     try {
       console.log('Memuat data jawaban untuk user:', user.id)
-      
+
       const { data, error } = await supabase
         .from('tugas_jawaban')
         .select('*')
@@ -535,7 +456,7 @@ export default function TugasSiswa() {
       data?.forEach((jawaban) => {
         map[jawaban.tugas_id] = jawaban
       })
-      
+
       console.log('Data jawaban berhasil dimuat:', Object.keys(map).length, 'jawaban')
       setJawabanMap(map)
     } catch (error) {
@@ -552,6 +473,7 @@ export default function TugasSiswa() {
   }, [profile?.kelas, user?.id])
 
   /* ========== Data Processing & Filtering ========== */
+
   const {
     filteredTugas,
     stats,
@@ -614,7 +536,6 @@ export default function TugasSiswa() {
         }
       }
 
-      // ambil nama guru pengampu
       if (!mapelGuruTmp[mapel]) {
         mapelGuruTmp[mapel] =
           tugas.guru_nama ||
@@ -626,7 +547,6 @@ export default function TugasSiswa() {
 
       mapelStatsTmp[mapel].total += 1
 
-      // global stats + per-mapel
       if (statusInfo.status === 'dinilai') {
         stats.dinilai += 1
         mapelStatsTmp[mapel].sudahDinilai += 1
@@ -644,10 +564,7 @@ export default function TugasSiswa() {
       const deadlineDate = new Date(tugas.deadline)
       const deadlineStr = deadlineDate.toISOString().split('T')[0]
 
-      if (
-        deadlineStr >= weekRange.start &&
-        deadlineStr <= weekRange.end
-      ) {
+      if (deadlineStr >= weekRange.start && deadlineStr <= weekRange.end) {
         tugasMingguIni.push(tugas)
       }
 
@@ -658,15 +575,12 @@ export default function TugasSiswa() {
 
     stats.mingguIni = tugasMingguIni.length
 
-    // ---- filter tugas untuk tabel ----
     let filtered = [...tugasList]
 
-    // by mapel
     if (selectedMapel && selectedMapel !== 'semua') {
       filtered = filtered.filter((t) => t.mapel === selectedMapel)
     }
 
-    // by waktu
     if (timeFilter && timeFilter !== 'all') {
       if (timeFilter === 'minggu-ini') {
         const start = new Date()
@@ -689,9 +603,6 @@ export default function TugasSiswa() {
       }
     }
 
-    // Urutan:
-    // - Jika mapel dipilih -> tugas terbaru dulu (created_at desc)
-    // - Kalau semua mapel -> deadline terdekat dulu
     if (selectedMapel && selectedMapel !== 'semua') {
       filtered.sort((a, b) => {
         const aDate = new Date(a.created_at || a.deadline)
@@ -699,9 +610,7 @@ export default function TugasSiswa() {
         return bDate - aDate
       })
     } else {
-      filtered.sort(
-        (a, b) => new Date(a.deadline) - new Date(b.deadline)
-      )
+      filtered.sort((a, b) => new Date(a.deadline) - new Date(b.deadline))
     }
 
     const mapelListArr = Array.from(mapelSet).sort()
@@ -715,7 +624,6 @@ export default function TugasSiswa() {
     }
   }, [tugasList, jawabanMap, selectedMapel, timeFilter])
 
-  // Limit 5 tugas saat mapel dipilih & semua waktu
   const showLimitedForSelectedMapel =
     selectedMapel && selectedMapel !== 'semua' && timeFilter === 'all'
 
@@ -723,8 +631,7 @@ export default function TugasSiswa() {
     ? filteredTugas.slice(0, 5)
     : filteredTugas
 
-  const isLimited =
-    showLimitedForSelectedMapel && filteredTugas.length > 5
+  const isLimited = showLimitedForSelectedMapel && filteredTugas.length > 5
 
   const selectedMapelStats =
     selectedMapel &&
@@ -734,26 +641,24 @@ export default function TugasSiswa() {
       : null
 
   /* ========== File Upload Handlers ========== */
+
   const handleFileSelect = async (files) => {
     if (!files?.length) return
-    
+
     const selectedFile = files[0]
     console.log('File dipilih:', selectedFile.name, formatFileSize(selectedFile.size))
-    
+
     try {
       setCompressionProgress('Mengkompresi file...')
-      
-      // Kompres file sebelum disimpan
+
       const compressedFile = await compressFileBeforeUpload(selectedFile)
-      
+
       setFile(compressedFile)
       setUploadedFileSize(formatFileSize(compressedFile.size))
       setCompressionProgress(null)
-      
+
       console.log('File berhasil dikompresi:', compressedFile.name, formatFileSize(compressedFile.size))
-      
       pushToast('success', `File berhasil dikompresi: ${formatFileSize(compressedFile.size)}`)
-      
     } catch (error) {
       console.error('Error kompresi file:', error)
       setCompressionProgress(null)
@@ -767,7 +672,8 @@ export default function TugasSiswa() {
     setUploadedFileSize('')
   }
 
-  /* ========== Submit Jawaban Handler ========== */
+  /* ========== Submit Jawaban Handler (dengan rule baru) ========== */
+
   const submitJawaban = async () => {
     if (!selectedTugas || !user?.id) {
       return pushToast('error', 'Pilih tugas terlebih dahulu')
@@ -776,8 +682,9 @@ export default function TugasSiswa() {
     const existingJawaban = jawabanMap[selectedTugas.id]
     const now = new Date()
     const deadline = new Date(selectedTugas.deadline)
+    const isDeadlinePassed = now > deadline
 
-    // RULE: kalau sudah dinilai, tidak boleh update lagi
+    // 1) Kalau sudah dinilai → KUNCI total
     if (existingJawaban?.nilai != null) {
       return pushToast(
         'error',
@@ -785,14 +692,21 @@ export default function TugasSiswa() {
       )
     }
 
-    // Belum pernah submit & sudah lewat deadline -> tidak boleh kirim pertama kali
-    if (!existingJawaban && now > deadline) {
+    // 2) Kalau deadline sudah lewat → tidak boleh submit / update
+    if (isDeadlinePassed) {
+      if (existingJawaban) {
+        return pushToast(
+          'error',
+          'Deadline sudah lewat, jawaban tidak dapat diubah lagi'
+        )
+      }
       return pushToast(
         'error',
         'Tidak dapat mengumpulkan tugas karena deadline sudah lewat'
       )
     }
 
+    // 3) Wajib ada file atau link
     if (!file && !link) {
       return pushToast(
         'error',
@@ -808,7 +722,6 @@ export default function TugasSiswa() {
       let fileName = null
       let fileToUpload = file
 
-      // Kompres file sebelum upload (sebagai backup, sudah dikompres di handleFileSelect)
       if (fileToUpload) {
         try {
           console.log('Final kompresi sebelum upload...')
@@ -819,22 +732,20 @@ export default function TugasSiswa() {
         }
       }
 
-      // Hapus file lama jika ada file baru
       if (existingJawaban?.file_url && fileToUpload) {
         console.log('Menghapus file lama sebelum upload baru...')
         await deleteFileFromStorage(existingJawaban.file_url)
       }
 
-      // Upload file baru (yang sudah dikompresi)
       if (fileToUpload) {
         const ext = fileToUpload.name.split('.').pop()
         const filename = `${selectedTugas.id}/${user.id}-${Date.now()}.${ext}`
 
         console.log('Mengupload file ke:', filename)
-        
+
         const { error: uploadError } = await supabase.storage
           .from(ASSIGNMENT_BUCKET)
-          .upload(filename, fileToUpload, { 
+          .upload(filename, fileToUpload, {
             upsert: true,
             cacheControl: '3600'
           })
@@ -850,10 +761,9 @@ export default function TugasSiswa() {
 
         fileUrl = publicUrl.publicUrl
         fileName = fileToUpload.name
-        
+
         console.log('File berhasil diupload:', fileUrl)
       } else if (existingJawaban?.file_url) {
-        // kalau tidak upload file baru, pakai file lama
         fileUrl = existingJawaban.file_url
         fileName = existingJawaban.file_name
         console.log('Menggunakan file lama:', fileUrl)
@@ -870,8 +780,8 @@ export default function TugasSiswa() {
             file_name: fileName,
             link_url: link || null,
             waktu_submit: new Date().toISOString(),
-            status: 'submitted',
-            nilai: null // reset nilai agar guru bisa nilai ulang
+            status: 'submitted'
+            // nilai TIDAK di-reset agar kalau sudah pernah dinilai, tetap kebaca & terkunci
           })
           .eq('id', existingJawaban.id)
 
@@ -905,27 +815,22 @@ export default function TugasSiswa() {
           : 'Jawaban berhasil dikumpulkan!'
       )
 
-      // Reset form
       setFile(null)
       setLink('')
       setUploadedFileSize('')
 
-      // Reload data
       await loadJawabanSaya()
-      
     } catch (error) {
       console.error('Error submitting jawaban:', error)
-      pushToast(
-        'error',
-        `Gagal mengumpulkan jawaban: ${error.message}`
-      )
+      pushToast('error', `Gagal mengumpulkan jawaban: ${error.message}`)
     } finally {
       setIsSubmitting(false)
       setLoading(false)
     }
   }
 
-  /* ========== Render Helper Functions ========== */
+  /* ========== Render Helper ========== */
+
   const renderFileLink = (url, text, fileNameOrSize = '') => {
     if (!url) return null
 
@@ -965,6 +870,7 @@ export default function TugasSiswa() {
   }
 
   /* ========== Auto-select & Reset Effects ========== */
+
   useEffect(() => {
     if (!selectedTugas && filteredTugas.length > 0) {
       setSelectedTugas(filteredTugas[0])
@@ -984,7 +890,8 @@ export default function TugasSiswa() {
     }
   }, [selectedTugas, jawabanMap])
 
-  /* ========== Render Functions ========== */
+  /* ========== Render Tabel Tugas ========== */
+
   const renderTugasTable = (list) => {
     if (!list.length) {
       return (
@@ -1129,7 +1036,7 @@ export default function TugasSiswa() {
               ? 'Upload ulang file jawaban (opsional)'
               : 'Upload file jawaban'}
           </label>
-          
+
           {compressionProgress && (
             <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
               <div className="flex items-center gap-2 text-blue-700 text-sm">
@@ -1138,7 +1045,7 @@ export default function TugasSiswa() {
               </div>
             </div>
           )}
-          
+
           {file ? (
             <div className="space-y-2">
               <div className="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded-lg">
@@ -1169,7 +1076,7 @@ export default function TugasSiswa() {
               label="Seret file jawaban ke sini atau klik untuk memilih"
             />
           )}
-          
+
           <div className="mt-2 p-3 bg-slate-50 rounded-lg border border-slate-200">
             <p className="text-xs font-semibold text-slate-700 mb-2">
               📋 Batas Ukuran File (Otomatis Dikompresi):
@@ -1239,6 +1146,7 @@ export default function TugasSiswa() {
   }
 
   /* ========== Main Render ========== */
+
   return (
     <div className="min-h-screen bg-slate-50 py-6">
       <div className="w-full px-3 sm:px-4 lg:px-5 space-y-5">
@@ -1310,8 +1218,7 @@ export default function TugasSiswa() {
                 const ms = mapelStats[mapel] || {}
                 const total = ms.total || 0
                 const graded = ms.sudahDinilai || 0
-                const submitted =
-                  (ms.sudahDinilai || 0) + (ms.belumDinilai || 0)
+                const submitted = (ms.sudahDinilai || 0) + (ms.belumDinilai || 0)
                 const upcoming = ms.upcomingWithinWeek || 0
                 const guruLabel = mapelGuru[mapel]
 
@@ -1322,28 +1229,24 @@ export default function TugasSiswa() {
                 let badgeBg = 'bg-slate-100 text-slate-700'
 
                 if (total > 0 && graded === total) {
-                  // ✅ semua tugas sudah dinilai -> hijau (aman)
                   borderClass = 'border-green-200'
                   bgClass = 'bg-green-50'
                   textClass = 'text-green-800'
                   badgeText = 'Aman (semua dinilai)'
                   badgeBg = 'bg-green-100 text-green-700'
                 } else if (upcoming > 0) {
-                  // 🔴 ada deadline 7 hari ke depan
                   borderClass = 'border-red-200'
                   bgClass = 'bg-red-50'
                   textClass = 'text-red-800'
                   badgeText = `${upcoming} deadline dekat`
                   badgeBg = 'bg-red-100 text-red-700'
                 } else if (submitted > 0) {
-                  // 🔵 sudah ada yang dikumpulkan & tidak ada deadline dekat
                   borderClass = 'border-blue-200'
                   bgClass = 'bg-blue-50'
                   textClass = 'text-blue-800'
                   badgeText = `${submitted} sudah dikumpulkan`
                   badgeBg = 'bg-blue-100 text-blue-700'
                 } else {
-                  // 🟡 belum ada pengumpulan
                   borderClass = 'border-yellow-200'
                   bgClass = 'bg-yellow-50'
                   textClass = 'text-yellow-800'
@@ -1605,15 +1508,15 @@ export default function TugasSiswa() {
                       const jawaban = jawabanMap[selectedTugas.id]
                       const statusInfo = getStatusInfo(selectedTugas, jawaban)
                       const now = new Date()
-                      const isDeadlinePassed =
-                        now > new Date(selectedTugas.deadline)
-                      const isLocked =
-                        statusInfo.status === 'dinilai' && jawaban
+                      const deadlineDate = new Date(selectedTugas.deadline)
+                      const isDeadlinePassed = now > deadlineDate
+                      const isGraded = jawaban?.nilai != null
 
+                      // ==== SUDAH PERNAH KUMPUL ====
                       if (jawaban) {
-                        // SUDAH PERNAH KUMPUL
                         return (
                           <div className="space-y-4">
+                            {/* Card status */}
                             <div
                               className={`p-3 rounded-xl border ${statusInfo.bgColor} ${statusInfo.borderColor}`}
                             >
@@ -1683,7 +1586,8 @@ export default function TugasSiswa() {
                               </div>
                             </div>
 
-                            {isLocked ? (
+                            {/* Locking rules */}
+                            {isGraded ? (
                               <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-center">
                                 <div className="text-3xl mb-2">🔒</div>
                                 <p className="text-red-800 font-medium text-sm">
@@ -1693,12 +1597,22 @@ export default function TugasSiswa() {
                                   Jawaban tidak dapat diperbarui lagi
                                 </p>
                               </div>
+                            ) : isDeadlinePassed ? (
+                              <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-center">
+                                <div className="text-3xl mb-2">⏰</div>
+                                <p className="text-red-800 font-medium text-sm">
+                                  Deadline sudah lewat
+                                </p>
+                                <p className="text-red-700 text-xs mt-1">
+                                  Jawaban tidak dapat diubah lagi setelah melewati deadline
+                                </p>
+                              </div>
                             ) : (
                               <>
                                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
                                   <p className="text-yellow-800 text-xs font-medium text-center">
                                     ⚠️ Anda dapat memperbarui jawaban di bawah
-                                    ini selama tugas belum dinilai
+                                    ini selama tugas belum dinilai dan belum melewati deadline
                                   </p>
                                 </div>
                                 {renderSubmissionForm('update')}
@@ -1708,7 +1622,7 @@ export default function TugasSiswa() {
                         )
                       }
 
-                      // BELUM PERNAH KUMPUL
+                      // ==== BELUM PERNAH KUMPUL ====
                       if (isDeadlinePassed) {
                         return (
                           <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-center">
@@ -1723,6 +1637,7 @@ export default function TugasSiswa() {
                         )
                       }
 
+                      // Belum pernah kumpul & belum deadline → form baru
                       return renderSubmissionForm('new')
                     })()}
                   </div>
