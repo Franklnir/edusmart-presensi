@@ -465,7 +465,7 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
       }
     }
 
-    // Fungsi untuk export ke Excel
+    // Fungsi untuk export ke Excel dengan format yang rapi
     const exportToExcel = () => {
       try {
         // Group by kelas dan hitung statistik
@@ -477,6 +477,7 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
           if (!kelasStats[anggota.kelas]) {
             kelasStats[anggota.kelas] = {
               kelas: anggota.kelas,
+              siswa: [],
               totalSiswa: 0,
               totalHadir: 0,
               totalIzin: 0,
@@ -484,6 +485,10 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
             }
           }
           
+          kelasStats[anggota.kelas].siswa.push({
+            nama: anggota.nama,
+            stats: stats
+          })
           kelasStats[anggota.kelas].totalSiswa++
           kelasStats[anggota.kelas].totalHadir += stats.hadir
           kelasStats[anggota.kelas].totalIzin += stats.izin
@@ -492,7 +497,6 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
 
         // Konversi ke array dan urutkan berdasarkan kelas
         const dataRekap = Object.values(kelasStats).sort((a, b) => {
-          // Urutkan berdasarkan: angka kelas -> jurusan -> nomor kelas
           const extractKelasInfo = (kelasStr) => {
             const match = kelasStr.match(/(\d+)\s*([A-Za-z]+)?\s*(\d+)?/)
             return {
@@ -510,8 +514,8 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
           return aInfo.nomor - bInfo.nomor
         })
 
-        // Format data untuk Excel
-        const excelData = [
+        // Format data untuk Excel - DUA SHEET
+        const excelDataRekap = [
           // Header
           ['REKAP ABSENSI EKSKUL', '', '', '', ''],
           [`Ekskul: ${eskul.nama}`, '', '', '', ''],
@@ -519,7 +523,7 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
           [`Total Pertemuan: ${eskulDates.length}`, '', '', '', ''],
           ['', '', '', '', ''],
           // Kolom header
-          ['No', 'Kelas', 'Jumlah Siswa', 'Total Kehadiran', 'Total Izin', 'Total Alpha'],
+          ['No', 'Kelas', 'Jml Siswa', 'H', 'I', 'A'],
           // Data
           ...dataRekap.map((item, index) => [
             index + 1,
@@ -538,46 +542,94 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
           ]
         ]
 
-        // Buat workbook dan worksheet
-        const wb = XLSX.utils.book_new()
-        const ws = XLSX.utils.aoa_to_sheet(excelData)
-
-        // Styling untuk Excel
-        // Merge cells untuk judul
-        if (!ws['!merges']) ws['!merges'] = []
-        ws['!merges'].push({ s: { r: 0, c: 0 }, e: { r: 0, c: 5 } })
-        ws['!merges'].push({ s: { r: 1, c: 0 }, e: { r: 1, c: 5 } })
-        ws['!merges'].push({ s: { r: 2, c: 0 }, e: { r: 2, c: 5 } })
-        ws['!merges'].push({ s: { r: 3, c: 0 }, e: { r: 3, c: 5 } })
-
-        // Set column widths
-        ws['!cols'] = [
-          { wch: 5 },  // No
-          { wch: 15 }, // Kelas
-          { wch: 12 }, // Jumlah Siswa
-          { wch: 15 }, // Total Kehadiran
-          { wch: 10 }, // Total Izin
-          { wch: 12 }  // Total Alpha
+        // Sheet 2: Detail per siswa
+        const excelDataDetail = [
+          // Header
+          ['DETAIL ABSENSI PER SISWA', '', '', '', ''],
+          [`Ekskul: ${eskul.nama}`, '', '', '', ''],
+          [`Bulan: ${new Date(selectedYear, selectedMonth).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}`, '', '', '', ''],
+          ['', '', '', '', ''],
+          // Kolom header
+          ['No', 'Kelas', 'Nama Siswa', 'H', 'I', 'A'],
+          // Data
+          ...anggotaEskul.map((anggota, index) => {
+            const stats = calculateStats(anggota.user_id)
+            return [
+              index + 1,
+              anggota.kelas,
+              anggota.nama,
+              stats.hadir,
+              stats.izin,
+              stats.alpha
+            ]
+          })
         ]
 
-        // Tambahkan worksheet ke workbook
-        XLSX.utils.book_append_sheet(wb, ws, 'Rekap Absensi')
+        // Buat workbook dan worksheet
+        const wb = XLSX.utils.book_new()
+        
+        // Sheet 1: Rekap
+        const wsRekap = XLSX.utils.aoa_to_sheet(excelDataRekap)
+        
+        // Styling untuk Sheet Rekap
+        if (!wsRekap['!merges']) wsRekap['!merges'] = []
+        wsRekap['!merges'].push(
+          { s: { r: 0, c: 0 }, e: { r: 0, c: 5 } },
+          { s: { r: 1, c: 0 }, e: { r: 1, c: 5 } },
+          { s: { r: 2, c: 0 }, e: { r: 2, c: 5 } },
+          { s: { r: 3, c: 0 }, e: { r: 3, c: 5 } }
+        )
+
+        // Set column widths untuk rekap
+        wsRekap['!cols'] = [
+          { wch: 5 },   // No
+          { wch: 12 },  // Kelas
+          { wch: 10 },  // Jml Siswa
+          { wch: 8 },   // H
+          { wch: 8 },   // I
+          { wch: 8 }    // A
+        ]
+
+        // Sheet 2: Detail
+        const wsDetail = XLSX.utils.aoa_to_sheet(excelDataDetail)
+        
+        // Styling untuk Sheet Detail
+        if (!wsDetail['!merges']) wsDetail['!merges'] = []
+        wsDetail['!merges'].push(
+          { s: { r: 0, c: 0 }, e: { r: 0, c: 5 } },
+          { s: { r: 1, c: 0 }, e: { r: 1, c: 5 } },
+          { s: { r: 2, c: 0 }, e: { r: 2, c: 5 } }
+        )
+
+        // Set column widths untuk detail
+        wsDetail['!cols'] = [
+          { wch: 5 },   // No
+          { wch: 12 },  // Kelas
+          { wch: 25 },  // Nama Siswa
+          { wch: 8 },   // H
+          { wch: 8 },   // I
+          { wch: 8 }    // A
+        ]
+
+        // Tambahkan worksheets ke workbook
+        XLSX.utils.book_append_sheet(wb, wsRekap, 'Rekap Kelas')
+        XLSX.utils.book_append_sheet(wb, wsDetail, 'Detail Siswa')
 
         // Export ke Excel
-        const fileName = `Rekap_Absensi_${eskul.nama}_${selectedMonth + 1}_${selectedYear}.xlsx`
+        const fileName = `Rekap_Absensi_${eskul.nama.replace(/\s+/g, '_')}_${selectedMonth + 1}_${selectedYear}.xlsx`
         XLSX.writeFile(wb, fileName)
 
-        pushToast('success', 'Rekap berhasil diexport ke Excel')
+        pushToast('success', 'Rekap berhasil diexport ke Excel (2 sheets)')
       } catch (error) {
         console.error('Error exporting to Excel:', error)
         pushToast('error', 'Gagal mengexport rekap')
       }
     }
 
-    // Fungsi untuk export ke Google Sheets (format CSV)
+    // Fungsi untuk export ke Google Sheets (format CSV) - DUA FILE
     const exportToGoogleSheets = () => {
       try {
-        // Group by kelas dan hitung statistik (sama seperti Excel)
+        // Group by kelas dan hitung statistik
         const kelasStats = {}
         
         anggotaEskul.forEach(anggota => {
@@ -618,42 +670,69 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
           return aInfo.nomor - bInfo.nomor
         })
 
-        // Buat CSV content
-        let csvContent = 'REKAP ABSENSI EKSKUL\n'
-        csvContent += `Ekskul: ${eskul.nama}\n`
-        csvContent += `Bulan: ${new Date(selectedYear, selectedMonth).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}\n`
-        csvContent += `Total Pertemuan: ${eskulDates.length}\n\n`
+        // Buat CSV content untuk REKAP
+        let csvContentRekap = 'REKAP ABSENSI EKSKUL\n'
+        csvContentRekap += `Ekskul: ${eskul.nama}\n`
+        csvContentRekap += `Bulan: ${new Date(selectedYear, selectedMonth).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}\n`
+        csvContentRekap += `Total Pertemuan: ${eskulDates.length}\n\n`
         
-        // Header CSV
-        csvContent += 'No,Kelas,Jumlah Siswa,Total Kehadiran,Total Izin,Total Alpha\n'
+        // Header CSV Rekap
+        csvContentRekap += 'No,Kelas,Jml Siswa,H,I,A\n'
         
-        // Data
+        // Data Rekap
         dataRekap.forEach((item, index) => {
-          csvContent += `${index + 1},${item.kelas},${item.totalSiswa},${item.totalHadir},${item.totalIzin},${item.totalAlpha}\n`
+          csvContentRekap += `${index + 1},${item.kelas},${item.totalSiswa},${item.totalHadir},${item.totalIzin},${item.totalAlpha}\n`
         })
 
-        // Total
+        // Total Rekap
         const totalSiswa = dataRekap.reduce((sum, item) => sum + item.totalSiswa, 0)
         const totalHadir = dataRekap.reduce((sum, item) => sum + item.totalHadir, 0)
         const totalIzin = dataRekap.reduce((sum, item) => sum + item.totalIzin, 0)
         const totalAlpha = dataRekap.reduce((sum, item) => sum + item.totalAlpha, 0)
         
-        csvContent += `,TOTAL,${totalSiswa},${totalHadir},${totalIzin},${totalAlpha}\n`
+        csvContentRekap += `,TOTAL,${totalSiswa},${totalHadir},${totalIzin},${totalAlpha}\n`
 
-        // Buat blob dan download
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-        const link = document.createElement('a')
-        const url = URL.createObjectURL(blob)
+        // Buat CSV content untuk DETAIL
+        let csvContentDetail = 'DETAIL ABSENSI PER SISWA\n'
+        csvContentDetail += `Ekskul: ${eskul.nama}\n`
+        csvContentDetail += `Bulan: ${new Date(selectedYear, selectedMonth).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}\n\n`
         
-        link.setAttribute('href', url)
-        link.setAttribute('download', `Rekap_Absensi_${eskul.nama}_${selectedMonth + 1}_${selectedYear}.csv`)
-        link.style.visibility = 'hidden'
+        // Header CSV Detail
+        csvContentDetail += 'No,Kelas,Nama Siswa,H,I,A\n'
         
-        document.body.appendChild(link)
-        link.click()
-        document.body.removeChild(link)
+        // Data Detail
+        anggotaEskul.forEach((anggota, index) => {
+          const stats = calculateStats(anggota.user_id)
+          csvContentDetail += `${index + 1},${anggota.kelas},${anggota.nama},${stats.hadir},${stats.izin},${stats.alpha}\n`
+        })
 
-        pushToast('success', 'Rekap berhasil diexport ke CSV (Google Sheets)')
+        // Buat blob dan download REKAP
+        const blobRekap = new Blob([csvContentRekap], { type: 'text/csv;charset=utf-8;' })
+        const linkRekap = document.createElement('a')
+        const urlRekap = URL.createObjectURL(blobRekap)
+        
+        linkRekap.setAttribute('href', urlRekap)
+        linkRekap.setAttribute('download', `Rekap_Kelas_${eskul.nama.replace(/\s+/g, '_')}_${selectedMonth + 1}_${selectedYear}.csv`)
+        linkRekap.style.visibility = 'hidden'
+        
+        document.body.appendChild(linkRekap)
+        linkRekap.click()
+        document.body.removeChild(linkRekap)
+
+        // Buat blob dan download DETAIL
+        const blobDetail = new Blob([csvContentDetail], { type: 'text/csv;charset=utf-8;' })
+        const linkDetail = document.createElement('a')
+        const urlDetail = URL.createObjectURL(blobDetail)
+        
+        linkDetail.setAttribute('href', urlDetail)
+        linkDetail.setAttribute('download', `Detail_Siswa_${eskul.nama.replace(/\s+/g, '_')}_${selectedMonth + 1}_${selectedYear}.csv`)
+        linkDetail.style.visibility = 'hidden'
+        
+        document.body.appendChild(linkDetail)
+        linkDetail.click()
+        document.body.removeChild(linkDetail)
+
+        pushToast('success', 'Rekap berhasil diexport ke CSV (2 files)')
       } catch (error) {
         console.error('Error exporting to CSV:', error)
         pushToast('error', 'Gagal mengexport rekap')
@@ -689,7 +768,7 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
               </button>
             </div>
             
-            {/* Month Selector - FIXED COLOR */}
+            {/* Month Selector */}
             <div className="flex items-center gap-4 mt-4">
               <select 
                 value={selectedMonth}
@@ -748,13 +827,13 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
                       ))}
                       
                       <th className="px-4 py-3 text-center font-semibold text-gray-700 border-b">
-                        Hadir
+                        H
                       </th>
                       <th className="px-4 py-3 text-center font-semibold text-gray-700 border-b">
-                        Izin
+                        I
                       </th>
                       <th className="px-4 py-3 text-center font-semibold text-gray-700 border-b">
-                        Alpha
+                        A
                       </th>
                     </tr>
                   </thead>
@@ -847,15 +926,15 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
             <div className="flex gap-4 text-sm text-gray-600">
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 bg-green-500 rounded"></div>
-                <span>Hadir</span>
+                <span>H = Hadir</span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 bg-yellow-500 rounded"></div>
-                <span>Izin</span>
+                <span>I = Izin</span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 bg-red-500 rounded"></div>
-                <span>Alpha</span>
+                <span>A = Alpha</span>
               </div>
             </div>
             
@@ -864,6 +943,7 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
               <button
                 onClick={exportToExcel}
                 className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold transition-colors flex items-center gap-2"
+                title="Export ke Excel dengan 2 sheets: Rekap Kelas dan Detail Siswa"
               >
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -875,11 +955,12 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
               <button
                 onClick={exportToGoogleSheets}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition-colors flex items-center gap-2"
+                title="Export ke CSV (2 files): Rekap Kelas dan Detail Siswa"
               >
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
-                Export Google Sheets
+                Export CSV
               </button>
 
               <button
