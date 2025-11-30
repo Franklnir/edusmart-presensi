@@ -1,3 +1,4 @@
+// src/pages/admin/ASiswa.jsx
 import React, { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useUIStore } from '../../store/useUIStore'
@@ -28,7 +29,7 @@ function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Passwor
         <p className="text-gray-600 text-sm mb-4">
           Untuk melanjutkan, masukkan password Anda:
         </p>
-        
+
         <form onSubmit={handleSubmit}>
           <input
             type="password"
@@ -39,7 +40,7 @@ function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Passwor
             required
             autoFocus
           />
-          
+
           <div className="flex justify-end space-x-3">
             <button
               type="button"
@@ -66,16 +67,14 @@ function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Passwor
 /* ===== Password Verification Utility ===== */
 const verifyPassword = async (password) => {
   try {
-    // Get current user
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
       throw new Error('User tidak ditemukan')
     }
 
-    // Try to sign in with the provided password
     const { error } = await supabase.auth.signInWithPassword({
       email: user.email,
-      password: password
+      password
     })
 
     if (error) {
@@ -312,7 +311,7 @@ export default function ASiswa() {
   const [orgMember, setOrgMember] = useState([])
   const [osisRow, setOsisRow] = useState(null)
 
-  // Pindah kelas
+  // Pindah kelas (di detail)
   const [moveKelas, setMoveKelas] = useState('')
   const [moveGrade, setMoveGrade] = useState('')
 
@@ -354,6 +353,16 @@ export default function ASiswa() {
   const [aktifkanModalOpen, setAktifkanModalOpen] = useState(false)
   const [siswaToAktifkan, setSiswaToAktifkan] = useState(null)
 
+  // Kenaikan kelas massal
+  const [promotionModalOpen, setPromotionModalOpen] = useState(false)
+  const [promotionMode, setPromotionMode] = useState('kelas') // 'kelas' | 'selected'
+  const [promotionFromKelas, setPromotionFromKelas] = useState('')
+  const [promotionToKelas, setPromotionToKelas] = useState('')
+  const [promotionLoading, setPromotionLoading] = useState(false)
+
+  // Siswa yang dipilih di tabel
+  const [selectedSiswaIds, setSelectedSiswaIds] = useState([])
+
   // Cleanup channel
   useEffect(() => {
     return () => {
@@ -375,10 +384,12 @@ export default function ASiswa() {
 
   const handlePasswordConfirm = async (password) => {
     setPasswordModal(prev => ({ ...prev, loading: true }))
-    
+
     try {
       await verifyPassword(password)
-      await passwordModal.action()
+      if (passwordModal.action) {
+        await passwordModal.action()
+      }
       setPasswordModal({ isOpen: false, title: '', action: null, loading: false })
     } catch (error) {
       console.error('Password verification failed:', error)
@@ -525,8 +536,8 @@ export default function ASiswa() {
               ? hasRfid
               : !hasRfid
 
-        const okStatus = statusNeedle === '' 
-          ? true 
+        const okStatus = statusNeedle === ''
+          ? true
           : s.status === statusNeedle
 
         return okNama && okNik && okKls && okRfid && okStatus
@@ -569,6 +580,156 @@ export default function ASiswa() {
     return kelasList.filter(k => getGradeLabel(k.id) === G)
   }
 
+  /* ===== Selection untuk kenaikan kelas ===== */
+  const toggleSelectSiswa = (id) => {
+    setSelectedSiswaIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    )
+  }
+
+  const toggleSelectAllVisible = () => {
+    const visibleIds = siswa.map(s => s.id)
+    const allSelected = visibleIds.length > 0 && visibleIds.every(id => selectedSiswaIds.includes(id))
+
+    if (allSelected) {
+      setSelectedSiswaIds(prev => prev.filter(id => !visibleIds.includes(id)))
+    } else {
+      setSelectedSiswaIds(prev => [...new Set([...prev, ...visibleIds])])
+    }
+  }
+
+  // Bersihkan selection jika data berubah
+  useEffect(() => {
+    setSelectedSiswaIds(prev => prev.filter(id => siswaRaw.some(s => s.id === id)))
+  }, [siswaRaw])
+
+  const openPromotionModal = () => {
+    openPasswordModal(
+      'Fitur Kenaikan Kelas',
+      () => {
+        setPromotionMode('kelas')
+        setPromotionFromKelas('')
+        setPromotionToKelas('')
+        setPromotionModalOpen(true)
+      }
+    )
+  }
+
+  const closePromotionModal = () => {
+    setPromotionModalOpen(false)
+    setPromotionLoading(false)
+    setPromotionFromKelas('')
+    setPromotionToKelas('')
+  }
+
+  const handlePromotion = async () => {
+    try {
+      if (!promotionToKelas) {
+        pushToast('error', 'Pilih kelas tujuan terlebih dahulu')
+        return
+      }
+
+      let ids = []
+      let infoText = ''
+
+      if (promotionMode === 'kelas') {
+        if (!promotionFromKelas) {
+          pushToast('error', 'Pilih kelas asal terlebih dahulu')
+          return
+        }
+        if (promotionFromKelas === promotionToKelas) {
+          pushToast('error', 'Kelas asal dan tujuan tidak boleh sama')
+          return
+        }
+
+        const siswaInKelas = siswaRaw.filter(s => s.kelas === promotionFromKelas)
+        if (!siswaInKelas.length) {
+          pushToast('error', 'Tidak ada siswa di kelas asal tersebut')
+          return
+        }
+
+        ids = siswaInKelas.map(s => s.id)
+        const fromGrade = getGradeLabel(promotionFromKelas)
+        const toGrade = getGradeLabel(promotionToKelas)
+
+        infoText =
+          `Anda akan memindahkan ${ids.length} siswa\n` +
+          `Dari : ${getNamaKelas(promotionFromKelas)} (${fromGrade || '-'})\n` +
+          `Ke   : ${getNamaKelas(promotionToKelas)} (${toGrade || '-'})`
+
+        if (fromGrade && toGrade && fromGrade !== toGrade) {
+          infoText +=
+            `\n\n⚠️ PERHATIAN:\n` +
+            `Ini termasuk pindah tingkatan (grade) dari ${fromGrade} ke ${toGrade}.`
+        }
+      } else {
+        if (!selectedSiswaIds.length) {
+          pushToast('error', 'Belum ada siswa yang dipilih di tabel')
+          return
+        }
+        ids = [...selectedSiswaIds]
+
+        const selectedSiswa = siswaRaw.filter(s => ids.includes(s.id))
+        const targetGrade = getGradeLabel(promotionToKelas)
+        const gradesSet = new Set(selectedSiswa.map(s => getGradeLabel(s.kelas || '')))
+        const gradeList = [...gradesSet].filter(Boolean)
+
+        infoText =
+          `Anda akan memindahkan ${ids.length} siswa terpilih\n` +
+          `Ke   : ${getNamaKelas(promotionToKelas)} (${targetGrade || '-'})`
+
+        if (gradeList.length === 1 && gradeList[0] && gradeList[0] !== targetGrade) {
+          infoText +=
+            `\n\n⚠️ PERHATIAN:\n` +
+            `Semua siswa berasal dari grade ${gradeList[0]} dan akan dipindah ke grade ${targetGrade}.`
+        } else if (gradeList.length > 1) {
+          infoText +=
+            `\n\n⚠️ PERHATIAN:\n` +
+            `Siswa berasal dari beberapa grade: ${gradeList.join(', ')}.`
+        }
+      }
+
+      const ok = window.confirm(
+        infoText +
+        `\n\nDampak:\n` +
+        `• Data absensi SELANJUTNYA mengikuti kelas baru\n` +
+        `• Data organisasi, tugas, dan nilai tetap sama\n` +
+        `• Status ketua kelas akan direset jika ada`
+      )
+      if (!ok) return
+
+      setPromotionLoading(true)
+
+      const { error } = await supabase
+        .from('profiles')
+        .update({ kelas: promotionToKelas })
+        .in('id', ids)
+
+      if (error) throw error
+
+      // Reset ketua kelas jika ada
+      const { error: strukturError } = await supabase
+        .from('kelas_struktur')
+        .update({ ketua_siswa_id: null, ketua_siswa_nama: null })
+        .in('ketua_siswa_id', ids)
+
+      if (strukturError) {
+        console.warn('Error reset ketua kelas:', strukturError)
+      }
+
+      pushToast('success', `Berhasil memindahkan ${ids.length} siswa`)
+      setSelectedSiswaIds(prev => prev.filter(id => !ids.includes(id)))
+      closePromotionModal()
+      loadSiswaRaw()
+      loadStrukturKelas()
+    } catch (err) {
+      console.error('Error kenaikan kelas:', err)
+      pushToast('error', 'Gagal memproses kenaikan kelas')
+    } finally {
+      setPromotionLoading(false)
+    }
+  }
+
   /* ===== Detail modal ===== */
   const openDetail = (u) => {
     openPasswordModal(
@@ -589,7 +750,6 @@ export default function ASiswa() {
         setDetailOpen(true)
 
         try {
-          // Organisasi dengan jabatan
           const { data: orgData, error: orgError } = await supabase
             .from('organisasi')
             .select('*')
@@ -599,7 +759,6 @@ export default function ASiswa() {
           const all = orgData?.map(o => ({ id: o.id, nama: o.nama || o.id })) || []
           setOrgAll(all)
 
-          // Load organisasi anggota dengan jabatan
           const { data: orgAnggotaData, error: orgAnggotaError } = await supabase
             .from('organisasi_anggota')
             .select('*')
@@ -617,7 +776,6 @@ export default function ASiswa() {
 
           setOrgMember(mine)
 
-          // OSIS
           const { data: osisData, error: osisError } = await supabase
             .from('osis_anggota')
             .select('*')
@@ -643,7 +801,7 @@ export default function ASiswa() {
     )
   }
 
-  // Auto pilih kelas ketika grade dipilih
+  // Auto pilih kelas ketika grade dipilih (detail modal)
   useEffect(() => {
     if (!detailOpen) return
     const currentGrade = getGradeLabel(detailUser?.kelas || '')
@@ -672,25 +830,27 @@ export default function ASiswa() {
     const target = moveKelas || ''
     if (!user || !target) return
 
-    const currentGrade = getGradeLabel(user.kelas || '')
+    const originalGrade = getGradeLabel(user.kelas || '')
     const targetGrade = getGradeLabel(target || '')
-    const chosenGrade = moveGrade || currentGrade
 
-    if (currentGrade ? (targetGrade !== currentGrade) : (chosenGrade && targetGrade !== chosenGrade)) {
-      pushToast('error', 'Hanya boleh pindah ke kelas dalam tingkatan (grade) yang sama.')
-      return
-    }
+    const isCrossGrade =
+      originalGrade && targetGrade && originalGrade !== targetGrade
 
     const konfirmasi = window.confirm(
       `Yakin ingin mengubah kelas siswa?\n\n` +
-      `Siswa: ${user.nama}\n` +
-      `Dari: ${getNamaKelas(user.kelas) || 'Tidak ada kelas'}\n` +
-      `Ke: ${getNamaKelas(target)}\n\n` +
+      `Siswa : ${user.nama}\n` +
+      `Dari   : ${getNamaKelas(user.kelas) || 'Tidak ada kelas'} (${originalGrade || '-'})\n` +
+      `Ke     : ${getNamaKelas(target)} (${targetGrade || '-'})\n\n` +
       `Dampak perubahan:\n` +
-      `• Data absensi akan mengikuti kelas baru\n` +
+      `• Data absensi SELANJUTNYA akan mengikuti kelas baru\n` +
       `• Data organisasi tetap sama\n` +
       `• Data tugas dan nilai tetap sama\n` +
-      `• Status ketua kelas akan direset jika ada`
+      `• Status ketua kelas akan direset jika ada` +
+      (isCrossGrade
+        ? `\n\n⚠️ PERHATIAN:\n` +
+          `Ini termasuk pindah tingkatan (grade) dari ${originalGrade} ke ${targetGrade}.\n` +
+          `Pastikan ini memang kenaikan kelas / perbaikan salah kelas.`
+        : '')
     )
 
     if (!konfirmasi) return
@@ -703,7 +863,6 @@ export default function ASiswa() {
 
       if (error) throw error
 
-      // Reset ketua kelas jika siswa ini adalah ketua di kelas lama
       if (isKetuaKelas(user.id)) {
         const strukturLama = Object.values(strukturKelas).find(
           s => s.ketua_siswa_id === user.id
@@ -711,9 +870,9 @@ export default function ASiswa() {
         if (strukturLama) {
           await supabase
             .from('kelas_struktur')
-            .update({ 
-              ketua_siswa_id: null, 
-              ketua_siswa_nama: null 
+            .update({
+              ketua_siswa_id: null,
+              ketua_siswa_nama: null
             })
             .eq('kelas_id', strukturLama.kelas_id)
         }
@@ -798,15 +957,15 @@ export default function ASiswa() {
           if (error) throw error
 
           pushToast('success', 'Siswa berhasil dinonaktifkan')
-          
+
           if (detailUser && detailUser.id === siswaToNonaktif.id) {
-            setDetailUser(prev => prev ? ({ 
-              ...prev, 
-              status: 'nonaktif', 
-              alasan_nonaktif: alasanNonaktif 
+            setDetailUser(prev => prev ? ({
+              ...prev,
+              status: 'nonaktif',
+              alasan_nonaktif: alasanNonaktif
             }) : prev)
           }
-          
+
           setNonaktifModalOpen(false)
           setAlasanNonaktif('')
           setSiswaToNonaktif(null)
@@ -838,15 +997,15 @@ export default function ASiswa() {
           if (error) throw error
 
           pushToast('success', 'Siswa berhasil diaktifkan')
-          
+
           if (detailUser && detailUser.id === siswaToAktifkan.id) {
-            setDetailUser(prev => prev ? ({ 
-              ...prev, 
-              status: 'active', 
-              alasan_nonaktif: null 
+            setDetailUser(prev => prev ? ({
+              ...prev,
+              status: 'active',
+              alasan_nonaktif: null
             }) : prev)
           }
-          
+
           setAktifkanModalOpen(false)
           setSiswaToAktifkan(null)
           loadSiswaRaw()
@@ -914,7 +1073,7 @@ export default function ASiswa() {
       if (exError) throw exError
       if (existingRows && existingRows.length > 0) {
         const other = existingRows[0]
-        pushToast('error', 
+        pushToast('error',
           `UID ${cleaned} sudah terdaftar untuk siswa:\n` +
           `${other.nama || 'Tanpa nama'} (${other.email || 'Tanpa email'})`
         )
@@ -1032,7 +1191,6 @@ export default function ASiswa() {
         try {
           setDeletingSiswa(true)
 
-          // Hapus dari semua tabel terkait
           await supabase.from('organisasi_anggota').delete().eq('siswa_id', siswaToDelete.id)
           await supabase.from('osis_anggota').delete().eq('siswa_id', siswaToDelete.id)
           await supabase.from('ekskul_anggota').delete().eq('user_id', siswaToDelete.id)
@@ -1040,14 +1198,12 @@ export default function ASiswa() {
           await supabase.from('tugas_jawaban').delete().eq('user_id', siswaToDelete.id)
           await supabase.from('absensi').delete().eq('uid', siswaToDelete.id)
           await supabase.from('absensi_ajuan').delete().eq('uid', siswaToDelete.id)
-          
-          // Reset ketua kelas jika siswa ini adalah ketua
+
           await supabase
             .from('kelas_struktur')
             .update({ ketua_siswa_id: null, ketua_siswa_nama: null })
             .eq('ketua_siswa_id', siswaToDelete.id)
 
-          // Hapus dari profiles table
           const { error: profileError } = await supabase
             .from('profiles')
             .delete()
@@ -1055,15 +1211,13 @@ export default function ASiswa() {
 
           if (profileError) throw profileError
 
-          // HAPUS DARI AUTHENTICATION - menggunakan Admin API
           try {
             const { error: authError } = await supabase.auth.admin.deleteUser(
               siswaToDelete.id
             )
-            
+
             if (authError) {
               console.warn('Gagal menghapus dari authentication, tetapi lanjutkan:', authError)
-              // Tetap lanjutkan karena data utama sudah dihapus
               pushToast('warning', 'Akun siswa dihapus, tetapi ada masalah dengan authentication. Silakan coba lagi nanti.')
             } else {
               pushToast('success', 'Akun siswa berhasil dihapus sepenuhnya')
@@ -1089,14 +1243,14 @@ export default function ASiswa() {
   /* ===== Tambah Siswa ===== */
   const validateForm = () => {
     const errors = {}
-    
+
     if (!form.email.trim()) errors.email = 'Email harus diisi'
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errors.email = 'Format email tidak valid'
-    
+
     if (!form.nama.trim()) errors.nama = 'Nama lengkap harus diisi'
     if (!form.password) errors.password = 'Password harus diisi'
     else if (form.password.length < 6) errors.password = 'Password minimal 6 karakter'
-    
+
     if (form.password !== form.confirmPassword) errors.confirmPassword = 'Password dan konfirmasi tidak sama'
     if (form.nik && !/^\d+$/.test(form.nik)) errors.nik = 'NIK harus berupa angka'
     if (form.usia && (form.usia < 5 || form.usia > 25)) errors.usia = 'Usia harus antara 5-25 tahun'
@@ -1109,7 +1263,7 @@ export default function ASiswa() {
   const handleChange = (e) => {
     const { name, value } = e.target
     setForm(prev => ({ ...prev, [name]: value }))
-    
+
     if (formErrors[name]) {
       setFormErrors(prev => ({ ...prev, [name]: '' }))
     }
@@ -1213,12 +1367,22 @@ export default function ASiswa() {
                 </p>
               </div>
             </div>
-            <button
-              className="mt-4 lg:mt-0 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 font-medium"
-              onClick={() => setShowAddForm(!showAddForm)}
-            >
-              {showAddForm ? '✕ Tutup Form' : '➕ Tambah Siswa'}
-            </button>
+
+            {/* Tombol aksi kanan */}
+            <div className="mt-4 lg:mt-0 flex flex-col sm:flex-row gap-2">
+              <button
+                className="bg-indigo-50 text-indigo-700 px-4 py-2 rounded-lg border border-indigo-200 hover:bg-indigo-100 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-all duration-200 font-medium"
+                onClick={openPromotionModal}
+              >
+                ⬆️ Kenaikan Kelas
+              </button>
+              <button
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 font-medium"
+                onClick={() => setShowAddForm(!showAddForm)}
+              >
+                {showAddForm ? '✕ Tutup Form' : '➕ Tambah Siswa'}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1478,11 +1642,11 @@ export default function ASiswa() {
                 Daftar Siswa
               </h3>
               <span className="text-sm text-gray-600">
-                {siswa.length} dari {siswaRaw.length} siswa
+                {siswa.length} dari {siswaRaw.length} siswa • Dipilih: {selectedSiswaIds.length}
               </span>
             </div>
           </div>
-          
+
           <div className="overflow-x-auto">
             {loadingInit ? (
               <div className="p-8 space-y-4">
@@ -1500,6 +1664,18 @@ export default function ASiswa() {
               <table className="w-full">
                 <thead className="bg-gray-50">
                   <tr>
+                    {/* checkbox select all */}
+                    <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 text-blue-600 rounded border-gray-300"
+                        onChange={toggleSelectAllVisible}
+                        checked={
+                          siswa.length > 0 &&
+                          siswa.every(s => selectedSiswaIds.includes(s.id))
+                        }
+                      />
+                    </th>
                     <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
                       No
                     </th>
@@ -1530,15 +1706,24 @@ export default function ASiswa() {
                   {siswa.map((s, index) => {
                     const foto = s.photo_url || s.foto_url || s.foto || ''
                     const isKetua = isKetuaKelas(s.id)
-                    const kelasKetua = getKelasKetua(s.id)
 
                     return (
                       <tr key={s.id} className="hover:bg-gray-50">
+                        {/* checkbox pilih siswa */}
+                        <td className="px-3 py-3 text-center">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 text-blue-600 rounded border-gray-300"
+                            checked={selectedSiswaIds.includes(s.id)}
+                            onChange={() => toggleSelectSiswa(s.id)}
+                          />
+                        </td>
+
                         {/* Kolom Nomor Urut */}
                         <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 text-center">
                           {index + 1}
                         </td>
-                        
+
                         <td className="px-4 py-3 whitespace-nowrap">
                           <div className="flex items-center">
                             <div className="flex-shrink-0 h-10 w-10">
@@ -1629,7 +1814,7 @@ export default function ASiswa() {
                   })}
                   {!siswa.length && (
                     <tr>
-                      <td colSpan="8" className="px-4 py-8 text-center">
+                      <td colSpan="9" className="px-4 py-8 text-center">
                         <div className="flex flex-col items-center justify-center">
                           <div className="text-gray-300 text-4xl mb-2">👨‍🎓</div>
                           <p className="text-gray-500 font-medium mb-1">Tidak ada data siswa</p>
@@ -1790,6 +1975,121 @@ export default function ASiswa() {
           </div>
         )}
 
+        {/* Modal Kenaikan Kelas */}
+        {promotionModalOpen && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg p-6 w-full max-w-lg">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2 bg-indigo-100 text-indigo-600 rounded-lg">
+                  <span className="text-xl">⬆️</span>
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">Kenaikan Kelas</h3>
+                  <p className="text-gray-600 text-sm">
+                    Pindahkan kelas siswa secara massal atau berdasarkan siswa yang dipilih.
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                {/* Mode pilihan */}
+                <div className="flex gap-2 text-sm">
+                  <button
+                    type="button"
+                    className={`flex-1 px-3 py-2 rounded-lg border ${
+                      promotionMode === 'kelas'
+                        ? 'bg-indigo-50 border-indigo-400 text-indigo-700'
+                        : 'bg-gray-50 border-gray-300 text-gray-700'
+                    }`}
+                    onClick={() => setPromotionMode('kelas')}
+                  >
+                    Berdasarkan Kelas
+                  </button>
+                  <button
+                    type="button"
+                    className={`flex-1 px-3 py-2 rounded-lg border ${
+                      promotionMode === 'selected'
+                        ? 'bg-indigo-50 border-indigo-400 text-indigo-700'
+                        : 'bg-gray-50 border-gray-300 text-gray-700'
+                    }`}
+                    onClick={() => setPromotionMode('selected')}
+                  >
+                    Dari Siswa Terpilih ({selectedSiswaIds.length})
+                  </button>
+                </div>
+
+                {promotionMode === 'kelas' ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <Select
+                      label="Kelas Asal"
+                      value={promotionFromKelas}
+                      onChange={e => setPromotionFromKelas(e.target.value)}
+                      options={[
+                        { value: '', label: 'Pilih kelas asal' },
+                        ...kelasOptions.map(k => ({ value: k.value, label: k.label }))
+                      ]}
+                    />
+                    <Select
+                      label="Kelas Tujuan"
+                      value={promotionToKelas}
+                      onChange={e => setPromotionToKelas(e.target.value)}
+                      options={[
+                        { value: '', label: 'Pilih kelas tujuan' },
+                        ...kelasOptions.map(k => ({ value: k.value, label: k.label }))
+                      ]}
+                    />
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="text-sm text-gray-700">
+                      Siswa yang dipilih di tabel: <span className="font-semibold">{selectedSiswaIds.length}</span>
+                    </p>
+                    <Select
+                      label="Kelas Tujuan"
+                      value={promotionToKelas}
+                      onChange={e => setPromotionToKelas(e.target.value)}
+                      options={[
+                        { value: '', label: 'Pilih kelas tujuan' },
+                        ...kelasOptions.map(k => ({ value: k.value, label: k.label }))
+                      ]}
+                    />
+                    {!selectedSiswaIds.length && (
+                      <p className="text-xs text-red-500">
+                        Pilih minimal satu siswa di tabel untuk menggunakan mode ini.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                <p className="text-xs text-gray-500">
+                  Catatan: Kenaikan kelas boleh lintas tingkatan (misal X → XI), sistem akan memberi peringatan di konfirmasi.
+                </p>
+
+                <div className="flex justify-end space-x-3 pt-2">
+                  <Button
+                    variant="secondary"
+                    onClick={closePromotionModal}
+                    disabled={promotionLoading}
+                  >
+                    ✕ Batal
+                  </Button>
+                  <Button
+                    onClick={handlePromotion}
+                    loading={promotionLoading}
+                    disabled={
+                      promotionLoading ||
+                      !promotionToKelas ||
+                      (promotionMode === 'kelas' && !promotionFromKelas)
+                    }
+                  >
+                    ⬆️ Jalankan
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Modal Detail Siswa */}
         {detailOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -1877,7 +2177,7 @@ export default function ASiswa() {
                   </div>
                 ) : (
                   <>
-                    {/* Kelas & Status */}
+                    {/* Kelas & Status + RFID */}
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                       <div className="bg-white border border-gray-200 rounded-lg p-4">
                         <h4 className="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
@@ -1916,7 +2216,7 @@ export default function ASiswa() {
                               })()}
                             />
                           </div>
-                          
+
                           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-3 border-t">
                             <div className="text-sm">
                               <span className="text-gray-600">Status: </span>
@@ -1965,7 +2265,7 @@ export default function ASiswa() {
                               </p>
                             )}
                           </div>
-                          
+
                           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                             <Button
                               variant={rfidEnrolling ? 'warning' : 'primary'}
