@@ -298,6 +298,7 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
   const [absensiData, setAbsensiData] = useState({})
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth())
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear())
+  const [viewMode, setViewMode] = useState('detail') // 'detail' atau 'rekap'
 
   // Generate tanggal-tanggal dalam bulan yang sesuai dengan hari eskul
   const getEskulDatesInMonth = () => {
@@ -320,6 +321,7 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
   }
 
   const eskulDates = getEskulDatesInMonth()
+  const totalPertemuan = eskulDates.length
 
   // Load anggota eskul
   useEffect(() => {
@@ -468,78 +470,29 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
     // Fungsi untuk export ke Excel dengan format yang rapi
     const exportToExcel = () => {
       try {
-        // Group by kelas dan hitung statistik
-        const kelasStats = {}
-        
-        anggotaEskul.forEach(anggota => {
-          const stats = calculateStats(anggota.user_id)
-          
-          if (!kelasStats[anggota.kelas]) {
-            kelasStats[anggota.kelas] = {
-              kelas: anggota.kelas,
-              siswa: [],
-              totalSiswa: 0,
-              totalHadir: 0,
-              totalIzin: 0,
-              totalAlpha: 0
-            }
-          }
-          
-          kelasStats[anggota.kelas].siswa.push({
-            nama: anggota.nama,
-            stats: stats
-          })
-          kelasStats[anggota.kelas].totalSiswa++
-          kelasStats[anggota.kelas].totalHadir += stats.hadir
-          kelasStats[anggota.kelas].totalIzin += stats.izin
-          kelasStats[anggota.kelas].totalAlpha += stats.alpha
-        })
-
-        // Konversi ke array dan urutkan berdasarkan kelas
-        const dataRekap = Object.values(kelasStats).sort((a, b) => {
-          const extractKelasInfo = (kelasStr) => {
-            const match = kelasStr.match(/(\d+)\s*([A-Za-z]+)?\s*(\d+)?/)
-            return {
-              angka: parseInt(match?.[1] || 0),
-              jurusan: match?.[2] || '',
-              nomor: parseInt(match?.[3] || 0)
-            }
-          }
-
-          const aInfo = extractKelasInfo(a.kelas)
-          const bInfo = extractKelasInfo(b.kelas)
-
-          if (aInfo.angka !== bInfo.angka) return aInfo.angka - bInfo.angka
-          if (aInfo.jurusan !== bInfo.jurusan) return aInfo.jurusan.localeCompare(bInfo.jurusan)
-          return aInfo.nomor - bInfo.nomor
-        })
-
-        // Format data untuk Excel - DUA SHEET
+        // Data untuk sheet rekap
         const excelDataRekap = [
           // Header
           ['REKAP ABSENSI EKSKUL', '', '', '', ''],
           [`Ekskul: ${eskul.nama}`, '', '', '', ''],
           [`Bulan: ${new Date(selectedYear, selectedMonth).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}`, '', '', '', ''],
-          [`Total Pertemuan: ${eskulDates.length}`, '', '', '', ''],
+          [`Total Pertemuan: ${totalPertemuan}`, '', '', '', ''],
           ['', '', '', '', ''],
           // Kolom header
-          ['No', 'Kelas', 'Jml Siswa', 'H', 'I', 'A'],
+          ['No', 'Kelas', 'Total', 'Masuk'],
+          ['', '', '', 'H', 'A', 'I'],
           // Data
-          ...dataRekap.map((item, index) => [
-            index + 1,
-            item.kelas,
-            item.totalSiswa,
-            item.totalHadir,
-            item.totalIzin,
-            item.totalAlpha
-          ]),
-          // Total
-          ['', 'TOTAL', 
-            dataRekap.reduce((sum, item) => sum + item.totalSiswa, 0),
-            dataRekap.reduce((sum, item) => sum + item.totalHadir, 0),
-            dataRekap.reduce((sum, item) => sum + item.totalIzin, 0),
-            dataRekap.reduce((sum, item) => sum + item.totalAlpha, 0)
-          ]
+          ...anggotaEskul.map((anggota, index) => {
+            const stats = calculateStats(anggota.user_id)
+            return [
+              index + 1,
+              anggota.kelas,
+              totalPertemuan,
+              stats.hadir,
+              stats.alpha,
+              stats.izin
+            ]
+          })
         ]
 
         // Sheet 2: Detail per siswa
@@ -550,7 +503,8 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
           [`Bulan: ${new Date(selectedYear, selectedMonth).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}`, '', '', '', ''],
           ['', '', '', '', ''],
           // Kolom header
-          ['No', 'Kelas', 'Nama Siswa', 'H', 'I', 'A'],
+          ['No', 'Kelas', 'Nama Siswa', 'Total', 'Masuk'],
+          ['', '', '', '', 'H', 'A', 'I'],
           // Data
           ...anggotaEskul.map((anggota, index) => {
             const stats = calculateStats(anggota.user_id)
@@ -558,9 +512,10 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
               index + 1,
               anggota.kelas,
               anggota.nama,
+              totalPertemuan,
               stats.hadir,
-              stats.izin,
-              stats.alpha
+              stats.alpha,
+              stats.izin
             ]
           })
         ]
@@ -577,17 +532,18 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
           { s: { r: 0, c: 0 }, e: { r: 0, c: 5 } },
           { s: { r: 1, c: 0 }, e: { r: 1, c: 5 } },
           { s: { r: 2, c: 0 }, e: { r: 2, c: 5 } },
-          { s: { r: 3, c: 0 }, e: { r: 3, c: 5 } }
+          { s: { r: 3, c: 0 }, e: { r: 3, c: 5 } },
+          { s: { r: 5, c: 3 }, e: { r: 5, c: 5 } }
         )
 
         // Set column widths untuk rekap
         wsRekap['!cols'] = [
           { wch: 5 },   // No
           { wch: 12 },  // Kelas
-          { wch: 10 },  // Jml Siswa
+          { wch: 8 },   // Total
           { wch: 8 },   // H
-          { wch: 8 },   // I
-          { wch: 8 }    // A
+          { wch: 8 },   // A
+          { wch: 8 }    // I
         ]
 
         // Sheet 2: Detail
@@ -596,9 +552,10 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
         // Styling untuk Sheet Detail
         if (!wsDetail['!merges']) wsDetail['!merges'] = []
         wsDetail['!merges'].push(
-          { s: { r: 0, c: 0 }, e: { r: 0, c: 5 } },
-          { s: { r: 1, c: 0 }, e: { r: 1, c: 5 } },
-          { s: { r: 2, c: 0 }, e: { r: 2, c: 5 } }
+          { s: { r: 0, c: 0 }, e: { r: 0, c: 6 } },
+          { s: { r: 1, c: 0 }, e: { r: 1, c: 6 } },
+          { s: { r: 2, c: 0 }, e: { r: 2, c: 6 } },
+          { s: { r: 4, c: 4 }, e: { r: 4, c: 6 } }
         )
 
         // Set column widths untuk detail
@@ -606,9 +563,10 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
           { wch: 5 },   // No
           { wch: 12 },  // Kelas
           { wch: 25 },  // Nama Siswa
+          { wch: 8 },   // Total
           { wch: 8 },   // H
-          { wch: 8 },   // I
-          { wch: 8 }    // A
+          { wch: 8 },   // A
+          { wch: 8 }    // I
         ]
 
         // Tambahkan worksheets ke workbook
@@ -626,126 +584,184 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
       }
     }
 
-    // Fungsi untuk export ke Google Sheets (format CSV) - DUA FILE
-    const exportToGoogleSheets = () => {
-      try {
-        // Group by kelas dan hitung statistik
-        const kelasStats = {}
-        
-        anggotaEskul.forEach(anggota => {
-          const stats = calculateStats(anggota.user_id)
-          
-          if (!kelasStats[anggota.kelas]) {
-            kelasStats[anggota.kelas] = {
-              kelas: anggota.kelas,
-              totalSiswa: 0,
-              totalHadir: 0,
-              totalIzin: 0,
-              totalAlpha: 0
-            }
-          }
-          
-          kelasStats[anggota.kelas].totalSiswa++
-          kelasStats[anggota.kelas].totalHadir += stats.hadir
-          kelasStats[anggota.kelas].totalIzin += stats.izin
-          kelasStats[anggota.kelas].totalAlpha += stats.alpha
-        })
-
-        // Konversi ke array dan urutkan
-        const dataRekap = Object.values(kelasStats).sort((a, b) => {
-          const extractKelasInfo = (kelasStr) => {
-            const match = kelasStr.match(/(\d+)\s*([A-Za-z]+)?\s*(\d+)?/)
-            return {
-              angka: parseInt(match?.[1] || 0),
-              jurusan: match?.[2] || '',
-              nomor: parseInt(match?.[3] || 0)
-            }
-          }
-
-          const aInfo = extractKelasInfo(a.kelas)
-          const bInfo = extractKelasInfo(b.kelas)
-
-          if (aInfo.angka !== bInfo.angka) return aInfo.angka - bInfo.angka
-          if (aInfo.jurusan !== bInfo.jurusan) return aInfo.jurusan.localeCompare(bInfo.jurusan)
-          return aInfo.nomor - bInfo.nomor
-        })
-
-        // Buat CSV content untuk REKAP
-        let csvContentRekap = 'REKAP ABSENSI EKSKUL\n'
-        csvContentRekap += `Ekskul: ${eskul.nama}\n`
-        csvContentRekap += `Bulan: ${new Date(selectedYear, selectedMonth).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}\n`
-        csvContentRekap += `Total Pertemuan: ${eskulDates.length}\n\n`
-        
-        // Header CSV Rekap
-        csvContentRekap += 'No,Kelas,Jml Siswa,H,I,A\n'
-        
-        // Data Rekap
-        dataRekap.forEach((item, index) => {
-          csvContentRekap += `${index + 1},${item.kelas},${item.totalSiswa},${item.totalHadir},${item.totalIzin},${item.totalAlpha}\n`
-        })
-
-        // Total Rekap
-        const totalSiswa = dataRekap.reduce((sum, item) => sum + item.totalSiswa, 0)
-        const totalHadir = dataRekap.reduce((sum, item) => sum + item.totalHadir, 0)
-        const totalIzin = dataRekap.reduce((sum, item) => sum + item.totalIzin, 0)
-        const totalAlpha = dataRekap.reduce((sum, item) => sum + item.totalAlpha, 0)
-        
-        csvContentRekap += `,TOTAL,${totalSiswa},${totalHadir},${totalIzin},${totalAlpha}\n`
-
-        // Buat CSV content untuk DETAIL
-        let csvContentDetail = 'DETAIL ABSENSI PER SISWA\n'
-        csvContentDetail += `Ekskul: ${eskul.nama}\n`
-        csvContentDetail += `Bulan: ${new Date(selectedYear, selectedMonth).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}\n\n`
-        
-        // Header CSV Detail
-        csvContentDetail += 'No,Kelas,Nama Siswa,H,I,A\n'
-        
-        // Data Detail
-        anggotaEskul.forEach((anggota, index) => {
-          const stats = calculateStats(anggota.user_id)
-          csvContentDetail += `${index + 1},${anggota.kelas},${anggota.nama},${stats.hadir},${stats.izin},${stats.alpha}\n`
-        })
-
-        // Buat blob dan download REKAP
-        const blobRekap = new Blob([csvContentRekap], { type: 'text/csv;charset=utf-8;' })
-        const linkRekap = document.createElement('a')
-        const urlRekap = URL.createObjectURL(blobRekap)
-        
-        linkRekap.setAttribute('href', urlRekap)
-        linkRekap.setAttribute('download', `Rekap_Kelas_${eskul.nama.replace(/\s+/g, '_')}_${selectedMonth + 1}_${selectedYear}.csv`)
-        linkRekap.style.visibility = 'hidden'
-        
-        document.body.appendChild(linkRekap)
-        linkRekap.click()
-        document.body.removeChild(linkRekap)
-
-        // Buat blob dan download DETAIL
-        const blobDetail = new Blob([csvContentDetail], { type: 'text/csv;charset=utf-8;' })
-        const linkDetail = document.createElement('a')
-        const urlDetail = URL.createObjectURL(blobDetail)
-        
-        linkDetail.setAttribute('href', urlDetail)
-        linkDetail.setAttribute('download', `Detail_Siswa_${eskul.nama.replace(/\s+/g, '_')}_${selectedMonth + 1}_${selectedYear}.csv`)
-        linkDetail.style.visibility = 'hidden'
-        
-        document.body.appendChild(linkDetail)
-        linkDetail.click()
-        document.body.removeChild(linkDetail)
-
-        pushToast('success', 'Rekap berhasil diexport ke CSV (2 files)')
-      } catch (error) {
-        console.error('Error exporting to CSV:', error)
-        pushToast('error', 'Gagal mengexport rekap')
-      }
+    // Render Tabel Rekap (Format Baru)
+    const renderRekapTable = () => {
+      return (
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm border border-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th rowSpan="2" className="px-4 py-3 text-left font-semibold text-gray-700 border-b border-r">
+                  No
+                </th>
+                <th rowSpan="2" className="px-4 py-3 text-left font-semibold text-gray-700 border-b border-r">
+                  Name
+                </th>
+                <th rowSpan="2" className="px-4 py-3 text-left font-semibold text-gray-700 border-b border-r">
+                  Kelas
+                </th>
+                <th rowSpan="2" className="px-4 py-3 text-left font-semibold text-gray-700 border-b border-r">
+                  Total
+                </th>
+                <th colSpan="3" className="px-4 py-3 text-center font-semibold text-gray-700 border-b">
+                  Masuk
+                </th>
+              </tr>
+              <tr>
+                <th className="px-4 py-2 text-center font-semibold text-gray-700 border-b border-r">H</th>
+                <th className="px-4 py-2 text-center font-semibold text-gray-700 border-b border-r">A</th>
+                <th className="px-4 py-2 text-center font-semibold text-gray-700 border-b">I</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {anggotaEskul.map((anggota, index) => {
+                const stats = calculateStats(anggota.user_id)
+                return (
+                  <tr key={anggota.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-3 font-medium text-gray-900 border-r">
+                      {index + 1}
+                    </td>
+                    <td className="px-4 py-3 font-medium text-gray-900 border-r">
+                      {anggota.nama}
+                    </td>
+                    <td className="px-4 py-3 text-gray-600 border-r">
+                      {anggota.kelas}
+                    </td>
+                    <td className="px-4 py-3 font-semibold text-gray-900 border-r">
+                      {totalPertemuan}
+                    </td>
+                    <td className="px-4 py-3 text-center font-semibold text-green-600 border-r">
+                      {stats.hadir}
+                    </td>
+                    <td className="px-4 py-3 text-center font-semibold text-red-600 border-r">
+                      {stats.alpha}
+                    </td>
+                    <td className="px-4 py-3 text-center font-semibold text-yellow-600">
+                      {stats.izin}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )
     }
 
-    const getStatusColor = (status) => {
-      switch (status) {
-        case 'Hadir': return 'bg-green-100 text-green-800 border-green-200'
-        case 'Izin': return 'bg-yellow-100 text-yellow-800 border-yellow-200'
-        case 'Alpha': return 'bg-red-100 text-red-800 border-red-200'
-        default: return 'bg-gray-100 text-gray-800 border-gray-200'
-      }
+    // Render Tabel Detail (Format Lama)
+    const renderDetailTable = () => {
+      return (
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="sticky left-0 z-10 bg-gray-50 px-4 py-3 text-left font-semibold text-gray-700 border-b">
+                  No
+                </th>
+                <th className="sticky left-12 z-10 bg-gray-50 px-4 py-3 text-left font-semibold text-gray-700 border-b min-w-[200px]">
+                  Nama
+                </th>
+                <th className="sticky left-64 z-10 bg-gray-50 px-4 py-3 text-left font-semibold text-gray-700 border-b min-w-[100px]">
+                  Kelas
+                </th>
+                
+                {/* Tanggal columns */}
+                {eskulDates.map((date, idx) => (
+                  <th key={date.dateStr} className="px-3 py-3 text-center font-semibold text-gray-700 border-b whitespace-nowrap">
+                    <div className="flex flex-col items-center">
+                      <span className="text-xs">{date.dayName}</span>
+                      <span className="text-xs font-normal">{date.date.getDate()}</span>
+                    </div>
+                  </th>
+                ))}
+                
+                <th className="px-4 py-3 text-center font-semibold text-gray-700 border-b">
+                  H
+                </th>
+                <th className="px-4 py-3 text-center font-semibold text-gray-700 border-b">
+                  I
+                </th>
+                <th className="px-4 py-3 text-center font-semibold text-gray-700 border-b">
+                  A
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {anggotaEskul.map((anggota, index) => {
+                const stats = calculateStats(anggota.user_id)
+                return (
+                  <tr key={anggota.id} className="hover:bg-gray-50">
+                    <td className="sticky left-0 bg-white px-4 py-3 font-medium text-gray-900">
+                      {index + 1}
+                    </td>
+                    <td className="sticky left-12 bg-white px-4 py-3 font-medium text-gray-900 min-w-[200px]">
+                      {anggota.nama}
+                    </td>
+                    <td className="sticky left-64 bg-white px-4 py-3 text-gray-600 min-w-[100px]">
+                      {anggota.kelas}
+                    </td>
+                    
+                    {/* Status per tanggal */}
+                    {eskulDates.map((date) => {
+                      const key = `${anggota.user_id}_${date.dateStr}`
+                      const status = absensiData[key] || '-'
+                      return (
+                        <td key={date.dateStr} className="px-3 py-3 text-center">
+                          <div className="flex gap-1 justify-center">
+                            <button
+                              onClick={() => updateAbsensi(anggota.user_id, date.dateStr, 'Hadir')}
+                              className={`w-6 h-6 rounded text-xs font-bold transition-colors ${
+                                status === 'Hadir' 
+                                  ? 'bg-green-500 text-white' 
+                                  : 'bg-gray-100 text-gray-600 hover:bg-green-100'
+                              }`}
+                              title="Hadir"
+                            >
+                              H
+                            </button>
+                            <button
+                              onClick={() => updateAbsensi(anggota.user_id, date.dateStr, 'Izin')}
+                              className={`w-6 h-6 rounded text-xs font-bold transition-colors ${
+                                status === 'Izin' 
+                                  ? 'bg-yellow-500 text-white' 
+                                  : 'bg-gray-100 text-gray-600 hover:bg-yellow-100'
+                              }`}
+                              title="Izin"
+                            >
+                              I
+                            </button>
+                            <button
+                              onClick={() => updateAbsensi(anggota.user_id, date.dateStr, 'Alpha')}
+                              className={`w-6 h-6 rounded text-xs font-bold transition-colors ${
+                                status === 'Alpha' 
+                                  ? 'bg-red-500 text-white' 
+                                  : 'bg-gray-100 text-gray-600 hover:bg-red-100'
+                              }`}
+                              title="Alpha"
+                            >
+                              A
+                            </button>
+                          </div>
+                        </td>
+                      )
+                    })}
+                    
+                    <td className="px-4 py-3 text-center font-semibold text-green-600">
+                      {stats.hadir}
+                    </td>
+                    <td className="px-4 py-3 text-center font-semibold text-yellow-600">
+                      {stats.izin}
+                    </td>
+                    <td className="px-4 py-3 text-center font-semibold text-red-600">
+                      {stats.alpha}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )
     }
 
     return (
@@ -755,7 +771,9 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
           <div className="bg-gradient-to-r from-purple-600 to-indigo-700 p-6 text-white">
             <div className="flex justify-between items-start">
               <div>
-                <h2 className="text-2xl font-bold">Absensi {eskul.nama}</h2>
+                <h2 className="text-2xl font-bold">
+                  {viewMode === 'detail' ? `Absensi ${eskul.nama}` : `Rekap Absensi ${eskul.nama}`}
+                </h2>
                 <p className="text-purple-100 mt-1">
                   {eskul.hari} • {eskul.jam_mulai} - {eskul.jam_selesai}
                 </p>
@@ -768,7 +786,7 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
               </button>
             </div>
             
-            {/* Month Selector */}
+            {/* Month Selector dan View Toggle */}
             <div className="flex items-center gap-4 mt-4">
               <select 
                 value={selectedMonth}
@@ -792,6 +810,30 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
                   return <option key={year} value={year} className="text-gray-900">{year}</option>
                 })}
               </select>
+
+              {/* View Mode Toggle */}
+              <div className="flex gap-2 ml-4">
+                <button
+                  onClick={() => setViewMode('detail')}
+                  className={`px-4 py-2 rounded-lg font-semibold text-sm transition-colors ${
+                    viewMode === 'detail'
+                      ? 'bg-white text-purple-700 shadow-md'
+                      : 'bg-white/10 text-white hover:bg-white/20'
+                  }`}
+                >
+                  Tampilan Detail
+                </button>
+                <button
+                  onClick={() => setViewMode('rekap')}
+                  className={`px-4 py-2 rounded-lg font-semibold text-sm transition-colors ${
+                    viewMode === 'rekap'
+                      ? 'bg-white text-purple-700 shadow-md'
+                      : 'bg-white/10 text-white hover:bg-white/20'
+                  }`}
+                >
+                  Tampilan Rekap
+                </button>
+              </div>
               
               <div className="text-sm text-purple-100 ml-auto">
                 {eskulDates.length} pertemuan • {anggotaEskul.length} anggota
@@ -802,116 +844,7 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
           {/* Content */}
           <div className="flex-1 overflow-auto p-6">
             {anggotaEskul.length > 0 ? (
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-sm">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="sticky left-0 z-10 bg-gray-50 px-4 py-3 text-left font-semibold text-gray-700 border-b">
-                        No
-                      </th>
-                      <th className="sticky left-12 z-10 bg-gray-50 px-4 py-3 text-left font-semibold text-gray-700 border-b min-w-[200px]">
-                        Nama
-                      </th>
-                      <th className="sticky left-64 z-10 bg-gray-50 px-4 py-3 text-left font-semibold text-gray-700 border-b min-w-[100px]">
-                        Kelas
-                      </th>
-                      
-                      {/* Tanggal columns */}
-                      {eskulDates.map((date, idx) => (
-                        <th key={date.dateStr} className="px-3 py-3 text-center font-semibold text-gray-700 border-b whitespace-nowrap">
-                          <div className="flex flex-col items-center">
-                            <span className="text-xs">{date.dayName}</span>
-                            <span className="text-xs font-normal">{date.date.getDate()}</span>
-                          </div>
-                        </th>
-                      ))}
-                      
-                      <th className="px-4 py-3 text-center font-semibold text-gray-700 border-b">
-                        H
-                      </th>
-                      <th className="px-4 py-3 text-center font-semibold text-gray-700 border-b">
-                        I
-                      </th>
-                      <th className="px-4 py-3 text-center font-semibold text-gray-700 border-b">
-                        A
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200">
-                    {anggotaEskul.map((anggota, index) => {
-                      const stats = calculateStats(anggota.user_id)
-                      return (
-                        <tr key={anggota.id} className="hover:bg-gray-50">
-                          <td className="sticky left-0 bg-white px-4 py-3 font-medium text-gray-900">
-                            {index + 1}
-                          </td>
-                          <td className="sticky left-12 bg-white px-4 py-3 font-medium text-gray-900 min-w-[200px]">
-                            {anggota.nama}
-                          </td>
-                          <td className="sticky left-64 bg-white px-4 py-3 text-gray-600 min-w-[100px]">
-                            {anggota.kelas}
-                          </td>
-                          
-                          {/* Status per tanggal */}
-                          {eskulDates.map((date) => {
-                            const key = `${anggota.user_id}_${date.dateStr}`
-                            const status = absensiData[key] || '-'
-                            return (
-                              <td key={date.dateStr} className="px-3 py-3 text-center">
-                                <div className="flex gap-1 justify-center">
-                                  <button
-                                    onClick={() => updateAbsensi(anggota.user_id, date.dateStr, 'Hadir')}
-                                    className={`w-6 h-6 rounded text-xs font-bold transition-colors ${
-                                      status === 'Hadir' 
-                                        ? 'bg-green-500 text-white' 
-                                        : 'bg-gray-100 text-gray-600 hover:bg-green-100'
-                                    }`}
-                                    title="Hadir"
-                                  >
-                                    H
-                                  </button>
-                                  <button
-                                    onClick={() => updateAbsensi(anggota.user_id, date.dateStr, 'Izin')}
-                                    className={`w-6 h-6 rounded text-xs font-bold transition-colors ${
-                                      status === 'Izin' 
-                                        ? 'bg-yellow-500 text-white' 
-                                        : 'bg-gray-100 text-gray-600 hover:bg-yellow-100'
-                                    }`}
-                                    title="Izin"
-                                  >
-                                    I
-                                  </button>
-                                  <button
-                                    onClick={() => updateAbsensi(anggota.user_id, date.dateStr, 'Alpha')}
-                                    className={`w-6 h-6 rounded text-xs font-bold transition-colors ${
-                                      status === 'Alpha' 
-                                        ? 'bg-red-500 text-white' 
-                                        : 'bg-gray-100 text-gray-600 hover:bg-red-100'
-                                    }`}
-                                    title="Alpha"
-                                  >
-                                    A
-                                  </button>
-                                </div>
-                              </td>
-                            )
-                          })}
-                          
-                          <td className="px-4 py-3 text-center font-semibold text-green-600">
-                            {stats.hadir}
-                          </td>
-                          <td className="px-4 py-3 text-center font-semibold text-yellow-600">
-                            {stats.izin}
-                          </td>
-                          <td className="px-4 py-3 text-center font-semibold text-red-600">
-                            {stats.alpha}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
+              viewMode === 'detail' ? renderDetailTable() : renderRekapTable()
             ) : (
               <div className="text-center py-12">
                 <div className="text-gray-300 text-6xl mb-4">👥</div>
@@ -949,18 +882,6 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
                 Export Excel
-              </button>
-
-              {/* Tombol Export Google Sheets */}
-              <button
-                onClick={exportToGoogleSheets}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition-colors flex items-center gap-2"
-                title="Export ke CSV (2 files): Rekap Kelas dan Detail Siswa"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                Export CSV
               </button>
 
               <button
