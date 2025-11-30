@@ -13,11 +13,11 @@ const MONTH_NAMES = [
 ]
 
 const FILE_SIZE_LIMITS = {
-  IMAGE: 200 * 1024, // 200KB
-  PDF: 2 * 1024 * 1024, // 2MB
+  IMAGE: 70 * 1024,          // 70KB (foto setelah kompres)
+  PDF: 2 * 1024 * 1024,      // 2MB
   DOCUMENT: 2 * 1024 * 1024, // 2MB
   PRESENTATION: 3 * 1024 * 1024, // 3MB
-  OTHER: 5 * 1024 * 1024 // 5MB
+  OTHER: 5 * 1024 * 1024     // 5MB
 }
 
 const formatDateTime = (dateString) => {
@@ -54,8 +54,9 @@ const formatFileSize = (bytes) => {
 
 /**
  * Kompresi gambar menggunakan Canvas API
+ * maxSizeKB default: 70KB
  */
-const compressImage = async (file, maxSizeKB = 200, initialQuality = 0.9) => {
+const compressImage = async (file, maxSizeKB = 70, initialQuality = 0.9) => {
   return new Promise((resolve, reject) => {
     if (!file.type.startsWith('image/')) {
       reject(new Error('File bukan gambar'))
@@ -148,7 +149,7 @@ const compressImage = async (file, maxSizeKB = 200, initialQuality = 0.9) => {
 const compressPDF = async (file, maxSizeMB = 2) => {
   const maxSizeBytes = maxSizeMB * 1024 * 1024
   if (file.size <= maxSizeBytes) return file
-  throw new Error(`File PDF terlalu besar (${formatFileSize(file.size)}). Maksimal ${maxSizeMB}MB.`)
+  throw new Error(`File PDF terlalu besar (${formatFileSize(file.size)}). Maksimal ${maxSizeMB}MB. Silakan kompres PDF-nya terlebih dahulu.`)
 }
 
 const compressPPT = async (file, maxSizeMB = 3) => {
@@ -181,19 +182,19 @@ const compressFileBeforeUpload = async (file) => {
   try {
     if (fileType.startsWith('image/')) {
       console.log('File adalah gambar, memulai kompresi...')
-      const compressed = await compressImage(file, 200)
+      const compressed = await compressImage(file, FILE_SIZE_LIMITS.IMAGE / 1024) // 70KB
       console.log(`Kompresi gambar selesai: ${compressed.name} (${formatFileSize(compressed.size)})`)
       return compressed
     } else if (fileType === 'application/pdf' || fileName.endsWith('.pdf')) {
       console.log('Validasi ukuran PDF...')
-      return await compressPDF(file, 2)
+      return await compressPDF(file, FILE_SIZE_LIMITS.PDF / (1024 * 1024)) // 2MB
     } else if (
       fileType.includes('presentation') ||
       fileName.endsWith('.ppt') ||
       fileName.endsWith('.pptx')
     ) {
       console.log('Validasi ukuran PPT...')
-      return await compressPPT(file, 3)
+      return await compressPPT(file, FILE_SIZE_LIMITS.PRESENTATION / (1024 * 1024)) // 3MB
     } else if (
       fileType.includes('document') ||
       fileName.endsWith('.doc') ||
@@ -202,10 +203,10 @@ const compressFileBeforeUpload = async (file) => {
       fileName.endsWith('.rtf')
     ) {
       console.log('Validasi ukuran dokumen...')
-      return await compressDocument(file, 2)
+      return await compressDocument(file, FILE_SIZE_LIMITS.DOCUMENT / (1024 * 1024)) // 2MB
     } else {
       console.log('Validasi ukuran file lainnya...')
-      return await compressOtherFile(file, 5)
+      return await compressOtherFile(file, FILE_SIZE_LIMITS.OTHER / (1024 * 1024)) // 5MB
     }
   } catch (error) {
     console.error('Error dalam kompresi file:', error)
@@ -645,6 +646,22 @@ export default function TugasSiswa() {
   const handleFileSelect = async (files) => {
     if (!files?.length) return
 
+    // Komentar otomatis kalau user pilih > 1 file (banyak foto)
+    if (files.length > 1) {
+      const allImages = files.every((f) => f?.type?.startsWith('image/'))
+      if (allImages) {
+        pushToast(
+          'info',
+          'Anda memilih beberapa foto. Untuk banyak foto, lebih baik upload semua ke Google Drive lalu kirim satu link folder di kolom link jawaban.'
+        )
+      } else {
+        pushToast(
+          'info',
+          'Anda memilih lebih dari 1 file. Sistem hanya akan memakai file pertama. Jika butuh mengirim banyak foto, upload ke Google Drive lalu kirim satu link folder di kolom link jawaban.'
+        )
+      }
+    }
+
     const selectedFile = files[0]
     console.log('File dipilih:', selectedFile.name, formatFileSize(selectedFile.size))
 
@@ -781,7 +798,7 @@ export default function TugasSiswa() {
             link_url: link || null,
             waktu_submit: new Date().toISOString(),
             status: 'submitted'
-            // nilai TIDAK di-reset agar kalau sudah pernah dinilai, tetap kebaca & terkunci
+            // nilai tidak di-reset → kalau sudah dinilai, tetap kebaca & sudah dikunci di UI
           })
           .eq('id', existingJawaban.id)
 
@@ -1079,24 +1096,31 @@ export default function TugasSiswa() {
 
           <div className="mt-2 p-3 bg-slate-50 rounded-lg border border-slate-200">
             <p className="text-xs font-semibold text-slate-700 mb-2">
-              📋 Batas Ukuran File (Otomatis Dikompresi):
+              📋 Batas Ukuran & Saran Upload:
             </p>
             <ul className="text-xs text-slate-600 space-y-1">
               <li className="flex items-center gap-2">
                 <span className="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
-                <span>Gambar (JPEG/PNG): <strong>maks. 200KB</strong></span>
+                <span>Gambar (JPEG/PNG): <strong>maks. 70KB</strong> (otomatis dikompresi).</span>
               </li>
               <li className="flex items-center gap-2">
                 <span className="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
-                <span>PDF & Dokumen: <strong>maks. 2MB</strong></span>
+                <span>PDF & Dokumen: <strong>maks. 2MB</strong>. Kalau lebih besar, kompres dulu PDF-nya.</span>
               </li>
               <li className="flex items-center gap-2">
                 <span className="w-1.5 h-1.5 bg-orange-500 rounded-full"></span>
-                <span>Presentasi (PPT): <strong>maks. 3MB</strong></span>
+                <span>Presentasi (PPT): <strong>maks. 3MB</strong>.</span>
               </li>
               <li className="flex items-center gap-2">
                 <span className="w-1.5 h-1.5 bg-purple-500 rounded-full"></span>
-                <span>File lainnya: <strong>maks. 5MB</strong></span>
+                <span>File lainnya: <strong>maks. 5MB</strong>.</span>
+              </li>
+              <li className="flex items-center gap-2">
+                <span className="w-1.5 h-1.5 bg-pink-500 rounded-full"></span>
+                <span>
+                  Jika butuh mengirim <strong>lebih dari 1 foto</strong>, lebih rapi kalau semua foto diupload ke{' '}
+                  <strong>Google Drive</strong>, lalu kirim <strong>1 link folder</strong> di kolom link jawaban di bawah.
+                </span>
               </li>
             </ul>
           </div>
@@ -1110,12 +1134,12 @@ export default function TugasSiswa() {
           <input
             type="url"
             className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-colors text-sm"
-            placeholder="https://docs.google.com/document/... atau https://github.com/..."
+            placeholder="https://drive.google.com/... atau https://docs.google.com/..."
             value={link}
             onChange={(e) => setLink(e.target.value)}
           />
           <p className="text-xs text-slate-500 mt-1">
-            Google Docs, GitHub, Figma, atau platform lainnya
+            Gunakan Google Drive (folder berisi banyak foto), Google Docs, GitHub, Figma, atau platform lainnya.
           </p>
         </div>
 
@@ -1139,7 +1163,7 @@ export default function TugasSiswa() {
         </button>
 
         <p className="text-xs text-slate-500 text-center">
-          Pastikan file atau link sudah benar sebelum mengirim. File akan otomatis dikompresi.
+          Pastikan file atau link sudah benar sebelum mengirim. Foto akan otomatis dikompresi, dan untuk banyak foto disarankan pakai link Google Drive.
         </p>
       </div>
     )
