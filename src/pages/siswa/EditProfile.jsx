@@ -8,7 +8,7 @@ import { useUIStore } from '../../store/useUIStore'
 async function compressImageTo100KB(file, maxBytes = 100 * 1024) {
   if (!file || file.size <= maxBytes) return file
 
-  console.log(`Mengkompresi gambar: ${file.name} (${(file.size / 1024).toFixed(2)}KB) -> target 100KB`)
+  console.log(`Mengkompresi gambar: ${file.name} (${(file.size / 1024).toFixed(2)}KB) -> target ${(maxBytes / 1024).toFixed(0)}KB`)
 
   const dataUrl = await new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -43,14 +43,14 @@ async function compressImageTo100KB(file, maxBytes = 100 * 1024) {
   ctx.imageSmoothingQuality = 'high'
   ctx.drawImage(img, 0, 0, width, height)
 
-  let quality = 0.8 // Mulai dengan kualitas lebih rendah
+  let quality = 0.8 // mulai dengan kualitas agak rendah
   let blob = await new Promise(resolve =>
     canvas.toBlob(resolve, 'image/jpeg', quality),
   )
 
   console.log(`Kompresi awal: ${(blob.size / 1024).toFixed(2)}KB dengan kualitas ${quality}`)
 
-  // Loop kompresi hingga mencapai target 100KB
+  // Loop kompresi hingga mencapai target
   while (blob && blob.size > maxBytes && quality > 0.3) {
     quality -= 0.1
     blob = await new Promise(resolve =>
@@ -76,7 +76,6 @@ async function compressImageTo100KB(file, maxBytes = 100 * 1024) {
 // Fungsi untuk mengkonversi slug kelas ke format tampilan
 const formatKelasDisplay = (slug) => {
   if (!slug) return ''
-  
   try {
     return slug
       .split('-')
@@ -91,7 +90,7 @@ const formatKelasDisplay = (slug) => {
 /* ==================== COMPONENT ==================== */
 export default function EditProfile() {
   const { user, profile, logout, refreshProfile } = useAuthStore()
-  const { pushToast, setLoading } = useUIStore()
+  const { pushToast } = useUIStore()
 
   const [form, setForm] = useState({
     nama: '',
@@ -113,6 +112,10 @@ export default function EditProfile() {
   const [newKelas, setNewKelas] = useState('')
   const [originalKelas, setOriginalKelas] = useState('')
   const [compressionProgress, setCompressionProgress] = useState('')
+  const [kelasChangeUsed, setKelasChangeUsed] = useState(false) // <-- baru
+
+  // flag: ada kelas awal nggak
+  const hasExistingKelas = originalKelas && originalKelas.trim() !== ''
 
   // Load profile data dan kelas list
   useEffect(() => {
@@ -128,11 +131,13 @@ export default function EditProfile() {
       setPhotoURL(profile.photo_url || '')
       setPreview(profile.photo_url || '')
       setOriginalKelas(profile.kelas || '')
+      setKelasChangeUsed(!!profile.kelas_change_used) // <-- ambil dari DB
     }
     loadKelasList()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile])
 
-  // Load daftar kelas dengan format yang benar
+  // Load daftar kelas
   const loadKelasList = async () => {
     try {
       setIsLoadingKelas(true)
@@ -178,22 +183,48 @@ export default function EditProfile() {
         setNamaError('')
       }
     }
-    
-    if (key === 'kelas' && originalKelas && originalKelas.trim() !== '' && value !== originalKelas) {
-      console.log('Kelas change detected, showing warning. Old:', originalKelas, 'New:', value)
-      setNewKelas(value)
-      setShowKelasWarning(true)
-      return
+
+    if (key === 'kelas') {
+      // 1) Kalau siswa sudah pernah ganti kelas → blok total
+      if (
+        kelasChangeUsed &&                     // sudah pernah ganti
+        originalKelas && originalKelas.trim() !== '' && // ada kelas awal
+        value !== originalKelas                // mau ganti ke kelas lain
+      ) {
+        pushToast(
+          'error',
+          'Kelas hanya bisa diubah satu kali. Jika ada kesalahan, silakan hubungi admin/wali kelas.'
+        )
+        return
+      }
+
+      // 2) Kalau BELUM pernah ganti dan kelas awal terisi → munculkan modal warning
+      if (
+        originalKelas && 
+        originalKelas.trim() !== '' && 
+        value !== originalKelas
+      ) {
+        console.log('Kelas change detected, showing warning. Old:', originalKelas, 'New:', value)
+        setNewKelas(value)
+        setShowKelasWarning(true)
+        return
+      }
     }
     
     setForm(prev => ({ ...prev, [key]: value }))
   }
 
-  // Konfirmasi perubahan kelas
+  // Konfirmasi perubahan kelas (1x kesempatan siswa)
   const confirmKelasChange = () => {
     console.log('Confirming kelas change to:', newKelas)
     setForm(prev => ({ ...prev, kelas: newKelas }))
     setShowKelasWarning(false)
+
+    // tandai bahwa jatah ganti kelas sudah dipakai
+    if (newKelas && newKelas !== originalKelas) {
+      setKelasChangeUsed(true)
+    }
+
     setOriginalKelas(newKelas)
     pushToast('warning', 'Perubahan kelas berhasil disimpan. Pastikan untuk memeriksa data tugas dan absensi Anda.')
   }
@@ -205,8 +236,6 @@ export default function EditProfile() {
     setShowKelasWarning(false)
     setForm(prev => ({ ...prev, kelas: originalKelas || '' }))
   }
-
-  const hasExistingKelas = originalKelas && originalKelas.trim() !== ''
 
   /* ========== Upload & Kompres Foto Profil ========== */
   const handleFileChange = async (e) => {
@@ -222,20 +251,20 @@ export default function EditProfile() {
         throw new Error('Hanya file gambar yang diizinkan')
       }
 
-      // Validasi ukuran file awal
-      if (file.size > 10 * 1024 * 1024) { // 10MB
+      // Validasi ukuran file awal (maks 10MB)
+      if (file.size > 10 * 1024 * 1024) {
         throw new Error('Ukuran file terlalu besar. Maksimal 10MB.')
       }
 
       // Kompresi gambar ke 100KB
-      const compressedFile = await compressImageTo100KB(file)
+      let compressedFile = await compressImageTo100KB(file)
       
       if (compressedFile.size > 100 * 1024) {
-        console.warn(`File masih terlalu besar: ${(compressedFile.size / 1024).toFixed(2)}KB, memaksa kompresi ulang`)
-        // Kompresi lebih agresif
+        console.warn(`File masih terlalu besar: ${(compressedFile.size / 1024).toFixed(2)}KB, mencoba kompresi ulang lebih agresif`)
         const moreCompressed = await compressImageTo100KB(compressedFile, 80 * 1024)
-        if (moreCompressed.size > 100 * 1024) {
-          pushToast('warning', 'Gambar masih melebihi 100KB setelah kompresi. Ukuran mungkin masih besar.')
+        compressedFile = moreCompressed
+        if (compressedFile.size > 100 * 1024) {
+          pushToast('warning', 'Gambar masih melebihi 100KB setelah kompresi. Ukuran mungkin masih sedikit besar.')
         }
       }
 
@@ -338,6 +367,8 @@ export default function EditProfile() {
       return
     }
 
+    const isKelasChanged = form.kelas !== originalKelas
+
     setSaving(true)
     
     try {
@@ -348,6 +379,11 @@ export default function EditProfile() {
         usia: form.usia ? parseInt(form.usia) : null,
         kelas: form.kelas,
         updated_at: new Date().toISOString()
+      }
+
+      // Kalau kelas berubah & jatah belum terpakai, tandai di DB
+      if (isKelasChanged && !kelasChangeUsed) {
+        updateData.kelas_change_used = true
       }
 
       console.log('Updating profile with:', updateData)
@@ -366,6 +402,10 @@ export default function EditProfile() {
       console.log('Update successful, response:', data)
 
       setOriginalKelas(form.kelas)
+      if (isKelasChanged && !kelasChangeUsed) {
+        setKelasChangeUsed(true)
+      }
+
       await refreshProfile()
       pushToast('success', 'Profil berhasil diperbarui')
       
@@ -584,6 +624,12 @@ export default function EditProfile() {
                     {profile?.created_at ? new Date(profile.created_at).toLocaleDateString('id-ID') : '-'}
                   </span>
                 </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Hak ganti kelas</span>
+                  <span className="font-semibold text-slate-800 text-xs">
+                    {kelasChangeUsed ? 'Sudah digunakan' : 'Belum digunakan'}
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -642,7 +688,11 @@ export default function EditProfile() {
                     <span className="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
                     Kelas <span className="text-red-500">*</span>
                     {hasExistingKelas && (
-                      <span className="ml-1 text-xs text-orange-600 font-medium">(Dapat diubah)</span>
+                      <span className="ml-1 text-xs text-orange-600 font-medium">
+                        {kelasChangeUsed
+                          ? '(Sudah pernah diubah)'
+                          : '(Dapat diubah satu kali)'}
+                      </span>
                     )}
                   </label>
                   <select
@@ -671,7 +721,9 @@ export default function EditProfile() {
                   {hasExistingKelas && (
                     <p className="mt-2 text-xs text-orange-600 flex items-center gap-1.5">
                       <span>💡</span>
-                      <span>Kelas sudah terisi. Mengganti kelas dapat mempengaruhi data tugas dan absensi.</span>
+                      <span>
+                        Perubahan kelas dibatasi. Jika terjadi kesalahan, hubungi admin/wali kelas.
+                      </span>
                     </p>
                   )}
                 </div>
@@ -754,7 +806,9 @@ export default function EditProfile() {
                   </div>
                   <div className="flex items-start gap-2">
                     <span className="text-orange-500 mt-0.5">⚠️</span>
-                    <span className="text-slate-600">Perubahan kelas dapat mempengaruhi data akademik</span>
+                    <span className="text-slate-600">
+                      Perubahan kelas hanya bisa dilakukan terbatas. Jika salah, hubungi admin.
+                    </span>
                   </div>
                   <div className="flex items-start gap-2">
                     <span className="text-purple-500 mt-0.5">🔄</span>
@@ -804,7 +858,7 @@ export default function EditProfile() {
               <h3 className="text-xl font-bold text-slate-800 mb-2">Peringatan!</h3>
               <p className="text-slate-600 text-sm leading-relaxed">
                 <strong className="text-orange-600">Mengganti kelas dapat mempengaruhi</strong> data tugas, absensi, dan nilai Anda. 
-                Pastikan perubahan ini benar-benar diperlukan.
+                Pastikan perubahan ini benar-benar diperlukan. Kesempatan ganti kelas dibatasi.
               </p>
             </div>
 
