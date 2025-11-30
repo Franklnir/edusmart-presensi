@@ -633,7 +633,7 @@ export default function LaporanRekap() {
       right: { style: 'thin' }
     }
 
-    // 3 kolom awal (No, Nama, NIK) + jumlah tanggal + 4 kolom ringkasan (I, S, A, Hadir)
+    // Tambah +4 karena ada 4 kolom summary (I, S, A, H)
     ws.mergeCells(1, 1, 1, 3 + absensiData.dateStrings.length + 4)
     const t = ws.getCell(1, 1)
     t.value = `REKAP ABSENSI ${selectedMapel} - ${getNamaKelasFromList(selectedKelas, kelasList)}`
@@ -650,7 +650,8 @@ export default function LaporanRekap() {
     absensiData.dateStrings.forEach((ds) =>
       headers.push(parseInt(ds.split('-')[2]))
     )
-    headers.push('I', 'S', 'A', 'Hadir')
+    // I = Izin, S = Sakit, A = Alpha, H = Hadir
+    headers.push('I', 'S', 'A', 'H')
 
     const r = ws.getRow(3)
     r.values = headers
@@ -671,7 +672,8 @@ export default function LaporanRekap() {
       const rowVals = [i + 1, s.nama, s.nik]
       absensiData.dateStrings.forEach((ds) => {
         const st = s.absensiPerTanggal[ds]
-        rowVals.push(isSunday(ds) ? '' : (st ? st.charAt(0) : ''))
+        // Tampilkan status di semua hari (termasuk Minggu)
+        rowVals.push(st ? st.charAt(0) : '')
       })
       rowVals.push(s.total.Izin, s.total.Sakit, s.total.Alpha, s.total.Hadir)
 
@@ -784,7 +786,8 @@ export default function LaporanRekap() {
         const daily = absensiData.dateStrings
           .map((ds) => {
             const st = s.absensiPerTanggal[ds]
-            return isSunday(ds) ? '' : (st ? st.charAt(0) : '')
+            // Tampilkan status semua hari
+            return st ? st.charAt(0) : ''
           })
           .join(sep)
         csv += `${i + 1}${sep}"${s.nama}"${sep}'${s.nik}'${sep}${daily}${sep}${s.total.Izin}${sep}${s.total.Sakit}${sep}${s.total.Alpha}${sep}${s.total.Hadir}\n`
@@ -963,19 +966,20 @@ export default function LaporanRekap() {
       right: { style: 'thin' }
     }
 
-    const title = ws.addRow([
+    ws.mergeCells(1, 1, 1, 8)
+    const title = ws.getRow(1)
+    title.getCell(1).value =
       `REKAP NILAI + ABSENSI – ${selectedMapel} – ${getNamaKelasFromList(
         selectedKelas,
         kelasList
       )}`
-    ])
     title.font = { bold: true, size: 12 }
-    ws.mergeCells(1, 1, 1, 8)
     title.alignment = { horizontal: 'center' }
 
     const periodeGabungan = absensiData.periode || tugasData.periode
-    const sub = ws.addRow([periodeGabungan])
     ws.mergeCells(2, 1, 2, 8)
+    const sub = ws.getRow(2)
+    sub.getCell(1).value = periodeGabungan
     sub.alignment = { horizontal: 'center' }
 
     const header = ws.addRow([
@@ -1216,13 +1220,13 @@ export default function LaporanRekap() {
       footerRow.getCell(1).font = { bold: true }
       footerRow.getCell(2).value =
         `Rata-rata: ${siswaNilai.rataRata ?? '-'}  | Grade: ${siswaNilai.grade ?? '-'}`
-    }
 
-    wsNilai.getColumn(1).width = 5
-    wsNilai.getColumn(2).width = 35
-    wsNilai.getColumn(3).width = 10
-    wsNilai.getColumn(4).width = 10
-    wsNilai.getColumn(5).width = 18
+      wsNilai.getColumn(1).width = 5
+      wsNilai.getColumn(2).width = 35
+      wsNilai.getColumn(3).width = 10
+      wsNilai.getColumn(4).width = 10
+      wsNilai.getColumn(5).width = 18
+    }
 
     const buf = await wb.xlsx.writeBuffer()
     const safeName = siswaAbs.nama?.replace(/[^\w\d]+/g, '_') || 'siswa'
@@ -1466,7 +1470,7 @@ export default function LaporanRekap() {
                   <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-blue-50 text-xs font-semibold text-blue-700">
                     I {absensiSummary.totalIzin}
                   </span>
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-yellow-50 text-xs font-semibold text-yellow-700">
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-amber-50 text-xs font-semibold text-amber-700">
                     S {absensiSummary.totalSakit}
                   </span>
                   <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-red-50 text-xs font-semibold text-red-700">
@@ -1520,7 +1524,7 @@ export default function LaporanRekap() {
                     <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-blue-100 text-xs font-semibold text-blue-700">
                       Izin: {singleStudentAbsensiSummary.totalIzin}
                     </span>
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-yellow-100 text-xs font-semibold text-yellow-700">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-amber-100 text-xs font-semibold text-amber-700">
                       Sakit: {singleStudentAbsensiSummary.totalSakit}
                     </span>
                     <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-red-100 text-xs font-semibold text-red-700">
@@ -1567,7 +1571,7 @@ export default function LaporanRekap() {
                     <th className="px-2 py-3 text-center border-l bg-blue-50">
                       I
                     </th>
-                    <th className="px-2 py-3 text-center bg-yellow-50">
+                    <th className="px-2 py-3 text-center bg-amber-50">
                       S
                     </th>
                     <th className="px-2 py-3 text-center bg-red-50">
@@ -1595,7 +1599,7 @@ export default function LaporanRekap() {
                               isSun ? 'bg-red-50' : ''
                             }`}
                           >
-                            {!isSun && st ? (
+                            {st ? (
                               <span
                                 className={`font-bold ${
                                   st === 'Hadir'
@@ -1603,7 +1607,7 @@ export default function LaporanRekap() {
                                     : st === 'Izin'
                                     ? 'text-blue-600'
                                     : st === 'Sakit'
-                                    ? 'text-yellow-600'
+                                    ? 'text-amber-600'
                                     : 'text-red-600'
                                 }`}
                               >
@@ -1616,7 +1620,7 @@ export default function LaporanRekap() {
                       <td className="px-2 py-2 text-center bg-blue-50/50 font-bold">
                         {s.total.Izin}
                       </td>
-                      <td className="px-2 py-2 text-center bg-yellow-50/50 font-bold">
+                      <td className="px-2 py-2 text-center bg-amber-50/50 font-bold">
                         {s.total.Sakit}
                       </td>
                       <td className="px-2 py-2 text-center bg-red-50/50 font-bold">
@@ -1687,6 +1691,8 @@ export default function LaporanRekap() {
                   <span className="text-base">🟢</span>
                   <span>A / ≥ 90</span>
                 </span>
+              </div>
+              <div className="flex items-center gap-2">
                 <span className="inline-flex items-center gap-1">
                   <span className="text-base">⚪</span>
                   <span>B / 80–89</span>
