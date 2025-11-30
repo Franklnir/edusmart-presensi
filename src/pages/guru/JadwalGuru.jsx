@@ -1,8 +1,11 @@
+// src/pages/guru/JadwalGuru.jsx
 import React, { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
-import * as XLSX from 'xlsx'
+// Pakai xlsx-js-style agar bisa kasih warna & style di Excel
+// npm install xlsx-js-style
+import * as XLSX from 'xlsx-js-style'
 
 // --- HELPER FUNCTIONS ---
 
@@ -50,7 +53,7 @@ const SertifikatDetailOverlay = ({ sertifikat, onClose, onDownload }) => {
                 {sertifikat.event}
               </p>
             </div>
-            <button 
+            <button
               onClick={onClose}
               className="text-white hover:text-gray-200 text-2xl p-2 transition-colors"
             >
@@ -66,7 +69,7 @@ const SertifikatDetailOverlay = ({ sertifikat, onClose, onDownload }) => {
             <div className="lg:col-span-2">
               <div className="bg-gray-50 border-2 border-dashed border-gray-300 rounded-xl p-4">
                 <h3 className="font-semibold text-gray-900 mb-4">Preview Sertifikat</h3>
-                
+
                 {fileType === 'pdf' ? (
                   <div className="aspect-[4/3] bg-white rounded-lg border border-gray-200 flex items-center justify-center">
                     <div className="text-center">
@@ -77,8 +80,8 @@ const SertifikatDetailOverlay = ({ sertifikat, onClose, onDownload }) => {
                   </div>
                 ) : fileType === 'image' ? (
                   <div className="aspect-[4/3] bg-white rounded-lg border border-gray-200 overflow-hidden">
-                    <img 
-                      src={sertifikat.file_url} 
+                    <img
+                      src={sertifikat.file_url}
                       alt={`Sertifikat ${sertifikat.event}`}
                       className="w-full h-full object-contain"
                     />
@@ -140,8 +143,8 @@ const SertifikatDetailOverlay = ({ sertifikat, onClose, onDownload }) => {
 
               {/* Status Pengiriman */}
               <div className={`border rounded-xl p-4 ${
-                sertifikat.sent 
-                  ? 'bg-green-50 border-green-200' 
+                sertifikat.sent
+                  ? 'bg-green-50 border-green-200'
                   : 'bg-yellow-50 border-yellow-200'
               }`}>
                 <h4 className="font-semibold mb-2 flex items-center gap-2">
@@ -175,7 +178,7 @@ const SertifikatDetailOverlay = ({ sertifikat, onClose, onDownload }) => {
                   </svg>
                   Download Sertifikat
                 </button>
-                
+
                 <button
                   onClick={onClose}
                   className="w-full py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-semibold transition-colors"
@@ -205,7 +208,7 @@ const RiwayatSertifikatOverlay = ({ sertifikatList, onClose, onViewDetail, onDow
                 Total {sertifikatList.length} sertifikat
               </p>
             </div>
-            <button 
+            <button
               onClick={onClose}
               className="text-white hover:text-gray-200 text-2xl p-2 transition-colors"
             >
@@ -219,7 +222,7 @@ const RiwayatSertifikatOverlay = ({ sertifikatList, onClose, onViewDetail, onDow
           {sertifikatList.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {sertifikatList.map((sertifikat) => (
-                <div 
+                <div
                   key={sertifikat.id}
                   className="border border-gray-200 rounded-xl p-4 hover:border-amber-300 hover:shadow-md transition-all cursor-pointer group"
                   onClick={() => onViewDetail(sertifikat)}
@@ -234,14 +237,14 @@ const RiwayatSertifikatOverlay = ({ sertifikatList, onClose, onViewDetail, onDow
                       </p>
                     </div>
                     <span className={`text-xs px-2 py-1 rounded-full ${
-                      sertifikat.sent 
-                        ? 'bg-green-100 text-green-700 border border-green-200' 
+                      sertifikat.sent
+                        ? 'bg-green-100 text-green-700 border border-green-200'
                         : 'bg-yellow-100 text-yellow-700 border border-yellow-200'
                     }`}>
                       {sertifikat.sent ? 'Terkirim' : 'Pending'}
                     </span>
                   </div>
-                  
+
                   <div className="flex items-center justify-between text-xs text-gray-500">
                     <span>
                       {new Date(sertifikat.issued_at).toLocaleDateString('id-ID', {
@@ -251,7 +254,7 @@ const RiwayatSertifikatOverlay = ({ sertifikatList, onClose, onViewDetail, onDow
                       })}
                     </span>
                     <div className="flex gap-2">
-                      <button 
+                      <button
                         onClick={(e) => {
                           e.stopPropagation()
                           onDownload(sertifikat)
@@ -307,7 +310,7 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
 
     selectedMonths.forEach(month => {
       const daysInMonth = new Date(selectedYear, month + 1, 0).getDate()
-      
+
       for (let day = 1; day <= daysInMonth; day++) {
         const date = new Date(selectedYear, month, day)
         const dayName = HARI_JS[date.getDay()]
@@ -321,7 +324,7 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
         }
       }
     })
-    
+
     return dates.sort((a, b) => a.date - b.date)
   }
 
@@ -363,7 +366,7 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
     if (eskul) {
       loadAnggotaEskul()
     }
-  }, [eskul, siswaMap])
+  }, [eskul, siswaMap, setLoading, pushToast])
 
   // Load data absensi
   useEffect(() => {
@@ -396,24 +399,27 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
     loadAbsensiData()
   }, [anggotaEskul, eskulDates, eskul.id])
 
-  // Hitung statistik kehadiran
+  // === Hitung statistik kehadiran (TANPA menganggap kosong sebagai Alpha) ===
   const calculateStats = (userId) => {
-    const userAbsensi = eskulDates.filter(date => {
-      const key = `${userId}_${date.dateStr}`
-      return absensiData[key] === 'Hadir'
-    }).length
+    let hadir = 0
+    let izin = 0
+    let alpha = 0
 
-    const userIzin = eskulDates.filter(date => {
+    eskulDates.forEach((date) => {
       const key = `${userId}_${date.dateStr}`
-      return absensiData[key] === 'Izin'
-    }).length
+      const status = absensiData[key]
 
-    const userAlpha = eskulDates.filter(date => {
-      const key = `${userId}_${date.dateStr}`
-      return absensiData[key] === 'Alpha' || !absensiData[key]
-    }).length
+      if (status === 'Hadir') {
+        hadir++
+      } else if (status === 'Izin') {
+        izin++
+      } else if (status === 'Alpha') {
+        alpha++
+      }
+      // Jika belum ada status (undefined / null / '-'), tidak dihitung sebagai Alpha
+    })
 
-    return { hadir: userAbsensi, izin: userIzin, alpha: userAlpha }
+    return { hadir, izin, alpha }
   }
 
   // Update status absensi
@@ -435,7 +441,7 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
         // Update existing
         const { error } = await supabase
           .from('absensi_eskul')
-          .update({ 
+          .update({
             status,
             updated_at: new Date().toISOString()
           })
@@ -468,497 +474,558 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
       console.error('Error updating absensi:', error)
       pushToast('error', 'Gagal memperbarui absensi')
     } finally {
-        setLoading(false)
-      }
+      setLoading(false)
     }
+  }
 
-    // Fungsi untuk export ke Excel dengan format yang sesuai
-    const exportToExcel = () => {
-      try {
-        // Data untuk sheet rekap dengan format yang diminta
-        const excelDataRekap = [
-          // Header
-          ['REKAP ABSENSI EKSKUL', '', '', '', '', ''],
-          [`Ekskul: ${eskul.nama}`, '', '', '', '', ''],
-          [`Periode: ${selectedMonths.map(month => 
+  // Fungsi untuk export ke Excel dengan format & warna
+  const exportToExcel = () => {
+    try {
+      // Data untuk sheet rekap
+      const excelDataRekap = [
+        ['REKAP ABSENSI EKSKUL', '', '', '', '', '', ''],
+        [`Ekskul: ${eskul.nama}`, '', '', '', '', '', ''],
+        [
+          `Periode: ${selectedMonths.map(month =>
             new Date(selectedYear, month).toLocaleDateString('id-ID', { month: 'long' })
-          ).join(', ')} ${selectedYear}`, '', '', '', '', ''],
-          [`Total Pertemuan: ${totalPertemuan}`, '', '', '', '', ''],
-          ['', '', '', '', '', ''],
-          // Kolom header sesuai format yang diminta
-          ['No', 'Name', 'Kelas', 'Total', '', '', 'Masuk'],
-          ['', '', '', '', 'H', 'A', 'I'],
-          // Data
-          ...anggotaEskul.map((anggota, index) => {
-            const stats = calculateStats(anggota.user_id)
-            return [
-              index + 1,
-              anggota.nama,
-              anggota.kelas,
-              totalPertemuan,
-              stats.hadir,
-              stats.alpha,
-              stats.izin
-            ]
-          })
-        ]
+          ).join(', ')} ${selectedYear}`,
+          '', '', '', '', '', ''
+        ],
+        [`Total Pertemuan: ${totalPertemuan}`, '', '', '', '', '', ''],
+        ['', '', '', '', '', '', ''],
+        ['No', 'Name', 'Kelas', 'Total', '', '', 'Masuk'],
+        ['', '', '', '', 'H', 'A', 'I'],
+        ...anggotaEskul.map((anggota, index) => {
+          const stats = calculateStats(anggota.user_id)
+          return [
+            index + 1,
+            anggota.nama,
+            anggota.kelas,
+            totalPertemuan,
+            stats.hadir,
+            stats.alpha,
+            stats.izin
+          ]
+        })
+      ]
 
-        // Sheet 2: Detail per siswa
-        const excelDataDetail = [
-          // Header
-          ['DETAIL ABSENSI PER SISWA', '', '', '', '', ''],
-          [`Ekskul: ${eskul.nama}`, '', '', '', '', ''],
-          [`Periode: ${selectedMonths.map(month => 
+      // Data untuk sheet detail (untuk sekarang sama seperti rekap; bisa di-custom kalau mau)
+      const excelDataDetail = [
+        ['DETAIL ABSENSI PER SISWA', '', '', '', '', '', ''],
+        [`Ekskul: ${eskul.nama}`, '', '', '', '', '', ''],
+        [
+          `Periode: ${selectedMonths.map(month =>
             new Date(selectedYear, month).toLocaleDateString('id-ID', { month: 'long' })
-          ).join(', ')} ${selectedYear}`, '', '', '', '', ''],
-          ['', '', '', '', '', ''],
-          // Kolom header
-          ['No', 'Name', 'Kelas', 'Total', '', '', 'Masuk'],
-          ['', '', '', '', 'H', 'A', 'I'],
-          // Data
-          ...anggotaEskul.map((anggota, index) => {
-            const stats = calculateStats(anggota.user_id)
-            return [
-              index + 1,
-              anggota.nama,
-              anggota.kelas,
-              totalPertemuan,
-              stats.hadir,
-              stats.alpha,
-              stats.izin
-            ]
-          })
-        ]
+          ).join(', ')} ${selectedYear}`,
+          '', '', '', '', '', ''
+        ],
+        ['', '', '', '', '', '', ''],
+        ['No', 'Name', 'Kelas', 'Total', '', '', 'Masuk'],
+        ['', '', '', '', 'H', 'A', 'I'],
+        ...anggotaEskul.map((anggota, index) => {
+          const stats = calculateStats(anggota.user_id)
+          return [
+            index + 1,
+            anggota.nama,
+            anggota.kelas,
+            totalPertemuan,
+            stats.hadir,
+            stats.alpha,
+            stats.izin
+          ]
+        })
+      ]
 
-        // Buat workbook dan worksheet
-        const wb = XLSX.utils.book_new()
-        
-        // Sheet 1: Rekap
-        const wsRekap = XLSX.utils.aoa_to_sheet(excelDataRekap)
-        
-        // Styling untuk Sheet Rekap
-        if (!wsRekap['!merges']) wsRekap['!merges'] = []
-        wsRekap['!merges'].push(
-          { s: { r: 0, c: 0 }, e: { r: 0, c: 6 } },
-          { s: { r: 1, c: 0 }, e: { r: 1, c: 6 } },
-          { s: { r: 2, c: 0 }, e: { r: 2, c: 6 } },
-          { s: { r: 3, c: 0 }, e: { r: 3, c: 6 } },
-          { s: { r: 5, c: 3 }, e: { r: 5, c: 6 } },
-          { s: { r: 5, c: 0 }, e: { r: 6, c: 0 } },
-          { s: { r: 5, c: 1 }, e: { r: 6, c: 1 } },
-          { s: { r: 5, c: 2 }, e: { r: 6, c: 2 } },
-          { s: { r: 5, c: 3 }, e: { r: 6, c: 3 } }
-        )
+      const wb = XLSX.utils.book_new()
 
-        // Set column widths untuk rekap
-        wsRekap['!cols'] = [
-          { wch: 5 },   // No
-          { wch: 25 },  // Name
-          { wch: 12 },  // Kelas
-          { wch: 8 },   // Total
-          { wch: 8 },   // H
-          { wch: 8 },   // A
-          { wch: 8 }    // I
-        ]
+      // Sheet Rekap
+      const wsRekap = XLSX.utils.aoa_to_sheet(excelDataRekap)
+      if (!wsRekap['!merges']) wsRekap['!merges'] = []
+      wsRekap['!merges'].push(
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 6 } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: 6 } },
+        { s: { r: 2, c: 0 }, e: { r: 2, c: 6 } },
+        { s: { r: 3, c: 0 }, e: { r: 3, c: 6 } },
+        { s: { r: 5, c: 3 }, e: { r: 5, c: 6 } },
+        { s: { r: 5, c: 0 }, e: { r: 6, c: 0 } },
+        { s: { r: 5, c: 1 }, e: { r: 6, c: 1 } },
+        { s: { r: 5, c: 2 }, e: { r: 6, c: 2 } },
+        { s: { r: 5, c: 3 }, e: { r: 6, c: 3 } }
+      )
+      wsRekap['!cols'] = [
+        { wch: 5 },
+        { wch: 25 },
+        { wch: 12 },
+        { wch: 8 },
+        { wch: 8 },
+        { wch: 8 },
+        { wch: 8 },
+      ]
 
-        // Sheet 2: Detail
-        const wsDetail = XLSX.utils.aoa_to_sheet(excelDataDetail)
-        
-        // Styling untuk Sheet Detail
-        if (!wsDetail['!merges']) wsDetail['!merges'] = []
-        wsDetail['!merges'].push(
-          { s: { r: 0, c: 0 }, e: { r: 0, c: 6 } },
-          { s: { r: 1, c: 0 }, e: { r: 1, c: 6 } },
-          { s: { r: 2, c: 0 }, e: { r: 2, c: 6 } },
-          { s: { r: 4, c: 3 }, e: { r: 4, c: 6 } },
-          { s: { r: 4, c: 0 }, e: { r: 5, c: 0 } },
-          { s: { r: 4, c: 1 }, e: { r: 5, c: 1 } },
-          { s: { r: 4, c: 2 }, e: { r: 5, c: 2 } },
-          { s: { r: 4, c: 3 }, e: { r: 5, c: 3 } }
-        )
+      // Sheet Detail
+      const wsDetail = XLSX.utils.aoa_to_sheet(excelDataDetail)
+      if (!wsDetail['!merges']) wsDetail['!merges'] = []
+      wsDetail['!merges'].push(
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 6 } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: 6 } },
+        { s: { r: 2, c: 0 }, e: { r: 2, c: 6 } },
+        { s: { r: 4, c: 3 }, e: { r: 4, c: 6 } },
+        { s: { r: 4, c: 0 }, e: { r: 5, c: 0 } },
+        { s: { r: 4, c: 1 }, e: { r: 5, c: 1 } },
+        { s: { r: 4, c: 2 }, e: { r: 5, c: 2 } },
+        { s: { r: 4, c: 3 }, e: { r: 5, c: 3 } }
+      )
+      wsDetail['!cols'] = [
+        { wch: 5 },
+        { wch: 25 },
+        { wch: 12 },
+        { wch: 8 },
+        { wch: 8 },
+        { wch: 8 },
+        { wch: 8 },
+      ]
 
-        // Set column widths untuk detail
-        wsDetail['!cols'] = [
-          { wch: 5 },   // No
-          { wch: 25 },  // Name
-          { wch: 12 },  // Kelas
-          { wch: 8 },   // Total
-          { wch: 8 },   // H
-          { wch: 8 },   // A
-          { wch: 8 }    // I
-        ]
+      // ==== STYLING (judul berwarna, header tabel lembut) ====
 
-        // Tambahkan worksheets ke workbook
-        XLSX.utils.book_append_sheet(wb, wsRekap, 'Rekap Siswa')
-        XLSX.utils.book_append_sheet(wb, wsDetail, 'Detail Siswa')
-
-        // Export ke Excel
-        const fileName = `Rekap_Absensi_${eskul.nama.replace(/\s+/g, '_')}_${selectedMonths.map(m => m + 1).join('-')}_${selectedYear}.xlsx`
-        XLSX.writeFile(wb, fileName)
-
-        pushToast('success', 'Rekap berhasil diexport ke Excel (2 sheets)')
-      } catch (error) {
-        console.error('Error exporting to Excel:', error)
-        pushToast('error', 'Gagal mengexport rekap')
+      const titleStyle = {
+        font: { bold: true, sz: 14, color: { rgb: 'FFFFFFFF' } },
+        alignment: { horizontal: 'center', vertical: 'center' },
+        fill: { fgColor: { rgb: 'FF2563EB' } } // biru tua
       }
-    }
 
-    // Render Tabel Rekap (Format Baru sesuai permintaan)
-    const renderRekapTable = () => {
-      return (
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm border border-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th rowSpan="2" className="px-4 py-3 text-center font-semibold text-gray-700 border-b border-r">
-                  No
-                </th>
-                <th rowSpan="2" className="px-4 py-3 text-left font-semibold text-gray-700 border-b border-r">
-                  Name
-                </th>
-                <th rowSpan="2" className="px-4 py-3 text-left font-semibold text-gray-700 border-b border-r">
-                  Kelas
-                </th>
-                <th rowSpan="2" className="px-4 py-3 text-center font-semibold text-gray-700 border-b border-r">
-                  Total
-                </th>
-                <th colSpan="3" className="px-4 py-3 text-center font-semibold text-gray-700 border-b">
-                  Masuk
-                </th>
-              </tr>
-              <tr>
-                <th className="px-4 py-2 text-center font-semibold text-gray-700 border-b border-r">H</th>
-                <th className="px-4 py-2 text-center font-semibold text-gray-700 border-b border-r">A</th>
-                <th className="px-4 py-2 text-center font-semibold text-gray-700 border-b">I</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {anggotaEskul.map((anggota, index) => {
-                const stats = calculateStats(anggota.user_id)
-                return (
-                  <tr key={anggota.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 text-center font-medium text-gray-900 border-r">
-                      {index + 1}
-                    </td>
-                    <td className="px-4 py-3 font-medium text-gray-900 border-r">
-                      {anggota.nama}
-                    </td>
-                    <td className="px-4 py-3 text-gray-600 border-r">
-                      {anggota.kelas}
-                    </td>
-                    <td className="px-4 py-3 text-center font-semibold text-gray-900 border-r">
-                      {totalPertemuan}
-                    </td>
-                    <td className="px-4 py-3 text-center font-semibold text-green-600 border-r">
-                      {stats.hadir}
-                    </td>
-                    <td className="px-4 py-3 text-center font-semibold text-red-600 border-r">
-                      {stats.alpha}
-                    </td>
-                    <td className="px-4 py-3 text-center font-semibold text-yellow-600">
-                      {stats.izin}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      )
-    }
+      const headerStyle = {
+        font: { bold: true, color: { rgb: 'FF111827' } },
+        alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+        fill: { fgColor: { rgb: 'FFE0F2FE' } } // biru muda
+      }
 
-    // Render Tabel Detail (Format Lama)
-    const renderDetailTable = () => {
-      return (
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="sticky left-0 z-10 bg-gray-50 px-4 py-3 text-left font-semibold text-gray-700 border-b">
-                  No
-                </th>
-                <th className="sticky left-12 z-10 bg-gray-50 px-4 py-3 text-left font-semibold text-gray-700 border-b min-w-[200px]">
-                  Nama
-                </th>
-                <th className="sticky left-64 z-10 bg-gray-50 px-4 py-3 text-left font-semibold text-gray-700 border-b min-w-[100px]">
-                  Kelas
-                </th>
-                
-                {/* Tanggal columns */}
-                {eskulDates.map((date, idx) => (
-                  <th key={date.dateStr} className="px-3 py-3 text-center font-semibold text-gray-700 border-b whitespace-nowrap">
-                    <div className="flex flex-col items-center">
-                      <span className="text-xs">{date.dayName}</span>
-                      <span className="text-xs font-normal">
-                        {date.date.getDate()}/{date.date.getMonth() + 1}
-                      </span>
-                    </div>
-                  </th>
-                ))}
-                
-                <th className="px-4 py-3 text-center font-semibold text-gray-700 border-b">
-                  H
-                </th>
-                <th className="px-4 py-3 text-center font-semibold text-gray-700 border-b">
-                  I
-                </th>
-                <th className="px-4 py-3 text-center font-semibold text-gray-700 border-b">
-                  A
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {anggotaEskul.map((anggota, index) => {
-                const stats = calculateStats(anggota.user_id)
-                return (
-                  <tr key={anggota.id} className="hover:bg-gray-50">
-                    <td className="sticky left-0 bg-white px-4 py-3 font-medium text-gray-900">
-                      {index + 1}
-                    </td>
-                    <td className="sticky left-12 bg-white px-4 py-3 font-medium text-gray-900 min-w-[200px]">
-                      {anggota.nama}
-                    </td>
-                    <td className="sticky left-64 bg-white px-4 py-3 text-gray-600 min-w-[100px]">
-                      {anggota.kelas}
-                    </td>
-                    
-                    {/* Status per tanggal */}
-                    {eskulDates.map((date) => {
-                      const key = `${anggota.user_id}_${date.dateStr}`
-                      const status = absensiData[key] || '-'
-                      return (
-                        <td key={date.dateStr} className="px-3 py-3 text-center">
-                          <div className="flex gap-1 justify-center">
-                            <button
-                              onClick={() => updateAbsensi(anggota.user_id, date.dateStr, 'Hadir')}
-                              className={`w-6 h-6 rounded text-xs font-bold transition-colors ${
-                                status === 'Hadir' 
-                                  ? 'bg-green-500 text-white' 
-                                  : 'bg-gray-100 text-gray-600 hover:bg-green-100'
-                              }`}
-                              title="Hadir"
-                            >
-                              H
-                            </button>
-                            <button
-                              onClick={() => updateAbsensi(anggota.user_id, date.dateStr, 'Izin')}
-                              className={`w-6 h-6 rounded text-xs font-bold transition-colors ${
-                                status === 'Izin' 
-                                  ? 'bg-yellow-500 text-white' 
-                                  : 'bg-gray-100 text-gray-600 hover:bg-yellow-100'
-                              }`}
-                              title="Izin"
-                            >
-                              I
-                            </button>
-                            <button
-                              onClick={() => updateAbsensi(anggota.user_id, date.dateStr, 'Alpha')}
-                              className={`w-6 h-6 rounded text-xs font-bold transition-colors ${
-                                status === 'Alpha' 
-                                  ? 'bg-red-500 text-white' 
-                                  : 'bg-gray-100 text-gray-600 hover:bg-red-100'
-                              }`}
-                              title="Alpha"
-                            >
-                              A
-                            </button>
-                          </div>
-                        </td>
-                      )
-                    })}
-                    
-                    <td className="px-4 py-3 text-center font-semibold text-green-600">
-                      {stats.hadir}
-                    </td>
-                    <td className="px-4 py-3 text-center font-semibold text-yellow-600">
-                      {stats.izin}
-                    </td>
-                    <td className="px-4 py-3 text-center font-semibold text-red-600">
-                      {stats.alpha}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      )
-    }
+      const subHeaderStyle = {
+        font: { bold: true, color: { rgb: 'FF111827' } },
+        alignment: { horizontal: 'center', vertical: 'center' },
+        fill: { fgColor: { rgb: 'FFF1F5F9' } } // abu soft
+      }
 
-    // Toggle bulan yang dipilih
-    const toggleMonth = (month) => {
-      setSelectedMonths(prev => 
-        prev.includes(month) 
-          ? prev.filter(m => m !== month)
-          : [...prev, month]
-      )
-    }
+      const thinBorder = {
+        style: 'thin',
+        color: { rgb: 'FFCBD5E1' }
+      }
 
-    // Pilih semua bulan
-    const selectAllMonths = () => {
-      setSelectedMonths([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
-    }
+      const applyStyleRange = (ws, startRow, endRow, startCol, endCol, style, withBorder = false) => {
+        for (let r = startRow; r <= endRow; r++) {
+          for (let c = startCol; c <= endCol; c++) {
+            const cellAddress = XLSX.utils.encode_cell({ r, c })
+            const cell = ws[cellAddress]
+            if (!cell) continue
 
-    // Hapus semua pilihan bulan
-    const clearAllMonths = () => {
-      setSelectedMonths([])
-    }
+            cell.s = {
+              ...(cell.s || {}),
+              ...style,
+              ...(withBorder
+                ? {
+                    border: {
+                      top: thinBorder,
+                      bottom: thinBorder,
+                      left: thinBorder,
+                      right: thinBorder
+                    }
+                  }
+                : {})
+            }
+          }
+        }
+      }
 
+      // Judul & info rekap (A1–A4)
+      ;['A1', 'A2', 'A3', 'A4'].forEach((addr) => {
+        const cell = wsRekap[addr]
+        if (cell) {
+          cell.s = { ...(cell.s || {}), ...titleStyle }
+        }
+      })
+
+      // Header tabel rekap (baris 6 & 7 → index 5 & 6)
+      applyStyleRange(wsRekap, 5, 5, 0, 6, headerStyle, true)
+      applyStyleRange(wsRekap, 6, 6, 0, 6, subHeaderStyle, true)
+      // Data tidak diberi border, jadi tidak terlalu "kotak-kotak", pakai grid default Excel saja
+
+      // Judul detail (A1–A3)
+      ;['A1', 'A2', 'A3'].forEach((addr) => {
+        const cell = wsDetail[addr]
+        if (cell) {
+          cell.s = { ...(cell.s || {}), ...titleStyle }
+        }
+      })
+      // Header tabel detail (baris 5 & 6 → index 4 & 5)
+      applyStyleRange(wsDetail, 4, 4, 0, 6, headerStyle, true)
+      applyStyleRange(wsDetail, 5, 5, 0, 6, subHeaderStyle, true)
+
+      // Tambahkan ke workbook & export
+      XLSX.utils.book_append_sheet(wb, wsRekap, 'Rekap Siswa')
+      XLSX.utils.book_append_sheet(wb, wsDetail, 'Detail Siswa')
+
+      const fileName = `Rekap_Absensi_${eskul.nama.replace(/\s+/g, '_')}_${selectedMonths
+        .map(m => m + 1)
+        .join('-')}_${selectedYear}.xlsx`
+      XLSX.writeFile(wb, fileName)
+
+      pushToast('success', 'Rekap berhasil diexport ke Excel (2 sheets) dengan judul berwarna & tabel rapi')
+    } catch (error) {
+      console.error('Error exporting to Excel:', error)
+      pushToast('error', 'Gagal mengexport rekap')
+    }
+  }
+
+  // Render Tabel Rekap (Format Baru)
+  const renderRekapTable = () => {
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-        <div className="bg-white rounded-2xl shadow-xl w-full max-w-7xl max-h-[90vh] overflow-hidden flex flex-col">
-          {/* Header */}
-          <div className="bg-gradient-to-r from-purple-600 to-indigo-700 p-6 text-white">
-            <div className="flex justify-between items-start">
-              <div>
-                <h2 className="text-2xl font-bold">
-                  {viewMode === 'detail' ? `Absensi ${eskul.nama}` : `Rekap Absensi ${eskul.nama}`}
-                </h2>
-                <p className="text-purple-100 mt-1">
-                  {eskul.hari} • {eskul.jam_mulai} - {eskul.jam_selesai}
-                </p>
-              </div>
-              <button 
-                onClick={onClose}
-                className="text-white hover:text-gray-200 text-2xl p-2 transition-colors"
-              >
-                ✕
-              </button>
-            </div>
-            
-            {/* Month Selector dan View Toggle */}
-            <div className="flex items-center gap-4 mt-4 flex-wrap">
-              {/* Tahun */}
-              <select 
-                value={selectedYear}
-                onChange={(e) => setSelectedYear(parseInt(e.target.value))}
-                className="bg-white/10 text-white border border-white/30 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-white/50"
-              >
-                {Array.from({ length: 5 }, (_, i) => {
-                  const year = new Date().getFullYear() - 2 + i
-                  return <option key={year} value={year} className="text-gray-900">{year}</option>
-                })}
-              </select>
-
-              {/* Pilihan Bulan Multiple */}
-              <div className="flex items-center gap-2">
-                <span className="text-purple-100 text-sm font-medium">Bulan:</span>
-                <div className="flex flex-wrap gap-1">
-                  {Array.from({ length: 12 }, (_, i) => (
-                    <button
-                      key={i}
-                      onClick={() => toggleMonth(i)}
-                      className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
-                        selectedMonths.includes(i)
-                          ? 'bg-white text-purple-700 shadow-md'
-                          : 'bg-white/10 text-white hover:bg-white/20'
-                      }`}
-                    >
-                      {new Date(selectedYear, i).toLocaleDateString('id-ID', { month: 'short' })}
-                    </button>
-                  ))}
-                </div>
-                <div className="flex gap-1 ml-2">
-                  <button
-                    onClick={selectAllMonths}
-                    className="px-2 py-1 bg-green-500 text-white rounded text-xs hover:bg-green-600"
-                  >
-                    Pilih Semua
-                  </button>
-                  <button
-                    onClick={clearAllMonths}
-                    className="px-2 py-1 bg-red-500 text-white rounded text-xs hover:bg-red-600"
-                  >
-                    Hapus Semua
-                  </button>
-                </div>
-              </div>
-
-              {/* View Mode Toggle */}
-              <div className="flex gap-2 ml-4">
-                <button
-                  onClick={() => setViewMode('detail')}
-                  className={`px-4 py-2 rounded-lg font-semibold text-sm transition-colors ${
-                    viewMode === 'detail'
-                      ? 'bg-white text-purple-700 shadow-md'
-                      : 'bg-white/10 text-white hover:bg-white/20'
-                  }`}
-                >
-                  Tampilan Detail
-                </button>
-                <button
-                  onClick={() => setViewMode('rekap')}
-                  className={`px-4 py-2 rounded-lg font-semibold text-sm transition-colors ${
-                    viewMode === 'rekap'
-                      ? 'bg-white text-purple-700 shadow-md'
-                      : 'bg-white/10 text-white hover:bg-white/20'
-                  }`}
-                >
-                  Tampilan Rekap
-                </button>
-              </div>
-              
-              <div className="text-sm text-purple-100 ml-auto">
-                {eskulDates.length} pertemuan • {anggotaEskul.length} anggota
-              </div>
-            </div>
-          </div>
-
-          {/* Content */}
-          <div className="flex-1 overflow-auto p-6">
-            {anggotaEskul.length > 0 ? (
-              viewMode === 'detail' ? renderDetailTable() : renderRekapTable()
-            ) : (
-              <div className="text-center py-12">
-                <div className="text-gray-300 text-6xl mb-4">👥</div>
-                <p className="text-gray-500 text-lg font-medium">Belum ada anggota</p>
-                <p className="text-gray-400 mt-2">Tambahkan siswa ke ekskul ini terlebih dahulu</p>
-              </div>
-            )}
-          </div>
-
-          {/* Footer */}
-          <div className="bg-gray-50 px-6 py-4 border-t flex justify-between items-center">
-            <div className="flex gap-4 text-sm text-gray-600">
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 bg-green-500 rounded"></div>
-                <span>H = Hadir</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 bg-yellow-500 rounded"></div>
-                <span>I = Izin</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 bg-red-500 rounded"></div>
-                <span>A = Alpha</span>
-              </div>
-            </div>
-            
-            <div className="flex gap-3">
-              {/* Tombol Export Excel */}
-              <button
-                onClick={exportToExcel}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold transition-colors flex items-center gap-2"
-                title="Export ke Excel dengan 2 sheets: Rekap Kelas dan Detail Siswa"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                Export Excel
-              </button>
-
-              <button
-                onClick={onClose}
-                className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-semibold transition-colors"
-              >
-                Tutup
-              </button>
-            </div>
-          </div>
-        </div>
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-sm border border-gray-200">
+          <thead className="bg-gray-50">
+            <tr>
+              <th rowSpan="2" className="px-4 py-3 text-center font-semibold text-gray-700 border-b border-r">
+                No
+              </th>
+              <th rowSpan="2" className="px-4 py-3 text-left font-semibold text-gray-700 border-b border-r">
+                Name
+              </th>
+              <th rowSpan="2" className="px-4 py-3 text-left font-semibold text-gray-700 border-b border-r">
+                Kelas
+              </th>
+              <th rowSpan="2" className="px-4 py-3 text-center font-semibold text-gray-700 border-b border-r">
+                Total
+              </th>
+              <th colSpan="3" className="px-4 py-3 text-center font-semibold text-gray-700 border-b">
+                Masuk
+              </th>
+            </tr>
+            <tr>
+              <th className="px-4 py-2 text-center font-semibold text-gray-700 border-b border-r">H</th>
+              <th className="px-4 py-2 text-center font-semibold text-gray-700 border-b border-r">A</th>
+              <th className="px-4 py-2 text-center font-semibold text-gray-700 border-b">I</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-200">
+            {anggotaEskul.map((anggota, index) => {
+              const stats = calculateStats(anggota.user_id)
+              return (
+                <tr key={anggota.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-3 text-center font-medium text-gray-900 border-r">
+                    {index + 1}
+                  </td>
+                  <td className="px-4 py-3 font-medium text-gray-900 border-r">
+                    {anggota.nama}
+                  </td>
+                  <td className="px-4 py-3 text-gray-600 border-r">
+                    {anggota.kelas}
+                  </td>
+                  <td className="px-4 py-3 text-center font-semibold text-gray-900 border-r">
+                    {totalPertemuan}
+                  </td>
+                  <td className="px-4 py-3 text-center font-semibold text-green-600 border-r">
+                    {stats.hadir}
+                  </td>
+                  <td className="px-4 py-3 text-center font-semibold text-red-600 border-r">
+                    {stats.alpha}
+                  </td>
+                  <td className="px-4 py-3 text-center font-semibold text-yellow-600">
+                    {stats.izin}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
       </div>
     )
   }
+
+  // Render Tabel Detail (per tanggal)
+  const renderDetailTable = () => {
+    return (
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-sm">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="sticky left-0 z-10 bg-gray-50 px-4 py-3 text-left font-semibold text-gray-700 border-b">
+                No
+              </th>
+              <th className="sticky left-12 z-10 bg-gray-50 px-4 py-3 text-left font-semibold text-gray-700 border-b min-w-[200px]">
+                Nama
+              </th>
+              <th className="sticky left-64 z-10 bg-gray-50 px-4 py-3 text-left font-semibold text-gray-700 border-b min-w-[100px]">
+                Kelas
+              </th>
+
+              {eskulDates.map((date) => (
+                <th key={date.dateStr} className="px-3 py-3 text-center font-semibold text-gray-700 border-b whitespace-nowrap">
+                  <div className="flex flex-col items-center">
+                    <span className="text-xs">{date.dayName}</span>
+                    <span className="text-xs font-normal">
+                      {date.date.getDate()}/{date.date.getMonth() + 1}
+                    </span>
+                  </div>
+                </th>
+              ))}
+
+              <th className="px-4 py-3 text-center font-semibold text-gray-700 border-b">
+                H
+              </th>
+              <th className="px-4 py-3 text-center font-semibold text-gray-700 border-b">
+                I
+              </th>
+              <th className="px-4 py-3 text-center font-semibold text-gray-700 border-b">
+                A
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-200">
+            {anggotaEskul.map((anggota, index) => {
+              const stats = calculateStats(anggota.user_id)
+              return (
+                <tr key={anggota.id} className="hover:bg-gray-50">
+                  <td className="sticky left-0 bg-white px-4 py-3 font-medium text-gray-900">
+                    {index + 1}
+                  </td>
+                  <td className="sticky left-12 bg-white px-4 py-3 font-medium text-gray-900 min-w-[200px]">
+                    {anggota.nama}
+                  </td>
+                  <td className="sticky left-64 bg-white px-4 py-3 text-gray-600 min-w-[100px]">
+                    {anggota.kelas}
+                  </td>
+
+                  {eskulDates.map((date) => {
+                    const key = `${anggota.user_id}_${date.dateStr}`
+                    const status = absensiData[key] || '-'
+                    return (
+                      <td key={date.dateStr} className="px-3 py-3 text-center">
+                        <div className="flex gap-1 justify-center">
+                          <button
+                            onClick={() => updateAbsensi(anggota.user_id, date.dateStr, 'Hadir')}
+                            className={`w-6 h-6 rounded text-xs font-bold transition-colors ${
+                              status === 'Hadir'
+                                ? 'bg-green-500 text-white'
+                                : 'bg-gray-100 text-gray-600 hover:bg-green-100'
+                            }`}
+                            title="Hadir"
+                          >
+                            H
+                          </button>
+                          <button
+                            onClick={() => updateAbsensi(anggota.user_id, date.dateStr, 'Izin')}
+                            className={`w-6 h-6 rounded text-xs font-bold transition-colors ${
+                              status === 'Izin'
+                                ? 'bg-yellow-500 text-white'
+                                : 'bg-gray-100 text-gray-600 hover:bg-yellow-100'
+                            }`}
+                            title="Izin"
+                          >
+                            I
+                          </button>
+                          <button
+                            onClick={() => updateAbsensi(anggota.user_id, date.dateStr, 'Alpha')}
+                            className={`w-6 h-6 rounded text-xs font-bold transition-colors ${
+                              status === 'Alpha'
+                                ? 'bg-red-500 text-white'
+                                : 'bg-gray-100 text-gray-600 hover:bg-red-100'
+                            }`}
+                            title="Alpha"
+                          >
+                            A
+                          </button>
+                        </div>
+                      </td>
+                    )
+                  })}
+
+                  <td className="px-4 py-3 text-center font-semibold text-green-600">
+                    {stats.hadir}
+                  </td>
+                  <td className="px-4 py-3 text-center font-semibold text-yellow-600">
+                    {stats.izin}
+                  </td>
+                  <td className="px-4 py-3 text-center font-semibold text-red-600">
+                    {stats.alpha}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+
+  // Toggle bulan yang dipilih
+  const toggleMonth = (month) => {
+    setSelectedMonths(prev =>
+      prev.includes(month)
+        ? prev.filter(m => m !== month)
+        : [...prev, month]
+    )
+  }
+
+  const selectAllMonths = () => {
+    setSelectedMonths([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
+  }
+
+  const clearAllMonths = () => {
+    setSelectedMonths([])
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-7xl max-h-[90vh] overflow-hidden flex flex-col">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-purple-600 to-indigo-700 p-6 text-white">
+          <div className="flex justify-between items-start">
+            <div>
+              <h2 className="text-2xl font-bold">
+                {viewMode === 'detail' ? `Absensi ${eskul.nama}` : `Rekap Absensi ${eskul.nama}`}
+              </h2>
+              <p className="text-purple-100 mt-1">
+                {eskul.hari} • {eskul.jam_mulai} - {eskul.jam_selesai}
+              </p>
+            </div>
+            <button
+              onClick={onClose}
+              className="text-white hover:text-gray-200 text-2xl p-2 transition-colors"
+            >
+              ✕
+            </button>
+          </div>
+
+          {/* Month Selector dan View Toggle */}
+          <div className="flex items-center gap-4 mt-4 flex-wrap">
+            {/* Tahun */}
+            <select
+              value={selectedYear}
+              onChange={(e) => setSelectedYear(parseInt(e.target.value))}
+              className="bg-white/10 text-white border border-white/30 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-white/50"
+            >
+              {Array.from({ length: 5 }, (_, i) => {
+                const year = new Date().getFullYear() - 2 + i
+                return <option key={year} value={year} className="text-gray-900">{year}</option>
+              })}
+            </select>
+
+            {/* Pilihan Bulan Multiple */}
+            <div className="flex items-center gap-2">
+              <span className="text-purple-100 text-sm font-medium">Bulan:</span>
+              <div className="flex flex-wrap gap-1">
+                {Array.from({ length: 12 }, (_, i) => (
+                  <button
+                    key={i}
+                    onClick={() => toggleMonth(i)}
+                    className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                      selectedMonths.includes(i)
+                        ? 'bg-white text-purple-700 shadow-md'
+                        : 'bg-white/10 text-white hover:bg-white/20'
+                    }`}
+                  >
+                    {new Date(selectedYear, i).toLocaleDateString('id-ID', { month: 'short' })}
+                  </button>
+                ))}
+              </div>
+              <div className="flex gap-1 ml-2">
+                <button
+                  onClick={selectAllMonths}
+                  className="px-2 py-1 bg-green-500 text-white rounded text-xs hover:bg-green-600"
+                >
+                  Pilih Semua
+                </button>
+                <button
+                  onClick={clearAllMonths}
+                  className="px-2 py-1 bg-red-500 text-white rounded text-xs hover:bg-red-600"
+                >
+                  Hapus Semua
+                </button>
+              </div>
+            </div>
+
+            {/* View Mode Toggle */}
+            <div className="flex gap-2 ml-4">
+              <button
+                onClick={() => setViewMode('detail')}
+                className={`px-4 py-2 rounded-lg font-semibold text-sm transition-colors ${
+                  viewMode === 'detail'
+                    ? 'bg-white text-purple-700 shadow-md'
+                    : 'bg-white/10 text-white hover:bg-white/20'
+                }`}
+              >
+                Tampilan Detail
+              </button>
+              <button
+                onClick={() => setViewMode('rekap')}
+                className={`px-4 py-2 rounded-lg font-semibold text-sm transition-colors ${
+                  viewMode === 'rekap'
+                    ? 'bg-white text-purple-700 shadow-md'
+                    : 'bg-white/10 text-white hover:bg-white/20'
+                }`}
+              >
+                Tampilan Rekap
+              </button>
+            </div>
+
+            <div className="text-sm text-purple-100 ml-auto">
+              {eskulDates.length} pertemuan • {anggotaEskul.length} anggota
+            </div>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-auto p-6">
+          {anggotaEskul.length > 0 ? (
+            viewMode === 'detail' ? renderDetailTable() : renderRekapTable()
+          ) : (
+            <div className="text-center py-12">
+              <div className="text-gray-300 text-6xl mb-4">👥</div>
+              <p className="text-gray-500 text-lg font-medium">Belum ada anggota</p>
+              <p className="text-gray-400 mt-2">Tambahkan siswa ke ekskul ini terlebih dahulu</p>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="bg-gray-50 px-6 py-4 border-t flex justify-between items-center">
+          <div className="flex gap-4 text-sm text-gray-600">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 bg-green-500 rounded"></div>
+              <span>H = Hadir</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 bg-yellow-500 rounded"></div>
+              <span>I = Izin</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 bg-red-500 rounded"></div>
+              <span>A = Alpha</span>
+            </div>
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              onClick={exportToExcel}
+              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold transition-colors flex items-center gap-2"
+              title="Export ke Excel dengan 2 sheets: Rekap & Detail"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              Export Excel
+            </button>
+
+            <button
+              onClick={onClose}
+              className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-semibold transition-colors"
+            >
+              Tutup
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 // Komponen Overlay Detail Organisasi
 const OrganisasiDetailOverlay = ({ organisasi, onClose }) => {
@@ -989,7 +1056,7 @@ const OrganisasiDetailOverlay = ({ organisasi, onClose }) => {
     if (organisasi) {
       loadAnggotaOrganisasi()
     }
-  }, [organisasi])
+  }, [organisasi, pushToast, setLoading])
 
   const getJabatanColor = (jabatan) => {
     const jabatanLower = jabatan?.toLowerCase() || ''
@@ -1017,7 +1084,7 @@ const OrganisasiDetailOverlay = ({ organisasi, onClose }) => {
                 </p>
               )}
             </div>
-            <button 
+            <button
               onClick={onClose}
               className="text-white hover:text-gray-200 text-2xl p-2 transition-colors"
             >
@@ -1033,12 +1100,12 @@ const OrganisasiDetailOverlay = ({ organisasi, onClose }) => {
               <span className="p-2 bg-emerald-100 text-emerald-600 rounded-lg">👥</span>
               Daftar Anggota ({anggotaOrganisasi.length})
             </h3>
-            
+
             {anggotaOrganisasi.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {anggotaOrganisasi.map((anggota, index) => (
-                  <div 
-                    key={anggota.id} 
+                  <div
+                    key={anggota.id}
                     className="bg-white border border-gray-200 rounded-xl p-4 hover:shadow-md transition-shadow"
                   >
                     <div className="flex items-start justify-between mb-3">
@@ -1050,7 +1117,7 @@ const OrganisasiDetailOverlay = ({ organisasi, onClose }) => {
                         {anggota.jabatan || 'Anggota'}
                       </span>
                     </div>
-                    
+
                     <div className="flex items-center justify-between text-xs text-gray-500">
                       <span>Anggota #{index + 1}</span>
                       <span>
@@ -1130,13 +1197,13 @@ export default function JadwalGuru() {
   const [siswaList, setSiswaList] = useState([])
   const [strukturSekolah, setStrukturSekolah] = useState([])
 
-  // State untuk overlay
+  // State overlay
   const [selectedEskul, setSelectedEskul] = useState(null)
   const [selectedOrganisasi, setSelectedOrganisasi] = useState(null)
   const [showAbsensiOverlay, setShowAbsensiOverlay] = useState(false)
   const [showOrganisasiOverlay, setShowOrganisasiOverlay] = useState(false)
 
-  // State untuk sertifikat
+  // Sertifikat
   const [sertifikatList, setSertifikatList] = useState([])
   const [showSertifikatOverlay, setShowSertifikatOverlay] = useState(false)
   const [showRiwayatSertifikatOverlay, setShowRiwayatSertifikatOverlay] = useState(false)
@@ -1145,11 +1212,10 @@ export default function JadwalGuru() {
   const [activeHari, setActiveHari] = useState('Hari Ini')
   const [currentTime, setCurrentTime] = useState(new Date())
 
-  // --- TIME SYNCHRONIZATION LOGIC ---
   const { todayStr, todayName } = React.useMemo(() => {
     const now = new Date()
     const todayName = HARI_JS[now.getDay()]
-    const todayStr = now.toLocaleDateString('en-CA') 
+    const todayStr = now.toLocaleDateString('en-CA')
     return { todayStr, todayName }
   }, [])
 
@@ -1158,7 +1224,7 @@ export default function JadwalGuru() {
     return () => clearInterval(timer)
   }, [])
 
-  // Map siswa untuk akses cepat
+  // Map siswa
   const siswaMap = React.useMemo(() => {
     const map = {}
     siswaList.forEach(siswa => {
@@ -1167,9 +1233,7 @@ export default function JadwalGuru() {
     return map
   }, [siswaList])
 
-  // --- DATA FETCHING ---
-
-  // 1. Load Data Kelas
+  // === LOAD DATA (kelas, siswa, pengumuman, sertifikat, struktur, dll) ===
   useEffect(() => {
     const loadAllKelas = async () => {
       try {
@@ -1187,7 +1251,6 @@ export default function JadwalGuru() {
     loadAllKelas()
   }, [])
 
-  // 2. Load Data Siswa
   useEffect(() => {
     const loadSiswaList = async () => {
       try {
@@ -1212,16 +1275,15 @@ export default function JadwalGuru() {
     loadSiswaList()
   }, [])
 
-  // 3. Load Pengumuman
   useEffect(() => {
     const loadPengumuman = async () => {
       try {
         const { data, error } = await supabase
           .from('pengumuman')
           .select('*')
-          .in('target', ['guru', 'semua']) 
+          .in('target', ['guru', 'semua'])
           .order('created_at', { ascending: false })
-          .limit(3) 
+          .limit(3)
 
         if (error) throw error
         setPengumumanList(data || [])
@@ -1232,11 +1294,10 @@ export default function JadwalGuru() {
     loadPengumuman()
   }, [])
 
-  // 4. Load Data Sertifikat
   useEffect(() => {
     const loadSertifikat = async () => {
       if (!user?.id) return
-      
+
       try {
         setLoading(true)
         const { data, error } = await supabase
@@ -1256,9 +1317,8 @@ export default function JadwalGuru() {
     }
 
     loadSertifikat()
-  }, [user?.id])
+  }, [user?.id, setLoading, pushToast])
 
-  // 5. Load Struktur Sekolah
   useEffect(() => {
     const loadStrukturSekolah = async () => {
       try {
@@ -1276,20 +1336,19 @@ export default function JadwalGuru() {
     loadStrukturSekolah()
   }, [])
 
-  // 6. Load User Data
   useEffect(() => {
     if (!user?.id) return
 
     const fetchData = async () => {
       try {
-        // A. Wali Kelas
+        // Wali Kelas
         const { data: waliData } = await supabase
           .from('kelas_struktur')
           .select(`kelas_id, wali_guru_id, kelas:kelas_id(id, nama, grade, suffix)`)
           .eq('wali_guru_id', user.id)
         setWaliKelasSaya(waliData || [])
 
-        // B. Jadwal Mengajar
+        // Jadwal
         const { data: jadwalData } = await supabase
           .from('jadwal')
           .select('*')
@@ -1297,12 +1356,12 @@ export default function JadwalGuru() {
           .order('jam_mulai', { ascending: true })
         setJadwal(jadwalData || [])
 
-        // C. Ekskul
+        // Ekskul
         const { data: ekskulData } = await supabase
           .from('ekskul')
           .select('*')
           .eq('pembina_guru_id', user.id)
-        
+
         if (ekskulData) {
           const ekskulWithCount = await Promise.all(ekskulData.map(async (e) => {
             const { count } = await supabase
@@ -1314,19 +1373,19 @@ export default function JadwalGuru() {
           setEskulDiampu(ekskulWithCount)
         }
 
-        // D. Struktur Jabatan
+        // Struktur jabatan saya
         const { data: jabatanData } = await supabase
           .from('struktur_sekolah')
           .select('*')
           .eq('guru_id', user.id)
         setStrukturJabatan(jabatanData || [])
 
-        // E. Organisasi
+        // Organisasi
         const { data: orgData } = await supabase
           .from('organisasi')
           .select('*')
           .eq('pembina_guru_id', user.id)
-        
+
         if (orgData) {
           const orgWithCount = await Promise.all(orgData.map(async (org) => {
             const { count } = await supabase
@@ -1337,7 +1396,6 @@ export default function JadwalGuru() {
           }))
           setOrganisasiDiampu(orgWithCount)
         }
-
       } catch (error) {
         console.error('Error fetching user related data:', error)
       }
@@ -1345,7 +1403,6 @@ export default function JadwalGuru() {
     fetchData()
   }, [user?.id])
 
-  // 7. Load Jam Kosong
   const loadSemuaJamKosongHariIni = React.useCallback(async () => {
     if (!todayStr) return
     try {
@@ -1384,7 +1441,6 @@ export default function JadwalGuru() {
   }, [loadSemuaJamKosongHariIni])
 
   // --- LOGIC HANDLERS ---
-
   const filteredJadwal = React.useMemo(() => {
     if (activeHari === 'Hari Ini') {
       return jadwal.filter((j) => j.hari === todayName)
@@ -1394,8 +1450,8 @@ export default function JadwalGuru() {
 
   const hariList = React.useMemo(() => {
     const hariSet = new Set(jadwal.map((j) => j.hari).filter(Boolean))
-    const sorter = { "Senin":1, "Selasa":2, "Rabu":3, "Kamis":4, "Jumat":5, "Sabtu":6, "Minggu":7 }
-    const sortedHari = Array.from(hariSet).sort((a,b) => (sorter[a] || 99) - (sorter[b] || 99))
+    const sorter = { 'Senin': 1, 'Selasa': 2, 'Rabu': 3, 'Kamis': 4, 'Jumat': 5, 'Sabtu': 6, 'Minggu': 7 }
+    const sortedHari = Array.from(hariSet).sort((a, b) => (sorter[a] || 99) - (sorter[b] || 99))
     return ['Hari Ini', ...sortedHari]
   }, [jadwal])
 
@@ -1403,7 +1459,7 @@ export default function JadwalGuru() {
     try {
       setLoading(true)
       const namaUser = profile?.nama || user?.email || 'Guru Pengganti'
-      
+
       const isCanceling = currentPengganti === namaUser
       const newValue = isCanceling ? null : namaUser
 
@@ -1424,13 +1480,12 @@ export default function JadwalGuru() {
             : jam
         )
       )
-      
+
       if (isCanceling) {
         pushToast('info', 'Anda membatalkan pengambilan jam ini.')
       } else {
         pushToast('success', 'Berhasil mengambil jam kosong!')
       }
-
     } catch (error) {
       console.error('Error updating jam kosong:', error)
       pushToast('error', 'Gagal memperbarui status jam kosong')
@@ -1441,7 +1496,6 @@ export default function JadwalGuru() {
 
   const formatWaktu = (waktu) => (waktu ? String(waktu).slice(0, 5) : '-')
 
-  // Handler untuk sertifikat
   const handleViewSertifikat = (sertifikat) => {
     setSelectedSertifikat(sertifikat)
     setShowSertifikatOverlay(true)
@@ -1450,26 +1504,22 @@ export default function JadwalGuru() {
   const handleDownloadSertifikat = async (sertifikat) => {
     try {
       setLoading(true)
-      
-      // Download file dari URL
       const response = await fetch(sertifikat.file_url)
       const blob = await response.blob()
-      
-      // Create download link
+
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.style.display = 'none'
       a.href = url
-      
-      // Extract file extension from URL
+
       const fileExtension = sertifikat.file_url.split('.').pop() || 'pdf'
       const fileName = `Sertifikat_${sertifikat.event}_${sertifikat.nama_penerima}.${fileExtension}`
-      
+
       a.download = fileName
       document.body.appendChild(a)
       a.click()
       window.URL.revokeObjectURL(url)
-      
+
       pushToast('success', 'Sertifikat berhasil diunduh')
     } catch (error) {
       console.error('Error downloading sertifikat:', error)
@@ -1479,7 +1529,6 @@ export default function JadwalGuru() {
     }
   }
 
-  // Handler untuk overlay
   const handleEskulClick = (eskul) => {
     setSelectedEskul(eskul)
     setShowAbsensiOverlay(true)
@@ -1513,15 +1562,13 @@ export default function JadwalGuru() {
     setShowRiwayatSertifikatOverlay(false)
   }
 
-  // Sertifikat terbatas (5 terbaru)
   const displayedSertifikat = sertifikatList.slice(0, 5)
 
-  // --- RENDER COMPONENT ---
-
+  // --- RENDER ---
   return (
     <div className="min-h-screen bg-gray-50/50 p-4 md:p-6 pb-20">
       <div className="max-w-7xl mx-auto space-y-6">
-        
+
         {/* HEADER */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 relative overflow-hidden">
           <div className="absolute top-0 right-0 w-64 h-64 bg-blue-50 rounded-full blur-3xl -mr-16 -mt-16 opacity-50 pointer-events-none"></div>
@@ -1586,10 +1633,9 @@ export default function JadwalGuru() {
 
         {/* GRID UTAMA */}
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
-          
-          {/* KOLOM KIRI (Jadwal, Ekskul, Organisasi, Struktur Sekolah) */}
+
+          {/* KOLOM KIRI */}
           <div className="xl:col-span-4 space-y-6">
-            
             {/* Jadwal Mengajar */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col h-[600px]">
               <div className="p-5 border-b border-gray-100 bg-gray-50/50 flex justify-between items-center">
@@ -1600,7 +1646,7 @@ export default function JadwalGuru() {
                   {filteredJadwal.length} Mapel
                 </span>
               </div>
-              
+
               <div className="p-4 flex-1 overflow-hidden flex flex-col">
                 <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide mb-2">
                   {hariList.map(hari => (
@@ -1608,9 +1654,9 @@ export default function JadwalGuru() {
                       key={hari}
                       onClick={() => setActiveHari(hari)}
                       className={`whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors border ${
-                        activeHari === hari 
-                        ? 'bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-500/20' 
-                        : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                        activeHari === hari
+                          ? 'bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-500/20'
+                          : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
                       }`}
                     >
                       {hari}
@@ -1622,9 +1668,9 @@ export default function JadwalGuru() {
                   {filteredJadwal.length > 0 ? (
                     filteredJadwal.map((j) => (
                       <div key={j.id} className={`group p-4 rounded-xl border transition-all ${
-                        j.hari === todayName 
-                        ? 'bg-blue-50/50 border-blue-100 hover:border-blue-300' 
-                        : 'bg-white border-gray-100 hover:border-gray-300'
+                        j.hari === todayName
+                          ? 'bg-blue-50/50 border-blue-100 hover:border-blue-300'
+                          : 'bg-white border-gray-100 hover:border-gray-300'
                       }`}>
                         <div className="flex justify-between items-start mb-2">
                           <h4 className="font-bold text-gray-800 line-clamp-1">{j.mapel}</h4>
@@ -1656,9 +1702,9 @@ export default function JadwalGuru() {
               <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
                 <span>🏆</span> Tanggung Jawab Lain
               </h3>
-              
+
               <div className="space-y-4">
-                {/* Ekskul Item Updated */}
+                {/* Ekskul */}
                 <div>
                   <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
                     Ekstrakurikuler ({eskulDiampu.length})
@@ -1666,8 +1712,8 @@ export default function JadwalGuru() {
                   {eskulDiampu.length > 0 ? (
                     <div className="space-y-2">
                       {eskulDiampu.map(e => (
-                        <div 
-                          key={e.id} 
+                        <div
+                          key={e.id}
                           onClick={() => handleEskulClick(e)}
                           className="p-3 rounded-lg bg-purple-50 border border-purple-100 hover:border-purple-300 hover:shadow-md transition-all cursor-pointer group"
                         >
@@ -1679,8 +1725,7 @@ export default function JadwalGuru() {
                               {e.hari || '-'}
                             </span>
                           </div>
-                          
-                          {/* Info Tambahan Waktu & Anggota */}
+
                           <div className="flex items-center gap-3 text-xs text-purple-600">
                             <div className="flex items-center gap-1">
                               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1695,8 +1740,7 @@ export default function JadwalGuru() {
                               <span>{e.jumlah_anggota} Anggota</span>
                             </div>
                           </div>
-                          
-                          {/* Tombol Absensi */}
+
                           <div className="mt-2 pt-2 border-t border-purple-100">
                             <button className="text-xs text-purple-600 hover:text-purple-800 font-medium flex items-center gap-1">
                               <span>📝 Klik untuk Absensi</span>
@@ -1708,9 +1752,9 @@ export default function JadwalGuru() {
                   ) : <p className="text-xs text-gray-400 italic">Tidak ada ekskul</p>}
                 </div>
 
-                <hr className="border-gray-100"/>
+                <hr className="border-gray-100" />
 
-                {/* Organisasi Item */}
+                {/* Organisasi */}
                 <div>
                   <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
                     Organisasi ({organisasiDiampu.length})
@@ -1718,8 +1762,8 @@ export default function JadwalGuru() {
                   {organisasiDiampu.length > 0 ? (
                     <div className="space-y-2">
                       {organisasiDiampu.map(o => (
-                        <div 
-                          key={o.id} 
+                        <div
+                          key={o.id}
                           onClick={() => handleOrganisasiClick(o)}
                           className="flex items-center justify-between p-3 rounded-lg bg-emerald-50 border border-emerald-100 hover:border-emerald-300 hover:shadow-md transition-all cursor-pointer group"
                         >
@@ -1744,16 +1788,16 @@ export default function JadwalGuru() {
               </div>
             </div>
 
-            {/* CARD STRUKTUR SEKOLAH */}
+            {/* Struktur Sekolah */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
               <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
                 <span>🏛️</span> Struktur Sekolah
               </h3>
-              
+
               <div className="space-y-3">
                 {strukturSekolah.length > 0 ? (
                   strukturSekolah.map((struktur, index) => (
-                    <div 
+                    <div
                       key={struktur.id}
                       className="flex items-center justify-between p-3 rounded-lg bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-100 hover:border-blue-300 transition-all group"
                     >
@@ -1785,10 +1829,9 @@ export default function JadwalGuru() {
             </div>
           </div>
 
-          {/* KOLOM KANAN (Pengumuman & Monitoring) */}
+          {/* KOLOM KANAN */}
           <div className="xl:col-span-8 space-y-6">
-
-            {/* --- CARD PENGUMUMAN --- */}
+            {/* Pengumuman */}
             {pengumumanList.length > 0 && (
               <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
                 <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-4 flex items-center justify-between">
@@ -1796,7 +1839,7 @@ export default function JadwalGuru() {
                     <span>📢</span> Pengumuman Terbaru
                   </h2>
                 </div>
-                
+
                 <div className="p-5">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     {pengumumanList.map((p) => (
@@ -1804,9 +1847,9 @@ export default function JadwalGuru() {
                         <div>
                           <div className="flex items-center justify-between mb-3">
                             <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase border ${
-                              p.target === 'guru' 
-                              ? 'bg-purple-50 text-purple-700 border-purple-100' 
-                              : 'bg-blue-50 text-blue-700 border-blue-100'
+                              p.target === 'guru'
+                                ? 'bg-purple-50 text-purple-700 border-purple-100'
+                                : 'bg-blue-50 text-blue-700 border-blue-100'
                             }`}>
                               {p.target === 'semua' ? 'Semua' : 'Guru'}
                             </span>
@@ -1828,9 +1871,8 @@ export default function JadwalGuru() {
               </div>
             )}
 
-            {/* --- MONITORING JAM KOSONG (DIKECILKAN) --- */}
+            {/* Monitoring Jam Kosong */}
             <div className="bg-white rounded-2xl shadow-md border border-gray-200 flex flex-col max-h-[500px]">
-              
               <div className="p-6 border-b border-gray-100">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div>
@@ -1845,20 +1887,20 @@ export default function JadwalGuru() {
                       Data real-time pengajuan jam kosong hari ini ({todayName}).
                     </p>
                   </div>
-                  
+
                   <div className="flex gap-3">
-                      <div className="bg-red-50 border border-red-100 px-4 py-2 rounded-xl text-center">
-                        <div className="text-xs text-red-600 font-bold uppercase">Perlu Guru</div>
-                        <div className="text-lg font-bold text-red-700 leading-none">
-                          {jamKosongHariIni.filter(j => !j.guru_pengganti).length}
-                        </div>
+                    <div className="bg-red-50 border border-red-100 px-4 py-2 rounded-xl text-center">
+                      <div className="text-xs text-red-600 font-bold uppercase">Perlu Guru</div>
+                      <div className="text-lg font-bold text-red-700 leading-none">
+                        {jamKosongHariIni.filter(j => !j.guru_pengganti).length}
                       </div>
-                      <div className="bg-green-50 border border-green-100 px-4 py-2 rounded-xl text-center">
-                        <div className="text-xs text-green-600 font-bold uppercase">Teratasi</div>
-                        <div className="text-lg font-bold text-green-700 leading-none">
-                          {jamKosongHariIni.filter(j => j.guru_pengganti).length}
-                        </div>
+                    </div>
+                    <div className="bg-green-50 border border-green-100 px-4 py-2 rounded-xl text-center">
+                      <div className="text-xs text-green-600 font-bold uppercase">Teratasi</div>
+                      <div className="text-lg font-bold text-green-700 leading-none">
+                        {jamKosongHariIni.filter(j => j.guru_pengganti).length}
                       </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1867,16 +1909,16 @@ export default function JadwalGuru() {
                 {jamKosongHariIni.length > 0 ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {jamKosongHariIni.map((item) => {
-                      const isHandled = !!item.guru_pengganti;
-                      const isMe = item.guru_pengganti === (profile?.nama || user?.email);
+                      const isHandled = !!item.guru_pengganti
+                      const isMe = item.guru_pengganti === (profile?.nama || user?.email)
 
                       return (
-                        <div 
-                          key={item.id} 
+                        <div
+                          key={item.id}
                           className={`relative p-5 rounded-xl border-2 transition-all duration-200 flex flex-col justify-between group ${
-                            isHandled 
-                            ? 'bg-white border-green-200' 
-                            : 'bg-white border-red-200 shadow-lg shadow-red-100 hover:-translate-y-1'
+                            isHandled
+                              ? 'bg-white border-green-200'
+                              : 'bg-white border-red-200 shadow-lg shadow-red-100 hover:-translate-y-1'
                           }`}
                         >
                           <div className={`absolute top-0 right-0 px-3 py-1 rounded-bl-xl rounded-tr-lg text-[10px] font-bold tracking-wide uppercase ${
@@ -1898,35 +1940,32 @@ export default function JadwalGuru() {
                             <h3 className="text-lg font-bold text-gray-800 leading-tight mb-2">
                               {item.mapel}
                             </h3>
-                            
+
                             <div className="bg-gray-50 p-3 rounded-lg border border-gray-100 text-sm space-y-1">
-                               <div className="flex justify-between">
-                                  <span className="text-gray-500">Pengajar:</span>
-                                  <span className="font-medium text-gray-800">{item.guru_pengaju}</span>
-                               </div>
-                               <div className="flex justify-between items-start">
-                                  <span className="text-gray-500 shrink-0">Alasan:</span>
-                                  <span className="font-medium text-gray-800 text-right line-clamp-2">{item.alasan}</span>
-                               </div>
+                              <div className="flex justify-between">
+                                <span className="text-gray-500">Pengajar:</span>
+                                <span className="font-medium text-gray-800">{item.guru_pengaju}</span>
+                              </div>
+                              <div className="flex justify-between items-start">
+                                <span className="text-gray-500 shrink-0">Alasan:</span>
+                                <span className="font-medium text-gray-800 text-right line-clamp-2">{item.alasan}</span>
+                              </div>
                             </div>
                           </div>
 
                           <div className="mt-2 pt-3 border-t border-gray-100">
-                            {/* LOGIKA TOMBOL AMBIL / BATAL */}
                             {isHandled ? (
                               isMe ? (
-                                // JIKA SAYA YANG MENGAMBIL, TAMPILKAN TOMBOL BATALKAN
                                 <button
                                   onClick={() => handleToggleJamKosong(item.id, item.guru_pengganti)}
                                   className="w-full py-2.5 px-4 bg-orange-100 hover:bg-orange-200 text-orange-700 border border-orange-300 rounded-lg font-bold text-sm transition-colors flex items-center justify-center gap-2"
                                 >
-                                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                   </svg>
-                                   Batalkan (Saya Penggantinya)
+                                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                  </svg>
+                                  Batalkan (Saya Penggantinya)
                                 </button>
                               ) : (
-                                // JIKA ORANG LAIN, TAMPILKAN INFO SAJA
                                 <div className="flex items-center gap-2 text-green-700 bg-green-50 p-2 rounded-lg justify-center">
                                   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -1937,7 +1976,6 @@ export default function JadwalGuru() {
                                 </div>
                               )
                             ) : (
-                              // JIKA BELUM DIAMBIL, TAMPILKAN TOMBOL AMBIL
                               <button
                                 onClick={() => handleToggleJamKosong(item.id, null)}
                                 className="w-full py-2.5 px-4 bg-red-500 hover:bg-red-600 active:bg-red-700 text-white rounded-lg font-semibold text-sm transition-colors shadow-md shadow-red-200 flex items-center justify-center gap-2"
@@ -1957,7 +1995,7 @@ export default function JadwalGuru() {
                   <div className="h-full flex flex-col items-center justify-center text-center p-10 bg-white rounded-xl border border-dashed border-gray-300">
                     <div className="w-24 h-24 bg-green-50 rounded-full flex items-center justify-center mb-5 animate-pulse">
                       <svg className="w-12 h-12 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
                     </div>
                     <h3 className="text-xl font-bold text-gray-800">Semua Aman!</h3>
@@ -1969,7 +2007,7 @@ export default function JadwalGuru() {
               </div>
             </div>
 
-            {/* --- CARD SERTIFIKAT SAYA (MAX 5) --- */}
+            {/* Sertifikat Saya */}
             <div className="bg-white rounded-2xl shadow-md border border-gray-200">
               <div className="p-6 border-b border-gray-100">
                 <div className="flex justify-between items-center">
@@ -1978,8 +2016,8 @@ export default function JadwalGuru() {
                       <span>🏆</span> Sertifikat Saya
                     </h2>
                     <p className="text-sm text-gray-500 mt-1">
-                      {sertifikatList.length > 5 
-                        ? `Menampilkan 5 dari ${sertifikatList.length} sertifikat` 
+                      {sertifikatList.length > 5
+                        ? `Menampilkan 5 dari ${sertifikatList.length} sertifikat`
                         : `${sertifikatList.length} sertifikat`}
                     </p>
                   </div>
@@ -1988,7 +2026,7 @@ export default function JadwalGuru() {
                       {sertifikatList.length} Total
                     </span>
                     {sertifikatList.length > 5 && (
-                      <button 
+                      <button
                         onClick={handleRiwayatSertifikat}
                         className="text-xs text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1 px-3 py-1 bg-blue-50 rounded-lg border border-blue-100 hover:bg-blue-100 transition-colors"
                       >
@@ -2006,7 +2044,7 @@ export default function JadwalGuru() {
                 {displayedSertifikat.length > 0 ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {displayedSertifikat.map((sertifikat) => (
-                      <div 
+                      <div
                         key={sertifikat.id}
                         className="border border-gray-200 rounded-xl p-4 hover:border-amber-300 hover:shadow-md transition-all cursor-pointer group"
                         onClick={() => handleViewSertifikat(sertifikat)}
@@ -2021,14 +2059,14 @@ export default function JadwalGuru() {
                             </p>
                           </div>
                           <span className={`text-xs px-2 py-1 rounded-full ${
-                            sertifikat.sent 
-                              ? 'bg-green-100 text-green-700 border border-green-200' 
+                            sertifikat.sent
+                              ? 'bg-green-100 text-green-700 border border-green-200'
                               : 'bg-yellow-100 text-yellow-700 border border-yellow-200'
                           }`}>
                             {sertifikat.sent ? 'Terkirim' : 'Pending'}
                           </span>
                         </div>
-                        
+
                         <div className="flex items-center justify-between text-xs text-gray-500">
                           <span>
                             {new Date(sertifikat.issued_at).toLocaleDateString('id-ID', {
@@ -2038,7 +2076,7 @@ export default function JadwalGuru() {
                             })}
                           </span>
                           <div className="flex gap-2">
-                            <button 
+                            <button
                               onClick={(e) => {
                                 e.stopPropagation()
                                 handleDownloadSertifikat(sertifikat)
@@ -2070,7 +2108,7 @@ export default function JadwalGuru() {
 
       {/* Overlay Absensi Eskul */}
       {showAbsensiOverlay && selectedEskul && (
-        <AbsensiEskulOverlay 
+        <AbsensiEskulOverlay
           eskul={selectedEskul}
           onClose={closeAbsensiOverlay}
           siswaMap={siswaMap}
@@ -2079,7 +2117,7 @@ export default function JadwalGuru() {
 
       {/* Overlay Detail Organisasi */}
       {showOrganisasiOverlay && selectedOrganisasi && (
-        <OrganisasiDetailOverlay 
+        <OrganisasiDetailOverlay
           organisasi={selectedOrganisasi}
           onClose={closeOrganisasiOverlay}
         />
@@ -2087,7 +2125,7 @@ export default function JadwalGuru() {
 
       {/* Overlay Detail Sertifikat */}
       {showSertifikatOverlay && selectedSertifikat && (
-        <SertifikatDetailOverlay 
+        <SertifikatDetailOverlay
           sertifikat={selectedSertifikat}
           onClose={closeSertifikatOverlay}
           onDownload={handleDownloadSertifikat}
@@ -2096,7 +2134,7 @@ export default function JadwalGuru() {
 
       {/* Overlay Riwayat Sertifikat */}
       {showRiwayatSertifikatOverlay && (
-        <RiwayatSertifikatOverlay 
+        <RiwayatSertifikatOverlay
           sertifikatList={sertifikatList}
           onClose={closeRiwayatSertifikatOverlay}
           onViewDetail={handleViewSertifikat}
