@@ -576,42 +576,75 @@ function AbsensiGuru() {
 
   /* ===== Subscription Absensi & Ajuan (live, tanpa reload berat) ===== */
   useEffect(() => {
-    if (!kelas || !currentSchedule?.mapel || !tgl) return
+    if (!kelas || !currentScheduleRef.current?.mapel || !tgl) return
 
+    // Realtime ABSENSI
     const absensiChannel = supabase
-      .channel(`absensi-changes-${kelas}-${currentSchedule.mapel}-${tgl}`)
+      .channel(`absensi-changes-${kelas}-${currentScheduleRef.current.mapel}-${tgl}`)
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
           table: 'absensi',
-          filter: `kelas=eq.${kelas}&mapel=eq.${currentSchedule.mapel}&tanggal=eq.${tgl}`
+          filter: `kelas=eq.${kelas}`
         },
         (payload) => {
-          console.log('Absensi realtime:', payload)
           if (view !== 'absen') return
+
+          const row = payload.new || payload.old
+          if (!row) return
+
+          if (
+            row.kelas !== kelas ||
+            row.mapel !== currentScheduleRef.current?.mapel ||
+            row.tanggal !== tgl
+          ) {
+            return
+          }
+
+          console.log('Absensi realtime (filtered):', payload)
           setAbsensi(prev => applyRealtimeChange(prev, payload))
           setLastUpdate(new Date())
         }
       )
       .subscribe()
 
+    // Realtime AJUAN IZIN
     const ajuanChannel = supabase
-      .channel(`ajuan-changes-${kelas}-${currentSchedule.mapel}-${tgl}`)
+      .channel(`ajuan-changes-${kelas}-${currentScheduleRef.current.mapel}-${tgl}`)
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
           table: 'absensi_ajuan',
-          filter: `kelas=eq.${kelas}&mapel=eq.${currentSchedule.mapel}&tanggal=eq.${tgl}`
+          filter: `kelas=eq.${kelas}`
         },
         (payload) => {
-          console.log('Ajuan realtime:', payload)
           if (view !== 'absen') return
+
+          const row = payload.new || payload.old
+          if (!row) return
+
+          if (
+            row.kelas !== kelas ||
+            row.mapel !== currentScheduleRef.current?.mapel ||
+            row.tanggal !== tgl
+          ) {
+            return
+          }
+
+          console.log('Ajuan realtime (filtered):', payload)
           setAjuan(prev => applyRealtimeChange(prev, payload))
           setLastUpdate(new Date())
+
+          if (
+            payload.eventType === 'INSERT' &&
+            (row.alasan || '').toLowerCase().includes('sakit')
+          ) {
+            pushToast('info', `Ajuan izin sakit dari ${row.nama}`)
+          }
         }
       )
       .subscribe()
@@ -620,7 +653,7 @@ function AbsensiGuru() {
       supabase.removeChannel(absensiChannel)
       supabase.removeChannel(ajuanChannel)
     }
-  }, [kelas, currentSchedule?.mapel, tgl, view])
+  }, [kelas, tgl, view, pushToast])
 
   /* ===== Subscription Jam Kosong ===== */
   useEffect(() => {
@@ -986,11 +1019,13 @@ function AbsensiGuru() {
     return now >= toMinutes(currentSchedule.jam_mulai) && now <= toMinutes(currentSchedule.jam_selesai) + 5
   }, [currentSchedule, tgl, currentDateTime])
 
-  const { listHadir, listIzin, listAlpha, listBelumHadir } = useMemo(() => {
+  const { listHadir, listIzin, listSakit, listAlpha, listBelumHadir } = useMemo(() => {
     const listHadir = []
     const listIzin = []
+    const listSakit = []
     const listAlpha = []
     const listBelumHadir = []
+
     siswa.forEach(s => {
       const absen = absensi.find(a => a.uid === s.id)
       const row = {
@@ -1004,10 +1039,11 @@ function AbsensiGuru() {
       if (!absen) listBelumHadir.push(row)
       else if (absen.status === 'Hadir') listHadir.push(row)
       else if (absen.status === 'Izin') listIzin.push(row)
+      else if (absen.status === 'Sakit') listSakit.push(row)
       else if (absen.status === 'Alpha') listAlpha.push(row)
       else listBelumHadir.push(row)
     })
-    return { listHadir, listIzin, listAlpha, listBelumHadir }
+    return { listHadir, listIzin, listSakit, listAlpha, listBelumHadir }
   }, [siswa, absensi])
 
   /* ===== Action Handlers ===== */
@@ -1038,7 +1074,7 @@ function AbsensiGuru() {
       const { data, error } = await supabase
         .from('absensi')
         .upsert(payload, {
-          onConflict: 'kelas,tanggal,uid,mapel' // URUTAN SAMA DENGAN CONSTRAINT
+          onConflict: 'kelas,tanggal,uid,mapel'
         })
         .select()
         .single()
@@ -1464,27 +1500,35 @@ function AbsensiGuru() {
     setIsDetailIzinModalOpen(true)
   }
 
-  const keputusanAjuan = async (a, terima) => {
+  const keputusanAjuan = async (a, action) => {
     setLoadingActions(prev => ({ ...prev, [`ajuan-${a.id}`]: true }))
 
     try {
-      if (terima) {
+      if (action === 'izin') {
         await setStatus(a.uid, 'Izin', a.alasan)
+      } else if (action === 'sakit') {
+        await setStatus(a.uid, 'Sakit', a.alasan || 'Sakit (Ajuan)')
       }
 
-      const { error } = await supabase
-        .from('absensi_ajuan')
-        .delete()
-        .eq('id', a.id)
+      if (action === 'izin' || action === 'sakit' || action === 'tolak') {
+        const { error } = await supabase
+          .from('absensi_ajuan')
+          .delete()
+          .eq('id', a.id)
 
-      if (error) {
-        console.error('Error deleting ajuan:', error)
-        pushToast('error', 'Gagal memproses ajuan')
-      } else {
-        setIsDetailIzinModalOpen(false)
-        setAjuan(prev => prev.filter(x => x.id !== a.id))
-        setLastUpdate(new Date())
-        pushToast('success', `Ajuan ${terima ? 'diterima' : 'ditolak'}`)
+        if (error) {
+          console.error('Error deleting ajuan:', error)
+          pushToast('error', 'Gagal memproses ajuan')
+        } else {
+          setIsDetailIzinModalOpen(false)
+          setAjuan(prev => prev.filter(x => x.id !== a.id))
+          setLastUpdate(new Date())
+          let teks = 'Ajuan diproses'
+          if (action === 'izin') teks = 'Ajuan diterima sebagai Izin'
+          if (action === 'sakit') teks = 'Ajuan diterima sebagai Sakit'
+          if (action === 'tolak') teks = 'Ajuan ditolak'
+          pushToast('success', teks)
+        }
       }
     } catch (error) {
       console.error('Exception in keputusanAjuan:', error)
@@ -1496,7 +1540,7 @@ function AbsensiGuru() {
 
   /* ===== Real-time RFID Listeners (ringan, tanpa reload penuh) ===== */
   useEffect(() => {
-    if (!kelas || !currentSchedule?.mapel || !siswa.length || absenMode !== 'otomatis' || tgl !== getToday())
+    if (!kelas || !currentScheduleRef.current?.mapel || !siswa.length || absenMode !== 'otomatis' || tgl !== getToday())
       return
 
     const channel = supabase
@@ -1579,6 +1623,7 @@ function AbsensiGuru() {
     const rowColors = {
       Hadir: 'bg-green-50 hover:bg-green-100',
       Izin: 'bg-yellow-50 hover:bg-yellow-100',
+      Sakit: 'bg-blue-50 hover:bg-blue-100',
       Alpha: 'bg-red-50 hover:bg-red-100',
       'Belum Absen': 'bg-white hover:bg-gray-50'
     }
@@ -1586,12 +1631,15 @@ function AbsensiGuru() {
     const badgeColors = {
       Hadir: 'bg-green-100 text-green-700 border-green-200',
       Izin: 'bg-yellow-100 text-yellow-700 border-yellow-200',
+      Sakit: 'bg-blue-100 text-blue-700 border-blue-200',
       Alpha: 'bg-red-100 text-red-700 border-red-200',
       'Belum Absen': 'bg-gray-100 text-gray-600 border-gray-200'
     }
 
     const getSourceInfo = (s) => {
-      if (s.status !== 'Hadir') return <span className="text-gray-500 italic text-xs">{s.komentar || '-'}</span>
+      if (s.status !== 'Hadir') {
+        return <span className="text-gray-500 italic text-xs">{s.komentar || '-'}</span>
+      }
 
       const text = (s.komentar || '').toLowerCase()
       const oleh = (s.oleh || '').toLowerCase()
@@ -1625,6 +1673,7 @@ function AbsensiGuru() {
         <h4 className="font-bold text-gray-800 text-sm mb-2 flex items-center gap-2">
           {type === 'Hadir' && '✅'}
           {type === 'Izin' && '🟡'}
+          {type === 'Sakit' && '💙'}
           {type === 'Alpha' && '❌'}
           {type === 'Belum Absen' && '⏳'}
           {type}{' '}
@@ -1715,6 +1764,14 @@ function AbsensiGuru() {
                               title="Izin"
                             >
                               I
+                            </button>
+                            <button
+                              onClick={() => setStatus(s.id, 'Sakit')}
+                              disabled={loadingActions[s.id]}
+                              className="w-7 h-7 rounded bg-blue-500 hover:bg-blue-600 text-white flex items-center justify-center text-xs shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                              title="Sakit"
+                            >
+                              S
                             </button>
                             <button
                               onClick={() => setStatus(s.id, 'Alpha')}
@@ -2071,19 +2128,33 @@ function AbsensiGuru() {
                           className="bg-white p-3 rounded-lg border border-amber-100 flex justify-between items-center shadow-sm"
                         >
                           <div>
-                            <div className="font-bold text-sm text-gray-800">{a.nama}</div>
+                            <div className="flex items-center gap-2 mb-1">
+                              <div className="font-bold text-sm text-gray-800">{a.nama}</div>
+                              {a.alasan?.toLowerCase().includes('sakit') && (
+                                <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-[10px] font-bold border border-blue-200">
+                                  Izin Sakit
+                                </span>
+                              )}
+                            </div>
                             <div className="text-xs text-gray-500 italic">"{a.alasan}"</div>
                           </div>
                           <div className="flex gap-2">
                             <button
-                              onClick={() => keputusanAjuan(a, true)}
+                              onClick={() => keputusanAjuan(a, 'izin')}
                               disabled={loadingActions[`ajuan-${a.id}`]}
                               className="px-3 py-1.5 bg-green-500 text-white text-xs rounded-lg font-bold hover:bg-green-600 shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                              Terima
+                              Terima (Izin)
                             </button>
                             <button
-                              onClick={() => keputusanAjuan(a, false)}
+                              onClick={() => keputusanAjuan(a, 'sakit')}
+                              disabled={loadingActions[`ajuan-${a.id}`]}
+                              className="px-3 py-1.5 bg-blue-500 text-white text-xs rounded-lg font-bold hover:bg-blue-600 shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              Sakit
+                            </button>
+                            <button
+                              onClick={() => keputusanAjuan(a, 'tolak')}
                               disabled={loadingActions[`ajuan-${a.id}`]}
                               className="px-3 py-1.5 bg-red-500 text-white text-xs rounded-lg font-bold hover:bg-red-600 shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                             >
@@ -2113,6 +2184,7 @@ function AbsensiGuru() {
                   <>
                     {renderSiswaTable(listHadir, 'Hadir')}
                     {renderSiswaTable(listIzin, 'Izin')}
+                    {renderSiswaTable(listSakit, 'Sakit')}
                     {renderSiswaTable(listAlpha, 'Alpha')}
                     {renderSiswaTable(listBelumHadir, 'Belum Absen')}
                   </>
@@ -2393,18 +2465,25 @@ function AbsensiGuru() {
                 Tutup
               </button>
               <button
-                onClick={() => keputusanAjuan(selectedAjuan, false)}
+                onClick={() => keputusanAjuan(selectedAjuan, 'tolak')}
                 disabled={loadingActions[`ajuan-${selectedAjuan.id}`]}
                 className="px-5 py-2.5 bg-red-100 text-red-700 hover:bg-red-200 rounded-xl font-bold disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Tolak
               </button>
               <button
-                onClick={() => keputusanAjuan(selectedAjuan, true)}
+                onClick={() => keputusanAjuan(selectedAjuan, 'izin')}
                 disabled={loadingActions[`ajuan-${selectedAjuan.id}`]}
-                className="px-5 py-2.5 bg-green-600 text-white hover:bg-green-700 rounded-xl font-bold shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-5 py-2.5 bg-yellow-500 text-white hover:bg-yellow-600 rounded-xl font-bold shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Terima Izin
+                Izin
+              </button>
+              <button
+                onClick={() => keputusanAjuan(selectedAjuan, 'sakit')}
+                disabled={loadingActions[`ajuan-${selectedAjuan.id}`]}
+                className="px-5 py-2.5 bg-blue-600 text-white hover:bg-blue-700 rounded-xl font-bold shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Sakit
               </button>
             </div>
           </div>
