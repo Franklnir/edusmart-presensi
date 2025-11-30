@@ -10,6 +10,7 @@ function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Passwor
     e.preventDefault()
     if (password.trim()) {
       onConfirm(password)
+      // jangan langsung clear di sini, biar kalau error user bisa edit
     }
   }
 
@@ -85,48 +86,6 @@ const verifyPassword = async (password) => {
   }
 }
 
-/* ===== Confirmation Modal Component ===== */
-function ConfirmationModal({ 
-  isOpen, 
-  onClose, 
-  onConfirm, 
-  title = "Konfirmasi", 
-  message = "Apakah Anda yakin?",
-  confirmText = "Ya, Lanjutkan",
-  cancelText = "Batal",
-  loading = false 
-}) {
-  if (!isOpen) return null
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4">
-        <h3 className="text-lg font-bold text-gray-900 mb-2">{title}</h3>
-        <p className="text-gray-600 text-sm mb-6">{message}</p>
-
-        <div className="flex justify-end space-x-3">
-          <button
-            type="button"
-            className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors duration-200"
-            onClick={onClose}
-            disabled={loading}
-          >
-            {cancelText}
-          </button>
-          <button
-            type="button"
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-            onClick={onConfirm}
-            disabled={loading}
-          >
-            {loading ? 'Memproses...' : confirmText}
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 /* ===== Utils ===== */
 const HARI_OPTS = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu']
 const GRADE_OPTS = ['VII', 'VIII', 'IX', 'X', 'XI', 'XII']
@@ -190,6 +149,7 @@ export default function AKelas() {
   }
 
   const handlePasswordClose = () => {
+    // Boleh ditutup, tapi halaman tetap terkunci
     setPasswordModalOpen(false)
   }
 
@@ -228,13 +188,6 @@ export default function AKelas() {
   const [editId, setEditId] = useState(null)
   const [editData, setEditData] = useState(null)
 
-  /* ====== STATE UNTUK UBAH KELAS MASSAL ====== */
-  const [ubahKelasModalOpen, setUbahKelasModalOpen] = useState(false)
-  const [selectedGrade, setSelectedGrade] = useState('')
-  const [selectedKelas, setSelectedKelas] = useState('')
-  const [ubahKelasLoading, setUbahKelasLoading] = useState(false)
-  const [siswaByGrade, setSiswaByGrade] = useState([])
-
   /* ====== EFFECTS: sekarang digate oleh isAuthorized ====== */
 
   // Load guru & siswa setelah password benar
@@ -269,19 +222,6 @@ export default function AKelas() {
       setKetuaUid('')
     }
   }, [isAuthorized, kelasSelected])
-
-  // Update siswaByGrade ketika selectedGrade berubah
-  useEffect(() => {
-    if (selectedGrade) {
-      const filteredSiswa = siswaList.filter(siswa => {
-        const siswaGrade = parseGrade(siswa.kelas)
-        return siswaGrade === selectedGrade
-      })
-      setSiswaByGrade(filteredSiswa)
-    } else {
-      setSiswaByGrade([])
-    }
-  }, [selectedGrade, siswaList])
 
   /* ================== LOADERS ================== */
   const loadGuruList = async () => {
@@ -569,55 +509,6 @@ export default function AKelas() {
     } catch (error) {
       console.error('Error checking conflict:', error)
       return 'Error memeriksa konflik jadwal'
-    }
-  }
-
-  /* ================== FUNGSI UBAH KELAS MASSAL ================== */
-  const openUbahKelasModal = () => {
-    setSelectedGrade('')
-    setSelectedKelas('')
-    setSiswaByGrade([])
-    setUbahKelasModalOpen(true)
-  }
-
-  const closeUbahKelasModal = () => {
-    setUbahKelasModalOpen(false)
-    setSelectedGrade('')
-    setSelectedKelas('')
-    setSiswaByGrade([])
-  }
-
-  const handleUbahKelasMassal = async () => {
-    if (!selectedGrade || !selectedKelas) {
-      pushToast('error', 'Pilih grade dan kelas tujuan terlebih dahulu')
-      return
-    }
-
-    if (siswaByGrade.length === 0) {
-      pushToast('info', `Tidak ada siswa di grade ${selectedGrade}`)
-      return
-    }
-
-    setUbahKelasLoading(true)
-    try {
-      // Update semua siswa dengan grade yang dipilih ke kelas baru
-      const siswaIds = siswaByGrade.map(siswa => siswa.uid)
-      
-      const { error } = await supabase
-        .from('profiles')
-        .update({ kelas: selectedKelas })
-        .in('id', siswaIds)
-
-      if (error) throw error
-
-      pushToast('success', `Berhasil mengubah ${siswaByGrade.length} siswa grade ${selectedGrade} ke kelas ${selectedKelas}`)
-      closeUbahKelasModal()
-      loadSiswaList() // Reload data siswa
-    } catch (error) {
-      console.error('Error updating kelas massal:', error)
-      pushToast('error', 'Gagal mengubah kelas siswa')
-    } finally {
-      setUbahKelasLoading(false)
     }
   }
 
@@ -1037,18 +928,6 @@ export default function AKelas() {
         loading={passwordLoading}
       />
 
-      {/* Modal Konfirmasi Ubah Kelas Massal */}
-      <ConfirmationModal
-        isOpen={ubahKelasModalOpen}
-        onClose={closeUbahKelasModal}
-        onConfirm={handleUbahKelasMassal}
-        title="Konfirmasi Ubah Kelas Massal"
-        message={`Apakah Anda yakin ingin mengubah ${siswaByGrade.length} siswa dari grade ${selectedGrade} ke kelas ${selectedKelas}?`}
-        confirmText="Ya, Ubah Kelas"
-        cancelText="Batal"
-        loading={ubahKelasLoading}
-      />
-
       {/* Jika belum authorized: tampilkan layar kunci saja */}
       {!isAuthorized ? (
         <div className="min-h-screen flex items-center justify-center px-4">
@@ -1208,89 +1087,6 @@ export default function AKelas() {
                       </div>
                     )}
                   </div>
-                </div>
-
-                {/* Ubah Kelas Massal Card */}
-                <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-200">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center space-x-2">
-                    <span>🔄</span>
-                    <span>Ubah Kelas Massal</span>
-                  </h3>
-                  <p className="text-gray-600 text-sm mb-4">
-                    Ubah kelas untuk semua siswa dalam tingkatan (grade) tertentu ke kelas baru
-                  </p>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Pilih Grade</label>
-                      <select
-                        className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm text-gray-900"
-                        value={selectedGrade}
-                        onChange={e => setSelectedGrade(e.target.value)}
-                      >
-                        <option value="">Pilih grade</option>
-                        {GRADE_OPTS.map(g => (
-                          <option key={g} value={g}>{g}</option>
-                        ))}
-                      </select>
-                    </div>
-                    
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Kelas Tujuan</label>
-                      <select
-                        className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm text-gray-900"
-                        value={selectedKelas}
-                        onChange={e => setSelectedKelas(e.target.value)}
-                        disabled={!selectedGrade}
-                      >
-                        <option value="">Pilih kelas</option>
-                        {kelas
-                          .filter(k => k.grade === selectedGrade)
-                          .map(k => (
-                            <option key={k.id} value={k.id}>{k.nama}</option>
-                          ))
-                        }
-                      </select>
-                    </div>
-                    
-                    <div className="flex items-end">
-                      <button
-                        className="w-full bg-gradient-to-r from-purple-600 to-purple-700 text-white py-2.5 px-4 rounded-lg hover:from-purple-700 hover:to-purple-800 focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 transition-all duration-200 text-sm font-medium shadow-md flex items-center justify-center space-x-2"
-                        onClick={openUbahKelasModal}
-                        disabled={!selectedGrade || !selectedKelas || siswaByGrade.length === 0}
-                      >
-                        <span>🔄</span>
-                        <span>Ubah Kelas ({siswaByGrade.length} siswa)</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Info Siswa yang Akan Diubah */}
-                  {selectedGrade && (
-                    <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                      <h4 className="text-sm font-medium text-blue-800 mb-2">
-                        Siswa di Grade {selectedGrade} yang akan diubah:
-                      </h4>
-                      {siswaByGrade.length > 0 ? (
-                        <div className="max-h-40 overflow-y-auto">
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            {siswaByGrade.slice(0, 10).map(siswa => (
-                              <div key={siswa.uid} className="text-sm text-blue-700 bg-blue-100 px-3 py-1 rounded">
-                                {siswa.nama} {siswa.kelas ? `(${siswa.kelas})` : ''}
-                              </div>
-                            ))}
-                            {siswaByGrade.length > 10 && (
-                              <div className="text-sm text-blue-600 italic">
-                                ... dan {siswaByGrade.length - 10} siswa lainnya
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ) : (
-                        <p className="text-sm text-blue-600">Tidak ada siswa di grade {selectedGrade}</p>
-                      )}
-                    </div>
-                  )}
                 </div>
 
                 {/* Grid untuk Form Kelas dan Mata Pelajaran */}
