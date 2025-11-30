@@ -180,7 +180,7 @@ const JadwalHariIniCard = ({ jadwal, currentTimeMinutes, onClick }) => {
   const getStatusJadwal = (jamMulai, jamSelesai) => {
     const mulai = toMinutes(jamMulai);
     const selesai = toMinutes(jamSelesai);
-    const toleransi = 15;
+    const toleransi = 5; // DIUBAH: dari 15 menjadi 5 menit
     
     if (currentTimeMinutes > selesai + toleransi) {
       return 'lewat';
@@ -650,16 +650,16 @@ function AbsensiGuru() {
       const now = currentDateTime.minutes;
       const start = toMinutes(currentSchedule.jam_mulai);
       const end = toMinutes(currentSchedule.jam_selesai);
-      const toleransi = 15;
+      const toleransi = 5; // DIUBAH: dari 15 menjadi 5 menit
 
       const isWithinClassTime = now >= start && now <= end + toleransi;
       const isOutsideClassTime = now > end + toleransi;
 
-      // Jika sedang dalam jam pelajaran + toleransi dan mode bukan otomatis, switch ke otomatis
+      // DIUBAH: Paksa mode otomatis selama jam pelajaran + toleransi
       if (isWithinClassTime && absenMode !== 'otomatis') {
         toggleAbsenMode('otomatis');
       }
-      // Jika sudah lewat jam pelajaran + toleransi dan mode masih otomatis, switch ke manual
+      // DIUBAH: Paksa mode manual di luar jam pelajaran + toleransi
       else if (isOutsideClassTime && absenMode === 'otomatis') {
         toggleAbsenMode('manual');
       }
@@ -760,6 +760,7 @@ function AbsensiGuru() {
     const kelasSet = new Set()
     const jadwalByHariTemp = {}
     const todayDayName = getDayName(getToday())
+    const selectedDayName = getDayName(tgl) // DIUBAH: Ambil hari dari tanggal yang dipilih
 
     const jadwalHariIniTemp = jadwalAll.filter(j => j.hari === todayDayName)
 
@@ -772,8 +773,9 @@ function AbsensiGuru() {
     const schedulesList = []
     if (kelas) {
         const now = currentDateTime.minutes
-        jadwalAll.filter(j => j.kelas_id === kelas).forEach(j => {
-            const isCurrent = j.hari === todayDayName && now >= toMinutes(j.jam_mulai) - 15 && now <= toMinutes(j.jam_selesai) + 30
+        // DIUBAH: Filter jadwal berdasarkan hari dari tanggal yang dipilih
+        jadwalAll.filter(j => j.kelas_id === kelas && j.hari === selectedDayName).forEach(j => {
+            const isCurrent = j.hari === todayDayName && now >= toMinutes(j.jam_mulai) - 5 && now <= toMinutes(j.jam_selesai) + 5 // DIUBAH: toleransi 5 menit
             schedulesList.push({ 
               id: j.id, 
               label: `${j.mapel} - ${j.hari} (${j.jam_mulai}-${j.jam_selesai})`, 
@@ -790,7 +792,7 @@ function AbsensiGuru() {
       jadwalByHari: jadwalByHariTemp,
       jadwalHariIni: jadwalHariIniTemp
     }
-  }, [jadwalAll, user?.id, kelas, currentDateTime])
+  }, [jadwalAll, user?.id, kelas, currentDateTime, tgl]) // DIUBAH: Tambahkan tgl sebagai dependency
 
   const jadwalForJamKosongHariIni = useMemo(() => {
     if (!kelas || !jadwalAll.length) return []
@@ -812,7 +814,7 @@ function AbsensiGuru() {
     
     const now = currentDateTime.minutes
     const endTime = toMinutes(currentSchedule.jam_selesai)
-    return now > endTime + 15
+    return now > endTime + 5 // DIUBAH: dari 15 menjadi 5 menit
   }, [currentSchedule, tgl, currentDateTime])
 
   /* ===== Auto Select Schedule ===== */
@@ -932,7 +934,7 @@ function AbsensiGuru() {
   const isWithinTolerance = useMemo(() => {
     if (!currentSchedule || tgl !== getToday()) return false
     const now = currentDateTime.minutes
-    return now >= toMinutes(currentSchedule.jam_mulai) && now <= toMinutes(currentSchedule.jam_selesai) + 30
+    return now >= toMinutes(currentSchedule.jam_mulai) && now <= toMinutes(currentSchedule.jam_selesai) + 5 // DIUBAH: dari 30 menjadi 5 menit
   }, [currentSchedule, tgl, currentDateTime])
 
   const { listHadir, listIzin, listAlpha, listBelumHadir } = useMemo(() => {
@@ -1030,15 +1032,15 @@ function AbsensiGuru() {
       return
     }
 
-    // Enhanced validation untuk mode otomatis
+    // DIUBAH: Enhanced validation untuk mode otomatis dengan toleransi 5 menit
     if (mode === 'otomatis') {
       const now = currentDateTime.minutes;
       const start = toMinutes(currentSchedule.jam_mulai);
       const end = toMinutes(currentSchedule.jam_selesai);
-      const toleransi = 15;
+      const toleransi = 5; // DIUBAH: dari 15 menjadi 5 menit
 
       if (now < start || now > end + toleransi) {
-        pushToast('error', 'Mode otomatis hanya bisa diaktifkan selama jam pelajaran + 15 menit toleransi')
+        pushToast('error', 'Mode otomatis hanya bisa diaktifkan selama jam pelajaran + 5 menit toleransi')
         return;
       }
     }
@@ -1075,13 +1077,18 @@ function AbsensiGuru() {
 
   /* ===== AUTO ALPHA SYSTEM ===== */
   const triggerAutoAlphaManual = async () => {
+    // DIUBAH: Tambahkan konfirmasi sebelum menjalankan Auto Alpha
+    if (!window.confirm('Anda yakin ingin menjalankan Auto Alpha? Siswa yang belum absen akan di-set Alpha.')) {
+      return
+    }
+
     if (!currentSchedule || !kelas) {
       pushToast('error', 'Pilih kelas dan jadwal terlebih dahulu')
       return
     }
 
     if (!canRunAutoAlpha) {
-      pushToast('error', 'Auto Alpha hanya bisa dijalankan setelah jam pelajaran selesai + toleransi 15 menit')
+      pushToast('error', 'Auto Alpha hanya bisa dijalankan setelah jam pelajaran selesai + toleransi 5 menit') // DIUBAH: pesan error
       return
     }
 
@@ -1174,7 +1181,7 @@ function AbsensiGuru() {
       const endTime = toMinutes(currentSchedule.jam_selesai)
 
       const isToday = tgl === today
-      const isPastClassTime = now > endTime + 30
+      const isPastClassTime = now > endTime + 5 // DIUBAH: dari 30 menjadi 5 menit
       const isPastDate = tgl < today
 
       if (!isPastDate && (!isToday || !isPastClassTime)) return
@@ -1776,7 +1783,7 @@ function AbsensiGuru() {
                     <span>{formatKelasDisplay(kelas)}</span>
                     {isWithinTolerance && (
                       <span className="text-amber-600 font-semibold bg-amber-50 px-1 rounded border border-amber-100">
-                        Toleransi Aktif
+                        Toleransi Aktif (5 menit)
                       </span>
                     )}
                   </div>
@@ -1787,9 +1794,9 @@ function AbsensiGuru() {
               <div className="flex items-center gap-3">
                 <button 
                   onClick={triggerAutoAlphaManual}
-                  disabled={isRunningAutoAlpha || !currentSchedule || !canRunAutoAlpha}
+                  disabled={isRunningAutoAlpha || !currentSchedule}
                   className="px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-xs font-bold rounded-lg disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center gap-1 shadow-sm"
-                  title={!canRunAutoAlpha ? "Auto Alpha hanya bisa dijalankan setelah jam pelajaran selesai + toleransi 15 menit" : ""}
+                  title="Jalankan Auto Alpha untuk siswa yang belum absen"
                 >
                   {isRunningAutoAlpha ? (
                     <>
@@ -1807,23 +1814,25 @@ function AbsensiGuru() {
                 <div className="flex items-center bg-gray-100 rounded-lg p-1 border border-gray-200">
                   <button 
                     onClick={() => toggleAbsenMode('manual')}
+                    disabled={isWithinTolerance} // DIUBAH: Disable manual selama jam pelajaran
                     className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-1.5 ${
                       absenMode === 'manual' 
                         ? 'bg-white text-blue-600 shadow-sm border border-gray-200' 
                         : 'text-gray-500 hover:text-gray-700'
-                    }`}
+                    } ${isWithinTolerance ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    title={isWithinTolerance ? "Mode manual tidak tersedia selama jam pelajaran" : ""}
                   >
                     <span>👨‍🏫</span> Manual
                   </button>
                   <button 
                     onClick={() => toggleAbsenMode('otomatis')}
-                    disabled={!isWithinTolerance}
+                    disabled={!isWithinTolerance} // DIUBAH: Disable otomatis di luar jam pelajaran
                     className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-1.5 ${
                       absenMode === 'otomatis' 
                         ? 'bg-white text-green-600 shadow-sm border border-gray-200' 
                         : 'text-gray-500 hover:text-gray-700'
                     } ${!isWithinTolerance ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    title={!isWithinTolerance ? "Mode otomatis hanya tersedia selama jam pelajaran + 15 menit toleransi" : ""}
+                    title={!isWithinTolerance ? "Mode otomatis hanya tersedia selama jam pelajaran" : ""}
                   >
                     <span>🤖</span> Otomatis {rfidSettings.rfid_aktif && (
                       <span className="text-[9px] bg-green-500 text-white px-1 rounded ml-1">RFID</span>
@@ -1869,6 +1878,11 @@ function AbsensiGuru() {
                         <h4 className="font-bold text-blue-800 text-sm">Sistem Real-time Aktif</h4>
                         <p className="text-blue-600 text-xs">
                           Data diperbarui otomatis. Mode: <strong>{absenMode === 'otomatis' ? 'Otomatis (RFID)' : 'Manual'}</strong>
+                          {isWithinTolerance && absenMode === 'otomatis' && (
+                            <span className="ml-2 bg-green-100 text-green-700 px-1.5 py-0.5 rounded text-[10px] font-bold">
+                              🔒 Terkunci Otomatis
+                            </span>
+                          )}
                         </p>
                       </div>
                     </div>
@@ -1884,7 +1898,7 @@ function AbsensiGuru() {
                 </div>
 
                 {/* Auto Alpha Info Banner */}
-                {(tgl < getToday() || (tgl === getToday() && currentDateTime.minutes > toMinutes(currentSchedule?.jam_selesai || '23:59') + 30)) && (
+                {(tgl < getToday() || (tgl === getToday() && currentDateTime.minutes > toMinutes(currentSchedule?.jam_selesai || '23:59') + 5)) && ( // DIUBAH: toleransi 5 menit
                   <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 animate-pulse-slow">
                     <div className="flex items-center gap-3">
                       <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600">
