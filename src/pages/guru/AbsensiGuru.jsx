@@ -1,5 +1,5 @@
 // src/pages/guru/AbsensiGuru.jsx
-import React, { useState, useEffect, useMemo, useRef } from 'react'
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
@@ -90,11 +90,11 @@ const formatKelasDisplay = (kelasSlug) => {
 }
 
 const getToday = () => {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 const toMinutes = (hhmm) => {
@@ -116,7 +116,7 @@ const getDayName = (tglString) => {
 }
 
 const getCurrentDateTime = () => {
-  const now = new Date();
+  const now = new Date()
   return {
     date: now.toISOString().slice(0, 10),
     time: now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }),
@@ -127,14 +127,14 @@ const getCurrentDateTime = () => {
 
 const formatDateDisplay = (dateString) => {
   try {
-    const date = new Date(dateString + 'T12:00:00Z');
+    const date = new Date(dateString + 'T12:00:00Z')
     return date.toLocaleDateString('id-ID', {
       day: 'numeric',
       month: 'long',
       year: 'numeric'
-    });
+    })
   } catch (error) {
-    return dateString;
+    return dateString
   }
 }
 
@@ -178,21 +178,21 @@ const RealTimeClock = () => {
 /* ===== Komponen Card Jadwal Hari Ini ===== */
 const JadwalHariIniCard = ({ jadwal, currentTimeMinutes, onClick }) => {
   const getStatusJadwal = (jamMulai, jamSelesai) => {
-    const mulai = toMinutes(jamMulai);
-    const selesai = toMinutes(jamSelesai);
-    const toleransi = 5; // DIUBAH: dari 15 menjadi 5 menit
-    
-    if (currentTimeMinutes > selesai + toleransi) {
-      return 'lewat';
-    } else if (currentTimeMinutes >= mulai && currentTimeMinutes <= selesai + toleransi) {
-      return 'berlangsung';
-    } else {
-      return 'akan_datang';
-    }
-  };
+    const mulai = toMinutes(jamMulai)
+    const selesai = toMinutes(jamSelesai)
+    const toleransi = 5
 
-  const status = getStatusJadwal(jadwal.jam_mulai, jadwal.jam_selesai);
-  
+    if (currentTimeMinutes > selesai + toleransi) {
+      return 'lewat'
+    } else if (currentTimeMinutes >= mulai && currentTimeMinutes <= selesai + toleransi) {
+      return 'berlangsung'
+    } else {
+      return 'akan_datang'
+    }
+  }
+
+  const status = getStatusJadwal(jadwal.jam_mulai, jadwal.jam_selesai)
+
   const statusConfig = {
     lewat: {
       color: 'bg-red-50 border-red-200',
@@ -212,9 +212,9 @@ const JadwalHariIniCard = ({ jadwal, currentTimeMinutes, onClick }) => {
       icon: '🟡',
       text: 'Akan Datang'
     }
-  };
+  }
 
-  const config = statusConfig[status];
+  const config = statusConfig[status]
 
   return (
     <div 
@@ -251,8 +251,8 @@ const JadwalHariIniCard = ({ jadwal, currentTimeMinutes, onClick }) => {
         </div>
       </div>
     </div>
-  );
-};
+  )
+}
 
 /* ===== Storage Keys ===== */
 const STORAGE_KEYS = {
@@ -426,6 +426,61 @@ function AbsensiGuru() {
   useEffect(() => { jadwalRef.current = jadwalAll }, [jadwalAll])
   useEffect(() => { currentScheduleRef.current = currentSchedule }, [currentSchedule])
 
+  /* ===== Helper: patch state dari Supabase Realtime ===== */
+  const applyAbsensiChange = useCallback((payload) => {
+    if (!payload) return
+    const targetMapel = currentScheduleRef.current?.mapel
+    const { eventType, new: newRow, old: oldRow } = payload
+    const row = eventType === 'DELETE' ? oldRow : newRow
+
+    if (!row || !targetMapel) return
+    if (row.kelas !== kelas || row.tanggal !== tgl || row.mapel !== targetMapel) return
+
+    setAbsensi(prev => {
+      const idx = prev.findIndex(a => a.id === row.id)
+      if (eventType === 'DELETE') {
+        if (idx === -1) return prev
+        const copy = [...prev]
+        copy.splice(idx, 1)
+        return copy
+      }
+      if (idx === -1) {
+        return [...prev, row]
+      } else {
+        const copy = [...prev]
+        copy[idx] = row
+        return copy
+      }
+    })
+  }, [kelas, tgl])
+
+  const applyAjuanChange = useCallback((payload) => {
+    if (!payload) return
+    const targetMapel = currentScheduleRef.current?.mapel
+    const { eventType, new: newRow, old: oldRow } = payload
+    const row = eventType === 'DELETE' ? oldRow : newRow
+
+    if (!row || !targetMapel) return
+    if (row.kelas !== kelas || row.tanggal !== tgl || row.mapel !== targetMapel) return
+
+    setAjuan(prev => {
+      const idx = prev.findIndex(a => a.id === row.id)
+      if (eventType === 'DELETE') {
+        if (idx === -1) return prev
+        const copy = [...prev]
+        copy.splice(idx, 1)
+        return copy
+      }
+      if (idx === -1) {
+        return [...prev, row]
+      } else {
+        const copy = [...prev]
+        copy[idx] = row
+        return copy
+      }
+    })
+  }, [kelas, tgl])
+
   /* ===== Persist State to localStorage ===== */
   useEffect(() => {
     try {
@@ -514,18 +569,19 @@ function AbsensiGuru() {
 
   /* ===== Enhanced Real-time Subscriptions ===== */
   useEffect(() => {
-    if (!user?.id) return;
+    if (!user?.id) return
 
     // Subscription untuk perubahan jadwal
     const jadwalSubscription = supabase
       .channel('jadwal-changes')
-      .on('postgres_changes', 
+      .on(
+        'postgres_changes',
         { 
-          event: '*', 
-          schema: 'public', 
+          event: '*',
+          schema: 'public',
           table: 'jadwal',
           filter: `guru_id=eq.${user.id}`
-        }, 
+        },
         (payload) => {
           console.log('Jadwal changed:', payload)
           loadJadwal()
@@ -539,22 +595,23 @@ function AbsensiGuru() {
   }, [user?.id])
 
   useEffect(() => {
-    if (!kelas || !currentSchedule?.mapel || !tgl) return;
+    if (!kelas || !currentSchedule?.mapel || !tgl) return
 
     // Subscription untuk perubahan absensi realtime
     const absensiSubscription = supabase
       .channel('absensi-changes')
-      .on('postgres_changes', 
+      .on(
+        'postgres_changes',
         { 
-          event: '*', 
-          schema: 'public', 
+          event: '*',
+          schema: 'public',
           table: 'absensi',
           filter: `kelas=eq.${kelas}&mapel=eq.${currentSchedule.mapel}&tanggal=eq.${tgl}`
-        }, 
+        },
         (payload) => {
           console.log('Absensi changed:', payload)
           if (view === 'absen') {
-            loadDataAbsensi()
+            applyAbsensiChange(payload)
           }
         }
       )
@@ -563,17 +620,18 @@ function AbsensiGuru() {
     // Subscription untuk perubahan ajuan izin
     const ajuanSubscription = supabase
       .channel('ajuan-changes')
-      .on('postgres_changes', 
+      .on(
+        'postgres_changes',
         { 
-          event: '*', 
-          schema: 'public', 
+          event: '*',
+          schema: 'public',
           table: 'absensi_ajuan',
           filter: `kelas=eq.${kelas}&mapel=eq.${currentSchedule.mapel}&tanggal=eq.${tgl}`
-        }, 
+        },
         (payload) => {
           console.log('Ajuan changed:', payload)
           if (view === 'absen') {
-            loadDataAbsensi()
+            applyAjuanChange(payload)
           }
         }
       )
@@ -583,21 +641,22 @@ function AbsensiGuru() {
       supabase.removeChannel(absensiSubscription)
       supabase.removeChannel(ajuanSubscription)
     }
-  }, [kelas, currentSchedule?.mapel, tgl, view])
+  }, [kelas, currentSchedule?.mapel, tgl, view, applyAbsensiChange, applyAjuanChange])
 
   useEffect(() => {
-    if (!user?.id) return;
+    if (!user?.id) return
 
     // Subscription untuk jam kosong
     const jamKosongSubscription = supabase
       .channel('jam-kosong-changes')
-      .on('postgres_changes', 
+      .on(
+        'postgres_changes',
         { 
-          event: '*', 
-          schema: 'public', 
+          event: '*',
+          schema: 'public',
           table: 'jam_kosong',
           filter: `created_by=eq.${user.id}`
-        }, 
+        },
         (payload) => {
           console.log('Jam kosong changed:', payload)
           if (view === 'jam_kosong') {
@@ -645,40 +704,37 @@ function AbsensiGuru() {
   /* ===== Enhanced Auto Switch Mode dengan Real-time Check ===== */
   useEffect(() => {
     const checkModeSwitch = () => {
-      if (!currentSchedule || view !== 'absen') return;
+      if (!currentSchedule || view !== 'absen') return
 
-      const today = getToday();
-      const now = currentDateTime.minutes;
-      const start = toMinutes(currentSchedule.jam_mulai);
-      const end = toMinutes(currentSchedule.jam_selesai);
-      const toleransi = 5; // DIUBAH: dari 15 menjadi 5 menit
+      const today = getToday()
+      const now = currentDateTime.minutes
+      const start = toMinutes(currentSchedule.jam_mulai)
+      const end = toMinutes(currentSchedule.jam_selesai)
+      const toleransi = 5
 
       // JIKA BUKAN HARI INI - PAKSA MANUAL
       if (tgl !== today) {
         if (absenMode !== 'manual') {
-          toggleAbsenMode('manual');
+          toggleAbsenMode('manual')
         }
-        return;
+        return
       }
 
       // JIKA HARI INI - PERIKSA WAKTU
-      const isWithinClassTime = now >= start && now <= end + toleransi;
-      const isOutsideClassTime = now > end + toleransi;
+      const isWithinClassTime = now >= start && now <= end + toleransi
+      const isOutsideClassTime = now > end + toleransi
 
-      // Jika dalam jam pelajaran + toleransi dan mode bukan otomatis, switch ke otomatis
       if (isWithinClassTime && absenMode !== 'otomatis') {
-        toggleAbsenMode('otomatis');
+        toggleAbsenMode('otomatis')
+      } else if (isOutsideClassTime && absenMode === 'otomatis') {
+        toggleAbsenMode('manual')
       }
-      // Jika sudah lewat jam pelajaran + toleransi dan mode masih otomatis, switch ke manual
-      else if (isOutsideClassTime && absenMode === 'otomatis') {
-        toggleAbsenMode('manual');
-      }
-    };
+    }
 
-    checkModeSwitch();
-  }, [currentDateTime, currentSchedule, tgl, view, absenMode]);
+    checkModeSwitch()
+  }, [currentDateTime, currentSchedule, tgl, view, absenMode])
 
-  /* ===== Load Data Logic ===== */
+  /* ===== Load Data Logic (jadwal, guru, jam kosong) ===== */
   useEffect(() => {
     loadJadwal()
     loadGuruList()
@@ -737,7 +793,7 @@ function AbsensiGuru() {
         .eq('created_by', user.id)
         .order('tanggal', { ascending: false })
         .order('created_at', { ascending: false })
-        .limit(50) // Batasi untuk performa
+        .limit(50)
       
       if (error) {
         console.error('Error loading riwayat jam kosong:', error)
@@ -770,7 +826,7 @@ function AbsensiGuru() {
     const kelasSet = new Set()
     const jadwalByHariTemp = {}
     const todayDayName = getDayName(getToday())
-    const selectedDayName = getDayName(tgl) // DIUBAH: Ambil hari dari tanggal yang dipilih
+    const selectedDayName = getDayName(tgl)
 
     const jadwalHariIniTemp = jadwalAll.filter(j => j.hari === todayDayName)
 
@@ -782,18 +838,21 @@ function AbsensiGuru() {
 
     const schedulesList = []
     if (kelas) {
-        const now = currentDateTime.minutes
-        // DIUBAH: Filter jadwal berdasarkan hari dari tanggal yang dipilih
-        jadwalAll.filter(j => j.kelas_id === kelas && j.hari === selectedDayName).forEach(j => {
-            const isCurrent = j.hari === todayDayName && now >= toMinutes(j.jam_mulai) - 5 && now <= toMinutes(j.jam_selesai) + 5 // DIUBAH: toleransi 5 menit
-            schedulesList.push({ 
-              id: j.id, 
-              label: `${j.mapel} - ${j.hari} (${j.jam_mulai}-${j.jam_selesai})`, 
-              schedule: j, 
-              isCurrent 
-            })
+      const now = currentDateTime.minutes
+      jadwalAll
+        .filter(j => j.kelas_id === kelas && j.hari === selectedDayName)
+        .forEach(j => {
+          const isCurrent = j.hari === todayDayName &&
+            now >= toMinutes(j.jam_mulai) - 5 &&
+            now <= toMinutes(j.jam_selesai) + 5
+          schedulesList.push({ 
+            id: j.id, 
+            label: `${j.mapel} - ${j.hari} (${j.jam_mulai}-${j.jam_selesai})`, 
+            schedule: j, 
+            isCurrent 
+          })
         })
-        schedulesList.sort((a, b) => (a.isCurrent === b.isCurrent ? 0 : a.isCurrent ? -1 : 1))
+      schedulesList.sort((a, b) => (a.isCurrent === b.isCurrent ? 0 : a.isCurrent ? -1 : 1))
     }
 
     return { 
@@ -802,7 +861,7 @@ function AbsensiGuru() {
       jadwalByHari: jadwalByHariTemp,
       jadwalHariIni: jadwalHariIniTemp
     }
-  }, [jadwalAll, user?.id, kelas, currentDateTime, tgl]) // DIUBAH: Tambahkan tgl sebagai dependency
+  }, [jadwalAll, user?.id, kelas, currentDateTime, tgl])
 
   const jadwalForJamKosongHariIni = useMemo(() => {
     if (!kelas || !jadwalAll.length) return []
@@ -824,10 +883,10 @@ function AbsensiGuru() {
     
     const now = currentDateTime.minutes
     const endTime = toMinutes(currentSchedule.jam_selesai)
-    return now > endTime + 5 // DIUBAH: dari 15 menjadi 5 menit
+    return now > endTime + 5
   }, [currentSchedule, tgl, currentDateTime])
 
-  /* ===== Auto Select Schedule ===== */
+  /* ===== Auto Select Schedule & Initial Load ===== */
   useEffect(() => {
     if (jadwalAll.length > 0 && kelas && !selectedScheduleId && view === 'absen') {
       const current = schedulesForSelectedClass.find(s => s.isCurrent)
@@ -836,20 +895,28 @@ function AbsensiGuru() {
   }, [jadwalAll, kelas, selectedScheduleId, view, schedulesForSelectedClass])
 
   useEffect(() => {
-    if (kelas && selectedScheduleId && tgl && view === 'absen') loadDataAbsensi()
+    if (kelas && selectedScheduleId && tgl && view === 'absen') {
+      loadDataAbsensi({ withLoader: true, clearExisting: true })
+    }
   }, [kelas, selectedScheduleId, tgl, view])
 
-  const loadDataAbsensi = async () => {
+  /* ===== Load Data Absensi (bisa soft reload) ===== */
+  const loadDataAbsensi = async ({
+    withLoader = true,
+    clearExisting = false
+  } = {}) => {
     if (!kelas || !selectedScheduleId || !tgl) return
     
-    setIsLoading(true)
-    setSiswa([])
-    setAbsensi([])
-    setAjuan([])
+    if (withLoader) setIsLoading(true)
+    if (clearExisting) {
+      setSiswa([])
+      setAbsensi([])
+      setAjuan([])
+    }
     
     const selectedScheduleObj = schedulesForSelectedClass.find(s => s.id === selectedScheduleId)
     if (!selectedScheduleObj) { 
-      setIsLoading(false)
+      if (withLoader) setIsLoading(false)
       return
     }
     
@@ -858,7 +925,7 @@ function AbsensiGuru() {
     setTodayName(getDayName(tgl))
 
     try {
-      // Load settings dengan real-time check
+      // Load settings
       try {
         const { data: settings, error: settingsError } = await supabase 
           .from('absensi_settings')
@@ -930,7 +997,7 @@ function AbsensiGuru() {
       console.error('General error in loadDataAbsensi:', e)
       pushToast('error', 'Terjadi kesalahan saat memuat data') 
     } finally { 
-      setIsLoading(false) 
+      if (withLoader) setIsLoading(false)
     }
   }
 
@@ -942,7 +1009,7 @@ function AbsensiGuru() {
   }, [currentSchedule, tgl, currentDateTime])
 
   const isWithinTolerance = useMemo(() => {
-    if (!currentSchedule || tgl !== getToday()) return false // HANYA UNTUK HARI INI
+    if (!currentSchedule || tgl !== getToday()) return false
     const now = currentDateTime.minutes
     return now >= toMinutes(currentSchedule.jam_mulai) && now <= toMinutes(currentSchedule.jam_selesai) + 5
   }, [currentSchedule, tgl, currentDateTime])
@@ -993,20 +1060,24 @@ function AbsensiGuru() {
         waktu: new Date().toISOString() 
       }
       
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('absensi')
         .upsert(payload, { 
           onConflict: 'kelas,tanggal,mapel,uid' 
         })
+        .select()
+        .single()
 
       if (error) {
         console.error('Error setting status:', error)
         pushToast('error', 'Gagal mengupdate status absensi')
       } else {
-        await loadDataAbsensi()
+        if (data) {
+          applyAbsensiChange({ eventType: 'INSERT', new: data, old: null })
+        }
         pushToast('success', `Status ${st} berhasil disimpan untuk ${siswaData.nama}`)
       }
-    } catch(e) { 
+    } catch (e) { 
       console.error('Exception in setStatus:', e)
       pushToast('error', 'Terjadi kesalahan sistem') 
     } finally { 
@@ -1027,7 +1098,7 @@ function AbsensiGuru() {
         console.error('Error deleting absensi:', error)
         pushToast('error', 'Gagal menghapus data absensi')
       } else {
-        await loadDataAbsensi()
+        setAbsensi(prev => prev.filter(a => a.id !== id))
         pushToast('success', 'Data absensi berhasil dihapus')
       }
     } catch (error) {
@@ -1043,24 +1114,22 @@ function AbsensiGuru() {
       return
     }
 
-    const today = getToday();
+    const today = getToday()
     
-    // VALIDASI: Mode otomatis hanya untuk hari ini
     if (mode === 'otomatis' && tgl !== today) {
       pushToast('error', 'Mode otomatis hanya tersedia untuk tanggal hari ini')
-      return;
+      return
     }
 
-    // Enhanced validation untuk mode otomatis
     if (mode === 'otomatis') {
-      const now = currentDateTime.minutes;
-      const start = toMinutes(currentSchedule.jam_mulai);
-      const end = toMinutes(currentSchedule.jam_selesai);
-      const toleransi = 5; // DIUBAH: dari 15 menjadi 5 menit
+      const now = currentDateTime.minutes
+      const start = toMinutes(currentSchedule.jam_mulai)
+      const end = toMinutes(currentSchedule.jam_selesai)
+      const toleransi = 5
 
       if (now < start || now > end + toleransi) {
         pushToast('error', 'Mode otomatis hanya bisa diaktifkan selama jam pelajaran + 5 menit toleransi')
-        return;
+        return
       }
     }
 
@@ -1094,9 +1163,8 @@ function AbsensiGuru() {
     }
   }
 
-  /* ===== AUTO ALPHA SYSTEM ===== */
+  /* ===== AUTO ALPHA SYSTEM (Manual) ===== */
   const triggerAutoAlphaManual = async () => {
-    // DIUBAH: Tambahkan konfirmasi sebelum menjalankan Auto Alpha
     if (!window.confirm('Anda yakin ingin menjalankan Auto Alpha? Siswa yang belum absen akan di-set Alpha.')) {
       return
     }
@@ -1107,7 +1175,7 @@ function AbsensiGuru() {
     }
 
     if (!canRunAutoAlpha) {
-      pushToast('error', 'Auto Alpha hanya bisa dijalankan setelah jam pelajaran selesai + toleransi 5 menit') // DIUBAH: pesan error
+      pushToast('error', 'Auto Alpha hanya bisa dijalankan setelah jam pelajaran selesai + toleransi 5 menit')
       return
     }
 
@@ -1177,7 +1245,7 @@ function AbsensiGuru() {
 
       if (updatedCount > 0) {
         pushToast('success', `Auto-alpha manual: ${updatedCount} siswa di-set Alpha`)
-        await loadDataAbsensi()
+        await loadDataAbsensi({ withLoader: false, clearExisting: false })
       } else {
         pushToast('info', 'Tidak ada siswa yang perlu di-set Alpha')
       }
@@ -1190,7 +1258,7 @@ function AbsensiGuru() {
     }
   }
 
-  /* ===== Enhanced Real-time Auto Alpha ===== */
+  /* ===== Enhanced Real-time Auto Alpha (background) ===== */
   useEffect(() => {
     const checkEnhancedAutoAlpha = async () => {
       if (!currentSchedule || !kelas || !currentSchedule.mapel) return
@@ -1200,7 +1268,7 @@ function AbsensiGuru() {
       const endTime = toMinutes(currentSchedule.jam_selesai)
 
       const isToday = tgl === today
-      const isPastClassTime = now > endTime + 5 // DIUBAH: dari 30 menjadi 5 menit
+      const isPastClassTime = now > endTime + 5
       const isPastDate = tgl < today
 
       if (!isPastDate && (!isToday || !isPastClassTime)) return
@@ -1275,7 +1343,7 @@ function AbsensiGuru() {
           if (document.visibilityState === 'visible') {
             pushToast('info', `Auto-alpha: ${updates.length} siswa di-set Alpha`)
           }
-          loadDataAbsensi()
+          loadDataAbsensi({ withLoader: false, clearExisting: false })
         }
 
       } catch (error) {
@@ -1329,7 +1397,7 @@ function AbsensiGuru() {
         await loadRiwayatJamKosong()
         pushToast('success', 'Jam kosong berhasil disimpan')
       }
-    } catch(e) { 
+    } catch (e) { 
       console.error('Exception in handleJamKosong:', e)
       pushToast('error', 'Terjadi kesalahan sistem') 
     } finally { 
@@ -1429,7 +1497,7 @@ function AbsensiGuru() {
         pushToast('error', 'Gagal memproses ajuan')
       } else {
         setIsDetailIzinModalOpen(false)
-        await loadDataAbsensi()
+        setAjuan(prev => prev.filter(x => x.id !== a.id))
         pushToast('success', `Ajuan ${terima ? 'diterima' : 'ditolak'}`)
       }
     } catch (error) {
@@ -1446,18 +1514,19 @@ function AbsensiGuru() {
     
     const channel = supabase
       .channel(`rfid-absen-guru-${kelas}-realtime`)
-      .on('postgres_changes', 
+      .on(
+        'postgres_changes',
         { 
-          event: 'INSERT', 
-          schema: 'public', 
-          table: 'rfid_scans', 
-          filter: 'status=eq.raw' 
-        }, 
+          event: 'INSERT',
+          schema: 'public',
+          table: 'rfid_scans',
+          filter: 'status=eq.raw'
+        },
         async (payload) => {
           const scan = payload.new
-          const cardUid = (scan.card_uid||'').toString().toUpperCase().replace(/\s+/g, '')
+          const cardUid = (scan.card_uid || '').toString().toUpperCase().replace(/\s+/g, '')
           const target = siswaRef.current.find(s => 
-            (s.rfid_uid||'').toString().toUpperCase().replace(/\s+/g, '') === cardUid
+            (s.rfid_uid || '').toString().toUpperCase().replace(/\s+/g, '') === cardUid
           )
           
           if (!target) {
@@ -1472,7 +1541,7 @@ function AbsensiGuru() {
           }
           
           try {
-            await supabase
+            const { data, error: upsertError } = await supabase
               .from('absensi')
               .upsert({ 
                 kelas, 
@@ -1485,14 +1554,25 @@ function AbsensiGuru() {
                 oleh: 'rfid:device', 
                 waktu: new Date().toISOString() 
               })
+              .select()
+              .single()
             
+            if (upsertError) {
+              console.error('Error upsert absensi via RFID:', upsertError)
+              pushToast('error', 'Gagal menyimpan absen RFID')
+              return
+            }
+
             await supabase
               .from('rfid_scans')
               .update({ status: 'processed' })
               .eq('id', scan.id)
+
+            if (data) {
+              applyAbsensiChange({ eventType: 'INSERT', new: data, old: null })
+            }
             
             pushToast('success', `${target.nama} berhasil absen via RFID`)
-            loadDataAbsensi()
           } catch (error) {
             console.error('Error processing RFID scan:', error)
             pushToast('error', 'Gagal memproses absen RFID')
@@ -1502,7 +1582,7 @@ function AbsensiGuru() {
       .subscribe()
     
     return () => supabase.removeChannel(channel)
-  }, [kelas, currentSchedule, absenMode, tgl, siswa.length, pushToast])
+  }, [kelas, currentSchedule, absenMode, tgl, siswa.length, pushToast, applyAbsensiChange])
 
   /* ===== RENDER TABLE SISWA ===== */
   const renderSiswaTable = (list, type) => {
@@ -1545,7 +1625,10 @@ function AbsensiGuru() {
           {type === 'Izin' && '🟡'}
           {type === 'Alpha' && '❌'}
           {type === 'Belum Absen' && '⏳'}
-          {type} <span className="bg-gray-200 text-gray-700 px-2 py-0.5 rounded-full text-xs min-w-[24px] text-center">{list.length}</span>
+          {type}{' '}
+          <span className="bg-gray-200 text-gray-700 px-2 py-0.5 rounded-full text-xs min-w-[24px] text-center">
+            {list.length}
+          </span>
         </h4>
 
         <div className="overflow-x-auto rounded-xl border border-gray-200 shadow-sm">
@@ -1569,7 +1652,9 @@ function AbsensiGuru() {
               ) : (
                 list.map((s, index) => (
                   <tr key={s.id} className={`transition-colors ${rowColors[type]}`}>
-                    <td className="px-4 py-3 text-center font-medium text-gray-600 border-r border-transparent">{index + 1}</td>
+                    <td className="px-4 py-3 text-center font-medium text-gray-600 border-r border-transparent">
+                      {index + 1}
+                    </td>
                     <td className="px-4 py-3 text-center">
                       {s.photo_url ? (
                         <img 
@@ -1823,9 +1908,7 @@ function AbsensiGuru() {
                       Processing...
                     </>
                   ) : (
-                    <>
-                      ⚡ Auto Alpha
-                    </>
+                    <>⚡ Auto Alpha</>
                   )}
                 </button>
 
@@ -1843,7 +1926,7 @@ function AbsensiGuru() {
                   </button>
                   <button 
                     onClick={() => toggleAbsenMode('otomatis')}
-                    disabled={tgl !== getToday() || !isWithinTolerance} // DISABLE JIKA BUKAN HARI INI
+                    disabled={tgl !== getToday() || !isWithinTolerance}
                     className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-1.5 ${
                       absenMode === 'otomatis' 
                         ? 'bg-white text-green-600 shadow-sm border border-gray-200' 
@@ -1915,7 +1998,7 @@ function AbsensiGuru() {
                 </div>
 
                 {/* Auto Alpha Info Banner */}
-                {(tgl < getToday() || (tgl === getToday() && currentDateTime.minutes > toMinutes(currentSchedule?.jam_selesai || '23:59') + 5)) && ( // DIUBAH: toleransi 5 menit
+                {(tgl < getToday() || (tgl === getToday() && currentDateTime.minutes > toMinutes(currentSchedule?.jam_selesai || '23:59') + 5)) && (
                   <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 animate-pulse-slow">
                     <div className="flex items-center gap-3">
                       <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600">
@@ -2020,7 +2103,7 @@ function AbsensiGuru() {
               </div>
             )}
 
-            {/* === TAB: INPUT JAM KOSONG DENGAN TANGGAL === */}
+            {/* === TAB: INPUT JAM KOSONG === */}
             {view === 'jam_kosong' && (
               <div className="space-y-8">
                 {/* Form Input Jam Kosong */}
