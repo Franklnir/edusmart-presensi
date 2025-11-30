@@ -645,21 +645,31 @@ function AbsensiGuru() {
   /* ===== Enhanced Auto Switch Mode dengan Real-time Check ===== */
   useEffect(() => {
     const checkModeSwitch = () => {
-      if (!currentSchedule || tgl !== getToday() || view !== 'absen') return;
+      if (!currentSchedule || view !== 'absen') return;
 
+      const today = getToday();
       const now = currentDateTime.minutes;
       const start = toMinutes(currentSchedule.jam_mulai);
       const end = toMinutes(currentSchedule.jam_selesai);
       const toleransi = 5; // DIUBAH: dari 15 menjadi 5 menit
 
+      // JIKA BUKAN HARI INI - PAKSA MANUAL
+      if (tgl !== today) {
+        if (absenMode !== 'manual') {
+          toggleAbsenMode('manual');
+        }
+        return;
+      }
+
+      // JIKA HARI INI - PERIKSA WAKTU
       const isWithinClassTime = now >= start && now <= end + toleransi;
       const isOutsideClassTime = now > end + toleransi;
 
-      // DIUBAH: Paksa mode otomatis selama jam pelajaran + toleransi
+      // Jika dalam jam pelajaran + toleransi dan mode bukan otomatis, switch ke otomatis
       if (isWithinClassTime && absenMode !== 'otomatis') {
         toggleAbsenMode('otomatis');
       }
-      // DIUBAH: Paksa mode manual di luar jam pelajaran + toleransi
+      // Jika sudah lewat jam pelajaran + toleransi dan mode masih otomatis, switch ke manual
       else if (isOutsideClassTime && absenMode === 'otomatis') {
         toggleAbsenMode('manual');
       }
@@ -932,9 +942,9 @@ function AbsensiGuru() {
   }, [currentSchedule, tgl, currentDateTime])
 
   const isWithinTolerance = useMemo(() => {
-    if (!currentSchedule || tgl !== getToday()) return false
+    if (!currentSchedule || tgl !== getToday()) return false // HANYA UNTUK HARI INI
     const now = currentDateTime.minutes
-    return now >= toMinutes(currentSchedule.jam_mulai) && now <= toMinutes(currentSchedule.jam_selesai) + 5 // DIUBAH: dari 30 menjadi 5 menit
+    return now >= toMinutes(currentSchedule.jam_mulai) && now <= toMinutes(currentSchedule.jam_selesai) + 5
   }, [currentSchedule, tgl, currentDateTime])
 
   const { listHadir, listIzin, listAlpha, listBelumHadir } = useMemo(() => {
@@ -1026,13 +1036,22 @@ function AbsensiGuru() {
     }
   }
 
+  /* ===== Toggle Absen Mode dengan Validasi Tanggal ===== */
   const toggleAbsenMode = async (mode) => {
     if (!currentSchedule?.mapel) {
       pushToast('error', 'Tidak ada jadwal yang dipilih')
       return
     }
 
-    // DIUBAH: Enhanced validation untuk mode otomatis dengan toleransi 5 menit
+    const today = getToday();
+    
+    // VALIDASI: Mode otomatis hanya untuk hari ini
+    if (mode === 'otomatis' && tgl !== today) {
+      pushToast('error', 'Mode otomatis hanya tersedia untuk tanggal hari ini')
+      return;
+    }
+
+    // Enhanced validation untuk mode otomatis
     if (mode === 'otomatis') {
       const now = currentDateTime.minutes;
       const start = toMinutes(currentSchedule.jam_mulai);
@@ -1810,29 +1829,27 @@ function AbsensiGuru() {
                   )}
                 </button>
 
-                {/* Enhanced Mode Toggle dengan Real-time Status */}
+                {/* Enhanced Mode Toggle dengan Validasi Tanggal */}
                 <div className="flex items-center bg-gray-100 rounded-lg p-1 border border-gray-200">
                   <button 
                     onClick={() => toggleAbsenMode('manual')}
-                    disabled={isWithinTolerance} // DIUBAH: Disable manual selama jam pelajaran
                     className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-1.5 ${
                       absenMode === 'manual' 
                         ? 'bg-white text-blue-600 shadow-sm border border-gray-200' 
                         : 'text-gray-500 hover:text-gray-700'
-                    } ${isWithinTolerance ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    title={isWithinTolerance ? "Mode manual tidak tersedia selama jam pelajaran" : ""}
+                    }`}
                   >
                     <span>👨‍🏫</span> Manual
                   </button>
                   <button 
                     onClick={() => toggleAbsenMode('otomatis')}
-                    disabled={!isWithinTolerance} // DIUBAH: Disable otomatis di luar jam pelajaran
+                    disabled={tgl !== getToday() || !isWithinTolerance} // DISABLE JIKA BUKAN HARI INI
                     className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-1.5 ${
                       absenMode === 'otomatis' 
                         ? 'bg-white text-green-600 shadow-sm border border-gray-200' 
                         : 'text-gray-500 hover:text-gray-700'
-                    } ${!isWithinTolerance ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    title={!isWithinTolerance ? "Mode otomatis hanya tersedia selama jam pelajaran" : ""}
+                    } ${tgl !== getToday() || !isWithinTolerance ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    title={tgl !== getToday() ? "Mode otomatis hanya tersedia untuk hari ini" : !isWithinTolerance ? "Mode otomatis hanya tersedia selama jam pelajaran" : ""}
                   >
                     <span>🤖</span> Otomatis {rfidSettings.rfid_aktif && (
                       <span className="text-[9px] bg-green-500 text-white px-1 rounded ml-1">RFID</span>
