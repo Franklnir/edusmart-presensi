@@ -8,8 +8,18 @@ import FilePreviewModal from '../../components/FilePreviewModal'
 
 /* ================ Constants & Helpers ================ */
 const MONTH_NAMES_ID = [
-  'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
-  'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+  'Januari',
+  'Februari',
+  'Maret',
+  'April',
+  'Mei',
+  'Juni',
+  'Juli',
+  'Agustus',
+  'September',
+  'Oktober',
+  'November',
+  'Desember'
 ]
 
 const FILE_SIZE_LIMITS = {
@@ -120,9 +130,7 @@ const compressImage = async (file, maxSizeKB = 200, initialQuality = 0.9) => {
                   type: file.type,
                   lastModified: Date.now()
                 })
-                console.log(
-                  `Kompresi selesai: ${formatFileSize(compressedFile.size)}`
-                )
+                console.log(`Kompresi selesai: ${formatFileSize(compressedFile.size)}`)
                 resolve(compressedFile)
               }
             },
@@ -582,6 +590,7 @@ export default function TugasGuru() {
 
       let tugasData = tugasRaw || []
 
+      // Filter lagi berdasarkan bulan kalau custom_months
       if (timeRange === 'custom_months' && selectedMonths.length > 0) {
         const setMonths = new Set(selectedMonths)
         tugasData = tugasData.filter((t) => {
@@ -603,11 +612,12 @@ export default function TugasGuru() {
           ...new Set(tugasData.map((t) => t.kelas).filter(Boolean))
         ]
 
+        // ====== AMBIL JAWABAN + SISWA UNTUK STATISTIK ======
         const jawabanPromise =
           tugasIds.length > 0
             ? supabase
                 .from('tugas_jawaban')
-                .select('tugas_id, nilai')
+                .select('tugas_id, user_id, nilai')
                 .in('tugas_id', tugasIds)
             : Promise.resolve({ data: [], error: null })
 
@@ -634,21 +644,45 @@ export default function TugasGuru() {
         const siswaArr = studentsData || []
 
         formattedTugas = tugasData.map((tugas) => {
-          const totalSiswaDiKelas = siswaArr.filter(
-            (s) => s.kelas === tugas.kelas
-          ).length
+          // semua siswa di kelas tugas ini
+          const siswaKelas = siswaArr.filter((s) => s.kelas === tugas.kelas)
+          const totalSiswaDiKelas = siswaKelas.length
 
-          const jawabanIni = jawabanArr.filter(
-            (j) => j.tugas_id === tugas.id
+          // semua jawaban untuk tugas ini yang benar2 dari siswa di kelas itu
+          const jawabanIni = jawabanArr.filter((j) => {
+            if (j.tugas_id !== tugas.id) return false
+            return siswaKelas.some((s) => s.id === j.user_id)
+          })
+
+          // ====== DEDUP per user_id (1 siswa = 1 jawaban) ======
+          const uniqueJawabanByUser = Object.values(
+            jawabanIni.reduce((acc, j) => {
+              const existing = acc[j.user_id]
+              if (!existing) {
+                acc[j.user_id] = j
+              } else {
+                // prioritas jawaban yang sudah dinilai
+                if (existing.nilai == null && j.nilai != null) {
+                  acc[j.user_id] = j
+                } else {
+                  // kalau dua-duanya null atau dua-duanya ada nilai, pakai yang terakhir
+                  acc[j.user_id] = j
+                }
+              }
+              return acc
+            }, {})
           )
 
-          const sudahDinilai = jawabanIni.filter(
+          const sudahDinilai = uniqueJawabanByUser.filter(
             (j) => j.nilai !== null
           ).length
-          const belumDinilai = jawabanIni.filter(
+
+          const belumDinilai = uniqueJawabanByUser.filter(
             (j) => j.nilai === null
           ).length
-          const totalDikumpulkan = jawabanIni.length
+
+          const totalDikumpulkan = uniqueJawabanByUser.length
+
           const belumMengerjakan = Math.max(
             0,
             totalSiswaDiKelas - totalDikumpulkan
@@ -947,11 +981,9 @@ export default function TugasGuru() {
     }
   }
 
-  const handleEditFileUpload = async (files) =>
-    await handleFileUpload(files, 'edit')
+  const handleEditFileUpload = async (files) => await handleFileUpload(files, 'edit')
 
-  /* ========== 7b. Ambil ukuran file lama saat edit ==========
-     (supaya guru lihat size lampiran lama sebelum diganti) */
+  /* ========== 7b. Ambil ukuran file lama saat edit ========== */
   useEffect(() => {
     let cancelled = false
 
@@ -990,14 +1022,9 @@ export default function TugasGuru() {
     }
     try {
       const fileExtension = url.split('.').pop().toLowerCase()
-      const isImage = [
-        'jpeg',
-        'jpg',
-        'gif',
-        'png',
-        'webp',
-        'bmp'
-      ].includes(fileExtension)
+      const isImage = ['jpeg', 'jpg', 'gif', 'png', 'webp', 'bmp'].includes(
+        fileExtension
+      )
       const icon = isImage ? '🖼️' : '📄'
       return (
         <button
@@ -1022,10 +1049,7 @@ export default function TugasGuru() {
   /* ========== 9. Tambah Tugas ========== */
   const tambahTugas = async () => {
     if (!kelas || !selectedMapel || !form.judul || !form.deadline)
-      return pushToast(
-        'error',
-        'Lengkapi data (Kelas, Mapel, Judul, Deadline)'
-      )
+      return pushToast('error', 'Lengkapi data (Kelas, Mapel, Judul, Deadline)')
     try {
       setLoading(true)
       const payload = {
@@ -1112,7 +1136,6 @@ export default function TugasGuru() {
       file_url: selectedTugas.file_url || ''
     })
     setIsEditingTugas(true)
-    // reset info size agar diambil ulang
     setUploadedFileSizeEdit('')
     setEditExistingFileSize('')
   }
@@ -1649,9 +1672,7 @@ export default function TugasGuru() {
           <button
             className="w-full mt-6 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-semibold py-4 px-6 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3 text-base shadow-lg"
             onClick={tambahTugas}
-            disabled={
-              !kelas || !selectedMapel || !form.judul || !form.deadline
-            }
+            disabled={!kelas || !selectedMapel || !form.judul || !form.deadline}
           >
             <span>💾</span>
             <span>Simpan Tugas Baru</span>
@@ -1825,9 +1846,7 @@ export default function TugasGuru() {
                     >
                       <option value="week">1 Minggu Terakhir</option>
                       <option value="all">12 Bulan Terakhir</option>
-                      <option value="custom_months">
-                        Pilih Beberapa Bulan
-                      </option>
+                      <option value="custom_months">Pilih Beberapa Bulan</option>
                     </select>
                   </div>
                 </div>
@@ -1870,9 +1889,8 @@ export default function TugasGuru() {
                     <h3 className="text-sm font-semibold text-slate-700 mb-3">
                       Mata Pelajaran di Kelas{' '}
                       {
-                        myKelasList.find(
-                          (k) => k.id === selectedKelasFilter
-                        )?.nama
+                        myKelasList.find((k) => k.id === selectedKelasFilter)
+                          ?.nama
                       }
                     </h3>
                     {mapelCards.length > 0 ? (
@@ -1925,23 +1943,16 @@ export default function TugasGuru() {
                     if (stats) {
                       total = stats.total_siswa || 0
                       sudah = stats.sudah || 0
-                      dikerjakan =
-                        (stats.sudah || 0) + (stats.belum_dinilai || 0)
+                      dikerjakan = (stats.sudah || 0) + (stats.belum_dinilai || 0)
                       percentSudah = total ? (sudah / total) * 100 : 0
                       percentDikerjakan = total ? (dikerjakan / total) * 100 : 0
 
-                      widthSudah = Math.min(
-                        100,
-                        Math.max(0, percentSudah)
-                      )
+                      widthSudah = Math.min(100, Math.max(0, percentSudah))
                       widthBelumDinilai = Math.min(
                         100,
                         Math.max(0, percentDikerjakan - percentSudah)
                       )
-                      widthBelum = Math.max(
-                        0,
-                        100 - (widthSudah + widthBelumDinilai)
-                      )
+                      widthBelum = Math.max(0, 100 - (widthSudah + widthBelumDinilai))
                     }
 
                     return (
@@ -2017,30 +2028,22 @@ export default function TugasGuru() {
                                           siswa sudah dinilai
                                         </span>
                                         <span className="font-medium text-slate-600">
-                                          {Math.round(
-                                            percentDikerjakan || 0
-                                          )}
-                                          % sudah mengumpulkan
+                                          {Math.round(percentDikerjakan || 0)}%
+                                          {' '}sudah mengumpulkan
                                         </span>
                                       </div>
                                       <div className="w-full h-2.5 rounded-full bg-slate-100 overflow-hidden flex">
                                         <div
                                           className="h-full bg-green-500"
-                                          style={{
-                                            width: `${widthSudah}%`
-                                          }}
+                                          style={{ width: `${widthSudah}%` }}
                                         />
                                         <div
                                           className="h-full bg-yellow-400"
-                                          style={{
-                                            width: `${widthBelumDinilai}%`
-                                          }}
+                                          style={{ width: `${widthBelumDinilai}%` }}
                                         />
                                         <div
                                           className="h-full bg-red-300"
-                                          style={{
-                                            width: `${widthBelum}%`
-                                          }}
+                                          style={{ width: `${widthBelum}%` }}
                                         />
                                       </div>
                                     </div>
@@ -2049,8 +2052,7 @@ export default function TugasGuru() {
 
                                 <div className="flex flex-wrap gap-4 text-sm text-slate-600">
                                   <span className="flex items-center gap-1">
-                                    📅 Dibuat:{' '}
-                                    {formatDateTime(tugas.created_at)}
+                                    📅 Dibuat: {formatDateTime(tugas.created_at)}
                                   </span>
                                   {tugas.deadline && (
                                     <span className="flex items-center gap-1">
@@ -2296,8 +2298,7 @@ export default function TugasGuru() {
                           </button>
                         </div>
                         <div className="text-xs text-slate-500">
-                          Jika Anda mengupload file baru, file lama akan
-                          diganti.
+                          Jika Anda mengupload file baru, file lama akan diganti.
                         </div>
                       </div>
                     ) : (
