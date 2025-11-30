@@ -290,14 +290,16 @@ export default function LaporanRekap() {
 
       const formatted = siswaData.map((s) => {
         const absS = absData?.filter((a) => a.uid === s.id) || []
-        const total = { Hadir: 0, Izin: 0, Alpha: 0 }
+        const total = { Hadir: 0, Izin: 0, Sakit: 0, Alpha: 0 }
         const absensiPerTanggal = {}
 
         dateStrings.forEach((dateStr) => {
           const found = absS.find((a) => a.tanggal === dateStr)
           if (found) {
             absensiPerTanggal[dateStr] = found.status
-            if (['Hadir', 'Izin', 'Alpha'].includes(found.status)) total[found.status]++
+            if (['Hadir', 'Izin', 'Sakit', 'Alpha'].includes(found.status)) {
+              total[found.status]++
+            }
           } else {
             absensiPerTanggal[dateStr] = null
           }
@@ -421,12 +423,14 @@ export default function LaporanRekap() {
 
     let totalHadir = 0
     let totalIzin = 0
+    let totalSakit = 0
     let totalAlpha = 0
     let sumPersenHadir = 0
 
     absensiData.siswa.forEach((s) => {
       totalHadir += s.total.Hadir || 0
       totalIzin += s.total.Izin || 0
+      totalSakit += s.total.Sakit || 0
       totalAlpha += s.total.Alpha || 0
       if (totalHariKerja > 0) {
         const persen = (s.total.Hadir / totalHariKerja) * 100
@@ -442,6 +446,7 @@ export default function LaporanRekap() {
     return {
       totalHadir,
       totalIzin,
+      totalSakit,
       totalAlpha,
       totalHariKerja,
       rataPersenHadir,
@@ -509,6 +514,7 @@ export default function LaporanRekap() {
       nik: s.nik,
       totalHadir: s.total.Hadir,
       totalIzin: s.total.Izin,
+      totalSakit: s.total.Sakit,
       totalAlpha: s.total.Alpha,
       totalHariKerja,
       persenHadir
@@ -627,13 +633,14 @@ export default function LaporanRekap() {
       right: { style: 'thin' }
     }
 
-    ws.mergeCells(1, 1, 1, 3 + absensiData.dateStrings.length + 3)
+    // 3 kolom awal (No, Nama, NIK) + jumlah tanggal + 4 kolom ringkasan (I, S, A, Hadir)
+    ws.mergeCells(1, 1, 1, 3 + absensiData.dateStrings.length + 4)
     const t = ws.getCell(1, 1)
     t.value = `REKAP ABSENSI ${selectedMapel} - ${getNamaKelasFromList(selectedKelas, kelasList)}`
     t.font = { bold: true, size: 12 }
     t.alignment = { horizontal: 'center' }
 
-    ws.mergeCells(2, 1, 2, 3 + absensiData.dateStrings.length + 3)
+    ws.mergeCells(2, 1, 2, 3 + absensiData.dateStrings.length + 4)
     const sub = ws.getCell(2, 1)
     sub.value = absensiData.periode
     sub.font = { bold: true, size: 10 }
@@ -643,7 +650,7 @@ export default function LaporanRekap() {
     absensiData.dateStrings.forEach((ds) =>
       headers.push(parseInt(ds.split('-')[2]))
     )
-    headers.push('I', 'A', 'Hadir')
+    headers.push('I', 'S', 'A', 'Hadir')
 
     const r = ws.getRow(3)
     r.values = headers
@@ -666,7 +673,7 @@ export default function LaporanRekap() {
         const st = s.absensiPerTanggal[ds]
         rowVals.push(isSunday(ds) ? '' : (st ? st.charAt(0) : ''))
       })
-      rowVals.push(s.total.Izin, s.total.Alpha, s.total.Hadir)
+      rowVals.push(s.total.Izin, s.total.Sakit, s.total.Alpha, s.total.Hadir)
 
       const row = ws.addRow(rowVals)
       row.eachCell((cell, col) => {
@@ -690,7 +697,7 @@ export default function LaporanRekap() {
     saveBlob(buf, `Absensi_${selectedMapel}.xlsx`)
   }
 
-  // === ABSENSI – RINGKAS (No, Nama, Hadir, Izin, Alpha) ===
+  // === ABSENSI – RINGKAS (No, Nama, Hadir, Izin, Sakit, Alpha) ===
   const exportAbsensiSummaryToExcel = async () => {
     if (!absensiData) return
     if (!excelReady) {
@@ -699,7 +706,7 @@ export default function LaporanRekap() {
     }
 
     const wb = new ExcelJS.Workbook()
-    const ws = wb.addWorksheet('Rekap HIA')
+    const ws = wb.addWorksheet('Rekap HISA')
 
     const borderAll = {
       top: { style: 'thin' },
@@ -709,20 +716,20 @@ export default function LaporanRekap() {
     }
 
     const title = ws.addRow([
-      `REKAP ABSENSI (H/I/A) – ${selectedMapel} – ${getNamaKelasFromList(
+      `REKAP ABSENSI (H/I/S/A) – ${selectedMapel} – ${getNamaKelasFromList(
         selectedKelas,
         kelasList
       )}`
     ])
     title.font = { bold: true, size: 12 }
-    ws.mergeCells(1, 1, 1, 5)
+    ws.mergeCells(1, 1, 1, 6)
     title.alignment = { horizontal: 'center' }
 
     const sub = ws.addRow([absensiData.periode])
-    ws.mergeCells(2, 1, 2, 5)
+    ws.mergeCells(2, 1, 2, 6)
     sub.alignment = { horizontal: 'center' }
 
-    const header = ws.addRow(['No', 'Nama', 'Hadir', 'Izin', 'Alpha'])
+    const header = ws.addRow(['No', 'Nama', 'Hadir', 'Izin', 'Sakit', 'Alpha'])
     header.font = { bold: true }
     header.eachCell((cell) => {
       cell.border = borderAll
@@ -740,6 +747,7 @@ export default function LaporanRekap() {
         s.nama,
         s.total.Hadir,
         s.total.Izin,
+        s.total.Sakit,
         s.total.Alpha
       ])
       row.getCell(2).alignment = { horizontal: 'left' }
@@ -756,6 +764,7 @@ export default function LaporanRekap() {
     ws.getColumn(3).width = 10
     ws.getColumn(4).width = 10
     ws.getColumn(5).width = 10
+    ws.getColumn(6).width = 10
 
     const buf = await wb.xlsx.writeBuffer()
     saveBlob(buf, `Absensi_ringkas_${selectedMapel}.xlsx`)
@@ -769,7 +778,7 @@ export default function LaporanRekap() {
       const dateHeaders = absensiData.dateStrings
         .map((ds) => parseInt(ds.split('-')[2]))
         .join(sep)
-      csv += `No${sep}Nama${sep}NIK${sep}${dateHeaders}${sep}I${sep}A${sep}Hadir\n`
+      csv += `No${sep}Nama${sep}NIK${sep}${dateHeaders}${sep}I${sep}S${sep}A${sep}Hadir\n`
 
       absensiData.siswa.forEach((s, i) => {
         const daily = absensiData.dateStrings
@@ -778,7 +787,7 @@ export default function LaporanRekap() {
             return isSunday(ds) ? '' : (st ? st.charAt(0) : '')
           })
           .join(sep)
-        csv += `${i + 1}${sep}"${s.nama}"${sep}'${s.nik}'${sep}${daily}${sep}${s.total.Izin}${sep}${s.total.Alpha}${sep}${s.total.Hadir}\n`
+        csv += `${i + 1}${sep}"${s.nama}"${sep}'${s.nik}'${sep}${daily}${sep}${s.total.Izin}${sep}${s.total.Sakit}${sep}${s.total.Alpha}${sep}${s.total.Hadir}\n`
       })
     } else if (type === 'tugas' && tugasData) {
       const tHeads = tugasData.tugas
@@ -930,7 +939,7 @@ export default function LaporanRekap() {
     saveBlob(buf, `Nilai_ringkas_${selectedMapel}.xlsx`)
   }
 
-  // === GABUNGAN: Nilai + Absensi (No, Nama, Rata-rata, Grade, Hadir, Izin, Alpha) ===
+  // === GABUNGAN: Nilai + Absensi (No, Nama, Rata-rata, Grade, Hadir, Izin, Sakit, Alpha) ===
   const exportCombinedSummaryToExcel = async () => {
     if (!tugasData || !absensiData) {
       pushToast(
@@ -961,12 +970,12 @@ export default function LaporanRekap() {
       )}`
     ])
     title.font = { bold: true, size: 12 }
-    ws.mergeCells(1, 1, 1, 7)
+    ws.mergeCells(1, 1, 1, 8)
     title.alignment = { horizontal: 'center' }
 
     const periodeGabungan = absensiData.periode || tugasData.periode
     const sub = ws.addRow([periodeGabungan])
-    ws.mergeCells(2, 1, 2, 7)
+    ws.mergeCells(2, 1, 2, 8)
     sub.alignment = { horizontal: 'center' }
 
     const header = ws.addRow([
@@ -976,6 +985,7 @@ export default function LaporanRekap() {
       'Grade',
       'Hadir',
       'Izin',
+      'Sakit',
       'Alpha'
     ])
     header.font = { bold: true }
@@ -1002,6 +1012,7 @@ export default function LaporanRekap() {
         n?.grade ?? '-',
         s.total.Hadir,
         s.total.Izin,
+        s.total.Sakit,
         s.total.Alpha
       ])
       row.getCell(2).alignment = { horizontal: 'left' }
@@ -1020,6 +1031,7 @@ export default function LaporanRekap() {
     ws.getColumn(5).width = 10
     ws.getColumn(6).width = 10
     ws.getColumn(7).width = 10
+    ws.getColumn(8).width = 10
 
     const buf = await wb.xlsx.writeBuffer()
     saveBlob(buf, `Rekap_nilai_absensi_${selectedMapel}.xlsx`)
@@ -1094,6 +1106,7 @@ export default function LaporanRekap() {
       let ket = ''
       if (st === 'Hadir') ket = 'Masuk'
       else if (st === 'Izin') ket = 'Izin'
+      else if (st === 'Sakit') ket = 'Sakit'
       else if (st === 'Alpha') ket = 'Tidak Hadir'
 
       row.getCell(1).value = i + 1
@@ -1117,6 +1130,7 @@ export default function LaporanRekap() {
     sumRow.getCell(2).value =
       `Hadir: ${singleStudentAbsensiSummary.totalHadir}  | ` +
       `Izin: ${singleStudentAbsensiSummary.totalIzin}  | ` +
+      `Sakit: ${singleStudentAbsensiSummary.totalSakit}  | ` +
       `Alpha: ${singleStudentAbsensiSummary.totalAlpha}  | ` +
       `Hari Efektif: ${singleStudentAbsensiSummary.totalHariKerja}  | ` +
       `Persentase Hadir: ${singleStudentAbsensiSummary.persenHadir}%`
@@ -1202,13 +1216,13 @@ export default function LaporanRekap() {
       footerRow.getCell(1).font = { bold: true }
       footerRow.getCell(2).value =
         `Rata-rata: ${siswaNilai.rataRata ?? '-'}  | Grade: ${siswaNilai.grade ?? '-'}`
-
-      wsNilai.getColumn(1).width = 5
-      wsNilai.getColumn(2).width = 35
-      wsNilai.getColumn(3).width = 10
-      wsNilai.getColumn(4).width = 10
-      wsNilai.getColumn(5).width = 18
     }
+
+    wsNilai.getColumn(1).width = 5
+    wsNilai.getColumn(2).width = 35
+    wsNilai.getColumn(3).width = 10
+    wsNilai.getColumn(4).width = 10
+    wsNilai.getColumn(5).width = 18
 
     const buf = await wb.xlsx.writeBuffer()
     const safeName = siswaAbs.nama?.replace(/[^\w\d]+/g, '_') || 'siswa'
@@ -1413,7 +1427,7 @@ export default function LaporanRekap() {
                   onClick={exportAbsensiSummaryToExcel}
                   className="text-xs bg-emerald-600 text-white px-3 py-2 rounded hover:bg-emerald-700"
                 >
-                  Excel Ringkas (H/I/A)
+                  Excel Ringkas (H/I/S/A)
                 </button>
                 <button
                   onClick={() => exportToGoogleSheets('absensi')}
@@ -1451,6 +1465,9 @@ export default function LaporanRekap() {
                   </span>
                   <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-blue-50 text-xs font-semibold text-blue-700">
                     I {absensiSummary.totalIzin}
+                  </span>
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-yellow-50 text-xs font-semibold text-yellow-700">
+                    S {absensiSummary.totalSakit}
                   </span>
                   <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-red-50 text-xs font-semibold text-red-700">
                     A {absensiSummary.totalAlpha}
@@ -1503,6 +1520,9 @@ export default function LaporanRekap() {
                     <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-blue-100 text-xs font-semibold text-blue-700">
                       Izin: {singleStudentAbsensiSummary.totalIzin}
                     </span>
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-yellow-100 text-xs font-semibold text-yellow-700">
+                      Sakit: {singleStudentAbsensiSummary.totalSakit}
+                    </span>
                     <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-red-100 text-xs font-semibold text-red-700">
                       Alpha: {singleStudentAbsensiSummary.totalAlpha}
                     </span>
@@ -1547,7 +1567,12 @@ export default function LaporanRekap() {
                     <th className="px-2 py-3 text-center border-l bg-blue-50">
                       I
                     </th>
-                    <th className="px-2 py-3 text-center bg-red-50">A</th>
+                    <th className="px-2 py-3 text-center bg-yellow-50">
+                      S
+                    </th>
+                    <th className="px-2 py-3 text-center bg-red-50">
+                      A
+                    </th>
                     <th className="px-2 py-3 text-center bg-green-50 font-bold">
                       H
                     </th>
@@ -1577,6 +1602,8 @@ export default function LaporanRekap() {
                                     ? 'text-green-600'
                                     : st === 'Izin'
                                     ? 'text-blue-600'
+                                    : st === 'Sakit'
+                                    ? 'text-yellow-600'
                                     : 'text-red-600'
                                 }`}
                               >
@@ -1588,6 +1615,9 @@ export default function LaporanRekap() {
                       })}
                       <td className="px-2 py-2 text-center bg-blue-50/50 font-bold">
                         {s.total.Izin}
+                      </td>
+                      <td className="px-2 py-2 text-center bg-yellow-50/50 font-bold">
+                        {s.total.Sakit}
                       </td>
                       <td className="px-2 py-2 text-center bg-red-50/50 font-bold">
                         {s.total.Alpha}
