@@ -363,9 +363,6 @@ export default function ASiswa() {
   const [promotionFilterKelas, setPromotionFilterKelas] = useState('')
   const [promotionSelectedIds, setPromotionSelectedIds] = useState([])
 
-  // Siswa yang dipilih di tabel (global)
-  const [selectedSiswaIds, setSelectedSiswaIds] = useState([])
-
   // Cleanup channel
   useEffect(() => {
     return () => {
@@ -583,29 +580,6 @@ export default function ASiswa() {
     return kelasList.filter(k => getGradeLabel(k.id) === G)
   }
 
-  /* ===== Selection untuk kenaikan kelas (tabel utama) ===== */
-  const toggleSelectSiswa = (id) => {
-    setSelectedSiswaIds(prev =>
-      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
-    )
-  }
-
-  const toggleSelectAllVisible = () => {
-    const visibleIds = siswa.map(s => s.id)
-    const allSelected = visibleIds.length > 0 && visibleIds.every(id => selectedSiswaIds.includes(id))
-
-    if (allSelected) {
-      setSelectedSiswaIds(prev => prev.filter(id => !visibleIds.includes(id)))
-    } else {
-      setSelectedSiswaIds(prev => [...new Set([...prev, ...visibleIds])])
-    }
-  }
-
-  // Bersihkan selection jika data berubah
-  useEffect(() => {
-    setSelectedSiswaIds(prev => prev.filter(id => siswaRaw.some(s => s.id === id)))
-  }, [siswaRaw])
-
   /* ===== Kandidat & pilihan siswa di modal kenaikan kelas (manual) ===== */
   const promotionCandidateSiswa = useMemo(() => {
     let list = siswaRaw
@@ -644,14 +618,6 @@ export default function ASiswa() {
     }
   }
 
-  // Sinkronkan pilihan manual dengan checkbox tabel saat modal dibuka
-  useEffect(() => {
-    if (!promotionModalOpen) return
-    if (!promotionSelectedIds.length && selectedSiswaIds.length) {
-      setPromotionSelectedIds(selectedSiswaIds)
-    }
-  }, [promotionModalOpen, selectedSiswaIds, promotionSelectedIds])
-
   const openPromotionModal = () => {
     openPasswordModal(
       'Fitur Kenaikan Kelas',
@@ -661,7 +627,7 @@ export default function ASiswa() {
         setPromotionToKelas('')
         setPromotionFilterGrade('')
         setPromotionFilterKelas('')
-        setPromotionSelectedIds(selectedSiswaIds) // mulai dari pilihan di tabel (jika ada)
+        setPromotionSelectedIds([])
         setPromotionModalOpen(true)
       }
     )
@@ -718,16 +684,14 @@ export default function ASiswa() {
             `Ini termasuk pindah tingkatan (grade) dari ${fromGrade} ke ${toGrade}.`
         }
       } else {
-        const activeIds = promotionSelectedIds.length ? promotionSelectedIds : selectedSiswaIds
-
-        if (!activeIds.length) {
+        if (!promotionSelectedIds.length) {
           pushToast('error', 'Belum ada siswa yang dipilih untuk dipindahkan')
           return
         }
 
-        ids = [...activeIds]
+        ids = [...promotionSelectedIds]
 
-        const selectedSiswa = siswaRaw.filter(s => ids.includes(s.id))
+        const selectedSiswa = siswaRaw.filter(s => promotionSelectedIds.includes(s.id))
         const targetGrade = getGradeLabel(promotionToKelas)
         const gradesSet = new Set(selectedSiswa.map(s => getGradeLabel(s.kelas || '')))
         const gradeList = [...gradesSet].filter(Boolean)
@@ -776,7 +740,6 @@ export default function ASiswa() {
       }
 
       pushToast('success', `Berhasil memindahkan ${ids.length} siswa`)
-      setSelectedSiswaIds(prev => prev.filter(id => !ids.includes(id)))
       closePromotionModal()
       loadSiswaRaw()
       loadStrukturKelas()
@@ -1699,7 +1662,7 @@ export default function ASiswa() {
                 Daftar Siswa
               </h3>
               <span className="text-sm text-gray-600">
-                {siswa.length} dari {siswaRaw.length} siswa • Dipilih: {selectedSiswaIds.length}
+                {siswa.length} dari {siswaRaw.length} siswa
               </span>
             </div>
           </div>
@@ -1721,18 +1684,6 @@ export default function ASiswa() {
               <table className="w-full">
                 <thead className="bg-gray-50">
                   <tr>
-                    {/* checkbox select all */}
-                    <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 text-blue-600 rounded border-gray-300"
-                        onChange={toggleSelectAllVisible}
-                        checked={
-                          siswa.length > 0 &&
-                          siswa.every(s => selectedSiswaIds.includes(s.id))
-                        }
-                      />
-                    </th>
                     <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
                       No
                     </th>
@@ -1766,16 +1717,6 @@ export default function ASiswa() {
 
                     return (
                       <tr key={s.id} className="hover:bg-gray-50">
-                        {/* checkbox pilih siswa */}
-                        <td className="px-3 py-3 text-center">
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4 text-blue-600 rounded border-gray-300"
-                            checked={selectedSiswaIds.includes(s.id)}
-                            onChange={() => toggleSelectSiswa(s.id)}
-                          />
-                        </td>
-
                         {/* Kolom Nomor Urut */}
                         <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 text-center">
                           {index + 1}
@@ -1871,7 +1812,7 @@ export default function ASiswa() {
                   })}
                   {!siswa.length && (
                     <tr>
-                      <td colSpan="9" className="px-4 py-8 text-center">
+                      <td colSpan="8" className="px-4 py-8 text-center">
                         <div className="flex flex-col items-center justify-center">
                           <div className="text-gray-300 text-4xl mb-2">👨‍🎓</div>
                           <p className="text-gray-500 font-medium mb-1">Tidak ada data siswa</p>
@@ -2069,14 +2010,9 @@ export default function ASiswa() {
                         ? 'bg-indigo-50 border-indigo-400 text-indigo-700'
                         : 'bg-gray-50 border-gray-300 text-gray-700'
                     }`}
-                    onClick={() => {
-                      setPromotionMode('selected')
-                      if (!promotionSelectedIds.length && selectedSiswaIds.length) {
-                        setPromotionSelectedIds(selectedSiswaIds)
-                      }
-                    }}
+                    onClick={() => setPromotionMode('selected')}
                   >
-                    Pilih Siswa Manual ({promotionSelectedIds.length || selectedSiswaIds.length})
+                    Pilih Siswa Manual ({promotionSelectedIds.length})
                   </button>
                 </div>
 
@@ -2191,7 +2127,7 @@ export default function ASiswa() {
                       ]}
                     />
 
-                    {!promotionSelectedIds.length && !selectedSiswaIds.length && (
+                    {!promotionSelectedIds.length && (
                       <p className="text-xs text-red-500">
                         Pilih minimal satu siswa untuk dipindahkan.
                       </p>
