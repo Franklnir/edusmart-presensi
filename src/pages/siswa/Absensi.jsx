@@ -83,6 +83,7 @@ const Badge = ({ children, variant = 'default', className = '' }) => {
     default: 'bg-gray-100 text-gray-800',
     hadir: 'bg-green-100 text-green-800 border border-green-300',
     izin: 'bg-yellow-100 text-yellow-800 border border-yellow-300',
+    sakit: 'bg-blue-100 text-blue-800 border border-blue-300', // 🟦 baru
     alpha: 'bg-red-100 text-red-800 border border-red-300',
     live: 'bg-green-500 text-white',
     warning: 'bg-amber-100 text-amber-800 border border-amber-300',
@@ -101,10 +102,8 @@ const Badge = ({ children, variant = 'default', className = '' }) => {
 
 /* ======================= Tabel Ringkasan Kehadiran Kelas ======================= */
 /**
- * NOTE PERMINTAAN:
  * - Hanya tampilkan siswa yang SUDAH punya record absensi (Hadir / Izin / Sakit / Alpha)
- * - Row warna hijau = Hadir, kuning = Izin/Sakit, merah = Alpha
- * - Realtime: listen perubahan tabel absensi (kelas + mapel + tanggal ini)
+ * - Row warna hijau = Hadir, kuning = Izin, biru = Sakit, merah = Alpha
  */
 const RingkasanKelasTable = ({ kelas, mapel, tanggal }) => {
   const [dataSiswa, setDataSiswa] = useState([])
@@ -118,7 +117,6 @@ const RingkasanKelasTable = ({ kelas, mapel, tanggal }) => {
 
     setIsLoading(true)
     try {
-      // Ambil hanya siswa yang sudah punya record absensi utk mapel & tanggal ini
       const { data: absensiData, error: absensiError } = await supabase
         .from('absensi')
         .select('uid, status, komentar, oleh, waktu, nama, tanggal, mapel, kelas')
@@ -171,12 +169,10 @@ const RingkasanKelasTable = ({ kelas, mapel, tanggal }) => {
     }
   }, [kelas, mapel, tanggal])
 
-  // initial load / saat filter berubah
   useEffect(() => {
     loadDataSiswa()
   }, [loadDataSiswa])
 
-  // Realtime: listen perubahan absensi untuk kelas ini, lalu filter mapel+tanggal
   useEffect(() => {
     if (!kelas || !mapel || !tanggal) return
 
@@ -209,8 +205,9 @@ const RingkasanKelasTable = ({ kelas, mapel, tanggal }) => {
       case 'Hadir':
         return 'bg-green-50 border-l-4 border-green-400'
       case 'Izin':
-      case 'Sakit':
         return 'bg-yellow-50 border-l-4 border-yellow-400'
+      case 'Sakit': // 🟦 biru khusus sakit
+        return 'bg-blue-50 border-l-4 border-blue-400'
       case 'Alpha':
         return 'bg-red-50 border-l-4 border-red-400'
       default:
@@ -223,8 +220,9 @@ const RingkasanKelasTable = ({ kelas, mapel, tanggal }) => {
       case 'Hadir':
         return 'text-green-800'
       case 'Izin':
-      case 'Sakit':
         return 'text-yellow-800'
+      case 'Sakit': // 🟦 teks biru
+        return 'text-blue-800'
       case 'Alpha':
         return 'text-red-800'
       default:
@@ -434,8 +432,10 @@ const JadwalCard = ({
             variant={
               jadwal.status === 'Hadir'
                 ? 'hadir'
-                : jadwal.status === 'Izin' || jadwal.status === 'Sakit'
+                : jadwal.status === 'Izin'
                 ? 'izin'
+                : jadwal.status === 'Sakit'
+                ? 'sakit'
                 : 'alpha'
             }
           >
@@ -558,16 +558,21 @@ const CalendarOverlay = ({ mapel, jadwalMingguIni, onClose, profile, userId }) =
 
       if (hasJadwal) {
         if (status === 'Hadir') {
-          bgColor = 'bg-blue-100'
-          borderColor = 'border-blue-300'
+          bgColor = 'bg-green-100'
+          borderColor = 'border-green-300'
+          textColor = 'text-green-900'
         } else if (status === 'Alpha') {
           bgColor = 'bg-red-100'
           borderColor = 'border-red-300'
           textColor = 'text-red-900'
-        } else if (status === 'Izin' || status === 'Sakit') {
-          bgColor = 'bg-gray-100'
-          borderColor = 'border-gray-300'
-          textColor = 'text-gray-700'
+        } else if (status === 'Izin') {
+          bgColor = 'bg-yellow-100'
+          borderColor = 'border-yellow-300'
+          textColor = 'text-yellow-900'
+        } else if (status === 'Sakit') {
+          bgColor = 'bg-blue-100'
+          borderColor = 'border-blue-300'
+          textColor = 'text-blue-900'
         } else {
           bgColor = 'bg-yellow-100'
           borderColor = 'border-yellow-300'
@@ -632,24 +637,26 @@ const CalendarOverlay = ({ mapel, jadwalMingguIni, onClose, profile, userId }) =
         </div>
 
         {/* Legend */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-4">
           <div className="flex items-center space-x-2">
-            <div className="w-4 h-4 bg-blue-100 border border-blue-300 rounded" />
+            <div className="w-4 h-4 bg-green-100 border border-green-300 rounded" />
             <span className="text-xs text-gray-600">Hadir</span>
           </div>
           <div className="flex items-center space-x-2">
             <div className="w-4 h-4 bg-yellow-100 border border-yellow-300 rounded" />
-            <span className="text-xs text-gray-600">
-              Ada Jadwal (Belum Absen)
-            </span>
+            <span className="text-xs text-gray-600">Izin</span>
+          </div>
+          <div className="flex items-center space-x-2">
+            <div className="w-4 h-4 bg-blue-100 border border-blue-300 rounded" />
+            <span className="text-xs text-gray-600">Sakit</span>
           </div>
           <div className="flex items-center space-x-2">
             <div className="w-4 h-4 bg-red-100 border border-red-300 rounded" />
             <span className="text-xs text-gray-600">Alpha</span>
           </div>
           <div className="flex items-center space-x-2">
-            <div className="w-4 h-4 bg-gray-100 border border-gray-300 rounded" />
-            <span className="text-xs text-gray-600">Izin/Sakit</span>
+            <div className="w-4 h-4 bg-yellow-100 border border-yellow-300 rounded" />
+            <span className="text-xs text-gray-600">Belum Absen</span>
           </div>
         </div>
 
@@ -693,13 +700,17 @@ const CalendarOverlay = ({ mapel, jadwalMingguIni, onClose, profile, userId }) =
                             <div
                               className={`text-xs px-1 py-0.5 rounded ${
                                 day.status === 'Hadir'
-                                  ? 'bg-blue-200 text-blue-800'
+                                  ? 'bg-green-200 text-green-800'
                                   : day.status === 'Alpha'
                                   ? 'bg-red-200 text-red-800'
-                                  : 'bg-gray-200 text-gray-800'
+                                  : day.status === 'Izin'
+                                  ? 'bg-yellow-200 text-yellow-800'
+                                  : day.status === 'Sakit'
+                                  ? 'bg-blue-200 text-blue-800'
+                                  : 'bg-yellow-200 text-yellow-800'
                               }`}
                             >
-                              {day.status}
+                              {day.status || 'Belum Absen'}
                             </div>
                           )}
                           {!day.status && (
@@ -792,8 +803,7 @@ export default function SAbsensi() {
   const [mapel, setMapel] = useState('')
   const [tgl, setTgl] = useState(getToday())
   const [status, setStatus] = useState(null)
-  const [ringkas, setRingkas] = useState({ H: 0, I: 0, A: 0 })
-
+  const [ringkas, setRingkas] = useState({ H: 0, I: 0, S: 0, A: 0 }) // 🆕 ada S
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [jadwalHariIni, setJadwalHariIni] = useState([])
   const [jadwalMingguIni, setJadwalMingguIni] = useState({})
@@ -808,6 +818,7 @@ export default function SAbsensi() {
   const [statistikKehadiran, setStatistikKehadiran] = useState({
     Hadir: 0,
     Izin: 0,
+    Sakit: 0,
     Alpha: 0
   })
 
@@ -922,10 +933,11 @@ export default function SAbsensi() {
 
       if (error) throw error
 
-      const statistik = { Hadir: 0, Izin: 0, Alpha: 0 }
+      const statistik = { Hadir: 0, Izin: 0, Sakit: 0, Alpha: 0 }
       ;(data || []).forEach((item) => {
         if (item.status === 'Hadir') statistik.Hadir++
-        else if (item.status === 'Izin' || item.status === 'Sakit') statistik.Izin++
+        else if (item.status === 'Izin') statistik.Izin++
+        else if (item.status === 'Sakit') statistik.Sakit++
         else if (item.status === 'Alpha') statistik.Alpha++
       })
       setStatistikKehadiran(statistik)
@@ -1100,12 +1112,13 @@ export default function SAbsensi() {
 
       if (error) throw error
 
-      const agg = { H: 0, I: 0, A: 0 }
+      const agg = { H: 0, I: 0, S: 0, A: 0 }
       let myStatus = null
 
       ;(data || []).forEach((row) => {
         if (row.status === 'Hadir') agg.H++
-        else if (row.status === 'Izin' || row.status === 'Sakit') agg.I++
+        else if (row.status === 'Izin') agg.I++
+        else if (row.status === 'Sakit') agg.S++
         else if (row.status === 'Alpha') agg.A++
 
         if (row.uid === userId) myStatus = row.status
@@ -1164,7 +1177,7 @@ export default function SAbsensi() {
   /* ========== Saat Mapel Berganti ========== */
   useEffect(() => {
     if (!mapel) {
-      setRingkas({ H: 0, I: 0, A: 0 })
+      setRingkas({ H: 0, I: 0, S: 0, A: 0 })
       setStatus(null)
       setCurrentJadwal(null)
       return
@@ -1674,7 +1687,13 @@ export default function SAbsensi() {
                   <div className="text-lg font-bold text-yellow-600">
                     {statistikKehadiran.Izin}
                   </div>
-                  <div className="text-xs text-gray-600 font-medium">Izin/Sakit</div>
+                  <div className="text-xs text-gray-600 font-medium">Izin</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-lg font-bold text-blue-600">
+                    {statistikKehadiran.Sakit}
+                  </div>
+                  <div className="text-xs text-gray-600 font-medium">Sakit</div>
                 </div>
                 <div className="text-center">
                   <div className="text-lg font-bold text-red-600">
@@ -1896,8 +1915,10 @@ export default function SAbsensi() {
                         variant={
                           status === 'Hadir'
                             ? 'hadir'
-                            : status === 'Izin' || status === 'Sakit'
+                            : status === 'Izin'
                             ? 'izin'
+                            : status === 'Sakit'
+                            ? 'sakit'
                             : 'alpha'
                         }
                         className="ml-1"
@@ -1979,7 +2000,7 @@ export default function SAbsensi() {
                   )}
                 </div>
 
-                {/* Ringkasan kelas (hanya siswa yang sudah absen/izin/alpha/sakit) */}
+                {/* Ringkasan kelas */}
                 <div className="bg-white rounded-lg p-3 border border-gray-200">
                   <h3 className="font-semibold text-sm mb-2 text-gray-800 flex items-center space-x-1">
                     <span>📊</span>
@@ -1990,7 +2011,7 @@ export default function SAbsensi() {
                   </h3>
 
                   {/* Statistik ringkas */}
-                  <div className="grid grid-cols-3 gap-2 mb-4">
+                  <div className="grid grid-cols-4 gap-2 mb-4">
                     <div className="text-center p-3 bg-green-50 border border-green-300 rounded-lg">
                       <div className="text-lg font-bold text-green-700">
                         {ringkas.H}
@@ -2004,7 +2025,15 @@ export default function SAbsensi() {
                         {ringkas.I}
                       </div>
                       <div className="text-xs text-yellow-600 font-medium mt-1">
-                        Izin/Sakit
+                        Izin
+                      </div>
+                    </div>
+                    <div className="text-center p-3 bg-blue-50 border border-blue-300 rounded-lg">
+                      <div className="text-lg font-bold text-blue-700">
+                        {ringkas.S}
+                      </div>
+                      <div className="text-xs text-blue-600 font-medium mt-1">
+                        Sakit
                       </div>
                     </div>
                     <div className="text-center p-3 bg-red-50 border border-red-300 rounded-lg">
@@ -2017,7 +2046,7 @@ export default function SAbsensi() {
                     </div>
                   </div>
 
-                  {/* Tabel detail siswa (realtime, hanya yang sudah punya record absensi) */}
+                  {/* Tabel detail siswa */}
                   <RingkasanKelasTable
                     kelas={profile?.kelas}
                     mapel={mapel}
