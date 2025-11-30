@@ -1,3 +1,4 @@
+// src/pages/admin/ASiswa.jsx
 import React, { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useUIStore } from '../../store/useUIStore'
@@ -66,16 +67,14 @@ function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Passwor
 /* ===== Password Verification Utility ===== */
 const verifyPassword = async (password) => {
   try {
-    // Get current user
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
       throw new Error('User tidak ditemukan')
     }
 
-    // Try to sign in with the provided password
     const { error } = await supabase.auth.signInWithPassword({
       email: user.email,
-      password: password
+      password
     })
 
     if (error) {
@@ -103,7 +102,7 @@ const JK_LABEL = (jk) => {
 }
 
 const GRADE_REGEX = /^\s*(XII|XI|X|IX|VIII|VII|VI|V|IV|III|II|I|\d+)/i
-function getGradeRaw(kelasId = '') {
+function getGradeRawFromString(kelasId = '') {
   const m = String(kelasId || '').toUpperCase().match(GRADE_REGEX)
   return m ? m[1] : ''
 }
@@ -120,8 +119,9 @@ function canonGrade(x) {
   return s
 }
 
-function getGradeLabel(kelasId = '') {
-  return canonGrade(getGradeRaw(kelasId))
+// fallback kalau mau ambil grade dari string id
+function getGradeLabelFromString(kelasId = '') {
+  return canonGrade(getGradeRawFromString(kelasId))
 }
 
 function getKelasDisplayName(kelasObj) {
@@ -174,7 +174,9 @@ function Button({
   className = '',
   ...props
 }) {
-  const baseClasses = 'inline-flex items-center justify-center font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed'
+  const baseClasses =
+    'inline-flex items-center justify-center font-medium rounded-lg transition-all duration-200 ' +
+    'focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed'
 
   const variants = {
     primary: 'bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500',
@@ -450,7 +452,17 @@ export default function ASiswa() {
     setStrukturKelas(struktur)
   }
 
-  // Opsi kelas untuk Select
+  // ===== Helper: ambil grade dari kelas.id menggunakan kelasList =====
+  function getGradeFromKelasId(kelasId) {
+    if (!kelasId) return ''
+    const kelas = kelasList.find(k => k.id === kelasId)
+    if (!kelas) return ''
+    if (kelas.grade) return canonGrade(kelas.grade)
+    // fallback kalau grade kosong, coba tebak dari string id
+    return getGradeLabelFromString(kelas.id)
+  }
+
+  // Opsi kelas untuk Select (form tambah siswa)
   const kelasOptions = useMemo(() => {
     return kelasList.map(kelas => ({
       value: kelas.id,
@@ -546,19 +558,24 @@ export default function ASiswa() {
     setSiswa(siswaRaw)
   }
 
-  // Auto apply filter ketika state berubah
   useEffect(() => {
     applyFilter()
   }, [qNama, qNIK, qKelas, qHasRfid, qStatus])
 
-  /* ===== Grade helpers ===== */
+  /* ===== Grade helpers (berbasis tabel kelas) ===== */
   const DEFAULT_GRADES = ['VII', 'VIII', 'IX', 'X', 'XI', 'XII']
+
   const gradeLabels = useMemo(() => {
-    const s = new Set(DEFAULT_GRADES)
+    const s = new Set()
     for (const k of kelasList) {
-      const g = getGradeLabel(k.id)
+      const g = k.grade ? canonGrade(k.grade) : getGradeLabelFromString(k.id)
       if (g) s.add(g)
     }
+    // fallback kalau belum ada data kelas
+    if (s.size === 0) {
+      DEFAULT_GRADES.forEach(g => s.add(g))
+    }
+
     const order = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII']
     return [...s].sort((a, b) => order.indexOf(a) - order.indexOf(b))
   }, [kelasList])
@@ -566,7 +583,10 @@ export default function ASiswa() {
   function kelasByGrade(g) {
     const G = canonGrade(g)
     if (!G) return []
-    return kelasList.filter(k => getGradeLabel(k.id) === G)
+    return kelasList.filter(k => {
+      const kGrade = k.grade ? canonGrade(k.grade) : getGradeLabelFromString(k.id)
+      return kGrade === G
+    })
   }
 
   /* ===== Detail modal ===== */
@@ -583,13 +603,16 @@ export default function ASiswa() {
         }
 
         setDetailUser(u)
+
+        // set default tingkatan & kelas sesuai data siswa
         setMoveKelas(u.kelas || '')
-        setMoveGrade(getGradeLabel(u.kelas || '') || '')
+        setMoveGrade(getGradeFromKelasId(u.kelas || '') || '')
+
         setDetailLoading(true)
         setDetailOpen(true)
 
         try {
-          // Organisasi dengan jabatan
+          // Organisasi
           const { data: orgData, error: orgError } = await supabase
             .from('organisasi')
             .select('*')
@@ -599,7 +622,6 @@ export default function ASiswa() {
           const all = orgData?.map(o => ({ id: o.id, nama: o.nama || o.id })) || []
           setOrgAll(all)
 
-          // Load organisasi anggota dengan jabatan
           const { data: orgAnggotaData, error: orgAnggotaError } = await supabase
             .from('organisasi_anggota')
             .select('*')
@@ -643,16 +665,16 @@ export default function ASiswa() {
     )
   }
 
-  // Auto pilih kelas ketika grade dipilih
+  // Auto pilih kelas pertama ketika tingkatan dipilih & belum ada kelas terpilih
   useEffect(() => {
     if (!detailOpen) return
-    const currentGrade = getGradeLabel(detailUser?.kelas || '')
-    if (currentGrade) return
     if (!moveGrade) return
+    if (moveKelas) return
+
     const opts = kelasByGrade(moveGrade)
     if (!opts.length) return
-    if (!moveKelas) setMoveKelas(opts[0].id)
-  }, [detailOpen, moveGrade, kelasList, detailUser, moveKelas])
+    setMoveKelas(opts[0].id)
+  }, [detailOpen, moveGrade, kelasList, moveKelas])
 
   function closeDetailModal() {
     setDetailOpen(false)
@@ -672,11 +694,11 @@ export default function ASiswa() {
     const target = moveKelas || ''
     if (!user || !target) return
 
-    const currentGrade = getGradeLabel(user.kelas || '')
-    const targetGrade = getGradeLabel(target || '')
-    const chosenGrade = moveGrade || currentGrade
+    const originalGrade = getGradeFromKelasId(user.kelas || '')
+    const targetGrade = getGradeFromKelasId(target || '')
 
-    if (currentGrade ? (targetGrade !== currentGrade) : (chosenGrade && targetGrade !== chosenGrade)) {
+    // Hanya boleh pindah ke kelas dengan tingkatan yang sama
+    if (originalGrade && targetGrade && originalGrade !== targetGrade) {
       pushToast('error', 'Hanya boleh pindah ke kelas dalam tingkatan (grade) yang sama.')
       return
     }
@@ -703,7 +725,7 @@ export default function ASiswa() {
 
       if (error) throw error
 
-      // Reset ketua kelas jika siswa ini adalah ketua di kelas lama
+      // Reset ketua kelas jika dia ketua di kelas lama
       if (isKetuaKelas(user.id)) {
         const strukturLama = Object.values(strukturKelas).find(
           s => s.ketua_siswa_id === user.id
@@ -1032,7 +1054,6 @@ export default function ASiswa() {
         try {
           setDeletingSiswa(true)
 
-          // Hapus dari semua tabel terkait
           await supabase.from('organisasi_anggota').delete().eq('siswa_id', siswaToDelete.id)
           await supabase.from('osis_anggota').delete().eq('siswa_id', siswaToDelete.id)
           await supabase.from('ekskul_anggota').delete().eq('user_id', siswaToDelete.id)
@@ -1041,13 +1062,11 @@ export default function ASiswa() {
           await supabase.from('absensi').delete().eq('uid', siswaToDelete.id)
           await supabase.from('absensi_ajuan').delete().eq('uid', siswaToDelete.id)
           
-          // Reset ketua kelas jika siswa ini adalah ketua
           await supabase
             .from('kelas_struktur')
             .update({ ketua_siswa_id: null, ketua_siswa_nama: null })
             .eq('ketua_siswa_id', siswaToDelete.id)
 
-          // Hapus dari profiles table
           const { error: profileError } = await supabase
             .from('profiles')
             .delete()
@@ -1055,16 +1074,15 @@ export default function ASiswa() {
 
           if (profileError) throw profileError
 
-          // HAPUS DARI AUTHENTICATION - menggunakan Admin API
+          // HAPUS DARI AUTH (butuh service role di backend, hati-hati kalau dari client)
           try {
             const { error: authError } = await supabase.auth.admin.deleteUser(
               siswaToDelete.id
             )
             
             if (authError) {
-              console.warn('Gagal menghapus dari authentication, tetapi lanjutkan:', authError)
-              // Tetap lanjutkan karena data utama sudah dihapus
-              pushToast('warning', 'Akun siswa dihapus, tetapi ada masalah dengan authentication. Silakan coba lagi nanti.')
+              console.warn('Gagal menghapus dari authentication:', authError)
+              pushToast('warning', 'Akun siswa dihapus dari database, tapi ada masalah dengan authentication.')
             } else {
               pushToast('success', 'Akun siswa berhasil dihapus sepenuhnya')
             }
@@ -1530,11 +1548,9 @@ export default function ASiswa() {
                   {siswa.map((s, index) => {
                     const foto = s.photo_url || s.foto_url || s.foto || ''
                     const isKetua = isKetuaKelas(s.id)
-                    const kelasKetua = getKelasKetua(s.id)
 
                     return (
                       <tr key={s.id} className="hover:bg-gray-50">
-                        {/* Kolom Nomor Urut */}
                         <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 text-center">
                           {index + 1}
                         </td>
@@ -1877,8 +1893,9 @@ export default function ASiswa() {
                   </div>
                 ) : (
                   <>
-                    {/* Kelas & Status */}
+                    {/* Kelas & Status + RFID */}
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      {/* Kelas & Status */}
                       <div className="bg-white border border-gray-200 rounded-lg p-4">
                         <h4 className="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
                           <span>🏫</span>
@@ -1889,7 +1906,10 @@ export default function ASiswa() {
                             <Select
                               label="Tingkatan"
                               value={moveGrade}
-                              onChange={e => { setMoveGrade(e.target.value); setMoveKelas('') }}
+                              onChange={e => { 
+                                setMoveGrade(e.target.value)
+                                setMoveKelas('')      // reset kelas saat tingkatan ganti
+                              }}
                               options={[
                                 { value: '', label: 'Pilih tingkatan' },
                                 ...gradeLabels.map(g => ({ value: g, label: g }))
@@ -1900,12 +1920,10 @@ export default function ASiswa() {
                               value={moveKelas}
                               onChange={e => setMoveKelas(e.target.value)}
                               options={(() => {
-                                const baseGrade = getGradeLabel(detailUser?.kelas || '') || moveGrade
-                                const options = kelasByGrade(baseGrade)
-
-                                if (!baseGrade) {
+                                if (!moveGrade) {
                                   return [{ value: '', label: 'Pilih tingkatan dulu' }]
                                 }
+                                const options = kelasByGrade(moveGrade)
                                 if (options.length === 0) {
                                   return [{ value: '', label: 'Tidak ada kelas pada tingkatan ini' }]
                                 }
@@ -1923,6 +1941,9 @@ export default function ASiswa() {
                               <span className={detailUser?.status === 'nonaktif' ? 'text-red-600 font-medium' : 'text-green-600 font-medium'}>
                                 {detailUser?.status === 'nonaktif' ? 'Nonaktif' : 'Aktif'}
                               </span>
+                              <p className="text-xs text-gray-500 mt-1">
+                                Kelas sekarang: {getNamaKelas(detailUser?.kelas)}
+                              </p>
                             </div>
                             <div className="flex gap-2">
                               <Button
