@@ -23,7 +23,7 @@ const MONTH_NAMES_ID = [
 ]
 
 const FILE_SIZE_LIMITS = {
-  IMAGE: 200 * 1024, // 200KB
+  IMAGE: 70 * 1024, // 70KB (khusus foto akan dikompres sampai sekitar ini)
   PDF: 2 * 1024 * 1024, // 2MB
   DOCUMENT: 2 * 1024 * 1024, // 2MB
   PRESENTATION: 3 * 1024 * 1024, // 3MB
@@ -58,8 +58,9 @@ const formatFileSize = (bytes) => {
 
 /**
  * Kompresi gambar menggunakan Canvas API
+ * Target ±70KB (supaya ringan dan cepat di-load)
  */
-const compressImage = async (file, maxSizeKB = 200, initialQuality = 0.9) => {
+const compressImage = async (file, maxSizeKB = 70, initialQuality = 0.9) => {
   return new Promise((resolve, reject) => {
     if (!file.type.startsWith('image/')) {
       reject(new Error('File bukan gambar'))
@@ -102,7 +103,9 @@ const compressImage = async (file, maxSizeKB = 200, initialQuality = 0.9) => {
 
               const currentSizeKB = blob.size / 1024
               console.log(
-                `Ukuran saat ini: ${currentSizeKB.toFixed(2)}KB, Kualitas: ${quality.toFixed(2)}`
+                `Ukuran saat ini: ${currentSizeKB.toFixed(
+                  2
+                )}KB, Kualitas: ${quality.toFixed(2)}`
               )
 
               if (currentSizeKB > maxSizeKB && quality > 0.3) {
@@ -205,7 +208,8 @@ const compressFileBeforeUpload = async (file) => {
   try {
     if (fileType.startsWith('image/')) {
       console.log('File adalah gambar, memulai kompresi...')
-      const compressed = await compressImage(file, 200)
+      // Pakai batas dari FILE_SIZE_LIMITS (70KB)
+      const compressed = await compressImage(file, FILE_SIZE_LIMITS.IMAGE / 1024)
       console.log(
         `Kompresi gambar selesai: ${compressed.name} (${formatFileSize(
           compressed.size
@@ -376,7 +380,7 @@ export default function TugasGuru() {
   const [isLoadingTugasPerluDinilai, setIsLoadingTugasPerluDinilai] =
     useState(false)
 
-  /* ---------- preview file ---------- */
+  /* ---------- preview file / link (overlay) ---------- */
   const [previewFile, setPreviewFile] = useState(null)
 
   /* ---------- opsi 12 bulan terakhir ---------- */
@@ -612,7 +616,7 @@ export default function TugasGuru() {
           ...new Set(tugasData.map((t) => t.kelas).filter(Boolean))
         ]
 
-        // ====== AMBIL JAWABAN + SISWA UNTUK STATISTIK ======
+        // ====== AMBIL JAWABAN + SISWA UNTUK STATISTIK ======#
         const jawabanPromise =
           tugasIds.length > 0
             ? supabase
@@ -654,7 +658,7 @@ export default function TugasGuru() {
             return siswaKelas.some((s) => s.id === j.user_id)
           })
 
-          // ====== DEDUP per user_id (1 siswa = 1 jawaban) ======
+          // ====== DEDUP per user_id (1 siswa = 1 jawaban) ======#
           const uniqueJawabanByUser = Object.values(
             jawabanIni.reduce((acc, j) => {
               const existing = acc[j.user_id]
@@ -981,7 +985,8 @@ export default function TugasGuru() {
     }
   }
 
-  const handleEditFileUpload = async (files) => await handleFileUpload(files, 'edit')
+  const handleEditFileUpload = async (files) =>
+    await handleFileUpload(files, 'edit')
 
   /* ========== 7b. Ambil ukuran file lama saat edit ========== */
   useEffect(() => {
@@ -1331,6 +1336,7 @@ export default function TugasGuru() {
                         <div className="flex flex-wrap gap-1">
                           {siswa.jawaban?.file_url && (
                             <button
+                              type="button"
                               onClick={() =>
                                 setPreviewFile(siswa.jawaban.file_url)
                               }
@@ -1340,14 +1346,16 @@ export default function TugasGuru() {
                             </button>
                           )}
                           {siswa.jawaban?.link_url && (
-                            <a
-                              href={siswa.jawaban.link_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
+                            // ⬇️ SEKARANG LINK DIBUKA DI OVERLAY (BUKAN TAB BARU)
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setPreviewFile(siswa.jawaban.link_url)
+                              }
                               className="inline-flex items-center gap-1 px-2 py-1 bg-purple-100 text-purple-700 rounded text-xs hover:bg-purple-200 transition-colors whitespace-nowrap"
                             >
                               🔗 Link
-                            </a>
+                            </button>
                           )}
                           {!siswa.jawaban?.file_url &&
                             !siswa.jawaban?.link_url && (
@@ -1643,7 +1651,7 @@ export default function TugasGuru() {
                   <li className="flex items-center gap-2">
                     <span className="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
                     <span>
-                      Gambar (JPEG/PNG): <strong>maks. 200KB</strong>
+                      Gambar (JPEG/PNG): <strong>maks. 70KB</strong>
                     </span>
                   </li>
                   <li className="flex items-center gap-2">
@@ -1665,6 +1673,12 @@ export default function TugasGuru() {
                     </span>
                   </li>
                 </ul>
+                <p className="text-[11px] text-slate-500 mt-2">
+                  💡 Jika foto yang akan dikirim lebih dari satu (misalnya banyak
+                  halaman), sebaiknya simpan semua foto di Google Drive lalu
+                  kirimkan <strong>link-nya saja</strong> di jawaban siswa. Lebih
+                  ringan dan tidak membebani server.
+                </p>
               </div>
             </div>
           </div>
@@ -1952,7 +1966,10 @@ export default function TugasGuru() {
                         100,
                         Math.max(0, percentDikerjakan - percentSudah)
                       )
-                      widthBelum = Math.max(0, 100 - (widthSudah + widthBelumDinilai))
+                      widthBelum = Math.max(
+                        0,
+                        100 - (widthSudah + widthBelumDinilai)
+                      )
                     }
 
                     return (
@@ -2318,7 +2335,7 @@ export default function TugasGuru() {
                         <li className="flex items-center gap-2">
                           <span className="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
                           <span>
-                            Gambar (JPEG/PNG): <strong>maks. 200KB</strong>
+                            Gambar (JPEG/PNG): <strong>maks. 70KB</strong>
                           </span>
                         </li>
                         <li className="flex items-center gap-2">
@@ -2340,6 +2357,12 @@ export default function TugasGuru() {
                           </span>
                         </li>
                       </ul>
+                      <p className="text-[11px] text-slate-500 mt-2">
+                        💡 Jika foto yang akan dikirim lebih dari satu (misalnya
+                        banyak halaman), sebaiknya simpan semua foto di Google
+                        Drive lalu kirimkan <strong>link-nya saja</strong> di
+                        jawaban siswa. Lebih ringan dan tidak membebani server.
+                      </p>
                     </div>
                   </div>
                   <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
@@ -2483,7 +2506,7 @@ export default function TugasGuru() {
         </div>
       )}
 
-      {/* FILE PREVIEW MODAL */}
+      {/* FILE / LINK PREVIEW MODAL */}
       {previewFile && (
         <FilePreviewModal
           fileUrl={previewFile}
