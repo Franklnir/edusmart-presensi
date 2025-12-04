@@ -23,7 +23,7 @@ function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Passwor
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 backdrop-blur-sm">
-      <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
+      <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4">
         <h3 className="text-lg font-bold text-gray-900 mb-2">{title}</h3>
         <p className="text-gray-600 text-sm mb-4">
           Untuk melanjutkan, masukkan password akun Anda:
@@ -931,9 +931,9 @@ export default function AKelas() {
       {/* Jika belum authorized: tampilkan layar kunci saja */}
       {!isAuthorized ? (
         <div className="min-h-screen flex items-center justify-center px-4">
-          <div className="bg-white rounded-lg shadow-lg border border-gray-200 p-6 w-full max-w-md">
+          <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6 w-full max-w-md">
             <div className="flex items-center mb-4">
-              <div className="p-3 bg-blue-100 rounded-lg mr-3">
+              <div className="p-3 bg-blue-100 rounded-xl mr-3">
                 <span className="text-2xl">🔒</span>
               </div>
               <div>
@@ -960,7 +960,7 @@ export default function AKelas() {
           <div className="bg-white shadow-lg p-6 border-b border-gray-200">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center space-x-4">
-                <div className="p-3 bg-blue-600 rounded-lg">
+                <div className="p-3 bg-blue-600 rounded-xl">
                   <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
                   </svg>
@@ -973,7 +973,7 @@ export default function AKelas() {
                 </div>
               </div>
               <div className="mt-4 sm:mt-0">
-                <div className="flex items-center space-x-1 bg-gray-100 rounded-lg p-1 border border-gray-200">
+                <div className="flex items-center space-x-1 bg-gray-100 rounded-xl p-1 border border-gray-200">
                   {[
                     { key: 'kelas', label: 'Kelas & Jadwal', icon: '📚' },
                     { key: 'struktur', label: 'Struktur Sekolah', icon: '🏢' },
@@ -1005,7 +1005,7 @@ export default function AKelas() {
             {/* Loading Overlay */}
             {loading && (
               <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 backdrop-blur-sm">
-                <div className="bg-white rounded-lg p-6 flex items-center space-x-3 shadow-2xl">
+                <div className="bg-white rounded-2xl p-6 flex items-center space-x-3 shadow-2xl">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
                   <span className="text-gray-700 font-medium">Memproses data...</span>
                 </div>
@@ -1016,7 +1016,7 @@ export default function AKelas() {
             {tab === 'kelas' && (
               <div className="space-y-6">
                 {/* Kelas List Card */}
-                <div className="bg-white rounded-lg shadow-lg p-6 border border-gray-200">
+                <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-200">
                   <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-6">
                     <div>
                       <h2 className="text-xl font-bold text-gray-900 flex items-center space-x-2">
@@ -1054,7 +1054,7 @@ export default function AKelas() {
                     {kelasByGrade.map(k => (
                       <div key={k.id} className="flex items-center group relative">
                         <button
-                          className={`px-4 py-3 rounded-lg border-2 transition-all duration-200 font-semibold min-w-[100px] ${
+                          className={`px-4 py-3 rounded-xl border-2 transition-all duration-200 font-semibold min-w-[100px] ${
                             kelasSelected === k.id
                               ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white border-blue-600 shadow-lg transform scale-105'
                               : 'bg-white text-gray-700 border-gray-300 hover:border-blue-400 hover:text-blue-600 hover:shadow-md'
@@ -1077,7 +1077,7 @@ export default function AKelas() {
                     ))}
                     {!kelasByGrade.length && (
                       <div className="text-center py-12 text-gray-500 w-full">
-                        <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-lg flex items-center justify-center">
+                        <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
                           <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0H4" />
                           </svg>
@@ -1092,7 +1092,7 @@ export default function AKelas() {
                 {/* Grid untuk Form Kelas dan Mata Pelajaran */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {/* Form Buat Kelas */}
-                  <div className="bg-white rounded-lg shadow-lg p-6 border border-gray-200">
+                  <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-200">
                     <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center space-x-2">
                       <span>✨</span>
                       <span>Buat Kelas Baru</span>
@@ -1135,7 +1135,7 @@ export default function AKelas() {
                   </div>
 
                   {/* Mata Pelajaran */}
-                  <div className="bg-white rounded-lg shadow-lg p-6 border border-gray-200">
+                  <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-200">
                     <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center space-x-2">
                       <span>📖</span>
                       <span>Kelola Mata Pelajaran</span>
@@ -1185,7 +1185,7 @@ export default function AKelas() {
                           ))}
                           {!mapelList.length && (
                             <div className="text-center py-8 text-gray-500">
-                              <div className="w-12 h-12 mx-auto mb-3 bg-gray-100 rounded-lg flex items-center justify-center">
+                              <div className="w-12 h-12 mx-auto mb-3 bg-gray-100 rounded-full flex items-center justify-center">
                                 <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
                                 </svg>
@@ -1201,7 +1201,7 @@ export default function AKelas() {
 
                 {/* Struktur Kelas */}
                 {selObj && kelasSelected && (
-                  <div className="bg-white rounded-lg shadow-lg p-6 border border-gray-200">
+                  <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-200">
                     <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center space-x-2">
                       <span>👨‍🏫</span>
                       <span>Struktur Kelas • {(selObj?.nama || kelasSelected).toUpperCase()}</span>
@@ -1261,7 +1261,7 @@ export default function AKelas() {
 
                 {/* Jadwal Section */}
                 {kelasSelected && (
-                  <div className="bg-white rounded-lg shadow-lg p-6 border border-gray-200">
+                  <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-200">
                     <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between mb-6">
                       <div>
                         <h3 className="text-xl font-bold text-gray-900 flex items-center space-x-2">
@@ -1275,7 +1275,7 @@ export default function AKelas() {
                     </div>
 
                     {/* Filter Hari */}
-                    <div className="mb-6 flex flex-col sm:flex-row sm:items-end space-y-4 sm:space-y-0 sm:space-x-4 bg-blue-50 p-4 rounded-lg border border-blue-200">
+                    <div className="mb-6 flex flex-col sm:flex-row sm:items-end space-y-4 sm:space-y-0 sm:space-x-4 bg-blue-50 p-4 rounded-xl border border-blue-200">
                       <div className="flex-1">
                         <label className="block text-sm font-medium text-blue-800 mb-1">Filter Hari</label>
                         <select
@@ -1305,7 +1305,7 @@ export default function AKelas() {
                     </div>
 
                     {/* Form Tambah Jadwal */}
-                    <div className="bg-blue-50 rounded-lg p-5 mb-6 border border-blue-200">
+                    <div className="bg-blue-50 rounded-xl p-5 mb-6 border border-blue-200">
                       <h4 className="font-semibold text-blue-900 mb-4 flex items-center space-x-2">
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
@@ -1402,7 +1402,7 @@ export default function AKelas() {
                     </div>
 
                     {/* Daftar Jadwal */}
-                    <div className="overflow-hidden rounded-lg border border-gray-200 shadow-sm">
+                    <div className="overflow-hidden rounded-xl border border-gray-200 shadow-sm">
                       <table className="min-w-full divide-y divide-gray-200">
                         <thead className="bg-gray-50">
                           <tr>
@@ -1430,7 +1430,7 @@ export default function AKelas() {
                                 <>
                                   <td className="px-6 py-4 whitespace-nowrap">
                                     <select
-                                      className="block w-full px-3 py-1 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
+                                      className="block w-full px-3 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
                                       value={editData.hari}
                                       onChange={e => setEditData(d => ({ ...d, hari: e.target.value }))}
                                     >
@@ -1443,14 +1443,14 @@ export default function AKelas() {
                                     <div className="flex items-center space-x-2">
                                       <input
                                         type="time"
-                                        className="block w-full px-3 py-1 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900"
+                                        className="block w-full px-3 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900"
                                         value={editData.jamMulai}
                                         onChange={e => setEditData(d => ({ ...d, jamMulai: e.target.value }))}
                                       />
                                       <span className="text-gray-400">-</span>
                                       <input
                                         type="time"
-                                        className="block w-full px-3 py-1 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900"
+                                        className="block w-full px-3 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900"
                                         value={editData.jamSelesai}
                                         onChange={e => setEditData(d => ({ ...d, jamSelesai: e.target.value }))}
                                       />
@@ -1458,7 +1458,7 @@ export default function AKelas() {
                                   </td>
                                   <td className="px-6 py-4 whitespace-nowrap">
                                     <select
-                                      className="block w-full px-3 py-1 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
+                                      className="block w-full px-3 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
                                       value={editData.mapel}
                                       onChange={e => setEditData(d => ({ ...d, mapel: e.target.value }))}
                                     >
@@ -1470,7 +1470,7 @@ export default function AKelas() {
                                   </td>
                                   <td className="px-6 py-4 whitespace-nowrap">
                                     <select
-                                      className="block w-full px-3 py-1 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
+                                      className="block w-full px-3 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
                                       value={editData.guruId || ''}
                                       onChange={e => setEditData(d => ({ ...d, guruId: e.target.value || null }))}
                                     >
@@ -1482,7 +1482,7 @@ export default function AKelas() {
                                   </td>
                                   <td className="px-6 py-4 whitespace-nowrap text-right space-x-2">
                                     <button
-                                      className="text-green-600 hover:text-green-800 font-medium text-sm px-3 py-1 rounded-lg hover:bg-green-50 transition-colors duration-200 flex items-center space-x-1"
+                                      className="text-green-600 hover:text-green-800 font-medium text-sm px-3 py-1 rounded hover:bg-green-50 transition-colors duration-200 flex items-center space-x-1"
                                       onClick={saveEdit}
                                     >
                                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1491,7 +1491,7 @@ export default function AKelas() {
                                       <span>Simpan</span>
                                     </button>
                                     <button
-                                      className="text-gray-600 hover:text-gray-800 font-medium text-sm px-3 py-1 rounded-lg hover:bg-gray-50 transition-colors duration-200 flex items-center space-x-1"
+                                      className="text-gray-600 hover:text-gray-800 font-medium text-sm px-3 py-1 rounded hover:bg-gray-50 transition-colors duration-200 flex items-center space-x-1"
                                       onClick={cancelEdit}
                                     >
                                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1504,7 +1504,7 @@ export default function AKelas() {
                               ) : (
                                 <>
                                   <td className="px-6 py-4 whitespace-nowrap">
-                                    <span className="font-medium text-gray-900 bg-blue-100 px-2 py-1 rounded-lg text-xs">
+                                    <span className="font-medium text-gray-900 bg-blue-100 px-2 py-1 rounded-full text-xs">
                                       {j.hari}
                                     </span>
                                   </td>
@@ -1523,7 +1523,7 @@ export default function AKelas() {
                                   </td>
                                   <td className="px-6 py-4 whitespace-nowrap text-right space-x-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
                                     <button
-                                      className="text-blue-600 hover:text-blue-800 font-medium text-sm px-3 py-1 rounded-lg hover:bg-blue-50 transition-colors duration-200 flex items-center space-x-1"
+                                      className="text-blue-600 hover:text-blue-800 font-medium text-sm px-3 py-1 rounded hover:bg-blue-50 transition-colors duration-200 flex items-center space-x-1"
                                       onClick={() => startEdit(j)}
                                     >
                                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1532,7 +1532,7 @@ export default function AKelas() {
                                       <span>Edit</span>
                                     </button>
                                     <button
-                                      className="text-red-600 hover:text-red-800 font-medium text-sm px-3 py-1 rounded-lg hover:bg-red-50 transition-colors duration-200 flex items-center space-x-1"
+                                      className="text-red-600 hover:text-red-800 font-medium text-sm px-3 py-1 rounded hover:bg-red-50 transition-colors duration-200 flex items-center space-x-1"
                                       onClick={() => hapusJadwal(j.id)}
                                     >
                                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1548,7 +1548,7 @@ export default function AKelas() {
                           {!jadwalToShow.length && (
                             <tr>
                               <td colSpan="5" className="px-6 py-12 text-center text-gray-500">
-                                <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-lg flex items-center justify-center">
+                                <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
                                   <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                                   </svg>
@@ -1586,7 +1586,7 @@ export default function AKelas() {
   )
 }
 
-/* === STRUKTUR SEKOLAH === */
+/* === STRUKTUR SEKOLAH (SAMA SEPERTI VERSI SEBELUMNYA) === */
 function StrukturSekolah({ guruList, pushToast }) {
   const DEFAULT_POS = ['Kepala Sekolah', 'Wakil Kepala Sekolah', 'Kurikulum', 'Kesiswaan', 'Sarpras', 'Humas', 'Bendahara', 'Tata Usaha']
   const [struktur, setStruktur] = useState([])
@@ -1827,7 +1827,7 @@ function StrukturSekolah({ guruList, pushToast }) {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="bg-white rounded-lg shadow-lg p-6 border border-gray-200">
+      <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-200">
         <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
           <div>
             <h2 className="text-2xl font-bold text-gray-900 flex items-center space-x-2">
@@ -1842,7 +1842,7 @@ function StrukturSekolah({ guruList, pushToast }) {
       </div>
 
       {/* Form Tambah Posisi */}
-      <div className="bg-white rounded-lg shadow-lg p-6 border border-gray-200">
+      <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-200">
         <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center space-x-2">
           <span>➕</span>
           <span>Tambah Posisi Baru</span>
@@ -1901,7 +1901,7 @@ function StrukturSekolah({ guruList, pushToast }) {
       </div>
 
       {/* Struktur Sekolah */}
-      <div className="bg-white rounded-lg shadow-lg p-6 border border-gray-200">
+      <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-200">
         <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center space-x-2">
           <span>📊</span>
           <span>Struktur Sekolah</span>
@@ -1911,12 +1911,12 @@ function StrukturSekolah({ guruList, pushToast }) {
           {struktur.map((p, index) => (
             <div
               key={p.id}
-              className="bg-white rounded-lg border border-gray-200 shadow-sm hover:shadow-md transition-all duration-300 p-4"
+              className="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all duration-300 p-4"
             >
               <div className="flex justify-between items-start">
                 <div className="flex-1">
                   <div className="flex items-center space-x-2 mb-2">
-                    <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
+                    <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
                       <span className="text-xs font-bold text-blue-600">{index + 1}</span>
                     </div>
                     <h4 className="font-bold text-gray-900 text-lg">{p.jabatan}</h4>
@@ -1965,7 +1965,7 @@ function StrukturSekolah({ guruList, pushToast }) {
           ))}
           {!struktur.length && (
             <div className="col-span-full text-center py-12 text-gray-500">
-              <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-lg flex items-center justify-center">
+              <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
                 <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
                 </svg>
@@ -1978,7 +1978,7 @@ function StrukturSekolah({ guruList, pushToast }) {
       </div>
 
       {/* Wali Kelas */}
-      <div className="bg-white rounded-lg shadow-lg p-6 border border-gray-200">
+      <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-200">
         <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center space-x-2">
           <span>👨‍🏫</span>
           <span>Wali Kelas</span>
@@ -1988,12 +1988,12 @@ function StrukturSekolah({ guruList, pushToast }) {
           {waliKelas.map((wk, index) => (
             <div
               key={wk.id}
-              className="bg-white rounded-lg border border-gray-200 shadow-sm hover:shadow-md transition-all duration-300 p-4"
+              className="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all duration-300 p-4"
             >
               <div className="flex justify-between items-start">
                 <div className="flex-1">
                   <div className="flex items-center space-x-2 mb-2">
-                    <div className="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center">
+                    <div className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center">
                       <span className="text-xs font-bold text-purple-600">{index + 1}</span>
                     </div>
                     <div>
@@ -2038,7 +2038,7 @@ function StrukturSekolah({ guruList, pushToast }) {
           ))}
           {!waliKelas.length && (
             <div className="col-span-full text-center py-12 text-gray-500">
-              <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-lg flex items-center justify-center">
+              <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
                 <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
                 </svg>
@@ -2052,7 +2052,7 @@ function StrukturSekolah({ guruList, pushToast }) {
 
       {loading && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 backdrop-blur-sm">
-          <div className="bg-white rounded-lg p-6 flex items-center space-x-3 shadow-2xl">
+          <div className="bg-white rounded-2xl p-6 flex items-center space-x-3 shadow-2xl">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
             <span className="text-gray-700 font-medium">Memproses...</span>
           </div>
@@ -2384,7 +2384,7 @@ function Organisasi({ guruList, siswaList, pushToast }) {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="bg-white rounded-lg shadow-lg p-6 border border-gray-200">
+      <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-200">
         <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
           <div>
             <h2 className="text-2xl font-bold text-gray-900 flex items-center space-x-2">
@@ -2399,7 +2399,7 @@ function Organisasi({ guruList, siswaList, pushToast }) {
       </div>
 
       {/* Organisasi + Detail */}
-      <div className="bg-white rounded-lg shadow-lg p-6 border border-gray-200">
+      <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-200">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* List Organisasi */}
           <div>
@@ -2539,14 +2539,14 @@ function Organisasi({ guruList, siswaList, pushToast }) {
 
       {/* Anggota Organisasi */}
       {orgSel && (
-        <div className="bg-white rounded-lg shadow-lg p-6 border border-gray-200">
+        <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-200">
           <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center space-x-2">
             <span>👨‍🎓</span>
             <span>Anggota Organisasi</span>
           </h3>
 
           {/* Form tambah anggota */}
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4">
             <h4 className="text-sm font-semibold text-blue-900 mb-3 flex items-center space-x-2">
               <span>➕</span>
               <span>Tambah Anggota</span>
@@ -2608,7 +2608,7 @@ function Organisasi({ guruList, siswaList, pushToast }) {
           </div>
 
           {/* List anggota */}
-          <div className="overflow-hidden rounded-lg border border-gray-200 shadow-sm">
+          <div className="overflow-hidden rounded-xl border border-gray-200 shadow-sm">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
@@ -2649,13 +2649,13 @@ function Organisasi({ guruList, siswaList, pushToast }) {
                       {editAnggotaId === a.id ? (
                         <>
                           <button
-                            className="text-green-600 hover:text-green-800 px-2 py-1 rounded-lg hover:bg-green-50 text-xs font-medium"
+                            className="text-green-600 hover:text-green-800 px-2 py-1 rounded hover:bg-green-50 text-xs font-medium"
                             onClick={saveEditAnggota}
                           >
                             Simpan
                           </button>
                           <button
-                            className="text-gray-600 hover:text-gray-800 px-2 py-1 rounded-lg hover:bg-gray-50 text-xs font-medium"
+                            className="text-gray-600 hover:text-gray-800 px-2 py-1 rounded hover:bg-gray-50 text-xs font-medium"
                             onClick={batalEditAnggota}
                           >
                             Batal
@@ -2664,13 +2664,13 @@ function Organisasi({ guruList, siswaList, pushToast }) {
                       ) : (
                         <>
                           <button
-                            className="text-blue-600 hover:text-blue-800 px-2 py-1 rounded-lg hover:bg-blue-50 text-xs font-medium"
+                            className="text-blue-600 hover:text-blue-800 px-2 py-1 rounded hover:bg-blue-50 text-xs font-medium"
                             onClick={() => startEditAnggota(a)}
                           >
                             Edit
                           </button>
                           <button
-                            className="text-red-600 hover:text-red-800 px-2 py-1 rounded-lg hover:bg-red-50 text-xs font-medium"
+                            className="text-red-600 hover:text-red-800 px-2 py-1 rounded hover:bg-red-50 text-xs font-medium"
                             onClick={() => hapusAnggota(a)}
                           >
                             Hapus
@@ -2693,7 +2693,7 @@ function Organisasi({ guruList, siswaList, pushToast }) {
 
           {loading && (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 backdrop-blur-sm">
-              <div className="bg-white rounded-lg p-6 flex items-center space-x-3 shadow-2xl">
+              <div className="bg-white rounded-2xl p-6 flex items-center space-x-3 shadow-2xl">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
                 <span className="text-gray-700 font-medium">Memproses...</span>
               </div>
