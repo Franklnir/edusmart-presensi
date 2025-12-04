@@ -136,7 +136,7 @@ const GuruStatCard = ({ label, value, icon, color = 'blue', description }) => {
   }
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-5">
       <div className="flex items-center justify-between">
         <div className="flex-1">
           <p className="text-sm font-medium text-gray-600 mb-1">{label}</p>
@@ -146,7 +146,7 @@ const GuruStatCard = ({ label, value, icon, color = 'blue', description }) => {
           )}
         </div>
         {icon && (
-          <div className={`text-xl text-white p-2 rounded-lg ${colorClasses[color]}`}>
+          <div className={`text-xl text-white p-3 rounded-lg ${colorClasses[color]}`}>
             {icon}
           </div>
         )}
@@ -158,17 +158,17 @@ const GuruStatCard = ({ label, value, icon, color = 'blue', description }) => {
 // Loading Skeleton
 const LoadingSkeleton = () => (
   <div className="animate-pulse">
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-6">
       {[...Array(4)].map((_, i) => (
-        <div key={i} className="bg-gray-200 rounded-lg h-20"></div>
+        <div key={i} className="bg-gray-200 rounded-lg h-24"></div>
       ))}
     </div>
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-      <div className="space-y-3">
+    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-5">
+      <div className="space-y-4">
         {[...Array(5)].map((_, i) => (
-          <div key={i} className="flex items-center space-x-3">
-            <div className="rounded-full bg-gray-200 h-4 w-4 ml-2"></div>
-            <div className="rounded-full bg-gray-200 h-10 w-10"></div>
+          <div key={i} className="flex items-center space-x-4">
+            <div className="rounded-full bg-gray-200 h-5 w-5 ml-2"></div>
+            <div className="rounded-full bg-gray-200 h-12 w-12"></div>
             <div className="flex-1 space-y-2">
               <div className="h-4 bg-gray-200 rounded w-3/4"></div>
               <div className="h-3 bg-gray-200 rounded w-1/2"></div>
@@ -199,7 +199,7 @@ function Badge({ children, variant = 'default', className = '' }) {
     info: 'bg-indigo-100 text-indigo-800'
   }
   return (
-    <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${variants[variant]} ${className}`}>
+    <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${variants[variant]} ${className}`}>
       {children}
     </span>
   )
@@ -226,7 +226,7 @@ function Button({
 
   const sizes = {
     sm: 'px-3 py-1.5 text-sm',
-    md: 'px-4 py-2 text-sm',
+    md: 'px-4 py-2.5 text-sm',
     lg: 'px-6 py-3 text-base'
   }
 
@@ -253,7 +253,7 @@ function Input({ label, error, className = '', ...props }) {
         </label>
       )}
       <input
-        className={`block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-white ${className}`}
+        className={`block w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-white ${className}`}
         {...props}
       />
       {error && <p className="text-red-600 text-sm">{error}</p>}
@@ -270,7 +270,7 @@ function Select({ label, error, options = [], className = '', ...props }) {
         </label>
       )}
       <select
-        className={`block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-white ${className}`}
+        className={`block w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-white ${className}`}
         {...props}
       >
         {options.map(option => (
@@ -818,11 +818,11 @@ export default function AGuru() {
     }
 
     return (
-      <div className="flex flex-wrap gap-1">
+      <div className="flex flex-wrap gap-1.5">
         {jabatanList.map((jabatan, index) => (
           <span
             key={index}
-            className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200"
+            className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800 border border-blue-200"
             title={jabatan}
           >
             {jabatan}
@@ -834,8 +834,8 @@ export default function AGuru() {
 
   /* ===== Render ===== */
   return (
-    <div className="min-h-screen bg-gray-50 p-4">
-      <div className="max-w-7xl mx-auto space-y-6">
+    <div className="min-h-screen bg-gray-50">
+      <div className="w-full px-6 py-6 space-y-6">
         {/* Password Modal */}
         <PasswordModal
           isOpen={passwordModal.isOpen}
@@ -846,28 +846,28 @@ export default function AGuru() {
         />
 
         {/* Header */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex items-center gap-4">
-              <div className="p-3 bg-blue-100 rounded-lg">
-                <span className="text-2xl text-blue-600">👨‍🏫</span>
+            <div className="flex items-center gap-5">
+              <div className="p-4 bg-blue-100 rounded-xl">
+                <span className="text-3xl text-blue-600">👨‍🏫</span>
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-gray-900 mb-1">Manajemen Guru</h1>
-                <p className="text-gray-600">Kelola data guru, mata pelajaran, dan penugasan</p>
+                <h1 className="text-2xl font-bold text-gray-900 mb-2">Manajemen Guru</h1>
+                <p className="text-gray-600 text-lg">Kelola data guru, mata pelajaran, dan penugasan</p>
               </div>
             </div>
             <button
-              className="mt-4 lg:mt-0 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 font-medium"
+              className="mt-5 lg:mt-0 bg-blue-600 text-white px-5 py-3 rounded-xl hover:bg-blue-700 focus:ring-3 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 font-medium text-base shadow-sm hover:shadow-md"
               onClick={() => setShowAddForm(!showAddForm)}
             >
-              {showAddForm ? '✕ Tutup Form' : '➕ Tambah Guru'}
+              {showAddForm ? '✕ Tutup Form' : '➕ Tambah Guru Baru'}
             </button>
           </div>
         </div>
 
         {/* Dashboard Statistics */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
           <GuruStatCard 
             label="Total Guru" 
             value={stats.totalGuru} 
@@ -901,14 +901,14 @@ export default function AGuru() {
         {/* Form Tambah Guru */}
         {showAddForm && (
           <Card className="mb-6">
-            <div className="bg-blue-50 border-b border-blue-200 p-4">
-              <h3 className="text-lg font-semibold text-blue-900 flex items-center gap-2">
-                <span>➕</span>
+            <div className="bg-blue-50 border-b border-blue-200 p-5">
+              <h3 className="text-xl font-semibold text-blue-900 flex items-center gap-3">
+                <span className="text-2xl">➕</span>
                 Tambah Guru Baru
               </h3>
             </div>
-            <div className="p-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="p-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <Input
                   label="Email *"
                   name="email"
@@ -955,15 +955,17 @@ export default function AGuru() {
                 </div>
               </div>
 
-              <div className="flex justify-end space-x-3 mt-4 pt-4 border-t border-gray-200">
+              <div className="flex justify-end space-x-4 mt-6 pt-6 border-t border-gray-200">
                 <Button
                   variant="secondary"
                   onClick={() => setShowAddForm(false)}
+                  size="lg"
                 >
                   ✕ Batal
                 </Button>
                 <Button
                   onClick={handleAdd}
+                  size="lg"
                   disabled={
                     !form.email ||
                     !form.nama ||
@@ -971,7 +973,7 @@ export default function AGuru() {
                     form.password !== form.confirmPassword
                   }
                 >
-                  👨‍🏫 Daftarkan
+                  👨‍🏫 Daftarkan Guru
                 </Button>
               </div>
             </div>
@@ -980,14 +982,14 @@ export default function AGuru() {
 
         {/* Filter Section */}
         <Card>
-          <div className="bg-gray-50 border-b border-gray-200 p-4">
-            <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-              <span>🔍</span>
+          <div className="bg-gray-50 border-b border-gray-200 p-5">
+            <h3 className="text-xl font-semibold text-gray-900 flex items-center gap-3">
+              <span className="text-2xl">🔍</span>
               Filter Pencarian
             </h3>
           </div>
-          <div className="p-4">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="p-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
               <Input
                 label="Nama / Email"
                 placeholder="Cari nama atau email guru"
@@ -1013,18 +1015,20 @@ export default function AGuru() {
                 ]}
               />
             </div>
-            <div className="flex justify-end space-x-3 mt-4">
+            <div className="flex justify-end space-x-4 mt-6">
               <Button
                 onClick={applyFilter}
                 loading={isSearching}
+                size="lg"
               >
-                Cari
+                🔍 Cari Guru
               </Button>
               <Button
                 variant="secondary"
                 onClick={resetFilter}
+                size="lg"
               >
-                🔄 Reset
+                🔄 Reset Filter
               </Button>
             </div>
           </div>
@@ -1032,46 +1036,46 @@ export default function AGuru() {
 
         {/* Tabel Guru */}
         <Card>
-          <div className="bg-gray-50 border-b border-gray-200 p-4">
+          <div className="bg-gray-50 border-b border-gray-200 p-5">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                <span>📊</span>
+              <h3 className="text-xl font-semibold text-gray-900 flex items-center gap-3">
+                <span className="text-2xl">📊</span>
                 Daftar Guru
               </h3>
-              <span className="text-sm text-gray-600">
+              <span className="text-base text-gray-600 font-medium">
                 {guru.length} dari {guruProcessed.length} guru
               </span>
             </div>
           </div>
 
           {loadingInit ? (
-            <div className="p-4">
+            <div className="p-6">
               <LoadingSkeleton />
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <table className="w-full min-w-max">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b w-12">
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider border-b w-14">
                       No
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider border-b min-w-[250px]">
                       Guru
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider border-b min-w-[200px]">
                       Mapel
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider border-b min-w-[150px]">
                       Kelas
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider border-b min-w-[250px]">
                       Jabatan
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider border-b min-w-[120px]">
                       Status
                     </th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                    <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700 uppercase tracking-wider border-b min-w-[220px]">
                       Aksi
                     </th>
                   </tr>
@@ -1083,86 +1087,89 @@ export default function AGuru() {
                     const kelasPreview = listPreview(g.kelasList)
                     
                     return (
-                      <tr key={g.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 text-center">
+                      <tr key={g.id} className="hover:bg-gray-50 transition-colors duration-150">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center font-medium">
                           {index + 1}
                         </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
+                        <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex items-center">
-                            <div className="flex-shrink-0 h-10 w-10">
+                            <div className="flex-shrink-0 h-12 w-12">
                               {foto ? (
                                 <img
                                   src={foto}
                                   alt={g.nama || 'foto'}
-                                  className="h-10 w-10 rounded-full object-cover border border-gray-200"
+                                  className="h-12 w-12 rounded-full object-cover border-2 border-gray-200"
                                 />
                               ) : (
-                                <div className="h-10 w-10 rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center text-sm font-medium text-blue-600">
+                                <div className="h-12 w-12 rounded-full bg-blue-100 border-2 border-blue-200 flex items-center justify-center text-base font-semibold text-blue-600">
                                   {initials(g.nama)}
                                 </div>
                               )}
                             </div>
-                            <div className="ml-3">
-                              <div className="text-sm font-medium text-gray-900">
+                            <div className="ml-4">
+                              <div className="text-base font-semibold text-gray-900">
                                 {g.nama || '—'}
                               </div>
-                              <div className="text-sm text-gray-500">
+                              <div className="text-sm text-gray-600">
                                 {g.email || '—'}
                               </div>
-                              {g.telp && <div className="text-xs text-gray-500 flex items-center gap-1 mt-1">
-                                <span>📞</span>
+                              {g.telp && <div className="text-sm text-gray-500 flex items-center gap-2 mt-1">
+                                <span className="text-gray-400">📞</span>
                                 <span>{g.telp}</span>
                               </div>}
                             </div>
                           </div>
                         </td>
-                        <td className="px-4 py-3">
-                          <div className="text-sm text-gray-900" title={mapelPreview.title}>
+                        <td className="px-6 py-4">
+                          <div className="text-sm text-gray-900 font-medium" title={mapelPreview.title}>
                             {mapelPreview.text}
                           </div>
                         </td>
-                        <td className="px-4 py-3">
-                          <div className="text-sm text-gray-900" title={kelasPreview.title}>
+                        <td className="px-6 py-4">
+                          <div className="text-sm text-gray-900 font-medium" title={kelasPreview.title}>
                             {kelasPreview.text}
                           </div>
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-6 py-4">
                           <JabatanBadge jabatanList={g.jabatanList} />
                         </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
+                        <td className="px-6 py-4 whitespace-nowrap">
                           {g.status === 'nonaktif' ? (
-                            <Badge variant="danger" className="text-xs">
+                            <Badge variant="danger" className="text-sm px-4 py-1.5">
                               ⏸️ Nonaktif
                             </Badge>
                           ) : (
-                            <Badge variant="success" className="text-xs">
+                            <Badge variant="success" className="text-sm px-4 py-1.5">
                               ✅ Aktif
                             </Badge>
                           )}
                         </td>
-                        <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-medium space-x-1">
+                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
                           <Button
                             variant="primary"
-                            size="sm"
+                            size="md"
                             onClick={() => openDetailModal(g)}
+                            className="shadow-sm"
                           >
-                            Detail
+                            📋 Detail
                           </Button>
                           {g.status === 'nonaktif' ? (
                             <Button
                               variant="success"
-                              size="sm"
+                              size="md"
                               onClick={() => aktif(g)}
+                              className="shadow-sm"
                             >
-                              Aktifkan
+                              ✅ Aktifkan
                             </Button>
                           ) : (
                             <Button
                               variant="warning"
-                              size="sm"
+                              size="md"
                               onClick={() => openNonaktif(g)}
+                              className="shadow-sm"
                             >
-                              Nonaktif
+                              ⏸️ Nonaktif
                             </Button>
                           )}
                         </td>
@@ -1171,11 +1178,11 @@ export default function AGuru() {
                   })}
                   {!guru.length && (
                     <tr>
-                      <td colSpan="7" className="px-4 py-8 text-center">
+                      <td colSpan="7" className="px-6 py-12 text-center">
                         <div className="flex flex-col items-center justify-center">
-                          <div className="text-gray-300 text-4xl mb-2">👨‍🏫</div>
-                          <p className="text-gray-500 font-medium mb-1">Tidak ada data guru</p>
-                          <p className="text-gray-400 text-sm">Coba ubah filter pencarian</p>
+                          <div className="text-gray-300 text-5xl mb-4">👨‍🏫</div>
+                          <p className="text-gray-500 font-semibold text-lg mb-2">Tidak ada data guru</p>
+                          <p className="text-gray-400 text-base">Coba ubah filter pencarian atau tambahkan guru baru</p>
                         </div>
                       </td>
                     </tr>
@@ -1189,42 +1196,45 @@ export default function AGuru() {
         {/* Modal Nonaktifkan Guru */}
         {disableUID && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-lg p-6 w-full max-w-md">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="p-2 bg-orange-100 text-orange-600 rounded-lg">
-                  <span className="text-xl">⏸️</span>
+            <div className="bg-white rounded-xl p-7 w-full max-w-lg">
+              <div className="flex items-center gap-4 mb-5">
+                <div className="p-3 bg-orange-100 text-orange-600 rounded-xl">
+                  <span className="text-2xl">⏸️</span>
                 </div>
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900">Nonaktifkan Guru</h3>
-                  <p className="text-gray-600 text-sm">Guru akan diblokir di aplikasi</p>
+                  <h3 className="text-xl font-semibold text-gray-900">Nonaktifkan Guru</h3>
+                  <p className="text-gray-600 text-base">Guru akan diblokir di aplikasi</p>
                 </div>
               </div>
               
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+              <div className="mb-5">
+                <label className="block text-sm font-semibold text-gray-700 mb-3">
                   Alasan Penonaktifan *
                 </label>
                 <textarea
-                  className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 min-h-[100px]"
-                  placeholder="Contoh: Cuti panjang..."
+                  className="block w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-3 focus:ring-orange-500 focus:border-orange-500 min-h-[120px] text-base"
+                  placeholder="Contoh: Cuti panjang, sakit berkepanjangan, mengundurkan diri..."
                   value={alasanNonaktif}
                   onChange={e => setAlasanNonaktif(e.target.value)}
                   required
                 />
               </div>
               
-              <div className="flex justify-end space-x-3">
+              <div className="flex justify-end space-x-4">
                 <Button
                   variant="secondary"
                   onClick={batalNonaktif}
+                  size="lg"
                 >
                   ✕ Batal
                 </Button>
                 <Button
                   onClick={simpanNonaktif}
                   disabled={!alasanNonaktif.trim()}
+                  size="lg"
+                  className="bg-orange-600 hover:bg-orange-700"
                 >
-                  ⏸️ Nonaktifkan
+                  ⏸️ Nonaktifkan Guru
                 </Button>
               </div>
             </div>
@@ -1234,37 +1244,45 @@ export default function AGuru() {
         {/* Modal Konfirmasi Hapus Akun */}
         {deleteConfirmOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-lg p-6 w-full max-w-md">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="p-2 bg-red-100 text-red-600 rounded-lg">
-                  <span className="text-xl">🗑️</span>
+            <div className="bg-white rounded-xl p-7 w-full max-w-lg">
+              <div className="flex items-center gap-4 mb-5">
+                <div className="p-3 bg-red-100 text-red-600 rounded-xl">
+                  <span className="text-2xl">🗑️</span>
                 </div>
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900">Hapus Akun Guru</h3>
-                  <p className="text-gray-600 text-sm">Tindakan ini tidak dapat dibatalkan</p>
+                  <h3 className="text-xl font-semibold text-gray-900">Hapus Akun Guru</h3>
+                  <p className="text-gray-600 text-base">Tindakan ini tidak dapat dibatalkan</p>
                 </div>
               </div>
               
-              <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
-                <p className="text-red-800 text-sm font-medium mb-2">
+              <div className="bg-red-50 border border-red-200 rounded-xl p-5 mb-5">
+                <p className="text-red-800 text-base font-semibold mb-3">
                   Apakah Anda yakin ingin menghapus akun guru ini?
                 </p>
-                <p className="text-red-700 text-sm">
+                <p className="text-red-700 text-base mb-3">
                   <strong>{guruToDelete?.nama}</strong> ({guruToDelete?.email})
                 </p>
-                <p className="text-red-600 text-xs mt-2">
-                  • Akun akan dihapus dari database dan authentication
-                  <br />
-                  • Semua data terkait (jadwal, struktur) akan dihapus
-                  <br />
-                  • Tindakan ini PERMANEN dan tidak dapat dikembalikan
-                </p>
+                <div className="text-red-600 text-sm space-y-2">
+                  <div className="flex items-start">
+                    <span className="mr-2">•</span>
+                    <span>Akun akan dihapus dari database dan authentication</span>
+                  </div>
+                  <div className="flex items-start">
+                    <span className="mr-2">•</span>
+                    <span>Semua data terkait (jadwal, struktur) akan dihapus</span>
+                  </div>
+                  <div className="flex items-start">
+                    <span className="mr-2">•</span>
+                    <span>Tindakan ini PERMANEN dan tidak dapat dikembalikan</span>
+                  </div>
+                </div>
               </div>
 
-              <div className="flex justify-end space-x-3">
+              <div className="flex justify-end space-x-4">
                 <Button
                   variant="secondary"
                   onClick={closeDeleteConfirm}
+                  size="lg"
                 >
                   ✕ Batal
                 </Button>
@@ -1272,8 +1290,9 @@ export default function AGuru() {
                   variant="danger"
                   onClick={hapusAkunGuru}
                   loading={deletingGuru}
+                  size="lg"
                 >
-                  🗑️ Ya, Hapus
+                  🗑️ Ya, Hapus Akun
                 </Button>
               </div>
             </div>
@@ -1283,30 +1302,30 @@ export default function AGuru() {
         {/* Modal Detail Guru */}
         {detailModalOpen && selectedGuru && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-lg w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="bg-white rounded-xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
               {/* Header */}
-              <div className="px-6 py-4 border-b bg-gray-50 flex items-start justify-between">
-                <div className="flex items-center space-x-4">
+              <div className="px-7 py-5 border-b bg-gray-50 flex items-start justify-between">
+                <div className="flex items-center space-x-5">
                   {selectedGuru.photo_url ? (
                     <img
                       src={selectedGuru.photo_url}
                       alt={selectedGuru.nama}
-                      className="h-12 w-12 rounded-full object-cover border border-gray-200"
+                      className="h-14 w-14 rounded-full object-cover border-2 border-gray-200"
                     />
                   ) : (
-                    <div className="h-12 w-12 rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center text-base font-semibold text-blue-600">
+                    <div className="h-14 w-14 rounded-full bg-blue-100 border-2 border-blue-200 flex items-center justify-center text-lg font-semibold text-blue-600">
                       {initials(selectedGuru.nama)}
                     </div>
                   )}
                   <div>
-                    <h3 className="text-lg font-semibold text-gray-900">{selectedGuru.nama}</h3>
-                    <p className="text-gray-600 text-sm">{selectedGuru.email}</p>
-                    {selectedGuru.telp && <p className="text-gray-500 text-xs flex items-center gap-1 mt-1">
+                    <h3 className="text-xl font-semibold text-gray-900">{selectedGuru.nama}</h3>
+                    <p className="text-gray-600 text-base">{selectedGuru.email}</p>
+                    {selectedGuru.telp && <p className="text-gray-500 text-sm flex items-center gap-2 mt-1">
                       <span>📞</span>
                       <span>{selectedGuru.telp}</span>
                     </p>}
-                    <div className="flex items-center space-x-2 mt-1">
-                      <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                    <div className="flex items-center space-x-3 mt-2">
+                      <span className={`inline-flex items-center px-4 py-1.5 rounded-full text-sm font-medium ${
                         selectedGuru.status === 'active' 
                           ? 'bg-green-100 text-green-800 border border-green-200' 
                           : 'bg-red-100 text-red-800 border border-red-200'
@@ -1317,122 +1336,127 @@ export default function AGuru() {
                   </div>
                 </div>
                 <button
-                  className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"
+                  className="p-2.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100 transition-colors"
                   onClick={closeDetailModal}
                 >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                   </svg>
                 </button>
               </div>
 
               {/* Content */}
-              <div className="p-6 space-y-6 overflow-y-auto flex-1">
+              <div className="p-7 space-y-6 overflow-y-auto flex-1">
                 {/* Informasi Profil */}
-                <div className="bg-white border border-gray-200 rounded-lg p-4">
-                  <h4 className="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                    <span>👤</span>
+                <div className="bg-white border border-gray-200 rounded-xl p-5">
+                  <h4 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-3">
+                    <span className="text-xl">👤</span>
                     Informasi Profil
                   </h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-sm font-medium text-gray-700">Email</p>
-                      <p className="text-sm text-gray-900">{selectedGuru.email}</p>
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+                    <div className="bg-gray-50 p-4 rounded-lg">
+                      <p className="text-sm font-medium text-gray-700 mb-1">Email</p>
+                      <p className="text-base text-gray-900">{selectedGuru.email}</p>
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-gray-700">Telepon</p>
-                      <p className="text-sm text-gray-900">{selectedGuru.telp || '—'}</p>
+                    <div className="bg-gray-50 p-4 rounded-lg">
+                      <p className="text-sm font-medium text-gray-700 mb-1">Telepon</p>
+                      <p className="text-base text-gray-900">{selectedGuru.telp || '—'}</p>
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-gray-700">NIK</p>
-                      <p className="text-sm text-gray-900">{selectedGuru.nik || '—'}</p>
+                    <div className="bg-gray-50 p-4 rounded-lg">
+                      <p className="text-sm font-medium text-gray-700 mb-1">NIK</p>
+                      <p className="text-base text-gray-900">{selectedGuru.nik || '—'}</p>
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-gray-700">Jenis Kelamin</p>
-                      <p className="text-sm text-gray-900">{selectedGuru.jk || '—'}</p>
+                    <div className="bg-gray-50 p-4 rounded-lg">
+                      <p className="text-sm font-medium text-gray-700 mb-1">Jenis Kelamin</p>
+                      <p className="text-base text-gray-900">{selectedGuru.jk || '—'}</p>
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-gray-700">Agama</p>
-                      <p className="text-sm text-gray-900">{selectedGuru.agama || '—'}</p>
+                    <div className="bg-gray-50 p-4 rounded-lg">
+                      <p className="text-sm font-medium text-gray-700 mb-1">Agama</p>
+                      <p className="text-base text-gray-900">{selectedGuru.agama || '—'}</p>
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-gray-700">Jabatan Profil</p>
-                      <p className="text-sm text-gray-900">{selectedGuru.jabatan || '—'}</p>
+                    <div className="bg-gray-50 p-4 rounded-lg">
+                      <p className="text-sm font-medium text-gray-700 mb-1">Jabatan Profil</p>
+                      <p className="text-base text-gray-900">{selectedGuru.jabatan || '—'}</p>
                     </div>
                   </div>
                 </div>
 
-                {/* Mata Pelajaran Diampu */}
-                <div className="bg-white border border-gray-200 rounded-lg p-4">
-                  <h4 className="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                    <span>📚</span>
-                    Mata Pelajaran Diampu ({selectedGuru.mapelList.length})
-                  </h4>
-                  <div className="space-y-2">
-                    {selectedGuru.mapelList.length > 0 ? (
-                      selectedGuru.mapelList.map((mapel, index) => (
-                        <div key={index} className="flex items-center p-2 bg-gray-50 rounded-lg">
-                          <span className="text-sm text-gray-900">{mapel}</span>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-gray-500 text-sm text-center py-2">Tidak ada mata pelajaran</p>
-                    )}
+                {/* Container Grid untuk Mapel, Kelas, dan Jabatan */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  {/* Mata Pelajaran Diampu */}
+                  <div className="bg-white border border-gray-200 rounded-xl p-5 h-full">
+                    <h4 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-3">
+                      <span className="text-xl">📚</span>
+                      Mata Pelajaran ({selectedGuru.mapelList.length})
+                    </h4>
+                    <div className="space-y-3 max-h-60 overflow-y-auto pr-2">
+                      {selectedGuru.mapelList.length > 0 ? (
+                        selectedGuru.mapelList.map((mapel, index) => (
+                          <div key={index} className="flex items-center p-3 bg-gray-50 rounded-lg border border-gray-100">
+                            <span className="text-base text-gray-900 font-medium">{mapel}</span>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-gray-500 text-base text-center py-4">Tidak ada mata pelajaran</p>
+                      )}
+                    </div>
                   </div>
-                </div>
 
-                {/* Kelas Diampu */}
-                <div className="bg-white border border-gray-200 rounded-lg p-4">
-                  <h4 className="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                    <span>🏫</span>
-                    Kelas Diampu ({selectedGuru.kelasList.length})
-                  </h4>
-                  <div className="space-y-2">
-                    {selectedGuru.kelasList.length > 0 ? (
-                      selectedGuru.kelasList.map((kelas, index) => (
-                        <div key={index} className="flex items-center p-2 bg-gray-50 rounded-lg">
-                          <span className="text-sm text-gray-900">{kelas}</span>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-gray-500 text-sm text-center py-2">Tidak ada kelas</p>
-                    )}
+                  {/* Kelas Diampu */}
+                  <div className="bg-white border border-gray-200 rounded-xl p-5 h-full">
+                    <h4 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-3">
+                      <span className="text-xl">🏫</span>
+                      Kelas Diampu ({selectedGuru.kelasList.length})
+                    </h4>
+                    <div className="space-y-3 max-h-60 overflow-y-auto pr-2">
+                      {selectedGuru.kelasList.length > 0 ? (
+                        selectedGuru.kelasList.map((kelas, index) => (
+                          <div key={index} className="flex items-center p-3 bg-gray-50 rounded-lg border border-gray-100">
+                            <span className="text-base text-gray-900 font-medium">{kelas}</span>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-gray-500 text-base text-center py-4">Tidak ada kelas</p>
+                      )}
+                    </div>
                   </div>
-                </div>
 
-                {/* Semua Jabatan */}
-                <div className="bg-white border border-gray-200 rounded-lg p-4">
-                  <h4 className="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                    <span>💼</span>
-                    Semua Jabatan ({selectedGuru.jabatanList.length})
-                  </h4>
-                  <div className="space-y-2">
-                    {selectedGuru.jabatanList.length > 0 ? (
-                      selectedGuru.jabatanList.map((jabatan, index) => (
-                        <div key={index} className="flex items-center p-2 bg-gray-50 rounded-lg">
-                          <span className="text-sm text-gray-900">{jabatan}</span>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-gray-500 text-sm text-center py-2">Tidak ada jabatan</p>
-                    )}
+                  {/* Semua Jabatan */}
+                  <div className="bg-white border border-gray-200 rounded-xl p-5 h-full">
+                    <h4 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-3">
+                      <span className="text-xl">💼</span>
+                      Semua Jabatan ({selectedGuru.jabatanList.length})
+                    </h4>
+                    <div className="space-y-3 max-h-60 overflow-y-auto pr-2">
+                      {selectedGuru.jabatanList.length > 0 ? (
+                        selectedGuru.jabatanList.map((jabatan, index) => (
+                          <div key={index} className="flex items-center p-3 bg-gray-50 rounded-lg border border-gray-100">
+                            <span className="text-base text-gray-900 font-medium">{jabatan}</span>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-gray-500 text-base text-center py-4">Tidak ada jabatan</p>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
 
               {/* Footer */}
-              <div className="px-6 py-4 border-t bg-gray-50 flex justify-end space-x-3">
+              <div className="px-7 py-5 border-t bg-gray-50 flex justify-end space-x-4">
                 <Button
                   variant="secondary"
                   onClick={closeDetailModal}
+                  size="lg"
                 >
                   ✕ Tutup
                 </Button>
                 <Button
                   onClick={() => openDeleteConfirm(selectedGuru)}
                   variant="danger"
+                  size="lg"
                 >
-                  🗑️ Hapus Akun
+                  🗑️ Hapus Akun Guru
                 </Button>
               </div>
             </div>
