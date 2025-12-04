@@ -24,16 +24,16 @@ function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Passwor
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl p-7 w-full max-w-lg mx-6">
-        <h3 className="text-xl font-bold text-gray-900 mb-3">{title}</h3>
-        <p className="text-gray-600 text-base mb-5">
+      <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4">
+        <h3 className="text-lg font-bold text-gray-900 mb-2">{title}</h3>
+        <p className="text-gray-600 text-sm mb-4">
           Untuk melanjutkan, masukkan password Anda:
         </p>
 
         <form onSubmit={handleSubmit}>
           <input
             type="password"
-            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-3 focus:ring-blue-500 focus:border-blue-500 mb-5 text-base"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 mb-4"
             placeholder="Masukkan password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -41,10 +41,10 @@ function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Passwor
             autoFocus
           />
 
-          <div className="flex justify-end space-x-4">
+          <div className="flex justify-end space-x-3">
             <button
               type="button"
-              className="px-5 py-2.5 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors duration-200 font-medium"
+              className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors duration-200"
               onClick={handleClose}
               disabled={loading}
             >
@@ -52,7 +52,7 @@ function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Passwor
             </button>
             <button
               type="submit"
-              className="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-3 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
               disabled={loading || !password.trim()}
             >
               {loading ? 'Memverifikasi...' : 'Konfirmasi'}
@@ -132,9 +132,9 @@ function getKelasDisplayName(kelasObj) {
 function LoadingSpinner({ size = 'md', text = 'Memuat...' }) {
   const sizes = { sm: 'h-4 w-4', md: 'h-6 w-6', lg: 'h-8 w-8' }
   return (
-    <div className="flex items-center justify-center space-x-3">
-      <div className={`animate-spin rounded-full border-3 border-blue-600 border-t-transparent ${sizes[size]}`} />
-      {text && <span className="text-gray-600 text-base">{text}</span>}
+    <div className="flex items-center justify-center space-x-2">
+      <div className={`animate-spin rounded-full border-2 border-blue-600 border-t-transparent ${sizes[size]}`} />
+      {text && <span className="text-gray-600 text-sm">{text}</span>}
     </div>
   )
 }
@@ -158,7 +158,7 @@ function Badge({ children, variant = 'default', className = '' }) {
     info: 'bg-indigo-100 text-indigo-800'
   }
   return (
-    <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-sm font-medium ${variants[variant]} ${className}`}>
+    <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${variants[variant]} ${className}`}>
       {children}
     </span>
   )
@@ -173,7 +173,7 @@ function Button({
   className = '',
   ...props
 }) {
-  const baseClasses = 'inline-flex items-center justify-center font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-3 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed'
+  const baseClasses = 'inline-flex items-center justify-center font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed'
 
   const variants = {
     primary: 'bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500',
@@ -184,9 +184,9 @@ function Button({
   }
 
   const sizes = {
-    sm: 'px-4 py-2 text-sm',
-    md: 'px-5 py-2.5 text-base',
-    lg: 'px-6 py-3 text-lg'
+    sm: 'px-3 py-1.5 text-sm',
+    md: 'px-4 py-2 text-sm',
+    lg: 'px-6 py-3 text-base'
   }
 
   return (
@@ -196,7 +196,7 @@ function Button({
       {...props}
     >
       {loading && (
-        <div className="animate-spin rounded-full h-5 w-5 border-3 border-white border-t-transparent mr-3" />
+        <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2" />
       )}
       {children}
     </button>
@@ -205,31 +205,31 @@ function Button({
 
 function Input({ label, error, className = '', ...props }) {
   return (
-    <div className="space-y-2">
+    <div className="space-y-1">
       {label && (
-        <label className="block text-sm font-semibold text-gray-700">
+        <label className="block text-sm font-medium text-gray-700">
           {label}
         </label>
       )}
       <input
-        className={`block w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-3 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-white text-base ${className}`}
+        className={`block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-white ${className}`}
         {...props}
       />
-      {error && <p className="text-red-600 text-sm mt-1">{error}</p>}
+      {error && <p className="text-red-600 text-sm">{error}</p>}
     </div>
   )
 }
 
 function Select({ label, error, options = [], className = '', ...props }) {
   return (
-    <div className="space-y-2">
+    <div className="space-y-1">
       {label && (
-        <label className="block text-sm font-semibold text-gray-700">
+        <label className="block text-sm font-medium text-gray-700">
           {label}
         </label>
       )}
       <select
-        className={`block w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-3 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-white text-base ${className}`}
+        className={`block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-white ${className}`}
         {...props}
       >
         {options.map(option => (
@@ -238,7 +238,7 @@ function Select({ label, error, options = [], className = '', ...props }) {
           </option>
         ))}
       </select>
-      {error && <p className="text-red-600 text-sm mt-1">{error}</p>}
+      {error && <p className="text-red-600 text-sm">{error}</p>}
     </div>
   )
 }
@@ -253,17 +253,17 @@ function StatCard({ label, value, icon, color = 'blue', description }) {
   }
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
       <div className="flex items-center justify-between">
         <div className="flex-1">
-          <p className="text-sm font-medium text-gray-600 mb-2">{label}</p>
+          <p className="text-sm font-medium text-gray-600 mb-1">{label}</p>
           <p className="text-2xl font-bold text-gray-900">{value}</p>
           {description && (
-            <p className="text-sm text-gray-500 mt-2">{description}</p>
+            <p className="text-xs text-gray-500 mt-1">{description}</p>
           )}
         </div>
         {icon && (
-          <div className={`text-2xl text-white p-3 rounded-xl ${colorClasses[color]}`}>
+          <div className={`text-xl text-white p-2 rounded-lg ${colorClasses[color]}`}>
             {icon}
           </div>
         )}
@@ -1362,8 +1362,8 @@ export default function ASiswa() {
 
   /* ===== Render ===== */
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="w-full px-6 py-6 space-y-6">
+    <div className="min-h-screen bg-gray-50 p-4">
+      <div className="max-w-7xl mx-auto space-y-6">
         {/* Password Modal */}
         <PasswordModal
           isOpen={passwordModal.isOpen}
@@ -1374,30 +1374,30 @@ export default function ASiswa() {
         />
 
         {/* Header */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex items-center gap-5">
-              <div className="p-4 bg-blue-100 rounded-xl">
-                <span className="text-3xl text-blue-600">👨‍🎓</span>
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-blue-100 rounded-lg">
+                <span className="text-2xl text-blue-600">👨‍🎓</span>
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-gray-900 mb-2">Manajemen Siswa</h1>
-                <p className="text-gray-600 text-lg">
+                <h1 className="text-2xl font-bold text-gray-900 mb-1">Manajemen Siswa</h1>
+                <p className="text-gray-600">
                   Kelola data siswa, kelas, organisasi, OSIS, dan kartu RFID
                 </p>
               </div>
             </div>
 
             {/* Tombol aksi kanan */}
-            <div className="mt-5 lg:mt-0 flex flex-col sm:flex-row gap-3">
+            <div className="mt-4 lg:mt-0 flex flex-col sm:flex-row gap-2">
               <button
-                className="bg-indigo-50 text-indigo-700 px-5 py-3 rounded-xl border border-indigo-200 hover:bg-indigo-100 focus:ring-3 focus:ring-indigo-500 focus:ring-offset-2 transition-all duration-200 font-medium shadow-sm hover:shadow-md"
+                className="bg-indigo-50 text-indigo-700 px-4 py-2 rounded-lg border border-indigo-200 hover:bg-indigo-100 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-all duration-200 font-medium"
                 onClick={openPromotionModal}
               >
                 ⬆️ Kenaikan Kelas
               </button>
               <button
-                className="bg-blue-600 text-white px-5 py-3 rounded-xl hover:bg-blue-700 focus:ring-3 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 font-medium shadow-sm hover:shadow-md"
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 font-medium"
                 onClick={() => setShowAddForm(!showAddForm)}
               >
                 {showAddForm ? '✕ Tutup Form' : '➕ Tambah Siswa'}
@@ -1407,7 +1407,7 @@ export default function ASiswa() {
         </div>
 
         {/* Dashboard Statistics */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard
             label="Total Siswa"
             value={stats.totalSiswa}
@@ -1441,14 +1441,14 @@ export default function ASiswa() {
         {/* Form Tambah Siswa */}
         {showAddForm && (
           <Card className="mb-6">
-            <div className="bg-blue-50 border-b border-blue-200 p-5">
-              <h3 className="text-xl font-semibold text-blue-900 flex items-center gap-3">
-                <span className="text-2xl">➕</span>
+            <div className="bg-blue-50 border-b border-blue-200 p-4">
+              <h3 className="text-lg font-semibold text-blue-900 flex items-center gap-2">
+                <span>➕</span>
                 Tambah Siswa Baru
               </h3>
             </div>
-            <div className="p-6">
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+            <div className="p-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <Input
                   label="Email *"
                   name="email"
@@ -1523,7 +1523,7 @@ export default function ASiswa() {
                   placeholder="Nomor telepon"
                   error={formErrors.telp}
                 />
-                <div className="lg:col-span-3">
+                <div className="md:col-span-2 lg:col-span-3">
                   <Input
                     label="Alamat"
                     name="alamat"
@@ -1554,25 +1554,22 @@ export default function ASiswa() {
                 />
               </div>
 
-              <div className="flex justify-end space-x-4 mt-6 pt-6 border-t border-gray-200">
+              <div className="flex justify-end space-x-3 mt-4 pt-4 border-t border-gray-200">
                 <Button
                   variant="secondary"
                   onClick={resetForm}
-                  size="lg"
                 >
                   🔄 Reset
                 </Button>
                 <Button
                   variant="secondary"
                   onClick={() => setShowAddForm(false)}
-                  size="lg"
                 >
                   ✕ Batal
                 </Button>
                 <Button
                   onClick={handleAdd}
                   loading={addingSiswa}
-                  size="lg"
                   disabled={
                     !form.email ||
                     !form.nama ||
@@ -1589,14 +1586,14 @@ export default function ASiswa() {
 
         {/* Filter Section */}
         <Card>
-          <div className="bg-gray-50 border-b border-gray-200 p-5">
-            <h3 className="text-xl font-semibold text-gray-900 flex items-center gap-3">
-              <span className="text-2xl">🔍</span>
+          <div className="bg-gray-50 border-b border-gray-200 p-4">
+            <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+              <span>🔍</span>
               Filter Pencarian
             </h3>
           </div>
-          <div className="p-6">
-            <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
+          <div className="p-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
               <Input
                 label="Nama / Email"
                 placeholder="Cari nama atau email"
@@ -1639,20 +1636,18 @@ export default function ASiswa() {
                 ]}
               />
             </div>
-            <div className="flex justify-end space-x-4 mt-6">
+            <div className="flex justify-end space-x-3 mt-4">
               <Button
                 onClick={applyFilter}
                 loading={isSearching}
-                size="lg"
               >
-                🔍 Cari Siswa
+                Cari
               </Button>
               <Button
                 variant="secondary"
                 onClick={resetFilter}
-                size="lg"
               >
-                🔄 Reset Filter
+                🔄 Reset
               </Button>
             </div>
           </div>
@@ -1660,13 +1655,13 @@ export default function ASiswa() {
 
         {/* Tabel Siswa */}
         <Card>
-          <div className="bg-gray-50 border-b border-gray-200 p-5">
+          <div className="bg-gray-50 border-b border-gray-200 p-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-xl font-semibold text-gray-900 flex items-center gap-3">
-                <span className="text-2xl">📊</span>
+              <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                <span>📊</span>
                 Daftar Siswa
               </h3>
-              <span className="text-base text-gray-600 font-medium">
+              <span className="text-sm text-gray-600">
                 {siswa.length} dari {siswaRaw.length} siswa
               </span>
             </div>
@@ -1674,43 +1669,43 @@ export default function ASiswa() {
 
           <div className="overflow-x-auto">
             {loadingInit ? (
-              <div className="p-8 space-y-5">
+              <div className="p-8 space-y-4">
                 {[...Array(5)].map((_, i) => (
-                  <div key={i} className="animate-pulse flex space-x-5 items-center">
-                    <div className="rounded-full bg-gray-200 h-12 w-12" />
-                    <div className="flex-1 space-y-3">
-                      <div className="h-5 bg-gray-200 rounded w-3/4" />
-                      <div className="h-4 bg-gray-200 rounded w-1/2" />
+                  <div key={i} className="animate-pulse flex space-x-4 items-center">
+                    <div className="rounded-full bg-gray-200 h-10 w-10" />
+                    <div className="flex-1 space-y-2">
+                      <div className="h-4 bg-gray-200 rounded w-3/4" />
+                      <div className="h-3 bg-gray-200 rounded w-1/2" />
                     </div>
                   </div>
                 ))}
               </div>
             ) : (
-              <table className="w-full min-w-max">
+              <table className="w-full">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-6 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider border-b w-16">
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
                       No
                     </th>
-                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider border-b min-w-[250px]">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
                       Siswa
                     </th>
-                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider border-b min-w-[180px]">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
                       Kelas
                     </th>
-                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider border-b min-w-[150px]">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
                       NIK
                     </th>
-                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider border-b min-w-[120px]">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
                       JK
                     </th>
-                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider border-b min-w-[180px]">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
                       RFID
                     </th>
-                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider border-b min-w-[130px]">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
                       Status
                     </th>
-                    <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700 uppercase tracking-wider border-b min-w-[240px]">
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
                       Aksi
                     </th>
                   </tr>
@@ -1721,97 +1716,94 @@ export default function ASiswa() {
                     const isKetua = isKetuaKelas(s.id)
 
                     return (
-                      <tr key={s.id} className="hover:bg-gray-50 transition-colors duration-150">
+                      <tr key={s.id} className="hover:bg-gray-50">
                         {/* Kolom Nomor Urut */}
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center font-medium">
+                        <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 text-center">
                           {index + 1}
                         </td>
 
-                        <td className="px-6 py-4 whitespace-nowrap">
+                        <td className="px-4 py-3 whitespace-nowrap">
                           <div className="flex items-center">
-                            <div className="flex-shrink-0 h-12 w-12">
+                            <div className="flex-shrink-0 h-10 w-10">
                               {foto ? (
                                 <img
                                   src={foto}
                                   alt={s.nama || 'foto'}
-                                  className="h-12 w-12 rounded-full object-cover border-2 border-gray-200"
+                                  className="h-10 w-10 rounded-full object-cover border border-gray-200"
                                 />
                               ) : (
-                                <div className="h-12 w-12 rounded-full bg-blue-100 border-2 border-blue-200 flex items-center justify-center text-base font-semibold text-blue-600">
+                                <div className="h-10 w-10 rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center text-sm font-medium text-blue-600">
                                   {initials(s.nama)}
                                 </div>
                               )}
                             </div>
-                            <div className="ml-4">
-                              <div className="text-base font-semibold text-gray-900 flex items-center flex-wrap gap-2">
+                            <div className="ml-3">
+                              <div className="text-sm font-medium text-gray-900">
                                 {s.nama || '—'}
                                 {isKetua && (
-                                  <Badge variant="warning" className="text-sm">
+                                  <Badge variant="warning" className="ml-2 text-xs">
                                     👑 Ketua
                                   </Badge>
                                 )}
                               </div>
-                              <div className="text-sm text-gray-600 mt-1">
+                              <div className="text-sm text-gray-500">
                                 {s.email || '—'}
                               </div>
                             </div>
                           </div>
                         </td>
-                        <td className="px-6 py-4 text-base text-gray-900 font-medium">
+                        <td className="px-4 py-3 text-sm text-gray-900">
                           {getNamaKelas(s.kelas)}
                         </td>
-                        <td className="px-6 py-4 text-base text-gray-900">
+                        <td className="px-4 py-3 text-sm text-gray-900">
                           {s.nik || '—'}
                         </td>
-                        <td className="px-6 py-4 text-base text-gray-900">
+                        <td className="px-4 py-3 text-sm text-gray-900">
                           {JK_LABEL(s.jk)}
                         </td>
-                        <td className="px-6 py-4 text-base">
+                        <td className="px-4 py-3 text-sm">
                           {s.rfid_uid ? (
-                            <Badge variant="info" className="text-sm px-3 py-1.5">
+                            <Badge variant="info" className="text-xs">
                               {(s.rfid_uid || '').toUpperCase()}
                             </Badge>
                           ) : (
                             <span className="text-gray-400">—</span>
                           )}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
+                        <td className="px-4 py-3 whitespace-nowrap">
                           {s.status === 'nonaktif' ? (
-                            <Badge variant="danger" className="text-sm px-4 py-1.5">
+                            <Badge variant="danger" className="text-xs">
                               ⏸️ Nonaktif
                             </Badge>
                           ) : (
-                            <Badge variant="success" className="text-sm px-4 py-1.5">
+                            <Badge variant="success" className="text-xs">
                               ✅ Aktif
                             </Badge>
                           )}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
+                        <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-medium space-x-1">
                           <Button
                             variant="primary"
-                            size="md"
+                            size="sm"
                             onClick={() => openDetail(s)}
-                            className="shadow-sm"
                           >
-                            📋 Detail
+                            Detail
                           </Button>
                           {s.status === 'active' ? (
                             <Button
                               variant="warning"
-                              size="md"
+                              size="sm"
                               onClick={() => openNonaktifModal(s)}
-                              className="shadow-sm"
                             >
-                              ⏸️ Nonaktif
+                              Nonaktif
                             </Button>
                           ) : (
                             <Button
                               variant="success"
-                              size="md"
+                              size="sm"
                               onClick={() => openAktifkanModal(s)}
-                              className="shadow-sm"
                             >
-                              ✅ Aktifkan
+                              Aktifkan
                             </Button>
                           )}
                         </td>
@@ -1820,11 +1812,11 @@ export default function ASiswa() {
                   })}
                   {!siswa.length && (
                     <tr>
-                      <td colSpan="8" className="px-6 py-12 text-center">
+                      <td colSpan="8" className="px-4 py-8 text-center">
                         <div className="flex flex-col items-center justify-center">
-                          <div className="text-gray-300 text-5xl mb-4">👨‍🎓</div>
-                          <p className="text-gray-500 font-semibold text-lg mb-2">Tidak ada data siswa</p>
-                          <p className="text-gray-400 text-base">Coba ubah filter pencarian atau tambahkan siswa baru</p>
+                          <div className="text-gray-300 text-4xl mb-2">👨‍🎓</div>
+                          <p className="text-gray-500 font-medium mb-1">Tidak ada data siswa</p>
+                          <p className="text-gray-400 text-sm">Coba ubah filter pencarian</p>
                         </div>
                       </td>
                     </tr>
@@ -1838,45 +1830,38 @@ export default function ASiswa() {
         {/* Modal Konfirmasi Hapus Akun */}
         {deleteConfirmOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl p-7 w-full max-w-lg">
-              <div className="flex items-center gap-4 mb-5">
-                <div className="p-3 bg-red-100 text-red-600 rounded-xl">
-                  <span className="text-2xl">🗑️</span>
+            <div className="bg-white rounded-lg p-6 w-full max-w-md">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2 bg-red-100 text-red-600 rounded-lg">
+                  <span className="text-xl">🗑️</span>
                 </div>
                 <div>
-                  <h3 className="text-xl font-semibold text-gray-900">Hapus Akun Siswa</h3>
-                  <p className="text-gray-600 text-base">Tindakan ini tidak dapat dibatalkan</p>
+                  <h3 className="text-lg font-semibold text-gray-900">Hapus Akun Siswa</h3>
+                  <p className="text-gray-600 text-sm">Tindakan ini tidak dapat dibatalkan</p>
                 </div>
               </div>
 
-              <div className="bg-red-50 border border-red-200 rounded-xl p-5 mb-5">
-                <p className="text-red-800 text-base font-semibold mb-3">
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+                <p className="text-red-800 text-sm font-medium mb-2">
                   Apakah Anda yakin ingin menghapus akun siswa ini?
                 </p>
-                <p className="text-red-700 text-base mb-4">
+                <p className="text-red-700 text-sm">
                   <strong>{siswaToDelete?.nama}</strong> ({siswaToDelete?.email})
                 </p>
-                <div className="text-red-700 text-sm space-y-2">
-                  <div className="flex items-start">
-                    <span className="mr-2">•</span>
-                    <span>Data akan dihapus dari database profiles dan tabel terkait</span>
-                  </div>
-                  <div className="flex items-start">
-                    <span className="mr-2">•</span>
-                    <span>Authentication system</span>
-                  </div>
-                  <div className="flex items-start">
-                    <span className="mr-2">•</span>
-                    <span>Data absensi, organisasi, dan tugas</span>
-                  </div>
-                </div>
+                <p className="text-red-700 text-sm mt-2">
+                  Data akan dihapus dari:
+                </p>
+                <ul className="text-red-700 text-sm list-disc list-inside mt-1">
+                  <li>Database profiles dan tabel terkait</li>
+                  <li>Authentication system</li>
+                  <li>Data absensi, organisasi, dan tugas</li>
+                </ul>
               </div>
 
-              <div className="flex justify-end space-x-4">
+              <div className="flex justify-end space-x-3">
                 <Button
                   variant="secondary"
                   onClick={closeDeleteConfirm}
-                  size="lg"
                 >
                   ✕ Batal
                 </Button>
@@ -1884,7 +1869,6 @@ export default function ASiswa() {
                   variant="danger"
                   onClick={hapusAkunSiswa}
                   loading={deletingSiswa}
-                  size="lg"
                 >
                   🗑️ Ya, Hapus
                 </Button>
@@ -1896,32 +1880,32 @@ export default function ASiswa() {
         {/* Modal Nonaktifkan Siswa */}
         {nonaktifModalOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl p-7 w-full max-w-lg">
-              <div className="flex items-center gap-4 mb-5">
-                <div className="p-3 bg-orange-100 text-orange-600 rounded-xl">
-                  <span className="text-2xl">⏸️</span>
+            <div className="bg-white rounded-lg p-6 w-full max-w-md">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2 bg-orange-100 text-orange-600 rounded-lg">
+                  <span className="text-xl">⏸️</span>
                 </div>
                 <div>
-                  <h3 className="text-xl font-semibold text-gray-900">Nonaktifkan Siswa</h3>
-                  <p className="text-gray-600 text-base">Siswa tidak akan bisa login</p>
+                  <h3 className="text-lg font-semibold text-gray-900">Nonaktifkan Siswa</h3>
+                  <p className="text-gray-600 text-sm">Siswa tidak akan bisa login</p>
                 </div>
               </div>
 
-              <div className="space-y-5">
+              <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-3">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
                     Alasan Penonaktifan *
                   </label>
                   <textarea
                     value={alasanNonaktif}
                     onChange={(e) => setAlasanNonaktif(e.target.value)}
                     placeholder="Masukkan alasan menonaktifkan siswa..."
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-3 focus:ring-orange-500 focus:border-orange-500 bg-white resize-none text-base"
-                    rows={4}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 bg-white resize-none"
+                    rows={3}
                   />
                 </div>
 
-                <div className="flex justify-end space-x-4">
+                <div className="flex justify-end space-x-3">
                   <Button
                     variant="secondary"
                     onClick={() => {
@@ -1929,7 +1913,6 @@ export default function ASiswa() {
                       setAlasanNonaktif('')
                       setSiswaToNonaktif(null)
                     }}
-                    size="lg"
                   >
                     ✕ Batal
                   </Button>
@@ -1937,7 +1920,6 @@ export default function ASiswa() {
                     variant="warning"
                     onClick={nonaktifkanSiswa}
                     disabled={!alasanNonaktif.trim()}
-                    size="lg"
                   >
                     ⏸️ Nonaktifkan
                   </Button>
@@ -1950,41 +1932,39 @@ export default function ASiswa() {
         {/* Modal Aktifkan Siswa */}
         {aktifkanModalOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl p-7 w-full max-w-lg">
-              <div className="flex items-center gap-4 mb-5">
-                <div className="p-3 bg-green-100 text-green-600 rounded-xl">
-                  <span className="text-2xl">✅</span>
+            <div className="bg-white rounded-lg p-6 w-full max-w-md">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2 bg-green-100 text-green-600 rounded-lg">
+                  <span className="text-xl">✅</span>
                 </div>
                 <div>
-                  <h3 className="text-xl font-semibold text-gray-900">Aktifkan Siswa</h3>
-                  <p className="text-gray-600 text-base">Siswa akan bisa login kembali</p>
+                  <h3 className="text-lg font-semibold text-gray-900">Aktifkan Siswa</h3>
+                  <p className="text-gray-600 text-sm">Siswa akan bisa login kembali</p>
                 </div>
               </div>
 
-              <div className="bg-green-50 border border-green-200 rounded-xl p-5 mb-5">
-                <p className="text-green-800 text-base font-semibold mb-3">
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
+                <p className="text-green-800 text-sm font-medium mb-2">
                   Apakah Anda yakin ingin mengaktifkan siswa ini?
                 </p>
-                <p className="text-green-700 text-base">
+                <p className="text-green-700 text-sm">
                   <strong>{siswaToAktifkan?.nama}</strong> ({siswaToAktifkan?.email})
                 </p>
               </div>
 
-              <div className="flex justify-end space-x-4">
+              <div className="flex justify-end space-x-3">
                 <Button
                   variant="secondary"
                   onClick={() => {
                     setAktifkanModalOpen(false)
                     setSiswaToAktifkan(null)
                   }}
-                  size="lg"
                 >
                   ✕ Batal
                 </Button>
                 <Button
                   variant="success"
                   onClick={aktifkanSiswa}
-                  size="lg"
                 >
                   ✅ Ya, Aktifkan
                 </Button>
@@ -1996,27 +1976,27 @@ export default function ASiswa() {
         {/* Modal Kenaikan Kelas */}
         {promotionModalOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl p-7 w-full max-w-3xl">
-              <div className="flex items-center gap-4 mb-5">
-                <div className="p-3 bg-indigo-100 text-indigo-600 rounded-xl">
-                  <span className="text-2xl">⬆️</span>
+            <div className="bg-white rounded-lg p-6 w-full max-w-lg">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2 bg-indigo-100 text-indigo-600 rounded-lg">
+                  <span className="text-xl">⬆️</span>
                 </div>
                 <div>
-                  <h3 className="text-xl font-semibold text-gray-900">Kenaikan Kelas</h3>
-                  <p className="text-gray-600 text-base">
+                  <h3 className="text-lg font-semibold text-gray-900">Kenaikan Kelas</h3>
+                  <p className="text-gray-600 text-sm">
                     Pindahkan kelas siswa secara massal (berdasarkan kelas) atau pilih siswa manual dari sini.
                   </p>
                 </div>
               </div>
 
-              <div className="space-y-5">
+              <div className="space-y-4">
                 {/* Mode pilihan */}
-                <div className="flex gap-3 text-base">
+                <div className="flex gap-2 text-sm">
                   <button
                     type="button"
-                    className={`flex-1 px-4 py-3 rounded-xl border ${
+                    className={`flex-1 px-3 py-2 rounded-lg border ${
                       promotionMode === 'kelas'
-                        ? 'bg-indigo-50 border-indigo-400 text-indigo-700 font-medium'
+                        ? 'bg-indigo-50 border-indigo-400 text-indigo-700'
                         : 'bg-gray-50 border-gray-300 text-gray-700'
                     }`}
                     onClick={() => setPromotionMode('kelas')}
@@ -2025,9 +2005,9 @@ export default function ASiswa() {
                   </button>
                   <button
                     type="button"
-                    className={`flex-1 px-4 py-3 rounded-xl border ${
+                    className={`flex-1 px-3 py-2 rounded-lg border ${
                       promotionMode === 'selected'
-                        ? 'bg-indigo-50 border-indigo-400 text-indigo-700 font-medium'
+                        ? 'bg-indigo-50 border-indigo-400 text-indigo-700'
                         : 'bg-gray-50 border-gray-300 text-gray-700'
                     }`}
                     onClick={() => setPromotionMode('selected')}
@@ -2037,7 +2017,7 @@ export default function ASiswa() {
                 </div>
 
                 {promotionMode === 'kelas' ? (
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <Select
                       label="Kelas Asal"
                       value={promotionFromKelas}
@@ -2058,12 +2038,12 @@ export default function ASiswa() {
                     />
                   </div>
                 ) : (
-                  <div className="space-y-4">
+                  <div className="space-y-3">
                     <p className="text-sm text-gray-700">
                       Pilih siswa yang akan dipindahkan ke kelas tujuan. Bisa filter berdasarkan tingkatan dan kelas asal.
                     </p>
 
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       <Select
                         label="Filter Tingkatan"
                         value={promotionFilterGrade}
@@ -2089,9 +2069,9 @@ export default function ASiswa() {
                       />
                     </div>
 
-                    <div className="border rounded-xl max-h-60 overflow-y-auto">
-                      <div className="flex items-center justify-between px-4 py-3 border-b bg-gray-50">
-                        <p className="text-sm text-gray-700">
+                    <div className="border rounded-lg max-h-56 overflow-y-auto">
+                      <div className="flex items-center justify-between px-3 py-2 border-b bg-gray-50">
+                        <p className="text-xs text-gray-600">
                           Siswa terlihat:{' '}
                           <span className="font-semibold">{promotionCandidateSiswa.length}</span>{' '}
                           • Dipilih:{' '}
@@ -2099,7 +2079,7 @@ export default function ASiswa() {
                         </p>
                         <button
                           type="button"
-                          className="text-sm text-blue-600 hover:underline disabled:text-gray-400"
+                          className="text-xs text-blue-600 hover:underline disabled:text-gray-400"
                           onClick={togglePromotionSelectAllVisible}
                           disabled={!promotionCandidateSiswa.length}
                         >
@@ -2112,18 +2092,18 @@ export default function ASiswa() {
                       {promotionCandidateSiswa.length ? (
                         <ul className="divide-y divide-gray-100">
                           {promotionCandidateSiswa.map(s => (
-                            <li key={s.id} className="px-4 py-3 flex items-center gap-3 hover:bg-gray-50">
+                            <li key={s.id} className="px-3 py-2 flex items-center gap-2">
                               <input
                                 type="checkbox"
-                                className="h-5 w-5 text-indigo-600 border-gray-300 rounded"
+                                className="h-4 w-4 text-indigo-600 border-gray-300 rounded"
                                 checked={promotionSelectedIds.includes(s.id)}
                                 onChange={() => togglePromotionSelect(s.id)}
                               />
                               <div className="flex-1 min-w-0">
-                                <p className="text-sm text-gray-900 font-medium truncate">
+                                <p className="text-sm text-gray-900 truncate">
                                   {s.nama || s.email || 'Tanpa nama'}
                                 </p>
-                                <p className="text-xs text-gray-500 mt-1">
+                                <p className="text-xs text-gray-500">
                                   {getNamaKelas(s.kelas)} • {s.email}
                                 </p>
                               </div>
@@ -2131,7 +2111,7 @@ export default function ASiswa() {
                           ))}
                         </ul>
                       ) : (
-                        <div className="px-4 py-6 text-center text-sm text-gray-500">
+                        <div className="px-3 py-4 text-center text-sm text-gray-500">
                           Tidak ada siswa yang cocok dengan filter.
                         </div>
                       )}
@@ -2148,23 +2128,22 @@ export default function ASiswa() {
                     />
 
                     {!promotionSelectedIds.length && (
-                      <p className="text-sm text-red-500">
+                      <p className="text-xs text-red-500">
                         Pilih minimal satu siswa untuk dipindahkan.
                       </p>
                     )}
                   </div>
                 )}
 
-                <p className="text-sm text-gray-500">
+                <p className="text-xs text-gray-500">
                   Catatan: Kenaikan kelas boleh lintas tingkatan (misal X → XI), sistem akan memberi peringatan di konfirmasi.
                 </p>
 
-                <div className="flex justify-end space-x-4 pt-3">
+                <div className="flex justify-end space-x-3 pt-2">
                   <Button
                     variant="secondary"
                     onClick={closePromotionModal}
                     disabled={promotionLoading}
-                    size="lg"
                   >
                     ✕ Batal
                   </Button>
@@ -2176,9 +2155,8 @@ export default function ASiswa() {
                       !promotionToKelas ||
                       (promotionMode === 'kelas' && !promotionFromKelas)
                     }
-                    size="lg"
                   >
-                    ⬆️ Jalankan Kenaikan
+                    ⬆️ Jalankan
                   </Button>
                 </div>
               </div>
@@ -2189,77 +2167,74 @@ export default function ASiswa() {
         {/* Modal Detail Siswa */}
         {detailOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="bg-white rounded-lg w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
               {/* Header */}
-              <div className="px-7 py-5 border-b bg-gray-50 flex items-start justify-between">
-                <div className="flex items-center space-x-5">
-                  <div className="flex-shrink-0 h-14 w-14">
+              <div className="px-6 py-4 border-b bg-gray-50 flex items-start justify-between">
+                <div className="flex items-center space-x-4">
+                  <div className="flex-shrink-0 h-12 w-12">
                     {detailUser?.photo_url ? (
                       <img
                         src={detailUser.photo_url}
                         alt={detailUser.nama || 'foto'}
-                        className="h-14 w-14 rounded-full object-cover border-2 border-gray-200"
+                        className="h-12 w-12 rounded-full object-cover border border-gray-200"
                       />
                     ) : (
-                      <div className="h-14 w-14 rounded-full bg-blue-100 border-2 border-blue-200 flex items-center justify-center text-lg font-semibold text-blue-600">
+                      <div className="h-12 w-12 rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center text-base font-semibold text-blue-600">
                         {initials(detailUser?.nama)}
                       </div>
                     )}
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center gap-3 flex-wrap">
-                      <h3 className="text-xl font-semibold text-gray-900">
+                      <h3 className="text-lg font-semibold text-gray-900">
                         {detailUser?.nama || detailUser?.email}
                       </h3>
                       {isKetuaKelas(detailUser?.id) && (
-                        <Badge variant="warning" className="text-sm">
+                        <Badge variant="warning" className="text-xs">
                           👑 Ketua {getKelasKetua(detailUser?.id)}
                         </Badge>
                       )}
                       {detailUser?.status === 'nonaktif' && (
-                        <Badge variant="danger" className="text-sm">
+                        <Badge variant="danger" className="text-xs">
                           ⏸️ Nonaktif
                         </Badge>
                       )}
                     </div>
-                    <p className="text-gray-600 text-base mt-1">
+                    <p className="text-gray-600 text-sm mt-1">
                       {detailUser?.email || '—'} • NIK: {detailUser?.nik || '—'}
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center space-x-3">
+                <div className="flex items-center space-x-2">
                   {detailUser?.status === 'active' ? (
                     <Button
                       variant="warning"
-                      size="md"
+                      size="sm"
                       onClick={() => openNonaktifModal(detailUser)}
-                      className="shadow-sm"
                     >
                       ⏸️ Nonaktif
                     </Button>
                   ) : (
                     <Button
                       variant="success"
-                      size="md"
+                      size="sm"
                       onClick={() => openAktifkanModal(detailUser)}
-                      className="shadow-sm"
                     >
                       ✅ Aktifkan
                     </Button>
                   )}
                   <Button
                     variant="danger"
-                    size="md"
+                    size="sm"
                     onClick={() => openDeleteConfirm(detailUser)}
-                    className="shadow-sm"
                   >
                     🗑️ Hapus
                   </Button>
                   <button
-                    className="p-2.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100 transition-colors"
+                    className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"
                     onClick={closeDetailModal}
                   >
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                     </svg>
                   </button>
@@ -2267,24 +2242,24 @@ export default function ASiswa() {
               </div>
 
               {/* Content */}
-              <div className="p-7 space-y-6 overflow-y-auto flex-1">
+              <div className="p-6 space-y-6 overflow-y-auto flex-1">
                 {detailLoading ? (
-                  <div className="space-y-5">
-                    <div className="animate-pulse h-20 bg-gray-200 rounded-xl" />
-                    <div className="animate-pulse h-28 bg-gray-200 rounded-xl" />
-                    <div className="animate-pulse h-24 bg-gray-200 rounded-xl" />
+                  <div className="space-y-4">
+                    <div className="animate-pulse h-16 bg-gray-200 rounded-lg" />
+                    <div className="animate-pulse h-24 bg-gray-200 rounded-lg" />
+                    <div className="animate-pulse h-20 bg-gray-200 rounded-lg" />
                   </div>
                 ) : (
                   <>
                     {/* Kelas & Status + RFID */}
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                      <div className="bg-white border border-gray-200 rounded-xl p-5">
-                        <h4 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-3">
-                          <span className="text-xl">🏫</span>
+                      <div className="bg-white border border-gray-200 rounded-lg p-4">
+                        <h4 className="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                          <span>🏫</span>
                           Kelas & Status
                         </h4>
-                        <div className="space-y-4">
-                          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        <div className="space-y-3">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                             <Select
                               label="Tingkatan"
                               value={moveGrade}
@@ -2316,27 +2291,25 @@ export default function ASiswa() {
                             />
                           </div>
 
-                          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 pt-4 border-t">
-                            <div className="text-base">
-                              <span className="text-gray-600 font-medium">Status: </span>
-                              <span className={detailUser?.status === 'nonaktif' ? 'text-red-600 font-semibold' : 'text-green-600 font-semibold'}>
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-3 border-t">
+                            <div className="text-sm">
+                              <span className="text-gray-600">Status: </span>
+                              <span className={detailUser?.status === 'nonaktif' ? 'text-red-600 font-medium' : 'text-green-600 font-medium'}>
                                 {detailUser?.status === 'nonaktif' ? 'Nonaktif' : 'Aktif'}
                               </span>
                             </div>
-                            <div className="flex gap-3">
+                            <div className="flex gap-2">
                               <Button
                                 onClick={simpanPindahKelas}
                                 disabled={!moveKelas || moveKelas === detailUser?.kelas}
-                                size="md"
-                                className="shadow-sm"
+                                size="sm"
                               >
                                 💾 Simpan
                               </Button>
                               <Button
                                 variant="secondary"
                                 onClick={kosongkanKelas}
-                                size="md"
-                                className="shadow-sm"
+                                size="sm"
                               >
                                 🗑️ Kosongkan
                               </Button>
@@ -2346,13 +2319,13 @@ export default function ASiswa() {
                       </div>
 
                       {/* Kartu RFID */}
-                      <div className="bg-white border border-gray-200 rounded-xl p-5">
-                        <h4 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-3">
-                          <span className="text-xl">💳</span>
+                      <div className="bg-white border border-gray-200 rounded-lg p-4">
+                        <h4 className="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                          <span>💳</span>
                           Kartu RFID
                         </h4>
 
-                        <div className="space-y-4">
+                        <div className="space-y-3">
                           <div>
                             <Input
                               label="UID RFID"
@@ -2361,39 +2334,36 @@ export default function ASiswa() {
                               placeholder="Tap kartu atau isi manual"
                             />
                             {detailUser?.rfid_uid && (
-                              <p className="text-sm text-gray-500 mt-2">
+                              <p className="text-xs text-gray-500 mt-1">
                                 UID tersimpan:{' '}
-                                <span className="font-mono font-medium text-base">
+                                <span className="font-mono font-medium">
                                   {(detailUser.rfid_uid || '').toUpperCase()}
                                 </span>
                               </p>
                             )}
                           </div>
 
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                             <Button
                               variant={rfidEnrolling ? 'warning' : 'primary'}
-                              size="md"
+                              size="sm"
                               onClick={toggleRfidListen}
-                              className="shadow-sm"
                             >
                               {rfidEnrolling ? '⏹️ Stop' : '🎫 Scan'}
                             </Button>
                             <Button
                               variant="success"
-                              size="md"
+                              size="sm"
                               onClick={saveRfid}
                               disabled={!rfidInput}
-                              className="shadow-sm"
                             >
                               💾 Simpan
                             </Button>
                             <Button
                               variant="secondary"
-                              size="md"
+                              size="sm"
                               onClick={clearRfid}
                               disabled={!detailUser?.rfid_uid && !rfidInput}
-                              className="shadow-sm"
                             >
                               🗑️ Hapus
                             </Button>
@@ -2405,105 +2375,101 @@ export default function ASiswa() {
                     {/* Organisasi & OSIS */}
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                       {/* Organisasi */}
-                      <div className="bg-white border border-gray-200 rounded-xl p-5">
-                        <h4 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-3">
-                          <span className="text-xl">👥</span>
+                      <div className="bg-white border border-gray-200 rounded-lg p-4">
+                        <h4 className="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                          <span>👥</span>
                           Organisasi ({orgMember.length})
                         </h4>
-                        <div className="space-y-3 max-h-52 overflow-y-auto pr-2">
+                        <div className="space-y-2 max-h-40 overflow-y-auto">
                           {orgMember.map(row => (
-                            <div key={row.orgId} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-100">
+                            <div key={row.orgId} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
                               <div>
-                                <p className="text-base font-medium text-gray-900">{row.orgNama}</p>
-                                <p className="text-sm text-gray-500 mt-1">{row.jabatan} • {row.bagian || '-'}</p>
+                                <p className="text-sm font-medium text-gray-900">{row.orgNama}</p>
+                                <p className="text-xs text-gray-500">{row.jabatan} • {row.bagian || '-'}</p>
                               </div>
                               <Button
                                 variant="danger"
                                 size="sm"
                                 onClick={() => hapusOrg(row.orgId)}
-                                className="shadow-sm"
                               >
                                 🗑️
                               </Button>
                             </div>
                           ))}
                           {!orgMember.length && (
-                            <p className="text-gray-500 text-base text-center py-6">Belum terdaftar di organisasi</p>
+                            <p className="text-gray-500 text-sm text-center py-4">Belum terdaftar di organisasi</p>
                           )}
                         </div>
                       </div>
 
                       {/* OSIS */}
-                      <div className="bg-white border border-gray-200 rounded-xl p-5">
-                        <h4 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-3">
-                          <span className="text-xl">🌟</span>
+                      <div className="bg-white border border-gray-200 rounded-lg p-4">
+                        <h4 className="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                          <span>🌟</span>
                           OSIS
                         </h4>
                         {osisRow ? (
-                          <div className="space-y-4">
-                            <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-3">
+                            <div className="grid grid-cols-2 gap-3">
                               <div>
                                 <p className="text-sm font-medium text-gray-700">Status</p>
-                                <Badge variant={osisRow.status === 'aktif' ? 'success' : 'danger'} className="text-sm mt-1">
+                                <Badge variant={osisRow.status === 'aktif' ? 'success' : 'danger'} className="text-xs">
                                   {osisRow.status}
                                 </Badge>
                               </div>
                               <div>
                                 <p className="text-sm font-medium text-gray-700">Jabatan</p>
-                                <p className="text-base text-gray-900 font-medium mt-1">{osisRow.jabatan}</p>
+                                <p className="text-sm text-gray-900">{osisRow.jabatan}</p>
                               </div>
                             </div>
                             {osisRow.bagian && (
                               <div>
                                 <p className="text-sm font-medium text-gray-700">Bagian</p>
-                                <p className="text-base text-gray-900 font-medium mt-1">{osisRow.bagian}</p>
+                                <p className="text-sm text-gray-900">{osisRow.bagian}</p>
                               </div>
                             )}
                             <div className="flex justify-end">
                               <Button
                                 variant="danger"
-                                size="md"
+                                size="sm"
                                 onClick={hapusOsis}
-                                className="shadow-sm"
                               >
-                                🗑️ Hapus dari OSIS
+                                🗑️ Hapus
                               </Button>
                             </div>
                           </div>
                         ) : (
-                          <p className="text-gray-500 text-base text-center py-6">Belum terdaftar di OSIS</p>
+                          <p className="text-gray-500 text-sm text-center py-4">Belum terdaftar di OSIS</p>
                         )}
                       </div>
                     </div>
 
                     {/* Informasi Tambahan */}
-                    <div className="bg-white border border-gray-200 rounded-xl p-5">
-                      <h4 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-3">
-                        <span className="text-xl">📋</span>
+                    <div className="bg-white border border-gray-200 rounded-lg p-4">
+                      <h4 className="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                        <span>📋</span>
                         Informasi Tambahan
                       </h4>
-                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-                        <div className="bg-gray-50 p-4 rounded-lg">
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <div>
                           <p className="text-sm font-medium text-gray-700">Jenis Kelamin</p>
-                          <p className="text-base text-gray-900 font-medium mt-1">{JK_LABEL(detailUser?.jk)}</p>
+                          <p className="text-sm text-gray-900">{JK_LABEL(detailUser?.jk)}</p>
                         </div>
-                        <div className="bg-gray-50 p-4 rounded-lg">
+                        <div>
                           <p className="text-sm font-medium text-gray-700">Usia</p>
-                          <p className="text-base text-gray-900 font-medium mt-1">{detailUser?.usia ? `${detailUser.usia} tahun` : '—'}</p>
+                          <p className="text-sm text-gray-900">{detailUser?.usia ? `${detailUser.usia} tahun` : '—'}</p>
                         </div>
-                        <div className="bg-gray-50 p-4 rounded-lg">
+                        <div>
                           <p className="text-sm font-medium text-gray-700">Agama</p>
-                          <p className="text-base text-gray-900 font-medium mt-1">{detailUser?.agama || '—'}</p>
+                          <p className="text-sm text-gray-900">{detailUser?.agama || '—'}</p>
                         </div>
-                        <div className="bg-gray-50 p-4 rounded-lg">
+                        <div>
                           <p className="text-sm font-medium text-gray-700">Telepon</p>
-                          <p className="text-base text-gray-900 font-medium mt-1">{detailUser?.telp || '—'}</p>
+                          <p className="text-sm text-gray-900">{detailUser?.telp || '—'}</p>
                         </div>
-                        <div className="lg:col-span-2">
-                          <div className="bg-gray-50 p-4 rounded-lg h-full">
-                            <p className="text-sm font-medium text-gray-700">Alamat</p>
-                            <p className="text-base text-gray-900 font-medium mt-1">{detailUser?.alamat || '—'}</p>
-                          </div>
+                        <div className="md:col-span-2 lg:col-span-1">
+                          <p className="text-sm font-medium text-gray-700">Alamat</p>
+                          <p className="text-sm text-gray-900">{detailUser?.alamat || '—'}</p>
                         </div>
                       </div>
                     </div>
