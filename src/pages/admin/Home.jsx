@@ -40,11 +40,13 @@ const StatCard = ({ label, value, icon, color = 'blue' }) => {
     purple: 'from-purple-500 to-purple-600',
     orange: 'from-orange-500 to-orange-600',
     red: 'from-rose-500 to-rose-600',
-    indigo: 'from-indigo-500 to-indigo-600'
+    indigo: 'from-indigo-500 to-indigo-600',
+    amber: 'from-amber-500 to-amber-600',
+    teal: 'from-teal-500 to-teal-600'
   }
 
   return (
-    <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-lg border border-gray-200 p-6 transition-all duration-300 hover:shadow-xl hover:-translate-y-1">
+    <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-lg border border-gray-200 p-6 transition-all duration-300 hover:shadow-xl hover:-translate-y-1 hover:border-blue-200">
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm font-medium text-gray-600 mb-2">{label}</p>
@@ -66,14 +68,14 @@ const StatCard = ({ label, value, icon, color = 'blue' }) => {
 // Loading Skeleton
 const LoadingSkeleton = () => (
   <div className="animate-pulse">
-    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-6">
-      {[...Array(6)].map((_, i) => (
-        <div key={i} className="bg-gray-200 rounded-2xl h-24" />
+    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-6 mb-8">
+      {[...Array(7)].map((_, i) => (
+        <div key={i} className="bg-gray-200 rounded-2xl h-32" />
       ))}
     </div>
-    <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+    <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
       {[...Array(2)].map((_, i) => (
-        <div key={i} className="bg-gray-200 rounded-2xl h-96" />
+        <div key={i} className="bg-gray-200 rounded-2xl h-[600px]" />
       ))}
     </div>
   </div>
@@ -171,7 +173,7 @@ export default function AHome() {
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('id, nama, email, status')
+        .select('id, nama, email, status, last_sign_in_at, created_at')
         .eq('role', 'admin')
         .order('nama')
 
@@ -182,7 +184,9 @@ export default function AHome() {
           id: a.id,
           nama: a.nama || a.email || 'Tanpa Nama',
           email: a.email || '-',
-          status: a.status || 'active'
+          status: a.status || 'active',
+          lastSignIn: a.last_sign_in_at,
+          joinedAt: a.created_at
         }))
       )
     } catch (error) {
@@ -669,8 +673,8 @@ export default function AHome() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 py-6">
-        <div className="w-full">
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 p-4">
+        <div className="w-full max-w-screen-2xl mx-auto">
           <LoadingSkeleton />
         </div>
       </div>
@@ -678,74 +682,122 @@ export default function AHome() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 py-6">
-      <div className="w-full space-y-8 px-4 sm:px-6 lg:px-8">
-        {/* Header */}
-        <div className="text-center">
-  
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 p-4">
+      {/* Container utama yang diperluas */}
+      <div className="w-full max-w-screen-2xl mx-auto space-y-8">
+        {/* Header Dashboard */}
+        <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-2xl shadow-2xl overflow-hidden">
+          <div className="p-8">
+            <div className="flex flex-col md:flex-row items-center justify-between">
+              <div className="mb-6 md:mb-0">
+                <h1 className="text-3xl md:text-4xl font-bold text-white mb-3">
+                  Dashboard Administrator
+                </h1>
+                <p className="text-blue-100 text-lg">
+                  Selamat datang, {profile?.nama || 'Admin'} 👋
+                </p>
+                <p className="text-blue-200 mt-2">
+                  Kelola semua aspek sistem sekolah dari satu tempat
+                </p>
+              </div>
+              <div className="flex items-center gap-4">
+                <div className="text-center p-4 bg-white/10 backdrop-blur-sm rounded-xl">
+                  <div className="text-2xl font-bold text-white">
+                    {new Date().getDate()}
+                  </div>
+                  <div className="text-blue-100 text-sm">
+                    {new Date().toLocaleDateString('id-ID', { weekday: 'long', month: 'long', year: 'numeric' })}
+                  </div>
+                </div>
+                <div className="hidden md:block p-3 bg-white/10 backdrop-blur-sm rounded-xl">
+                  <span className="text-white text-2xl">⚙️</span>
+                </div>
+              </div>
+            </div>
+            
+            {/* Quick Stats Bar */}
+            <div className="mt-8 grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4">
+                <div className="text-white/80 text-sm">Sesi Aktif</div>
+                <div className="text-2xl font-bold text-white">24/7</div>
+              </div>
+              <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4">
+                <div className="text-white/80 text-sm">Update Terakhir</div>
+                <div className="text-2xl font-bold text-white">Baru Saja</div>
+              </div>
+              <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4">
+                <div className="text-white/80 text-sm">Database</div>
+                <div className="text-2xl font-bold text-white">Supabase</div>
+              </div>
+              <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4">
+                <div className="text-white/80 text-sm">Status Sistem</div>
+                <div className="text-2xl font-bold text-green-300">Normal</div>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* --- DASHBOARD STATISTICS --- */}
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-7 gap-6">
           <StatCard label="Total Siswa" value={stats.siswa} icon="👨‍🎓" color="blue" />
           <StatCard label="Total Guru" value={stats.guru} icon="👨‍🏫" color="green" />
-          {/* Card Total Admin DIHAPUS sesuai permintaan */}
-          <StatCard label="Kelas" value={stats.kelas} icon="🏫" color="purple" />
-          <StatCard label="Absensi" value={stats.absensi} icon="📊" color="orange" />
+          <StatCard label="Total Admin" value={stats.admin} icon="🛡️" color="purple" />
+          <StatCard label="Kelas" value={stats.kelas} icon="🏫" color="orange" />
+          <StatCard label="Absensi" value={stats.absensi} icon="📊" color="red" />
           <StatCard
-            label="Informasi"
+            label="Pengumuman"
             value={stats.pengumuman}
             icon="📢"
-            color="red"
+            color="indigo"
           />
           <StatCard
-            label="Eskul"
+            label="Ekstrakurikuler"
             value={stats.eskul}
             icon="⚽"
-            color="green"
+            color="teal"
           />
         </div>
 
         {/* --- FORM PENGUMUMAN & ESKUL --- */}
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 items-start">
           {/* === KOLOM PENGUMUMAN === */}
-          <div className="space-y-6">
+          <div className="space-y-8">
             {/* --- CARD FORM PENGUMUMAN --- */}
-            <div className="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden transition-all duration-300 hover:shadow-2xl">
-              <div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-6">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="p-3 bg-white/20 rounded-xl">
-                      <span className="text-2xl text-white">📢</span>
+            <div className="bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden transition-all duration-300 hover:shadow-3xl">
+              <div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-8">
+                <div className="flex flex-col md:flex-row items-center justify-between">
+                  <div className="flex items-center gap-4 mb-4 md:mb-0">
+                    <div className="p-4 bg-white/20 backdrop-blur-sm rounded-2xl">
+                      <span className="text-3xl text-white">📢</span>
                     </div>
                     <div>
-                      <h2 className="text-2xl font-bold text-white">
+                      <h2 className="text-2xl md:text-3xl font-bold text-white">
                         Kelola Pengumuman
                       </h2>
-                      <p className="text-blue-100 mt-1">
+                      <p className="text-blue-100 mt-2 text-lg">
                         Tambah atau edit pengumuman untuk guru & siswa
                       </p>
                     </div>
                   </div>
-                  <div className="px-4 py-2 bg-white/20 text-white rounded-full text-sm font-medium">
-                    📋 Admin
+                  <div className="px-6 py-3 bg-white/20 backdrop-blur-sm text-white rounded-full text-sm font-medium shadow-lg">
+                    📋 Admin Dashboard
                   </div>
                 </div>
               </div>
 
-              <div className="p-6">
-                <form className="space-y-6" onSubmit={simpanPengumuman}>
-                  <div className="grid grid-cols-1 gap-4">
+              <div className="p-8">
+                <form className="space-y-8" onSubmit={simpanPengumuman}>
+                  <div className="grid grid-cols-1 gap-6">
                     <div>
-                      <label className="block text-sm font-semibold text-gray-700 mb-3">
-                        <span className="flex items-center gap-2">
-                          <span className="w-2 h-2 bg-blue-500 rounded-full" />
+                      <label className="block text-lg font-semibold text-gray-800 mb-4">
+                        <span className="flex items-center gap-3">
+                          <span className="w-3 h-3 bg-blue-500 rounded-full" />
                           Judul Pengumuman
                         </span>
                       </label>
                       <input
-                        className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
-                        placeholder="Cth: Libur Nasional, Rapat Guru"
+                        className="w-full px-6 py-4 border-2 border-gray-200 rounded-2xl focus:ring-4 focus:ring-blue-500/30 focus:border-blue-500 transition-all duration-200 text-lg"
+                        placeholder="Cth: Libur Nasional, Rapat Guru, Ujian Semester"
                         value={pForm.judul}
                         onChange={(e) =>
                           setPForm((f) => ({ ...f, judul: e.target.value }))
@@ -753,15 +805,15 @@ export default function AHome() {
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-semibold text-gray-700 mb-3">
-                        <span className="flex items-center gap-2">
-                          <span className="w-2 h-2 bg-green-500 rounded-full" />
-                          Keterangan / Isi
+                      <label className="block text-lg font-semibold text-gray-800 mb-4">
+                        <span className="flex items-center gap-3">
+                          <span className="w-3 h-3 bg-green-500 rounded-full" />
+                          Keterangan / Isi Pengumuman
                         </span>
                       </label>
                       <textarea
-                        className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[120px] transition-all duration-200"
-                        placeholder="Isi pengumuman..."
+                        className="w-full px-6 py-4 border-2 border-gray-200 rounded-2xl focus:ring-4 focus:ring-blue-500/30 focus:border-blue-500 min-h-[160px] transition-all duration-200 text-lg resize-y"
+                        placeholder="Isi lengkap pengumuman..."
                         value={pForm.keterangan}
                         onChange={(e) =>
                           setPForm((f) => ({ ...f, keterangan: e.target.value }))
@@ -769,49 +821,61 @@ export default function AHome() {
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-semibold text-gray-700 mb-3">
-                        <span className="flex items-center gap-2">
-                          <span className="w-2 h-2 bg-purple-500 rounded-full" />
+                      <label className="block text-lg font-semibold text-gray-800 mb-4">
+                        <span className="flex items-center gap-3">
+                          <span className="w-3 h-3 bg-purple-500 rounded-full" />
                           Tampilkan ke
                         </span>
                       </label>
-                      <select
-                        className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
-                        value={pForm.target}
-                        onChange={(e) =>
-                          setPForm((f) => ({ ...f, target: e.target.value }))
-                        }
-                      >
-                        <option value="semua">Semua (Guru & Siswa)</option>
-                        <option value="siswa">Siswa Saja</option>
-                        <option value="guru">Guru Saja</option>
-                      </select>
+                      <div className="relative">
+                        <select
+                          className="w-full px-6 py-4 border-2 border-gray-200 rounded-2xl focus:ring-4 focus:ring-blue-500/30 focus:border-blue-500 transition-all duration-200 text-lg appearance-none bg-white"
+                          value={pForm.target}
+                          onChange={(e) =>
+                            setPForm((f) => ({ ...f, target: e.target.value }))
+                          }
+                        >
+                          <option value="semua">🌍 Semua (Guru & Siswa)</option>
+                          <option value="siswa">👨‍🎓 Siswa Saja</option>
+                          <option value="guru">👨‍🏫 Guru Saja</option>
+                        </select>
+                        <div className="absolute right-6 top-1/2 transform -translate-y-1/2 pointer-events-none">
+                          <span className="text-gray-400 text-xl">▼</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
-                  <div className="flex justify-end gap-3 pt-6 border-t border-gray-200">
+                  <div className="flex flex-col sm:flex-row justify-end gap-4 pt-8 border-t border-gray-200">
                     {pEditId && (
                       <button
                         type="button"
-                        className="px-6 py-3 text-sm font-semibold text-gray-700 bg-white border-2 border-gray-300 rounded-xl hover:bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 hover:shadow-md"
+                        className="px-8 py-4 text-base font-semibold text-gray-700 bg-white border-2 border-gray-300 rounded-2xl hover:bg-gray-50 focus:ring-4 focus:ring-blue-500/30 focus:ring-offset-2 transition-all duration-200 hover:shadow-lg flex items-center justify-center gap-2"
                         onClick={cancelEditPengumuman}
                       >
-                        ✕ Batal Edit
+                        <span>✕</span>
+                        <span>Batal Edit</span>
                       </button>
                     )}
                     <button
                       type="submit"
-                      className="px-6 py-3 text-sm font-semibold text-white bg-gradient-to-r from-blue-600 to-indigo-700 rounded-xl hover:from-blue-700 hover:to-indigo-800 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="px-8 py-4 text-base font-semibold text-white bg-gradient-to-r from-blue-600 to-indigo-700 rounded-2xl hover:from-blue-700 hover:to-indigo-800 focus:ring-4 focus:ring-blue-500/30 focus:ring-offset-2 transition-all duration-200 hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                       disabled={loadingPengumuman}
                     >
                       {loadingPengumuman ? (
-                        <span className="flex items-center gap-2">
-                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                          Menyimpan...
-                        </span>
+                        <>
+                          <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          <span>Menyimpan...</span>
+                        </>
                       ) : pEditId ? (
-                        '💾 Simpan Perubahan'
+                        <>
+                          <span>💾</span>
+                          <span>Simpan Perubahan</span>
+                        </>
                       ) : (
-                        '📝 Tambah Pengumuman'
+                        <>
+                          <span>📝</span>
+                          <span>Tambah Pengumuman</span>
+                        </>
                       )}
                     </button>
                   </div>
@@ -820,96 +884,111 @@ export default function AHome() {
             </div>
 
             {/* --- CARD DAFTAR PENGUMUMAN --- */}
-            <div className="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden transition-all duration-300 hover:shadow-2xl">
-              <div className="px-6 py-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <span className="p-2 bg-blue-100 text-blue-600 rounded-lg">📋</span>
+            <div className="bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden transition-all duration-300 hover:shadow-3xl">
+              <div className="px-8 py-6 border-b bg-gradient-to-r from-blue-50 to-indigo-50 flex flex-col md:flex-row items-center justify-between">
+                <div className="flex items-center gap-4 mb-4 md:mb-0">
+                  <span className="p-3 bg-blue-100 text-blue-600 rounded-xl text-2xl">📋</span>
                   <div>
-                    <h3 className="text-lg font-bold text-gray-900">
-                      Daftar Pengumuman
+                    <h3 className="text-xl font-bold text-gray-900">
+                      Daftar Pengumuman Aktif
                     </h3>
-                    <p className="text-xs text-gray-500">
-                      {pengumumanList.length} pengumuman tersimpan
+                    <p className="text-sm text-gray-600 mt-1">
+                      {pengumumanList.length} pengumuman tersimpan • Terbaru di atas
                     </p>
                   </div>
                 </div>
                 {pengumumanList.length > 0 && (
-                  <span className="px-3 py-1 text-xs font-semibold rounded-full bg-white/70 text-blue-700">
-                    Terbaru di atas
+                  <span className="px-4 py-2 text-sm font-semibold rounded-full bg-white shadow text-blue-700 border border-blue-200">
+                    🔄 Auto Refresh
                   </span>
                 )}
               </div>
 
               <div className="p-6">
-                {/* max-h disamakan dengan daftar anggota eskul (max-h-80) supaya scroll rapi */}
-                <div className="space-y-4 max-h-80 overflow-y-auto pr-2">
+                <div className="space-y-5 max-h-[500px] overflow-y-auto pr-3 custom-scrollbar">
                   {pengumumanList.map((p, index) => (
                     <div
                       key={p.id}
-                      className="flex items-center justify-between p-5 border-2 border-gray-200 rounded-xl hover:border-blue-300 hover:bg-blue-50 transition-all duration-200 group"
+                      className="flex flex-col md:flex-row items-start md:items-center justify-between p-6 border-2 border-gray-200 rounded-2xl hover:border-blue-300 hover:bg-blue-50/50 transition-all duration-300 group shadow-sm hover:shadow-md"
                     >
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
-                          <div className="font-semibold text-gray-900 text-lg group-hover:text-blue-700 transition-colors">
+                      <div className="flex-1 mb-4 md:mb-0">
+                        <div className="flex flex-col md:flex-row md:items-center gap-3 mb-4">
+                          <div className="font-bold text-xl text-gray-900 group-hover:text-blue-700 transition-colors">
                             {p.judul}
                           </div>
-                          {index === 0 && (
-                            <span className="px-3 py-1 text-xs font-bold bg-green-100 text-green-800 rounded-full">
-                              TERBARU
+                          <div className="flex items-center gap-3">
+                            {index === 0 && (
+                              <span className="px-3 py-1 text-xs font-bold bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-full shadow">
+                                🔥 TERBARU
+                              </span>
+                            )}
+                            <span
+                              className={`px-3 py-1 rounded-full font-medium text-sm shadow ${
+                                p.target === 'siswa'
+                                  ? 'bg-gradient-to-r from-orange-500 to-amber-600 text-white'
+                                  : p.target === 'guru'
+                                  ? 'bg-gradient-to-r from-purple-500 to-pink-600 text-white'
+                                  : 'bg-gradient-to-r from-blue-500 to-indigo-600 text-white'
+                              }`}
+                            >
+                              {p.target === 'siswa' ? '👨‍🎓 Siswa' : 
+                               p.target === 'guru' ? '👨‍🏫 Guru' : 
+                               '🌍 Semua'}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="text-gray-700 text-base leading-relaxed mb-4 line-clamp-3">
+                          {p.keterangan}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-4 text-sm">
+                          <span className="text-gray-500 flex items-center gap-2">
+                            <span className="text-lg">📅</span>
+                            <span>
+                              {p.created_at
+                                ? new Date(p.created_at).toLocaleDateString('id-ID', {
+                                    day: 'numeric',
+                                    month: 'long',
+                                    year: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                  })
+                                : '-'}
+                            </span>
+                          </span>
+                          {p.updated_at && p.updated_at !== p.created_at && (
+                            <span className="text-gray-500 flex items-center gap-2">
+                              <span className="text-lg">✏️</span>
+                              <span>Diedit</span>
                             </span>
                           )}
                         </div>
-                        <div className="text-gray-600 text-sm leading-relaxed line-clamp-2">
-                          {p.keterangan}
-                        </div>
-                        <div className="flex items-center gap-4 mt-3 text-xs">
-                          <span
-                            className={`px-3 py-1 rounded-full font-medium ${
-                              p.target === 'siswa'
-                                ? 'bg-orange-100 text-orange-800'
-                                : p.target === 'guru'
-                                ? 'bg-purple-100 text-purple-800'
-                                : 'bg-blue-100 text-blue-800'
-                            }`}
-                          >
-                            👥 {p.target || 'semua'}
-                          </span>
-                          <span className="text-gray-500">
-                            📅{' '}
-                            {p.created_at
-                              ? new Date(p.created_at).toLocaleDateString('id-ID', {
-                                  day: 'numeric',
-                                  month: 'long',
-                                  year: 'numeric'
-                                })
-                              : '-'}
-                          </span>
-                        </div>
                       </div>
-                      <div className="flex gap-2 ml-4">
+                      <div className="flex gap-3">
                         <button
-                          className="px-4 py-2 text-xs font-semibold text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 hover:shadow-md"
+                          className="px-5 py-3 text-sm font-semibold text-blue-600 bg-blue-50 rounded-xl hover:bg-blue-100 focus:ring-4 focus:ring-blue-500/30 focus:ring-offset-2 transition-all duration-200 hover:shadow-md flex items-center gap-2 border border-blue-200"
                           onClick={() => startEditPengumuman(p)}
                         >
-                          ✏️ Edit
+                          <span className="text-lg">✏️</span>
+                          <span>Edit</span>
                         </button>
                         <button
-                          className="px-4 py-2 text-xs font-semibold text-red-600 bg-red-50 rounded-lg hover:bg-red-100 focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-all duration-200 hover:shadow-md"
+                          className="px-5 py-3 text-sm font-semibold text-red-600 bg-red-50 rounded-xl hover:bg-red-100 focus:ring-4 focus:ring-red-500/30 focus:ring-offset-2 transition-all duration-200 hover:shadow-md flex items-center gap-2 border border-red-200"
                           onClick={() => hapusPengumuman(p.id)}
                         >
-                          🗑️ Hapus
+                          <span className="text-lg">🗑️</span>
+                          <span>Hapus</span>
                         </button>
                       </div>
                     </div>
                   ))}
                   {pengumumanList.length === 0 && (
-                    <div className="text-center py-12">
-                      <div className="text-gray-300 text-6xl mb-4">📢</div>
-                      <p className="text-gray-500 text-lg font-medium">
+                    <div className="text-center py-16">
+                      <div className="text-gray-300 text-7xl mb-6">📢</div>
+                      <p className="text-gray-600 text-xl font-medium mb-3">
                         Belum ada pengumuman
                       </p>
-                      <p className="text-gray-400 mt-2">
-                        Mulai dengan membuat pengumuman pertama
+                      <p className="text-gray-500 text-lg max-w-md mx-auto">
+                        Mulai dengan membuat pengumuman pertama untuk guru dan siswa
                       </p>
                     </div>
                   )}
@@ -919,92 +998,104 @@ export default function AHome() {
           </div>
 
           {/* === KOLOM EKSTRAKURIKULER === */}
-          <div className="space-y-6">
+          <div className="space-y-8">
             {/* Form utama eskul */}
-            <div className="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden transition-all duration-300 hover:shadow-2xl">
-              <div className="bg-gradient-to-r from-orange-600 to-amber-700 p-6">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="p-3 bg-white/20 rounded-xl">
-                      <span className="text-2xl text-white">⚽</span>
+            <div className="bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden transition-all duration-300 hover:shadow-3xl">
+              <div className="bg-gradient-to-r from-orange-600 to-amber-700 p-8">
+                <div className="flex flex-col md:flex-row items-center justify-between">
+                  <div className="flex items-center gap-4 mb-4 md:mb-0">
+                    <div className="p-4 bg-white/20 backdrop-blur-sm rounded-2xl">
+                      <span className="text-3xl text-white">⚽</span>
                     </div>
                     <div>
-                      <h2 className="text-2xl font-bold text-white">
+                      <h2 className="text-2xl md:text-3xl font-bold text-white">
                         Kelola Ekstrakurikuler
                       </h2>
-                      <p className="text-orange-100 mt-1">
-                        Atur data ekskul, jadwal, dan pembina
+                      <p className="text-orange-100 mt-2 text-lg">
+                        Atur data ekskul, jadwal, pembina, dan anggota
                       </p>
                     </div>
                   </div>
-                  <div className="px-4 py-2 bg-white/20 text-white rounded-full text-sm font-medium">
-                    🏆 {eskulList.length} Eskul
+                  <div className="px-6 py-3 bg-white/20 backdrop-blur-sm text-white rounded-full text-sm font-medium shadow-lg">
+                    🏆 {eskulList.length} Eskul Terdaftar
                   </div>
                 </div>
               </div>
 
-              <div className="p-6">
-                <div className="flex items-center justify-between mb-6">
-                  <div className="flex-1">
-                    <label className="block text-sm font-semibold text-gray-700 mb-3">
-                      <span className="flex items-center gap-2">
-                        <span className="w-2 h-2 bg-orange-500 rounded-full" />
-                        Pilih Eskul
+              <div className="p-8">
+                <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6 mb-8">
+                  <div className="flex-1 w-full">
+                    <label className="block text-lg font-semibold text-gray-800 mb-4">
+                      <span className="flex items-center gap-3">
+                        <span className="w-3 h-3 bg-orange-500 rounded-full" />
+                        Pilih atau Buat Eskul Baru
                       </span>
                     </label>
-                    <select
-                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-all duration-200"
-                      value={eskulSel}
-                      onChange={(e) => setEskulSel(e.target.value)}
-                    >
-                      <option value="">— Buat Eskul Baru —</option>
-                      {eskulList.map((o) => (
-                        <option key={o.id} value={o.id}>
-                          {o.nama}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="relative">
+                      <select
+                        className="w-full px-6 py-4 border-2 border-gray-200 rounded-2xl focus:ring-4 focus:ring-orange-500/30 focus:border-orange-500 transition-all duration-200 text-lg appearance-none bg-white"
+                        value={eskulSel}
+                        onChange={(e) => setEskulSel(e.target.value)}
+                      >
+                        <option value="">✨ Buat Eskul Baru ✨</option>
+                        {eskulList.map((o) => (
+                          <option key={o.id} value={o.id}>
+                            {o.nama} {o.pembina_guru_id ? '(Sudah ada pembina)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="absolute right-6 top-1/2 transform -translate-y-1/2 pointer-events-none">
+                        <span className="text-gray-400 text-xl">▼</span>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex gap-3 ml-6">
+                  <div className="flex gap-4 w-full lg:w-auto">
                     {eskulSel && (
                       <button
-                        className="px-6 py-3 text-sm font-semibold text-red-600 bg-red-50 border-2 border-red-200 rounded-xl hover:bg-red-100 focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-all duration-200 hover:shadow-md"
+                        className="px-6 py-4 text-base font-semibold text-red-600 bg-red-50 border-2 border-red-200 rounded-2xl hover:bg-red-100 focus:ring-4 focus:ring-red-500/30 focus:ring-offset-2 transition-all duration-200 hover:shadow-lg flex items-center justify-center gap-2 w-full lg:w-auto"
                         onClick={hapusEskul}
                       >
-                        🗑️ Hapus
+                        <span className="text-lg">🗑️</span>
+                        <span>Hapus</span>
                       </button>
                     )}
                     <button
-                      className="px-6 py-3 text-sm font-semibold text-white bg-gradient-to-r from-orange-600 to-amber-700 rounded-xl hover:from-orange-700 hover:to-amber-800 focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 transition-all duration-200 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="px-8 py-4 text-base font-semibold text-white bg-gradient-to-r from-orange-600 to-amber-700 rounded-2xl hover:from-orange-700 hover:to-amber-800 focus:ring-4 focus:ring-orange-500/30 focus:ring-offset-2 transition-all duration-200 hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 w-full lg:w-auto"
                       onClick={simpanEskul}
                       disabled={loadingEskul}
                     >
                       {loadingEskul ? (
-                        <span className="flex items-center gap-2">
-                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                          Menyimpan...
-                        </span>
+                        <>
+                          <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          <span>Menyimpan...</span>
+                        </>
                       ) : eskulSel ? (
-                        '💾 Simpan Perubahan'
+                        <>
+                          <span>💾</span>
+                          <span>Simpan Perubahan</span>
+                        </>
                       ) : (
-                        '✨ Tambah Eskul Baru'
+                        <>
+                          <span>✨</span>
+                          <span>Tambah Eskul Baru</span>
+                        </>
                       )}
                     </button>
                   </div>
                 </div>
 
                 {/* Form detail eskul */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-y-6 md:gap-x-10 items-start">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-y-8 md:gap-x-10 items-start">
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-3">
-                      <span className="flex items-center gap-2">
-                        <span className="w-2 h-2 bg-blue-500 rounded-full" />
+                    <label className="block text-lg font-semibold text-gray-800 mb-4">
+                      <span className="flex items-center gap-3">
+                        <span className="w-3 h-3 bg-blue-500 rounded-full" />
                         Nama Eskul
                       </span>
                     </label>
                     <input
-                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
-                      placeholder="cth: Pramuka, Paskibra"
+                      className="w-full px-6 py-4 border-2 border-gray-200 rounded-2xl focus:ring-4 focus:ring-blue-500/30 focus:border-blue-500 transition-all duration-200 text-lg"
+                      placeholder="cth: Pramuka, Paskibra, Futsal, Basket"
                       value={eskulForm.nama}
                       onChange={(e) =>
                         setEskulForm((f) => ({ ...f, nama: e.target.value }))
@@ -1013,89 +1104,98 @@ export default function AHome() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-3">
-                      <span className="flex items-center gap-2">
-                        <span className="w-2 h-2 bg-green-500 rounded-full" />
+                    <label className="block text-lg font-semibold text-gray-800 mb-4">
+                      <span className="flex items-center gap-3">
+                        <span className="w-3 h-3 bg-green-500 rounded-full" />
                         Pembina (Guru)
                       </span>
                     </label>
-                    <select
-                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200"
-                      value={eskulForm.pembina_guru_id}
-                      onChange={(e) =>
-                        setEskulForm((f) => ({
-                          ...f,
-                          pembina_guru_id: e.target.value
-                        }))
-                      }
-                    >
-                      <option value="">— Pilih guru —</option>
-                      {guruList.map((g) => (
-                        <option key={g.id} value={g.id}>
-                          {g.name}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="relative">
+                      <select
+                        className="w-full px-6 py-4 border-2 border-gray-200 rounded-2xl focus:ring-4 focus:ring-green-500/30 focus:border-green-500 transition-all duration-200 text-lg appearance-none bg-white"
+                        value={eskulForm.pembina_guru_id}
+                        onChange={(e) =>
+                          setEskulForm((f) => ({
+                            ...f,
+                            pembina_guru_id: e.target.value
+                          }))
+                        }
+                      >
+                        <option value="">— Pilih guru pembina —</option>
+                        {guruList.map((g) => (
+                          <option key={g.id} value={g.id}>
+                            {g.name}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="absolute right-6 top-1/2 transform -translate-y-1/2 pointer-events-none">
+                        <span className="text-gray-400 text-xl">▼</span>
+                      </div>
+                    </div>
                   </div>
 
                   {/* Hari */}
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-3">
-                      <span className="flex items-center gap-2">
-                        <span className="w-2 h-2 bg-purple-500 rounded-full" />
-                        Hari
+                    <label className="block text-lg font-semibold text-gray-800 mb-4">
+                      <span className="flex items-center gap-3">
+                        <span className="w-3 h-3 bg-purple-500 rounded-full" />
+                        Hari Pelaksanaan
                       </span>
                     </label>
-                    <div className="space-y-2">
-                      {/* Dropdown + checkbox multi-hari */}
+                    <div className="space-y-3">
                       <details className="group relative">
-                        <summary className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500 transition-all duration-200 flex items-center justify-between cursor-pointer list-none">
-                          <span className="text-sm text-gray-700">
+                        <summary className="w-full px-6 py-4 border-2 border-gray-200 rounded-2xl focus:outline-none focus:border-purple-500 transition-all duration-200 flex items-center justify-between cursor-pointer list-none bg-white hover:border-purple-300">
+                          <span className="text-lg text-gray-700">
                             {selectedHariValues.length === 0
-                              ? 'Pilih hari'
+                              ? 'Pilih hari pelaksanaan'
                               : selectedHariValues.join(', ')}
                           </span>
-                          <span className="ml-2 text-xs text-gray-500 group-open:rotate-180 transform transition-transform">
+                          <span className="ml-2 text-gray-500 group-open:rotate-180 transform transition-transform text-xl">
                             ▾
                           </span>
                         </summary>
-                        <div className="mt-2 absolute z-20 w-full bg-white border-2 border-purple-100 rounded-xl shadow-lg p-3 max-h-48 overflow-y-auto">
-                          {HARI_OPTS.map((h) => {
-                            const checked = selectedHariValues.includes(h)
-                            return (
-                              <label
-                                key={h}
-                                className="flex items-center gap-2 py-1 px-2 rounded-lg hover:bg-purple-50 cursor-pointer"
-                              >
-                                <input
-                                  type="checkbox"
-                                  className="rounded text-purple-600 focus:ring-purple-500"
-                                  checked={checked}
-                                  onChange={() => handleToggleHari(h)}
-                                />
-                                <span className="text-sm text-gray-700">{h}</span>
-                              </label>
-                            )
-                          })}
+                        <div className="mt-2 absolute z-20 w-full bg-white border-2 border-purple-100 rounded-2xl shadow-2xl p-4 max-h-60 overflow-y-auto">
+                          <div className="grid grid-cols-1 gap-2">
+                            {HARI_OPTS.map((h) => {
+                              const checked = selectedHariValues.includes(h)
+                              return (
+                                <label
+                                  key={h}
+                                  className="flex items-center gap-3 py-3 px-4 rounded-xl hover:bg-purple-50 cursor-pointer transition-colors"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    className="w-5 h-5 rounded text-purple-600 focus:ring-purple-500"
+                                    checked={checked}
+                                    onChange={() => handleToggleHari(h)}
+                                  />
+                                  <span className="text-lg text-gray-800">{h}</span>
+                                  {checked && (
+                                    <span className="ml-auto text-purple-600">✓</span>
+                                  )}
+                                </label>
+                              )
+                            })}
+                          </div>
                         </div>
                       </details>
-                      <p className="text-xs text-gray-400">
-                        Bisa pilih lebih dari satu hari untuk jadwal ekskul.
+                      <p className="text-sm text-gray-500 pl-3">
+                        💡 Bisa pilih lebih dari satu hari untuk jadwal ekskul
                       </p>
                     </div>
                   </div>
 
                   {/* Jadwal (Mulai) */}
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-3">
-                      <span className="flex items-center gap-2">
-                        <span className="w-2 h-2 bg-orange-500 rounded-full" />
-                        Jadwal (Mulai)
+                    <label className="block text-lg font-semibold text-gray-800 mb-4">
+                      <span className="flex items-center gap-3">
+                        <span className="w-3 h-3 bg-orange-500 rounded-full" />
+                        Jam Mulai
                       </span>
                     </label>
                     <input
                       type="time"
-                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-all duration-200"
+                      className="w-full px-6 py-4 border-2 border-gray-200 rounded-2xl focus:ring-4 focus:ring-orange-500/30 focus:border-orange-500 transition-all duration-200 text-lg"
                       value={eskulForm.jam_mulai}
                       onChange={(e) =>
                         setEskulForm((f) => ({ ...f, jam_mulai: e.target.value }))
@@ -1105,15 +1205,15 @@ export default function AHome() {
 
                   {/* Jadwal selesai */}
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-3">
-                      <span className="flex items-center gap-2">
-                        <span className="w-2 h-2 bg-red-500 rounded-full" />
-                        Jadwal (Selesai)
+                    <label className="block text-lg font-semibold text-gray-800 mb-4">
+                      <span className="flex items-center gap-3">
+                        <span className="w-3 h-3 bg-red-500 rounded-full" />
+                        Jam Selesai
                       </span>
                     </label>
                     <input
                       type="time"
-                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-200"
+                      className="w-full px-6 py-4 border-2 border-gray-200 rounded-2xl focus:ring-4 focus:ring-red-500/30 focus:border-red-500 transition-all duration-200 text-lg"
                       value={eskulForm.jam_selesai}
                       onChange={(e) =>
                         setEskulForm((f) => ({
@@ -1125,14 +1225,15 @@ export default function AHome() {
                   </div>
 
                   <div className="md:col-span-2">
-                    <label className="block text-sm font-semibold text-gray-700 mb-3">
-                      <span className="flex items-center gap-2">
-                        <span className="w-2 h-2 bg-indigo-500 rounded-full" />
-                        Keterangan
+                    <label className="block text-lg font-semibold text-gray-800 mb-4">
+                      <span className="flex items-center gap-3">
+                        <span className="w-3 h-3 bg-indigo-500 rounded-full" />
+                        Deskripsi & Keterangan
                       </span>
                     </label>
                     <textarea
-                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200 min-h-[100px]"
+                      className="w-full px-6 py-4 border-2 border-gray-200 rounded-2xl focus:ring-4 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all duration-200 min-h-[140px] text-lg resize-y"
+                      placeholder="Deskripsi kegiatan, tujuan, peralatan yang dibutuhkan, dll."
                       value={eskulForm.keterangan}
                       onChange={(e) =>
                         setEskulForm((f) => ({
@@ -1148,116 +1249,144 @@ export default function AHome() {
 
             {/* Anggota eskul */}
             {eskulSel && (
-              <div className="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden transition-all duration-300 hover:shadow-2xl">
-                <div className="bg-gradient-to-r from-emerald-600 to-green-700 p-6">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                      <div className="p-3 bg-white/20 rounded-xl">
-                        <span className="text-2xl text-white">👥</span>
+              <div className="bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden transition-all duration-300 hover:shadow-3xl">
+                <div className="bg-gradient-to-r from-emerald-600 to-green-700 p-8">
+                  <div className="flex flex-col md:flex-row items-center justify-between">
+                    <div className="flex items-center gap-4 mb-4 md:mb-0">
+                      <div className="p-4 bg-white/20 backdrop-blur-sm rounded-2xl">
+                        <span className="text-3xl text-white">👥</span>
                       </div>
                       <div>
-                        <h3 className="text-xl font-bold text-white">
-                          Anggota • {eskulForm.nama || eskulSel}
+                        <h3 className="text-2xl font-bold text-white">
+                          Manajemen Anggota • {eskulForm.nama || eskulSel}
                         </h3>
-                        <p className="text-emerald-100 mt-1">
-                          {anggotaDisplay.length} siswa mengikuti
+                        <p className="text-emerald-100 mt-2 text-lg">
+                          {anggotaDisplay.length} siswa mengikuti • Kelola keanggotaan dan statistik
                         </p>
                       </div>
                     </div>
-                    <div className="px-4 py-2 bg-white/20 text-white rounded-full text-sm font-medium">
-                      🎯 {anggotaDisplay.length} Anggota
+                    <div className="px-6 py-3 bg-white/20 backdrop-blur-sm text-white rounded-full text-sm font-medium shadow-lg">
+                      🎯 {anggotaDisplay.length} Anggota Terdaftar
                     </div>
                   </div>
                 </div>
 
-                <div className="p-6">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-semibold text-gray-700 mb-3">
-                        <span className="flex items-center gap-2">
-                          <span className="w-2 h-2 bg-emerald-500 rounded-full" />
-                          Tambah Anggota (Siswa)
+                <div className="p-8">
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-10">
+                    <div className="lg:col-span-2">
+                      <label className="block text-lg font-semibold text-gray-800 mb-4">
+                        <span className="flex items-center gap-3">
+                          <span className="w-3 h-3 bg-emerald-500 rounded-full" />
+                          Tambah Anggota Baru (Siswa)
                         </span>
                       </label>
-                      <select
-                        className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all duration-200"
-                        value={addMemberUid}
-                        onChange={(e) => setAddMemberUid(e.target.value)}
-                      >
-                        <option value="">— Pilih siswa —</option>
-                        {siswaList.map((s) => (
-                          <option key={s.uid} value={s.uid}>
-                            {s.nama} ({s.kelas || '—'})
-                          </option>
-                        ))}
-                      </select>
+                      <div className="relative">
+                        <select
+                          className="w-full px-6 py-4 border-2 border-gray-200 rounded-2xl focus:ring-4 focus:ring-emerald-500/30 focus:border-emerald-500 transition-all duration-200 text-lg appearance-none bg-white"
+                          value={addMemberUid}
+                          onChange={(e) => setAddMemberUid(e.target.value)}
+                        >
+                          <option value="">— Pilih siswa untuk ditambahkan —</option>
+                          {siswaList.map((s) => (
+                            <option key={s.uid} value={s.uid}>
+                              {s.nama} • Kelas {s.kelas || '—'} • {s.email || 'No email'}
+                            </option>
+                          ))}
+                        </select>
+                        <div className="absolute right-6 top-1/2 transform -translate-y-1/2 pointer-events-none">
+                          <span className="text-gray-400 text-xl">▼</span>
+                        </div>
+                      </div>
                     </div>
                     <div className="flex items-end">
                       <button
-                        className="w-full px-6 py-3 text-sm font-semibold text-gray-700 bg-white border-2 border-gray-300 rounded-xl hover:bg-gray-50 focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 transition-all duration-200 hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="w-full px-8 py-4 text-base font-semibold text-gray-800 bg-gradient-to-r from-gray-50 to-gray-100 border-2 border-gray-300 rounded-2xl hover:bg-gray-200 focus:ring-4 focus:ring-emerald-500/30 focus:ring-offset-2 transition-all duration-200 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                         onClick={tambahAnggotaEskul}
                         disabled={!addMemberUid}
                       >
-                        ➕ Tambah
+                        <span className="text-xl">➕</span>
+                        <span>Tambah Anggota</span>
                       </button>
                     </div>
                   </div>
 
-                  <div className="border-t pt-8">
-                    <h4 className="text-lg font-bold text-gray-900 mb-6 flex items-center gap-3">
-                      <span className="p-2 bg-emerald-100 text-emerald-600 rounded-lg">
-                        📊
-                      </span>
-                      Daftar Anggota
-                    </h4>
-                    {/* max-h-80: disamakan dengan daftar pengumuman */}
-                    <div className="space-y-4 max-h-80 overflow-y-auto pr-2">
+                  <div className="border-t pt-10">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between mb-8">
+                      <h4 className="text-2xl font-bold text-gray-900 mb-4 md:mb-0 flex items-center gap-4">
+                        <span className="p-3 bg-emerald-100 text-emerald-600 rounded-xl text-2xl">
+                          📊
+                        </span>
+                        Daftar Anggota & Statistik Kehadiran
+                      </h4>
+                      <div className="flex gap-4">
+                        <div className="px-4 py-2 bg-blue-50 text-blue-700 rounded-lg text-sm font-medium flex items-center gap-2">
+                          <span>✅</span>
+                          <span>Hadir: Total {Object.values(eskulAbsensiStats).reduce((sum, stat) => sum + stat.hadir, 0)}</span>
+                        </div>
+                        <div className="px-4 py-2 bg-amber-50 text-amber-700 rounded-lg text-sm font-medium flex items-center gap-2">
+                          <span>📝</span>
+                          <span>Izin: Total {Object.values(eskulAbsensiStats).reduce((sum, stat) => sum + stat.izin, 0)}</span>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div className="space-y-5 max-h-[500px] overflow-y-auto pr-3 custom-scrollbar">
                       {anggotaDisplay.map((a) => (
                         <div
                           key={a.id}
-                          className="flex items-center justify-between p-4 border-2 border-gray-200 rounded-xl hover:border-emerald-300 hover:bg-emerald-50 transition-all duration-200 group"
+                          className="flex flex-col md:flex-row md:items-center justify-between p-6 border-2 border-gray-200 rounded-2xl hover:border-emerald-300 hover:bg-emerald-50/50 transition-all duration-300 group shadow-sm hover:shadow-md"
                         >
-                          <div className="flex items-center gap-4">
-                            <div className="p-3 bg-emerald-100 text-emerald-600 rounded-lg group-hover:bg-emerald-200 transition-colors">
+                          <div className="flex items-start md:items-center gap-5 mb-4 md:mb-0">
+                            <div className="p-4 bg-emerald-100 text-emerald-600 rounded-xl text-2xl group-hover:bg-emerald-200 transition-colors">
                               👤
                             </div>
                             <div>
-                              <div className="font-semibold text-gray-900 group-hover:text-emerald-700 transition-colors">
+                              <div className="font-bold text-xl text-gray-900 group-hover:text-emerald-700 transition-colors mb-2">
                                 {a.nama}
                               </div>
-                              <div className="text-sm text-gray-500 mt-1">
-                                Kelas:{' '}
-                                <span className="font-medium">{a.kelas}</span>
+                              <div className="text-gray-700 text-base mb-3">
+                                <span className="font-medium">Kelas:</span>{' '}
+                                <span className="bg-gray-100 text-gray-800 px-3 py-1 rounded-full text-sm font-medium">
+                                  {a.kelas || '—'}
+                                </span>
                               </div>
                               {/* Status kehadiran & izin (total semua bulan) */}
-                              <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                                <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 font-semibold">
-                                  ✅ Hadir:
-                                  <span className="ml-1">{a.hadirCount}</span>
+                              <div className="flex flex-wrap gap-3">
+                                <span className="inline-flex items-center px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-50 to-emerald-100 text-emerald-700 font-semibold shadow-sm">
+                                  <span className="text-lg mr-2">✅</span>
+                                  <span>Hadir:</span>
+                                  <span className="ml-2 font-bold text-xl">{a.hadirCount}</span>
                                 </span>
-                                <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 font-semibold">
-                                  📝 Izin:
-                                  <span className="ml-1">{a.izinCount}</span>
+                                <span className="inline-flex items-center px-4 py-2 rounded-xl bg-gradient-to-r from-amber-50 to-amber-100 text-amber-700 font-semibold shadow-sm">
+                                  <span className="text-lg mr-2">📝</span>
+                                  <span>Izin:</span>
+                                  <span className="ml-2 font-bold text-xl">{a.izinCount}</span>
+                                </span>
+                                <span className="inline-flex items-center px-4 py-2 rounded-xl bg-gradient-to-r from-gray-50 to-gray-100 text-gray-700 font-semibold shadow-sm">
+                                  <span className="text-lg mr-2">📈</span>
+                                  <span>Total:</span>
+                                  <span className="ml-2 font-bold text-xl">{a.hadirCount + a.izinCount}</span>
                                 </span>
                               </div>
                             </div>
                           </div>
                           <button
-                            className="px-4 py-2 text-xs font-semibold text-red-600 bg-red-50 rounded-lg hover:bg-red-100 focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-all duration-200 hover:shadow-md"
+                            className="px-6 py-3 text-sm font-semibold text-red-600 bg-red-50 rounded-xl hover:bg-red-100 focus:ring-4 focus:ring-red-500/30 focus:ring-offset-2 transition-all duration-200 hover:shadow-md flex items-center gap-2 border border-red-200 self-start md:self-center mt-4 md:mt-0"
                             onClick={() => hapusAnggotaEskul(a.id)}
                           >
-                            🗑️ Hapus
+                            <span className="text-lg">🗑️</span>
+                            <span>Hapus dari Eskul</span>
                           </button>
                         </div>
                       ))}
                       {anggotaDisplay.length === 0 && (
-                        <div className="text-center py-12">
-                          <div className="text-gray-300 text-6xl mb-4">👥</div>
-                          <p className="text-gray-500 text-lg font-medium">
+                        <div className="text-center py-16">
+                          <div className="text-gray-300 text-7xl mb-6">👥</div>
+                          <p className="text-gray-600 text-xl font-medium mb-3">
                             Belum ada anggota
                           </p>
-                          <p className="text-gray-400 mt-2">
-                            Tambahkan siswa ke ekskul ini
+                          <p className="text-gray-500 text-lg max-w-md mx-auto">
+                            Tambahkan siswa ke ekskul ini menggunakan form di atas
                           </p>
                         </div>
                       )}
@@ -1271,89 +1400,216 @@ export default function AHome() {
 
         {/* --- MONITORING ADMIN (DI BAWAH SEMUA) --- */}
         {adminList.length > 0 && (
-          <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-gray-900 flex items-center gap-3">
-                <span className="p-2 bg-indigo-100 text-indigo-600 rounded-lg">
-                  🛡️
-                </span>
-                Monitoring Admin
-              </h2>
-              <span className="px-4 py-1 text-xs font-semibold rounded-full bg-indigo-50 text-indigo-700">
-                {adminList.length} admin terdaftar
-              </span>
+          <div className="bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden">
+            <div className="bg-gradient-to-r from-indigo-600 to-purple-700 p-8">
+              <div className="flex flex-col md:flex-row items-center justify-between">
+                <div className="flex items-center gap-4 mb-4 md:mb-0">
+                  <div className="p-4 bg-white/20 backdrop-blur-sm rounded-2xl">
+                    <span className="text-3xl text-white">🛡️</span>
+                  </div>
+                  <div>
+                    <h2 className="text-2xl md:text-3xl font-bold text-white">
+                      Monitoring Administrator
+                    </h2>
+                    <p className="text-indigo-100 mt-2 text-lg">
+                      Pantau aktivitas dan status administrator sistem
+                    </p>
+                  </div>
+                </div>
+                <div className="px-6 py-3 bg-white/20 backdrop-blur-sm text-white rounded-full text-sm font-medium shadow-lg">
+                  {adminList.length} Admin Terdaftar
+                </div>
+              </div>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead>
-                  <tr className="border-b bg-gray-50">
-                    <th className="text-left py-3 px-3 font-semibold text-gray-700">
-                      Nama
-                    </th>
-                    <th className="text-left py-3 px-3 font-semibold text-gray-700">
-                      Email
-                    </th>
-                    <th className="text-left py-3 px-3 font-semibold text-gray-700">
-                      Status Login
-                    </th>
-                    <th className="text-left py-3 px-3 font-semibold text-gray-700">
-                      Status Akun
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {adminList.map((a) => {
-                    const isCurrentAdmin =
-                      (profile && a.id === profile.id) || (user && a.id === user.id)
-                    const isActiveAccount = (a.status || 'active') === 'active'
+            <div className="p-6">
+              <div className="overflow-x-auto rounded-2xl border border-gray-200 shadow-inner">
+                <table className="min-w-full text-base">
+                  <thead>
+                    <tr className="bg-gradient-to-r from-gray-50 to-gray-100 border-b">
+                      <th className="text-left py-5 px-6 font-bold text-gray-800 text-lg">
+                        <div className="flex items-center gap-2">
+                          <span>👤</span>
+                          <span>Nama Admin</span>
+                        </div>
+                      </th>
+                      <th className="text-left py-5 px-6 font-bold text-gray-800 text-lg">
+                        <div className="flex items-center gap-2">
+                          <span>📧</span>
+                          <span>Email</span>
+                        </div>
+                      </th>
+                      <th className="text-left py-5 px-6 font-bold text-gray-800 text-lg">
+                        <div className="flex items-center gap-2">
+                          <span>🌐</span>
+                          <span>Status Login</span>
+                        </div>
+                      </th>
+                      <th className="text-left py-5 px-6 font-bold text-gray-800 text-lg">
+                        <div className="flex items-center gap-2">
+                          <span>📅</span>
+                          <span>Bergabung</span>
+                        </div>
+                      </th>
+                      <th className="text-left py-5 px-6 font-bold text-gray-800 text-lg">
+                        <div className="flex items-center gap-2">
+                          <span>⚡</span>
+                          <span>Status Akun</span>
+                        </div>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {adminList.map((a) => {
+                      const isCurrentAdmin =
+                        (profile && a.id === profile.id) || (user && a.id === user.id)
+                      const isActiveAccount = (a.status || 'active') === 'active'
+                      const lastSignIn = a.lastSignIn 
+                        ? new Date(a.lastSignIn).toLocaleDateString('id-ID', {
+                            day: 'numeric',
+                            month: 'short',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })
+                        : 'Belum pernah'
+                      
+                      const joinedDate = a.joinedAt
+                        ? new Date(a.joinedAt).toLocaleDateString('id-ID', {
+                            day: 'numeric',
+                            month: 'long',
+                            year: 'numeric'
+                          })
+                        : '-'
 
-                    return (
-                      <tr
-                        key={a.id}
-                        className="border-b last:border-0 hover:bg-indigo-50/40 transition-colors"
-                      >
-                        <td className="py-3 px-3 text-gray-900 font-medium">
-                          {a.nama}
-                          {isCurrentAdmin && (
-                            <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-semibold">
-                              Anda
+                      return (
+                        <tr
+                          key={a.id}
+                          className="border-b last:border-0 hover:bg-indigo-50/30 transition-colors group"
+                        >
+                          <td className="py-5 px-6">
+                            <div className="flex items-center gap-3">
+                              <div className={`w-3 h-3 rounded-full ${isCurrentAdmin ? 'bg-green-500' : 'bg-gray-300'}`} />
+                              <div>
+                                <div className="font-bold text-gray-900 text-lg">
+                                  {a.nama}
+                                  {isCurrentAdmin && (
+                                    <span className="ml-3 text-xs px-3 py-1 rounded-full bg-gradient-to-r from-green-500 to-emerald-600 text-white font-bold">
+                                      Anda
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-gray-500 text-sm mt-1">
+                                  ID: {a.id.substring(0, 8)}...
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="py-5 px-6">
+                            <div className="text-gray-800 font-medium">{a.email}</div>
+                            <div className="text-gray-500 text-sm mt-1">Role: Administrator</div>
+                          </td>
+                          <td className="py-5 px-6">
+                            <div className="flex items-center gap-3">
+                              <div className={`w-3 h-3 rounded-full animate-pulse ${isCurrentAdmin ? 'bg-green-500' : 'bg-gray-300'}`} />
+                              <div>
+                                <span className={`font-medium ${isCurrentAdmin ? 'text-green-600' : 'text-gray-600'}`}>
+                                  {isCurrentAdmin ? 'Online Sekarang' : 'Offline'}
+                                </span>
+                                <div className="text-gray-500 text-sm mt-1">
+                                  Login: {lastSignIn}
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="py-5 px-6">
+                            <div className="text-gray-800">{joinedDate}</div>
+                          </td>
+                          <td className="py-5 px-6">
+                            <span
+                              className={`inline-flex items-center px-4 py-2 rounded-full text-sm font-bold shadow ${
+                                isActiveAccount
+                                  ? 'bg-gradient-to-r from-green-50 to-emerald-100 text-emerald-700 border border-emerald-200'
+                                  : 'bg-gradient-to-r from-red-50 to-rose-100 text-rose-700 border border-rose-200'
+                              }`}
+                            >
+                              <span className={`w-2 h-2 rounded-full mr-2 ${isActiveAccount ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                              {isActiveAccount ? 'Aktif' : 'Nonaktif'}
                             </span>
-                          )}
-                        </td>
-                        <td className="py-3 px-3 text-gray-600">{a.email}</td>
-                        <td className="py-3 px-3">
-                          <span
-                            className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${
-                              isCurrentAdmin
-                                ? 'bg-emerald-100 text-emerald-700'
-                                : 'bg-gray-100 text-gray-600'
-                            }`}
-                          >
-                            <span className="w-2 h-2 rounded-full mr-2 bg-current" />
-                            {isCurrentAdmin ? 'Online sekarang' : 'Offline'}
-                          </span>
-                        </td>
-                        <td className="py-3 px-3">
-                          <span
-                            className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${
-                              isActiveAccount
-                                ? 'bg-blue-100 text-blue-700'
-                                : 'bg-red-100 text-red-700'
-                            }`}
-                          >
-                            {isActiveAccount ? 'Akun aktif' : 'Akun nonaktif'}
-                          </span>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              
+              {/* Summary Footer */}
+              <div className="mt-8 p-6 bg-gradient-to-r from-gray-50 to-blue-50 rounded-2xl border border-gray-200">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="text-center p-4">
+                    <div className="text-3xl font-bold text-indigo-600">{adminList.length}</div>
+                    <div className="text-gray-600 mt-2">Total Administrator</div>
+                  </div>
+                  <div className="text-center p-4">
+                    <div className="text-3xl font-bold text-green-600">
+                      {adminList.filter(a => (a.status || 'active') === 'active').length}
+                    </div>
+                    <div className="text-gray-600 mt-2">Akun Aktif</div>
+                  </div>
+                  <div className="text-center p-4">
+                    <div className="text-3xl font-bold text-blue-600">1</div>
+                    <div className="text-gray-600 mt-2">Anda Online</div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         )}
+
+        {/* Footer Dashboard */}
+        <div className="mt-12 p-8 bg-gradient-to-r from-gray-900 to-black rounded-2xl text-center">
+          <div className="text-white text-xl font-bold mb-4">
+            🏫 Sistem Manajemen Sekolah • v2.0
+          </div>
+          <div className="text-gray-400 text-sm">
+            Dashboard Administrator • Terakhir diperbarui: {new Date().toLocaleDateString('id-ID', { 
+              day: 'numeric', 
+              month: 'long', 
+              year: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit'
+            })}
+          </div>
+          <div className="mt-4 flex flex-wrap justify-center gap-4 text-gray-500 text-xs">
+            <span>⚡ Powered by Supabase</span>
+            <span>•</span>
+            <span>🎨 React + Tailwind CSS</span>
+            <span>•</span>
+            <span>🔒 Secure Authentication</span>
+            <span>•</span>
+            <span>📱 Responsive Design</span>
+          </div>
+        </div>
       </div>
+
+      {/* Custom CSS untuk scrollbar */}
+      <style jsx>{`
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: #f1f5f9;
+          border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: #cbd5e1;
+          border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: #94a3b8;
+        }
+      `}</style>
     </div>
   )
 }
