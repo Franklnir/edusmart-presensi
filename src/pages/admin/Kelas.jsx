@@ -957,7 +957,7 @@ export default function AKelas() {
         /* ================== KONTEN ASLI HALAMAN (SETELAH PASSWORD BENAR) ================== */
         <div className="w-full mx-auto">
           {/* Header */}
-          <div className="bg-white shadow-lg p-6 border-b border-gray-200">
+          <div className="bg-white shadow-lg p-6 border-b border-gray-400">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center space-x-4">
                 <div className="p-3 bg-blue-600 rounded-xl">
