@@ -973,7 +973,7 @@ export default function AKelas() {
                 </div>
               </div>
               <div className="mt-4 sm:mt-0">
-            <div className="bg-white rounded-3xl shadow-lg border border-gray-200 p-6 w-full max-w-md">
+                <div className="flex items-center space-x-1 bg-gray-600 rounded-xl p-1 border border-gray-200">
                   {[
                     { key: 'kelas', label: 'Kelas & Jadwal', icon: '📚' },
                     { key: 'struktur', label: 'Struktur Sekolah', icon: '🏢' },
