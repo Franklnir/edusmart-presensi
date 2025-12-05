@@ -20,7 +20,6 @@ export const useAuthStore = create((set, get) => ({
      =========================== */
   init: async () => {
     try {
-      // Selalu ambil settings dulu
       const settings = await get().loadSettings()
 
       const {
@@ -129,7 +128,6 @@ export const useAuthStore = create((set, get) => ({
     set({ isLoading: true, error: null })
 
     try {
-      // Clear session dulu biar bersih
       await supabase.auth.signOut()
 
       const normalizedEmail = normalizeEmail(email)
@@ -156,7 +154,6 @@ export const useAuthStore = create((set, get) => ({
       const user = authData?.user
       if (!user) throw new Error('User tidak ditemukan')
 
-      // Ambil profil user
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('*')
@@ -168,7 +165,6 @@ export const useAuthStore = create((set, get) => ({
         throw new Error('Gagal memuat data profil')
       }
 
-      // Blokir akun nonaktif
       if (profile.status === 'nonaktif') {
         let baseMessage = ''
         if (profile.role === 'guru') {
@@ -217,12 +213,14 @@ export const useAuthStore = create((set, get) => ({
     set({ isLoading: true, error: null })
 
     try {
+      // Validasi basic
       if (!email || !password || !role || !profileData?.nama) {
         throw new Error('Data registrasi tidak lengkap')
       }
 
       const normalizedEmail = normalizeEmail(email)
 
+      // 1) Daftarkan user di Supabase Auth
       const { data, error } = await supabase.auth.signUp({
         email: normalizedEmail,
         password,
@@ -245,7 +243,7 @@ export const useAuthStore = create((set, get) => ({
       const user = data?.user
       if (!user) throw new Error('User tidak ditemukan setelah registrasi')
 
-      // Insert profile
+      // 2) Insert ke tabel profiles
       const { error: errProfile } = await supabase.from('profiles').insert({
         id: user.id,
         email: normalizedEmail,
@@ -265,9 +263,8 @@ export const useAuthStore = create((set, get) => ({
 
       if (errProfile) {
         logError('Profile insert error:', errProfile)
-        // Catatan: untuk hapus user yang gagal profile-nya,
-        // sebaiknya dilakukan di backend menggunakan service role,
-        // bukan langsung di client.
+        // Di client TIDAK boleh panggil auth.admin (butuh service role),
+        // jadi di sini cukup lapor error saja.
         throw new Error('Gagal membuat profil pengguna')
       }
 
