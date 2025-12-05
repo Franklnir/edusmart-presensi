@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import { supabase } from '../lib/supabase'
 import { useUIStore } from './useUIStore.js'
+import { logDebug, logError } from '../utils/logger'
+
 
 export const useAuthStore = create((set, get) => ({
   user: null,
