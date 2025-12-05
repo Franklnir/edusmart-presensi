@@ -117,7 +117,6 @@ export default function AHome() {
         loadAdminList()
       ])
     } catch (error) {
-      console.error('Error loading all data:', error)
       pushToast('error', 'Gagal memuat data awal')
     } finally {
       setIsLoading(false)
@@ -167,7 +166,6 @@ export default function AHome() {
         eskul: eskul || 0
       })
     } catch (error) {
-      console.error('Error loading statistics:', error)
       pushToast('error', 'Gagal memuat statistik')
     }
   }, [pushToast])
@@ -191,7 +189,6 @@ export default function AHome() {
         }))
       )
     } catch (error) {
-      console.error('Error loading admin list:', error)
       pushToast('error', 'Gagal memuat data admin')
     }
   }, [pushToast])
@@ -237,7 +234,6 @@ export default function AHome() {
         setSiswaList(formattedSiswa)
       }
     } catch (error) {
-      console.error('Error loading guru and siswa:', error)
       pushToast('error', 'Gagal memuat data guru dan siswa')
     }
   }, [pushToast])
@@ -271,7 +267,6 @@ export default function AHome() {
       if (error) throw error
       setPengumumanList(data || [])
     } catch (error) {
-      console.error('Error loading pengumuman:', error)
       pushToast('error', 'Gagal memuat pengumuman')
     }
   }, [pushToast])
@@ -329,7 +324,6 @@ export default function AHome() {
       await loadPengumuman()
       await loadStatistics()
     } catch (err) {
-      console.error('Error saving pengumuman:', err)
       pushToast('error', 'Gagal menyimpan pengumuman')
     } finally {
       setLoadingPengumuman(false)
@@ -350,7 +344,6 @@ export default function AHome() {
       loadPengumuman()
       loadStatistics()
     } catch (error) {
-      console.error('Error deleting pengumuman:', error)
       pushToast('error', 'Gagal menghapus pengumuman')
     }
   }, [loadPengumuman, loadStatistics, pushToast])
@@ -392,7 +385,6 @@ export default function AHome() {
       if (error) throw error
       setEskulList(data || [])
     } catch (error) {
-      console.error('Error loading eskul list:', error)
       pushToast('error', 'Gagal memuat daftar eskul')
     }
   }, [pushToast])
@@ -419,7 +411,6 @@ export default function AHome() {
         })
       }
     } catch (error) {
-      console.error('Error loading eskul detail:', error)
       pushToast('error', 'Gagal memuat detail eskul')
     }
   }, [eskulSel, pushToast])
@@ -469,7 +460,6 @@ export default function AHome() {
 
       setEskulAbsensiStats(stats)
     } catch (error) {
-      console.error('Error loading eskul anggota:', error)
       pushToast('error', 'Gagal memuat data anggota eskul')
     }
   }, [eskulSel, pushToast])
@@ -594,7 +584,6 @@ export default function AHome() {
       await loadEskulList()
       await loadStatistics()
     } catch (err) {
-      console.error('Error saving eskul:', err)
       pushToast('error', 'Gagal menyimpan eskul')
     } finally {
       setLoadingEskul(false)
@@ -630,7 +619,6 @@ export default function AHome() {
       await loadEskulList()
       await loadStatistics()
     } catch (error) {
-      console.error('Error deleting eskul:', error)
       pushToast('error', 'Gagal menghapus eskul')
     }
   }, [eskulSel, eskulForm.nama, loadEskulList, loadStatistics, pushToast])
@@ -664,7 +652,6 @@ export default function AHome() {
       setAddMemberUid('')
       loadEskulAnggota()
     } catch (error) {
-      console.error('Error adding eskul member:', error)
       pushToast('error', 'Gagal menambah anggota')
     }
   }, [eskulSel, addMemberUid, loadEskulAnggota, pushToast])
@@ -683,7 +670,6 @@ export default function AHome() {
       pushToast('success', 'Anggota berhasil dihapus!')
       loadEskulAnggota()
     } catch (error) {
-      console.error('Error deleting eskul member:', error)
       pushToast('error', 'Gagal menghapus anggota')
     }
   }, [eskulSel, loadEskulAnggota, pushToast])
