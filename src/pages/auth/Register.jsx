@@ -1,7 +1,9 @@
 // src/pages/auth/Register.jsx
 import React, { useEffect, useState, useCallback } from 'react'
-import { supabase } from '../../lib/supabase'
 import { Link, useNavigate } from 'react-router-dom'
+import { supabase } from '../../lib/supabase'
+import { useAuthStore } from '../../store/useAuthStore'
+import { logError } from '../../utils/logger'
 import '../../styles/Login.css'
 
 const initialSettings = {
@@ -28,6 +30,7 @@ const initialForm = {
 
 export default function Register() {
   const nav = useNavigate()
+  const { register } = useAuthStore()
 
   /* ====== STATE PENGATURAN ====== */
   const [settings, setSettings] = useState(initialSettings)
@@ -43,7 +46,8 @@ export default function Register() {
 
   /* ====== CEK EMAIL TERDAFTAR ====== */
   const [checkingEmail, setCheckingEmail] = useState(false)
-  const [emailStatus, setEmailStatus] = useState<'idle' | 'allowed' | 'not_found' | 'error'>('idle')
+  // ⛔️ HAPUS generic TypeScript, cukup string biasa
+  const [emailStatus, setEmailStatus] = useState('idle') // 'idle' | 'allowed' | 'not_found' | 'error'
 
   // ========= LOAD SETTINGS =========
   useEffect(() => {
@@ -59,7 +63,6 @@ export default function Register() {
           .limit(1)
           .single()
 
-        // PGRST116 = no rows
         if (error && error.code === 'PGRST116') {
           data = null
         } else if (error) {
@@ -86,7 +89,7 @@ export default function Register() {
         }
       } catch (err) {
         if (!isCancelled) {
-          console.error('Gagal load settings:', err)
+          logError('Gagal load settings:', err)
         }
       } finally {
         if (!isCancelled) {
@@ -175,7 +178,6 @@ export default function Register() {
     }))
 
     if (name === 'email') {
-      // setiap kali email berubah, status cek direset
       setEmailStatus('idle')
     }
   }
@@ -240,7 +242,7 @@ export default function Register() {
           .maybeSingle()
 
         if (error) {
-          console.error('Gagal cek email terdaftar:', error)
+          logError('Gagal cek email terdaftar:', error)
           setEmailStatus('error')
           return {
             ok: false,
@@ -286,83 +288,47 @@ export default function Register() {
     try {
       setSubmitting(true)
 
-      // Pastikan email memang terdaftar (server side check via Supabase)
+      // Pastikan email memang terdaftar whitelist
       const checkResult = await checkEmailAllowed(form.email, selectedRole)
       if (!checkResult.ok) {
         setErrorMessage(checkResult.message)
         return
       }
 
-      const email = form.email.trim().toLowerCase()
-
-      // Buat user di Auth
-      const { data: signUpData, error: signUpError } =
-        await supabase.auth.signUp({
-          email,
-          password: form.password,
-          options: {
-            data: {
-              nama: form.nama.trim(),
-              role: selectedRole
-            },
-            // Opsional: redirect setelah verifikasi email
-            emailRedirectTo: `${window.location.origin}/login`
-          }
-        })
-
-      if (signUpError) {
-        console.error('SignUp error:', signUpError)
-        // Beberapa pesan error yang lebih ramah
-        if (signUpError.message?.includes('User already registered')) {
-          setErrorMessage(
-            'Email ini sudah memiliki akun. Silakan masuk menggunakan menu login.'
-          )
-        } else {
-          setErrorMessage(
-            signUpError.message ||
-              'Gagal mendaftar. Silakan coba beberapa saat lagi.'
-          )
-        }
-        return
-      }
-
-      const user = signUpData?.user
-      if (!user) {
-        setSuccessMessage(
-          'Registrasi berhasil dibuat. Silakan cek email untuk verifikasi akun.'
-        )
-        return
-      }
-
-      // Insert ke tabel profiles
-      const profilePayload = {
-        id: user.id,
-        email: user.email,
-        nama: form.nama.trim(),
+      // ===== PANGGIL register DARI useAuthStore =====
+      const payload = {
+        email: form.email.trim(),
+        password: form.password,
         role: selectedRole,
-        kelas: null,
-        jk: null,
-        telp: null,
-        status: 'active'
+        profile: {
+          nama: form.nama.trim(),
+          jk: null,
+          telp: null,
+          alamat: null,
+          kelas: null,
+          usia: null,
+          nik: null,
+          agama: null,
+          jabatan: null
+        }
       }
 
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .insert(profilePayload)
+      const result = await register(payload)
 
-      if (profileError) {
-        // Tidak fatal untuk user, tapi log ke console
-        console.error('Gagal insert profiles:', profileError)
+      if (result?.error) {
+        setErrorMessage(result.error)
+        return
       }
 
       setSuccessMessage(
-        'Berhasil mendaftar! Silakan cek email untuk verifikasi, lalu masuk ke sistem.'
+        'Registrasi berhasil! Silakan login menggunakan akun yang baru dibuat.'
       )
+
       setTimeout(() => {
         nav('/login')
       }, 2000)
     } catch (err) {
-      console.error('Error submit:', err)
+      logError('Error submit register:', err)
       setErrorMessage(
         'Terjadi kesalahan saat mendaftar. Coba beberapa saat lagi.'
       )
@@ -396,7 +362,7 @@ export default function Register() {
   const canSubmit =
     !!selectedRole &&
     !submitting &&
-    !checkingEmail && // jangan submit saat sedang cek
+    !checkingEmail &&
     emailStatus !== 'not_found'
 
   return (
@@ -409,7 +375,7 @@ export default function Register() {
       </div>
 
       <div className="login__container">
-        {/* Brand Section - kiri (sama seperti Login) */}
+        {/* Brand Section */}
         <div className="login__brand">
           <div className="login__brand-content">
             <div className="login__school-info">
@@ -466,7 +432,7 @@ export default function Register() {
           </div>
         </div>
 
-        {/* Form Section - kanan */}
+        {/* Form Section */}
         <div className="login__form-section">
           <div className="login__form-wrapper">
             <div className="login__form-header">
@@ -503,7 +469,6 @@ export default function Register() {
                   </div>
                 )}
 
-                {/* Info status email terdaftar */}
                 {emailStatus === 'allowed' && (
                   <div className="login__success login__success--soft">
                     <i className="ri-mail-check-fill"></i>
