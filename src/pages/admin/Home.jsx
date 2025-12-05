@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useUIStore } from '../../store/useUIStore'
 import { useAuthStore } from '../../store/useAuthStore'
@@ -17,7 +17,7 @@ const slug = (s = '') =>
 const confirmDelete = (msg = 'Yakin mau dihapus?') => window.confirm(msg)
 const HARI_OPTS = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']
 
-// helper parse/format hari ekskul (multi hari, disimpan sebagai string "Senin, Rabu")
+// Helper parse/format hari ekskul
 const parseEskulDays = (hariText = '') => {
   if (!hariText) return []
   return hariText
@@ -27,12 +27,12 @@ const parseEskulDays = (hariText = '') => {
 }
 
 const formatEskulDays = (hariArray = []) => {
-  if (!Array.isArray(hariArray)) return ''
+  if (!Array.isArray(hariArray) || hariArray.length === 0) return ''
   return hariArray.join(', ')
 }
 
 // Komponen Stat Card
-const StatCard = ({ label, value, icon, color = 'blue' }) => {
+const StatCard = React.memo(({ label, value, icon, color = 'blue' }) => {
   const colorClasses = {
     blue: 'from-blue-500 to-blue-600',
     green: 'from-emerald-500 to-emerald-600',
@@ -60,10 +60,12 @@ const StatCard = ({ label, value, icon, color = 'blue' }) => {
       <div className="mt-4 h-1 bg-gradient-to-r from-transparent via-gray-200 to-transparent" />
     </div>
   )
-}
+})
+
+StatCard.displayName = 'StatCard'
 
 // Loading Skeleton
-const LoadingSkeleton = () => (
+const LoadingSkeleton = React.memo(() => (
   <div className="animate-pulse">
     <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-6">
       {[...Array(6)].map((_, i) => (
@@ -76,7 +78,9 @@ const LoadingSkeleton = () => (
       ))}
     </div>
   </div>
-)
+))
+
+LoadingSkeleton.displayName = 'LoadingSkeleton'
 
 // ===================================================================
 //    Halaman Home Admin (Dashboard, Pengumuman & Ekstrakurikuler)
@@ -101,12 +105,8 @@ export default function AHome() {
   /* --- Monitoring Admin --- */
   const [adminList, setAdminList] = useState([])
 
-  useEffect(() => {
-    loadAllData()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  const loadAllData = async () => {
+  // Gunakan useCallback untuk fungsi yang dipanggil di useEffect
+  const loadAllData = useCallback(async () => {
     setIsLoading(true)
     try {
       await Promise.all([
@@ -117,13 +117,18 @@ export default function AHome() {
         loadAdminList()
       ])
     } catch (error) {
+      console.error('Error loading all data:', error)
       pushToast('error', 'Gagal memuat data awal')
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [pushToast])
 
-  const loadStatistics = async () => {
+  useEffect(() => {
+    loadAllData()
+  }, [loadAllData])
+
+  const loadStatistics = useCallback(async () => {
     try {
       const [
         { count: siswa },
@@ -162,11 +167,12 @@ export default function AHome() {
         eskul: eskul || 0
       })
     } catch (error) {
+      console.error('Error loading statistics:', error)
       pushToast('error', 'Gagal memuat statistik')
     }
-  }
+  }, [pushToast])
 
-  const loadAdminList = async () => {
+  const loadAdminList = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('profiles')
@@ -185,15 +191,16 @@ export default function AHome() {
         }))
       )
     } catch (error) {
+      console.error('Error loading admin list:', error)
       pushToast('error', 'Gagal memuat data admin')
     }
-  }
+  }, [pushToast])
 
   /* --- Data Umum (Guru & Siswa) --- */
   const [guruList, setGuruList] = useState([])
   const [siswaList, setSiswaList] = useState([])
 
-  const loadGuruDanSiswa = async () => {
+  const loadGuruDanSiswa = useCallback(async () => {
     try {
       // Load guru dari profiles
       const { data: guruData, error: guruError } = await supabase
@@ -230,9 +237,10 @@ export default function AHome() {
         setSiswaList(formattedSiswa)
       }
     } catch (error) {
+      console.error('Error loading guru and siswa:', error)
       pushToast('error', 'Gagal memuat data guru dan siswa')
     }
-  }
+  }, [pushToast])
 
   // Map cepat: uid → {nama, kelas}
   const siswaMap = useMemo(() => {
@@ -253,7 +261,7 @@ export default function AHome() {
   const [pEditId, setPEditId] = useState(null)
   const [loadingPengumuman, setLoadingPengumuman] = useState(false)
 
-  const loadPengumuman = async () => {
+  const loadPengumuman = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('pengumuman')
@@ -263,11 +271,12 @@ export default function AHome() {
       if (error) throw error
       setPengumumanList(data || [])
     } catch (error) {
+      console.error('Error loading pengumuman:', error)
       pushToast('error', 'Gagal memuat pengumuman')
     }
-  }
+  }, [pushToast])
 
-  async function simpanPengumuman(e) {
+  const simpanPengumuman = useCallback(async (e) => {
     e.preventDefault()
     const { judul, keterangan, target } = pForm
     if (!judul || !keterangan) {
@@ -317,16 +326,17 @@ export default function AHome() {
         pushToast('success', 'Pengumuman disimpan!')
       }
       cancelEditPengumuman()
-      loadPengumuman()
-      loadStatistics()
+      await loadPengumuman()
+      await loadStatistics()
     } catch (err) {
+      console.error('Error saving pengumuman:', err)
       pushToast('error', 'Gagal menyimpan pengumuman')
     } finally {
       setLoadingPengumuman(false)
     }
-  }
+  }, [pForm, pEditId, loadPengumuman, loadStatistics, pushToast])
 
-  async function hapusPengumuman(id) {
+  const hapusPengumuman = useCallback(async (id) => {
     if (!confirmDelete('Hapus pengumuman ini?')) return
 
     try {
@@ -340,23 +350,24 @@ export default function AHome() {
       loadPengumuman()
       loadStatistics()
     } catch (error) {
+      console.error('Error deleting pengumuman:', error)
       pushToast('error', 'Gagal menghapus pengumuman')
     }
-  }
+  }, [loadPengumuman, loadStatistics, pushToast])
 
-  function startEditPengumuman(p) {
+  const startEditPengumuman = useCallback((p) => {
     setPEditId(p.id)
     setPForm({
       judul: p.judul,
       keterangan: p.keterangan,
       target: p.target || 'semua'
     })
-  }
+  }, [])
 
-  function cancelEditPengumuman() {
+  const cancelEditPengumuman = useCallback(() => {
     setPEditId(null)
     setPForm({ judul: '', keterangan: '', target: 'semua' })
-  }
+  }, [])
 
   /* --- Section 2: Ekstrakurikuler --- */
   const [eskulList, setEskulList] = useState([])
@@ -370,43 +381,25 @@ export default function AHome() {
     pembina_guru_id: ''
   })
   const [eskulAnggota, setEskulAnggota] = useState([])
-  // statistik absensi eskul per anggota (Hadir & Izin) untuk semua bulan
   const [eskulAbsensiStats, setEskulAbsensiStats] = useState({})
   const [addMemberUid, setAddMemberUid] = useState('')
   const [loadingEskul, setLoadingEskul] = useState(false)
 
-  const loadEskulList = async () => {
+  const loadEskulList = useCallback(async () => {
     try {
       const { data, error } = await supabase.from('ekskul').select('*').order('nama')
 
       if (error) throw error
       setEskulList(data || [])
     } catch (error) {
+      console.error('Error loading eskul list:', error)
       pushToast('error', 'Gagal memuat daftar eskul')
     }
-  }
+  }, [pushToast])
 
-  useEffect(() => {
-    if (!eskulSel) {
-      setEskulForm({
-        nama: '',
-        keterangan: '',
-        hari: '',
-        jam_mulai: '',
-        jam_selesai: '',
-        pembina_guru_id: ''
-      })
-      setEskulAnggota([])
-      setEskulAbsensiStats({})
-      return
-    }
-
-    loadEskulDetail()
-    loadEskulAnggota()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [eskulSel])
-
-  const loadEskulDetail = async () => {
+  const loadEskulDetail = useCallback(async () => {
+    if (!eskulSel) return
+    
     try {
       const { data, error } = await supabase
         .from('ekskul')
@@ -426,11 +419,12 @@ export default function AHome() {
         })
       }
     } catch (error) {
-      // Tidak perlu toast untuk error detail
+      console.error('Error loading eskul detail:', error)
+      pushToast('error', 'Gagal memuat detail eskul')
     }
-  }
+  }, [eskulSel, pushToast])
 
-  const loadEskulAnggota = async () => {
+  const loadEskulAnggota = useCallback(async () => {
     if (!eskulSel) return
 
     try {
@@ -475,9 +469,30 @@ export default function AHome() {
 
       setEskulAbsensiStats(stats)
     } catch (error) {
+      console.error('Error loading eskul anggota:', error)
       pushToast('error', 'Gagal memuat data anggota eskul')
     }
-  }
+  }, [eskulSel, pushToast])
+
+  // Load eskul detail dan anggota ketika eskulSel berubah
+  useEffect(() => {
+    if (!eskulSel) {
+      setEskulForm({
+        nama: '',
+        keterangan: '',
+        hari: '',
+        jam_mulai: '',
+        jam_selesai: '',
+        pembina_guru_id: ''
+      })
+      setEskulAnggota([])
+      setEskulAbsensiStats({})
+      return
+    }
+
+    loadEskulDetail()
+    loadEskulAnggota()
+  }, [eskulSel, loadEskulDetail, loadEskulAnggota])
 
   // daftar hari yang sedang dipilih (multi hari)
   const selectedHariValues = useMemo(
@@ -507,7 +522,7 @@ export default function AHome() {
   }, [eskulAnggota, siswaMap, eskulAbsensiStats])
 
   // toggle hari (checkbox di dropdown)
-  const handleToggleHari = (hariValue) => {
+  const handleToggleHari = useCallback((hariValue) => {
     setEskulForm((prev) => {
       const current = parseEskulDays(prev.hari)
       const exists = current.includes(hariValue)
@@ -520,9 +535,9 @@ export default function AHome() {
         hari: formatEskulDays(next)
       }
     })
-  }
+  }, [])
 
-  async function simpanEskul() {
+  const simpanEskul = useCallback(async () => {
     const nama = (eskulForm.nama || '').trim()
     if (!nama) {
       pushToast('error', 'Nama eskul wajib diisi.')
@@ -576,16 +591,17 @@ export default function AHome() {
         pushToast('success', 'Eskul disimpan!')
         setEskulSel(id)
       }
-      loadEskulList()
-      loadStatistics()
+      await loadEskulList()
+      await loadStatistics()
     } catch (err) {
+      console.error('Error saving eskul:', err)
       pushToast('error', 'Gagal menyimpan eskul')
     } finally {
       setLoadingEskul(false)
     }
-  }
+  }, [eskulForm, eskulSel, loadEskulList, loadStatistics, pushToast])
 
-  async function hapusEskul() {
+  const hapusEskul = useCallback(async () => {
     if (!eskulSel) return
     if (
       !confirmDelete(`Hapus eskul "${eskulForm.nama || eskulSel}" beserta anggotanya?`)
@@ -611,17 +627,32 @@ export default function AHome() {
 
       pushToast('success', 'Eskul berhasil dihapus!')
       setEskulSel('')
-      loadEskulList()
-      loadStatistics()
+      await loadEskulList()
+      await loadStatistics()
     } catch (error) {
+      console.error('Error deleting eskul:', error)
       pushToast('error', 'Gagal menghapus eskul')
     }
-  }
+  }, [eskulSel, eskulForm.nama, loadEskulList, loadStatistics, pushToast])
 
-  async function tambahAnggotaEskul() {
+  const tambahAnggotaEskul = useCallback(async () => {
     if (!eskulSel || !addMemberUid) return
 
     try {
+      // Cek apakah sudah menjadi anggota
+      const { data: existing } = await supabase
+        .from('ekskul_anggota')
+        .select('id')
+        .eq('ekskul_id', eskulSel)
+        .eq('user_id', addMemberUid)
+        .single()
+
+      if (existing) {
+        pushToast('warning', 'Siswa ini sudah menjadi anggota eskul')
+        setAddMemberUid('')
+        return
+      }
+
       const { error } = await supabase.from('ekskul_anggota').insert({
         ekskul_id: eskulSel,
         user_id: addMemberUid,
@@ -633,11 +664,12 @@ export default function AHome() {
       setAddMemberUid('')
       loadEskulAnggota()
     } catch (error) {
+      console.error('Error adding eskul member:', error)
       pushToast('error', 'Gagal menambah anggota')
     }
-  }
+  }, [eskulSel, addMemberUid, loadEskulAnggota, pushToast])
 
-  async function hapusAnggotaEskul(anggotaId) {
+  const hapusAnggotaEskul = useCallback(async (anggotaId) => {
     if (!eskulSel) return
     if (!confirmDelete('Hapus anggota ini dari eskul?')) return
 
@@ -651,14 +683,15 @@ export default function AHome() {
       pushToast('success', 'Anggota berhasil dihapus!')
       loadEskulAnggota()
     } catch (error) {
+      console.error('Error deleting eskul member:', error)
       pushToast('error', 'Gagal menghapus anggota')
     }
-  }
+  }, [eskulSel, loadEskulAnggota, pushToast])
 
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 py-6">
-        <div className="w-full">
+        <div className="w-full px-4 sm:px-6 lg:px-8">
           <LoadingSkeleton />
         </div>
       </div>
@@ -668,9 +701,6 @@ export default function AHome() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 py-6">
       <div className="w-full space-y-8 px-4 sm:px-6 lg:px-8">
-        {/* Header */}
-        <div className="text-center"></div>
-
         {/* --- DASHBOARD STATISTICS --- */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
           <StatCard label="Total Siswa" value={stats.siswa} icon="👨‍🎓" color="blue" />
