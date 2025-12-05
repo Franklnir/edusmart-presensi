@@ -7,21 +7,17 @@ import FileDropzone from '../../components/FileDropzone'
 
 const SUPABASE_BUCKET = 'profile-photos'
 const LOGO_FILE_PATH = 'logo_sekolah.png'
-// ID tetap untuk row pengaturan RFID
 const RFID_SETTINGS_ID = '00000000-0000-0000-0000-000000000001'
 
-// Normalisasi string waktu supaya cocok dengan input type="time" (HH:MM)
 function normalizeTimeString(timeValue) {
   if (!timeValue) return ''
   if (typeof timeValue !== 'string') return ''
-  // Biasanya dari Supabase: "07:00:00" → ambil 5 karakter pertama
   if (timeValue.length >= 5) {
     return timeValue.slice(0, 5)
   }
   return timeValue
 }
 
-// Fungsi kompresi gambar
 const compressImage = (file, maxSizeKB = 300) => {
   return new Promise((resolve, reject) => {
     try {
@@ -97,7 +93,6 @@ const compressImage = (file, maxSizeKB = 300) => {
   })
 }
 
-/* ===== Password Modal Component ===== */
 function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Password", loading = false }) {
   const [password, setPassword] = useState('')
 
@@ -157,7 +152,6 @@ function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Passwor
   )
 }
 
-/* ===== Password Verification Utility ===== */
 const verifyPassword = async (password) => {
   try {
     const { data: { user } } = await supabase.auth.getUser()
@@ -180,128 +174,14 @@ const verifyPassword = async (password) => {
   }
 }
 
-/* ===== Change Password Modal Component ===== */
-function ChangePasswordModal({ isOpen, onClose, onSubmit, loading = false }) {
-  const [form, setForm] = useState({
-    current_password: '',
-    new_password: '',
-    confirm_password: ''
-  })
-
-  const handleChange = (e) => {
-    const { name, value } = e.target
-    setForm(prev => ({ ...prev, [name]: value }))
-  }
-
-  const handleSubmit = (e) => {
-    e.preventDefault()
-    onSubmit(form)
-  }
-
-  const handleClose = () => {
-    setForm({
-      current_password: '',
-      new_password: '',
-      confirm_password: ''
-    })
-    onClose()
-  }
-
-  if (!isOpen) return null
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4">
-        <h3 className="text-lg font-bold text-gray-900 mb-2">Ubah Password</h3>
-        <p className="text-gray-600 text-sm mb-4">
-          Untuk keamanan, gunakan password yang kuat dan jangan dibagikan ke siapapun.
-        </p>
-
-        <form onSubmit={handleSubmit}>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Password Baru
-              </label>
-              <input
-                type="password"
-                name="new_password"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                placeholder="Minimal 6 karakter"
-                value={form.new_password}
-                onChange={handleChange}
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Konfirmasi Password Baru
-              </label>
-              <input
-                type="password"
-                name="confirm_password"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                placeholder="Ulangi password baru"
-                value={form.confirm_password}
-                onChange={handleChange}
-                required
-              />
-            </div>
-          </div>
-
-          <div className="flex justify-end space-x-3 mt-6">
-            <button
-              type="button"
-              className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors duration-200"
-              onClick={handleClose}
-              disabled={loading}
-            >
-              Batal
-            </button>
-            <button
-              type="submit"
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={loading}
-            >
-              {loading ? 'Mengubah...' : 'Simpan Password'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  )
-}
-
 export default function APengaturan() {
   const { pushToast } = useUIStore()
   const { user, profile, logout } = useAuthStore()
 
-  /* ---------- LOCK SCREEN STATE ---------- */
   const [isAuthorized, setIsAuthorized] = useState(false)
   const [passwordModalOpen, setPasswordModalOpen] = useState(true)
   const [passwordLoading, setPasswordLoading] = useState(false)
 
-  const handlePasswordConfirm = async (password) => {
-    setPasswordLoading(true)
-    try {
-      await verifyPassword(password)
-      setIsAuthorized(true)
-      setPasswordModalOpen(false)
-      pushToast('success', 'Akses diizinkan. Selamat datang di Pengaturan Sistem.')
-    } catch (error) {
-      console.error('Password verification failed:', error)
-      pushToast('error', error.message || 'Password salah')
-    } finally {
-      setPasswordLoading(false)
-    }
-  }
-
-  const handlePasswordClose = () => {
-    setPasswordModalOpen(false)
-  }
-
-  /* ---------- State Existing ---------- */
   const [form, setForm] = useState({
     nama_sekolah: '',
     email: '',
@@ -319,7 +199,6 @@ export default function APengaturan() {
     registrasi_admin_aktif: false
   })
 
-  // Pengaturan RFID
   const [rfidSettings, setRfidSettings] = useState({
     rfid_aktif: false,
     rfid_mulai: '07:00',
@@ -334,14 +213,26 @@ export default function APengaturan() {
   const [selectedLogoFile, setSelectedLogoFile] = useState(null)
   const [settingsId, setSettingsId] = useState(null)
 
-  // ====== STATE UNTUK OVERLAY PASSWORD ======
-  const [showPasswordModal, setShowPasswordModal] = useState(false)
-  const [changingPassword, setChangingPassword] = useState(false)
-
-  // Timer untuk auto-save (debounce)
   const autoSaveTimerRef = useRef(null)
 
-  // Inisialisasi avatar URL
+  const handlePasswordConfirm = async (password) => {
+    setPasswordLoading(true)
+    try {
+      await verifyPassword(password)
+      setIsAuthorized(true)
+      setPasswordModalOpen(false)
+      pushToast('success', 'Akses diizinkan. Selamat datang di Pengaturan Sistem.')
+    } catch (error) {
+      pushToast('error', error.message || 'Password salah')
+    } finally {
+      setPasswordLoading(false)
+    }
+  }
+
+  const handlePasswordClose = () => {
+    setPasswordModalOpen(false)
+  }
+
   useEffect(() => {
     if (profile && isAuthorized) {
       const avatar = profile.photo_url || profile.avatar || profile.foto || ''
@@ -349,7 +240,6 @@ export default function APengaturan() {
     }
   }, [profile, isAuthorized])
 
-  // Load settings + RFID settings (hanya jika authorized)
   useEffect(() => {
     if (!isAuthorized) return
 
@@ -364,7 +254,6 @@ export default function APengaturan() {
           .single()
 
         if (error && error.code === 'PGRST116') {
-          // Belum ada row → buat default
           const { data: inserted, error: insertError } = await supabase
             .from('absensi_rfid_settings')
             .insert({
@@ -391,7 +280,7 @@ export default function APengaturan() {
         }
       } catch (err) {
         if (!isCancelled) {
-          console.error('Failed to load RFID settings:', err)
+          pushToast('error', 'Gagal memuat pengaturan RFID')
         }
       }
     }
@@ -399,7 +288,6 @@ export default function APengaturan() {
     async function loadSettings() {
       setLoading(true)
       try {
-        // Ambil 1 baris settings saja
         let { data, error } = await supabase
           .from('settings')
           .select('*')
@@ -408,7 +296,6 @@ export default function APengaturan() {
           .single()
 
         if (error && error.code === 'PGRST116') {
-          // Belum ada row → buat kosong
           const { data: inserted, error: insertError } = await supabase
             .from('settings')
             .insert({})
@@ -445,7 +332,6 @@ export default function APengaturan() {
         await ensureRfidSettings()
       } catch (err) {
         if (!isCancelled) {
-          console.error('Failed to load settings:', err)
           pushToast('error', 'Gagal memuat pengaturan: ' + err.message)
         }
       } finally {
@@ -462,7 +348,6 @@ export default function APengaturan() {
     }
   }, [pushToast, isAuthorized])
 
-  // Realtime update (kalau ada perubahan dari tab / user lain) - hanya jika authorized
   useEffect(() => {
     if (!settingsId || !isAuthorized) return
 
@@ -477,7 +362,6 @@ export default function APengaturan() {
           filter: `id=eq.${settingsId}`
         },
         (payload) => {
-          console.log('[Realtime:APengaturan] settings payload:', payload)
           const row = payload.new
           if (!row) return
 
@@ -509,7 +393,6 @@ export default function APengaturan() {
           filter: `id=eq.${RFID_SETTINGS_ID}`
         },
         (payload) => {
-          console.log('[Realtime:APengaturan] RFID payload:', payload)
           const row = payload.new
           if (!row) return
 
@@ -520,22 +403,18 @@ export default function APengaturan() {
           })
         }
       )
-      .subscribe((status) => {
-        console.log('[Realtime:APengaturan] channel status:', status)
-      })
+      .subscribe()
 
     return () => {
       supabase.removeChannel(channel)
     }
   }, [settingsId, isAuthorized])
 
-  // Handle perubahan input teks
   function handleChange(e) {
     const { name, value } = e.target
     setForm((prev) => ({ ...prev, [name]: value }))
   }
 
-  // Auto-save (debounce 800ms) untuk field teks utama - hanya jika authorized
   useEffect(() => {
     if (!settingsId || !isAuthorized) return
 
@@ -598,7 +477,6 @@ export default function APengaturan() {
     form.link_tiktok
   ])
 
-  // Handle checkbox registrasi (langsung simpan) - hanya jika authorized
   async function handleCheckboxChange(e) {
     if (!isAuthorized) return
 
@@ -623,12 +501,10 @@ export default function APengaturan() {
 
       pushToast('success', 'Pengaturan registrasi berhasil diperbarui.')
     } catch (err) {
-      console.error('Error saving checkbox:', err)
       pushToast('error', 'Gagal menyimpan pengaturan: ' + err.message)
     }
   }
 
-  // Handle perubahan pengaturan RFID (langsung simpan) - hanya jika authorized
   async function handleRfidChange(e) {
     if (!isAuthorized) return
 
@@ -659,51 +535,10 @@ export default function APengaturan() {
 
       pushToast('success', 'Pengaturan RFID berhasil diperbarui.')
     } catch (err) {
-      console.error('Error saving RFID settings:', err)
       pushToast('error', 'Gagal menyimpan pengaturan RFID: ' + err.message)
     }
   }
 
-  // ====== HANDLER PASSWORD ======
-  function openPasswordModal() {
-    setShowPasswordModal(true)
-  }
-
-  function closePasswordModal() {
-    setShowPasswordModal(false)
-  }
-
-  async function handlePasswordSubmit(passwordData) {
-    if (!passwordData.new_password || passwordData.new_password.length < 6) {
-      pushToast('error', 'Password baru minimal 6 karakter.')
-      return
-    }
-
-    if (passwordData.new_password !== passwordData.confirm_password) {
-      pushToast('error', 'Konfirmasi password tidak sama.')
-      return
-    }
-
-    try {
-      setChangingPassword(true)
-
-      const { error } = await supabase.auth.updateUser({
-        password: passwordData.new_password
-      })
-
-      if (error) throw error
-
-      pushToast('success', 'Password berhasil diubah.')
-      setShowPasswordModal(false)
-    } catch (err) {
-      console.error('Error changing password:', err)
-      pushToast('error', 'Gagal mengubah password: ' + err.message)
-    } finally {
-      setChangingPassword(false)
-    }
-  }
-
-  // Simpan settings umum - hanya jika authorized
   async function saveSettings(showToast = false) {
     if (!isAuthorized) return
 
@@ -737,34 +572,28 @@ export default function APengaturan() {
 
       if (showToast) {
         pushToast('success', 'Pengaturan berhasil disimpan.')
-      } else {
-        console.log('Pengaturan berhasil disimpan otomatis')
       }
     } catch (err) {
-      console.error('Error saving settings:', err)
       if (showToast) {
         pushToast('error', 'Gagal menyimpan: ' + err.message)
       }
     }
   }
 
-  // Upload Logo - hanya jika authorized
   async function handleLogoUpload() {
     if (!isAuthorized || !selectedLogoFile) return
     setUploadingLogo(true)
     try {
       const compressedFile = await compressImage(selectedLogoFile, 300)
 
-      // Hapus file logo lama jika ada sebelum upload yang baru
       const { error: deleteError } = await supabase.storage
         .from(SUPABASE_BUCKET)
         .remove([LOGO_FILE_PATH])
 
       if (deleteError && deleteError.message !== 'Object not found') {
-        console.warn('Gagal menghapus logo lama:', deleteError)
+        // Tidak perlu throw error untuk gagal hapus file lama
       }
 
-      // Upload file baru
       const { error: uploadError } = await supabase.storage
         .from(SUPABASE_BUCKET)
         .upload(LOGO_FILE_PATH, compressedFile, { 
@@ -778,7 +607,6 @@ export default function APengaturan() {
         data: { publicUrl }
       } = supabase.storage.from(SUPABASE_BUCKET).getPublicUrl(LOGO_FILE_PATH)
 
-      // Tambahkan timestamp untuk menghindari cache
       const timestamp = new Date().getTime()
       const logoUrlWithTimestamp = `${publicUrl}?t=${timestamp}`
 
@@ -799,14 +627,12 @@ export default function APengaturan() {
       pushToast('success', 'Logo berhasil diupload dan diperbarui!')
       setSelectedLogoFile(null)
     } catch (err) {
-      console.error('Error uploading logo:', err)
       pushToast('error', 'Gagal upload logo: ' + err.message)
     } finally {
       setUploadingLogo(false)
     }
   }
 
-  // Upload Foto Profil Admin - hanya jika authorized
   async function handleAdminPhotoChange(file) {
     if (!isAuthorized || !file || !user?.id) return
 
@@ -827,7 +653,6 @@ export default function APengaturan() {
         data: { publicUrl }
       } = supabase.storage.from(SUPABASE_BUCKET).getPublicUrl(path)
 
-      // Tambahkan timestamp untuk menghindari cache
       const timestamp = new Date().getTime()
       const avatarUrlWithTimestamp = `${publicUrl}?t=${timestamp}`
 
@@ -849,14 +674,12 @@ export default function APengaturan() {
 
       pushToast('success', 'Foto profil admin berhasil diperbarui.')
     } catch (err) {
-      console.error('Avatar upload error:', err)
       pushToast('error', 'Gagal upload foto profil: ' + err.message)
     } finally {
       setUploadingAvatar(false)
     }
   }
 
-  // Simpan manual (backup) - hanya jika authorized
   async function onSave() {
     if (!isAuthorized) return
     setSaving(true)
@@ -875,7 +698,6 @@ export default function APengaturan() {
 
   return (
     <div className="min-h-screen bg-gray-50 p-0">
-      {/* Modal Password Akses Halaman */}
       <PasswordModal
         isOpen={passwordModalOpen && !isAuthorized}
         onClose={handlePasswordClose}
@@ -884,15 +706,6 @@ export default function APengaturan() {
         loading={passwordLoading}
       />
 
-      {/* Modal Ubah Password */}
-      <ChangePasswordModal
-        isOpen={showPasswordModal}
-        onClose={closePasswordModal}
-        onSubmit={handlePasswordSubmit}
-        loading={changingPassword}
-      />
-
-      {/* Jika belum authorized: tampilkan layar kunci saja */}
       {!isAuthorized ? (
         <div className="min-h-screen flex items-center justify-center px-4">
           <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6 w-full max-w-md">
@@ -918,9 +731,7 @@ export default function APengaturan() {
           </div>
         </div>
       ) : (
-        /* ================== KONTEN ASLI HALAMAN (SETELAH PASSWORD BENAR) ================== */
         <div className="w-full mx-auto">
-          {/* Header */}
           <div className="bg-white shadow-lg p-6 border-b border-gray-200">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center space-x-4">
@@ -940,9 +751,7 @@ export default function APengaturan() {
             </div>
           </div>
 
-          {/* Main Content */}
           <div className="p-4 md:p-6">
-            {/* Loading Overlay */}
             {loading && (
               <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 backdrop-blur-sm">
                 <div className="bg-white rounded-2xl p-6 flex items-center space-x-3 shadow-2xl">
@@ -953,9 +762,7 @@ export default function APengaturan() {
             )}
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              {/* Kolom Kiri: Form Pengaturan */}
               <div className="lg:col-span-2 space-y-6">
-                {/* Identitas Sekolah */}
                 <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
                   <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center space-x-2">
                     <span>🏫</span>
@@ -1020,7 +827,6 @@ export default function APengaturan() {
                       ></textarea>
                     </div>
 
-                    {/* Visi dan Misi */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1057,7 +863,6 @@ export default function APengaturan() {
                       </div>
                     </div>
 
-                    {/* Media Sosial */}
                     <div className="border-t pt-6">
                       <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center space-x-2">
                         <span>📱</span>
@@ -1163,7 +968,6 @@ export default function APengaturan() {
                   </div>
                 </div>
 
-                {/* Pengaturan Absensi RFID */}
                 <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
                   <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center space-x-2">
                     <span>📡</span>
@@ -1240,18 +1044,11 @@ export default function APengaturan() {
                             onChange={handleRfidChange}
                           />
                         </div>
-
-                        <div className="md:col-span-2">
-                          <div className="text-xs text-green-600 bg-green-50 p-2 rounded border border-green-200">
-                            ✅ Pengaturan RFID tersimpan otomatis & realtime
-                          </div>
-                        </div>
                       </div>
                     )}
                   </div>
                 </div>
 
-                {/* Pengaturan Registrasi */}
                 <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
                   <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center space-x-2">
                     <span>👥</span>
@@ -1353,9 +1150,7 @@ export default function APengaturan() {
                 </div>
               </div>
 
-              {/* Kolom Kanan: Sidebar */}
               <div className="space-y-6">
-                {/* Profil Admin */}
                 <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
                   <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center space-x-2">
                     <span>👨‍💼</span>
@@ -1399,15 +1194,6 @@ export default function APengaturan() {
                     />
 
                     <button
-                      type="button"
-                      onClick={openPasswordModal}
-                      className="w-full bg-blue-50 text-blue-700 py-2 px-4 rounded-lg hover:bg-blue-100 transition-all duration-200 font-medium text-sm flex items-center justify-center space-x-2"
-                    >
-                      <span>🔒</span>
-                      <span>Ubah Password</span>
-                    </button>
-
-                    <button
                       onClick={logout}
                       className="w-full bg-gray-100 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-200 transition-all duration-200 font-medium text-sm flex items-center justify-center space-x-2"
                     >
@@ -1417,7 +1203,6 @@ export default function APengaturan() {
                   </div>
                 </div>
 
-                {/* Logo Sekolah */}
                 <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
                   <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center space-x-2">
                     <span>🏫</span>
@@ -1477,7 +1262,6 @@ export default function APengaturan() {
                   </p>
                 </div>
 
-                {/* Preview Visi Misi */}
                 <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
                   <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center space-x-2">
                     <span>📋</span>
@@ -1513,7 +1297,6 @@ export default function APengaturan() {
                   </div>
                 </div>
 
-                {/* Tombol Simpan (Backup Manual) */}
                 <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
                   <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4 transition-all duration-200">
                     <p className="text-sm text-green-700 text-center">
