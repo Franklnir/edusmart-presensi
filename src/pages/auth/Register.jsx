@@ -1,9 +1,7 @@
 // src/pages/auth/Register.jsx
-import React, { useEffect, useState, useCallback } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import React, { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
-import { useAuthStore } from '../../store/useAuthStore'
-import { logError } from '../../utils/logger'
+import { Link, useNavigate } from 'react-router-dom'
 import '../../styles/Login.css'
 
 const initialSettings = {
@@ -11,26 +9,21 @@ const initialSettings = {
   logo_url: '',
   registrasi_siswa_aktif: true,
   registrasi_guru_aktif: true,
-  registrasi_admin_aktif: false,
-  alamat: '',
-  telepon: '',
-  email: '',
-  link_facebook: null,
-  link_instagram: null,
-  link_youtube: null,
-  link_tiktok: null
+  registrasi_admin_aktif: false
 }
 
 const initialForm = {
   nama: '',
   email: '',
   password: '',
-  confirmPassword: ''
+  confirmPassword: '',
+  kelas: '',
+  jk: '',
+  telp: ''
 }
 
 export default function Register() {
   const nav = useNavigate()
-  const { register } = useAuthStore()
 
   /* ====== STATE PENGATURAN ====== */
   const [settings, setSettings] = useState(initialSettings)
@@ -44,10 +37,9 @@ export default function Register() {
   const [errorMessage, setErrorMessage] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
 
-  /* ====== CEK EMAIL TERDAFTAR ====== */
-  const [checkingEmail, setCheckingEmail] = useState(false)
-  // ⛔️ HAPUS generic TypeScript, cukup string biasa
-  const [emailStatus, setEmailStatus] = useState('idle') // 'idle' | 'allowed' | 'not_found' | 'error'
+  /* ====== DATA KELAS (kalau nanti dipakai) ====== */
+  const [kelasList, setKelasList] = useState([])
+  const [loadingKelas, setLoadingKelas] = useState(true)
 
   // ========= LOAD SETTINGS =========
   useEffect(() => {
@@ -71,25 +63,17 @@ export default function Register() {
 
         if (!isCancelled && data) {
           setSettingsId(data.id)
-          setSettings(prev => ({
-            ...prev,
+          setSettings({
             nama_sekolah: data.nama_sekolah || '',
             logo_url: data.logo_url || '',
             registrasi_siswa_aktif: data.registrasi_siswa_aktif ?? true,
             registrasi_guru_aktif: data.registrasi_guru_aktif ?? true,
-            registrasi_admin_aktif: data.registrasi_admin_aktif ?? false,
-            alamat: data.alamat || '',
-            telepon: data.telepon || '',
-            email: data.email || '',
-            link_facebook: data.link_facebook,
-            link_instagram: data.link_instagram,
-            link_youtube: data.link_youtube,
-            link_tiktok: data.link_tiktok
-          }))
+            registrasi_admin_aktif: data.registrasi_admin_aktif ?? false
+          })
         }
       } catch (err) {
         if (!isCancelled) {
-          logError('Gagal load settings:', err)
+          console.error('Gagal load settings:', err)
         }
       } finally {
         if (!isCancelled) {
@@ -118,25 +102,17 @@ export default function Register() {
           table: 'settings',
           filter: `id=eq.${settingsId}`
         },
-        payload => {
+        (payload) => {
           const row = payload.new
           if (!row) return
 
-          setSettings(prev => ({
-            ...prev,
+          setSettings({
             nama_sekolah: row.nama_sekolah || '',
             logo_url: row.logo_url || '',
             registrasi_siswa_aktif: row.registrasi_siswa_aktif ?? true,
             registrasi_guru_aktif: row.registrasi_guru_aktif ?? true,
-            registrasi_admin_aktif: row.registrasi_admin_aktif ?? false,
-            alamat: row.alamat || '',
-            telepon: row.telepon || '',
-            email: row.email || '',
-            link_facebook: row.link_facebook,
-            link_instagram: row.link_instagram,
-            link_youtube: row.link_youtube,
-            link_tiktok: row.link_tiktok
-          }))
+            registrasi_admin_aktif: row.registrasi_admin_aktif ?? false
+          })
         }
       )
       .subscribe()
@@ -146,21 +122,51 @@ export default function Register() {
     }
   }, [settingsId])
 
+  // ========= LOAD DATA KELAS (optional) =========
+  useEffect(() => {
+    let isCancelled = false
+
+    async function loadKelas() {
+      setLoadingKelas(true)
+      try {
+        const { data, error } = await supabase
+          .from('kelas')
+          .select('id, nama, grade, suffix')
+          .order('grade', { ascending: true })
+          .order('nama', { ascending: true })
+
+        if (error) throw error
+
+        if (!isCancelled && data) {
+          setKelasList(data)
+        }
+      } catch (err) {
+        if (!isCancelled) {
+          console.error('Gagal load kelas:', err)
+        }
+      } finally {
+        if (!isCancelled) {
+          setLoadingKelas(false)
+        }
+      }
+    }
+
+    loadKelas()
+    return () => {
+      isCancelled = true
+    }
+  }, [])
+
   /* ====== LOGIKA BANTUAN ====== */
   const allDisabled =
     !settings.registrasi_siswa_aktif &&
     !settings.registrasi_guru_aktif &&
     !settings.registrasi_admin_aktif
 
-  const resetMessages = () => {
+  const handleSelectRole = (role) => {
+    setSelectedRole(role)
     setErrorMessage('')
     setSuccessMessage('')
-  }
-
-  const handleSelectRole = role => {
-    setSelectedRole(role)
-    resetMessages()
-    setEmailStatus('idle')
     // reset form tapi pertahankan email kalau sudah diisi
     setForm(prev => ({
       ...initialForm,
@@ -168,116 +174,41 @@ export default function Register() {
     }))
   }
 
-  const handleInputChange = e => {
+  const handleInputChange = (e) => {
     const { name, value } = e.target
-    resetMessages()
-
     setForm(prev => ({
       ...prev,
       [name]: value
     }))
-
-    if (name === 'email') {
-      setEmailStatus('idle')
-    }
   }
 
   const validateForm = () => {
     if (!selectedRole) return 'Silakan pilih jenis akun terlebih dahulu.'
     if (!form.nama.trim()) return 'Nama lengkap wajib diisi.'
     if (!form.email.trim()) return 'Email wajib diisi.'
-
-    const email = form.email.trim().toLowerCase()
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-    if (!emailRegex.test(email)) return 'Format email tidak valid.'
-
     if (!form.password) return 'Password wajib diisi.'
-
-    if (form.password.length < 8) {
-      return 'Password minimal 8 karakter.'
+    
+    // Validasi password yang lebih ketat
+    if (form.password.length < 6) {
+      return 'Password minimal 6 karakter.'
     }
-
+    
     if (!/(?=.*[A-Z])/.test(form.password)) {
       return 'Password harus mengandung minimal 1 huruf besar.'
     }
-
+    
     if (!/(?=.*\d)/.test(form.password)) {
       return 'Password harus mengandung minimal 1 angka.'
     }
-
-    if (/\s/.test(form.password)) {
-      return 'Password tidak boleh mengandung spasi.'
-    }
-
-    if (form.password !== form.confirmPassword)
-      return 'Konfirmasi password tidak sama.'
-
+    
+    if (form.password !== form.confirmPassword) return 'Konfirmasi password tidak sama.'
     return null
   }
 
-  /**
-   * Cek apakah email + role diizinkan registrasi.
-   * Menggunakan tabel: public.allowed_registrations (email, role)
-   * Pastikan email di tabel disimpan lowercase.
-   */
-  const checkEmailAllowed = useCallback(
-    async (email, role) => {
-      const trimmed = (email || '').trim().toLowerCase()
-      if (!trimmed || !role) {
-        setEmailStatus('idle')
-        return {
-          ok: false,
-          message: 'Isi email dan pilih jenis akun terlebih dahulu.'
-        }
-      }
-
-      try {
-        setCheckingEmail(true)
-
-        const { data, error } = await supabase
-          .from('allowed_registrations')
-          .select('email, role')
-          .eq('email', trimmed)
-          .eq('role', role)
-          .maybeSingle()
-
-        if (error) {
-          logError('Gagal cek email terdaftar:', error)
-          setEmailStatus('error')
-          return {
-            ok: false,
-            message:
-              'Gagal mengecek email terdaftar. Coba beberapa saat lagi atau hubungi admin.'
-          }
-        }
-
-        if (!data) {
-          setEmailStatus('not_found')
-          return {
-            ok: false,
-            message:
-              'Email ini belum terdaftar di sistem untuk role tersebut. Silakan hubungi admin sekolah.'
-          }
-        }
-
-        setEmailStatus('allowed')
-        return { ok: true, message: '' }
-      } finally {
-        setCheckingEmail(false)
-      }
-    },
-    []
-  )
-
-  const handleBlurEmail = async () => {
-    resetMessages()
-    if (!form.email || !selectedRole) return
-    await checkEmailAllowed(form.email, selectedRole)
-  }
-
-  const handleSubmit = async e => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
-    resetMessages()
+    setErrorMessage('')
+    setSuccessMessage('')
 
     const validationError = validateForm()
     if (validationError) {
@@ -288,50 +219,58 @@ export default function Register() {
     try {
       setSubmitting(true)
 
-      // Pastikan email memang terdaftar whitelist
-      const checkResult = await checkEmailAllowed(form.email, selectedRole)
-      if (!checkResult.ok) {
-        setErrorMessage(checkResult.message)
-        return
-      }
-
-      // ===== PANGGIL register DARI useAuthStore =====
-      const payload = {
+      // Buat user di Auth
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
         email: form.email.trim(),
         password: form.password,
-        role: selectedRole,
-        profile: {
-          nama: form.nama.trim(),
-          jk: null,
-          telp: null,
-          alamat: null,
-          kelas: null,
-          usia: null,
-          nik: null,
-          agama: null,
-          jabatan: null
+        options: {
+          data: {
+            nama: form.nama.trim(),
+            role: selectedRole,
+            kelas: null,
+            jk: null,
+            telp: null
+          }
         }
-      }
+      })
 
-      const result = await register(payload)
-
-      if (result?.error) {
-        setErrorMessage(result.error)
+      if (signUpError) {
+        setErrorMessage(signUpError.message || 'Gagal mendaftar. Coba lagi.')
         return
       }
 
-      setSuccessMessage(
-        'Registrasi berhasil! Silakan login menggunakan akun yang baru dibuat.'
-      )
+      const user = signUpData?.user
+      if (!user) {
+        setErrorMessage(
+          'Registrasi berhasil dibuat, namun user belum tersedia. Cek email verifikasi terlebih dahulu.'
+        )
+        return
+      }
 
+      // Insert ke tabel profiles
+      const profilePayload = {
+        id: user.id,
+        email: user.email,
+        nama: form.nama.trim(),
+        role: selectedRole,
+        kelas: null,
+        jk: null,
+        telp: null,
+        status: 'active'
+      }
+
+      const { error: profileError } = await supabase.from('profiles').insert(profilePayload)
+      if (profileError) {
+        console.warn('Gagal insert profiles:', profileError)
+      }
+
+      setSuccessMessage('Berhasil mendaftar! Mengarahkan ke halaman login...')
       setTimeout(() => {
         nav('/login')
       }, 2000)
     } catch (err) {
-      logError('Error submit register:', err)
-      setErrorMessage(
-        'Terjadi kesalahan saat mendaftar. Coba beberapa saat lagi.'
-      )
+      console.error('Error submit:', err)
+      setErrorMessage('Terjadi kesalahan saat mendaftar. Coba beberapa saat lagi.')
     } finally {
       setSubmitting(false)
     }
@@ -346,11 +285,11 @@ export default function Register() {
     )
   }
 
-  const schoolName = settings.nama_sekolah || 'Nama Sekolah'
+  const schoolName = settings.nama_sekolah || 'bapak penabur'
   const logoUrl = settings.logo_url
-  const address = settings.alamat || 'Alamat sekolah belum diisi'
-  const phone = settings.telepon || '-'
-  const emailSekolah = settings.email || '-'
+  const address = settings.alamat || 'jl. kasuarieewd'
+  const phone = settings.telepon || '0895318323655'
+  const emailSekolah = settings.email || 'milertr26@gmail.com'
 
   const socials = [
     { key: 'facebook', href: settings?.link_facebook, icon: 'ri-facebook-fill' },
@@ -358,12 +297,6 @@ export default function Register() {
     { key: 'instagram', href: settings?.link_instagram, icon: 'ri-instagram-fill' },
     { key: 'youtube', href: settings?.link_youtube, icon: 'ri-youtube-fill' }
   ].filter(social => social.href)
-
-  const canSubmit =
-    !!selectedRole &&
-    !submitting &&
-    !checkingEmail &&
-    emailStatus !== 'not_found'
 
   return (
     <div className="login">
@@ -375,7 +308,7 @@ export default function Register() {
       </div>
 
       <div className="login__container">
-        {/* Brand Section */}
+        {/* Brand Section - kiri (sama seperti Login) */}
         <div className="login__brand">
           <div className="login__brand-content">
             <div className="login__school-info">
@@ -384,9 +317,7 @@ export default function Register() {
               )}
               <div className="login__school-text">
                 <h1 className="login__school-name">{schoolName}</h1>
-                <p className="login__system-name">
-                  Sistem Absensi &amp; Tugas Digital
-                </p>
+                <p className="login__system-name">Sistem Absensi & Tugas Digital</p>
               </div>
             </div>
 
@@ -432,7 +363,7 @@ export default function Register() {
           </div>
         </div>
 
-        {/* Form Section */}
+        {/* Form Section - kanan */}
         <div className="login__form-section">
           <div className="login__form-wrapper">
             <div className="login__form-header">
@@ -446,8 +377,7 @@ export default function Register() {
                 <div className="login__error-content">
                   <strong>Registrasi Ditutup</strong>
                   <span>
-                    Registrasi akun sedang tidak dibuka. Silakan hubungi admin
-                    sekolah.
+                    Registrasi akun sedang tidak dibuka. Silakan hubungi admin sekolah.
                   </span>
                   <Link to="/login" className="login__link">
                     Kembali ke halaman login
@@ -469,32 +399,6 @@ export default function Register() {
                   </div>
                 )}
 
-                {emailStatus === 'allowed' && (
-                  <div className="login__success login__success--soft">
-                    <i className="ri-mail-check-fill"></i>
-                    <span>
-                      Email ini terdaftar dan bisa digunakan untuk registrasi.
-                    </span>
-                  </div>
-                )}
-                {emailStatus === 'not_found' && (
-                  <div className="login__error login__error--soft">
-                    <i className="ri-mail-close-fill"></i>
-                    <span>
-                      Email ini belum terdaftar di whitelist. Silakan hubungi
-                      admin sekolah.
-                    </span>
-                  </div>
-                )}
-                {emailStatus === 'error' && (
-                  <div className="login__error login__error--soft">
-                    <i className="ri-alert-fill"></i>
-                    <span>
-                      Gagal mengecek status email. Coba beberapa saat lagi.
-                    </span>
-                  </div>
-                )}
-
                 {/* Pilih Role */}
                 <div className="login__role-selection">
                   <p className="login__role-title">Pilih Jenis Akun</p>
@@ -504,18 +408,14 @@ export default function Register() {
                       type="button"
                       onClick={() => handleSelectRole('siswa')}
                       className={`login__role-btn ${
-                        selectedRole === 'siswa'
-                          ? 'login__role-btn--active'
-                          : ''
+                        selectedRole === 'siswa' ? 'login__role-btn--active' : ''
                       }`}
                     >
                       <div className="login__role-content">
                         <i className="ri-user-fill"></i>
                         <div className="login__role-text">
                           <span className="login__role-name">Siswa</span>
-                          <span className="login__role-desc">
-                            Akses absensi dan tugas
-                          </span>
+                          <span className="login__role-desc">Akses absensi dan tugas</span>
                         </div>
                       </div>
                       <span
@@ -536,18 +436,14 @@ export default function Register() {
                       type="button"
                       onClick={() => handleSelectRole('guru')}
                       className={`login__role-btn ${
-                        selectedRole === 'guru'
-                          ? 'login__role-btn--active'
-                          : ''
+                        selectedRole === 'guru' ? 'login__role-btn--active' : ''
                       }`}
                     >
                       <div className="login__role-content">
                         <i className="ri-user-star-fill"></i>
                         <div className="login__role-text">
                           <span className="login__role-name">Guru</span>
-                          <span className="login__role-desc">
-                            Kelola kelas dan tugas
-                          </span>
+                          <span className="login__role-desc">Kelola kelas dan tugas</span>
                         </div>
                       </div>
                       <span
@@ -568,18 +464,14 @@ export default function Register() {
                       type="button"
                       onClick={() => handleSelectRole('admin')}
                       className={`login__role-btn ${
-                        selectedRole === 'admin'
-                          ? 'login__role-btn--active'
-                          : ''
+                        selectedRole === 'admin' ? 'login__role-btn--active' : ''
                       }`}
                     >
                       <div className="login__role-content">
                         <i className="ri-shield-keyhole-fill"></i>
                         <div className="login__role-text">
                           <span className="login__role-name">Admin</span>
-                          <span className="login__role-desc">
-                            Lingkungan pengembangan
-                          </span>
+                          <span className="login__role-desc">Lingkungan pengembangan</span>
                         </div>
                       </div>
                       <span
@@ -608,7 +500,6 @@ export default function Register() {
                           placeholder="Nama Lengkap"
                           value={form.nama}
                           onChange={handleInputChange}
-                          autoComplete="name"
                           required
                         />
                       </div>
@@ -618,18 +509,11 @@ export default function Register() {
                         <input
                           type="email"
                           name="email"
-                          placeholder="Email yang terdaftar di sekolah"
+                          placeholder="Email"
                           value={form.email}
                           onChange={handleInputChange}
-                          onBlur={handleBlurEmail}
-                          autoComplete="email"
                           required
                         />
-                        {checkingEmail && (
-                          <span className="login__input-hint">
-                            Mengecek email...
-                          </span>
-                        )}
                       </div>
 
                       <div className="login__input-row">
@@ -641,7 +525,6 @@ export default function Register() {
                             placeholder="Password"
                             value={form.password}
                             onChange={handleInputChange}
-                            autoComplete="new-password"
                             required
                           />
                         </div>
@@ -654,7 +537,6 @@ export default function Register() {
                             placeholder="Konfirmasi Password"
                             value={form.confirmPassword}
                             onChange={handleInputChange}
-                            autoComplete="new-password"
                             required
                           />
                         </div>
@@ -663,7 +545,7 @@ export default function Register() {
 
                     <button
                       type="submit"
-                      disabled={!canSubmit}
+                      disabled={submitting}
                       className="login__submit-btn"
                     >
                       {submitting ? (
