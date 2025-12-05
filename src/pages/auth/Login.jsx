@@ -19,8 +19,9 @@ const Login = () => {
 
   const [settings, setSettings] = useState(null);
   const [settingsId, setSettingsId] = useState(null);
+  const [isLoadingSettings, setIsLoadingSettings] = useState(true);
 
-  /* ========== LOAD SETTINGS SEKALI DI AWAL ========== */
+  // Load settings sekali di awal
   useEffect(() => {
     let isCancelled = false;
 
@@ -33,20 +34,35 @@ const Login = () => {
           .limit(1)
           .single();
 
-        // PGRST116 = no rows
         if (error && error.code === 'PGRST116') {
-          data = null;
+          // Tidak ada data settings, gunakan default
+          data = {
+            nama_sekolah: 'Sekolah',
+            alamat: '',
+            telepon: '',
+            email: '',
+            logo_url: ''
+          };
         } else if (error) {
           throw error;
         }
 
-        if (!isCancelled && data) {
-          setSettings(data);
-          setSettingsId(data.id);
-        }
-      } catch (err) {
         if (!isCancelled) {
-          console.error('Settings error:', err);
+          setSettings(data);
+          if (data?.id) setSettingsId(data.id);
+          setIsLoadingSettings(false);
+        }
+      } catch (_err) {
+        if (!isCancelled) {
+          // Tetap lanjut meski settings gagal load
+          setSettings({
+            nama_sekolah: 'Sekolah',
+            alamat: '',
+            telepon: '',
+            email: '',
+            logo_url: ''
+          });
+          setIsLoadingSettings(false);
         }
       }
     };
@@ -58,7 +74,7 @@ const Login = () => {
     };
   }, []);
 
-  /* ========== REALTIME UPDATE SETTINGS ========== */
+  // Realtime update settings jika ada perubahan
   useEffect(() => {
     if (!settingsId) return;
 
@@ -67,7 +83,7 @@ const Login = () => {
       .on(
         'postgres_changes',
         {
-          event: '*',
+          event: 'UPDATE',
           schema: 'public',
           table: 'settings',
           filter: `id=eq.${settingsId}`
@@ -76,7 +92,6 @@ const Login = () => {
           const row = payload.new;
           if (!row) return;
 
-          // update nama sekolah, logo, dan field lain kalau berubah
           setSettings((prev) => ({
             ...prev,
             ...row
@@ -90,23 +105,23 @@ const Login = () => {
     };
   }, [settingsId]);
 
-  /* ========== LOGIC LOGIN ========== */
+  // Logic redirect setelah login
   useEffect(() => {
     if (!user || !profile) return;
 
     if (profile.status === 'nonaktif') {
-      let message =
-        profile.role === 'guru'
-          ? 'Akun guru ini dinonaktifkan. Hubungi administrator.'
-          : 'Akun siswa ini dinonaktifkan. Hubungi wali kelas.';
+      let message = 'Akun ini dinonaktifkan. Hubungi administrator.';
 
-      if (profile.alasan_nonaktif) message += ` Alasan: ${profile.alasan_nonaktif}`;
+      if (profile.alasan_nonaktif) {
+        message += ` Alasan: ${profile.alasan_nonaktif}`;
+      }
 
       setError(message);
       supabase.auth.signOut();
       return;
     }
 
+    // Redirect berdasarkan role
     const redirectMap = {
       siswa: '/siswa/home',
       guru: '/guru/jadwal',
@@ -114,13 +129,25 @@ const Login = () => {
     };
 
     const target = redirectMap[profile.role];
-    if (target) navigate(target, { replace: true });
+    if (target) {
+      navigate(target, { replace: true });
+    } else {
+      setError('Role tidak dikenali. Hubungi administrator.');
+    }
   }, [user, profile, navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    // Validasi input
     if (!form.email.trim() || !form.password.trim()) {
       setError('Email dan password harus diisi');
+      return;
+    }
+
+    // Validasi format email sederhana
+    if (!form.email.includes('@')) {
+      setError('Format email tidak valid');
       return;
     }
 
@@ -129,35 +156,80 @@ const Login = () => {
 
     try {
       const result = await login(form.email, form.password);
-      if (result?.error) setError(result.error);
-    } catch (err) {
-      setError(err?.message || 'Terjadi kesalahan saat login');
+
+      if (result?.error) {
+        const errorMsg = result.error.toLowerCase();
+
+        if (
+          errorMsg.includes('invalid login credentials') ||
+          errorMsg.includes('invalid email or password')
+        ) {
+          setError('Email atau password salah');
+        } else if (errorMsg.includes('email not confirmed')) {
+          setError('Email belum dikonfirmasi. Silakan cek email Anda');
+        } else if (errorMsg.includes('too many requests')) {
+          setError('Terlalu banyak percobaan login. Silakan coba lagi nanti');
+        } else {
+          setError(result.error);
+        }
+      }
+    } catch (_err) {
+      setError('Terjadi kesalahan saat login. Silakan coba lagi');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // loading awal saat settings belum ada
-  if (!settings) {
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter' && !isSubmitting) {
+      handleSubmit(e);
+    }
+  };
+
+  // Loading state
+  if (isLoadingSettings) {
     return (
       <div className="login-loading">
         <div className="login-spinner"></div>
+        <p className="login-loading-text">Memuat halaman login...</p>
       </div>
     );
   }
 
-  const schoolName = settings?.nama_sekolah || 'bapak penabur';
-  const logoUrl = settings?.logo_url || settings?.logourl;
-  const address = settings?.alamat || 'jl. kasuarieewd';
-  const phone = settings?.telepon || '0895318323655';
-  const emailSekolah = settings?.email || 'milertr26@gmail.com';
+  // Data sekolah dengan fallback
+  const schoolName = settings?.nama_sekolah || 'Sekolah';
+  const logoUrl = settings?.logo_url || '';
+  const address = settings?.alamat || '';
+  const phone = settings?.telepon || '';
+  const emailSekolah = settings?.email || '';
 
+  // Social media links
   const socials = [
-    { key: 'facebook', href: settings?.link_facebook, icon: 'ri-facebook-fill' },
-    { key: 'tiktok', href: settings?.link_tiktok, icon: 'ri-tiktok-fill' },
-    { key: 'instagram', href: settings?.link_instagram, icon: 'ri-instagram-fill' },
-    { key: 'youtube', href: settings?.link_youtube, icon: 'ri-youtube-fill' }
-  ].filter((social) => social.href);
+    {
+      key: 'facebook',
+      href: settings?.link_facebook,
+      icon: 'ri-facebook-fill',
+      label: 'Facebook'
+    },
+    {
+      key: 'tiktok',
+      href: settings?.link_tiktok,
+      icon: 'ri-tiktok-fill',
+      label: 'TikTok'
+    },
+    {
+      key: 'instagram',
+      href: settings?.link_instagram,
+      icon: 'ri-instagram-fill',
+      label: 'Instagram'
+    },
+    {
+      key: 'youtube',
+      href: settings?.link_youtube,
+      icon: 'ri-youtube-fill',
+      label: 'YouTube'
+    }
+  ].filter((social) => social.href && social.href.trim() !== '');
 
   return (
     <div className="login">
@@ -173,12 +245,35 @@ const Login = () => {
         <div className="login__brand">
           <div className="login__brand-content">
             <div className="login__school-info">
-              {logoUrl && (
-                <img src={logoUrl} alt={schoolName} className="login__logo" />
+              {logoUrl ? (
+                <img
+                  src={logoUrl}
+                  alt={schoolName}
+                  className="login__logo"
+                  onError={(e) => {
+                    const img = e.target;
+                    img.style.display = 'none';
+
+                    const parent = img.parentElement;
+                    const fallback = parent
+                      ? parent.querySelector('.login__logo-fallback')
+                      : null;
+
+                    if (fallback && fallback.style) {
+                      fallback.style.display = 'flex';
+                    }
+                  }}
+                />
+              ) : (
+                <div className="login__logo-fallback">
+                  <i className="ri-school-fill"></i>
+                </div>
               )}
               <div className="login__school-text">
                 <h1 className="login__school-name">{schoolName}</h1>
-                <p className="login__system-name">Sistem Absensi & Tugas Digital</p>
+                <p className="login__system-name">
+                  Sistem Absensi & Tugas Digital
+                </p>
               </div>
             </div>
 
@@ -199,14 +294,17 @@ const Login = () => {
 
             {socials.length > 0 && (
               <div className="login__social">
+                <p className="login__social-title">Ikuti kami:</p>
                 <div className="login__social-links">
                   {socials.map((social) => (
                     <a
                       key={social.key}
                       href={social.href}
                       target="_blank"
-                      rel="noopener"
+                      rel="noopener noreferrer"
                       className="login__social-link"
+                      title={social.label}
+                      aria-label={social.label}
                     >
                       <i className={social.icon}></i>
                     </a>
@@ -215,12 +313,20 @@ const Login = () => {
               </div>
             )}
 
-            <div className="login__contact-info">
-              <p className="login__address">{address}</p>
-              <p className="login__contact-details">
-                {phone} • {emailSekolah}
-              </p>
-            </div>
+            {(address || phone || emailSekolah) && (
+              <div className="login__contact-info">
+                {address && <p className="login__address">{address}</p>}
+                {(phone || emailSekolah) && (
+                  <p className="login__contact-details">
+                    {phone && <span>{phone}</span>}
+                    {phone && emailSekolah && (
+                      <span className="login__separator"> • </span>
+                    )}
+                    {emailSekolah && <span>{emailSekolah}</span>}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -229,17 +335,22 @@ const Login = () => {
           <div className="login__form-wrapper">
             <div className="login__form-header">
               <h2>Masuk ke Akun</h2>
-              <p>Solusi mudah untuk untuk sekolah</p>
+              <p>Silakan masuk untuk mengakses sistem</p>
             </div>
 
             {error && (
-              <div className="login__error">
+              <div className="login__error" role="alert">
                 <i className="ri-alert-fill"></i>
                 <span>{error}</span>
               </div>
             )}
 
-            <form onSubmit={handleSubmit} className="login__form">
+            <form
+              onSubmit={handleSubmit}
+              className="login__form"
+              onKeyPress={handleKeyPress}
+              noValidate
+            >
               <div className="login__input-group">
                 <div className="login__input-field">
                   <i className="ri-user-3-fill"></i>
@@ -248,10 +359,15 @@ const Login = () => {
                     placeholder="Email"
                     value={form.email}
                     onChange={(e) =>
-                      setForm((prev) => ({ ...prev, email: e.target.value }))
+                      setForm((prev) => ({
+                        ...prev,
+                        email: e.target.value.trim()
+                      }))
                     }
                     disabled={isSubmitting}
                     required
+                    autoComplete="email"
+                    aria-label="Email"
                   />
                 </div>
 
@@ -262,15 +378,35 @@ const Login = () => {
                     placeholder="Password"
                     value={form.password}
                     onChange={(e) =>
-                      setForm((prev) => ({ ...prev, password: e.target.value }))
+                      setForm((prev) => ({
+                        ...prev,
+                        password: e.target.value
+                      }))
                     }
                     disabled={isSubmitting}
                     required
+                    autoComplete="current-password"
+                    aria-label="Password"
                   />
-                  <i
-                    className={`ri-eye-${showPassword ? 'off' : ''}-fill login__toggle`}
+                  <button
+                    type="button"
+                    className={`login__toggle ${
+                      showPassword ? 'active' : ''
+                    }`}
                     onClick={() => setShowPassword(!showPassword)}
-                  ></i>
+                    tabIndex={0}
+                    aria-label={
+                      showPassword
+                        ? 'Sembunyikan password'
+                        : 'Tampilkan password'
+                    }
+                  >
+                    <i
+                      className={`ri-eye-${
+                        showPassword ? 'off' : ''
+                      }-fill`}
+                    ></i>
+                  </button>
                 </div>
               </div>
 
@@ -282,15 +418,21 @@ const Login = () => {
 
               <button
                 type="submit"
-                disabled={isSubmitting}
+                disabled={isSubmitting || !form.email || !form.password}
                 className="login__submit-btn"
+                aria-label="Masuk"
               >
                 {isSubmitting ? (
-                  <div className="login__spinner"></div>
+                  <>
+                    <div className="login__spinner-btn"></div>
+                    <span>Memproses...</span>
+                  </>
                 ) : (
-                  <i className="ri-login-box-fill"></i>
+                  <>
+                    <i className="ri-login-box-fill"></i>
+                    <span>Masuk</span>
+                  </>
                 )}
-                Masuk
               </button>
             </form>
 
@@ -299,7 +441,7 @@ const Login = () => {
                 Belum punya akun?
                 <Link to="/register" className="login__register-link">
                   {' '}
-                  Daftar
+                  Daftar Sekarang
                 </Link>
               </p>
             </div>
