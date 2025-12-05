@@ -52,7 +52,7 @@ const Login = () => {
           if (data?.id) setSettingsId(data.id);
           setIsLoadingSettings(false);
         }
-      } catch (err) {
+      } catch (_err) {
         if (!isCancelled) {
           // Tetap lanjut meski settings gagal load
           setSettings({
@@ -111,7 +111,7 @@ const Login = () => {
 
     if (profile.status === 'nonaktif') {
       let message = 'Akun ini dinonaktifkan. Hubungi administrator.';
-      
+
       if (profile.alasan_nonaktif) {
         message += ` Alasan: ${profile.alasan_nonaktif}`;
       }
@@ -138,7 +138,7 @@ const Login = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     // Validasi input
     if (!form.email.trim() || !form.password.trim()) {
       setError('Email dan password harus diisi');
@@ -156,13 +156,14 @@ const Login = () => {
 
     try {
       const result = await login(form.email, form.password);
-      
+
       if (result?.error) {
-        // Handle error spesifik dari Supabase
         const errorMsg = result.error.toLowerCase();
-        
-        if (errorMsg.includes('invalid login credentials') || 
-            errorMsg.includes('invalid email or password')) {
+
+        if (
+          errorMsg.includes('invalid login credentials') ||
+          errorMsg.includes('invalid email or password')
+        ) {
           setError('Email atau password salah');
         } else if (errorMsg.includes('email not confirmed')) {
           setError('Email belum dikonfirmasi. Silakan cek email Anda');
@@ -172,7 +173,7 @@ const Login = () => {
           setError(result.error);
         }
       }
-    } catch (err) {
+    } catch (_err) {
       setError('Terjadi kesalahan saat login. Silakan coba lagi');
     } finally {
       setIsSubmitting(false);
@@ -204,27 +205,27 @@ const Login = () => {
 
   // Social media links
   const socials = [
-    { 
-      key: 'facebook', 
-      href: settings?.link_facebook, 
+    {
+      key: 'facebook',
+      href: settings?.link_facebook,
       icon: 'ri-facebook-fill',
       label: 'Facebook'
     },
-    { 
-      key: 'tiktok', 
-      href: settings?.link_tiktok, 
+    {
+      key: 'tiktok',
+      href: settings?.link_tiktok,
       icon: 'ri-tiktok-fill',
       label: 'TikTok'
     },
-    { 
-      key: 'instagram', 
-      href: settings?.link_instagram, 
+    {
+      key: 'instagram',
+      href: settings?.link_instagram,
       icon: 'ri-instagram-fill',
       label: 'Instagram'
     },
-    { 
-      key: 'youtube', 
-      href: settings?.link_youtube, 
+    {
+      key: 'youtube',
+      href: settings?.link_youtube,
       icon: 'ri-youtube-fill',
       label: 'YouTube'
     }
@@ -245,13 +246,22 @@ const Login = () => {
           <div className="login__brand-content">
             <div className="login__school-info">
               {logoUrl ? (
-                <img 
-                  src={logoUrl} 
-                  alt={schoolName} 
+                <img
+                  src={logoUrl}
+                  alt={schoolName}
                   className="login__logo"
                   onError={(e) => {
-                    e.target.style.display = 'none';
-                    e.target.parentElement.querySelector('.login__logo-fallback')?.style.display = 'flex';
+                    const img = e.target;
+                    img.style.display = 'none';
+
+                    const parent = img.parentElement;
+                    const fallback = parent
+                      ? parent.querySelector('.login__logo-fallback')
+                      : null;
+
+                    if (fallback && fallback.style) {
+                      fallback.style.display = 'flex';
+                    }
                   }}
                 />
               ) : (
@@ -261,7 +271,9 @@ const Login = () => {
               )}
               <div className="login__school-text">
                 <h1 className="login__school-name">{schoolName}</h1>
-                <p className="login__system-name">Sistem Absensi & Tugas Digital</p>
+                <p className="login__system-name">
+                  Sistem Absensi & Tugas Digital
+                </p>
               </div>
             </div>
 
@@ -307,7 +319,9 @@ const Login = () => {
                 {(phone || emailSekolah) && (
                   <p className="login__contact-details">
                     {phone && <span>{phone}</span>}
-                    {phone && emailSekolah && <span className="login__separator"> • </span>}
+                    {phone && emailSekolah && (
+                      <span className="login__separator"> • </span>
+                    )}
                     {emailSekolah && <span>{emailSekolah}</span>}
                   </p>
                 )}
@@ -331,8 +345,8 @@ const Login = () => {
               </div>
             )}
 
-            <form 
-              onSubmit={handleSubmit} 
+            <form
+              onSubmit={handleSubmit}
               className="login__form"
               onKeyPress={handleKeyPress}
               noValidate
@@ -345,7 +359,10 @@ const Login = () => {
                     placeholder="Email"
                     value={form.email}
                     onChange={(e) =>
-                      setForm((prev) => ({ ...prev, email: e.target.value.trim() }))
+                      setForm((prev) => ({
+                        ...prev,
+                        email: e.target.value.trim()
+                      }))
                     }
                     disabled={isSubmitting}
                     required
@@ -361,7 +378,10 @@ const Login = () => {
                     placeholder="Password"
                     value={form.password}
                     onChange={(e) =>
-                      setForm((prev) => ({ ...prev, password: e.target.value }))
+                      setForm((prev) => ({
+                        ...prev,
+                        password: e.target.value
+                      }))
                     }
                     disabled={isSubmitting}
                     required
@@ -370,12 +390,22 @@ const Login = () => {
                   />
                   <button
                     type="button"
-                    className={`login__toggle ${showPassword ? 'active' : ''}`}
+                    className={`login__toggle ${
+                      showPassword ? 'active' : ''
+                    }`}
                     onClick={() => setShowPassword(!showPassword)}
                     tabIndex={0}
-                    aria-label={showPassword ? 'Sembunyikan password' : 'Tampilkan password'}
+                    aria-label={
+                      showPassword
+                        ? 'Sembunyikan password'
+                        : 'Tampilkan password'
+                    }
                   >
-                    <i className={`ri-eye-${showPassword ? 'off' : ''}-fill`}></i>
+                    <i
+                      className={`ri-eye-${
+                        showPassword ? 'off' : ''
+                      }-fill`}
+                    ></i>
                   </button>
                 </div>
               </div>
@@ -410,6 +440,7 @@ const Login = () => {
               <p>
                 Belum punya akun?
                 <Link to="/register" className="login__register-link">
+                  {' '}
                   Daftar Sekarang
                 </Link>
               </p>
