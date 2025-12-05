@@ -1,6 +1,8 @@
+// src/store/useAuthStore.js
 import { create } from 'zustand'
 import { supabase } from '../lib/supabase'
 import { useUIStore } from './useUIStore.js'
+import logger from '../utils/logger'
 
 export const useAuthStore = create((set, get) => ({
   user: null,
@@ -15,7 +17,7 @@ export const useAuthStore = create((set, get) => ({
      =========================== */
   init: async () => {
     try {
-      console.log('🔄 Initializing auth store...')
+      logger.debug('🔄 Initializing auth store...')
 
       // Selalu load settings dulu (logo, nama sekolah, dsb)
       const settings = await get().loadSettings()
@@ -37,12 +39,14 @@ export const useAuthStore = create((set, get) => ({
         if (!error && data) {
           profile = data
         } else if (error) {
-          console.error('Error loading profile on init:', error)
+          logger.error('Error loading profile on init:', error)
         }
 
         // ✅ Cek SEMUA akun nonaktif (siswa/guru/admin)
         if (profile && profile.status === 'nonaktif') {
-          console.log('🚫 Akun nonaktif terdeteksi saat init, melakukan logout...')
+          logger.debug(
+            '🚫 Akun nonaktif terdeteksi saat init, melakukan logout...'
+          )
 
           await supabase.auth.signOut()
 
@@ -50,7 +54,8 @@ export const useAuthStore = create((set, get) => ({
           if (profile.role === 'guru') {
             baseMessage = 'Akun guru ini dinonaktifkan. Silakan hubungi administrator.'
           } else if (profile.role === 'siswa') {
-            baseMessage = 'Akun siswa ini dinonaktifkan. Silakan hubungi wali kelas atau admin.'
+            baseMessage =
+              'Akun siswa ini dinonaktifkan. Silakan hubungi wali kelas atau admin.'
           } else {
             baseMessage = 'Akun ini dinonaktifkan. Silakan hubungi administrator.'
           }
@@ -72,9 +77,9 @@ export const useAuthStore = create((set, get) => ({
       }
 
       set({ user, profile, settings, initialized: true })
-      console.log('✅ Auth store initialized with settings:', settings)
+      logger.debug('✅ Auth store initialized with settings:', settings)
     } catch (err) {
-      console.error('Init error:', err)
+      logger.error('Init error:', err)
       set({
         user: null,
         profile: null,
@@ -90,7 +95,8 @@ export const useAuthStore = create((set, get) => ({
      =========================== */
   loadSettings: async () => {
     try {
-      console.log('📥 Loading settings from database...')
+      logger.debug('📥 Loading settings from database...')
+
       const { data, error } = await supabase
         .from('settings')
         .select('*')
@@ -99,17 +105,17 @@ export const useAuthStore = create((set, get) => ({
 
       if (error) {
         if (error.code === 'PGRST116') {
-          console.log('ℹ️ No settings found in database')
+          logger.debug('ℹ️ No settings found in database')
           return null
         }
-        console.error('Error loading settings:', error)
+        logger.error('Error loading settings:', error)
         return null
       }
 
-      console.log('✅ Settings loaded:', data)
+      logger.debug('✅ Settings loaded:', data)
       return data
     } catch (error) {
-      console.error('Failed to load settings:', error)
+      logger.error('Failed to load settings:', error)
       return null
     }
   },
@@ -139,7 +145,7 @@ export const useAuthStore = create((set, get) => ({
         })
 
       if (authError) {
-        console.error('Login auth error:', authError)
+        logger.error('Login auth error:', authError)
         // Pesan error lebih ramah
         if (authError.message.includes('Invalid login credentials')) {
           throw new Error('Email atau password salah')
@@ -161,19 +167,20 @@ export const useAuthStore = create((set, get) => ({
         .single()
 
       if (profileError) {
-        console.error('Profile error:', profileError)
+        logger.error('Profile error:', profileError)
         throw new Error('Gagal memuat data profil')
       }
 
       // ✅ BLOKIR SEMUA AKUN NONAKTIF DI SINI
       if (profile.status === 'nonaktif') {
-        console.log('🚫 Akun nonaktif mencoba login:', profile.email)
+        logger.debug('🚫 Akun nonaktif mencoba login:', profile.email)
 
         let baseMessage = ''
         if (profile.role === 'guru') {
           baseMessage = 'Akun guru dinonaktifkan. Silahkan hubungi administrator.'
         } else if (profile.role === 'siswa') {
-          baseMessage = 'Akun siswa dinonaktifkan. Silahkan hubungi wali kelas atau admin.'
+          baseMessage =
+            'Akun siswa dinonaktifkan. Silahkan hubungi wali kelas atau admin.'
         } else {
           baseMessage = 'Akun ini dinonaktifkan. Silahkan hubungi administrator.'
         }
@@ -196,7 +203,7 @@ export const useAuthStore = create((set, get) => ({
 
       return { user, profile }
     } catch (err) {
-      console.error('Login catch error:', err)
+      logger.error('Login catch error:', err)
       const errorMessage = err.message || 'Terjadi kesalahan saat login'
       set({ error: errorMessage })
       pushToast('error', errorMessage)
@@ -210,7 +217,7 @@ export const useAuthStore = create((set, get) => ({
   /* ===========================
      REGISTER
      =========================== */
-  register: async (payload) => {
+  register: async payload => {
     const { email, password, role, profile: profileData } = payload
     const { pushToast } = useUIStore.getState()
 
@@ -233,7 +240,7 @@ export const useAuthStore = create((set, get) => ({
       })
 
       if (error) {
-        console.error('Signup error:', error)
+        logger.error('Signup error:', error)
         if (error.message.includes('User already registered')) {
           throw new Error('Email sudah terdaftar')
         }
@@ -244,32 +251,30 @@ export const useAuthStore = create((set, get) => ({
       if (!user) throw new Error('User tidak ditemukan setelah registrasi')
 
       // Insert profile data
-      const { error: errProfile } = await supabase
-        .from('profiles')
-        .insert({
-          id: user.id,
-          email: email.trim().toLowerCase(),
-          role: role,
-          nama: profileData.nama,
-          status: 'active', // default aktif
-          jk: profileData.jk || null,
-          telp: profileData.telp || null,
-          alamat: profileData.alamat || null,
-          kelas: profileData.kelas || null,
-          usia: profileData.usia || null,
-          nik: profileData.nik || null,
-          agama: profileData.agama || null,
-          jabatan: profileData.jabatan || null,
-          created_at: new Date().toISOString()
-        })
+      const { error: errProfile } = await supabase.from('profiles').insert({
+        id: user.id,
+        email: email.trim().toLowerCase(),
+        role: role,
+        nama: profileData.nama,
+        status: 'active', // default aktif
+        jk: profileData.jk || null,
+        telp: profileData.telp || null,
+        alamat: profileData.alamat || null,
+        kelas: profileData.kelas || null,
+        usia: profileData.usia || null,
+        nik: profileData.nik || null,
+        agama: profileData.agama || null,
+        jabatan: profileData.jabatan || null,
+        created_at: new Date().toISOString()
+      })
 
       if (errProfile) {
-        console.error('Profile insert error:', errProfile)
+        logger.error('Profile insert error:', errProfile)
         // Cleanup (but butuh service role di supabase)
         try {
           await supabase.auth.admin.deleteUser(user.id)
         } catch (e) {
-          console.error('Cleanup deleteUser failed:', e)
+          logger.error('Cleanup deleteUser failed:', e)
         }
         throw new Error('Gagal membuat profil pengguna')
       }
@@ -279,7 +284,7 @@ export const useAuthStore = create((set, get) => ({
 
       return { user }
     } catch (err) {
-      console.error('Register error:', err)
+      logger.error('Register error:', err)
       const errorMessage = err.message || 'Registrasi gagal'
       set({ error: errorMessage })
       pushToast('error', errorMessage)
@@ -297,7 +302,7 @@ export const useAuthStore = create((set, get) => ({
       await supabase.auth.signOut()
       set({ user: null, profile: null, error: null })
     } catch (err) {
-      console.error('Logout error:', err)
+      logger.error('Logout error:', err)
     }
   },
 
@@ -318,17 +323,22 @@ export const useAuthStore = create((set, get) => ({
       if (!error && data) {
         // ✅ Cek lagi jika status berubah jadi nonaktif
         if (data.status === 'nonaktif') {
-          console.log('🚫 Akun nonaktif terdeteksi saat refresh, melakukan logout...')
+          logger.debug(
+            '🚫 Akun nonaktif terdeteksi saat refresh, melakukan logout...'
+          )
           const { pushToast } = useUIStore.getState()
 
           await supabase.auth.signOut()
           set({ user: null, profile: null })
 
-          let msg = 'Akun Anda dinonaktifkan. Silakan hubungi administrator.'
+          let msg =
+            'Akun Anda dinonaktifkan. Silakan hubungi administrator.'
           if (data.role === 'siswa') {
-            msg = 'Akun siswa Anda dinonaktifkan. Silakan hubungi wali kelas atau admin.'
+            msg =
+              'Akun siswa Anda dinonaktifkan. Silakan hubungi wali kelas atau admin.'
           } else if (data.role === 'guru') {
-            msg = 'Akun guru Anda dinonaktifkan. Silakan hubungi administrator.'
+            msg =
+              'Akun guru Anda dinonaktifkan. Silakan hubungi administrator.'
           }
           if (data.alasan_nonaktif) {
             msg += ` Alasan: ${data.alasan_nonaktif}`
@@ -340,10 +350,10 @@ export const useAuthStore = create((set, get) => ({
 
         set({ profile: data })
       } else if (error) {
-        console.error('Refresh profile error:', error)
+        logger.error('Refresh profile error:', error)
       }
     } catch (err) {
-      console.error('Refresh profile error (catch):', err)
+      logger.error('Refresh profile error (catch):', err)
     }
   },
 
