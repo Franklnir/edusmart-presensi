@@ -4,7 +4,6 @@ import { useUIStore } from '../../store/useUIStore'
 import { useAuthStore } from '../../store/useAuthStore'
 
 /* ===== Utils ===== */
-const FORBIDDEN = /[.#$/[\]]/
 const slug = (s = '') =>
   s
     .toString()
@@ -427,7 +426,7 @@ export default function AHome() {
         })
       }
     } catch (error) {
-      // Tidak perlu toast untuk error detail, karena form sudah reset
+      // Tidak perlu toast untuk error detail
     }
   }
 
@@ -536,7 +535,6 @@ export default function AHome() {
     const payload = {
       nama,
       keterangan: eskulForm.keterangan || '',
-      // simpan hari sebagai string "Senin, Rabu" (multi hari)
       hari: eskulForm.hari || '',
       jam_mulai: eskulForm.jam_mulai || '',
       jam_selesai: eskulForm.jam_selesai || '',
@@ -671,15 +669,12 @@ export default function AHome() {
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 py-6">
       <div className="w-full space-y-8 px-4 sm:px-6 lg:px-8">
         {/* Header */}
-        <div className="text-center">
-  
-        </div>
+        <div className="text-center"></div>
 
         {/* --- DASHBOARD STATISTICS --- */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
           <StatCard label="Total Siswa" value={stats.siswa} icon="👨‍🎓" color="blue" />
           <StatCard label="Total Guru" value={stats.guru} icon="👨‍🏫" color="green" />
-          {/* Card Total Admin DIHAPUS sesuai permintaan */}
           <StatCard label="Kelas" value={stats.kelas} icon="🏫" color="purple" />
           <StatCard label="Absensi" value={stats.absensi} icon="📊" color="orange" />
           <StatCard
@@ -831,7 +826,6 @@ export default function AHome() {
               </div>
 
               <div className="p-6">
-                {/* max-h disamakan dengan daftar anggota eskul (max-h-80) supaya scroll rapi */}
                 <div className="space-y-4 max-h-80 overflow-y-auto pr-2">
                   {pengumumanList.map((p, index) => (
                     <div
@@ -1200,7 +1194,6 @@ export default function AHome() {
                       </span>
                       Daftar Anggota
                     </h4>
-                    {/* max-h-80: disamakan dengan daftar pengumuman */}
                     <div className="space-y-4 max-h-80 overflow-y-auto pr-2">
                       {anggotaDisplay.map((a) => (
                         <div
