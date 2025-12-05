@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { Link, useNavigate } from 'react-router-dom'
+import { logError } from '../../utils/logger'
 import '../../styles/Login.css'
 
 const initialSettings = {
@@ -9,39 +10,45 @@ const initialSettings = {
   logo_url: '',
   registrasi_siswa_aktif: true,
   registrasi_guru_aktif: true,
-  registrasi_admin_aktif: false
+  registrasi_admin_aktif: false,
+  alamat: '',
+  telepon: '',
+  email: '',
+  link_facebook: null,
+  link_instagram: null,
+  link_youtube: null,
+  link_tiktok: null
 }
 
 const initialForm = {
   nama: '',
   email: '',
   password: '',
-  confirmPassword: '',
-  kelas: '',
-  jk: '',
-  telp: ''
+  confirmPassword: ''
 }
 
 export default function Register() {
   const nav = useNavigate()
 
-  /* ====== STATE PENGATURAN ====== */
+  /* ====== STATE PENGATURAN (settings) ====== */
   const [settings, setSettings] = useState(initialSettings)
   const [settingsId, setSettingsId] = useState(null)
   const [loadingSettings, setLoadingSettings] = useState(true)
 
-  /* ====== STATE REGISTRASI ====== */
+  /* ====== STATE REGISTRASI & OTP ====== */
   const [selectedRole, setSelectedRole] = useState(null)
   const [form, setForm] = useState(initialForm)
+
+  const [step, setStep] = useState('email') // 'email' | 'otp'
+  const [otp, setOtp] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
 
-  /* ====== DATA KELAS (kalau nanti dipakai) ====== */
-  const [kelasList, setKelasList] = useState([])
-  const [loadingKelas, setLoadingKelas] = useState(true)
+  const [otpSent, setOtpSent] = useState(false)
+  const [otpCooldown, setOtpCooldown] = useState(0) // detik untuk resend
 
-  // ========= LOAD SETTINGS =========
+  /* ====== LOAD SETTINGS SEKALI DI AWAL ====== */
   useEffect(() => {
     let isCancelled = false
 
@@ -63,17 +70,25 @@ export default function Register() {
 
         if (!isCancelled && data) {
           setSettingsId(data.id)
-          setSettings({
+          setSettings(prev => ({
+            ...prev,
             nama_sekolah: data.nama_sekolah || '',
             logo_url: data.logo_url || '',
             registrasi_siswa_aktif: data.registrasi_siswa_aktif ?? true,
             registrasi_guru_aktif: data.registrasi_guru_aktif ?? true,
-            registrasi_admin_aktif: data.registrasi_admin_aktif ?? false
-          })
+            registrasi_admin_aktif: data.registrasi_admin_aktif ?? false,
+            alamat: data.alamat || '',
+            telepon: data.telepon || '',
+            email: data.email || '',
+            link_facebook: data.link_facebook,
+            link_instagram: data.link_instagram,
+            link_youtube: data.link_youtube,
+            link_tiktok: data.link_tiktok
+          }))
         }
       } catch (err) {
         if (!isCancelled) {
-          console.error('Gagal load settings:', err)
+          logError('Gagal load settings register:', err)
         }
       } finally {
         if (!isCancelled) {
@@ -88,7 +103,7 @@ export default function Register() {
     }
   }, [])
 
-  // ========= REALTIME LISTENER SETTINGS =========
+  /* ====== REALTIME UPDATE SETTINGS (optional) ====== */
   useEffect(() => {
     if (!settingsId) return
 
@@ -102,17 +117,25 @@ export default function Register() {
           table: 'settings',
           filter: `id=eq.${settingsId}`
         },
-        (payload) => {
+        payload => {
           const row = payload.new
           if (!row) return
 
-          setSettings({
+          setSettings(prev => ({
+            ...prev,
             nama_sekolah: row.nama_sekolah || '',
             logo_url: row.logo_url || '',
             registrasi_siswa_aktif: row.registrasi_siswa_aktif ?? true,
             registrasi_guru_aktif: row.registrasi_guru_aktif ?? true,
-            registrasi_admin_aktif: row.registrasi_admin_aktif ?? false
-          })
+            registrasi_admin_aktif: row.registrasi_admin_aktif ?? false,
+            alamat: row.alamat || '',
+            telepon: row.telepon || '',
+            email: row.email || '',
+            link_facebook: row.link_facebook,
+            link_instagram: row.link_instagram,
+            link_youtube: row.link_youtube,
+            link_tiktok: row.link_tiktok
+          }))
         }
       )
       .subscribe()
@@ -122,95 +145,100 @@ export default function Register() {
     }
   }, [settingsId])
 
-  // ========= LOAD DATA KELAS (optional) =========
+  /* ====== TIMER COOLDOWN OTP (untuk tombol resend) ====== */
   useEffect(() => {
-    let isCancelled = false
+    if (!otpSent || otpCooldown <= 0) return
 
-    async function loadKelas() {
-      setLoadingKelas(true)
-      try {
-        const { data, error } = await supabase
-          .from('kelas')
-          .select('id, nama, grade, suffix')
-          .order('grade', { ascending: true })
-          .order('nama', { ascending: true })
-
-        if (error) throw error
-
-        if (!isCancelled && data) {
-          setKelasList(data)
+    const timer = setInterval(() => {
+      setOtpCooldown(prev => {
+        if (prev <= 1) {
+          clearInterval(timer)
+          return 0
         }
-      } catch (err) {
-        if (!isCancelled) {
-          console.error('Gagal load kelas:', err)
-        }
-      } finally {
-        if (!isCancelled) {
-          setLoadingKelas(false)
-        }
-      }
-    }
+        return prev - 1
+      })
+    }, 1000)
 
-    loadKelas()
-    return () => {
-      isCancelled = true
-    }
-  }, [])
+    return () => clearInterval(timer)
+  }, [otpSent, otpCooldown])
 
-  /* ====== LOGIKA BANTUAN ====== */
+  /* ====== HELPER ====== */
+  const resetMessages = () => {
+    setErrorMessage('')
+    setSuccessMessage('')
+  }
+
   const allDisabled =
     !settings.registrasi_siswa_aktif &&
     !settings.registrasi_guru_aktif &&
     !settings.registrasi_admin_aktif
 
-  const handleSelectRole = (role) => {
+  const handleSelectRole = role => {
     setSelectedRole(role)
-    setErrorMessage('')
-    setSuccessMessage('')
-    // reset form tapi pertahankan email kalau sudah diisi
-    setForm(prev => ({
-      ...initialForm,
-      email: prev.email
-    }))
+    resetMessages()
+    setStep('email')
+    setOtp('')
   }
 
-  const handleInputChange = (e) => {
+  const handleInputChange = e => {
     const { name, value } = e.target
+    resetMessages()
     setForm(prev => ({
       ...prev,
       [name]: value
     }))
   }
 
-  const validateForm = () => {
+  const validateEmailStep = () => {
     if (!selectedRole) return 'Silakan pilih jenis akun terlebih dahulu.'
     if (!form.nama.trim()) return 'Nama lengkap wajib diisi.'
     if (!form.email.trim()) return 'Email wajib diisi.'
-    if (!form.password) return 'Password wajib diisi.'
-    
-    // Validasi password yang lebih ketat
-    if (form.password.length < 6) {
-      return 'Password minimal 6 karakter.'
+
+    const email = form.email.trim().toLowerCase()
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailRegex.test(email)) {
+      return 'Format email tidak valid.'
     }
-    
-    if (!/(?=.*[A-Z])/.test(form.password)) {
-      return 'Password harus mengandung minimal 1 huruf besar.'
+
+    // Hanya izinkan email Gmail
+    if (!email.endsWith('@gmail.com')) {
+      return 'Hanya email Gmail (@gmail.com) yang diizinkan untuk registrasi.'
     }
-    
-    if (!/(?=.*\d)/.test(form.password)) {
-      return 'Password harus mengandung minimal 1 angka.'
-    }
-    
-    if (form.password !== form.confirmPassword) return 'Konfirmasi password tidak sama.'
+
     return null
   }
 
-  const handleSubmit = async (e) => {
-    e.preventDefault()
-    setErrorMessage('')
-    setSuccessMessage('')
+  const validateOtpStep = () => {
+    if (!otp.trim()) return 'Kode OTP wajib diisi.'
+    if (!/^\d{6}$/.test(otp.trim())) {
+      return 'OTP harus 6 digit angka.'
+    }
 
-    const validationError = validateForm()
+    if (!form.password) return 'Password wajib diisi.'
+    if (form.password.length < 8) {
+      return 'Password minimal 8 karakter.'
+    }
+    if (!/(?=.*[A-Z])/.test(form.password)) {
+      return 'Password harus mengandung minimal 1 huruf besar.'
+    }
+    if (!/(?=.*\d)/.test(form.password)) {
+      return 'Password harus mengandung minimal 1 angka.'
+    }
+    if (/\s/.test(form.password)) {
+      return 'Password tidak boleh mengandung spasi.'
+    }
+    if (form.password !== form.confirmPassword) {
+      return 'Konfirmasi password tidak sama.'
+    }
+    return null
+  }
+
+  /* ====== STEP 1: KIRIM OTP KE EMAIL ====== */
+  const handleSendOtp = async e => {
+    e.preventDefault()
+    resetMessages()
+
+    const validationError = validateEmailStep()
     if (validationError) {
       setErrorMessage(validationError)
       return
@@ -218,59 +246,166 @@ export default function Register() {
 
     try {
       setSubmitting(true)
+      const email = form.email.trim().toLowerCase()
 
-      // Buat user di Auth
-      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-        email: form.email.trim(),
-        password: form.password,
-        options: {
-          data: {
-            nama: form.nama.trim(),
+      // PANGGIL EDGE FUNCTION: send-otp-register
+      const { data, error } = await supabase.functions.invoke(
+        'send-otp-register',
+        {
+          body: {
+            email,
             role: selectedRole,
-            kelas: null,
-            jk: null,
-            telp: null
+            nama: form.nama.trim()
           }
         }
-      })
+      )
 
-      if (signUpError) {
-        setErrorMessage(signUpError.message || 'Gagal mendaftar. Coba lagi.')
-        return
-      }
-
-      const user = signUpData?.user
-      if (!user) {
+      if (error) {
+        logError('send-otp-register error:', error)
         setErrorMessage(
-          'Registrasi berhasil dibuat, namun user belum tersedia. Cek email verifikasi terlebih dahulu.'
+          data?.message ||
+            error.message ||
+            'Gagal mengirim OTP. Coba beberapa saat lagi.'
         )
         return
       }
 
-      // Insert ke tabel profiles
-      const profilePayload = {
-        id: user.id,
-        email: user.email,
-        nama: form.nama.trim(),
-        role: selectedRole,
-        kelas: null,
-        jk: null,
-        telp: null,
-        status: 'active'
+      if (!data?.ok) {
+        setErrorMessage(
+          data?.message || 'Gagal mengirim OTP. Silakan hubungi admin.'
+        )
+        return
       }
 
-      const { error: profileError } = await supabase.from('profiles').insert(profilePayload)
-      if (profileError) {
-        console.warn('Gagal insert profiles:', profileError)
+      setOtpSent(true)
+      setOtpCooldown(60) // cooldown 60 detik
+      setStep('otp')
+      setSuccessMessage(
+        data.message ||
+          'OTP sudah dikirim ke email Anda. Silakan cek inbox / spam.'
+      )
+    } catch (err) {
+      logError('Unhandled error send-otp-register:', err)
+      setErrorMessage('Terjadi kesalahan saat mengirim OTP.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleResendOtp = async () => {
+    if (!otpSent || otpCooldown > 0) return
+    resetMessages()
+
+    const validationError = validateEmailStep()
+    if (validationError) {
+      setErrorMessage(validationError)
+      return
+    }
+
+    try {
+      setSubmitting(true)
+      const email = form.email.trim().toLowerCase()
+
+      const { data, error } = await supabase.functions.invoke(
+        'send-otp-register',
+        {
+          body: {
+            email,
+            role: selectedRole,
+            nama: form.nama.trim(),
+            resend: true
+          }
+        }
+      )
+
+      if (error) {
+        logError('resend-otp error:', error)
+        setErrorMessage(
+          data?.message ||
+            error.message ||
+            'Gagal mengirim ulang OTP. Coba lagi nanti.'
+        )
+        return
       }
 
-      setSuccessMessage('Berhasil mendaftar! Mengarahkan ke halaman login...')
+      if (!data?.ok) {
+        setErrorMessage(
+          data?.message || 'Gagal mengirim ulang OTP. Silakan hubungi admin.'
+        )
+        return
+      }
+
+      setOtp('')
+      setOtpCooldown(60)
+      setSuccessMessage(
+        data.message ||
+          'OTP baru sudah dikirim. Silakan cek email Anda kembali.'
+      )
+    } catch (err) {
+      logError('Unhandled error resend-otp:', err)
+      setErrorMessage('Terjadi kesalahan saat mengirim ulang OTP.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  /* ====== STEP 2: VERIFIKASI OTP & BUAT AKUN ====== */
+  const handleVerifyAndRegister = async e => {
+    e.preventDefault()
+    resetMessages()
+
+    const validationError = validateOtpStep()
+    if (validationError) {
+      setErrorMessage(validationError)
+      return
+    }
+
+    try {
+      setSubmitting(true)
+      const email = form.email.trim().toLowerCase()
+
+      // PANGGIL EDGE FUNCTION: verify-otp-register
+      const { data, error } = await supabase.functions.invoke(
+        'verify-otp-register',
+        {
+          body: {
+            email,
+            role: selectedRole,
+            otp: otp.trim(),
+            nama: form.nama.trim(),
+            password: form.password
+            // kalau nanti kamu mau kirim kelas/jk/telp, tambahkan di sini
+          }
+        }
+      )
+
+      if (error) {
+        logError('verify-otp-register error:', error)
+        setErrorMessage(
+          data?.message ||
+            error.message ||
+            'Gagal verifikasi OTP. Coba beberapa saat lagi.'
+        )
+        return
+      }
+
+      if (!data?.ok) {
+        setErrorMessage(
+          data?.message || 'Verifikasi OTP gagal. Silakan ulangi proses.'
+        )
+        return
+      }
+
+      setSuccessMessage(
+        data.message ||
+          'Registrasi berhasil! Silakan login menggunakan akun Anda.'
+      )
       setTimeout(() => {
         nav('/login')
       }, 2000)
     } catch (err) {
-      console.error('Error submit:', err)
-      setErrorMessage('Terjadi kesalahan saat mendaftar. Coba beberapa saat lagi.')
+      logError('Unhandled error verify-otp-register:', err)
+      setErrorMessage('Terjadi kesalahan saat memproses registrasi.')
     } finally {
       setSubmitting(false)
     }
@@ -285,18 +420,26 @@ export default function Register() {
     )
   }
 
-  const schoolName = settings.nama_sekolah || 'bapak penabur'
+  const schoolName = settings.nama_sekolah || 'Nama Sekolah'
   const logoUrl = settings.logo_url
-  const address = settings.alamat || 'jl. kasuarieewd'
-  const phone = settings.telepon || '0895318323655'
-  const emailSekolah = settings.email || 'milertr26@gmail.com'
+  const address = settings.alamat || 'Alamat sekolah belum diisi'
+  const phone = settings.telepon || '-'
+  const emailSekolah = settings.email || '-'
 
   const socials = [
     { key: 'facebook', href: settings?.link_facebook, icon: 'ri-facebook-fill' },
     { key: 'tiktok', href: settings?.link_tiktok, icon: 'ri-tiktok-fill' },
-    { key: 'instagram', href: settings?.link_instagram, icon: 'ri-instagram-fill' },
+    {
+      key: 'instagram',
+      href: settings?.link_instagram,
+      icon: 'ri-instagram-fill'
+    },
     { key: 'youtube', href: settings?.link_youtube, icon: 'ri-youtube-fill' }
   ].filter(social => social.href)
+
+  const canSendOtp = !submitting && !allDisabled
+  const canVerify =
+    !submitting && otpSent && step === 'otp' && otp.trim().length === 6
 
   return (
     <div className="login">
@@ -308,7 +451,7 @@ export default function Register() {
       </div>
 
       <div className="login__container">
-        {/* Brand Section - kiri (sama seperti Login) */}
+        {/* Brand Section - kiri */}
         <div className="login__brand">
           <div className="login__brand-content">
             <div className="login__school-info">
@@ -317,7 +460,9 @@ export default function Register() {
               )}
               <div className="login__school-text">
                 <h1 className="login__school-name">{schoolName}</h1>
-                <p className="login__system-name">Sistem Absensi & Tugas Digital</p>
+                <p className="login__system-name">
+                  Sistem Absensi &amp; Tugas Digital
+                </p>
               </div>
             </div>
 
@@ -377,7 +522,8 @@ export default function Register() {
                 <div className="login__error-content">
                   <strong>Registrasi Ditutup</strong>
                   <span>
-                    Registrasi akun sedang tidak dibuka. Silakan hubungi admin sekolah.
+                    Registrasi akun sedang tidak dibuka. Silakan hubungi admin
+                    sekolah.
                   </span>
                   <Link to="/login" className="login__link">
                     Kembali ke halaman login
@@ -408,14 +554,18 @@ export default function Register() {
                       type="button"
                       onClick={() => handleSelectRole('siswa')}
                       className={`login__role-btn ${
-                        selectedRole === 'siswa' ? 'login__role-btn--active' : ''
+                        selectedRole === 'siswa'
+                          ? 'login__role-btn--active'
+                          : ''
                       }`}
                     >
                       <div className="login__role-content">
                         <i className="ri-user-fill"></i>
                         <div className="login__role-text">
                           <span className="login__role-name">Siswa</span>
-                          <span className="login__role-desc">Akses absensi dan tugas</span>
+                          <span className="login__role-desc">
+                            Akses absensi dan tugas
+                          </span>
                         </div>
                       </div>
                       <span
@@ -436,14 +586,18 @@ export default function Register() {
                       type="button"
                       onClick={() => handleSelectRole('guru')}
                       className={`login__role-btn ${
-                        selectedRole === 'guru' ? 'login__role-btn--active' : ''
+                        selectedRole === 'guru'
+                          ? 'login__role-btn--active'
+                          : ''
                       }`}
                     >
                       <div className="login__role-content">
                         <i className="ri-user-star-fill"></i>
                         <div className="login__role-text">
                           <span className="login__role-name">Guru</span>
-                          <span className="login__role-desc">Kelola kelas dan tugas</span>
+                          <span className="login__role-desc">
+                            Kelola kelas dan tugas
+                          </span>
                         </div>
                       </div>
                       <span
@@ -464,14 +618,18 @@ export default function Register() {
                       type="button"
                       onClick={() => handleSelectRole('admin')}
                       className={`login__role-btn ${
-                        selectedRole === 'admin' ? 'login__role-btn--active' : ''
+                        selectedRole === 'admin'
+                          ? 'login__role-btn--active'
+                          : ''
                       }`}
                     >
                       <div className="login__role-content">
                         <i className="ri-shield-keyhole-fill"></i>
                         <div className="login__role-text">
                           <span className="login__role-name">Admin</span>
-                          <span className="login__role-desc">Lingkungan pengembangan</span>
+                          <span className="login__role-desc">
+                            Lingkungan pengembangan
+                          </span>
                         </div>
                       </div>
                       <span
@@ -488,9 +646,9 @@ export default function Register() {
                   )}
                 </div>
 
-                {/* Form Register */}
-                {selectedRole && (
-                  <form onSubmit={handleSubmit} className="login__form">
+                {/* STEP 1: FORM NAMA + EMAIL (KIRIM OTP) */}
+                {selectedRole && step === 'email' && (
+                  <form onSubmit={handleSendOtp} className="login__form">
                     <div className="login__input-group">
                       <div className="login__input-field">
                         <i className="ri-user-3-fill"></i>
@@ -509,9 +667,70 @@ export default function Register() {
                         <input
                           type="email"
                           name="email"
-                          placeholder="Email"
+                          placeholder="Email Gmail (contoh: nama@gmail.com)"
                           value={form.email}
                           onChange={handleInputChange}
+                          required
+                        />
+                      </div>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={!canSendOtp}
+                      className="login__submit-btn"
+                    >
+                      {submitting ? (
+                        <>
+                          <div className="login__spinner"></div>
+                          Mengirim OTP...
+                        </>
+                      ) : (
+                        <>
+                          <i className="ri-mail-send-fill"></i>
+                          Kirim OTP ke Email
+                        </>
+                      )}
+                    </button>
+
+                    <div className="login__form-footer">
+                      <p>
+                        Sudah punya akun?
+                        <Link to="/login" className="login__link">
+                          {' '}
+                          Masuk di sini
+                        </Link>
+                      </p>
+                    </div>
+                  </form>
+                )}
+
+                {/* STEP 2: FORM OTP + PASSWORD */}
+                {selectedRole && step === 'otp' && (
+                  <form
+                    onSubmit={handleVerifyAndRegister}
+                    className="login__form"
+                  >
+                    <div className="login__input-group">
+                      <div className="login__input-field login__input-field--readonly">
+                        <i className="ri-mail-fill"></i>
+                        <input
+                          type="email"
+                          value={form.email}
+                          readOnly
+                          disabled
+                        />
+                      </div>
+
+                      <div className="login__input-field">
+                        <i className="ri-shield-keyhole-fill"></i>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          maxLength={6}
+                          placeholder="Kode OTP 6 digit"
+                          value={otp}
+                          onChange={e => setOtp(e.target.value)}
                           required
                         />
                       </div>
@@ -525,6 +744,7 @@ export default function Register() {
                             placeholder="Password"
                             value={form.password}
                             onChange={handleInputChange}
+                            autoComplete="new-password"
                             required
                           />
                         </div>
@@ -537,31 +757,61 @@ export default function Register() {
                             placeholder="Konfirmasi Password"
                             value={form.confirmPassword}
                             onChange={handleInputChange}
+                            autoComplete="new-password"
                             required
                           />
                         </div>
                       </div>
                     </div>
 
+                    <div className="login__form-options">
+                      <button
+                        type="button"
+                        className="login__link login__link--inline"
+                        onClick={handleResendOtp}
+                        disabled={submitting || otpCooldown > 0}
+                      >
+                        {otpCooldown > 0
+                          ? `Kirim ulang OTP dalam ${otpCooldown}s`
+                          : 'Kirim ulang OTP'}
+                      </button>
+                    </div>
+
                     <button
                       type="submit"
-                      disabled={submitting}
+                      disabled={!canVerify}
                       className="login__submit-btn"
                     >
                       {submitting ? (
                         <>
                           <div className="login__spinner"></div>
-                          Mendaftarkan...
+                          Memproses...
                         </>
                       ) : (
                         <>
                           <i className="ri-user-add-fill"></i>
-                          Daftar Sekarang
+                          Daftar &amp; Verifikasi
                         </>
                       )}
                     </button>
 
                     <div className="login__form-footer">
+                      <p>
+                        Salah email?
+                        <button
+                          type="button"
+                          className="login__link login__link--inline"
+                          onClick={() => {
+                            setStep('email')
+                            setOtp('')
+                            setOtpSent(false)
+                            setOtpCooldown(0)
+                            resetMessages()
+                          }}
+                        >
+                          Ubah email / role
+                        </button>
+                      </p>
                       <p>
                         Sudah punya akun?
                         <Link to="/login" className="login__link">
