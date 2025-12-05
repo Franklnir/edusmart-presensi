@@ -128,6 +128,29 @@ function getKelasDisplayName(kelasObj) {
   return kelasObj.nama || kelasObj.id || ''
 }
 
+// Format nomor telepon untuk display
+const formatPhoneDisplay = (phone) => {
+  if (!phone) return '-'
+  
+  const cleanPhone = phone.replace(/\D/g, '')
+  
+  if (cleanPhone.startsWith('62')) {
+    const operatorCode = cleanPhone.slice(2, 4)
+    const firstPart = cleanPhone.slice(4, 8)
+    const secondPart = cleanPhone.slice(8)
+    return `+62 ${operatorCode}-${firstPart}-${secondPart}`
+  }
+  
+  if (cleanPhone.startsWith('0') && cleanPhone.length >= 10) {
+    const operatorCode = cleanPhone.slice(1, 4)
+    const firstPart = cleanPhone.slice(4, 8)
+    const secondPart = cleanPhone.slice(8)
+    return `0${operatorCode}-${firstPart}-${secondPart}`
+  }
+  
+  return phone
+}
+
 /* ===== Komponen Loading ===== */
 function LoadingSpinner({ size = 'md', text = 'Memuat...' }) {
   const sizes = { sm: 'h-4 w-4', md: 'h-6 w-6', lg: 'h-8 w-8' }
@@ -315,17 +338,13 @@ export default function ASiswa() {
   const [moveKelas, setMoveKelas] = useState('')
   const [moveGrade, setMoveGrade] = useState('')
 
-  // Form tambah siswa
+  // Form tambah siswa (SIMPLE VERSION - tanpa telepon, agama, usia, alamat)
   const [form, setForm] = useState({
     email: '',
     nama: '',
     kelas: '',
     nik: '',
     jk: '',
-    usia: '',
-    agama: '',
-    alamat: '',
-    telp: '',
     password: '',
     confirmPassword: ''
   })
@@ -362,6 +381,14 @@ export default function ASiswa() {
   const [promotionFilterGrade, setPromotionFilterGrade] = useState('')
   const [promotionFilterKelas, setPromotionFilterKelas] = useState('')
   const [promotionSelectedIds, setPromotionSelectedIds] = useState([])
+
+  // Edit HP Siswa & Wali
+  const [editingPhone, setEditingPhone] = useState(false)
+  const [editPhoneForm, setEditPhoneForm] = useState({
+    no_hp_siswa: '',
+    no_hp_wali: ''
+  })
+  const [phoneErrors, setPhoneErrors] = useState({})
 
   // Cleanup channel
   useEffect(() => {
@@ -766,6 +793,15 @@ export default function ASiswa() {
         setDetailUser(u)
         setMoveKelas(u.kelas || '')
         setMoveGrade(getGradeLabel(u.kelas || '') || '')
+        
+        // Set edit phone form
+        setEditPhoneForm({
+          no_hp_siswa: u.no_hp_siswa || '',
+          no_hp_wali: u.no_hp_wali || ''
+        })
+        
+        setEditingPhone(false)
+        
         setDetailLoading(true)
         setDetailOpen(true)
 
@@ -838,6 +874,8 @@ export default function ASiswa() {
     setRfidInput('')
     setRfidLastScan(null)
     setRfidEnrolling(false)
+    setEditingPhone(false)
+    setPhoneErrors({})
     if (rfidChannel) {
       supabase.removeChannel(rfidChannel)
       setRfidChannel(null)
@@ -928,6 +966,104 @@ export default function ASiswa() {
     } catch (error) {
       console.error('Error clearing kelas:', error)
       pushToast('error', 'Gagal mengosongkan kelas')
+    }
+  }
+
+  /* ===== Edit Nomor HP Siswa & Wali ===== */
+  const handleEditPhone = () => {
+    setEditingPhone(true)
+  }
+
+  const handleCancelEditPhone = () => {
+    setEditingPhone(false)
+    setEditPhoneForm({
+      no_hp_siswa: detailUser?.no_hp_siswa || '',
+      no_hp_wali: detailUser?.no_hp_wali || ''
+    })
+    setPhoneErrors({})
+  }
+
+  const handlePhoneChange = (e) => {
+    const { name, value } = e.target
+    setEditPhoneForm(prev => ({ ...prev, [name]: value }))
+    
+    // Clear error when user types
+    if (phoneErrors[name]) {
+      setPhoneErrors(prev => ({ ...prev, [name]: '' }))
+    }
+  }
+
+  // Validasi nomor telepon Indonesia
+  const validatePhoneNumber = (phone, fieldName) => {
+    if (!phone) return '' // Opsional, tidak error jika kosong
+    
+    // Hapus semua karakter non-digit
+    const cleanPhone = phone.replace(/\D/g, '')
+    
+    // Validasi panjang maksimal 14 digit
+    if (cleanPhone.length > 14) {
+      return `Nomor ${fieldName} maksimal 14 digit`
+    }
+    
+    // Validasi format Indonesia
+    const indonesianPhoneRegex = /^(?:\+62|62|0)[2-9]\d{7,11}$/
+    if (!indonesianPhoneRegex.test(cleanPhone)) {
+      return `Format nomor ${fieldName} tidak valid. Contoh: 081234567890`
+    }
+    
+    return ''
+  }
+
+  const handleSavePhone = async () => {
+    // Validasi
+    const errors = {}
+    const noHpSiswaError = validatePhoneNumber(editPhoneForm.no_hp_siswa, 'HP Siswa')
+    const noHpWaliError = validatePhoneNumber(editPhoneForm.no_hp_wali, 'HP Wali')
+    
+    if (noHpSiswaError) errors.no_hp_siswa = noHpSiswaError
+    if (noHpWaliError) errors.no_hp_wali = noHpWaliError
+    
+    if (Object.keys(errors).length > 0) {
+      setPhoneErrors(errors)
+      return
+    }
+
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          no_hp_siswa: editPhoneForm.no_hp_siswa || null,
+          no_hp_wali: editPhoneForm.no_hp_wali || null,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', detailUser.id)
+
+      if (error) throw error
+
+      pushToast('success', 'Nomor HP berhasil diperbarui')
+      setDetailUser(prev => prev ? ({
+        ...prev,
+        no_hp_siswa: editPhoneForm.no_hp_siswa,
+        no_hp_wali: editPhoneForm.no_hp_wali
+      }) : prev)
+      
+      // Update local state
+      setSiswaRaw(prev => prev.map(s => 
+        s.id === detailUser.id 
+          ? { ...s, no_hp_siswa: editPhoneForm.no_hp_siswa, no_hp_wali: editPhoneForm.no_hp_wali }
+          : s
+      ))
+      setSiswa(prev => prev.map(s => 
+        s.id === detailUser.id 
+          ? { ...s, no_hp_siswa: editPhoneForm.no_hp_siswa, no_hp_wali: editPhoneForm.no_hp_wali }
+          : s
+      ))
+      
+      setEditingPhone(false)
+      setPhoneErrors({})
+    } catch (error) {
+      console.error('Error saving phone numbers:', error)
+      pushToast('error', 'Gagal menyimpan nomor HP')
     }
   }
 
@@ -1260,7 +1396,7 @@ export default function ASiswa() {
     )
   }
 
-  /* ===== Tambah Siswa ===== */
+  /* ===== Tambah Siswa (SIMPLE VERSION) ===== */
   const validateForm = () => {
     const errors = {}
 
@@ -1273,8 +1409,6 @@ export default function ASiswa() {
 
     if (form.password !== form.confirmPassword) errors.confirmPassword = 'Password dan konfirmasi tidak sama'
     if (form.nik && !/^\d+$/.test(form.nik)) errors.nik = 'NIK harus berupa angka'
-    if (form.usia && (form.usia < 5 || form.usia > 25)) errors.usia = 'Usia harus antara 5-25 tahun'
-    if (form.telp && !/^[\d\s\+-]+$/.test(form.telp)) errors.telp = 'Format telepon tidak valid'
 
     setFormErrors(errors)
     return Object.keys(errors).length === 0
@@ -1296,10 +1430,6 @@ export default function ASiswa() {
       kelas: '',
       nik: '',
       jk: '',
-      usia: '',
-      agama: '',
-      alamat: '',
-      telp: '',
       password: '',
       confirmPassword: ''
     })
@@ -1337,13 +1467,11 @@ export default function ASiswa() {
         kelas: form.kelas || '',
         nik: form.nik || '',
         jk: form.jk || '',
-        usia: form.usia ? parseInt(form.usia) : null,
-        agama: form.agama || '',
-        alamat: form.alamat || '',
-        telp: form.telp || '',
         role: 'siswa',
         status: 'active',
-        created_at: new Date().toISOString()
+        created_at: new Date().toISOString(),
+        no_hp_siswa: null,
+        no_hp_wali: null
       })
 
       if (error) throw error
@@ -1438,7 +1566,7 @@ export default function ASiswa() {
           />
         </div>
 
-        {/* Form Tambah Siswa */}
+        {/* Form Tambah Siswa (SIMPLE VERSION) */}
         {showAddForm && (
           <Card className="mb-6">
             <div className="bg-blue-50 border-b border-blue-200 p-4">
@@ -1497,41 +1625,6 @@ export default function ASiswa() {
                     { value: 'P', label: 'Perempuan' }
                   ]}
                 />
-                <Input
-                  label="Usia"
-                  name="usia"
-                  value={form.usia}
-                  onChange={handleChange}
-                  placeholder="Usia dalam tahun"
-                  type="number"
-                  min="5"
-                  max="25"
-                  error={formErrors.usia}
-                />
-                <Input
-                  label="Agama"
-                  name="agama"
-                  value={form.agama}
-                  onChange={handleChange}
-                  placeholder="Agama"
-                />
-                <Input
-                  label="Telepon"
-                  name="telp"
-                  value={form.telp}
-                  onChange={handleChange}
-                  placeholder="Nomor telepon"
-                  error={formErrors.telp}
-                />
-                <div className="md:col-span-2 lg:col-span-3">
-                  <Input
-                    label="Alamat"
-                    name="alamat"
-                    value={form.alamat}
-                    onChange={handleChange}
-                    placeholder="Alamat lengkap"
-                  />
-                </div>
                 <Input
                   label="Password *"
                   name="password"
@@ -2372,6 +2465,138 @@ export default function ASiswa() {
                       </div>
                     </div>
 
+                    {/* Nomor HP Siswa & Wali - SECTION BARU */}
+                    <div className="bg-white border border-gray-200 rounded-lg p-4">
+                      <div className="flex items-center justify-between mb-4">
+                        <h4 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+                          <span>📱</span>
+                          Informasi Kontak
+                        </h4>
+                        {!editingPhone && (
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={handleEditPhone}
+                          >
+                            ✏️ Edit
+                          </Button>
+                        )}
+                      </div>
+
+                      {editingPhone ? (
+                        <div className="space-y-4">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Nomor HP Siswa
+                              </label>
+                              <div className="relative">
+                                <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+                                  <span className="text-gray-500 text-sm">+62</span>
+                                </div>
+                                <input
+                                  type="tel"
+                                  name="no_hp_siswa"
+                                  value={editPhoneForm.no_hp_siswa}
+                                  onChange={handlePhoneChange}
+                                  className={`w-full px-3 py-2 pl-12 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 ${
+                                    phoneErrors.no_hp_siswa ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                                  }`}
+                                  placeholder="81234567890"
+                                  maxLength={14}
+                                />
+                              </div>
+                              {phoneErrors.no_hp_siswa && (
+                                <p className="mt-1 text-xs text-red-600">
+                                  {phoneErrors.no_hp_siswa}
+                                </p>
+                              )}
+                              <p className="mt-1 text-xs text-gray-500">
+                                Contoh: 081234567890 atau +6281234567890
+                              </p>
+                            </div>
+
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Nomor HP Orang Tua/Wali
+                              </label>
+                              <div className="relative">
+                                <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+                                  <span className="text-gray-500 text-sm">+62</span>
+                                </div>
+                                <input
+                                  type="tel"
+                                  name="no_hp_wali"
+                                  value={editPhoneForm.no_hp_wali}
+                                  onChange={handlePhoneChange}
+                                  className={`w-full px-3 py-2 pl-12 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 ${
+                                    phoneErrors.no_hp_wali ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                                  }`}
+                                  placeholder="81234567890"
+                                  maxLength={14}
+                                />
+                              </div>
+                              {phoneErrors.no_hp_wali && (
+                                <p className="mt-1 text-xs text-red-600">
+                                  {phoneErrors.no_hp_wali}
+                                </p>
+                              )}
+                              <p className="mt-1 text-xs text-gray-500">
+                                Contoh: 081234567890 atau +6281234567890
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex justify-end space-x-3">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={handleCancelEditPhone}
+                            >
+                              ✕ Batal
+                            </Button>
+                            <Button
+                              variant="success"
+                              size="sm"
+                              onClick={handleSavePhone}
+                            >
+                              💾 Simpan
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="p-3 bg-gray-50 rounded-lg">
+                            <p className="text-sm font-medium text-gray-700 mb-1">
+                              Nomor HP Siswa
+                            </p>
+                            <p className="text-lg font-semibold text-gray-900">
+                              {formatPhoneDisplay(detailUser?.no_hp_siswa) || '—'}
+                            </p>
+                            {detailUser?.no_hp_siswa && (
+                              <p className="text-xs text-gray-500 mt-1">
+                                Format asli: {detailUser.no_hp_siswa}
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="p-3 bg-gray-50 rounded-lg">
+                            <p className="text-sm font-medium text-gray-700 mb-1">
+                              Nomor HP Orang Tua/Wali
+                            </p>
+                            <p className="text-lg font-semibold text-gray-900">
+                              {formatPhoneDisplay(detailUser?.no_hp_wali) || '—'}
+                            </p>
+                            {detailUser?.no_hp_wali && (
+                              <p className="text-xs text-gray-500 mt-1">
+                                Format asli: {detailUser.no_hp_wali}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
                     {/* Organisasi & OSIS */}
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                       {/* Organisasi */}
@@ -2450,7 +2675,7 @@ export default function ASiswa() {
                         <span>📋</span>
                         Informasi Tambahan
                       </h4>
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                         <div>
                           <p className="text-sm font-medium text-gray-700">Jenis Kelamin</p>
                           <p className="text-sm text-gray-900">{JK_LABEL(detailUser?.jk)}</p>
@@ -2462,10 +2687,6 @@ export default function ASiswa() {
                         <div>
                           <p className="text-sm font-medium text-gray-700">Agama</p>
                           <p className="text-sm text-gray-900">{detailUser?.agama || '—'}</p>
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium text-gray-700">Telepon</p>
-                          <p className="text-sm text-gray-900">{detailUser?.telp || '—'}</p>
                         </div>
                         <div className="md:col-span-2 lg:col-span-1">
                           <p className="text-sm font-medium text-gray-700">Alamat</p>
