@@ -1,5 +1,5 @@
 // src/pages/auth/Register.jsx
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { Link, useNavigate } from 'react-router-dom'
 import '../../styles/Login.css'
@@ -35,13 +35,14 @@ export default function Register() {
 
   const [selectedRole, setSelectedRole] = useState(null)
   const [form, setForm] = useState(initialForm)
+
   const [submitting, setSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
 
   // ========= LOAD SETTINGS =========
   useEffect(() => {
-    let isCancelled = false
+    let cancel = false
 
     async function loadSettings() {
       setLoadingSettings(true)
@@ -53,38 +54,28 @@ export default function Register() {
           .limit(1)
           .single()
 
-        if (error && error.code === 'PGRST116') {
-          data = null
-        } else if (error) {
-          throw error
-        }
+        if (error && error.code === 'PGRST116') data = null
+        else if (error) throw error
 
-        if (!isCancelled) {
+        if (!cancel) {
           const merged = { ...DEFAULT_SETTINGS, ...(data || {}) }
           setSettings(merged)
-          setSettingsId(data?.id || null)
+          if (data?.id) setSettingsId(data.id)
         }
-      } catch (err) {
-        if (!isCancelled) {
-          console.error('Gagal load settings:', err)
-          setSettings(DEFAULT_SETTINGS)
-          setSettingsId(null)
-        }
+      } catch (e) {
+        if (!cancel) setSettings(DEFAULT_SETTINGS)
       } finally {
-        if (!isCancelled) setLoadingSettings(false)
+        if (!cancel) setLoadingSettings(false)
       }
     }
 
     loadSettings()
-    return () => {
-      isCancelled = true
-    }
+    return () => { cancel = true }
   }, [])
 
   // ========= REALTIME SETTINGS =========
   useEffect(() => {
     if (!settingsId) return
-
     const channel = supabase
       .channel('register_settings_realtime')
       .on(
@@ -98,21 +89,33 @@ export default function Register() {
       )
       .subscribe()
 
-    return () => {
-      supabase.removeChannel(channel)
-    }
+    return () => supabase.removeChannel(channel)
   }, [settingsId])
 
-  const allDisabled =
-    !settings.registrasi_siswa_aktif &&
-    !settings.registrasi_guru_aktif &&
-    !settings.registrasi_admin_aktif
+  const allDisabled = useMemo(() => {
+    return !settings.registrasi_siswa_aktif &&
+      !settings.registrasi_guru_aktif &&
+      !settings.registrasi_admin_aktif
+  }, [settings])
+
+  const schoolName = settings.nama_sekolah || 'Sekolah'
+  const logoUrl = settings.logo_url || ''
+  const address = settings.alamat || ''
+  const phone = settings.telepon || ''
+  const emailSekolah = settings.email || ''
+
+  const socials = useMemo(() => ([
+    { key: 'facebook', href: settings.link_facebook, icon: 'ri-facebook-fill' },
+    { key: 'tiktok', href: settings.link_tiktok, icon: 'ri-tiktok-fill' },
+    { key: 'instagram', href: settings.link_instagram, icon: 'ri-instagram-fill' },
+    { key: 'youtube', href: settings.link_youtube, icon: 'ri-youtube-fill' }
+  ].filter(s => s.href && s.href.trim() !== '')), [settings])
 
   const handleSelectRole = (role) => {
     setSelectedRole(role)
     setErrorMessage('')
     setSuccessMessage('')
-    setForm(initialForm)
+    setForm(prev => ({ ...initialForm, email: prev.email }))
   }
 
   const handleInputChange = (e) => {
@@ -126,7 +129,6 @@ export default function Register() {
 
     const email = form.email.trim().toLowerCase()
     if (!email) return 'Email wajib diisi.'
-
     const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
     if (!emailPattern.test(email)) return 'Format email tidak valid.'
     if (!email.endsWith('@gmail.com')) {
@@ -139,10 +141,8 @@ export default function Register() {
     if (!/(?=.*\d)/.test(form.password)) return 'Password harus mengandung minimal 1 angka.'
     if (form.password !== form.confirmPassword) return 'Konfirmasi password tidak sama.'
 
-    // extra guard: batasi admin dari UI (kalau settings admin off)
-    if (selectedRole === 'admin' && !settings.registrasi_admin_aktif) {
-      return 'Registrasi admin tidak dibuka.'
-    }
+    // block admin signup dari UI (lebih aman)
+    if (selectedRole === 'admin') return 'Registrasi admin tidak dibuka lewat halaman ini.'
 
     return null
   }
@@ -152,35 +152,29 @@ export default function Register() {
     setErrorMessage('')
     setSuccessMessage('')
 
-    const validationError = validateForm()
-    if (validationError) {
-      setErrorMessage(validationError)
-      return
-    }
+    const err = validateForm()
+    if (err) return setErrorMessage(err)
 
+    setSubmitting(true)
     try {
-      setSubmitting(true)
       const email = form.email.trim().toLowerCase()
 
       const { data, error } = await supabase.auth.signUp({
         email,
         password: form.password,
         options: {
-          // metadata ini akan dipakai trigger handle_new_user()
+          // ini yang dipakai saat login pertama untuk bikin profiles
           data: {
             nama: form.nama.trim(),
             role: selectedRole
-          }
+          },
+          emailRedirectTo: `${window.location.origin}/login`
         }
       })
 
       if (error) {
         const msg = (error.message || '').toLowerCase()
-
-        // rate limit / throttle supabase auth
-        if (msg.includes('for security purposes')) {
-          setErrorMessage('Terlalu banyak percobaan. Coba lagi sebentar lagi ya.')
-        } else if (msg.includes('already registered')) {
+        if (msg.includes('already registered')) {
           setErrorMessage('Email sudah terdaftar. Silakan login.')
         } else {
           setErrorMessage(error.message || 'Gagal mendaftar. Coba lagi.')
@@ -188,23 +182,12 @@ export default function Register() {
         return
       }
 
-      // Kalau email confirmation ON, biasanya session null dan user ada.
-      // Trigger sudah membuat row profiles otomatis.
-      const user = data?.user
-      if (!user) {
-        setSuccessMessage('Registrasi dibuat. Silakan cek email untuk verifikasi.')
-      } else {
-        setSuccessMessage('Berhasil mendaftar! Silakan cek email Gmail kamu untuk verifikasi.')
-      }
-
-      // optional: kalau tiba-tiba session ada (confirm OFF), biar flow tetap rapi:
-      if (data?.session) {
-        await supabase.auth.signOut()
-      }
-
-      setTimeout(() => nav('/login'), 1500)
-    } catch (err) {
-      console.error('Error submit:', err)
+      // IMPORTANT:
+      // Kalau email confirm ON, biasanya data.session = null. Jadi jangan insert profiles di sini.
+      // Nanti profiles dibuat saat user login pertama (authenticated).
+      setSuccessMessage('Berhasil mendaftar! Silakan cek email Gmail kamu untuk verifikasi.')
+      setTimeout(() => nav('/login'), 2000)
+    } catch (e2) {
       setErrorMessage('Terjadi kesalahan saat mendaftar. Coba beberapa saat lagi.')
     } finally {
       setSubmitting(false)
@@ -219,19 +202,6 @@ export default function Register() {
     )
   }
 
-  const schoolName = settings.nama_sekolah || 'Sekolah'
-  const logoUrl = settings.logo_url
-  const address = settings.alamat || ''
-  const phone = settings.telepon || ''
-  const emailSekolah = settings.email || ''
-
-  const socials = [
-    { key: 'facebook', href: settings.link_facebook, icon: 'ri-facebook-fill' },
-    { key: 'tiktok', href: settings.link_tiktok, icon: 'ri-tiktok-fill' },
-    { key: 'instagram', href: settings.link_instagram, icon: 'ri-instagram-fill' },
-    { key: 'youtube', href: settings.link_youtube, icon: 'ri-youtube-fill' }
-  ].filter(s => s.href && String(s.href).trim() !== '')
-
   return (
     <div className="login">
       <div className="login__bg">
@@ -244,7 +214,18 @@ export default function Register() {
         <div className="login__brand">
           <div className="login__brand-content">
             <div className="login__school-info">
-              {logoUrl && <img src={logoUrl} alt={schoolName} className="login__logo" />}
+              {logoUrl ? (
+                <img
+                  src={logoUrl}
+                  alt={schoolName}
+                  className="login__logo"
+                  onError={(e) => { e.currentTarget.style.display = 'none' }}
+                />
+              ) : (
+                <div className="login__logo-fallback">
+                  <i className="ri-school-fill"></i>
+                </div>
+              )}
               <div className="login__school-text">
                 <h1 className="login__school-name">{schoolName}</h1>
                 <p className="login__system-name">Sistem Absensi & Tugas Digital</p>
@@ -252,16 +233,22 @@ export default function Register() {
             </div>
 
             <div className="login__features">
-              <div className="login__feature-item"><i className="ri-shield-check-fill"></i><span>Terpercaya</span></div>
-              <div className="login__feature-item"><i className="ri-time-fill"></i><span>Real-time</span></div>
-              <div className="login__feature-item"><i className="ri-smartphone-fill"></i><span>Responsive</span></div>
+              <div className="login__feature-item">
+                <i className="ri-shield-check-fill"></i><span>Terpercaya</span>
+              </div>
+              <div className="login__feature-item">
+                <i className="ri-time-fill"></i><span>Real-time</span>
+              </div>
+              <div className="login__feature-item">
+                <i className="ri-smartphone-fill"></i><span>Responsive</span>
+              </div>
             </div>
 
             {socials.length > 0 && (
               <div className="login__social">
                 <div className="login__social-links">
                   {socials.map(s => (
-                    <a key={s.key} href={s.href} target="_blank" rel="noopener" className="login__social-link">
+                    <a key={s.key} href={s.href} target="_blank" rel="noopener noreferrer" className="login__social-link">
                       <i className={s.icon}></i>
                     </a>
                   ))}
@@ -317,11 +304,8 @@ export default function Register() {
                   <p className="login__role-title">Pilih Jenis Akun</p>
 
                   {settings.registrasi_siswa_aktif && (
-                    <button
-                      type="button"
-                      onClick={() => handleSelectRole('siswa')}
-                      className={`login__role-btn ${selectedRole === 'siswa' ? 'login__role-btn--active' : ''}`}
-                    >
+                    <button type="button" onClick={() => handleSelectRole('siswa')}
+                      className={`login__role-btn ${selectedRole === 'siswa' ? 'login__role-btn--active' : ''}`}>
                       <div className="login__role-content">
                         <i className="ri-user-fill"></i>
                         <div className="login__role-text">
@@ -329,20 +313,15 @@ export default function Register() {
                           <span className="login__role-desc">Akses absensi dan tugas</span>
                         </div>
                       </div>
-                      <span className={'login__role-badge ' + (selectedRole === 'siswa'
-                        ? 'login__role-badge--selected'
-                        : 'login__role-badge--active')}>
+                      <span className={'login__role-badge ' + (selectedRole === 'siswa' ? 'login__role-badge--selected' : 'login__role-badge--active')}>
                         {selectedRole === 'siswa' ? 'Dipilih' : 'Dibuka'}
                       </span>
                     </button>
                   )}
 
                   {settings.registrasi_guru_aktif && (
-                    <button
-                      type="button"
-                      onClick={() => handleSelectRole('guru')}
-                      className={`login__role-btn ${selectedRole === 'guru' ? 'login__role-btn--active' : ''}`}
-                    >
+                    <button type="button" onClick={() => handleSelectRole('guru')}
+                      className={`login__role-btn ${selectedRole === 'guru' ? 'login__role-btn--active' : ''}`}>
                       <div className="login__role-content">
                         <i className="ri-user-star-fill"></i>
                         <div className="login__role-text">
@@ -350,86 +329,39 @@ export default function Register() {
                           <span className="login__role-desc">Kelola kelas dan tugas</span>
                         </div>
                       </div>
-                      <span className={'login__role-badge ' + (selectedRole === 'guru'
-                        ? 'login__role-badge--selected'
-                        : 'login__role-badge--active')}>
+                      <span className={'login__role-badge ' + (selectedRole === 'guru' ? 'login__role-badge--selected' : 'login__role-badge--active')}>
                         {selectedRole === 'guru' ? 'Dipilih' : 'Dibuka'}
-                      </span>
-                    </button>
-                  )}
-
-                  {settings.registrasi_admin_aktif && (
-                    <button
-                      type="button"
-                      onClick={() => handleSelectRole('admin')}
-                      className={`login__role-btn ${selectedRole === 'admin' ? 'login__role-btn--active' : ''}`}
-                    >
-                      <div className="login__role-content">
-                        <i className="ri-shield-keyhole-fill"></i>
-                        <div className="login__role-text">
-                          <span className="login__role-name">Admin</span>
-                          <span className="login__role-desc">Lingkungan pengembangan</span>
-                        </div>
-                      </div>
-                      <span className={'login__role-badge ' + (selectedRole === 'admin'
-                        ? 'login__role-badge--selected'
-                        : 'login__role-badge--warning')}>
-                        {selectedRole === 'admin' ? 'Dipilih' : 'Resiko Tinggi'}
                       </span>
                     </button>
                   )}
                 </div>
 
                 {selectedRole && (
-                  <form onSubmit={handleSubmit} className="login__form">
+                  <form onSubmit={handleSubmit} className="login__form" noValidate>
                     <div className="login__input-group">
                       <div className="login__input-field">
                         <i className="ri-user-3-fill"></i>
-                        <input
-                          type="text"
-                          name="nama"
-                          placeholder="Nama Lengkap"
-                          value={form.nama}
-                          onChange={handleInputChange}
-                          required
-                        />
+                        <input type="text" name="nama" placeholder="Nama Lengkap"
+                          value={form.nama} onChange={handleInputChange} required />
                       </div>
 
                       <div className="login__input-field">
                         <i className="ri-mail-fill"></i>
-                        <input
-                          type="email"
-                          name="email"
-                          placeholder="Email (wajib @gmail.com)"
-                          value={form.email}
-                          onChange={handleInputChange}
-                          required
-                        />
+                        <input type="email" name="email" placeholder="Email (wajib @gmail.com)"
+                          value={form.email} onChange={handleInputChange} required />
                       </div>
 
                       <div className="login__input-row">
                         <div className="login__input-field">
                           <i className="ri-lock-password-fill"></i>
-                          <input
-                            type="password"
-                            name="password"
-                            placeholder="Password"
-                            value={form.password}
-                            onChange={handleInputChange}
-                            required
-                          />
+                          <input type="password" name="password" placeholder="Password"
+                            value={form.password} onChange={handleInputChange} required />
                         </div>
 
                         <div className="login__input-field">
                           <i className="ri-lock-password-fill"></i>
-                          <input
-                            type="password"
-                            name="confirmPassword"
-                            placeholder="Konfirmasi Password"
-                            value={form.confirmPassword}
-                            onChange={handleInputChange}
-                            required
-                          />
+                          <input type="password" name="confirmPassword" placeholder="Konfirmasi Password"
+                            value={form.confirmPassword} onChange={handleInputChange} required />
                         </div>
                       </div>
                     </div>
