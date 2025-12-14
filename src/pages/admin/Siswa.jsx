@@ -1,4 +1,3 @@
-// src/pages/admin/ASiswa.jsx
 import React, { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useUIStore } from '../../store/useUIStore'
@@ -131,23 +130,23 @@ function getKelasDisplayName(kelasObj) {
 // Format nomor telepon untuk display
 const formatPhoneDisplay = (phone) => {
   if (!phone) return '-'
-  
+
   const cleanPhone = phone.replace(/\D/g, '')
-  
+
   if (cleanPhone.startsWith('62')) {
     const operatorCode = cleanPhone.slice(2, 4)
     const firstPart = cleanPhone.slice(4, 8)
     const secondPart = cleanPhone.slice(8)
     return `+62 ${operatorCode}-${firstPart}-${secondPart}`
   }
-  
+
   if (cleanPhone.startsWith('0') && cleanPhone.length >= 10) {
     const operatorCode = cleanPhone.slice(1, 4)
     const firstPart = cleanPhone.slice(4, 8)
     const secondPart = cleanPhone.slice(8)
     return `0${operatorCode}-${firstPart}-${secondPart}`
   }
-  
+
   return phone
 }
 
@@ -352,10 +351,11 @@ export default function ASiswa() {
   const [showAddForm, setShowAddForm] = useState(false)
   const [addingSiswa, setAddingSiswa] = useState(false)
 
-  // Hapus akun siswa
+  // "Soft delete" akun siswa
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [siswaToDelete, setSiswaToDelete] = useState(null)
   const [deletingSiswa, setDeletingSiswa] = useState(false)
+  const [alasanHapus, setAlasanHapus] = useState('')
 
   // RFID
   const [rfidInput, setRfidInput] = useState('')
@@ -793,15 +793,15 @@ export default function ASiswa() {
         setDetailUser(u)
         setMoveKelas(u.kelas || '')
         setMoveGrade(getGradeLabel(u.kelas || '') || '')
-        
+
         // Set edit phone form
         setEditPhoneForm({
           no_hp_siswa: u.no_hp_siswa || '',
           no_hp_wali: u.no_hp_wali || ''
         })
-        
+
         setEditingPhone(false)
-        
+
         setDetailLoading(true)
         setDetailOpen(true)
 
@@ -986,7 +986,7 @@ export default function ASiswa() {
   const handlePhoneChange = (e) => {
     const { name, value } = e.target
     setEditPhoneForm(prev => ({ ...prev, [name]: value }))
-    
+
     // Clear error when user types
     if (phoneErrors[name]) {
       setPhoneErrors(prev => ({ ...prev, [name]: '' }))
@@ -996,21 +996,21 @@ export default function ASiswa() {
   // Validasi nomor telepon Indonesia
   const validatePhoneNumber = (phone, fieldName) => {
     if (!phone) return '' // Opsional, tidak error jika kosong
-    
+
     // Hapus semua karakter non-digit
     const cleanPhone = phone.replace(/\D/g, '')
-    
+
     // Validasi panjang maksimal 14 digit
     if (cleanPhone.length > 14) {
       return `Nomor ${fieldName} maksimal 14 digit`
     }
-    
+
     // Validasi format Indonesia
     const indonesianPhoneRegex = /^(?:\+62|62|0)[2-9]\d{7,11}$/
     if (!indonesianPhoneRegex.test(cleanPhone)) {
       return `Format nomor ${fieldName} tidak valid. Contoh: 081234567890`
     }
-    
+
     return ''
   }
 
@@ -1019,10 +1019,10 @@ export default function ASiswa() {
     const errors = {}
     const noHpSiswaError = validatePhoneNumber(editPhoneForm.no_hp_siswa, 'HP Siswa')
     const noHpWaliError = validatePhoneNumber(editPhoneForm.no_hp_wali, 'HP Wali')
-    
+
     if (noHpSiswaError) errors.no_hp_siswa = noHpSiswaError
     if (noHpWaliError) errors.no_hp_wali = noHpWaliError
-    
+
     if (Object.keys(errors).length > 0) {
       setPhoneErrors(errors)
       return
@@ -1046,19 +1046,19 @@ export default function ASiswa() {
         no_hp_siswa: editPhoneForm.no_hp_siswa,
         no_hp_wali: editPhoneForm.no_hp_wali
       }) : prev)
-      
+
       // Update local state
-      setSiswaRaw(prev => prev.map(s => 
-        s.id === detailUser.id 
+      setSiswaRaw(prev => prev.map(s =>
+        s.id === detailUser.id
           ? { ...s, no_hp_siswa: editPhoneForm.no_hp_siswa, no_hp_wali: editPhoneForm.no_hp_wali }
           : s
       ))
-      setSiswa(prev => prev.map(s => 
-        s.id === detailUser.id 
+      setSiswa(prev => prev.map(s =>
+        s.id === detailUser.id
           ? { ...s, no_hp_siswa: editPhoneForm.no_hp_siswa, no_hp_wali: editPhoneForm.no_hp_wali }
           : s
       ))
-      
+
       setEditingPhone(false)
       setPhoneErrors({})
     } catch (error) {
@@ -1146,7 +1146,8 @@ export default function ASiswa() {
             .update({
               status: 'active',
               alasan_nonaktif: null,
-              disabled_at: null
+              disabled_at: null,
+              deleted_at: null
             })
             .eq('id', siswaToAktifkan.id)
 
@@ -1158,7 +1159,8 @@ export default function ASiswa() {
             setDetailUser(prev => prev ? ({
               ...prev,
               status: 'active',
-              alasan_nonaktif: null
+              alasan_nonaktif: null,
+              deleted_at: null
             }) : prev)
           }
 
@@ -1322,12 +1324,13 @@ export default function ASiswa() {
     }
   }
 
-  /* ===== Hapus Akun Siswa ===== */
+  /* ===== Soft Delete (Nonaktif Permanen) ===== */
   function openDeleteConfirm(siswa) {
     openPasswordModal(
-      'Konfirmasi Hapus Akun Siswa',
+      'Konfirmasi Nonaktif Permanen (Soft Delete)',
       () => {
         setSiswaToDelete(siswa)
+        setAlasanHapus('')
         setDeleteConfirmOpen(true)
       }
     )
@@ -1336,59 +1339,45 @@ export default function ASiswa() {
   function closeDeleteConfirm() {
     setDeleteConfirmOpen(false)
     setSiswaToDelete(null)
+    setAlasanHapus('')
   }
 
   const hapusAkunSiswa = () => {
     if (!siswaToDelete) return
 
     openPasswordModal(
-      'Konfirmasi Akhir Hapus Akun Siswa',
+      'Konfirmasi Akhir Nonaktif Permanen (Soft Delete)',
       async () => {
         try {
           setDeletingSiswa(true)
+          const now = new Date().toISOString()
 
-          await supabase.from('organisasi_anggota').delete().eq('siswa_id', siswaToDelete.id)
-          await supabase.from('osis_anggota').delete().eq('siswa_id', siswaToDelete.id)
-          await supabase.from('ekskul_anggota').delete().eq('user_id', siswaToDelete.id)
-          await supabase.from('anggota_ekskul').delete().eq('user_id', siswaToDelete.id)
-          await supabase.from('tugas_jawaban').delete().eq('user_id', siswaToDelete.id)
-          await supabase.from('absensi').delete().eq('uid', siswaToDelete.id)
-          await supabase.from('absensi_ajuan').delete().eq('uid', siswaToDelete.id)
-
+          // Reset ketua kelas jika siswa ini ketua
           await supabase
             .from('kelas_struktur')
             .update({ ketua_siswa_id: null, ketua_siswa_nama: null })
             .eq('ketua_siswa_id', siswaToDelete.id)
 
-          const { error: profileError } = await supabase
+          // Soft delete: simpan riwayat, hanya matikan akses
+          const { error } = await supabase
             .from('profiles')
-            .delete()
+            .update({
+              status: 'nonaktif',
+              deleted_at: now,
+              disabled_at: now,
+              alasan_nonaktif: (alasanHapus || 'Dinonaktifkan permanen oleh admin (soft delete)')
+            })
             .eq('id', siswaToDelete.id)
 
-          if (profileError) throw profileError
+          if (error) throw error
 
-          try {
-            const { error: authError } = await supabase.auth.admin.deleteUser(
-              siswaToDelete.id
-            )
-
-            if (authError) {
-              console.warn('Gagal menghapus dari authentication, tetapi lanjutkan:', authError)
-              pushToast('warning', 'Akun siswa dihapus, tetapi ada masalah dengan authentication. Silakan coba lagi nanti.')
-            } else {
-              pushToast('success', 'Akun siswa berhasil dihapus sepenuhnya')
-            }
-          } catch (authErr) {
-            console.warn('Error saat menghapus dari auth:', authErr)
-            pushToast('warning', 'Akun siswa dihapus dari database, tetapi ada masalah dengan authentication.')
-          }
-
+          pushToast('success', 'Akun siswa berhasil dinonaktifkan permanen (soft delete). Riwayat tetap tersimpan.')
           closeDeleteConfirm()
           if (detailOpen) closeDetailModal()
           loadAllData()
         } catch (error) {
-          console.error('Error deleting siswa:', error)
-          pushToast('error', 'Gagal menghapus akun siswa: ' + (error.message || 'Unknown error'))
+          console.error('Error soft delete siswa:', error)
+          pushToast('error', 'Gagal menonaktifkan akun siswa: ' + (error.message || 'Unknown error'))
         } finally {
           setDeletingSiswa(false)
         }
@@ -1555,7 +1544,7 @@ export default function ASiswa() {
             value={stats.nonaktifSiswa}
             icon="⏸️"
             color="orange"
-            description="Tidak aktif sementara"
+            description="Tidak aktif sementara / permanen"
           />
           <StatCard
             label="Ketua Kelas"
@@ -1920,7 +1909,7 @@ export default function ASiswa() {
           </div>
         </Card>
 
-        {/* Modal Konfirmasi Hapus Akun */}
+        {/* Modal Konfirmasi Soft Delete */}
         {deleteConfirmOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-lg p-6 w-full max-w-md">
@@ -1929,32 +1918,46 @@ export default function ASiswa() {
                   <span className="text-xl">🗑️</span>
                 </div>
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900">Hapus Akun Siswa</h3>
-                  <p className="text-gray-600 text-sm">Tindakan ini tidak dapat dibatalkan</p>
+                  <h3 className="text-lg font-semibold text-gray-900">Nonaktif Permanen (Soft Delete)</h3>
+                  <p className="text-gray-600 text-sm">Riwayat tetap tersimpan • Siswa tidak bisa akses lagi</p>
                 </div>
               </div>
 
               <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
                 <p className="text-red-800 text-sm font-medium mb-2">
-                  Apakah Anda yakin ingin menghapus akun siswa ini?
+                  Anda yakin ingin menonaktifkan permanen akun siswa ini?
                 </p>
                 <p className="text-red-700 text-sm">
                   <strong>{siswaToDelete?.nama}</strong> ({siswaToDelete?.email})
                 </p>
                 <p className="text-red-700 text-sm mt-2">
-                  Data akan dihapus dari:
+                  Dampak:
                 </p>
                 <ul className="text-red-700 text-sm list-disc list-inside mt-1">
-                  <li>Database profiles dan tabel terkait</li>
-                  <li>Authentication system</li>
-                  <li>Data absensi, organisasi, dan tugas</li>
+                  <li>Siswa tidak bisa login & mengakses data</li>
+                  <li>Data absensi, tugas, dan riwayat tetap ada untuk laporan</li>
+                  <li>Akun bisa diaktifkan kembali oleh admin</li>
                 </ul>
+
+                <div className="mt-3">
+                  <label className="block text-sm font-medium text-red-900 mb-1">
+                    Alasan (opsional)
+                  </label>
+                  <textarea
+                    value={alasanHapus}
+                    onChange={(e) => setAlasanHapus(e.target.value)}
+                    placeholder="Contoh: Lulus, pindah sekolah, keluar, dll."
+                    className="w-full px-3 py-2 border border-red-200 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 bg-white resize-none"
+                    rows={3}
+                  />
+                </div>
               </div>
 
               <div className="flex justify-end space-x-3">
                 <Button
                   variant="secondary"
                   onClick={closeDeleteConfirm}
+                  disabled={deletingSiswa}
                 >
                   ✕ Batal
                 </Button>
@@ -1963,7 +1966,7 @@ export default function ASiswa() {
                   onClick={hapusAkunSiswa}
                   loading={deletingSiswa}
                 >
-                  🗑️ Ya, Hapus
+                  🛑 Nonaktifkan Permanen
                 </Button>
               </div>
             </div>
@@ -2321,7 +2324,7 @@ export default function ASiswa() {
                     size="sm"
                     onClick={() => openDeleteConfirm(detailUser)}
                   >
-                    🗑️ Hapus
+                    🗑️ Nonaktif Permanen
                   </Button>
                   <button
                     className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"
@@ -2465,7 +2468,7 @@ export default function ASiswa() {
                       </div>
                     </div>
 
-                    {/* Nomor HP Siswa & Wali - SECTION BARU */}
+                    {/* Nomor HP Siswa & Wali */}
                     <div className="bg-white border border-gray-200 rounded-lg p-4">
                       <div className="flex items-center justify-between mb-4">
                         <h4 className="text-base font-semibold text-gray-900 flex items-center gap-2">
