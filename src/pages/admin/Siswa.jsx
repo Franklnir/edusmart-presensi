@@ -1,3 +1,4 @@
+// src/pages/admin/ASiswa.jsx
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useUIStore } from '../../store/useUIStore'
@@ -134,18 +135,6 @@ function getGradeLabel(kelasId = '') {
 function getKelasDisplayName(kelasObj) {
   if (!kelasObj) return ''
   return kelasObj.nama || kelasObj.id || ''
-}
-
-/* ===== Alumni year helper =====
-   Default: parse dari alasan_nonaktif "Lulus tahun 20xx"
-   (Jika ada kolom alumni_year di DB, akan ikut kebaca juga)
-*/
-function getAlumniYear(row) {
-  if (!row) return ''
-  if (row.alumni_year) return String(row.alumni_year)
-  const txt = String(row.alasan_nonaktif || '')
-  const m = txt.match(/lulus\s+tahun\s+(\d{4})/i)
-  return m ? String(m[1]) : ''
 }
 
 /* ===== Phone helpers (Indonesia) =====
@@ -352,8 +341,6 @@ export default function ASiswa() {
   const [qKelas, setQKelas] = useState('')
   const [qHasRfid, setQHasRfid] = useState('')
   const [qStatus, setQStatus] = useState('')
-  const [qHideExit, setQHideExit] = useState(true) // default: alumni/mutasi disembunyikan dari roster
-  const [qAlumniYear, setQAlumniYear] = useState('') // muncul saat filter status = alumni
   const [isSearching, setIsSearching] = useState(false)
   const filterTimerRef = useRef(null)
 
@@ -577,28 +564,13 @@ export default function ASiswa() {
     }
   }, [siswaRaw, strukturKelas])
 
-  /* ===== Alumni year options (untuk filter alumni) ===== */
-  const alumniYearOptions = useMemo(() => {
-    const ys = new Set()
-    for (const s of siswaRaw) {
-      const st = String(s.status || 'active').toLowerCase()
-      if (st !== 'alumni') continue
-      const y = getAlumniYear(s)
-      if (y) ys.add(String(y))
-    }
-    // urutkan terbaru dulu
-    return [...ys].sort((a, b) => Number(b) - Number(a))
-  }, [siswaRaw])
-
-  /* ===== Filter (debounced) ===== */
+  /* ===== Filter (debounced, fix logic) ===== */
   const applyFilterNow = () => {
     const namaNeedle = qNama.trim().toLowerCase()
     const nikNeedle = qNIK.trim().toLowerCase()
     const kelasNeedle = qKelas
     const hasRfidNeedle = qHasRfid
     const statusNeedle = qStatus
-    const hideExit = qHideExit
-    const alumniYearNeedle = qAlumniYear
 
     const res = siswaRaw.filter(s => {
       const okNama = namaNeedle
@@ -622,24 +594,12 @@ export default function ASiswa() {
             ? hasRfid
             : !hasRfid
 
-      const currentStatus = String(s.status || 'active').toLowerCase()
-
-      // Jika statusNeedle tidak dipilih dan hideExit = true,
-      // maka alumni & mutasi tidak ditampilkan di roster.
-      const okExit = statusNeedle
-        ? true
-        : (hideExit ? !['alumni', 'mutasi'].includes(currentStatus) : true)
-
+      const currentStatus = s.status || 'active'
       const okStatus = statusNeedle === ''
         ? true
-        : currentStatus === String(statusNeedle).toLowerCase()
+        : currentStatus === statusNeedle
 
-      // Filter tahun lulus hanya relevan saat status = alumni
-      const okAlumniYear = (String(statusNeedle).toLowerCase() === 'alumni' && alumniYearNeedle)
-        ? String(getAlumniYear(s) || '') === String(alumniYearNeedle)
-        : true
-
-      return okNama && okNik && okKls && okRfid && okStatus && okExit && okAlumniYear
+      return okNama && okNik && okKls && okRfid && okStatus
     })
 
     setSiswa(res)
@@ -657,18 +617,8 @@ export default function ASiswa() {
     setQKelas('')
     setQHasRfid('')
     setQStatus('')
-    setQAlumniYear('')
-    setQHideExit(true)
     setSiswa(siswaRaw)
   }
-
-  // jika status bukan alumni, reset filter tahun alumni (biar tidak nyangkut)
-  useEffect(() => {
-    if (String(qStatus || '').toLowerCase() !== 'alumni') {
-      if (qAlumniYear) setQAlumniYear('')
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [qStatus])
 
   useEffect(() => {
     if (filterTimerRef.current) clearTimeout(filterTimerRef.current)
@@ -681,7 +631,7 @@ export default function ASiswa() {
       if (filterTimerRef.current) clearTimeout(filterTimerRef.current)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [qNama, qNIK, qKelas, qHasRfid, qStatus, qHideExit, qAlumniYear, siswaRaw])
+  }, [qNama, qNIK, qKelas, qHasRfid, qStatus, siswaRaw])
 
   /* ===== Grade helpers ===== */
   const DEFAULT_GRADES = ['VII', 'VIII', 'IX', 'X', 'XI', 'XII']
@@ -817,7 +767,7 @@ export default function ASiswa() {
       const fromKelasName = promotionMode === 'kelas' ? getNamaKelas(promotionFromKelas) : null
       const toKelasName = !isExitMode ? getNamaKelas(promotionToKelas) : null
 
-      // Build confirm message
+      // Build confirm message (FIX: sebelumnya broken string & brace)
       const lines = []
 
       if (isExitMode) {
@@ -872,6 +822,7 @@ export default function ASiswa() {
           promotionMode === 'kelas'
             ? getGradeLabel(promotionFromKelas)
             : (() => {
+              // kalau selected mode, tampilkan jika campur grade tidak warn
               const uniqueFromGrades = [...new Set(selectedSiswa.map(s => getGradeLabel(s.kelas)).filter(Boolean))]
               return uniqueFromGrades.length === 1 ? uniqueFromGrades[0] : ''
             })()
@@ -959,7 +910,7 @@ export default function ASiswa() {
 
       if (error) throw error
 
-      // reset ketua kelas untuk semua kelas asal yg terdampak + kelas tujuan
+      // FIX: reset ketua kelas untuk semua kelas asal yg terdampak + kelas tujuan
       const affectedFrom = selectedSiswa.map(s => s.kelas).filter(Boolean)
       const affected = [...new Set([...affectedFrom, promotionToKelas].filter(Boolean))]
       if (affected.length) {
@@ -1902,45 +1853,10 @@ export default function ASiswa() {
                 ]}
               />
             </div>
-
-            {/* Tambahan: tampilkan/sembunyikan alumni & mutasi + filter tahun alumni */}
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-end">
-              <div className="flex items-center gap-2">
-                <input
-                  id="hide-exit"
-                  type="checkbox"
-                  className="h-4 w-4 text-blue-600 border-gray-300 rounded"
-                  checked={qHideExit}
-                  onChange={(e) => setQHideExit(e.target.checked)}
-                  disabled={String(qStatus || '').toLowerCase() === 'alumni' || String(qStatus || '').toLowerCase() === 'mutasi'}
-                  title="Jika Anda memilih status Alumni/Mutasi, checkbox ini tidak berlaku."
-                />
-                <label htmlFor="hide-exit" className="text-sm text-gray-700 select-none">
-                  Sembunyikan <span className="font-medium">Alumni & Mutasi</span> dari daftar (roster)
-                </label>
-              </div>
-
-              {String(qStatus || '').toLowerCase() === 'alumni' && (
-                <Select
-                  label="Tahun Lulus"
-                  value={qAlumniYear}
-                  onChange={e => setQAlumniYear(e.target.value)}
-                  options={[
-                    { value: '', label: 'Semua Tahun' },
-                    ...alumniYearOptions.map(y => ({ value: y, label: y }))
-                  ]}
-                />
-              )}
-
-              <div className="flex justify-end space-x-3 md:col-span-2 lg:col-span-1">
-                <Button onClick={applyFilter} loading={isSearching}>Cari</Button>
-                <Button variant="secondary" onClick={resetFilter}>🔄 Reset</Button>
-              </div>
+            <div className="flex justify-end space-x-3 mt-4">
+              <Button onClick={applyFilter} loading={isSearching}>Cari</Button>
+              <Button variant="secondary" onClick={resetFilter}>🔄 Reset</Button>
             </div>
-
-            <p className="text-xs text-gray-500 mt-3">
-              Default: daftar menyembunyikan Alumni & Mutasi agar tampilan lebih fokus ke roster aktif. Pilih status <b>Alumni</b> untuk memunculkan filter tahun lulus.
-            </p>
           </div>
         </Card>
 
@@ -2039,9 +1955,6 @@ export default function ASiswa() {
                             return (
                               <Badge variant={meta.variant} className="text-xs">
                                 {meta.icon} {meta.label}
-                                {String(s.status || '').toLowerCase() === 'alumni' && getAlumniYear(s) ? (
-                                  <span className="ml-1 opacity-80">({getAlumniYear(s)})</span>
-                                ) : null}
                               </Badge>
                             )
                           })()}
@@ -2259,25 +2172,23 @@ export default function ASiswa() {
           </div>
         )}
 
-        {/* Modal Kenaikan Kelas (dengan scroll modal) */}
+        {/* Modal Kenaikan Kelas */}
         {promotionModalOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-lg w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
-              <div className="p-6 border-b bg-gray-50">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-indigo-100 text-indigo-600 rounded-lg">
-                    <span className="text-xl">⬆️</span>
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-semibold text-gray-900">Kenaikan Kelas</h3>
-                    <p className="text-gray-600 text-sm">
-                      Pindahkan kelas siswa secara massal (berdasarkan kelas) atau pilih siswa manual dari sini.
-                    </p>
-                  </div>
+            <div className="bg-white rounded-lg p-6 w-full max-w-lg">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2 bg-indigo-100 text-indigo-600 rounded-lg">
+                  <span className="text-xl">⬆️</span>
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">Kenaikan Kelas</h3>
+                  <p className="text-gray-600 text-sm">
+                    Pindahkan kelas siswa secara massal (berdasarkan kelas) atau pilih siswa manual dari sini.
+                  </p>
                 </div>
               </div>
 
-              <div className="p-6 overflow-y-auto space-y-4">
+              <div className="space-y-4">
                 <div className="flex gap-2 text-sm">
                   <button
                     type="button"
@@ -2518,9 +2429,6 @@ export default function ASiswa() {
                       {detailUser?.status && detailUser.status !== 'active' && (
                         <Badge variant={STATUS_META(detailUser.status).variant} className="text-xs">
                           {STATUS_META(detailUser.status).icon} {STATUS_META(detailUser.status).label}
-                          {String(detailUser.status).toLowerCase() === 'alumni' && getAlumniYear(detailUser) ? (
-                            <span className="ml-1 opacity-80">({getAlumniYear(detailUser)})</span>
-                          ) : null}
                         </Badge>
                       )}
                     </div>
@@ -2540,6 +2448,7 @@ export default function ASiswa() {
                       ✅ Aktifkan
                     </Button>
                   )}
+                  {/* FIX label: ini soft-delete/keluar sekolah */}
                   <Button variant="danger" size="sm" onClick={() => openDeleteConfirm(detailUser)}>
                     🚪 Keluar
                   </Button>
@@ -2867,7 +2776,3 @@ export default function ASiswa() {
     </div>
   )
 }
-
-out_path = Path("/mnt/data/ASiswa.jsx")
-out_path.write_text(content, encoding="utf-8")
-str(out_path), out_path.stat().st_size
