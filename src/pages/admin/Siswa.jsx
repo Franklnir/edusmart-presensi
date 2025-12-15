@@ -1,8 +1,11 @@
-import React, { useEffect, useState, useMemo } from 'react'
+// src/pages/admin/ASiswa.jsx
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useUIStore } from '../../store/useUIStore'
 
-/* ===== Password Modal Component ===== */
+/* ===========================
+   Password Modal Component
+=========================== */
 function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Password", loading = false }) {
   const [password, setPassword] = useState('')
 
@@ -63,30 +66,27 @@ function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Passwor
   )
 }
 
-/* ===== Password Verification Utility ===== */
+/* ===========================
+   Password Verification Utility
+   Catatan: signInWithPassword akan refresh session user yg sama.
+=========================== */
 const verifyPassword = async (password) => {
-  try {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      throw new Error('User tidak ditemukan')
-    }
+  const { data: { user }, error: userErr } = await supabase.auth.getUser()
+  if (userErr) throw userErr
+  if (!user?.email) throw new Error('User tidak ditemukan / email tidak tersedia')
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email: user.email,
-      password
-    })
+  const { error } = await supabase.auth.signInWithPassword({
+    email: user.email,
+    password
+  })
 
-    if (error) {
-      throw new Error('Password salah')
-    }
-
-    return true
-  } catch (error) {
-    throw error
-  }
+  if (error) throw new Error('Password salah')
+  return true
 }
 
-/* ===== Utils ===== */
+/* ===========================
+   Utils
+=========================== */
 function initials(name = '?') {
   const parts = (name || '').trim().split(/\s+/).slice(0, 2)
   return parts.map(p => p[0]?.toUpperCase() || '').join('')
@@ -98,6 +98,16 @@ const JK_LABEL = (jk) => {
   if (['l', 'laki', 'laki-laki', 'male'].includes(s)) return 'Laki-laki'
   if (['p', 'perempuan', 'female'].includes(s)) return 'Perempuan'
   return jk
+}
+
+const STATUS_META = (status) => {
+  const st = String(status || '').toLowerCase()
+  if (st === 'active') return { key: 'active', label: 'Aktif', icon: '✅', variant: 'success' }
+  if (st === 'nonaktif' || st === 'inactive') return { key: 'nonaktif', label: 'Nonaktif', icon: '⏸️', variant: 'danger' }
+  if (st === 'mutasi') return { key: 'mutasi', label: 'Mutasi', icon: '📤', variant: 'info' }
+  if (st === 'alumni') return { key: 'alumni', label: 'Alumni', icon: '🎓', variant: 'primary' }
+  if (!st) return { key: '', label: '—', icon: '', variant: 'default' }
+  return { key: st, label: status, icon: '•', variant: 'default' }
 }
 
 const GRADE_REGEX = /^\s*(XII|XI|X|IX|VIII|VII|VI|V|IV|III|II|I|\d+)/i
@@ -127,41 +137,51 @@ function getKelasDisplayName(kelasObj) {
   return kelasObj.nama || kelasObj.id || ''
 }
 
-// Format nomor telepon untuk display
+/* ===== Phone helpers (Indonesia) =====
+   Normalisasi disimpan ke bentuk "0xxxxxxxxxx" (tanpa +62).
+*/
+function normalizePhoneID(input) {
+  if (!input) return ''
+  const digits = String(input).replace(/\D/g, '')
+  if (!digits) return ''
+  if (digits.startsWith('62')) return '0' + digits.slice(2)
+  if (digits.startsWith('8')) return '0' + digits
+  if (digits.startsWith('0')) return digits
+  return digits
+}
+
+const validatePhoneNumber = (raw, fieldName) => {
+  if (!raw) return ''
+  const normalized = normalizePhoneID(raw)
+  if (!normalized) return ''
+  if (normalized.length > 14) return `Nomor ${fieldName} maksimal 14 digit`
+
+  // 0 + operator (2-9) + 7..11 digit => total 9..13 digit setelah 0
+  const re = /^0[2-9]\d{7,11}$/
+  if (!re.test(normalized)) {
+    return `Format nomor ${fieldName} tidak valid. Contoh: 081234567890`
+  }
+  return ''
+}
+
 const formatPhoneDisplay = (phone) => {
-  if (!phone) return '-'
+  if (!phone) return '—'
+  const clean = normalizePhoneID(phone)
+  if (!clean) return '—'
 
-  const cleanPhone = phone.replace(/\D/g, '')
-
-  if (cleanPhone.startsWith('62')) {
-    const operatorCode = cleanPhone.slice(2, 4)
-    const firstPart = cleanPhone.slice(4, 8)
-    const secondPart = cleanPhone.slice(8)
-    return `+62 ${operatorCode}-${firstPart}-${secondPart}`
+  // contoh sederhana: 0812-3456-7890 (tidak memaksakan operator spesifik)
+  if (clean.startsWith('0') && clean.length >= 10) {
+    const p1 = clean.slice(0, 4)
+    const p2 = clean.slice(4, 8)
+    const p3 = clean.slice(8)
+    return `${p1}-${p2}-${p3}`
   }
-
-  if (cleanPhone.startsWith('0') && cleanPhone.length >= 10) {
-    const operatorCode = cleanPhone.slice(1, 4)
-    const firstPart = cleanPhone.slice(4, 8)
-    const secondPart = cleanPhone.slice(8)
-    return `0${operatorCode}-${firstPart}-${secondPart}`
-  }
-
   return phone
 }
 
-/* ===== Komponen Loading ===== */
-function LoadingSpinner({ size = 'md', text = 'Memuat...' }) {
-  const sizes = { sm: 'h-4 w-4', md: 'h-6 w-6', lg: 'h-8 w-8' }
-  return (
-    <div className="flex items-center justify-center space-x-2">
-      <div className={`animate-spin rounded-full border-2 border-blue-600 border-t-transparent ${sizes[size]}`} />
-      {text && <span className="text-gray-600 text-sm">{text}</span>}
-    </div>
-  )
-}
-
-/* ===== Komponen UI ===== */
+/* ===========================
+   UI Components
+=========================== */
 function Card({ children, className = '' }) {
   return (
     <div className={`bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden ${className}`}>
@@ -296,7 +316,7 @@ function StatCard({ label, value, icon, color = 'blue', description }) {
 
 /* =======================================================================
    MAIN COMPONENT - SISWA
-   ======================================================================= */
+======================================================================= */
 export default function ASiswa() {
   const { pushToast } = useUIStore()
   const [loadingInit, setLoadingInit] = useState(true)
@@ -322,6 +342,7 @@ export default function ASiswa() {
   const [qHasRfid, setQHasRfid] = useState('')
   const [qStatus, setQStatus] = useState('')
   const [isSearching, setIsSearching] = useState(false)
+  const filterTimerRef = useRef(null)
 
   // Detail modal state
   const [detailOpen, setDetailOpen] = useState(false)
@@ -337,7 +358,7 @@ export default function ASiswa() {
   const [moveKelas, setMoveKelas] = useState('')
   const [moveGrade, setMoveGrade] = useState('')
 
-  // Form tambah siswa (SIMPLE VERSION - tanpa telepon, agama, usia, alamat)
+  // Form tambah siswa
   const [form, setForm] = useState({
     email: '',
     nama: '',
@@ -351,11 +372,13 @@ export default function ASiswa() {
   const [showAddForm, setShowAddForm] = useState(false)
   const [addingSiswa, setAddingSiswa] = useState(false)
 
-  // "Soft delete" akun siswa
+  // Soft delete / keluar sekolah
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [siswaToDelete, setSiswaToDelete] = useState(null)
   const [deletingSiswa, setDeletingSiswa] = useState(false)
-  const [alasanHapus, setAlasanHapus] = useState('')
+  const [keluarMode, setKeluarMode] = useState('mutasi')
+  const [keluarYear, setKeluarYear] = useState(String(new Date().getFullYear()))
+  const [keluarReason, setKeluarReason] = useState('')
 
   // RFID
   const [rfidInput, setRfidInput] = useState('')
@@ -382,6 +405,12 @@ export default function ASiswa() {
   const [promotionFilterKelas, setPromotionFilterKelas] = useState('')
   const [promotionSelectedIds, setPromotionSelectedIds] = useState([])
 
+  const PROMO_ALUMNI = '__ALUMNI__'
+  const PROMO_MUTASI = '__MUTASI__'
+
+  const [promotionAlumniYear, setPromotionAlumniYear] = useState(String(new Date().getFullYear()))
+  const [promotionExitReason, setPromotionExitReason] = useState('')
+
   // Edit HP Siswa & Wali
   const [editingPhone, setEditingPhone] = useState(false)
   const [editPhoneForm, setEditPhoneForm] = useState({
@@ -390,11 +419,11 @@ export default function ASiswa() {
   })
   const [phoneErrors, setPhoneErrors] = useState({})
 
-  // Cleanup channel
+  /* ===== Cleanup channel ===== */
   useEffect(() => {
     return () => {
       if (rfidChannel) {
-        supabase.removeChannel(rfidChannel)
+        try { supabase.removeChannel(rfidChannel) } catch {}
       }
     }
   }, [rfidChannel])
@@ -411,7 +440,6 @@ export default function ASiswa() {
 
   const handlePasswordConfirm = async (password) => {
     setPasswordModal(prev => ({ ...prev, loading: true }))
-
     try {
       await verifyPassword(password)
       if (passwordModal.action) {
@@ -432,6 +460,7 @@ export default function ASiswa() {
   /* ===== Load initial data ===== */
   useEffect(() => {
     loadAllData()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const loadAllData = async () => {
@@ -455,8 +484,8 @@ export default function ASiswa() {
       .from('profiles')
       .select('*')
       .eq('role', 'siswa')
-      .order('kelas')
-      .order('nama')
+      .order('kelas', { ascending: true })
+      .order('nama', { ascending: true })
 
     if (error) throw error
     setSiswaRaw(data || [])
@@ -467,8 +496,8 @@ export default function ASiswa() {
     const { data, error } = await supabase
       .from('kelas')
       .select('*')
-      .order('grade')
-      .order('suffix')
+      .order('grade', { ascending: true })
+      .order('suffix', { ascending: true })
 
     if (error) throw error
     setKelasList(data || [])
@@ -482,9 +511,7 @@ export default function ASiswa() {
     if (error) throw error
 
     const struktur = {}
-    data?.forEach(item => {
-      struktur[item.kelas_id] = item
-    })
+    data?.forEach(item => { struktur[item.kelas_id] = item })
     setStrukturKelas(struktur)
   }
 
@@ -519,60 +546,69 @@ export default function ASiswa() {
   /* ===== Statistik dashboard ===== */
   const stats = useMemo(() => {
     const totalSiswa = siswaRaw.length
-    const aktifSiswa = siswaRaw.filter(s => s.status === 'active').length
-    const nonaktifSiswa = siswaRaw.filter(s => s.status === 'nonaktif').length
+    const aktifSiswa = siswaRaw.filter(s => (s.status || 'active') === 'active').length
+    const nonaktifOnly = siswaRaw.filter(s => s.status === 'nonaktif' || s.status === 'inactive').length
+    const mutasiSiswa = siswaRaw.filter(s => s.status === 'mutasi').length
+    const alumniSiswa = siswaRaw.filter(s => s.status === 'alumni').length
+    const nonaktifSiswa = totalSiswa - aktifSiswa
     const ketuaKelas = siswaRaw.filter(s => isKetuaKelas(s.id)).length
 
     return {
       totalSiswa,
       aktifSiswa,
       nonaktifSiswa,
+      nonaktifOnly,
+      mutasiSiswa,
+      alumniSiswa,
       ketuaKelas
     }
   }, [siswaRaw, strukturKelas])
 
-  /* ===== Filter ===== */
+  /* ===== Filter (debounced, fix logic) ===== */
+  const applyFilterNow = () => {
+    const namaNeedle = qNama.trim().toLowerCase()
+    const nikNeedle = qNIK.trim().toLowerCase()
+    const kelasNeedle = qKelas
+    const hasRfidNeedle = qHasRfid
+    const statusNeedle = qStatus
+
+    const res = siswaRaw.filter(s => {
+      const okNama = namaNeedle
+        ? (String(s.nama || '').toLowerCase().includes(namaNeedle) ||
+          String(s.email || '').toLowerCase().includes(namaNeedle))
+        : true
+
+      const okNik = nikNeedle
+        ? (String(s.nik || '').toLowerCase().includes(nikNeedle))
+        : true
+
+      const okKls = kelasNeedle
+        ? String(s.kelas || '') === kelasNeedle
+        : true
+
+      const hasRfid = !!s.rfid_uid
+      const okRfid =
+        hasRfidNeedle === ''
+          ? true
+          : hasRfidNeedle === 'yes'
+            ? hasRfid
+            : !hasRfid
+
+      const currentStatus = s.status || 'active'
+      const okStatus = statusNeedle === ''
+        ? true
+        : currentStatus === statusNeedle
+
+      return okNama && okNik && okKls && okRfid && okStatus
+    })
+
+    setSiswa(res)
+  }
+
   function applyFilter() {
     setIsSearching(true)
-    setTimeout(() => {
-      const namaNeedle = qNama.trim().toLowerCase()
-      const nikNeedle = qNIK.trim().toLowerCase()
-      const kelasNeedle = qKelas.trim().toLowerCase()
-      const hasRfidNeedle = qHasRfid
-      const statusNeedle = qStatus
-
-      const res = siswaRaw.filter(s => {
-        const okNama = namaNeedle
-          ? (String(s.nama || '').toLowerCase().includes(namaNeedle) ||
-            String(s.email || '').toLowerCase().includes(namaNeedle))
-          : true
-
-        const okNik = nikNeedle
-          ? (String(s.nik || '').toLowerCase().includes(nikNeedle))
-          : true
-
-        const okKls = kelasNeedle
-          ? (String(s.kelas || '').toLowerCase() === kelasNeedle)
-          : true
-
-        const hasRfid = !!s.rfid_uid
-        const okRfid =
-          hasRfidNeedle === ''
-            ? true
-            : hasRfidNeedle === 'yes'
-              ? hasRfid
-              : !hasRfid
-
-        const okStatus = statusNeedle === ''
-          ? true
-          : s.status === statusNeedle
-
-        return okNama && okNik && okKls && okRfid && okStatus
-      })
-
-      setSiswa(res)
-      setIsSearching(false)
-    }, 250)
+    applyFilterNow()
+    setIsSearching(false)
   }
 
   function resetFilter() {
@@ -584,10 +620,18 @@ export default function ASiswa() {
     setSiswa(siswaRaw)
   }
 
-  // Auto apply filter ketika state berubah
   useEffect(() => {
-    applyFilter()
-  }, [qNama, qNIK, qKelas, qHasRfid, qStatus])
+    if (filterTimerRef.current) clearTimeout(filterTimerRef.current)
+    setIsSearching(true)
+    filterTimerRef.current = setTimeout(() => {
+      applyFilterNow()
+      setIsSearching(false)
+    }, 250)
+    return () => {
+      if (filterTimerRef.current) clearTimeout(filterTimerRef.current)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qNama, qNIK, qKelas, qHasRfid, qStatus, siswaRaw])
 
   /* ===== Grade helpers ===== */
   const DEFAULT_GRADES = ['VII', 'VIII', 'IX', 'X', 'XI', 'XII']
@@ -607,7 +651,7 @@ export default function ASiswa() {
     return kelasList.filter(k => getGradeLabel(k.id) === G)
   }
 
-  /* ===== Kandidat & pilihan siswa di modal kenaikan kelas (manual) ===== */
+  /* ===== Kandidat & pilihan siswa di modal kenaikan kelas ===== */
   const promotionCandidateSiswa = useMemo(() => {
     let list = siswaRaw
 
@@ -625,6 +669,7 @@ export default function ASiswa() {
       if (kelasA !== kelasB) return kelasA.localeCompare(kelasB)
       return (a.nama || '').localeCompare(b.nama || '')
     })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [siswaRaw, promotionFilterGrade, promotionFilterKelas, kelasList])
 
   const togglePromotionSelect = (id) => {
@@ -655,6 +700,8 @@ export default function ASiswa() {
         setPromotionFilterGrade('')
         setPromotionFilterKelas('')
         setPromotionSelectedIds([])
+        setPromotionAlumniYear(String(new Date().getFullYear()))
+        setPromotionExitReason('')
         setPromotionModalOpen(true)
       }
     )
@@ -668,6 +715,8 @@ export default function ASiswa() {
     setPromotionFilterGrade('')
     setPromotionFilterKelas('')
     setPromotionSelectedIds([])
+    setPromotionExitReason('')
+    setPromotionAlumniYear(String(new Date().getFullYear()))
   }
 
   const handlePromotion = async () => {
@@ -677,78 +726,183 @@ export default function ASiswa() {
         return
       }
 
-      let ids = []
-      let infoText = ''
-
       if (promotionMode === 'kelas') {
         if (!promotionFromKelas) {
           pushToast('error', 'Pilih kelas asal terlebih dahulu')
           return
         }
-        if (promotionFromKelas === promotionToKelas) {
+        const isExit = [PROMO_ALUMNI, PROMO_MUTASI].includes(promotionToKelas)
+        if (!isExit && promotionFromKelas === promotionToKelas) {
           pushToast('error', 'Kelas asal dan tujuan tidak boleh sama')
           return
         }
-
-        const siswaInKelas = siswaRaw.filter(s => s.kelas === promotionFromKelas)
-        if (!siswaInKelas.length) {
-          pushToast('error', 'Tidak ada siswa di kelas asal tersebut')
-          return
-        }
-
-        ids = siswaInKelas.map(s => s.id)
-        const fromGrade = getGradeLabel(promotionFromKelas)
-        const toGrade = getGradeLabel(promotionToKelas)
-
-        infoText =
-          `Anda akan memindahkan ${ids.length} siswa\n` +
-          `Dari : ${getNamaKelas(promotionFromKelas)} (${fromGrade || '-'})\n` +
-          `Ke   : ${getNamaKelas(promotionToKelas)} (${toGrade || '-'})`
-
-        if (fromGrade && toGrade && fromGrade !== toGrade) {
-          infoText +=
-            `\n\n⚠️ PERHATIAN:\n` +
-            `Ini termasuk pindah tingkatan (grade) dari ${fromGrade} ke ${toGrade}.`
-        }
       } else {
         if (!promotionSelectedIds.length) {
-          pushToast('error', 'Belum ada siswa yang dipilih untuk dipindahkan')
+          pushToast('error', 'Pilih minimal 1 siswa untuk dipindahkan')
           return
-        }
-
-        ids = [...promotionSelectedIds]
-
-        const selectedSiswa = siswaRaw.filter(s => promotionSelectedIds.includes(s.id))
-        const targetGrade = getGradeLabel(promotionToKelas)
-        const gradesSet = new Set(selectedSiswa.map(s => getGradeLabel(s.kelas || '')))
-        const gradeList = [...gradesSet].filter(Boolean)
-
-        infoText =
-          `Anda akan memindahkan ${ids.length} siswa terpilih\n` +
-          `Ke   : ${getNamaKelas(promotionToKelas)} (${targetGrade || '-'})`
-
-        if (gradeList.length === 1 && gradeList[0] && gradeList[0] !== targetGrade) {
-          infoText +=
-            `\n\n⚠️ PERHATIAN:\n` +
-            `Semua siswa berasal dari grade ${gradeList[0]} dan akan dipindah ke grade ${targetGrade}.`
-        } else if (gradeList.length > 1) {
-          infoText +=
-            `\n\n⚠️ PERHATIAN:\n` +
-            `Siswa berasal dari beberapa grade: ${gradeList.join(', ')}.`
         }
       }
 
-      const ok = window.confirm(
-        infoText +
-        `\n\nDampak:\n` +
-        `• Data absensi SELANJUTNYA mengikuti kelas baru\n` +
-        `• Data organisasi, tugas, dan nilai tetap sama\n` +
-        `• Status ketua kelas akan direset jika ada`
-      )
-      if (!ok) return
+      // kumpulkan siswa & id sesuai mode
+      let selectedSiswa = []
+      let ids = []
+
+      if (promotionMode === 'kelas') {
+        selectedSiswa = siswaRaw.filter(s => s.kelas === promotionFromKelas)
+        ids = selectedSiswa.map(s => s.id)
+      } else {
+        selectedSiswa = siswaRaw.filter(s => promotionSelectedIds.includes(s.id))
+        ids = [...promotionSelectedIds]
+      }
+
+      if (!ids.length) {
+        pushToast('error', 'Tidak ada siswa yang bisa diproses')
+        return
+      }
+
+      const isAlumniMode = promotionToKelas === PROMO_ALUMNI
+      const isMutasiMode = promotionToKelas === PROMO_MUTASI
+      const isExitMode = isAlumniMode || isMutasiMode
+
+      const fromKelasName = promotionMode === 'kelas' ? getNamaKelas(promotionFromKelas) : null
+      const toKelasName = !isExitMode ? getNamaKelas(promotionToKelas) : null
+
+      // Build confirm message (FIX: sebelumnya broken string & brace)
+      const lines = []
+
+      if (isExitMode) {
+        const modeLabel = isAlumniMode ? 'ALUMNI (Lulus)' : 'MUTASI (Pindah Sekolah)'
+        lines.push(`Anda akan memproses status ${modeLabel} untuk ${ids.length} siswa.`)
+        lines.push('')
+
+        lines.push(
+          promotionMode === 'kelas'
+            ? `Sumber: kelas "${fromKelasName || promotionFromKelas}"`
+            : 'Sumber: siswa terpilih (multi-kelas)'
+        )
+
+        if (isAlumniMode) {
+          const eligible = selectedSiswa.filter(s => getGradeLabel(s.kelas) === 'XII')
+          const skipped = ids.length - eligible.length
+          const year = parseInt(promotionAlumniYear || '', 10) || new Date().getFullYear()
+
+          lines.push('')
+          lines.push('⚠️ Alumni otomatis hanya untuk siswa kelas XII.')
+          lines.push(`Eligible: ${eligible.length}${skipped ? `, dilewati: ${skipped}` : ''}`)
+          lines.push(`Tahun lulus: ${year}`)
+        }
+
+        if (!promotionExitReason.trim()) {
+          pushToast('error', 'Isi alasan/catatan terlebih dahulu')
+          return
+        }
+
+        lines.push('')
+        lines.push(`Alasan/Catatan: ${promotionExitReason.trim()}`)
+        lines.push('')
+        lines.push('Lanjutkan?')
+      } else {
+        // Normal pindah kelas
+        if (promotionMode === 'kelas') {
+          lines.push(
+            `Anda akan memindahkan semua siswa dari kelas "${fromKelasName || promotionFromKelas}"`,
+            `ke kelas "${toKelasName || promotionToKelas}".`,
+            '',
+            `Total siswa: ${ids.length}`
+          )
+        } else {
+          lines.push(
+            `Anda akan memindahkan ${ids.length} siswa terpilih`,
+            `ke kelas "${toKelasName || promotionToKelas}".`
+          )
+        }
+
+        // warning lintas grade
+        const fromGrade =
+          promotionMode === 'kelas'
+            ? getGradeLabel(promotionFromKelas)
+            : (() => {
+              // kalau selected mode, tampilkan jika campur grade tidak warn
+              const uniqueFromGrades = [...new Set(selectedSiswa.map(s => getGradeLabel(s.kelas)).filter(Boolean))]
+              return uniqueFromGrades.length === 1 ? uniqueFromGrades[0] : ''
+            })()
+
+        const toGrade = getGradeLabel(promotionToKelas)
+
+        if (fromGrade && toGrade && fromGrade !== toGrade) {
+          lines.push('')
+          lines.push('⚠️ PERHATIAN:')
+          lines.push(`Ini termasuk pindah tingkatan (grade) dari ${fromGrade} ke ${toGrade}.`)
+          lines.push('Pastikan ini memang kenaikan kelas / perbaikan salah kelas.')
+        }
+
+        lines.push('')
+        lines.push('Lanjutkan?')
+      }
+
+      const confirmMsg = lines.join('\n')
+      if (!window.confirm(confirmMsg)) return
 
       setPromotionLoading(true)
+      const now = new Date().toISOString()
 
+      if (isExitMode) {
+        let eligibleSiswa = selectedSiswa
+        if (isAlumniMode) {
+          eligibleSiswa = selectedSiswa.filter(s => getGradeLabel(s.kelas) === 'XII')
+        }
+
+        if (!eligibleSiswa.length) {
+          pushToast('error', 'Tidak ada siswa eligible untuk diproses (Alumni hanya kelas XII)')
+          return
+        }
+
+        const eligibleIds = eligibleSiswa.map(s => s.id)
+
+        // reset ketua kelas jika ketua ikut keluar
+        await supabase
+          .from('kelas_struktur')
+          .update({ ketua_siswa_id: null, ketua_siswa_nama: null })
+          .in('ketua_siswa_id', eligibleIds)
+
+        const lastClassText = promotionMode === 'kelas'
+          ? (fromKelasName || promotionFromKelas)
+          : 'Multi-kelas'
+
+        let alasan = ''
+        if (isAlumniMode) {
+          const year = parseInt(promotionAlumniYear || '', 10) || new Date().getFullYear()
+          alasan = `Lulus tahun ${year}. Kelas terakhir: ${lastClassText}.`
+        } else {
+          alasan = `Mutasi/Pindah sekolah. Kelas terakhir: ${lastClassText}.`
+        }
+        if (promotionExitReason.trim()) alasan += ` ${promotionExitReason.trim()}`
+
+        const payload = {
+          status: isAlumniMode ? 'alumni' : 'mutasi',
+          disabled_at: now,
+          alasan_nonaktif: alasan,
+          rfid_uid: null,
+          kelas: ''
+        }
+
+        const { error } = await supabase
+          .from('profiles')
+          .update(payload)
+          .in('id', eligibleIds)
+
+        if (error) throw error
+
+        const skipped = ids.length - eligibleIds.length
+        pushToast('success', `${isAlumniMode ? 'Kelulusan' : 'Mutasi'} berhasil: ${eligibleIds.length} siswa`)
+        if (skipped) pushToast('info', `${skipped} siswa dilewati (bukan kelas XII)`)
+
+        closePromotionModal()
+        await loadAllData()
+        return
+      }
+
+      // Normal pindah kelas
       const { error } = await supabase
         .from('profiles')
         .update({ kelas: promotionToKelas })
@@ -756,23 +910,23 @@ export default function ASiswa() {
 
       if (error) throw error
 
-      // Reset ketua kelas jika ada
-      const { error: strukturError } = await supabase
-        .from('kelas_struktur')
-        .update({ ketua_siswa_id: null, ketua_siswa_nama: null })
-        .in('ketua_siswa_id', ids)
-
-      if (strukturError) {
-        console.warn('Error reset ketua kelas:', strukturError)
+      // FIX: reset ketua kelas untuk semua kelas asal yg terdampak + kelas tujuan
+      const affectedFrom = selectedSiswa.map(s => s.kelas).filter(Boolean)
+      const affected = [...new Set([...affectedFrom, promotionToKelas].filter(Boolean))]
+      if (affected.length) {
+        await supabase
+          .from('kelas_struktur')
+          .update({ ketua_siswa_id: null, ketua_siswa_nama: null })
+          .in('kelas_id', affected)
       }
 
       pushToast('success', `Berhasil memindahkan ${ids.length} siswa`)
       closePromotionModal()
-      loadSiswaRaw()
-      loadStrukturKelas()
-    } catch (err) {
-      console.error('Error kenaikan kelas:', err)
-      pushToast('error', 'Gagal memproses kenaikan kelas')
+      await loadAllData()
+    } catch (error) {
+      console.error('Error in handlePromotion:', error)
+      pushToast('error', error.message || 'Gagal memproses kenaikan/pindah kelas')
+    } finally {
       setPromotionLoading(false)
     }
   }
@@ -786,7 +940,7 @@ export default function ASiswa() {
         setRfidLastScan(null)
         setRfidEnrolling(false)
         if (rfidChannel) {
-          supabase.removeChannel(rfidChannel)
+          try { supabase.removeChannel(rfidChannel) } catch {}
           setRfidChannel(null)
         }
 
@@ -794,12 +948,10 @@ export default function ASiswa() {
         setMoveKelas(u.kelas || '')
         setMoveGrade(getGradeLabel(u.kelas || '') || '')
 
-        // Set edit phone form
         setEditPhoneForm({
           no_hp_siswa: u.no_hp_siswa || '',
           no_hp_wali: u.no_hp_wali || ''
         })
-
         setEditingPhone(false)
 
         setDetailLoading(true)
@@ -846,7 +998,6 @@ export default function ASiswa() {
             jabatan: osisData.jabatan || 'Anggota'
           } : null
           setOsisRow(row)
-
         } catch (error) {
           console.error('Error loading detail:', error)
           pushToast('error', 'Gagal memuat detail siswa')
@@ -866,6 +1017,7 @@ export default function ASiswa() {
     const opts = kelasByGrade(moveGrade)
     if (!opts.length) return
     if (!moveKelas) setMoveKelas(opts[0].id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detailOpen, moveGrade, kelasList, detailUser, moveKelas])
 
   function closeDetailModal() {
@@ -877,12 +1029,12 @@ export default function ASiswa() {
     setEditingPhone(false)
     setPhoneErrors({})
     if (rfidChannel) {
-      supabase.removeChannel(rfidChannel)
+      try { supabase.removeChannel(rfidChannel) } catch {}
       setRfidChannel(null)
     }
   }
 
-  /* ===== Detail: actions (kelas & status) ===== */
+  /* ===== Detail: pindah kelas ===== */
   async function simpanPindahKelas() {
     const user = detailUser
     const target = moveKelas || ''
@@ -890,9 +1042,7 @@ export default function ASiswa() {
 
     const originalGrade = getGradeLabel(user.kelas || '')
     const targetGrade = getGradeLabel(target || '')
-
-    const isCrossGrade =
-      originalGrade && targetGrade && originalGrade !== targetGrade
+    const isCrossGrade = originalGrade && targetGrade && originalGrade !== targetGrade
 
     const konfirmasi = window.confirm(
       `Yakin ingin mengubah kelas siswa?\n\n` +
@@ -928,10 +1078,7 @@ export default function ASiswa() {
         if (strukturLama) {
           await supabase
             .from('kelas_struktur')
-            .update({
-              ketua_siswa_id: null,
-              ketua_siswa_nama: null
-            })
+            .update({ ketua_siswa_id: null, ketua_siswa_nama: null })
             .eq('kelas_id', strukturLama.kelas_id)
         }
       }
@@ -969,10 +1116,8 @@ export default function ASiswa() {
     }
   }
 
-  /* ===== Edit Nomor HP Siswa & Wali ===== */
-  const handleEditPhone = () => {
-    setEditingPhone(true)
-  }
+  /* ===== Edit Nomor HP ===== */
+  const handleEditPhone = () => setEditingPhone(true)
 
   const handleCancelEditPhone = () => {
     setEditingPhone(false)
@@ -986,36 +1131,10 @@ export default function ASiswa() {
   const handlePhoneChange = (e) => {
     const { name, value } = e.target
     setEditPhoneForm(prev => ({ ...prev, [name]: value }))
-
-    // Clear error when user types
-    if (phoneErrors[name]) {
-      setPhoneErrors(prev => ({ ...prev, [name]: '' }))
-    }
-  }
-
-  // Validasi nomor telepon Indonesia
-  const validatePhoneNumber = (phone, fieldName) => {
-    if (!phone) return '' // Opsional, tidak error jika kosong
-
-    // Hapus semua karakter non-digit
-    const cleanPhone = phone.replace(/\D/g, '')
-
-    // Validasi panjang maksimal 14 digit
-    if (cleanPhone.length > 14) {
-      return `Nomor ${fieldName} maksimal 14 digit`
-    }
-
-    // Validasi format Indonesia
-    const indonesianPhoneRegex = /^(?:\+62|62|0)[2-9]\d{7,11}$/
-    if (!indonesianPhoneRegex.test(cleanPhone)) {
-      return `Format nomor ${fieldName} tidak valid. Contoh: 081234567890`
-    }
-
-    return ''
+    if (phoneErrors[name]) setPhoneErrors(prev => ({ ...prev, [name]: '' }))
   }
 
   const handleSavePhone = async () => {
-    // Validasi
     const errors = {}
     const noHpSiswaError = validatePhoneNumber(editPhoneForm.no_hp_siswa, 'HP Siswa')
     const noHpWaliError = validatePhoneNumber(editPhoneForm.no_hp_wali, 'HP Wali')
@@ -1028,12 +1147,15 @@ export default function ASiswa() {
       return
     }
 
+    const normalizedSiswa = editPhoneForm.no_hp_siswa ? normalizePhoneID(editPhoneForm.no_hp_siswa) : null
+    const normalizedWali = editPhoneForm.no_hp_wali ? normalizePhoneID(editPhoneForm.no_hp_wali) : null
+
     try {
       const { error } = await supabase
         .from('profiles')
         .update({
-          no_hp_siswa: editPhoneForm.no_hp_siswa || null,
-          no_hp_wali: editPhoneForm.no_hp_wali || null,
+          no_hp_siswa: normalizedSiswa,
+          no_hp_wali: normalizedWali,
           updated_at: new Date().toISOString()
         })
         .eq('id', detailUser.id)
@@ -1043,19 +1165,18 @@ export default function ASiswa() {
       pushToast('success', 'Nomor HP berhasil diperbarui')
       setDetailUser(prev => prev ? ({
         ...prev,
-        no_hp_siswa: editPhoneForm.no_hp_siswa,
-        no_hp_wali: editPhoneForm.no_hp_wali
+        no_hp_siswa: normalizedSiswa,
+        no_hp_wali: normalizedWali
       }) : prev)
 
-      // Update local state
       setSiswaRaw(prev => prev.map(s =>
         s.id === detailUser.id
-          ? { ...s, no_hp_siswa: editPhoneForm.no_hp_siswa, no_hp_wali: editPhoneForm.no_hp_wali }
+          ? { ...s, no_hp_siswa: normalizedSiswa, no_hp_wali: normalizedWali }
           : s
       ))
       setSiswa(prev => prev.map(s =>
         s.id === detailUser.id
-          ? { ...s, no_hp_siswa: editPhoneForm.no_hp_siswa, no_hp_wali: editPhoneForm.no_hp_wali }
+          ? { ...s, no_hp_siswa: normalizedSiswa, no_hp_wali: normalizedWali }
           : s
       ))
 
@@ -1067,7 +1188,7 @@ export default function ASiswa() {
     }
   }
 
-  /* ===== Nonaktifkan & Aktifkan Siswa ===== */
+  /* ===== Nonaktifkan & Aktifkan ===== */
   const openNonaktifModal = (siswa) => {
     openPasswordModal(
       'Konfirmasi Nonaktifkan Siswa',
@@ -1091,7 +1212,6 @@ export default function ASiswa() {
 
   const nonaktifkanSiswa = () => {
     if (!siswaToNonaktif) return
-
     if (!alasanNonaktif.trim()) {
       pushToast('error', 'Harap masukkan alasan penonaktifan')
       return
@@ -1105,7 +1225,7 @@ export default function ASiswa() {
             .from('profiles')
             .update({
               status: 'nonaktif',
-              alasan_nonaktif: alasanNonaktif,
+              alasan_nonaktif: alasanNonaktif.trim(),
               disabled_at: new Date().toISOString()
             })
             .eq('id', siswaToNonaktif.id)
@@ -1118,7 +1238,7 @@ export default function ASiswa() {
             setDetailUser(prev => prev ? ({
               ...prev,
               status: 'nonaktif',
-              alasan_nonaktif: alasanNonaktif
+              alasan_nonaktif: alasanNonaktif.trim()
             }) : prev)
           }
 
@@ -1146,8 +1266,7 @@ export default function ASiswa() {
             .update({
               status: 'active',
               alasan_nonaktif: null,
-              disabled_at: null,
-              deleted_at: null
+              disabled_at: null
             })
             .eq('id', siswaToAktifkan.id)
 
@@ -1159,8 +1278,7 @@ export default function ASiswa() {
             setDetailUser(prev => prev ? ({
               ...prev,
               status: 'active',
-              alasan_nonaktif: null,
-              deleted_at: null
+              alasan_nonaktif: null
             }) : prev)
           }
 
@@ -1179,7 +1297,7 @@ export default function ASiswa() {
   function toggleRfidListen() {
     if (rfidEnrolling) {
       if (rfidChannel) {
-        supabase.removeChannel(rfidChannel)
+        try { supabase.removeChannel(rfidChannel) } catch {}
         setRfidChannel(null)
       }
       setRfidEnrolling(false)
@@ -1324,13 +1442,16 @@ export default function ASiswa() {
     }
   }
 
-  /* ===== Soft Delete (Nonaktif Permanen) ===== */
+  /* ===== Soft Delete / Keluar Sekolah ===== */
   function openDeleteConfirm(siswa) {
     openPasswordModal(
-      'Konfirmasi Nonaktif Permanen (Soft Delete)',
+      'Konfirmasi Keluar Sekolah',
       () => {
         setSiswaToDelete(siswa)
-        setAlasanHapus('')
+        const g = getGradeLabel(siswa?.kelas || '')
+        setKeluarMode(g === 'XII' ? 'alumni' : 'mutasi')
+        setKeluarYear(String(new Date().getFullYear()))
+        setKeluarReason('')
         setDeleteConfirmOpen(true)
       }
     )
@@ -1339,45 +1460,72 @@ export default function ASiswa() {
   function closeDeleteConfirm() {
     setDeleteConfirmOpen(false)
     setSiswaToDelete(null)
-    setAlasanHapus('')
+    setKeluarReason('')
+    setKeluarMode('mutasi')
+    setKeluarYear(String(new Date().getFullYear()))
   }
 
   const hapusAkunSiswa = () => {
     if (!siswaToDelete) return
+    if (!keluarReason.trim()) {
+      pushToast('error', 'Harap masukkan alasan')
+      return
+    }
 
     openPasswordModal(
-      'Konfirmasi Akhir Nonaktif Permanen (Soft Delete)',
+      'Konfirmasi Akhir Keluar Sekolah',
       async () => {
         try {
           setDeletingSiswa(true)
+
           const now = new Date().toISOString()
+          const lastKelasName = getNamaKelas(siswaToDelete.kelas)
+          const lastKelasRaw = siswaToDelete.kelas || ''
+          const lastInfo = lastKelasName || lastKelasRaw || '-'
 
-          // Reset ketua kelas jika siswa ini ketua
-          await supabase
-            .from('kelas_struktur')
-            .update({ ketua_siswa_id: null, ketua_siswa_nama: null })
-            .eq('ketua_siswa_id', siswaToDelete.id)
+          let alasan = keluarReason.trim()
+          const status = keluarMode
 
-          // Soft delete: simpan riwayat, hanya matikan akses
+          if (status === 'alumni') {
+            const y = parseInt(keluarYear, 10) || new Date().getFullYear()
+            alasan = `Lulus tahun ${y}. Kelas terakhir: ${lastInfo}. ${alasan}`
+          } else if (status === 'mutasi') {
+            alasan = `Mutasi/pindah sekolah. Kelas terakhir: ${lastInfo}. ${alasan}`
+          } else {
+            alasan = `Nonaktif permanen. Kelas terakhir: ${lastInfo}. ${alasan}`
+          }
+
+          const payload = {
+            status,
+            alasan_nonaktif: alasan,
+            disabled_at: now,
+            rfid_uid: null,
+            kelas: ''
+          }
+
           const { error } = await supabase
             .from('profiles')
-            .update({
-              status: 'nonaktif',
-              deleted_at: now,
-              disabled_at: now,
-              alasan_nonaktif: (alasanHapus || 'Dinonaktifkan permanen oleh admin (soft delete)')
-            })
+            .update(payload)
             .eq('id', siswaToDelete.id)
 
           if (error) throw error
 
-          pushToast('success', 'Akun siswa berhasil dinonaktifkan permanen (soft delete). Riwayat tetap tersimpan.')
+          // reset ketua kelas jika perlu
+          try {
+            await supabase
+              .from('kelas_struktur')
+              .update({ ketua_siswa_id: null, ketua_siswa_nama: null })
+              .eq('ketua_siswa_id', siswaToDelete.id)
+          } catch {}
+
+          pushToast('success', `Berhasil: ${status === 'alumni' ? 'dijadikan alumni' : status === 'mutasi' ? 'dimutasi' : 'dinonaktifkan'} (riwayat aman)`)
+
           closeDeleteConfirm()
           if (detailOpen) closeDetailModal()
-          loadAllData()
+          await loadAllData()
         } catch (error) {
-          console.error('Error soft delete siswa:', error)
-          pushToast('error', 'Gagal menonaktifkan akun siswa: ' + (error.message || 'Unknown error'))
+          console.error('Error soft-delete/keluar sekolah:', error)
+          pushToast('error', 'Gagal memproses: ' + (error.message || 'Unknown error'))
         } finally {
           setDeletingSiswa(false)
         }
@@ -1385,17 +1533,15 @@ export default function ASiswa() {
     )
   }
 
-  /* ===== Tambah Siswa (SIMPLE VERSION) ===== */
+  /* ===== Tambah Siswa ===== */
   const validateForm = () => {
     const errors = {}
-
     if (!form.email.trim()) errors.email = 'Email harus diisi'
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errors.email = 'Format email tidak valid'
 
     if (!form.nama.trim()) errors.nama = 'Nama lengkap harus diisi'
     if (!form.password) errors.password = 'Password harus diisi'
     else if (form.password.length < 6) errors.password = 'Password minimal 6 karakter'
-
     if (form.password !== form.confirmPassword) errors.confirmPassword = 'Password dan konfirmasi tidak sama'
     if (form.nik && !/^\d+$/.test(form.nik)) errors.nik = 'NIK harus berupa angka'
 
@@ -1406,10 +1552,7 @@ export default function ASiswa() {
   const handleChange = (e) => {
     const { name, value } = e.target
     setForm(prev => ({ ...prev, [name]: value }))
-
-    if (formErrors[name]) {
-      setFormErrors(prev => ({ ...prev, [name]: '' }))
-    }
+    if (formErrors[name]) setFormErrors(prev => ({ ...prev, [name]: '' }))
   }
 
   const resetForm = () => {
@@ -1427,7 +1570,6 @@ export default function ASiswa() {
 
   const handleAdd = async () => {
     if (!validateForm()) return
-
     try {
       setAddingSiswa(true)
 
@@ -1443,7 +1585,7 @@ export default function ASiswa() {
       })
 
       if (authError) {
-        if (authError.message.includes('User already registered')) {
+        if (authError.message?.toLowerCase().includes('already')) {
           throw new Error('Email sudah terdaftar')
         }
         throw authError
@@ -1477,7 +1619,9 @@ export default function ASiswa() {
     }
   }
 
-  /* ===== Render ===== */
+  /* ===========================
+     Render
+  ============================ */
   return (
     <div className="min-h-screen bg-gray-50 p-4">
       <div className="max-w-7xl mx-auto space-y-6">
@@ -1505,7 +1649,6 @@ export default function ASiswa() {
               </div>
             </div>
 
-            {/* Tombol aksi kanan */}
             <div className="mt-4 lg:mt-0 flex flex-col sm:flex-row gap-2">
               <button
                 className="bg-indigo-50 text-indigo-700 px-4 py-2 rounded-lg border border-indigo-200 hover:bg-indigo-100 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-all duration-200 font-medium"
@@ -1544,7 +1687,7 @@ export default function ASiswa() {
             value={stats.nonaktifSiswa}
             icon="⏸️"
             color="orange"
-            description="Tidak aktif sementara / permanen"
+            description={`Nonaktif: ${stats.nonaktifOnly} • Mutasi: ${stats.mutasiSiswa} • Alumni: ${stats.alumniSiswa}`}
           />
           <StatCard
             label="Ketua Kelas"
@@ -1555,7 +1698,7 @@ export default function ASiswa() {
           />
         </div>
 
-        {/* Form Tambah Siswa (SIMPLE VERSION) */}
+        {/* Form Tambah Siswa */}
         {showAddForm && (
           <Card className="mb-6">
             <div className="bg-blue-50 border-b border-blue-200 p-4">
@@ -1637,18 +1780,8 @@ export default function ASiswa() {
               </div>
 
               <div className="flex justify-end space-x-3 mt-4 pt-4 border-t border-gray-200">
-                <Button
-                  variant="secondary"
-                  onClick={resetForm}
-                >
-                  🔄 Reset
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => setShowAddForm(false)}
-                >
-                  ✕ Batal
-                </Button>
+                <Button variant="secondary" onClick={resetForm}>🔄 Reset</Button>
+                <Button variant="secondary" onClick={() => setShowAddForm(false)}>✕ Batal</Button>
                 <Button
                   onClick={handleAdd}
                   loading={addingSiswa}
@@ -1714,23 +1847,15 @@ export default function ASiswa() {
                 options={[
                   { value: '', label: 'Semua Status' },
                   { value: 'active', label: 'Aktif' },
-                  { value: 'nonaktif', label: 'Nonaktif' }
+                  { value: 'nonaktif', label: 'Nonaktif' },
+                  { value: 'mutasi', label: 'Mutasi (Pindah Sekolah)' },
+                  { value: 'alumni', label: 'Alumni (Lulus)' }
                 ]}
               />
             </div>
             <div className="flex justify-end space-x-3 mt-4">
-              <Button
-                onClick={applyFilter}
-                loading={isSearching}
-              >
-                Cari
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={resetFilter}
-              >
-                🔄 Reset
-              </Button>
+              <Button onClick={applyFilter} loading={isSearching}>Cari</Button>
+              <Button variant="secondary" onClick={resetFilter}>🔄 Reset</Button>
             </div>
           </div>
         </Card>
@@ -1766,30 +1891,14 @@ export default function ASiswa() {
               <table className="w-full">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
-                      No
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
-                      Siswa
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
-                      Kelas
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
-                      NIK
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
-                      JK
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
-                      RFID
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
-                      Status
-                    </th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
-                      Aksi
-                    </th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border-b">No</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">Siswa</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">Kelas</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">NIK</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">JK</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">RFID</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">Status</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider border-b">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
@@ -1799,10 +1908,7 @@ export default function ASiswa() {
 
                     return (
                       <tr key={s.id} className="hover:bg-gray-50">
-                        {/* Kolom Nomor Urut */}
-                        <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 text-center">
-                          {index + 1}
-                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 text-center">{index + 1}</td>
 
                         <td className="px-4 py-3 whitespace-nowrap">
                           <div className="flex items-center">
@@ -1823,75 +1929,52 @@ export default function ASiswa() {
                               <div className="text-sm font-medium text-gray-900">
                                 {s.nama || '—'}
                                 {isKetua && (
-                                  <Badge variant="warning" className="ml-2 text-xs">
-                                    👑 Ketua
-                                  </Badge>
+                                  <Badge variant="warning" className="ml-2 text-xs">👑 Ketua</Badge>
                                 )}
                               </div>
-                              <div className="text-sm text-gray-500">
-                                {s.email || '—'}
-                              </div>
+                              <div className="text-sm text-gray-500">{s.email || '—'}</div>
                             </div>
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-sm text-gray-900">
-                          {getNamaKelas(s.kelas)}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-gray-900">
-                          {s.nik || '—'}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-gray-900">
-                          {JK_LABEL(s.jk)}
-                        </td>
+
+                        <td className="px-4 py-3 text-sm text-gray-900">{getNamaKelas(s.kelas)}</td>
+                        <td className="px-4 py-3 text-sm text-gray-900">{s.nik || '—'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-900">{JK_LABEL(s.jk)}</td>
+
                         <td className="px-4 py-3 text-sm">
                           {s.rfid_uid ? (
-                            <Badge variant="info" className="text-xs">
-                              {(s.rfid_uid || '').toUpperCase()}
-                            </Badge>
+                            <Badge variant="info" className="text-xs">{(s.rfid_uid || '').toUpperCase()}</Badge>
                           ) : (
                             <span className="text-gray-400">—</span>
                           )}
                         </td>
+
                         <td className="px-4 py-3 whitespace-nowrap">
-                          {s.status === 'nonaktif' ? (
-                            <Badge variant="danger" className="text-xs">
-                              ⏸️ Nonaktif
-                            </Badge>
-                          ) : (
-                            <Badge variant="success" className="text-xs">
-                              ✅ Aktif
-                            </Badge>
-                          )}
+                          {(() => {
+                            const meta = STATUS_META(s.status || 'active')
+                            return (
+                              <Badge variant={meta.variant} className="text-xs">
+                                {meta.icon} {meta.label}
+                              </Badge>
+                            )
+                          })()}
                         </td>
+
                         <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-medium space-x-1">
-                          <Button
-                            variant="primary"
-                            size="sm"
-                            onClick={() => openDetail(s)}
-                          >
-                            Detail
-                          </Button>
-                          {s.status === 'active' ? (
-                            <Button
-                              variant="warning"
-                              size="sm"
-                              onClick={() => openNonaktifModal(s)}
-                            >
-                              Nonaktif
-                            </Button>
+                          <Button variant="primary" size="sm" onClick={() => openDetail(s)}>Detail</Button>
+
+                          {(s.status || 'active') === 'active' ? (
+                            <Button variant="warning" size="sm" onClick={() => openNonaktifModal(s)}>Nonaktif</Button>
                           ) : (
-                            <Button
-                              variant="success"
-                              size="sm"
-                              onClick={() => openAktifkanModal(s)}
-                            >
-                              Aktifkan
-                            </Button>
+                            <Button variant="success" size="sm" onClick={() => openAktifkanModal(s)}>Aktifkan</Button>
                           )}
+
+                          <Button variant="danger" size="sm" onClick={() => openDeleteConfirm(s)}>Keluar</Button>
                         </td>
                       </tr>
                     )
                   })}
+
                   {!siswa.length && (
                     <tr>
                       <td colSpan="8" className="px-4 py-8 text-center">
@@ -1909,71 +1992,96 @@ export default function ASiswa() {
           </div>
         </Card>
 
-        {/* Modal Konfirmasi Soft Delete */}
+        {/* Modal Konfirmasi Keluar Sekolah */}
         {deleteConfirmOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-lg p-6 w-full max-w-md">
               <div className="flex items-center gap-3 mb-4">
                 <div className="p-2 bg-red-100 text-red-600 rounded-lg">
-                  <span className="text-xl">🗑️</span>
+                  <span className="text-xl">🚪</span>
                 </div>
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900">Nonaktif Permanen (Soft Delete)</h3>
-                  <p className="text-gray-600 text-sm">Riwayat tetap tersimpan • Siswa tidak bisa akses lagi</p>
+                  <h3 className="text-lg font-semibold text-gray-900">Keluarkan dari Sekolah</h3>
+                  <p className="text-gray-600 text-sm">Tanpa menghapus riwayat absensi / tugas</p>
                 </div>
               </div>
 
-              <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
-                <p className="text-red-800 text-sm font-medium mb-2">
-                  Anda yakin ingin menonaktifkan permanen akun siswa ini?
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-4 space-y-3">
+                <p className="text-gray-800 text-sm">
+                  Target: <strong>{siswaToDelete?.nama}</strong> ({siswaToDelete?.email})
                 </p>
-                <p className="text-red-700 text-sm">
-                  <strong>{siswaToDelete?.nama}</strong> ({siswaToDelete?.email})
-                </p>
-                <p className="text-red-700 text-sm mt-2">
-                  Dampak:
-                </p>
-                <ul className="text-red-700 text-sm list-disc list-inside mt-1">
-                  <li>Siswa tidak bisa login & mengakses data</li>
-                  <li>Data absensi, tugas, dan riwayat tetap ada untuk laporan</li>
-                  <li>Akun bisa diaktifkan kembali oleh admin</li>
-                </ul>
 
-                <div className="mt-3">
-                  <label className="block text-sm font-medium text-red-900 mb-1">
-                    Alasan (opsional)
-                  </label>
-                  <textarea
-                    value={alasanHapus}
-                    onChange={(e) => setAlasanHapus(e.target.value)}
-                    placeholder="Contoh: Lulus, pindah sekolah, keluar, dll."
-                    className="w-full px-3 py-2 border border-red-200 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 bg-white resize-none"
-                    rows={3}
-                  />
+                <div className="grid grid-cols-1 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Mode</label>
+                    <select
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 bg-white"
+                      value={keluarMode}
+                      onChange={(e) => setKeluarMode(e.target.value)}
+                      disabled={deletingSiswa}
+                    >
+                      <option value="mutasi">📤 Mutasi / Pindah Sekolah</option>
+                      <option value="alumni">🎓 Alumni / Lulus</option>
+                      <option value="nonaktif">⏸️ Nonaktif Permanen</option>
+                    </select>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Catatan: semua mode di atas akan mematikan akses login.
+                    </p>
+                  </div>
+
+                  {keluarMode === 'alumni' && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Tahun Lulus</label>
+                      <input
+                        type="number"
+                        min="2000"
+                        max="2100"
+                        value={keluarYear}
+                        onChange={(e) => setKeluarYear(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                        placeholder="2025"
+                        disabled={deletingSiswa}
+                      />
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Alasan *</label>
+                    <textarea
+                      value={keluarReason}
+                      onChange={(e) => setKeluarReason(e.target.value)}
+                      placeholder={
+                        keluarMode === 'alumni'
+                          ? 'Contoh: Lulus sesuai kelulusan sekolah.'
+                          : 'Contoh: Pindah sekolah / mutasi orang tua.'
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 bg-white resize-none"
+                      rows={3}
+                      disabled={deletingSiswa}
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Sistem akan: mengosongkan kelas & RFID agar tidak muncul di daftar aktif, tapi riwayat tetap aman.
+                    </p>
+                  </div>
                 </div>
               </div>
 
               <div className="flex justify-end space-x-3">
-                <Button
-                  variant="secondary"
-                  onClick={closeDeleteConfirm}
-                  disabled={deletingSiswa}
-                >
-                  ✕ Batal
-                </Button>
+                <Button variant="secondary" onClick={closeDeleteConfirm} disabled={deletingSiswa}>✕ Batal</Button>
                 <Button
                   variant="danger"
                   onClick={hapusAkunSiswa}
                   loading={deletingSiswa}
+                  disabled={!keluarReason.trim()}
                 >
-                  🛑 Nonaktifkan Permanen
+                  🚪 Proses
                 </Button>
               </div>
             </div>
           </div>
         )}
 
-        {/* Modal Nonaktifkan Siswa */}
+        {/* Modal Nonaktifkan */}
         {nonaktifModalOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-lg p-6 w-full max-w-md">
@@ -2025,7 +2133,7 @@ export default function ASiswa() {
           </div>
         )}
 
-        {/* Modal Aktifkan Siswa */}
+        {/* Modal Aktifkan */}
         {aktifkanModalOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-lg p-6 w-full max-w-md">
@@ -2058,12 +2166,7 @@ export default function ASiswa() {
                 >
                   ✕ Batal
                 </Button>
-                <Button
-                  variant="success"
-                  onClick={aktifkanSiswa}
-                >
-                  ✅ Ya, Aktifkan
-                </Button>
+                <Button variant="success" onClick={aktifkanSiswa}>✅ Ya, Aktifkan</Button>
               </div>
             </div>
           </div>
@@ -2086,26 +2189,23 @@ export default function ASiswa() {
               </div>
 
               <div className="space-y-4">
-                {/* Mode pilihan */}
                 <div className="flex gap-2 text-sm">
                   <button
                     type="button"
-                    className={`flex-1 px-3 py-2 rounded-lg border ${
-                      promotionMode === 'kelas'
-                        ? 'bg-indigo-50 border-indigo-400 text-indigo-700'
-                        : 'bg-gray-50 border-gray-300 text-gray-700'
-                    }`}
+                    className={`flex-1 px-3 py-2 rounded-lg border ${promotionMode === 'kelas'
+                      ? 'bg-indigo-50 border-indigo-400 text-indigo-700'
+                      : 'bg-gray-50 border-gray-300 text-gray-700'
+                      }`}
                     onClick={() => setPromotionMode('kelas')}
                   >
                     Berdasarkan Kelas
                   </button>
                   <button
                     type="button"
-                    className={`flex-1 px-3 py-2 rounded-lg border ${
-                      promotionMode === 'selected'
-                        ? 'bg-indigo-50 border-indigo-400 text-indigo-700'
-                        : 'bg-gray-50 border-gray-300 text-gray-700'
-                    }`}
+                    className={`flex-1 px-3 py-2 rounded-lg border ${promotionMode === 'selected'
+                      ? 'bg-indigo-50 border-indigo-400 text-indigo-700'
+                      : 'bg-gray-50 border-gray-300 text-gray-700'
+                      }`}
                     onClick={() => setPromotionMode('selected')}
                   >
                     Pilih Siswa Manual ({promotionSelectedIds.length})
@@ -2129,7 +2229,9 @@ export default function ASiswa() {
                       onChange={e => setPromotionToKelas(e.target.value)}
                       options={[
                         { value: '', label: 'Pilih kelas tujuan' },
-                        ...kelasOptions.map(k => ({ value: k.value, label: k.label }))
+                        ...kelasOptions.map(k => ({ value: k.value, label: k.label })),
+                        { value: PROMO_ALUMNI, label: `🎓 Alumni (Lulus, tahun ${promotionAlumniYear || new Date().getFullYear()})` },
+                        { value: PROMO_MUTASI, label: '📤 Mutasi / Pindah Sekolah' }
                       ]}
                     />
                   </div>
@@ -2168,10 +2270,8 @@ export default function ASiswa() {
                     <div className="border rounded-lg max-h-56 overflow-y-auto">
                       <div className="flex items-center justify-between px-3 py-2 border-b bg-gray-50">
                         <p className="text-xs text-gray-600">
-                          Siswa terlihat:{' '}
-                          <span className="font-semibold">{promotionCandidateSiswa.length}</span>{' '}
-                          • Dipilih:{' '}
-                          <span className="font-semibold">{promotionSelectedIds.length}</span>
+                          Siswa terlihat: <span className="font-semibold">{promotionCandidateSiswa.length}</span>
+                          {' '}• Dipilih: <span className="font-semibold">{promotionSelectedIds.length}</span>
                         </p>
                         <button
                           type="button"
@@ -2180,11 +2280,12 @@ export default function ASiswa() {
                           disabled={!promotionCandidateSiswa.length}
                         >
                           {promotionCandidateSiswa.length > 0 &&
-                          promotionCandidateSiswa.every(s => promotionSelectedIds.includes(s.id))
+                            promotionCandidateSiswa.every(s => promotionSelectedIds.includes(s.id))
                             ? 'Hapus pilih semua'
                             : 'Pilih semua yang terlihat'}
                         </button>
                       </div>
+
                       {promotionCandidateSiswa.length ? (
                         <ul className="divide-y divide-gray-100">
                           {promotionCandidateSiswa.map(s => (
@@ -2219,7 +2320,9 @@ export default function ASiswa() {
                       onChange={e => setPromotionToKelas(e.target.value)}
                       options={[
                         { value: '', label: 'Pilih kelas tujuan' },
-                        ...kelasOptions.map(k => ({ value: k.value, label: k.label }))
+                        ...kelasOptions.map(k => ({ value: k.value, label: k.label })),
+                        { value: PROMO_ALUMNI, label: `🎓 Alumni (Lulus, tahun ${promotionAlumniYear || new Date().getFullYear()})` },
+                        { value: PROMO_MUTASI, label: '📤 Mutasi / Pindah Sekolah' }
                       ]}
                     />
 
@@ -2231,25 +2334,59 @@ export default function ASiswa() {
                   </div>
                 )}
 
+                {(promotionToKelas === PROMO_ALUMNI || promotionToKelas === PROMO_MUTASI) && (
+                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 space-y-3">
+                    <p className="text-sm text-yellow-900">
+                      Mode khusus dipilih: <strong>{promotionToKelas === PROMO_ALUMNI ? 'Alumni (Lulus)' : 'Mutasi (Pindah Sekolah)'}</strong>.
+                      Tidak ada data riwayat yang dihapus.
+                    </p>
+
+                    {promotionToKelas === PROMO_ALUMNI && (
+                      <Input
+                        label="Tahun Lulus"
+                        type="number"
+                        min="2000"
+                        max="2100"
+                        value={promotionAlumniYear}
+                        onChange={(e) => setPromotionAlumniYear(e.target.value)}
+                        placeholder="2025"
+                      />
+                    )}
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Alasan / Catatan *</label>
+                      <textarea
+                        value={promotionExitReason}
+                        onChange={(e) => setPromotionExitReason(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white resize-none"
+                        rows={3}
+                        placeholder={promotionToKelas === PROMO_ALUMNI ? 'Contoh: Lulus sesuai kelulusan sekolah.' : 'Contoh: Pindah sekolah (mutasi orang tua).'}
+                      />
+                      {!promotionExitReason.trim() && (
+                        <p className="text-xs text-red-500 mt-1">Alasan wajib diisi untuk keamanan audit.</p>
+                      )}
+                    </div>
+
+                    <p className="text-xs text-yellow-800">
+                      Sistem akan mengosongkan kelas & RFID agar tidak muncul di roster kelas aktif.
+                    </p>
+                  </div>
+                )}
+
                 <p className="text-xs text-gray-500">
-                  Catatan: Kenaikan kelas boleh lintas tingkatan (misal X → XI), sistem akan memberi peringatan di konfirmasi.
+                  Catatan: Kenaikan kelas boleh lintas tingkatan (misal X → XI), sistem akan memberi peringatan saat konfirmasi.
                 </p>
 
                 <div className="flex justify-end space-x-3 pt-2">
-                  <Button
-                    variant="secondary"
-                    onClick={closePromotionModal}
-                    disabled={promotionLoading}
-                  >
-                    ✕ Batal
-                  </Button>
+                  <Button variant="secondary" onClick={closePromotionModal} disabled={promotionLoading}>✕ Batal</Button>
                   <Button
                     onClick={handlePromotion}
                     loading={promotionLoading}
                     disabled={
                       promotionLoading ||
                       !promotionToKelas ||
-                      (promotionMode === 'kelas' && !promotionFromKelas)
+                      (promotionMode === 'kelas' && !promotionFromKelas) ||
+                      ((promotionToKelas === PROMO_ALUMNI || promotionToKelas === PROMO_MUTASI) && !promotionExitReason.trim())
                     }
                   >
                     ⬆️ Jalankan
@@ -2264,7 +2401,6 @@ export default function ASiswa() {
         {detailOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-lg w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
-              {/* Header */}
               <div className="px-6 py-4 border-b bg-gray-50 flex items-start justify-between">
                 <div className="flex items-center space-x-4">
                   <div className="flex-shrink-0 h-12 w-12">
@@ -2290,9 +2426,9 @@ export default function ASiswa() {
                           👑 Ketua {getKelasKetua(detailUser?.id)}
                         </Badge>
                       )}
-                      {detailUser?.status === 'nonaktif' && (
-                        <Badge variant="danger" className="text-xs">
-                          ⏸️ Nonaktif
+                      {detailUser?.status && detailUser.status !== 'active' && (
+                        <Badge variant={STATUS_META(detailUser.status).variant} className="text-xs">
+                          {STATUS_META(detailUser.status).icon} {STATUS_META(detailUser.status).label}
                         </Badge>
                       )}
                     </div>
@@ -2301,30 +2437,20 @@ export default function ASiswa() {
                     </p>
                   </div>
                 </div>
+
                 <div className="flex items-center space-x-2">
                   {detailUser?.status === 'active' ? (
-                    <Button
-                      variant="warning"
-                      size="sm"
-                      onClick={() => openNonaktifModal(detailUser)}
-                    >
+                    <Button variant="warning" size="sm" onClick={() => openNonaktifModal(detailUser)}>
                       ⏸️ Nonaktif
                     </Button>
                   ) : (
-                    <Button
-                      variant="success"
-                      size="sm"
-                      onClick={() => openAktifkanModal(detailUser)}
-                    >
+                    <Button variant="success" size="sm" onClick={() => openAktifkanModal(detailUser)}>
                       ✅ Aktifkan
                     </Button>
                   )}
-                  <Button
-                    variant="danger"
-                    size="sm"
-                    onClick={() => openDeleteConfirm(detailUser)}
-                  >
-                    🗑️ Nonaktif Permanen
+                  {/* FIX label: ini soft-delete/keluar sekolah */}
+                  <Button variant="danger" size="sm" onClick={() => openDeleteConfirm(detailUser)}>
+                    🚪 Keluar
                   </Button>
                   <button
                     className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"
@@ -2337,7 +2463,6 @@ export default function ASiswa() {
                 </div>
               </div>
 
-              {/* Content */}
               <div className="p-6 space-y-6 overflow-y-auto flex-1">
                 {detailLoading ? (
                   <div className="space-y-4">
@@ -2347,8 +2472,8 @@ export default function ASiswa() {
                   </div>
                 ) : (
                   <>
-                    {/* Kelas & Status + RFID */}
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      {/* Kelas */}
                       <div className="bg-white border border-gray-200 rounded-lg p-4">
                         <h4 className="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
                           <span>🏫</span>
@@ -2373,12 +2498,9 @@ export default function ASiswa() {
                                 const baseGrade = getGradeLabel(detailUser?.kelas || '') || moveGrade
                                 const options = kelasByGrade(baseGrade)
 
-                                if (!baseGrade) {
-                                  return [{ value: '', label: 'Pilih tingkatan dulu' }]
-                                }
-                                if (options.length === 0) {
-                                  return [{ value: '', label: 'Tidak ada kelas pada tingkatan ini' }]
-                                }
+                                if (!baseGrade) return [{ value: '', label: 'Pilih tingkatan dulu' }]
+                                if (options.length === 0) return [{ value: '', label: 'Tidak ada kelas pada tingkatan ini' }]
+
                                 return [
                                   { value: '', label: 'Pilih kelas' },
                                   ...options.map(k => ({ value: k.id, label: getKelasDisplayName(k) }))
@@ -2390,23 +2512,15 @@ export default function ASiswa() {
                           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-3 border-t">
                             <div className="text-sm">
                               <span className="text-gray-600">Status: </span>
-                              <span className={detailUser?.status === 'nonaktif' ? 'text-red-600 font-medium' : 'text-green-600 font-medium'}>
-                                {detailUser?.status === 'nonaktif' ? 'Nonaktif' : 'Aktif'}
+                              <span className={detailUser?.status && detailUser.status !== 'active' ? 'text-red-600 font-medium' : 'text-green-600 font-medium'}>
+                                {STATUS_META(detailUser?.status || 'active').label}
                               </span>
                             </div>
                             <div className="flex gap-2">
-                              <Button
-                                onClick={simpanPindahKelas}
-                                disabled={!moveKelas || moveKelas === detailUser?.kelas}
-                                size="sm"
-                              >
+                              <Button onClick={simpanPindahKelas} disabled={!moveKelas || moveKelas === detailUser?.kelas} size="sm">
                                 💾 Simpan
                               </Button>
-                              <Button
-                                variant="secondary"
-                                onClick={kosongkanKelas}
-                                size="sm"
-                              >
+                              <Button variant="secondary" onClick={kosongkanKelas} size="sm">
                                 🗑️ Kosongkan
                               </Button>
                             </div>
@@ -2414,7 +2528,7 @@ export default function ASiswa() {
                         </div>
                       </div>
 
-                      {/* Kartu RFID */}
+                      {/* RFID */}
                       <div className="bg-white border border-gray-200 rounded-lg p-4">
                         <h4 className="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
                           <span>💳</span>
@@ -2447,12 +2561,7 @@ export default function ASiswa() {
                             >
                               {rfidEnrolling ? '⏹️ Stop' : '🎫 Scan'}
                             </Button>
-                            <Button
-                              variant="success"
-                              size="sm"
-                              onClick={saveRfid}
-                              disabled={!rfidInput}
-                            >
+                            <Button variant="success" size="sm" onClick={saveRfid} disabled={!rfidInput}>
                               💾 Simpan
                             </Button>
                             <Button
@@ -2464,11 +2573,17 @@ export default function ASiswa() {
                               🗑️ Hapus
                             </Button>
                           </div>
+
+                          {rfidLastScan && (
+                            <div className="text-xs text-gray-500">
+                              Terakhir scan: <span className="font-mono">{(rfidLastScan.card_uid || '').toUpperCase()}</span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
 
-                    {/* Nomor HP Siswa & Wali */}
+                    {/* Phone */}
                     <div className="bg-white border border-gray-200 rounded-lg p-4">
                       <div className="flex items-center justify-between mb-4">
                         <h4 className="text-base font-semibold text-gray-900 flex items-center gap-2">
@@ -2476,11 +2591,7 @@ export default function ASiswa() {
                           Informasi Kontak
                         </h4>
                         {!editingPhone && (
-                          <Button
-                            variant="primary"
-                            size="sm"
-                            onClick={handleEditPhone}
-                          >
+                          <Button variant="primary" size="sm" onClick={handleEditPhone}>
                             ✏️ Edit
                           </Button>
                         )}
@@ -2493,29 +2604,21 @@ export default function ASiswa() {
                               <label className="block text-sm font-medium text-gray-700 mb-1">
                                 Nomor HP Siswa
                               </label>
-                              <div className="relative">
-                                <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
-                                  <span className="text-gray-500 text-sm">+62</span>
-                                </div>
-                                <input
-                                  type="tel"
-                                  name="no_hp_siswa"
-                                  value={editPhoneForm.no_hp_siswa}
-                                  onChange={handlePhoneChange}
-                                  className={`w-full px-3 py-2 pl-12 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 ${
-                                    phoneErrors.no_hp_siswa ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                              <input
+                                type="tel"
+                                name="no_hp_siswa"
+                                value={editPhoneForm.no_hp_siswa}
+                                onChange={handlePhoneChange}
+                                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 ${phoneErrors.no_hp_siswa ? 'border-red-300 bg-red-50' : 'border-gray-300'
                                   }`}
-                                  placeholder="81234567890"
-                                  maxLength={14}
-                                />
-                              </div>
+                                placeholder="081234567890 / 6281234567890 / 81234567890"
+                                maxLength={18}
+                              />
                               {phoneErrors.no_hp_siswa && (
-                                <p className="mt-1 text-xs text-red-600">
-                                  {phoneErrors.no_hp_siswa}
-                                </p>
+                                <p className="mt-1 text-xs text-red-600">{phoneErrors.no_hp_siswa}</p>
                               )}
                               <p className="mt-1 text-xs text-gray-500">
-                                Contoh: 081234567890 atau +6281234567890
+                                Sistem menyimpan otomatis dalam format 0xxxxxxxx.
                               </p>
                             </div>
 
@@ -2523,46 +2626,30 @@ export default function ASiswa() {
                               <label className="block text-sm font-medium text-gray-700 mb-1">
                                 Nomor HP Orang Tua/Wali
                               </label>
-                              <div className="relative">
-                                <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
-                                  <span className="text-gray-500 text-sm">+62</span>
-                                </div>
-                                <input
-                                  type="tel"
-                                  name="no_hp_wali"
-                                  value={editPhoneForm.no_hp_wali}
-                                  onChange={handlePhoneChange}
-                                  className={`w-full px-3 py-2 pl-12 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 ${
-                                    phoneErrors.no_hp_wali ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                              <input
+                                type="tel"
+                                name="no_hp_wali"
+                                value={editPhoneForm.no_hp_wali}
+                                onChange={handlePhoneChange}
+                                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 ${phoneErrors.no_hp_wali ? 'border-red-300 bg-red-50' : 'border-gray-300'
                                   }`}
-                                  placeholder="81234567890"
-                                  maxLength={14}
-                                />
-                              </div>
+                                placeholder="081234567890 / 6281234567890 / 81234567890"
+                                maxLength={18}
+                              />
                               {phoneErrors.no_hp_wali && (
-                                <p className="mt-1 text-xs text-red-600">
-                                  {phoneErrors.no_hp_wali}
-                                </p>
+                                <p className="mt-1 text-xs text-red-600">{phoneErrors.no_hp_wali}</p>
                               )}
                               <p className="mt-1 text-xs text-gray-500">
-                                Contoh: 081234567890 atau +6281234567890
+                                Sistem menyimpan otomatis dalam format 0xxxxxxxx.
                               </p>
                             </div>
                           </div>
 
                           <div className="flex justify-end space-x-3">
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              onClick={handleCancelEditPhone}
-                            >
+                            <Button variant="secondary" size="sm" onClick={handleCancelEditPhone}>
                               ✕ Batal
                             </Button>
-                            <Button
-                              variant="success"
-                              size="sm"
-                              onClick={handleSavePhone}
-                            >
+                            <Button variant="success" size="sm" onClick={handleSavePhone}>
                               💾 Simpan
                             </Button>
                           </div>
@@ -2570,29 +2657,25 @@ export default function ASiswa() {
                       ) : (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div className="p-3 bg-gray-50 rounded-lg">
-                            <p className="text-sm font-medium text-gray-700 mb-1">
-                              Nomor HP Siswa
-                            </p>
+                            <p className="text-sm font-medium text-gray-700 mb-1">Nomor HP Siswa</p>
                             <p className="text-lg font-semibold text-gray-900">
-                              {formatPhoneDisplay(detailUser?.no_hp_siswa) || '—'}
+                              {formatPhoneDisplay(detailUser?.no_hp_siswa)}
                             </p>
                             {detailUser?.no_hp_siswa && (
                               <p className="text-xs text-gray-500 mt-1">
-                                Format asli: {detailUser.no_hp_siswa}
+                                Tersimpan: {detailUser.no_hp_siswa}
                               </p>
                             )}
                           </div>
 
                           <div className="p-3 bg-gray-50 rounded-lg">
-                            <p className="text-sm font-medium text-gray-700 mb-1">
-                              Nomor HP Orang Tua/Wali
-                            </p>
+                            <p className="text-sm font-medium text-gray-700 mb-1">Nomor HP Orang Tua/Wali</p>
                             <p className="text-lg font-semibold text-gray-900">
-                              {formatPhoneDisplay(detailUser?.no_hp_wali) || '—'}
+                              {formatPhoneDisplay(detailUser?.no_hp_wali)}
                             </p>
                             {detailUser?.no_hp_wali && (
                               <p className="text-xs text-gray-500 mt-1">
-                                Format asli: {detailUser.no_hp_wali}
+                                Tersimpan: {detailUser.no_hp_wali}
                               </p>
                             )}
                           </div>
@@ -2602,7 +2685,6 @@ export default function ASiswa() {
 
                     {/* Organisasi & OSIS */}
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                      {/* Organisasi */}
                       <div className="bg-white border border-gray-200 rounded-lg p-4">
                         <h4 className="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
                           <span>👥</span>
@@ -2615,13 +2697,7 @@ export default function ASiswa() {
                                 <p className="text-sm font-medium text-gray-900">{row.orgNama}</p>
                                 <p className="text-xs text-gray-500">{row.jabatan} • {row.bagian || '-'}</p>
                               </div>
-                              <Button
-                                variant="danger"
-                                size="sm"
-                                onClick={() => hapusOrg(row.orgId)}
-                              >
-                                🗑️
-                              </Button>
+                              <Button variant="danger" size="sm" onClick={() => hapusOrg(row.orgId)}>🗑️</Button>
                             </div>
                           ))}
                           {!orgMember.length && (
@@ -2630,7 +2706,6 @@ export default function ASiswa() {
                         </div>
                       </div>
 
-                      {/* OSIS */}
                       <div className="bg-white border border-gray-200 rounded-lg p-4">
                         <h4 className="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
                           <span>🌟</span>
@@ -2657,13 +2732,7 @@ export default function ASiswa() {
                               </div>
                             )}
                             <div className="flex justify-end">
-                              <Button
-                                variant="danger"
-                                size="sm"
-                                onClick={hapusOsis}
-                              >
-                                🗑️ Hapus
-                              </Button>
+                              <Button variant="danger" size="sm" onClick={hapusOsis}>🗑️ Hapus</Button>
                             </div>
                           </div>
                         ) : (
