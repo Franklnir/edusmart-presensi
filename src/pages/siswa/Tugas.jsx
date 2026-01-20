@@ -774,7 +774,7 @@ export default function TugasSiswa() {
 
         const { data: publicUrl } = supabase.storage
           .from(ASSIGNMENT_BUCKET)
-          .getPublicUrl(filename)
+          .createSignedUrl(filename)
 
         fileUrl = publicUrl.publicUrl
         fileName = fileToUpload.name

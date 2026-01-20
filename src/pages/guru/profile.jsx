@@ -164,7 +164,7 @@ export default function EditProfile() {
       // Dapatkan URL public
       const { data: { publicUrl } } = supabase.storage
         .from('profile-photos')
-        .getPublicUrl(filePath)
+        .createSignedUrl(filePath)
 
       console.log('File uploaded successfully. Size:', compressedFile.size, 'bytes')
 

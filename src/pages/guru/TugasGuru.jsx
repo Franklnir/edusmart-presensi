@@ -958,7 +958,7 @@ export default function TugasGuru() {
 
       const {
         data: { publicUrl }
-      } = supabase.storage.from(ASSIGNMENT_BUCKET).getPublicUrl(filePath)
+      } = supabase.storage.from(ASSIGNMENT_BUCKET).createSignedUrl(filePath)
 
       const sizeLabel = formatFileSize(compressedFile.size)
       setCompressionProgress(null)

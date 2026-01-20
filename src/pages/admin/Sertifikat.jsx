@@ -383,7 +383,7 @@ const GeneratorSection = ({ templateVersion }) => {
           const { error: upErr } = await supabase.storage.from(CERT_BUCKET).upload(fname, blob)
           if (upErr) throw upErr
 
-          const { data: pub } = supabase.storage.from(CERT_BUCKET).getPublicUrl(fname)
+          const { data: pub } = supabase.storage.from(CERT_BUCKET).createSignedUrl(fname)
           await supabase.from('certificates').insert({
             user_id: p.id,
             nama_penerima: p.nama,
@@ -672,7 +672,7 @@ const TemplateManagerSection = ({ onTemplateChanged }) => {
         const { data } = supabase
           .storage
           .from(CERT_TEMPLATE_BUCKET)
-          .getPublicUrl(fname)
+          .createSignedUrl(fname)
 
         finalBg = data.publicUrl
       }

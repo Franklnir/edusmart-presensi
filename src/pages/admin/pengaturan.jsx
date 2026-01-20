@@ -605,7 +605,7 @@ export default function APengaturan() {
 
       const {
         data: { publicUrl }
-      } = supabase.storage.from(SUPABASE_BUCKET).getPublicUrl(LOGO_FILE_PATH)
+      } = supabase.storage.from(SUPABASE_BUCKET).createSignedUrl(LOGO_FILE_PATH)
 
       const timestamp = new Date().getTime()
       const logoUrlWithTimestamp = `${publicUrl}?t=${timestamp}`
@@ -651,7 +651,7 @@ export default function APengaturan() {
 
       const {
         data: { publicUrl }
-      } = supabase.storage.from(SUPABASE_BUCKET).getPublicUrl(path)
+      } = supabase.storage.from(SUPABASE_BUCKET).createSignedUrl(path)
 
       const timestamp = new Date().getTime()
       const avatarUrlWithTimestamp = `${publicUrl}?t=${timestamp}`
