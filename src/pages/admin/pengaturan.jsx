@@ -1,31 +1,51 @@
 // src/pages/admin/APengaturan.jsx
-import React, { useEffect, useState, useRef } from 'react'
+import React, { useEffect, useState, useRef, useCallback } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useUIStore } from '../../store/useUIStore'
 import { useAuthStore } from '../../store/useAuthStore'
 import FileDropzone from '../../components/FileDropzone'
 
-const SUPABASE_BUCKET = 'profile-photos'
-const LOGO_FILE_PATH = 'logo_sekolah.png'
+/**
+ * =========================
+ * ✅ "PAKET PROFESIONAL" STORAGE SETUP
+ * =========================
+ * 1) LOGO (publik):
+ *    - Bucket: SCHOOL_PUBLIC_BUCKET (set PUBLIC)
+ *    - DB simpan: settings.logo_path + settings.logo_updated_at
+ *    - Render: getPublicUrl(logo_path) + cache-buster
+ *
+ * 2) AVATAR (privat):
+ *    - Bucket: AVATAR_PRIVATE_BUCKET (set PRIVATE)
+ *    - DB simpan: profiles.photo_path + profiles.photo_updated_at
+ *    - Render: createSignedUrl(photo_path, expires)
+ *    - Jangan simpan signed URL ke DB (karena expire)
+ */
+
+// ✅ Ganti sesuai nama bucket kamu di Supabase
+const SCHOOL_PUBLIC_BUCKET = 'school-assets' // bucket PUBLIC untuk logo sekolah
+const AVATAR_PRIVATE_BUCKET = 'profile-photos' // bucket PRIVATE untuk avatar admin
+
+// ✅ Path stabil (permanen, tidak berubah-ubah)
+const LOGO_STORAGE_PATH = 'school/logo_sekolah.jpg'
+const getAvatarStoragePath = (userId) => `profiles/${userId}/avatar.jpg`
+
 const RFID_SETTINGS_ID = '00000000-0000-0000-0000-000000000001'
 
-// ✅ Signed URL expire (detik). Bisa kamu naikkan/turunkan sesuai kebutuhan.
-const SIGNED_URL_EXPIRES_IN = 60 * 60 * 24 * 7 // 7 hari
+// ✅ Signed URL expire (detik) untuk avatar (private)
+const SIGNED_URL_EXPIRES_IN = 60 * 60 // 1 jam
 
 function normalizeTimeString(timeValue) {
   if (!timeValue) return ''
   if (typeof timeValue !== 'string') return ''
-  if (timeValue.length >= 5) {
-    return timeValue.slice(0, 5)
-  }
+  if (timeValue.length >= 5) return timeValue.slice(0, 5)
   return timeValue
 }
 
-// ✅ cache-buster aman (kalau sudah ada "?" pakai "&", kalau belum pakai "?")
-function addCacheBuster(url) {
+function withCacheBuster(url, version) {
   if (!url) return ''
   const joiner = url.includes('?') ? '&' : '?'
-  return `${url}${joiner}t=${Date.now()}`
+  const v = version ? encodeURIComponent(String(version)) : Date.now()
+  return `${url}${joiner}v=${v}`
 }
 
 const compressImage = (file, maxSizeKB = 300) => {
@@ -103,14 +123,12 @@ const compressImage = (file, maxSizeKB = 300) => {
   })
 }
 
-function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Password", loading = false }) {
+function PasswordModal({ isOpen, onClose, onConfirm, title = 'Konfirmasi Password', loading = false }) {
   const [password, setPassword] = useState('')
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (password.trim()) {
-      onConfirm(password)
-    }
+    if (password.trim()) onConfirm(password)
   }
 
   const handleClose = () => {
@@ -124,9 +142,7 @@ function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Passwor
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 backdrop-blur-sm">
       <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4">
         <h3 className="text-lg font-bold text-gray-900 mb-2">{title}</h3>
-        <p className="text-gray-600 text-sm mb-4">
-          Untuk melanjutkan, masukkan password akun Anda:
-        </p>
+        <p className="text-gray-600 text-sm mb-4">Untuk melanjutkan, masukkan password akun Anda:</p>
 
         <form onSubmit={handleSubmit}>
           <input
@@ -163,25 +179,16 @@ function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Passwor
 }
 
 const verifyPassword = async (password) => {
-  try {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      throw new Error('User tidak ditemukan')
-    }
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('User tidak ditemukan')
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email: user.email,
-      password
-    })
+  const { error } = await supabase.auth.signInWithPassword({
+    email: user.email,
+    password
+  })
 
-    if (error) {
-      throw new Error('Password salah')
-    }
-
-    return true
-  } catch (error) {
-    throw error
-  }
+  if (error) throw new Error('Password salah')
+  return true
 }
 
 export default function APengaturan() {
@@ -197,6 +204,9 @@ export default function APengaturan() {
     email: '',
     telepon: '',
     alamat: '',
+    // ✅ NEW: simpan PATH, bukan URL
+    logo_path: '',
+    // ✅ URL hanya untuk preview UI (derived)
     logo_url: '',
     visi: '',
     misi: '',
@@ -215,7 +225,10 @@ export default function APengaturan() {
     rfid_selesai: '15:00'
   })
 
+  // ✅ Avatar: simpan PATH + signed URL di state (signed URL hanya sementara)
+  const [avatarPath, setAvatarPath] = useState('')
   const [avatarUrl, setAvatarUrl] = useState('')
+
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [uploadingLogo, setUploadingLogo] = useState(false)
@@ -224,6 +237,8 @@ export default function APengaturan() {
   const [settingsId, setSettingsId] = useState(null)
 
   const autoSaveTimerRef = useRef(null)
+  const avatarRefreshingRef = useRef(false)
+  const avatarErrorRetriedRef = useRef(false)
 
   const handlePasswordConfirm = async (password) => {
     setPasswordLoading(true)
@@ -243,12 +258,57 @@ export default function APengaturan() {
     setPasswordModalOpen(false)
   }
 
-  useEffect(() => {
-    if (profile && isAuthorized) {
-      const avatar = profile.photo_url || profile.avatar || profile.foto || ''
-      setAvatarUrl(avatar)
+  const getLogoPublicUrl = useCallback((logoPath, version) => {
+    if (!logoPath) return ''
+    const { data } = supabase.storage.from(SCHOOL_PUBLIC_BUCKET).getPublicUrl(logoPath)
+    const publicUrl = data?.publicUrl || ''
+    return withCacheBuster(publicUrl, version)
+  }, [])
+
+  const refreshAvatarSignedUrl = useCallback(async (path, version) => {
+    if (!path) return ''
+    if (avatarRefreshingRef.current) return avatarUrl
+
+    avatarRefreshingRef.current = true
+    try {
+      const { data: signedData, error: signedError } = await supabase.storage
+        .from(AVATAR_PRIVATE_BUCKET)
+        .createSignedUrl(path, SIGNED_URL_EXPIRES_IN)
+
+      if (signedError) throw signedError
+      const signedUrl = signedData?.signedUrl
+      if (!signedUrl) throw new Error('Gagal membuat signed URL avatar')
+
+      const finalUrl = withCacheBuster(signedUrl, version || Date.now())
+      setAvatarUrl(finalUrl)
+      return finalUrl
+    } finally {
+      avatarRefreshingRef.current = false
     }
-  }, [profile, isAuthorized])
+  }, [avatarUrl])
+
+  // ✅ Ambil avatarPath dari profile / localStorage, lalu generate signed URL
+  useEffect(() => {
+    if (!profile || !isAuthorized || !user?.id) return
+
+    const legacyUrl = profile.photo_url || profile.avatar || profile.foto || ''
+    const pathFromProfile = profile.photo_path || ''
+    const pathFromLocal =
+      typeof window !== 'undefined' ? localStorage.getItem(`user_avatar_path_${user.id}`) : ''
+
+    const bestPath = pathFromProfile || pathFromLocal || ''
+
+    if (bestPath) {
+      setAvatarPath(bestPath)
+      refreshAvatarSignedUrl(bestPath, profile.photo_updated_at || profile.updated_at || Date.now())
+        .catch(() => {
+          // fallback legacy kalau signed gagal
+          if (legacyUrl) setAvatarUrl(legacyUrl)
+        })
+    } else if (legacyUrl) {
+      setAvatarUrl(legacyUrl)
+    }
+  }, [profile, isAuthorized, user?.id, refreshAvatarSignedUrl])
 
   useEffect(() => {
     if (!isAuthorized) return
@@ -289,9 +349,7 @@ export default function APengaturan() {
           })
         }
       } catch (err) {
-        if (!isCancelled) {
-          pushToast('error', 'Gagal memuat pengaturan RFID')
-        }
+        if (!isCancelled) pushToast('error', 'Gagal memuat pengaturan RFID')
       }
     }
 
@@ -320,13 +378,20 @@ export default function APengaturan() {
 
         if (!isCancelled && data) {
           setSettingsId(data.id)
+
+          // ✅ Logo: gunakan logo_path kalau ada, kalau belum fallback ke logo_url lama
+          const logoPath = data.logo_path || ''
+          const logoVersion = data.logo_updated_at || data.updated_at || Date.now()
+          const derivedLogoUrl = logoPath ? getLogoPublicUrl(logoPath, logoVersion) : (data.logo_url || '')
+
           setForm((prev) => ({
             ...prev,
             nama_sekolah: data.nama_sekolah || '',
             email: data.email || '',
             telepon: data.telepon || '',
             alamat: data.alamat || '',
-            logo_url: data.logo_url || '',
+            logo_path: logoPath,
+            logo_url: derivedLogoUrl,
             visi: data.visi || '',
             misi: data.misi || '',
             link_instagram: data.link_instagram || '',
@@ -341,23 +406,17 @@ export default function APengaturan() {
 
         await ensureRfidSettings()
       } catch (err) {
-        if (!isCancelled) {
-          pushToast('error', 'Gagal memuat pengaturan: ' + err.message)
-        }
+        if (!isCancelled) pushToast('error', 'Gagal memuat pengaturan: ' + err.message)
       } finally {
-        if (!isCancelled) {
-          setLoading(false)
-        }
+        if (!isCancelled) setLoading(false)
       }
     }
 
     loadSettings()
+    return () => { isCancelled = true }
+  }, [pushToast, isAuthorized, getLogoPublicUrl])
 
-    return () => {
-      isCancelled = true
-    }
-  }, [pushToast, isAuthorized])
-
+  // ✅ Realtime sync (settings + RFID)
   useEffect(() => {
     if (!settingsId || !isAuthorized) return
 
@@ -365,15 +424,14 @@ export default function APengaturan() {
       .channel('pengaturan_realtime')
       .on(
         'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'settings',
-          filter: `id=eq.${settingsId}`
-        },
+        { event: '*', schema: 'public', table: 'settings', filter: `id=eq.${settingsId}` },
         (payload) => {
           const row = payload.new
           if (!row) return
+
+          const logoPath = row.logo_path || ''
+          const logoVersion = row.logo_updated_at || row.updated_at || Date.now()
+          const derivedLogoUrl = logoPath ? getLogoPublicUrl(logoPath, logoVersion) : (row.logo_url || '')
 
           setForm((prev) => ({
             ...prev,
@@ -381,7 +439,8 @@ export default function APengaturan() {
             email: row.email || '',
             telepon: row.telepon || '',
             alamat: row.alamat || '',
-            logo_url: row.logo_url || '',
+            logo_path: logoPath,
+            logo_url: derivedLogoUrl,
             visi: row.visi || '',
             misi: row.misi || '',
             link_instagram: row.link_instagram || '',
@@ -396,16 +455,10 @@ export default function APengaturan() {
       )
       .on(
         'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'absensi_rfid_settings',
-          filter: `id=eq.${RFID_SETTINGS_ID}`
-        },
+        { event: '*', schema: 'public', table: 'absensi_rfid_settings', filter: `id=eq.${RFID_SETTINGS_ID}` },
         (payload) => {
           const row = payload.new
           if (!row) return
-
           setRfidSettings({
             rfid_aktif: row.rfid_aktif || false,
             rfid_mulai: normalizeTimeString(row.rfid_mulai) || '07:00',
@@ -415,16 +468,15 @@ export default function APengaturan() {
       )
       .subscribe()
 
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [settingsId, isAuthorized])
+    return () => { supabase.removeChannel(channel) }
+  }, [settingsId, isAuthorized, getLogoPublicUrl])
 
   function handleChange(e) {
     const { name, value } = e.target
     setForm((prev) => ({ ...prev, [name]: value }))
   }
 
+  // ✅ Auto save (tanpa simpan logo_url ke DB)
   useEffect(() => {
     if (!settingsId || !isAuthorized) return
 
@@ -433,7 +485,7 @@ export default function APengaturan() {
       email,
       telepon,
       alamat,
-      logo_url,
+      logo_path,
       visi,
       misi,
       link_instagram,
@@ -447,7 +499,7 @@ export default function APengaturan() {
       email ||
       telepon ||
       alamat ||
-      logo_url ||
+      logo_path ||
       visi ||
       misi ||
       link_instagram ||
@@ -457,18 +509,14 @@ export default function APengaturan() {
 
     if (!hasContent) return
 
-    if (autoSaveTimerRef.current) {
-      clearTimeout(autoSaveTimerRef.current)
-    }
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
 
     autoSaveTimerRef.current = setTimeout(() => {
       saveSettings(false)
     }, 800)
 
     return () => {
-      if (autoSaveTimerRef.current) {
-        clearTimeout(autoSaveTimerRef.current)
-      }
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -478,7 +526,7 @@ export default function APengaturan() {
     form.email,
     form.telepon,
     form.alamat,
-    form.logo_url,
+    form.logo_path,
     form.visi,
     form.misi,
     form.link_instagram,
@@ -489,9 +537,7 @@ export default function APengaturan() {
 
   async function handleCheckboxChange(e) {
     if (!isAuthorized) return
-
     const { name, checked } = e.target
-
     setForm((prev) => ({ ...prev, [name]: checked }))
 
     try {
@@ -501,14 +547,8 @@ export default function APengaturan() {
       }
 
       const updateData = { [name]: checked, updated_at: new Date().toISOString() }
-
-      const { error } = await supabase
-        .from('settings')
-        .update(updateData)
-        .eq('id', settingsId)
-
+      const { error } = await supabase.from('settings').update(updateData).eq('id', settingsId)
       if (error) throw error
-
       pushToast('success', 'Pengaturan registrasi berhasil diperbarui.')
     } catch (err) {
       pushToast('error', 'Gagal menyimpan pengaturan: ' + err.message)
@@ -521,11 +561,7 @@ export default function APengaturan() {
     const { name, value, type, checked } = e.target
     const newValue = type === 'checkbox' ? checked : value
 
-    const newRfidSettings = {
-      ...rfidSettings,
-      [name]: newValue
-    }
-
+    const newRfidSettings = { ...rfidSettings, [name]: newValue }
     setRfidSettings(newRfidSettings)
 
     try {
@@ -537,12 +573,8 @@ export default function APengaturan() {
         updated_at: new Date().toISOString()
       }
 
-      const { error } = await supabase
-        .from('absensi_rfid_settings')
-        .upsert(payload)
-
+      const { error } = await supabase.from('absensi_rfid_settings').upsert(payload)
       if (error) throw error
-
       pushToast('success', 'Pengaturan RFID berhasil diperbarui.')
     } catch (err) {
       pushToast('error', 'Gagal menyimpan pengaturan RFID: ' + err.message)
@@ -551,7 +583,6 @@ export default function APengaturan() {
 
   async function saveSettings(showToast = false) {
     if (!isAuthorized) return
-
     try {
       if (!settingsId) return
 
@@ -560,7 +591,10 @@ export default function APengaturan() {
         email: form.email,
         telepon: form.telepon,
         alamat: form.alamat,
-        logo_url: form.logo_url,
+
+        // ✅ Simpan PATH, bukan URL
+        logo_path: form.logo_path || null,
+
         visi: form.visi,
         misi: form.misi,
         link_instagram: form.link_instagram,
@@ -573,72 +607,57 @@ export default function APengaturan() {
         updated_at: new Date().toISOString()
       }
 
-      const { error } = await supabase
-        .from('settings')
-        .update(dataToSave)
-        .eq('id', settingsId)
-
+      const { error } = await supabase.from('settings').update(dataToSave).eq('id', settingsId)
       if (error) throw error
 
-      if (showToast) {
-        pushToast('success', 'Pengaturan berhasil disimpan.')
-      }
+      if (showToast) pushToast('success', 'Pengaturan berhasil disimpan.')
     } catch (err) {
-      if (showToast) {
-        pushToast('error', 'Gagal menyimpan: ' + err.message)
-      }
+      if (showToast) pushToast('error', 'Gagal menyimpan: ' + err.message)
     }
   }
 
+  // ✅ Logo upload: upload fixed path + upsert + DB simpan logo_path, logo_updated_at
   async function handleLogoUpload() {
     if (!isAuthorized || !selectedLogoFile) return
     setUploadingLogo(true)
+
     try {
       const compressedFile = await compressImage(selectedLogoFile, 300)
 
-      const { error: deleteError } = await supabase.storage
-        .from(SUPABASE_BUCKET)
-        .remove([LOGO_FILE_PATH])
-
-      if (deleteError && deleteError.message !== 'Object not found') {
-        // Tidak perlu throw error untuk gagal hapus file lama
-      }
-
       const { error: uploadError } = await supabase.storage
-        .from(SUPABASE_BUCKET)
-        .upload(LOGO_FILE_PATH, compressedFile, {
+        .from(SCHOOL_PUBLIC_BUCKET)
+        .upload(LOGO_STORAGE_PATH, compressedFile, {
           upsert: true,
           cacheControl: '3600',
-          contentType: 'image/jpeg' // ✅ karena compressImage output jpeg
+          contentType: 'image/jpeg'
         })
 
       if (uploadError) throw uploadError
 
-      // ✅ FIX: createSignedUrl harus await + ada expiresIn + ambil data.signedUrl
-      const { data: signedData, error: signedError } = await supabase.storage
-        .from(SUPABASE_BUCKET)
-        .createSignedUrl(LOGO_FILE_PATH, SIGNED_URL_EXPIRES_IN)
+      const nowIso = new Date().toISOString()
 
-      if (signedError) throw signedError
-
-      const signedUrl = signedData?.signedUrl
-      if (!signedUrl) throw new Error('Gagal membuat signed URL logo')
-
-      const logoUrlWithTimestamp = addCacheBuster(signedUrl)
-
-      setForm((prev) => ({ ...prev, logo_url: logoUrlWithTimestamp }))
-
+      // ✅ Update DB: simpan PATH saja
       if (settingsId) {
         const { error } = await supabase
           .from('settings')
           .update({
-            logo_url: logoUrlWithTimestamp,
-            updated_at: new Date().toISOString()
+            logo_path: LOGO_STORAGE_PATH,
+            logo_updated_at: nowIso,
+            updated_at: nowIso
           })
           .eq('id', settingsId)
 
         if (error) throw error
       }
+
+      // ✅ Update preview URL dari public url
+      const derivedLogoUrl = getLogoPublicUrl(LOGO_STORAGE_PATH, nowIso)
+
+      setForm((prev) => ({
+        ...prev,
+        logo_path: LOGO_STORAGE_PATH,
+        logo_url: derivedLogoUrl
+      }))
 
       pushToast('success', 'Logo berhasil diupload dan diperbarui!')
       setSelectedLogoFile(null)
@@ -649,50 +668,47 @@ export default function APengaturan() {
     }
   }
 
+  // ✅ Avatar upload: upload fixed path + upsert + DB simpan photo_path
   async function handleAdminPhotoChange(file) {
     if (!isAuthorized || !file || !user?.id) return
-
     setUploadingAvatar(true)
+
     try {
       const compressedFile = await compressImage(file, 300)
 
-      const fileName = `avatar-${user.id}-${Date.now()}.jpg`
-      const path = `profiles/${fileName}`
+      const path = getAvatarStoragePath(user.id)
+      const nowIso = new Date().toISOString()
 
       const { error: uploadError } = await supabase.storage
-        .from(SUPABASE_BUCKET)
-        .upload(path, compressedFile, { upsert: false, contentType: 'image/jpeg' })
+        .from(AVATAR_PRIVATE_BUCKET)
+        .upload(path, compressedFile, {
+          upsert: true,
+          cacheControl: '3600',
+          contentType: 'image/jpeg'
+        })
 
       if (uploadError) throw uploadError
 
-      // ✅ FIX: createSignedUrl harus await + ada expiresIn + ambil data.signedUrl
-      const { data: signedData, error: signedError } = await supabase.storage
-        .from(SUPABASE_BUCKET)
-        .createSignedUrl(path, SIGNED_URL_EXPIRES_IN)
-
-      if (signedError) throw signedError
-
-      const signedUrl = signedData?.signedUrl
-      if (!signedUrl) throw new Error('Gagal membuat signed URL avatar')
-
-      const avatarUrlWithTimestamp = addCacheBuster(signedUrl)
-
-      setAvatarUrl(avatarUrlWithTimestamp)
-
+      // ✅ Simpan PATH saja ke profiles
       const { error: updateError } = await supabase
         .from('profiles')
         .update({
-          photo_url: avatarUrlWithTimestamp,
-          updated_at: new Date().toISOString()
+          photo_path: path,
+          photo_updated_at: nowIso,
+          updated_at: nowIso
         })
         .eq('id', user.id)
 
-      // ✅ simpan juga ke localStorage (baik sukses maupun gagal, biar UI tetap dapat fallback)
+      // simpan path untuk fallback UI
       if (typeof window !== 'undefined') {
-        localStorage.setItem(`user_avatar_${user.id}`, avatarUrlWithTimestamp)
+        localStorage.setItem(`user_avatar_path_${user.id}`, path)
       }
 
       if (updateError) throw updateError
+
+      setAvatarPath(path)
+      avatarErrorRetriedRef.current = false
+      await refreshAvatarSignedUrl(path, nowIso)
 
       pushToast('success', 'Foto profil admin berhasil diperbarui.')
     } catch (err) {
@@ -709,14 +725,22 @@ export default function APengaturan() {
     setSaving(false)
   }
 
-  const localStorageAvatar =
-    typeof window !== 'undefined' && user?.id
-      ? localStorage.getItem(`user_avatar_${user.id}`)
-      : null
-
-  const finalAvatarUrl = avatarUrl || localStorageAvatar || profile?.photo_url || ''
   const displayName = profile?.nama || user?.email || 'Admin'
   const roleLabel = (profile?.role || 'admin').toUpperCase()
+
+  const finalAvatarUrl = avatarUrl || (profile?.photo_url || '')
+
+  const handleAvatarImgError = async () => {
+    // kalau signed URL expire, img akan error (403). Kita refresh sekali.
+    if (!avatarPath) return
+    if (avatarErrorRetriedRef.current) return
+    avatarErrorRetriedRef.current = true
+    try {
+      await refreshAvatarSignedUrl(avatarPath, Date.now())
+    } catch (e) {
+      // ignore
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 p-0">
@@ -759,15 +783,18 @@ export default function APengaturan() {
               <div className="flex items-center space-x-4">
                 <div className="p-3 bg-blue-600 rounded-xl">
                   <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                    />
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                   </svg>
                 </div>
                 <div>
                   <h1 className="text-2xl font-bold text-gray-900">Pengaturan Sistem</h1>
-                  <p className="text-gray-600 mt-1">
-                    Kelola identitas sekolah, pengaturan registrasi, dan absensi RFID
-                  </p>
+                  <p className="text-gray-600 mt-1">Kelola identitas sekolah, pengaturan registrasi, dan absensi RFID</p>
                 </div>
               </div>
             </div>
@@ -785,16 +812,16 @@ export default function APengaturan() {
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               <div className="lg:col-span-2 space-y-6">
+                {/* ===================== IDENTITAS SEKOLAH ===================== */}
                 <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
                   <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center space-x-2">
                     <span>🏫</span>
                     <span>Identitas Sekolah</span>
                   </h2>
+
                   <div className="space-y-5">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Nama Sekolah
-                      </label>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Nama Sekolah</label>
                       <input
                         type="text"
                         name="nama_sekolah"
@@ -807,9 +834,7 @@ export default function APengaturan() {
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Email Sekolah
-                        </label>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Email Sekolah</label>
                         <input
                           type="email"
                           name="email"
@@ -821,9 +846,7 @@ export default function APengaturan() {
                       </div>
 
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Nomor Telepon
-                        </label>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Nomor Telepon</label>
                         <input
                           type="tel"
                           name="telepon"
@@ -836,9 +859,7 @@ export default function APengaturan() {
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Alamat Sekolah
-                      </label>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Alamat Sekolah</label>
                       <textarea
                         name="alamat"
                         className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none transition-all duration-200"
@@ -851,9 +872,7 @@ export default function APengaturan() {
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Visi Sekolah
-                        </label>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Visi Sekolah</label>
                         <textarea
                           name="visi"
                           className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none transition-all duration-200"
@@ -862,15 +881,11 @@ export default function APengaturan() {
                           onChange={handleChange}
                           placeholder="Visi sekolah yang ingin dicapai"
                         ></textarea>
-                        <p className="text-xs text-gray-500 mt-1">
-                          Tuliskan visi sekolah yang inspiratif dan jelas
-                        </p>
+                        <p className="text-xs text-gray-500 mt-1">Tuliskan visi sekolah yang inspiratif dan jelas</p>
                       </div>
 
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Misi Sekolah
-                        </label>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Misi Sekolah</label>
                         <textarea
                           name="misi"
                           className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none transition-all duration-200"
@@ -879,26 +894,22 @@ export default function APengaturan() {
                           onChange={handleChange}
                           placeholder="Misi sekolah untuk mencapai visi"
                         ></textarea>
-                        <p className="text-xs text-gray-500 mt-1">
-                          Tuliskan misi sekolah secara detail dan terukur
-                        </p>
+                        <p className="text-xs text-gray-500 mt-1">Tuliskan misi sekolah secara detail dan terukur</p>
                       </div>
                     </div>
 
+                    {/* ===================== SOSIAL MEDIA ===================== */}
                     <div className="border-t pt-6">
                       <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center space-x-2">
                         <span>📱</span>
                         <span>Media Sosial Sekolah</span>
                       </h3>
+
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">
                             <div className="flex items-center">
-                              <svg
-                                className="w-5 h-5 text-pink-500 mr-2"
-                                fill="currentColor"
-                                viewBox="0 0 24 24"
-                              >
+                              <svg className="w-5 h-5 text-pink-500 mr-2" fill="currentColor" viewBox="0 0 24 24">
                                 <path d="M12.017 0C5.396 0 .029 5.367.029 11.987c0 5.079 3.158 9.417 7.618 11.174-.105-.949-.199-2.403.042-3.441.219-.937 1.407-5.965 1.407-5.965s-.359-.719-.359-1.782c0-1.668.967-2.914 2.171-2.914 1.023 0 1.518.769 1.518 1.69 0 1.029-.653 2.567-.992 3.992-.285 1.193.6 2.165 1.775 2.165 2.128 0 3.768-2.245 3.768-5.487 0-2.861-2.063-4.869-5.008-4.869-3.41 0-5.409 2.562-5.409 5.199 0 1.033.394 2.143.889 2.741.099.12.112.225.085.345-.09.375-.293 1.199-.334 1.363-.053.225-.172.271-.402.165-1.495-.69-2.433-2.878-2.433-4.646 0-3.776 2.748-7.252 7.92-7.252 4.158 0 7.392 2.967 7.392 6.923 0 4.135-2.607 7.462-6.233 7.462-1.214 0-2.357-.629-2.75-1.378l-.748 2.853c-.271 1.043-1.002 2.35-1.492 3.146C9.57 23.812 10.763 24.009 12.017 24.009c6.624 0 11.99-5.367 11.99-11.988C24.007 5.367 18.641.001.012.017z" />
                               </svg>
                               Instagram
@@ -917,11 +928,7 @@ export default function APengaturan() {
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">
                             <div className="flex items-center">
-                              <svg
-                                className="w-5 h-5 text-blue-600 mr-2"
-                                fill="currentColor"
-                                viewBox="0 0 24 24"
-                              >
+                              <svg className="w-5 h-5 text-blue-600 mr-2" fill="currentColor" viewBox="0 0 24 24">
                                 <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
                               </svg>
                               Facebook
@@ -940,11 +947,7 @@ export default function APengaturan() {
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">
                             <div className="flex items-center">
-                              <svg
-                                className="w-5 h-5 text-red-600 mr-2"
-                                fill="currentColor"
-                                viewBox="0 0 24 24"
-                              >
+                              <svg className="w-5 h-5 text-red-600 mr-2" fill="currentColor" viewBox="0 0 24 24">
                                 <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
                               </svg>
                               YouTube
@@ -963,11 +966,7 @@ export default function APengaturan() {
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">
                             <div className="flex items-center">
-                              <svg
-                                className="w-5 h-5 text-black mr-2"
-                                fill="currentColor"
-                                viewBox="0 0 24 24"
-                              >
+                              <svg className="w-5 h-5 text-black mr-2" fill="currentColor" viewBox="0 0 24 24">
                                 <path d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z" />
                               </svg>
                               TikTok
@@ -983,13 +982,13 @@ export default function APengaturan() {
                           />
                         </div>
                       </div>
-                      <p className="text-xs text-gray-500 mt-2">
-                        Link media sosial akan ditampilkan di halaman publik sekolah
-                      </p>
+
+                      <p className="text-xs text-gray-500 mt-2">Link media sosial akan ditampilkan di halaman publik sekolah</p>
                     </div>
                   </div>
                 </div>
 
+                {/* ===================== RFID SETTINGS ===================== */}
                 <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
                   <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center space-x-2">
                     <span>📡</span>
@@ -1001,16 +1000,9 @@ export default function APengaturan() {
                       <div className="text-sm text-blue-700">
                         <strong>Info:</strong>
                         <ul className="mt-1 space-y-1">
-                          <li>
-                            • Jika fitur RFID aktif, siswa hanya bisa absen menggunakan kartu RFID dalam
-                            rentang waktu yang ditentukan
-                          </li>
-                          <li>
-                            • Jika fitur RFID non-aktif, siswa bisa absen mandiri (sesuai mode sistem)
-                          </li>
-                          <li>
-                            • Di luar rentang waktu, siswa tidak bisa absen mandiri maupun RFID
-                          </li>
+                          <li>• Jika fitur RFID aktif, siswa hanya bisa absen menggunakan kartu RFID dalam rentang waktu yang ditentukan</li>
+                          <li>• Jika fitur RFID non-aktif, siswa bisa absen mandiri (sesuai mode sistem)</li>
+                          <li>• Di luar rentang waktu, siswa tidak bisa absen mandiri maupun RFID</li>
                         </ul>
                       </div>
                     </div>
@@ -1026,15 +1018,12 @@ export default function APengaturan() {
                       <div className="flex-1">
                         <span className="text-gray-900 font-medium">Aktifkan Fitur RFID Saja</span>
                         <p className="text-sm text-gray-500 mt-1">
-                          Jika aktif, siswa hanya dapat absen dengan RFID dalam rentang waktu yang
-                          ditentukan
+                          Jika aktif, siswa hanya dapat absen dengan RFID dalam rentang waktu yang ditentukan
                         </p>
                       </div>
-                      <div
-                        className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${
-                          rfidSettings.rfid_aktif ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                        }`}
-                      >
+                      <div className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${
+                        rfidSettings.rfid_aktif ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                      }`}>
                         {rfidSettings.rfid_aktif ? 'AKTIF' : 'NON-AKTIF'}
                       </div>
                     </label>
@@ -1042,9 +1031,7 @@ export default function APengaturan() {
                     {rfidSettings.rfid_aktif && (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-gray-50 rounded-lg border border-gray-200 transition-all duration-200">
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Mulai Jam
-                          </label>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Mulai Jam</label>
                           <input
                             type="time"
                             name="rfid_mulai"
@@ -1055,9 +1042,7 @@ export default function APengaturan() {
                         </div>
 
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Selesai Jam
-                          </label>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Selesai Jam</label>
                           <input
                             type="time"
                             name="rfid_selesai"
@@ -1071,6 +1056,7 @@ export default function APengaturan() {
                   </div>
                 </div>
 
+                {/* ===================== REGISTRASI ===================== */}
                 <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
                   <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center space-x-2">
                     <span>👥</span>
@@ -1080,8 +1066,8 @@ export default function APengaturan() {
                   <div className="space-y-4">
                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
                       <div className="text-sm text-blue-700">
-                        <strong>Info:</strong> Pengaturan ini akan langsung tersimpan otomatis ketika
-                        diubah. Role yang tidak aktif akan disembunyikan di halaman registrasi publik.
+                        <strong>Info:</strong> Pengaturan ini akan langsung tersimpan otomatis ketika diubah.
+                        Role yang tidak aktif akan disembunyikan di halaman registrasi publik.
                       </div>
                     </div>
 
@@ -1095,17 +1081,11 @@ export default function APengaturan() {
                       />
                       <div className="flex-1">
                         <span className="text-gray-900 font-medium">Aktifkan Registrasi Siswa</span>
-                        <p className="text-sm text-gray-500 mt-1">
-                          Siswa dapat membuat akun sendiri melalui halaman registrasi publik
-                        </p>
+                        <p className="text-sm text-gray-500 mt-1">Siswa dapat membuat akun sendiri melalui halaman registrasi publik</p>
                       </div>
-                      <div
-                        className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${
-                          form.registrasi_siswa_aktif
-                            ? 'bg-green-100 text-green-800'
-                            : 'bg-gray-100 text-gray-800'
-                        }`}
-                      >
+                      <div className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${
+                        form.registrasi_siswa_aktif ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                      }`}>
                         {form.registrasi_siswa_aktif ? 'AKTIF' : 'NON-AKTIF'}
                       </div>
                     </label>
@@ -1120,17 +1100,11 @@ export default function APengaturan() {
                       />
                       <div className="flex-1">
                         <span className="text-gray-900 font-medium">Aktifkan Registrasi Guru</span>
-                        <p className="text-sm text-gray-500 mt-1">
-                          Guru dapat membuat akun sendiri melalui halaman registrasi publik
-                        </p>
+                        <p className="text-sm text-gray-500 mt-1">Guru dapat membuat akun sendiri melalui halaman registrasi publik</p>
                       </div>
-                      <div
-                        className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${
-                          form.registrasi_guru_aktif
-                            ? 'bg-green-100 text-green-800'
-                            : 'bg-gray-100 text-gray-800'
-                        }`}
-                      >
+                      <div className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${
+                        form.registrasi_guru_aktif ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                      }`}>
                         {form.registrasi_guru_aktif ? 'AKTIF' : 'NON-AKTIF'}
                       </div>
                     </label>
@@ -1145,17 +1119,11 @@ export default function APengaturan() {
                       />
                       <div className="flex-1">
                         <span className="text-gray-900 font-medium">Aktifkan Registrasi Admin</span>
-                        <p className="text-sm text-gray-500 mt-1">
-                          Admin dapat membuat akun sendiri melalui halaman registrasi publik
-                        </p>
+                        <p className="text-sm text-gray-500 mt-1">Admin dapat membuat akun sendiri melalui halaman registrasi publik</p>
                       </div>
-                      <div
-                        className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${
-                          form.registrasi_admin_aktif
-                            ? 'bg-green-100 text-green-800'
-                            : 'bg-gray-100 text-gray-800'
-                        }`}
-                      >
+                      <div className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${
+                        form.registrasi_admin_aktif ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                      }`}>
                         {form.registrasi_admin_aktif ? 'AKTIF' : 'NON-AKTIF'}
                       </div>
                     </label>
@@ -1163,8 +1131,7 @@ export default function APengaturan() {
                     {form.registrasi_admin_aktif && (
                       <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 transition-all duration-200">
                         <p className="text-sm text-yellow-700 font-medium">
-                          ⚠️ PERINGATAN: Membuka pendaftaran admin untuk publik sangat berisiko. Hanya
-                          aktifkan jika benar-benar diperlukan dan dalam lingkungan pengembangan.
+                          ⚠️ PERINGATAN: Membuka pendaftaran admin untuk publik sangat berisiko. Hanya aktifkan jika benar-benar diperlukan.
                         </p>
                       </div>
                     )}
@@ -1172,7 +1139,9 @@ export default function APengaturan() {
                 </div>
               </div>
 
+              {/* ===================== SIDEBAR ===================== */}
               <div className="space-y-6">
+                {/* PROFIL ADMIN */}
                 <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
                   <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center space-x-2">
                     <span>👨‍💼</span>
@@ -1185,6 +1154,7 @@ export default function APengaturan() {
                         <img
                           src={finalAvatarUrl}
                           alt="Foto Profil"
+                          onError={handleAvatarImgError}
                           className="w-16 h-16 rounded-full object-cover border-2 border-gray-200 transition-all duration-200 hover:border-blue-500"
                         />
                         {uploadingAvatar && (
@@ -1198,6 +1168,7 @@ export default function APengaturan() {
                         {displayName.charAt(0).toUpperCase()}
                       </div>
                     )}
+
                     <div>
                       <h3 className="font-semibold text-gray-900">{displayName}</h3>
                       <div className="text-sm text-blue-600 font-medium bg-blue-50 px-2 py-1 rounded-full inline-block">
@@ -1225,6 +1196,7 @@ export default function APengaturan() {
                   </div>
                 </div>
 
+                {/* LOGO SEKOLAH */}
                 <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
                   <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center space-x-2">
                     <span>🏫</span>
@@ -1279,11 +1251,11 @@ export default function APengaturan() {
                       </>
                     )}
                   </button>
-                  <p className="text-xs text-gray-500 text-center mt-2">
-                    Gambar akan dikompresi maksimal 300KB
-                  </p>
+
+                  <p className="text-xs text-gray-500 text-center mt-2">Gambar akan dikompresi maksimal 300KB</p>
                 </div>
 
+                {/* PREVIEW VISI MISI */}
                 <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
                   <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center space-x-2">
                     <span>📋</span>
@@ -1297,9 +1269,7 @@ export default function APengaturan() {
                         {form.visi ? (
                           <p className="text-sm text-gray-700 whitespace-pre-wrap">{form.visi}</p>
                         ) : (
-                          <p className="text-sm text-gray-400 italic">
-                            Belum ada visi yang ditambahkan
-                          </p>
+                          <p className="text-sm text-gray-400 italic">Belum ada visi yang ditambahkan</p>
                         )}
                       </div>
                     </div>
@@ -1310,20 +1280,17 @@ export default function APengaturan() {
                         {form.misi ? (
                           <p className="text-sm text-gray-700 whitespace-pre-wrap">{form.misi}</p>
                         ) : (
-                          <p className="text-sm text-gray-400 italic">
-                            Belum ada misi yang ditambahkan
-                          </p>
+                          <p className="text-sm text-gray-400 italic">Belum ada misi yang ditambahkan</p>
                         )}
                       </div>
                     </div>
                   </div>
                 </div>
 
+                {/* SAVE */}
                 <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
                   <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4 transition-all duration-200">
-                    <p className="text-sm text-green-700 text-center">
-                      ✅ Semua pengaturan tersimpan otomatis & bisa disinkron realtime
-                    </p>
+                    <p className="text-sm text-green-700 text-center">✅ Semua pengaturan tersimpan otomatis & bisa disinkron realtime</p>
                   </div>
 
                   <button
@@ -1344,9 +1311,7 @@ export default function APengaturan() {
                     )}
                   </button>
 
-                  <p className="text-xs text-gray-500 text-center mt-2">
-                    Tombol backup untuk memastikan data tersimpan.
-                  </p>
+                  <p className="text-xs text-gray-500 text-center mt-2">Tombol backup untuk memastikan data tersimpan.</p>
                 </div>
               </div>
             </div>
