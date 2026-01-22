@@ -1,118 +1,228 @@
-// src/pages/siswa/EditProfile.jsx
-import React, { useState, useEffect } from 'react'
+// src/pages/guru/profile.jsx
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 
-/* ========= Helper: kompres gambar ke <= 100KB ========= */
-async function compressImageTo100KB(file, maxBytes = 100 * 1024) {
-  if (!file || file.size <= maxBytes) return file
+/** Bucket Storage */
+const PHOTO_BUCKET = 'profile-photos'
 
-  return new Promise((resolve, reject) => {
-    const img = new Image()
-    const canvas = document.createElement('canvas')
-    const ctx = canvas.getContext('2d')
+/** Signed URL expire (detik) */
+const SIGNED_URL_EXPIRES_IN = 60 * 60 * 24 * 7 // 7 hari
 
-    img.onload = () => {
-      // Optimasi dimensi - maksimal 400px untuk menghemat ruang
-      const MAX_DIMENSION = 400
-      let { width, height } = img
-      
-      if (width > height && width > MAX_DIMENSION) {
-        height = (height * MAX_DIMENSION) / width
-        width = MAX_DIMENSION
-      } else if (height > MAX_DIMENSION) {
-        width = (width * MAX_DIMENSION) / height
-        height = MAX_DIMENSION
-      }
+/** Max file sebelum kompres */
+const MAX_ORIGINAL_SIZE = 5 * 1024 * 1024 // 5MB
 
-      canvas.width = width
-      canvas.height = height
+/** Target kompres */
+const MAX_COMPRESSED_BYTES = 100 * 1024 // 100KB
 
-      // Optimasi kualitas gambar
-      ctx.fillStyle = 'white'
-      ctx.fillRect(0, 0, width, height)
-      ctx.drawImage(img, 0, 0, width, height)
-
-      // Kompresi progresif dengan target 100KB
-      let quality = 0.8
-      let lastValidBlob = null
-      
-      const tryCompress = () => {
-        canvas.toBlob(
-          (blob) => {
-            if (!blob) {
-              reject(new Error('Gagal mengkompres gambar'))
-              return
-            }
-
-            if (blob.size <= maxBytes) {
-              resolve(new File([blob], file.name.replace(/\.\w+$/, '') + '.jpg', {
-                type: 'image/jpeg',
-              }))
-            } else if (quality > 0.3) {
-              quality -= 0.1
-              tryCompress()
-            } else if (lastValidBlob) {
-              // Fallback ke blob terakhir yang valid
-              resolve(new File([lastValidBlob], file.name.replace(/\.\w+$/, '') + '.jpg', {
-                type: 'image/jpeg',
-              }))
-            } else {
-              reject(new Error('Gambar terlalu besar, coba gunakan gambar yang lebih kecil'))
-            }
-          },
-          'image/jpeg',
-          quality
-        )
-      }
-
-      tryCompress()
-    }
-
-    img.onerror = () => reject(new Error('Gagal memuat gambar'))
-    img.src = URL.createObjectURL(file)
-  })
+function isHttpUrl(v) {
+  return typeof v === 'string' && /^https?:\/\//i.test(v)
 }
 
-/* ==================== COMPONENT ==================== */
-export default function EditProfile() {
-  const { user, profile, logout, refreshProfile } = useAuthStore()
-  const { pushToast, setLoading } = useUIStore()
+function addCacheBuster(url) {
+  if (!url) return ''
+  const joiner = url.includes('?') ? '&' : '?'
+  return `${url}${joiner}t=${Date.now()}`
+}
 
+/* ========= Helper: kompres gambar ke <= 100KB ========= */
+async function compressImageTo100KB(file, maxBytes = MAX_COMPRESSED_BYTES) {
+  if (!file || file.size <= maxBytes) return file
+
+  // pakai objectURL lalu revoke setelah selesai
+  const objectUrl = URL.createObjectURL(file)
+
+  try {
+    const img = await new Promise((resolve, reject) => {
+      const image = new Image()
+      image.onload = () => resolve(image)
+      image.onerror = () => reject(new Error('Gagal memuat gambar'))
+      image.src = objectUrl
+    })
+
+    const canvas = document.createElement('canvas')
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('Canvas tidak didukung')
+
+    // Optimasi dimensi - maksimal 400px untuk hemat size
+    const MAX_DIMENSION = 400
+    let { width, height } = img
+
+    if (width > height && width > MAX_DIMENSION) {
+      height = (height * MAX_DIMENSION) / width
+      width = MAX_DIMENSION
+    } else if (height > MAX_DIMENSION) {
+      width = (width * MAX_DIMENSION) / height
+      height = MAX_DIMENSION
+    }
+
+    width = Math.max(1, Math.round(width))
+    height = Math.max(1, Math.round(height))
+
+    canvas.width = width
+    canvas.height = height
+
+    // background putih biar png transparan jadi rapih
+    ctx.fillStyle = 'white'
+    ctx.fillRect(0, 0, width, height)
+    ctx.drawImage(img, 0, 0, width, height)
+
+    // Kompresi progresif
+    let quality = 0.82
+    let lastBlob = null
+
+    while (quality >= 0.3) {
+      // eslint-disable-next-line no-await-in-loop
+      const blob = await new Promise((resolve) => {
+        canvas.toBlob(resolve, 'image/jpeg', quality)
+      })
+
+      if (!blob) break
+      lastBlob = blob
+
+      if (blob.size <= maxBytes) {
+        return new File([blob], file.name.replace(/\.\w+$/, '') + '.jpg', {
+          type: 'image/jpeg'
+        })
+      }
+
+      quality -= 0.08
+    }
+
+    // fallback: blob terakhir
+    if (lastBlob && lastBlob.size <= 2 * maxBytes) {
+      return new File([lastBlob], file.name.replace(/\.\w+$/, '') + '.jpg', {
+        type: 'image/jpeg'
+      })
+    }
+
+    throw new Error('Gambar terlalu besar, gunakan gambar yang lebih kecil')
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
+}
+
+async function createSignedUrlOrThrow(path) {
+  const { data, error } = await supabase.storage
+    .from(PHOTO_BUCKET)
+    .createSignedUrl(path, SIGNED_URL_EXPIRES_IN)
+
+  if (error) throw error
+  const signedUrl = data?.signedUrl
+  if (!signedUrl) throw new Error('Gagal membuat signed URL')
+  return signedUrl
+}
+
+/**
+ * Simpan path foto ke DB.
+ * Prioritas: photo_path (kalau ada), fallback: photo_url (isi tetap path).
+ */
+async function savePhotoPathToProfile(uid, filePath) {
+  // coba update photo_path + photo_url dulu
+  const payloadA = {
+    photo_path: filePath,
+    photo_url: filePath,
+    updated_at: new Date().toISOString()
+  }
+
+  const { error: errA } = await supabase.from('profiles').update(payloadA).eq('id', uid)
+  if (!errA) return
+
+  // kalau kolom photo_path tidak ada, fallback photo_url saja
+  const msg = (errA?.message || '').toLowerCase()
+  const looksLikeMissingColumn = msg.includes('column') && msg.includes('photo_path')
+  if (!looksLikeMissingColumn) throw errA
+
+  const payloadB = {
+    photo_url: filePath,
+    updated_at: new Date().toISOString()
+  }
+  const { error: errB } = await supabase.from('profiles').update(payloadB).eq('id', uid)
+  if (errB) throw errB
+}
+
+export default function ProfileGuru() {
+  const { user, profile, logout, refreshProfile } = useAuthStore()
+  const { pushToast } = useUIStore()
+
+  const fileInputRef = useRef(null)
   const [form, setForm] = useState({
     nama: '',
     jk: '',
     agama: '',
     telp: '',
     alamat: '',
-    tanggal_lahir: '',
+    tanggal_lahir: ''
   })
 
-  const [photoURL, setPhotoURL] = useState('')
-  const [preview, setPreview] = useState('')
+  // photoKey = path di storage, previewUrl = signed url / local preview
+  const [photoKey, setPhotoKey] = useState('')
+  const [previewUrl, setPreviewUrl] = useState('')
+
   const [saving, setSaving] = useState(false)
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
   const [sendingVerify, setSendingVerify] = useState(false)
 
-  // Load profile data
+  const email = useMemo(() => user?.email || profile?.email || '', [user?.email, profile?.email])
+  const emailVerified = useMemo(
+    () => user?.email_confirmed_at || user?.emailVerified,
+    [user?.email_confirmed_at, user?.emailVerified]
+  )
+
+  // Load profile data + buat signed URL jika yang tersimpan adalah path
   useEffect(() => {
-    if (profile) {
+    let cancelled = false
+
+    async function hydrate() {
+      if (!profile) return
+
       setForm({
         nama: profile.nama || '',
         jk: profile.jk || '',
         agama: profile.agama || '',
         telp: profile.telp || '',
         alamat: profile.alamat || '',
-        tanggal_lahir: profile.tanggal_lahir || '',
+        tanggal_lahir: profile.tanggal_lahir || ''
       })
-      setPhotoURL(profile.photo_url || '')
-      setPreview(profile.photo_url || '')
+
+      const stored = profile.photo_path || profile.photo_url || ''
+      if (!stored) {
+        setPhotoKey('')
+        setPreviewUrl('')
+        return
+      }
+
+      // kalau ternyata masih URL lama, tetap bisa tampil
+      if (isHttpUrl(stored)) {
+        setPhotoKey(stored) // legacy (url)
+        setPreviewUrl(addCacheBuster(stored))
+        return
+      }
+
+      // path => signed URL
+      try {
+        const signed = await createSignedUrlOrThrow(stored)
+        if (!cancelled) {
+          setPhotoKey(stored)
+          setPreviewUrl(addCacheBuster(signed))
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setPhotoKey(stored)
+          setPreviewUrl('')
+        }
+      }
+    }
+
+    hydrate()
+    return () => {
+      cancelled = true
     }
   }, [profile])
 
   const handleFieldChange = (key, value) => {
-    setForm(prev => ({ ...prev, [key]: value }))
+    setForm((prev) => ({ ...prev, [key]: value }))
   }
 
   /* ========== Upload & Kompres Foto Profil ========== */
@@ -122,88 +232,78 @@ export default function EditProfile() {
 
     setUploadingPhoto(true)
 
+    // local preview (objectURL) supaya UI responsif
+    let localPreview = ''
     try {
       // Validasi tipe file
       if (!file.type.startsWith('image/')) {
-        throw new Error('Hanya file gambar yang diizinkan (JPEG, PNG)')
+        throw new Error('Hanya file gambar yang diizinkan (JPEG/PNG/WebP)')
       }
 
-      // Validasi ukuran file awal
-      if (file.size > 5 * 1024 * 1024) { // 5MB
+      // Validasi ukuran awal
+      if (file.size > MAX_ORIGINAL_SIZE) {
         throw new Error('Ukuran gambar maksimal 5MB')
       }
 
-      // Kompresi gambar ke <= 100KB
-      const compressedFile = await compressImageTo100KB(file)
-      
-      // Validasi ukuran setelah kompresi
-      if (compressedFile.size > 100 * 1024) {
-        throw new Error('Gagal mengkompres gambar ke bawah 100KB. Gunakan gambar yang lebih kecil.')
+      // Kompres
+      const compressedFile = await compressImageTo100KB(file, MAX_COMPRESSED_BYTES)
+      if (compressedFile.size > MAX_COMPRESSED_BYTES) {
+        throw new Error('Gagal mengkompres ke <= 100KB. Gunakan gambar yang lebih kecil.')
       }
 
-      const localPreview = URL.createObjectURL(compressedFile)
-      setPreview(localPreview)
+      localPreview = URL.createObjectURL(compressedFile)
+      setPreviewUrl(localPreview)
 
-      // Upload ke Supabase Storage
-      const fileExt = 'jpg'
-      const fileName = `profile_${user.id}_${Date.now()}.${fileExt}`
-      const filePath = `profiles/${fileName}`
+      // Path dipaksa fixed: 1 user = 1 object (tidak numpuk file)
+      const filePath = `profiles/${user.id}/avatar.jpg`
 
       const { error: uploadError } = await supabase.storage
-        .from('profile-photos')
+        .from(PHOTO_BUCKET)
         .upload(filePath, compressedFile, {
           cacheControl: '3600',
-          upsert: false
+          upsert: true,
+          contentType: 'image/jpeg'
         })
 
-      if (uploadError) {
-        console.error('Upload error details:', uploadError)
-        throw new Error(`Upload gagal: ${uploadError.message}`)
-      }
+      if (uploadError) throw new Error(`Upload gagal: ${uploadError.message}`)
 
-      // Dapatkan URL public
-      const { data: { publicUrl } } = supabase.storage
-        .from('profile-photos')
-        .createSignedUrl(filePath)
+      // Simpan path ke DB (bukan URL)
+      await savePhotoPathToProfile(user.id, filePath)
 
-      console.log('File uploaded successfully. Size:', compressedFile.size, 'bytes')
+      // Buat signed url untuk preview tampil
+      const signed = await createSignedUrlOrThrow(filePath)
+      setPhotoKey(filePath)
+      setPreviewUrl(addCacheBuster(signed))
 
-      // Hapus foto lama jika ada
-      if (photoURL && photoURL.includes('profile-photos')) {
-        try {
-          const oldFileName = photoURL.split('/').pop()
-          await supabase.storage
-            .from('profile-photos')
-            .remove([`profiles/${oldFileName}`])
-        } catch (deleteError) {
-          console.warn('Gagal menghapus foto lama:', deleteError)
-        }
-      }
-
-      // Update photo_url di database
-      const { error: updateError } = await supabase
-        .from('profiles')
-        .update({ 
-          photo_url: publicUrl,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', user.id)
-
-      if (updateError) {
-        throw new Error(`Update database gagal: ${updateError.message}`)
-      }
-
-      setPhotoURL(publicUrl)
       await refreshProfile()
+      pushToast('success', 'Foto profil berhasil diperbarui (disimpan sebagai path + signed URL)')
 
-      pushToast('success', 'Foto profil berhasil diperbarui (maks. 100KB)')
-      
     } catch (error) {
-      console.error('Error upload foto:', error)
-      pushToast('error', error.message)
-      setPreview(photoURL)
+      pushToast('error', error?.message || 'Gagal mengupload foto')
+      // fallback: coba tampilkan dari data yang ada
+      if (photoKey && isHttpUrl(photoKey)) setPreviewUrl(addCacheBuster(photoKey))
+      else if (photoKey && !isHttpUrl(photoKey)) {
+        try {
+          const signed = await createSignedUrlOrThrow(photoKey)
+          setPreviewUrl(addCacheBuster(signed))
+        } catch {
+          setPreviewUrl('')
+        }
+      } else {
+        setPreviewUrl('')
+      }
     } finally {
       setUploadingPhoto(false)
+
+      // reset input
+      if (fileInputRef.current) fileInputRef.current.value = ''
+
+      // revoke localPreview kalau masih dipakai, aman kalau sudah ganti signed url
+      if (localPreview) {
+        try {
+          URL.revokeObjectURL(localPreview)
+        } catch {}
+      }
     }
   }
 
@@ -215,24 +315,23 @@ export default function EditProfile() {
       pushToast('error', 'Nama lengkap harus diisi')
       return
     }
-
     if (!form.jk) {
       pushToast('error', 'Jenis kelamin harus dipilih')
       return
     }
 
     setSaving(true)
-    
     try {
+      // Anti-IDOR: update selalu untuk auth.uid() (user.id), tanpa menerima id dari UI/route
       const { error } = await supabase
         .from('profiles')
         .update({
           nama: form.nama.trim(),
           jk: form.jk,
-          agama: form.agama,
-          telp: form.telp,
-          alamat: form.alamat,
-          tanggal_lahir: form.tanggal_lahir,
+          agama: form.agama || null,
+          telp: form.telp || null,
+          alamat: form.alamat || null,
+          tanggal_lahir: form.tanggal_lahir || null,
           updated_at: new Date().toISOString()
         })
         .eq('id', user.id)
@@ -241,10 +340,8 @@ export default function EditProfile() {
 
       await refreshProfile()
       pushToast('success', 'Profil berhasil diperbarui')
-      
     } catch (error) {
-      console.error('Error update profile:', error)
-      pushToast('error', 'Gagal menyimpan profil')
+      pushToast('error', error?.message || 'Gagal menyimpan profil')
     } finally {
       setSaving(false)
     }
@@ -252,56 +349,44 @@ export default function EditProfile() {
 
   /* ========== Kirim Verifikasi Email ========== */
   const handleSendVerification = async () => {
-    if (!user) return
-
+    if (!user?.email) return
     setSendingVerify(true)
-    
     try {
       const { error } = await supabase.auth.resend({
         type: 'signup',
-        email: user.email,
+        email: user.email
       })
-
       if (error) throw error
-
-      pushToast('success', 'Email verifikasi telah dikirim. Silakan cek inbox Anda.')
-      
+      pushToast('success', 'Email verifikasi dikirim. Cek inbox (dan spam).')
     } catch (error) {
-      console.error('Error sending verification:', error)
-      pushToast('error', 'Gagal mengirim email verifikasi')
+      pushToast('error', error?.message || 'Gagal mengirim email verifikasi')
     } finally {
       setSendingVerify(false)
     }
   }
-
-  const email = user?.email || profile?.email || ''
-  const emailVerified = user?.email_confirmed_at || user?.emailVerified
 
   return (
     <div className="min-h-screen bg-gray-50/30 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-6xl mx-auto">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Profil Siswa</h1>
-          <p className="text-gray-600 text-lg">
-            Kelola informasi profil dan preferensi akun Anda
-          </p>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Profil Guru</h1>
+          <p className="text-gray-600 text-lg">Kelola informasi profil akun Anda</p>
         </div>
 
         <div className="grid lg:grid-cols-4 gap-8">
           {/* ========== SIDEBAR PROFIL ========== */}
           <div className="lg:col-span-1 space-y-6">
-            {/* Card Foto Profil */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
               <div className="flex flex-col items-center">
-                {/* Foto Container */}
                 <div className="relative mb-4">
                   <div className="relative w-28 h-28">
-                    {preview ? (
+                    {previewUrl ? (
                       <img
-                        src={preview}
+                        src={previewUrl}
                         alt="Foto Profil"
                         className="w-28 h-28 rounded-2xl object-cover border-4 border-white shadow-lg"
+                        onError={() => setPreviewUrl('')}
                       />
                     ) : (
                       <div className="w-28 h-28 rounded-2xl bg-gradient-to-br from-blue-50 to-blue-100 border-4 border-white shadow-lg flex items-center justify-center">
@@ -316,22 +401,24 @@ export default function EditProfile() {
                     )}
                   </div>
 
-                  {/* Tombol Upload */}
                   <label
                     htmlFor="photo-input"
                     className={`absolute -bottom-2 -right-2 ${
-                      uploadingPhoto 
-                        ? 'bg-gray-400 cursor-not-allowed' 
+                      uploadingPhoto
+                        ? 'bg-gray-400 cursor-not-allowed'
                         : 'bg-blue-600 hover:bg-blue-700 cursor-pointer shadow-lg'
                     } text-white p-2.5 rounded-full transition-all duration-200 border-4 border-white`}
+                    title="Ubah Foto"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
                     </svg>
                   </label>
+
                   <input
                     id="photo-input"
+                    ref={fileInputRef}
                     type="file"
                     accept="image/*"
                     className="hidden"
@@ -340,43 +427,36 @@ export default function EditProfile() {
                   />
                 </div>
 
-                {/* Info Siswa */}
-                <div className="text-center mb-6">
-                  <h2 className="font-bold text-lg text-gray-900 mb-1">
-                    {form.nama || profile?.nama || 'Siswa'}
+                <div className="text-center mb-6 w-full">
+                  <h2 className="font-bold text-lg text-gray-900 mb-1 break-words">
+                    {form.nama || profile?.nama || 'Guru'}
                   </h2>
-                  <p className="text-gray-600 text-sm mb-1">
-                    {profile?.kelas || 'Kelas belum ditentukan'}
-                  </p>
-                  <p className="text-gray-500 text-xs truncate max-w-full">
-                    {email || 'Email tidak tersedia'}
+                  <p className="text-gray-500 text-xs truncate">{email || 'Email tidak tersedia'}</p>
+                  <p className="text-[11px] text-gray-400 mt-2">
+                    Foto disimpan sebagai <span className="font-semibold">path</span> di DB dan ditampilkan via{' '}
+                    <span className="font-semibold">signed URL</span>.
                   </p>
                 </div>
 
-                {/* Status Verifikasi */}
                 <div className="w-full mb-4">
-                  <div className={`flex items-center justify-center px-3 py-2 rounded-xl text-sm font-medium ${
-                    emailVerified 
-                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
-                      : 'bg-amber-50 text-amber-700 border border-amber-200'
-                  }`}>
+                  <div
+                    className={`flex items-center justify-center px-3 py-2 rounded-xl text-sm font-medium ${
+                      emailVerified
+                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                        : 'bg-amber-50 text-amber-700 border border-amber-200'
+                    }`}
+                  >
                     {emailVerified ? (
                       <>
-                        <svg className="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                        </svg>
-                        Email Terverifikasi
+                        <span className="mr-2">✅</span>Email Terverifikasi
                       </>
                     ) : (
                       <>
-                        <svg className="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                        </svg>
-                        Belum Terverifikasi
+                        <span className="mr-2">⚠️</span>Belum Terverifikasi
                       </>
                     )}
                   </div>
-                  
+
                   {!emailVerified && (
                     <button
                       onClick={handleSendVerification}
@@ -395,7 +475,6 @@ export default function EditProfile() {
                   )}
                 </div>
 
-                {/* Tombol Logout */}
                 <button
                   onClick={logout}
                   className="w-full px-4 py-2.5 bg-white hover:bg-gray-50 text-gray-700 font-medium rounded-xl transition-all duration-200 border border-gray-300 shadow-sm flex items-center justify-center gap-2"
@@ -407,27 +486,6 @@ export default function EditProfile() {
                 </button>
               </div>
             </div>
-
-            {/* Info Sekolah */}
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
-              <h3 className="font-semibold text-gray-900 mb-4">Informasi Sekolah</h3>
-              <div className="space-y-3 text-sm">
-                <div>
-                  <label className="text-gray-500 text-xs">Kelas</label>
-                  <p className="font-medium text-gray-900">{profile?.kelas || '-'}</p>
-                </div>
-                <div>
-                  <label className="text-gray-500 text-xs">Status</label>
-                  <p className="font-medium text-gray-900 capitalize">{profile?.status || 'active'}</p>
-                </div>
-                <div>
-                  <label className="text-gray-500 text-xs">Bergabung</label>
-                  <p className="font-medium text-gray-900">
-                    {profile?.created_at ? new Date(profile.created_at).toLocaleDateString('id-ID') : '-'}
-                  </p>
-                </div>
-              </div>
-            </div>
           </div>
 
           {/* ========== FORM EDIT PROFIL ========== */}
@@ -436,17 +494,16 @@ export default function EditProfile() {
               <div className="flex items-center justify-between mb-8">
                 <div>
                   <h3 className="text-2xl font-bold text-gray-900">Informasi Pribadi</h3>
-                  <p className="text-gray-600 mt-1">Lengkapi data profil Anda</p>
+                  <p className="text-gray-600 mt-1">Perbarui data profil Anda</p>
                 </div>
                 <div className="text-right">
                   <div className="text-xs text-gray-500 bg-gray-50 px-3 py-1.5 rounded-lg">
-                    Maks. 100KB
+                    Foto maks. 100KB
                   </div>
                 </div>
               </div>
 
               <div className="grid md:grid-cols-2 gap-8">
-                {/* Nama Lengkap */}
                 <div className="space-y-2">
                   <label className="block text-sm font-semibold text-gray-900">
                     Nama Lengkap <span className="text-red-500">*</span>
@@ -460,7 +517,6 @@ export default function EditProfile() {
                   />
                 </div>
 
-                {/* Jenis Kelamin */}
                 <div className="space-y-2">
                   <label className="block text-sm font-semibold text-gray-900">
                     Jenis Kelamin <span className="text-red-500">*</span>
@@ -476,11 +532,8 @@ export default function EditProfile() {
                   </select>
                 </div>
 
-                {/* Agama */}
                 <div className="space-y-2">
-                  <label className="block text-sm font-semibold text-gray-900">
-                    Agama
-                  </label>
+                  <label className="block text-sm font-semibold text-gray-900">Agama</label>
                   <select
                     className="w-full px-4 py-3.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all duration-200"
                     value={form.agama}
@@ -496,11 +549,8 @@ export default function EditProfile() {
                   </select>
                 </div>
 
-                {/* Nomor Telepon */}
                 <div className="space-y-2">
-                  <label className="block text-sm font-semibold text-gray-900">
-                    Nomor Telepon/HP
-                  </label>
+                  <label className="block text-sm font-semibold text-gray-900">Nomor Telepon/HP</label>
                   <input
                     type="tel"
                     className="w-full px-4 py-3.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all duration-200 placeholder-gray-400"
@@ -510,11 +560,8 @@ export default function EditProfile() {
                   />
                 </div>
 
-                {/* Tanggal Lahir */}
                 <div className="md:col-span-2 space-y-2">
-                  <label className="block text-sm font-semibold text-gray-900">
-                    Tanggal Lahir
-                  </label>
+                  <label className="block text-sm font-semibold text-gray-900">Tanggal Lahir</label>
                   <input
                     type="date"
                     className="w-full px-4 py-3.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all duration-200"
@@ -523,11 +570,8 @@ export default function EditProfile() {
                   />
                 </div>
 
-                {/* Alamat */}
                 <div className="md:col-span-2 space-y-2">
-                  <label className="block text-sm font-semibold text-gray-900">
-                    Alamat Lengkap
-                  </label>
+                  <label className="block text-sm font-semibold text-gray-900">Alamat Lengkap</label>
                   <textarea
                     rows={4}
                     className="w-full px-4 py-3.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all duration-200 resize-none placeholder-gray-400"
@@ -538,7 +582,6 @@ export default function EditProfile() {
                 </div>
               </div>
 
-              {/* Action Buttons */}
               <div className="flex justify-end mt-10 pt-8 border-t border-gray-200">
                 <button
                   onClick={handleSaveProfile}
@@ -560,6 +603,13 @@ export default function EditProfile() {
                   )}
                 </button>
               </div>
+
+              {/* Debug kecil: path yang tersimpan (opsional, bisa hapus) */}
+              {photoKey && !isHttpUrl(photoKey) && (
+                <p className="mt-4 text-xs text-gray-500">
+                  Storage key: <span className="font-mono">{photoKey}</span>
+                </p>
+              )}
             </div>
           </div>
         </div>
