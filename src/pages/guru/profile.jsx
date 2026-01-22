@@ -162,7 +162,7 @@ export default function EditProfile() {
       }
 
       // Dapatkan URL public
-      const { data: {  photo_url } } = supabase.storage
+      const { data: { publicUrl } } = supabase.storage
         .from('profile-photos')
         .createSignedUrl(filePath)
 
@@ -184,7 +184,7 @@ export default function EditProfile() {
       const { error: updateError } = await supabase
         .from('profiles')
         .update({ 
-          photo_url: photo_url,
+          photo_url: publicUrl,
           updated_at: new Date().toISOString()
         })
         .eq('id', user.id)
@@ -193,7 +193,7 @@ export default function EditProfile() {
         throw new Error(`Update database gagal: ${updateError.message}`)
       }
 
-      setPhotoURL( photo_url)
+      setPhotoURL(publicUrl)
       await refreshProfile()
 
       pushToast('success', 'Foto profil berhasil diperbarui (maks. 100KB)')

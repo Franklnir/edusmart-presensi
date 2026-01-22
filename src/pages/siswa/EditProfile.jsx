@@ -565,11 +565,11 @@ export default function EditProfile() {
       }
 
       // Dapatkan URL public
-      const { data: { photo_url } } = supabase.storage
+      const { data: { publicUrl } } = supabase.storage
         .from('profile-photos')
         .createSignedUrl(filePath)
 
-      console.log('[PhotoUpload] Upload successful:', photo_url)
+      console.log('[PhotoUpload] Upload successful:', publicUrl)
 
       // Hapus foto lama jika ada
       if (photoURL && photoURL.includes('profile-photos')) {
@@ -588,7 +588,7 @@ export default function EditProfile() {
       const { error: updateError } = await supabase
         .from('profiles')
         .update({ 
-          photo_url: photo_url,
+          photo_url: publicUrl,
           updated_at: new Date().toISOString()
         })
         .eq('id', user.id)
@@ -599,7 +599,7 @@ export default function EditProfile() {
       }
 
       // Update state dan refresh
-      setPhotoURL(photo_url)
+      setPhotoURL(publicUrl)
       await refreshProfile()
       
       // Revoke object URL untuk menghindari memory leak

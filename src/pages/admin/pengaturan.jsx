@@ -604,11 +604,11 @@ export default function APengaturan() {
       if (uploadError) throw uploadError
 
       const {
-        data: {  photo_url }
+        data: { publicUrl }
       } = supabase.storage.from(SUPABASE_BUCKET).createSignedUrl(LOGO_FILE_PATH)
 
       const timestamp = new Date().getTime()
-      const logoUrlWithTimestamp = `${ photo_url}?t=${timestamp}`
+      const logoUrlWithTimestamp = `${publicUrl}?t=${timestamp}`
 
       setForm((prev) => ({ ...prev, logo_url: logoUrlWithTimestamp }))
 
@@ -650,11 +650,11 @@ export default function APengaturan() {
       if (uploadError) throw uploadError
 
       const {
-        data: {  photo_url }
+        data: { publicUrl }
       } = supabase.storage.from(SUPABASE_BUCKET).createSignedUrl(path)
 
       const timestamp = new Date().getTime()
-      const avatarUrlWithTimestamp = `${ photo_url}?t=${timestamp}`
+      const avatarUrlWithTimestamp = `${publicUrl}?t=${timestamp}`
 
       setAvatarUrl(avatarUrlWithTimestamp)
 
