@@ -13,11 +13,17 @@ const MONTH_NAMES = [
 ]
 
 const FILE_SIZE_LIMITS = {
-  IMAGE: 70 * 1024, // 70KB (foto setelah kompres)
-  PDF: 2 * 1024 * 1024, // 2MB
-  DOCUMENT: 2 * 1024 * 1024, // 2MB
-  PRESENTATION: 3 * 1024 * 1024, // 3MB
-  OTHER: 5 * 1024 * 1024 // 5MB
+  IMAGE: 70 * 1024,
+  PDF: 2 * 1024 * 1024,
+  DOCUMENT: 2 * 1024 * 1024,
+  PRESENTATION: 3 * 1024 * 1024,
+  OTHER: 5 * 1024 * 1024
+}
+
+// ANTI-IDOR: Validasi akses siswa ke tugas
+const validateSiswaAccessToTugas = (tugasKelas, siswaKelas) => {
+  if (!tugasKelas || !siswaKelas) return false
+  return tugasKelas === siswaKelas
 }
 
 const isValidDate = (d) => d instanceof Date && !Number.isNaN(d.getTime())
@@ -32,19 +38,6 @@ const formatDateTime = (dateString) => {
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit'
-  })
-}
-
-const formatDate = (dateStringOrDate) => {
-  if (!dateStringOrDate) return '-'
-  const d = typeof dateStringOrDate === 'string'
-    ? new Date(dateStringOrDate)
-    : dateStringOrDate
-  if (!isValidDate(d)) return '-'
-  return d.toLocaleDateString('id-ID', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric'
   })
 }
 
@@ -65,30 +58,20 @@ const isProbablyUrl = (value) => {
   return value.startsWith('http://') || value.startsWith('https://')
 }
 
-/**
- * Ambil object path dari kemungkinan:
- * - sudah berupa object path: "tugasId/uid-xxx.ext"
- * - public url supabase: .../object/public/<bucket>/<path>
- * - signed url supabase: .../object/sign/<bucket>/<path>?token=...
- * - format lain yang masih mengandung bucket di path
- */
 const extractObjectPathFromUrlOrPath = (urlOrPath, bucketName) => {
   if (!urlOrPath) return null
-  if (!isProbablyUrl(urlOrPath)) return urlOrPath // sudah path
+  if (!isProbablyUrl(urlOrPath)) return urlOrPath
 
   try {
     const u = new URL(urlOrPath)
     const pathname = stripQueryAndHash(u.pathname)
     const parts = pathname.split('/').filter(Boolean)
 
-    // cari bucket di URL
     const bucketIndex = parts.indexOf(bucketName)
     if (bucketIndex !== -1 && bucketIndex + 1 < parts.length) {
       return parts.slice(bucketIndex + 1).join('/')
     }
 
-    // pola umum supabase: /storage/v1/object/public/<bucket>/<path>
-    // atau: /storage/v1/object/sign/<bucket>/<path>
     const publicIdx = parts.indexOf('public')
     if (publicIdx !== -1 && parts[publicIdx + 1] === bucketName) {
       return parts.slice(publicIdx + 2).join('/')
@@ -99,7 +82,6 @@ const extractObjectPathFromUrlOrPath = (urlOrPath, bucketName) => {
       return parts.slice(signIdx + 2).join('/')
     }
 
-    // fallback: ambil segmen setelah bucket jika ada
     return urlOrPath
   } catch {
     return urlOrPath
@@ -114,11 +96,6 @@ const getFileExtFromUrl = (urlOrPath) => {
 }
 
 /* ================ File Compression Functions ================ */
-
-/**
- * Kompresi gambar menggunakan Canvas API
- * maxSizeKB default: 70KB
- */
 const compressImage = async (file, maxSizeKB = 70, initialQuality = 0.9) => {
   return new Promise((resolve, reject) => {
     if (!file?.type?.startsWith('image/')) {
@@ -241,7 +218,6 @@ const compressFileBeforeUpload = async (file) => {
 }
 
 /* ================ Status & Deadline Helpers ================ */
-
 const getStatusInfo = (tugas, jawaban) => {
   const now = new Date()
   const deadline = new Date(tugas?.deadline)
@@ -337,7 +313,6 @@ const getDeadlineInfo = (deadline) => {
   }
 }
 
-// Range satu minggu (Minggu–Sabtu)
 const getWeekRange = () => {
   const today = new Date()
   const startOfWeek = new Date(today)
@@ -361,12 +336,7 @@ const getTimeFilterLabel = (value) => {
   return ''
 }
 
-/* ================ Storage Helpers (Private bucket friendly) ================ */
-
-/**
- * Buat signed url ketika mau preview/download.
- * Jangan disimpan ke DB karena kadaluarsa.
- */
+/* ================ Storage Helpers ================ */
 const createSignedUrlSafe = async (objectPath, expiresInSec = 60 * 30) => {
   if (!objectPath) return null
   const { data, error } = await supabase.storage
@@ -377,24 +347,49 @@ const createSignedUrlSafe = async (objectPath, expiresInSec = 60 * 30) => {
   return data?.signedUrl || null
 }
 
-const resolvePreviewOrDownloadUrl = async (fileRefOrUrl) => {
+const resolvePreviewOrDownloadUrl = async (fileRefOrUrl, currentUserId) => {
   if (!fileRefOrUrl) return null
-  // kalau sudah URL biasa (misal link eksternal), pakai apa adanya
+  
+  // ANTI-IDOR: Validasi bahwa file ini milik user saat ini
   if (isProbablyUrl(fileRefOrUrl) && !fileRefOrUrl.includes('/storage/v1/object/')) {
     return fileRefOrUrl
   }
-  // kalau URL supabase atau path, kita ubah jadi object path lalu sign
+  
   const objectPath = extractObjectPathFromUrlOrPath(fileRefOrUrl, ASSIGNMENT_BUCKET)
   if (!objectPath) return null
+  
+  // Validasi path file jawaban
+  const pathParts = objectPath.split('/')
+  if (pathParts.length >= 2) {
+    const tugasId = pathParts[0]
+    const userIdPart = pathParts[1]?.split('-')[0]
+    
+    // Pastikan file jawaban milik user saat ini
+    if (userIdPart !== currentUserId) {
+      throw new Error('Akses tidak diizinkan ke file ini')
+    }
+  }
+  
   return await createSignedUrlSafe(objectPath, 60 * 30)
 }
 
-const deleteFileFromStorage = async (fileRefOrUrl) => {
+const deleteFileFromStorage = async (fileRefOrUrl, currentUserId) => {
   if (!fileRefOrUrl) return
 
   try {
     const objectPath = extractObjectPathFromUrlOrPath(fileRefOrUrl, ASSIGNMENT_BUCKET)
     if (!objectPath) return
+
+    // ANTI-IDOR: Validasi bahwa file ini milik user saat ini
+    const pathParts = objectPath.split('/')
+    if (pathParts.length >= 2) {
+      const tugasId = pathParts[0]
+      const userIdPart = pathParts[1]?.split('-')[0]
+      
+      if (userIdPart !== currentUserId) {
+        throw new Error('Tidak dapat menghapus file milik orang lain')
+      }
+    }
 
     const { error } = await supabase.storage
       .from(ASSIGNMENT_BUCKET)
@@ -402,10 +397,8 @@ const deleteFileFromStorage = async (fileRefOrUrl) => {
 
     if (error) throw error
   } catch (error) {
-    // tidak fatal, hanya log
-    // bisa gagal karena policy, file sudah tidak ada, dsb
-    // eslint-disable-next-line no-console
     console.error('deleteFileFromStorage error:', error)
+    throw error
   }
 }
 
@@ -418,16 +411,13 @@ export default function TugasSiswa() {
   const [tugasList, setTugasList] = useState([])
   const [jawabanMap, setJawabanMap] = useState({})
   const [selectedTugas, setSelectedTugas] = useState(null)
-
   const [selectedMapel, setSelectedMapel] = useState('semua')
   const [timeFilter, setTimeFilter] = useState('all')
-
   const [file, setFile] = useState(null)
   const [link, setLink] = useState('')
   const [uploadedFileSize, setUploadedFileSize] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [compressionProgress, setCompressionProgress] = useState(null)
-
   const [previewFile, setPreviewFile] = useState(null)
 
   /* ========== Data Loading ========== */
@@ -437,6 +427,7 @@ export default function TugasSiswa() {
     try {
       setLoading(true)
 
+      // ANTI-IDOR: Hanya ambil tugas untuk kelas siswa ini
       const { data, error } = await supabase
         .from('tugas')
         .select('*')
@@ -446,7 +437,6 @@ export default function TugasSiswa() {
       if (error) throw error
       setTugasList(data || [])
     } catch (error) {
-      // eslint-disable-next-line no-console
       console.error('Error loading tugas:', error)
       pushToast('error', 'Gagal memuat data tugas: ' + (error?.message || 'Unknown error'))
     } finally {
@@ -458,6 +448,7 @@ export default function TugasSiswa() {
     if (!user?.id) return
 
     try {
+      // ANTI-IDOR: Hanya ambil jawaban milik siswa ini
       const { data, error } = await supabase
         .from('tugas_jawaban')
         .select('*')
@@ -471,7 +462,6 @@ export default function TugasSiswa() {
       })
       setJawabanMap(map)
     } catch (error) {
-      // eslint-disable-next-line no-console
       console.error('Error loading jawaban:', error)
       pushToast('error', 'Gagal memuat data jawaban: ' + (error?.message || 'Unknown error'))
     }
@@ -669,7 +659,6 @@ export default function TugasSiswa() {
       setUploadedFileSize(formatFileSize(compressedFile.size))
       pushToast('success', `File siap diupload: ${formatFileSize(compressedFile.size)}`)
     } catch (error) {
-      // eslint-disable-next-line no-console
       console.error('Error kompresi file:', error)
       pushToast('error', error?.message || 'Gagal memproses file')
       setFile(null)
@@ -679,15 +668,22 @@ export default function TugasSiswa() {
     }
   }
 
-  const removeFile = () => {
+  const removeFile = async () => {
+    if (!file) return
     setFile(null)
     setUploadedFileSize('')
   }
 
-  /* ========== Submit Jawaban Handler (rule: nilai lock + deadline lock) ========== */
+  /* ========== Submit Jawaban Handler ========== */
   const submitJawaban = async () => {
-    if (!selectedTugas || !user?.id) {
+    if (!selectedTugas || !user?.id || !profile?.kelas) {
       return pushToast('error', 'Pilih tugas terlebih dahulu')
+    }
+
+    // ANTI-IDOR: Validasi akses siswa ke tugas ini
+    if (!validateSiswaAccessToTugas(selectedTugas.kelas, profile.kelas)) {
+      pushToast('error', 'Anda tidak memiliki akses ke tugas ini')
+      return
     }
 
     const existingJawaban = jawabanMap[selectedTugas.id]
@@ -715,9 +711,7 @@ export default function TugasSiswa() {
 
     if (trimmedLink) {
       try {
-        // validasi URL, kalau gagal langsung error biar tidak nyimpen string aneh
-        // (boleh juga di-relax kalau kamu ingin)
-        // eslint-disable-next-line no-new
+        // Validasi URL
         new URL(trimmedLink)
       } catch {
         return pushToast('error', 'Link tidak valid. Pastikan formatnya seperti https://...')
@@ -728,16 +722,20 @@ export default function TugasSiswa() {
       setIsSubmitting(true)
       setLoading(true)
 
-      let fileRef = null // ini yang disimpan ke DB: object path, bukan signed url
+      let fileRef = null
       let fileName = null
       let fileToUpload = file
 
       if (fileToUpload) {
         fileToUpload = await compressFileBeforeUpload(fileToUpload)
 
-        // kalau update dan sebelumnya ada file, hapus yang lama
+        // Hapus file lama jika ada
         if (existingJawaban?.file_url) {
-          await deleteFileFromStorage(existingJawaban.file_url)
+          try {
+            await deleteFileFromStorage(existingJawaban.file_url, user.id)
+          } catch (error) {
+            console.error('Gagal menghapus file lama:', error)
+          }
         }
 
         const ext = (fileToUpload.name || '').split('.').pop() || 'bin'
@@ -757,7 +755,7 @@ export default function TugasSiswa() {
         fileRef = objectPath
         fileName = fileToUpload.name
       } else if (existingJawaban?.file_url) {
-        // kalau tidak upload baru, pertahankan yang lama
+        // Pertahankan file lama
         fileRef = existingJawaban.file_url
         fileName = existingJawaban.file_name || null
       }
@@ -765,6 +763,7 @@ export default function TugasSiswa() {
       let error
 
       if (existingJawaban) {
+        // ANTI-IDOR: Pastikan hanya pemilik yang bisa update
         const { error: updateError } = await supabase
           .from('tugas_jawaban')
           .update({
@@ -775,6 +774,7 @@ export default function TugasSiswa() {
             status: 'submitted'
           })
           .eq('id', existingJawaban.id)
+          .eq('user_id', user.id) // Pastikan hanya pemilik
 
         error = updateError
       } else {
@@ -803,7 +803,6 @@ export default function TugasSiswa() {
 
       await loadJawabanSaya()
     } catch (error) {
-      // eslint-disable-next-line no-console
       console.error('Error submitting jawaban:', error)
       pushToast('error', `Gagal mengumpulkan jawaban: ${error?.message || 'Unknown error'}`)
     } finally {
@@ -820,11 +819,14 @@ export default function TugasSiswa() {
       e.preventDefault()
       e.stopPropagation()
       try {
-        const resolved = await resolvePreviewOrDownloadUrl(fileRefOrUrl)
-        if (!resolved) return pushToast('error', 'Gagal membuka file')
+        const resolved = await resolvePreviewOrDownloadUrl(fileRefOrUrl, user?.id)
+        if (!resolved) {
+          pushToast('error', 'Gagal membuka file')
+          return
+        }
         setPreviewFile(resolved)
       } catch (err) {
-        pushToast('error', 'Gagal membuat link akses file: ' + (err?.message || 'Unknown error'))
+        pushToast('error', 'Gagal membuka file: ' + (err?.message || 'Akses tidak diizinkan'))
       }
     }
 
@@ -832,11 +834,14 @@ export default function TugasSiswa() {
       e.preventDefault()
       e.stopPropagation()
       try {
-        const resolved = await resolvePreviewOrDownloadUrl(fileRefOrUrl)
-        if (!resolved) return pushToast('error', 'Gagal membuka file')
+        const resolved = await resolvePreviewOrDownloadUrl(fileRefOrUrl, user?.id)
+        if (!resolved) {
+          pushToast('error', 'Gagal membuka file')
+          return
+        }
         window.open(resolved, '_blank', 'noopener,noreferrer')
       } catch (err) {
-        pushToast('error', 'Gagal membuat link download: ' + (err?.message || 'Unknown error'))
+        pushToast('error', 'Gagal membuka file: ' + (err?.message || 'Akses tidak diizinkan'))
       }
     }
 
@@ -941,7 +946,25 @@ export default function TugasSiswa() {
                   className={`hover:bg-slate-50 cursor-pointer transition-colors ${
                     selectedTugas?.id === tugas.id ? 'bg-blue-50' : ''
                   }`}
-                  onClick={() => setSelectedTugas(tugas)}
+                  onClick={() => {
+                    // ANTI-IDOR: Validasi akses sebelum memilih
+                    if (validateSiswaAccessToTugas(tugas.kelas, profile?.kelas)) {
+                      setSelectedTugas(tugas)
+                    } else {
+                      pushToast('error', 'Anda tidak memiliki akses ke tugas ini')
+                    }
+                  }}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      if (validateSiswaAccessToTugas(tugas.kelas, profile?.kelas)) {
+                        setSelectedTugas(tugas)
+                      } else {
+                        pushToast('error', 'Anda tidak memiliki akses ke tugas ini')
+                      }
+                    }
+                  }}
                 >
                   <td className="px-4 py-3 align-top">
                     <div className="flex items-start gap-3">
@@ -1005,7 +1028,11 @@ export default function TugasSiswa() {
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
-                        setSelectedTugas(tugas)
+                        if (validateSiswaAccessToTugas(tugas.kelas, profile?.kelas)) {
+                          setSelectedTugas(tugas)
+                        } else {
+                          pushToast('error', 'Anda tidak memiliki akses ke tugas ini')
+                        }
                       }}
                       className="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium text-xs"
                       type="button"
@@ -1117,6 +1144,7 @@ export default function TugasSiswa() {
             placeholder="https://drive.google.com/... atau https://docs.google.com/..."
             value={link}
             onChange={(e) => setLink(e.target.value)}
+            pattern="https?://.+"
           />
           <p className="text-xs text-slate-500 mt-1">
             Gunakan Google Drive (folder berisi banyak foto), Google Docs, GitHub, Figma, atau platform lainnya.
@@ -1514,6 +1542,21 @@ export default function TugasSiswa() {
                       const deadlineDate = new Date(selectedTugas.deadline)
                       const isDeadlinePassed = isValidDate(deadlineDate) ? now > deadlineDate : false
                       const isGraded = jawaban?.nilai != null
+
+                      // ANTI-IDOR: Validasi akses sebelum menampilkan form
+                      if (!validateSiswaAccessToTugas(selectedTugas.kelas, profile?.kelas)) {
+                        return (
+                          <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-center">
+                            <div className="text-3xl mb-2">🚫</div>
+                            <p className="text-red-800 font-medium text-sm">
+                              Akses Ditolak
+                            </p>
+                            <p className="text-red-700 text-xs mt-1">
+                              Anda tidak memiliki akses ke tugas ini
+                            </p>
+                          </div>
+                        )
+                      }
 
                       if (jawaban) {
                         return (
