@@ -1,5 +1,12 @@
+// src/pages/guru/TugasGuru.jsx
 import React, { useState, useEffect, useMemo, useCallback } from 'react'
-import { supabase, ASSIGNMENT_BUCKET } from '../../lib/supabase'
+import {
+  supabase,
+  ASSIGNMENT_BUCKET,
+  extractObjectPath,
+  getSignedUrlForValue,
+  removeStorageObject
+} from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import FileDropzone from '../../components/FileDropzone'
@@ -56,7 +63,7 @@ const formatFileSize = (bytes) => {
   if (!bytes) return '0 B'
   const sizes = ['B', 'KB', 'MB', 'GB']
   const i = Math.floor(Math.log(bytes) / Math.log(1024))
-  return Math.round((bytes / Math.pow(1024, i)) * 100) / 100 + ' ' + sizes[i]
+  return `${Math.round((bytes / Math.pow(1024, i)) * 100) / 100} ${sizes[i]}`
 }
 
 const formatKelasDisplay = (slug) => {
@@ -72,10 +79,7 @@ const formatKelasDisplay = (slug) => {
 }
 
 const initials = (name = '?') => {
-  const parts = (name || '')
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
+  const parts = (name || '').trim().split(/\s+/).slice(0, 2)
   return parts.map((p) => p[0]?.toUpperCase() || '').join('') || '?'
 }
 
@@ -98,15 +102,8 @@ const validateKelasAccess = (userKelasList, kelasId) => {
 ========================= */
 const compressImage = async (file, maxSizeKB = 70, initialQuality = 0.9) => {
   return new Promise((resolve, reject) => {
-    if (!file?.type?.startsWith('image/')) {
-      reject(new Error('File bukan gambar'))
-      return
-    }
-
-    if (file.size <= maxSizeKB * 1024) {
-      resolve(file)
-      return
-    }
+    if (!file?.type?.startsWith('image/')) return reject(new Error('File bukan gambar'))
+    if (file.size <= maxSizeKB * 1024) return resolve(file)
 
     const reader = new FileReader()
     reader.onload = (event) => {
@@ -114,10 +111,7 @@ const compressImage = async (file, maxSizeKB = 70, initialQuality = 0.9) => {
       img.onload = () => {
         const canvas = document.createElement('canvas')
         const ctx = canvas.getContext('2d')
-        if (!ctx) {
-          reject(new Error('Canvas tidak didukung'))
-          return
-        }
+        if (!ctx) return reject(new Error('Canvas tidak didukung'))
 
         let width = img.width
         let height = img.height
@@ -131,10 +125,7 @@ const compressImage = async (file, maxSizeKB = 70, initialQuality = 0.9) => {
 
           canvas.toBlob(
             (blob) => {
-              if (!blob) {
-                reject(new Error('Gagal mengkompresi gambar'))
-                return
-              }
+              if (!blob) return reject(new Error('Gagal mengkompresi gambar'))
 
               const currentKB = blob.size / 1024
               if (currentKB > maxSizeKB && quality > 0.3) {
@@ -143,21 +134,12 @@ const compressImage = async (file, maxSizeKB = 70, initialQuality = 0.9) => {
                 height = Math.floor(height * 0.85)
 
                 if (width < 100 || height < 100) {
-                  const compressed = new File([blob], file.name, {
-                    type: file.type,
-                    lastModified: Date.now()
-                  })
-                  resolve(compressed)
-                  return
+                  return resolve(new File([blob], file.name, { type: file.type, lastModified: Date.now() }))
                 }
-                step()
-              } else {
-                const compressed = new File([blob], file.name, {
-                  type: file.type,
-                  lastModified: Date.now()
-                })
-                resolve(compressed)
+                return step()
               }
+
+              return resolve(new File([blob], file.name, { type: file.type, lastModified: Date.now() }))
             },
             file.type,
             quality
@@ -187,15 +169,10 @@ const compressFileBeforeUpload = async (file) => {
   if (fileType.startsWith('image/')) {
     return await compressImage(file, FILE_SIZE_LIMITS.IMAGE / 1024)
   }
-
-  if (fileType === 'application/pdf' || fileName.endsWith('.pdf')) {
-    return ensureMax(FILE_SIZE_LIMITS.PDF, 'PDF')
-  }
-
+  if (fileType === 'application/pdf' || fileName.endsWith('.pdf')) return ensureMax(FILE_SIZE_LIMITS.PDF, 'PDF')
   if (fileType.includes('presentation') || fileName.endsWith('.ppt') || fileName.endsWith('.pptx')) {
     return ensureMax(FILE_SIZE_LIMITS.PRESENTATION, 'presentasi')
   }
-
   if (
     fileType.includes('document') ||
     fileName.endsWith('.doc') ||
@@ -205,74 +182,32 @@ const compressFileBeforeUpload = async (file) => {
   ) {
     return ensureMax(FILE_SIZE_LIMITS.DOCUMENT, 'dokumen')
   }
-
   return ensureMax(FILE_SIZE_LIMITS.OTHER, 'lainnya')
 }
 
 /* =========================
-   Storage Helpers
+   Storage Helpers (FIXED)
+   - Preview selalu buat signed URL baru
+   - Support input path maupun URL (public/signed lama)
 ========================= */
-const extractObjectKeyFromAny = (value) => {
-  if (!value) return ''
-  const v = String(value)
+const normalizeAssignmentKey = (urlOrPath) => extractObjectPath(ASSIGNMENT_BUCKET, urlOrPath || '')
 
-  if (!isHttpUrl(v)) return v
-
-  try {
-    const url = new URL(v)
-    const parts = url.pathname.split('/').filter(Boolean)
-
-    const bucketIndex = parts.indexOf(ASSIGNMENT_BUCKET)
-    if (bucketIndex !== -1) {
-      const key = parts.slice(bucketIndex + 1).join('/')
-      return key || ''
-    }
-
-    const publicIdx = parts.indexOf('public')
-    if (publicIdx !== -1 && parts[publicIdx + 1] === ASSIGNMENT_BUCKET) {
-      return parts.slice(publicIdx + 2).join('/')
-    }
-
-    const signIdx = parts.indexOf('sign')
-    if (signIdx !== -1 && parts[signIdx + 1] === ASSIGNMENT_BUCKET) {
-      return parts.slice(signIdx + 2).join('/')
-    }
-  } catch {
-    // ignore
-  }
-
-  const raw = v.split('?')[0]
-  const urlParts = raw.split('/').filter(Boolean)
-  const fileName = urlParts[urlParts.length - 1]
-  const maybeFolder = urlParts[urlParts.length - 2]
-  if (fileName && maybeFolder) return `${maybeFolder}/${fileName}`
-
-  return ''
-}
-
-const createSignedUrlForKey = async (key, expiresInSeconds = 60 * 60) => {
-  if (!key) return null
-  if (isHttpUrl(key)) return key
-  const { data, error } = await supabase.storage
-    .from(ASSIGNMENT_BUCKET)
-    .createSignedUrl(key, expiresInSeconds)
-  if (error) throw error
-  return data?.signedUrl || null
+const createSignedUrlForAssignment = async (urlOrPath, expiresInSec = 60 * 15) => {
+  const key = normalizeAssignmentKey(urlOrPath)
+  if (!key) throw new Error('Path file tidak valid')
+  // getSignedUrlForValue sudah handle url/path dan akan membuat signed url baru
+  return getSignedUrlForValue(ASSIGNMENT_BUCKET, key, expiresInSec)
 }
 
 // ANTI-IDOR: penghapusan file hanya untuk folder milik guru (tugas_lampiran/<guruId>/...)
-const deleteFileFromStorage = async (fileKeyOrUrl, userId) => {
-  const key = extractObjectKeyFromAny(fileKeyOrUrl)
+const deleteTeacherAttachment = async (urlOrPath, teacherId) => {
+  const key = normalizeAssignmentKey(urlOrPath)
   if (!key) return
-
-  const keyParts = key.split('/')
-  if (keyParts[0] === 'tugas_lampiran' && keyParts[1] === userId) {
-    const { error } = await supabase.storage.from(ASSIGNMENT_BUCKET).remove([key])
-    if (error) throw error
-    return
+  if (!String(key).startsWith(`tugas_lampiran/${teacherId}/`)) {
+    throw new Error('Akses tidak diizinkan untuk menghapus file ini')
   }
-
-  throw new Error('Akses tidak diizinkan untuk menghapus file ini')
+  const res = await removeStorageObject(ASSIGNMENT_BUCKET, key)
+  if (!res.ok) throw res.error
 }
 
 /* =========================
@@ -366,15 +301,13 @@ export default function TugasGuru() {
   const [previewFile, setPreviewFile] = useState(null)
 
   /* ---------- Derived: kelas yang guru ampu ---------- */
-  const { myKelasList } = useMemo(() => {
-    if (!jadwalAll.length || !kelasList.length) return { myKelasList: [] }
+  const myKelasList = useMemo(() => {
+    if (!jadwalAll.length || !kelasList.length) return []
 
     const kelasSet = new Set()
-    jadwalAll.forEach((j) => {
-      if (j.kelas_id) kelasSet.add(j.kelas_id)
-    })
+    jadwalAll.forEach((j) => j.kelas_id && kelasSet.add(j.kelas_id))
 
-    const formatted = [...kelasSet]
+    return [...kelasSet]
       .map((kelasId) => {
         const kelasData = kelasList.find((k) => k.id === kelasId)
         return {
@@ -384,26 +317,17 @@ export default function TugasGuru() {
         }
       })
       .sort((a, b) => a.nama.localeCompare(b.nama))
-
-    return { myKelasList: formatted }
   }, [jadwalAll, kelasList])
 
   /* ---------- Access Control ---------- */
   const validateTugasAccess = useCallback(
-    (tugas) => {
-      if (!tugas || !user?.id) return false
-      return tugas.created_by === user.id
-    },
+    (tugas) => Boolean(tugas && user?.id && tugas.created_by === user.id),
     [user?.id]
   )
 
   /* ========== Body scroll lock on modal ========== */
   useEffect(() => {
-    if (selectedTugas) {
-      document.body.style.overflow = 'hidden'
-    } else {
-      document.body.style.overflow = 'unset'
-    }
+    document.body.style.overflow = selectedTugas ? 'hidden' : 'unset'
     return () => {
       document.body.style.overflow = 'unset'
     }
@@ -420,11 +344,7 @@ export default function TugasGuru() {
   useEffect(() => {
     const loadKelasData = async () => {
       try {
-        const { data, error } = await supabase
-          .from('kelas')
-          .select('*')
-          .order('grade')
-          .order('suffix')
+        const { data, error } = await supabase.from('kelas').select('*').order('grade').order('suffix')
         if (error) throw error
         setKelasList(data || [])
       } catch (error) {
@@ -441,10 +361,7 @@ export default function TugasGuru() {
     const loadJadwal = async () => {
       if (!user?.id) return
       try {
-        const { data, error } = await supabase
-          .from('jadwal')
-          .select('*')
-          .eq('guru_id', user.id)
+        const { data, error } = await supabase.from('jadwal').select('*').eq('guru_id', user.id)
         if (error) throw error
         setJadwalAll(data || [])
       } catch (error) {
@@ -473,8 +390,7 @@ export default function TugasGuru() {
       setMapelList([])
       setSelectedMapel('')
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kelas, jadwalAll])
+  }, [kelas, jadwalAll, selectedMapel])
 
   /* =========================
      4) Mapel list untuk filter history
@@ -494,8 +410,7 @@ export default function TugasGuru() {
       setMapelListFilter([])
       setSelectedSubject('')
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedKelasFilter, jadwalAll])
+  }, [selectedKelasFilter, jadwalAll, selectedSubject])
 
   /* =========================
      5) Load list tugas (history) + stats
@@ -506,11 +421,7 @@ export default function TugasGuru() {
       setLoading(true)
       const now = new Date()
 
-      // ANTI-IDOR: hanya tugas milik guru ini
-      let query = supabase
-        .from('tugas')
-        .select('*')
-        .eq('created_by', user.id)
+      let query = supabase.from('tugas').select('*').eq('created_by', user.id)
 
       if (selectedKelasFilter) query = query.eq('kelas', selectedKelasFilter)
       if (selectedSubject) query = query.eq('mapel', selectedSubject)
@@ -522,42 +433,9 @@ export default function TugasGuru() {
         const weekAgo = new Date(now)
         weekAgo.setDate(now.getDate() - 7)
         query = query.gte('created_at', weekAgo.toISOString())
-      } else if (timeRange === 'all') {
+      } else {
         const yearAgo = new Date(now.getFullYear(), now.getMonth() - 11, 1)
         query = query.gte('created_at', yearAgo.toISOString())
-      } else if (timeRange === 'custom_months') {
-        if (selectedMonths.length > 0) {
-          // range kasar dari min sampai max, lalu dipotong lagi by set
-          let minYear = Infinity
-          let minMonth = Infinity
-          let maxYear = -Infinity
-          let maxMonth = -Infinity
-
-          selectedMonths.forEach((ym) => {
-            const [ys, ms] = ym.split('-')
-            const y = parseInt(ys, 10)
-            const m = parseInt(ms, 10)
-            if (!Number.isNaN(y) && !Number.isNaN(m)) {
-              if (y < minYear || (y === minYear && m < minMonth)) {
-                minYear = y
-                minMonth = m
-              }
-              if (y > maxYear || (y === maxYear && m > maxMonth)) {
-                maxYear = y
-                maxMonth = m
-              }
-            }
-          })
-
-          if (minYear !== Infinity) {
-            const start = new Date(minYear, minMonth - 1, 1)
-            const end = new Date(maxYear, maxMonth, 1)
-            query = query.gte('created_at', start.toISOString()).lt('created_at', end.toISOString())
-          }
-        } else {
-          const yearAgo = new Date(now.getFullYear(), now.getMonth() - 11, 1)
-          query = query.gte('created_at', yearAgo.toISOString())
-        }
       }
 
       query = query.order('created_at', { ascending: false })
@@ -566,15 +444,21 @@ export default function TugasGuru() {
 
       let tugasData = tugasRaw || []
 
-      if (timeRange === 'custom_months' && selectedMonths.length > 0) {
-        const setMonths = new Set(selectedMonths)
-        tugasData = tugasData.filter((t) => {
-          if (!t.created_at) return false
-          const d = new Date(t.created_at)
-          if (!isValidDate(d)) return false
-          const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-          return setMonths.has(ym)
-        })
+      if (timeRange === 'custom_months') {
+        const yearAgo = new Date(now.getFullYear(), now.getMonth() - 11, 1)
+        // jika belum pilih bulan, fallback 12 bulan terakhir
+        if (selectedMonths.length === 0) {
+          tugasData = tugasData.filter((t) => t.created_at && new Date(t.created_at) >= yearAgo)
+        } else {
+          const setMonths = new Set(selectedMonths)
+          tugasData = tugasData.filter((t) => {
+            if (!t.created_at) return false
+            const d = new Date(t.created_at)
+            if (!isValidDate(d)) return false
+            const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+            return setMonths.has(ym)
+          })
+        }
       }
 
       if (tugasData.length === 0) {
@@ -585,7 +469,6 @@ export default function TugasGuru() {
       const tugasIds = tugasData.map((t) => t.id)
       const uniqueKelas = [...new Set(tugasData.map((t) => t.kelas).filter(Boolean))]
 
-      // stats jawaban & jumlah siswa
       const jawabanPromise =
         tugasIds.length > 0
           ? supabase.from('tugas_jawaban').select('tugas_id, user_id, nilai').in('tugas_id', tugasIds)
@@ -616,7 +499,6 @@ export default function TugasGuru() {
         const totalSiswa = siswaKelas.length
 
         const jawabanIni = jawabanArr.filter((j) => j.tugas_id === tugas.id)
-        // unique by user_id
         const uniqueByUser = Object.values(
           jawabanIni.reduce((acc, j) => {
             acc[j.user_id] = j
@@ -676,7 +558,6 @@ export default function TugasGuru() {
     try {
       setIsLoadingTugasPerluDinilai(true)
 
-      // ANTI-IDOR: hanya tugas milik guru
       const { data: tugasData, error: tugasError } = await supabase
         .from('tugas')
         .select('*')
@@ -733,7 +614,6 @@ export default function TugasGuru() {
     async (tugas, { silent = false } = {}) => {
       if (!tugas || !user?.id) return
 
-      // ANTI-IDOR: validasi kepemilikan tugas + akses kelas
       if (!validateTugasAccess(tugas)) {
         pushToast('error', 'Anda tidak memiliki akses ke tugas ini')
         setSelectedTugas(null)
@@ -787,9 +667,7 @@ export default function TugasGuru() {
         setNilaiInput((prev) => {
           const next = { ...prev }
           formattedJawaban.forEach((j) => {
-            if (j.nilai != null && next[j.user_id] === undefined) {
-              next[j.user_id] = String(j.nilai)
-            }
+            if (j.nilai != null && next[j.user_id] === undefined) next[j.user_id] = String(j.nilai)
           })
           return next
         })
@@ -804,9 +682,7 @@ export default function TugasGuru() {
   )
 
   useEffect(() => {
-    if (selectedTugas && !isEditingTugas) {
-      loadDetailTugas(selectedTugas)
-    }
+    if (selectedTugas && !isEditingTugas) loadDetailTugas(selectedTugas)
   }, [selectedTugas, isEditingTugas, loadDetailTugas])
 
   /* =========================
@@ -818,7 +694,6 @@ export default function TugasGuru() {
     const channel = supabase
       .channel(`tugas_jawaban_guru_${user.id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tugas_jawaban' }, async (payload) => {
-        // refresh sidebar & list
         await loadTugasPerluDinilai()
         await loadTugas()
 
@@ -835,8 +710,7 @@ export default function TugasGuru() {
     return () => {
       supabase.removeChannel(channel)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, selectedTugas, loadTugasPerluDinilai, loadTugas])
+  }, [user?.id, selectedTugas, loadTugasPerluDinilai, loadTugas, loadDetailTugas])
 
   /* =========================
      9) Group siswa status
@@ -874,7 +748,6 @@ export default function TugasGuru() {
 
       const compressed = await compressFileBeforeUpload(file)
 
-      // ANTI-IDOR: folder milik guru
       const safeName = sanitizeFileName(compressed.name)
       const filePath = `tugas_lampiran/${user.id}/${Date.now()}-${safeName}`
 
@@ -884,15 +757,17 @@ export default function TugasGuru() {
         .from(ASSIGNMENT_BUCKET)
         .upload(filePath, compressed, { upsert: false, cacheControl: '3600' })
 
-      if (uploadError) throw new Error(uploadError.message)
+      if (uploadError) {
+        // RLS storage paling sering muncul di sini
+        throw new Error(uploadError.message || 'Upload ditolak oleh policy storage')
+      }
 
-      // Hapus file lama jika ada (hanya jika itu file lampiran guru sendiri)
+      // Hapus file lama jika ada (hanya file milik guru sendiri)
       const currentFile = mode === 'edit' ? editForm?.file_url : form.file_url
       if (currentFile) {
         try {
-          await deleteFileFromStorage(currentFile, user.id)
+          await deleteTeacherAttachment(currentFile, user.id)
         } catch (e) {
-          // kalau gagal (misal bukan file milik guru), diamkan saja
           console.warn('Gagal menghapus file lama:', e)
         }
       }
@@ -913,7 +788,13 @@ export default function TugasGuru() {
     } catch (error) {
       console.error('Upload error:', error)
       setCompressionProgress(null)
-      pushToast('error', `Gagal mengupload file: ${error?.message || 'Unknown error'}`)
+      const msg = error?.message || 'Unknown error'
+      // bantu diagnosa biar cepat
+      if (String(msg).toLowerCase().includes('row-level security')) {
+        pushToast('error', 'Upload ditolak oleh RLS Storage. Policy INSERT bucket belum mengizinkan path tugas_lampiran/<uid>/...')
+      } else {
+        pushToast('error', `Gagal mengupload file: ${msg}`)
+      }
     } finally {
       setIsUploadingFile(false)
     }
@@ -935,11 +816,13 @@ export default function TugasGuru() {
       }
 
       try {
-        // ANTI-IDOR: file lampiran guru harus di folder guru
-        if (!String(editForm.file_url).startsWith(`tugas_lampiran/${user.id}/`)) return
+        const key = normalizeAssignmentKey(editForm.file_url)
+        if (!key) return
 
-        const signed = await createSignedUrlForKey(editForm.file_url, 60 * 10)
-        if (!signed) return
+        // ANTI-IDOR: file lampiran guru harus di folder guru
+        if (!String(key).startsWith(`tugas_lampiran/${user.id}/`)) return
+
+        const signed = await createSignedUrlForAssignment(key, 60 * 10)
         const res = await fetch(signed)
         if (!res.ok) return
         const blob = await res.blob()
@@ -963,7 +846,6 @@ export default function TugasGuru() {
       pushToast('error', 'Lengkapi data (Kelas, Mapel, Judul, Deadline)')
       return
     }
-
     if (!validateKelasAccess(myKelasList, kelas)) {
       pushToast('error', 'Anda tidak memiliki akses ke kelas ini')
       return
@@ -978,7 +860,7 @@ export default function TugasGuru() {
         judul: form.judul,
         keterangan: form.keterangan,
         deadline: new Date(form.deadline).toISOString(),
-        file_url: form.file_url,
+        file_url: form.file_url, // simpan PATH (bukan URL)
         created_by: user.id
       }
 
@@ -1023,7 +905,6 @@ export default function TugasGuru() {
   const simpanEditTugas = async () => {
     if (!editForm || !user?.id) return
 
-    // ANTI-IDOR: hanya pemilik
     if (editForm.created_by !== user.id) {
       pushToast('error', 'Anda tidak memiliki akses untuk mengedit tugas ini')
       setIsEditingTugas(false)
@@ -1031,7 +912,6 @@ export default function TugasGuru() {
       return
     }
 
-    // akses kelas (yang sedang diedit) juga harus valid
     if (!validateKelasAccess(myKelasList, editForm.kelas)) {
       pushToast('error', 'Anda tidak memiliki akses ke kelas ini')
       return
@@ -1057,7 +937,6 @@ export default function TugasGuru() {
       if (error) throw error
 
       pushToast('success', 'Tugas berhasil diperbarui')
-
       setSelectedTugas((prev) => (prev ? { ...prev, ...payload } : prev))
       setIsEditingTugas(false)
       setEditForm(null)
@@ -1088,16 +967,14 @@ export default function TugasGuru() {
     try {
       setLoading(true)
 
-      // hapus file lampiran guru (kalau memang folder guru)
       if (fileUrlOrKey) {
         try {
-          await deleteFileFromStorage(fileUrlOrKey, user.id)
+          await deleteTeacherAttachment(fileUrlOrKey, user.id)
         } catch (e) {
           console.warn('Gagal menghapus file lampiran:', e)
         }
       }
 
-      // ANTI-IDOR: delete hanya milik user
       const { error } = await supabase.from('tugas').delete().eq('id', tugasId).eq('created_by', user.id)
       if (error) throw error
 
@@ -1120,6 +997,7 @@ export default function TugasGuru() {
 
   /* =========================
      13) Simpan nilai siswa
+     FIX: jangan update kolom yang tidak ada (dinilai_at/dinilai_oleh)
 ========================= */
   const simpanNilai = async (siswaId) => {
     if (!selectedTugas || !user?.id) return
@@ -1150,22 +1028,17 @@ export default function TugasGuru() {
           .from('tugas_jawaban')
           .update({
             nilai: parsed,
-            status: 'dinilai',
-            dinilai_at: new Date().toISOString(),
-            dinilai_oleh: user.id
+            status: 'dinilai'
           })
           .eq('id', existing.id)
 
         if (error) throw error
       } else {
-        // jika belum ada row (biasanya tidak), tetap amankan insert
         const { error } = await supabase.from('tugas_jawaban').insert({
           tugas_id: selectedTugas.id,
           user_id: siswaId,
           nilai: parsed,
-          status: 'dinilai',
-          dinilai_at: new Date().toISOString(),
-          dinilai_oleh: user.id
+          status: 'dinilai'
         })
         if (error) throw error
       }
@@ -1197,12 +1070,16 @@ export default function TugasGuru() {
       e.preventDefault()
       e.stopPropagation()
       try {
-        const signed = await createSignedUrlForKey(keyOrUrl, 60 * 60)
-        if (!signed) throw new Error('Gagal membuat signed URL')
+        const signed = await createSignedUrlForAssignment(keyOrUrl, 60 * 30)
         setPreviewFile(signed)
       } catch (err) {
         console.error(err)
-        pushToast('error', 'Gagal membuka preview file')
+        const msg = String(err?.message || '')
+        if (msg.toLowerCase().includes('row-level security') || msg.toLowerCase().includes('permission')) {
+          pushToast('error', 'Gagal membuka preview: policy storage belum mengizinkan akses file ini')
+        } else {
+          pushToast('error', 'Gagal membuka preview file')
+        }
       }
     }
 
@@ -1311,13 +1188,11 @@ export default function TugasGuru() {
                                 type="button"
                                 onClick={async () => {
                                   try {
-                                    // Guru akan berhasil hanya jika policy mengizinkan
-                                    const signed = await createSignedUrlForKey(jawaban.file_url, 60 * 60)
-                                    if (!signed) throw new Error('no signed url')
+                                    const signed = await createSignedUrlForAssignment(jawaban.file_url, 60 * 30)
                                     setPreviewFile(signed)
                                   } catch (e) {
                                     console.error(e)
-                                    pushToast('error', 'Gagal membuka file jawaban')
+                                    pushToast('error', 'Gagal membuka file jawaban (cek policy storage SELECT)')
                                   }
                                 }}
                                 className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-700 rounded-lg text-xs hover:bg-blue-200 transition-colors"
@@ -1379,12 +1254,9 @@ export default function TugasGuru() {
                               value={nilaiInput[siswa.id] ?? ''}
                               onChange={(e) => {
                                 const val = e.target.value
-                                if (
-                                  val === '' ||
-                                  (!Number.isNaN(parseInt(val, 10)) &&
-                                    parseInt(val, 10) >= 0 &&
-                                    parseInt(val, 10) <= 100)
-                                ) {
+                                if (val === '') return setNilaiInput((prev) => ({ ...prev, [siswa.id]: '' }))
+                                const n = parseInt(val, 10)
+                                if (!Number.isNaN(n) && n >= 0 && n <= 100) {
                                   setNilaiInput((prev) => ({ ...prev, [siswa.id]: val }))
                                 }
                               }}
@@ -1606,7 +1478,7 @@ export default function TugasGuru() {
                         onClick={async () => {
                           if (!form.file_url) return
                           try {
-                            await deleteFileFromStorage(form.file_url, user.id)
+                            await deleteTeacherAttachment(form.file_url, user.id)
                             setForm((prev) => ({ ...prev, file_url: '' }))
                             setUploadedFileSizeCreate('')
                             pushToast('success', 'File berhasil dihapus')
@@ -1683,7 +1555,6 @@ export default function TugasGuru() {
                       key={item.tugas.id}
                       type="button"
                       onClick={async () => {
-                        // buka detail
                         setSelectedTugas(item.tugas)
                         setIsEditingTugas(false)
                         setEditForm(null)
@@ -1707,12 +1578,6 @@ export default function TugasGuru() {
                       </div>
                     </button>
                   ))}
-
-                  {tugasPerluDinilai.length > 8 && (
-                    <div className="text-xs text-slate-500 text-center pt-2">
-                      +{tugasPerluDinilai.length - 8} tugas lainnya
-                    </div>
-                  )}
                 </div>
               )}
             </div>
@@ -1811,9 +1676,7 @@ export default function TugasGuru() {
                         )
                       })}
                     </div>
-                    <div className="text-[11px] text-slate-500 mt-2">
-                      Tip: pilih 1–3 bulan biar ringkas.
-                    </div>
+                    <div className="text-[11px] text-slate-500 mt-2">Tip: pilih 1–3 bulan biar ringkas.</div>
                   </div>
                 )}
 
@@ -1845,32 +1708,7 @@ export default function TugasGuru() {
                     <span>📜</span>
                     <span>Riwayat Tugas</span>
                   </h3>
-                  <p className="text-sm text-slate-500 mt-1">
-                    Klik salah satu tugas untuk melihat jawaban dan memberi nilai.
-                  </p>
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  {selectedKelasFilter && (
-                    <span className="px-3 py-1 rounded-full bg-blue-100 text-blue-700 text-xs font-semibold">
-                      Kelas: {formatKelasDisplay(selectedKelasFilter)}
-                    </span>
-                  )}
-                  {selectedSubject && (
-                    <span className="px-3 py-1 rounded-full bg-indigo-100 text-indigo-700 text-xs font-semibold">
-                      Mapel: {selectedSubject}
-                    </span>
-                  )}
-                  {filterStatus !== 'all' && (
-                    <span className="px-3 py-1 rounded-full bg-slate-100 text-slate-700 text-xs font-semibold">
-                      {filterStatus === 'active' ? 'Aktif' : 'Expired'}
-                    </span>
-                  )}
-                  {timeRange === 'custom_months' && selectedMonths.length > 0 && (
-                    <span className="px-3 py-1 rounded-full bg-purple-100 text-purple-700 text-xs font-semibold">
-                      {selectedMonths.length} bulan dipilih
-                    </span>
-                  )}
+                  <p className="text-sm text-slate-500 mt-1">Klik salah satu tugas untuk melihat jawaban dan memberi nilai.</p>
                 </div>
               </div>
 
@@ -1897,15 +1735,8 @@ export default function TugasGuru() {
                         key={t.id}
                         type="button"
                         onClick={async () => {
-                          // ANTI-IDOR: double check ownership + class access
-                          if (!validateTugasAccess(t)) {
-                            pushToast('error', 'Akses ditolak')
-                            return
-                          }
-                          if (!validateKelasAccess(myKelasList, t.kelas)) {
-                            pushToast('error', 'Anda tidak punya akses ke kelas ini')
-                            return
-                          }
+                          if (!validateTugasAccess(t)) return pushToast('error', 'Akses ditolak')
+                          if (!validateKelasAccess(myKelasList, t.kelas)) return pushToast('error', 'Anda tidak punya akses ke kelas ini')
                           setSelectedTugas(t)
                           setIsEditingTugas(false)
                           setEditForm(null)
@@ -1935,7 +1766,10 @@ export default function TugasGuru() {
                         </div>
 
                         <div className="mt-3 text-xs text-slate-600">
-                          Deadline: <span className={`${isExpired ? 'text-red-700 font-semibold' : 'font-semibold'}`}>{formatDateTime(t.deadline)}</span>
+                          Deadline:{' '}
+                          <span className={`${isExpired ? 'text-red-700 font-semibold' : 'font-semibold'}`}>
+                            {formatDateTime(t.deadline)}
+                          </span>
                         </div>
 
                         <div className="mt-4 grid grid-cols-4 gap-2 text-center">
@@ -1965,9 +1799,7 @@ export default function TugasGuru() {
           </div>
         </div>
 
-        {/* =========================
-            MODAL DETAIL / EDIT
-        ========================= */}
+        {/* MODAL DETAIL / EDIT */}
         {selectedTugas && (
           <div className="fixed inset-0 z-50">
             <div
@@ -2035,12 +1867,11 @@ export default function TugasGuru() {
                           type="button"
                           onClick={async () => {
                             try {
-                              const signed = await createSignedUrlForKey(selectedTugas.file_url, 60 * 60)
-                              if (!signed) throw new Error('no signed url')
+                              const signed = await createSignedUrlForAssignment(selectedTugas.file_url, 60 * 30)
                               setPreviewFile(signed)
                             } catch (e) {
                               console.error(e)
-                              pushToast('error', 'Gagal membuka lampiran tugas')
+                              pushToast('error', 'Gagal membuka lampiran tugas (cek policy storage SELECT)')
                             }
                           }}
                           className="px-4 py-2 rounded-2xl bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors"
@@ -2145,9 +1976,7 @@ export default function TugasGuru() {
                         <div className="flex items-center justify-between gap-3 mb-3">
                           <div>
                             <div className="font-bold text-slate-800">File Lampiran</div>
-                            <div className="text-xs text-slate-500">
-                              File disimpan di folder guru (anti-IDOR).
-                            </div>
+                            <div className="text-xs text-slate-500">File disimpan di folder guru (anti-IDOR).</div>
                           </div>
                           {editForm.file_url && (
                             <div className="flex items-center gap-2">
@@ -2156,7 +1985,7 @@ export default function TugasGuru() {
                                 type="button"
                                 onClick={async () => {
                                   try {
-                                    await deleteFileFromStorage(editForm.file_url, user.id)
+                                    await deleteTeacherAttachment(editForm.file_url, user.id)
                                     setEditForm((p) => ({ ...p, file_url: '' }))
                                     setUploadedFileSizeEdit('')
                                     setEditExistingFileSize('')
@@ -2182,31 +2011,16 @@ export default function TugasGuru() {
                           </div>
                         )}
 
-                        {!editForm.file_url ? (
-                          <FileDropzone
-                            onFiles={handleEditFileUpload}
-                            accept="*/*"
-                            maxSize={10 * 1024 * 1024}
-                            label="Seret file lampiran baru ke sini atau klik untuk memilih"
-                          />
-                        ) : (
-                          <div className="text-xs text-slate-600">
-                            Lampiran sudah ada. Upload file baru jika ingin mengganti.
-                            <div className="mt-3">
-                              <FileDropzone
-                                onFiles={handleEditFileUpload}
-                                accept="*/*"
-                                maxSize={10 * 1024 * 1024}
-                                label="Ganti file lampiran (opsional)"
-                              />
-                            </div>
-                          </div>
-                        )}
+                        <FileDropzone
+                          onFiles={handleEditFileUpload}
+                          accept="*/*"
+                          maxSize={10 * 1024 * 1024}
+                          label={editForm.file_url ? 'Ganti file lampiran (opsional)' : 'Seret file lampiran baru ke sini atau klik untuk memilih'}
+                        />
                       </div>
                     </div>
                   ) : (
                     <>
-                      {/* Detail */}
                       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                         <div className="lg:col-span-2 space-y-4">
                           {selectedTugas.keterangan ? (
@@ -2222,7 +2036,6 @@ export default function TugasGuru() {
                             </div>
                           )}
 
-                          {/* Siswa tables */}
                           {isLoadingDetail ? (
                             <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center">
                               <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
@@ -2237,7 +2050,6 @@ export default function TugasGuru() {
                           )}
                         </div>
 
-                        {/* Side summary */}
                         <div className="space-y-4">
                           <div className="bg-white border border-slate-200 rounded-2xl p-4">
                             <div className="text-sm font-bold text-slate-800 mb-3">📊 Ringkasan</div>
@@ -2273,7 +2085,7 @@ export default function TugasGuru() {
                                 {renderFileButton(selectedTugas.file_url, 'Preview Lampiran')}
                               </div>
                               <div className="text-[11px] text-slate-500 mt-2">
-                                Lampiran hanya bisa dipreview jika policy storage mengizinkan.
+                                Preview butuh policy storage SELECT + signed URL.
                               </div>
                             </div>
                           )}
@@ -2281,10 +2093,10 @@ export default function TugasGuru() {
                           <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
                             <div className="text-sm font-bold text-slate-800 mb-2">🛡️ Catatan Anti-IDOR</div>
                             <ul className="text-xs text-slate-600 space-y-1 list-disc pl-5">
-                              <li>Query tugas selalu dibatasi <b>created_by = guru</b>.</li>
-                              <li>Akses detail divalidasi kepemilikan tugas + kelas yang diampu.</li>
-                              <li>Upload lampiran masuk ke folder <b>tugas_lampiran/&lt;guruId&gt;/</b>.</li>
-                              <li>Penghapusan lampiran hanya untuk folder guru sendiri.</li>
+                              <li>Query tugas dibatasi <b>created_by = guru</b>.</li>
+                              <li>Detail divalidasi: pemilik tugas + kelas yang diampu.</li>
+                              <li>Upload lampiran masuk ke <b>tugas_lampiran/&lt;guruId&gt;/</b>.</li>
+                              <li>Hapus lampiran hanya untuk folder guru sendiri.</li>
                             </ul>
                           </div>
                         </div>
