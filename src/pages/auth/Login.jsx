@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuthStore } from '../../store/useAuthStore';
 import { supabase } from '../../lib/supabase';
+import { getRoleHome, isValidRole } from '../../utils/role';
 import '../../styles/Login.css';
 
 const Login = () => {
@@ -121,19 +122,14 @@ const Login = () => {
       return;
     }
 
-    // Redirect berdasarkan role
-    const redirectMap = {
-      siswa: '/siswa/home',
-      guru: '/guru/jadwal',
-      admin: '/admin/home'
-    };
-
-    const target = redirectMap[profile.role];
-    if (target) {
-      navigate(target, { replace: true });
-    } else {
+    if (!isValidRole(profile.role)) {
       setError('Role tidak dikenali. Hubungi administrator.');
+      supabase.auth.signOut();
+      return;
     }
+
+    const target = getRoleHome(profile.role);
+    navigate(target, { replace: true });
   }, [user, profile, navigate]);
 
   const handleSubmit = async (e) => {

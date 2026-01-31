@@ -3,9 +3,70 @@ import { create } from 'zustand'
 import { supabase } from '../lib/supabase'
 import { useUIStore } from './useUIStore'
 import { logError } from '../utils/logger'
+import { isValidRole } from '../utils/role'
 
 // Helper kecil biar konsisten
 const normalizeEmail = (email) => email.trim().toLowerCase()
+
+const buildProfilePayload = (user) => {
+  const meta = user?.user_metadata || {}
+  const role = meta.role || user?.app_metadata?.role
+  if (!isValidRole(role)) return null
+
+  const nama =
+    meta.nama ||
+    meta.name ||
+    meta.full_name ||
+    (user?.email ? user.email.split('@')[0] : '') ||
+    'User'
+
+  const payload = {
+    id: user.id,
+    role,
+    nama,
+    status: 'active',
+    created_at: new Date().toISOString()
+  }
+
+  if (user?.email) {
+    payload.email = normalizeEmail(user.email)
+  }
+
+  return payload
+}
+
+const ensureProfile = async (user) => {
+  if (!user?.id) return { error: new Error('User tidak valid') }
+
+  let { data, error } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', user.id)
+    .single()
+
+  if (!error && data) return { profile: data }
+
+  if (error && error.code === 'PGRST116') {
+    const payload = buildProfilePayload(user)
+    if (!payload) {
+      return { error: new Error('Role pengguna tidak valid') }
+    }
+
+    const { error: insertError } = await supabase.from('profiles').insert(payload)
+    if (insertError) return { error: insertError }
+
+    ;({ data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', user.id)
+      .single())
+
+    if (error) return { error }
+    return { profile: data }
+  }
+
+  return { error }
+}
 
 export const useAuthStore = create((set, get) => ({
   user: null,
@@ -30,17 +91,33 @@ export const useAuthStore = create((set, get) => ({
       let profile = null
 
       if (user) {
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', user.id)
-          .single()
-
-        if (!error && data) {
-          profile = data
-        } else if (error) {
-          logError('Error loading profile on init:', error)
+        const { profile: loadedProfile, error: profileError } = await ensureProfile(user)
+        if (profileError) {
+          logError('Error loading profile on init:', profileError)
+          await supabase.auth.signOut()
+          set({
+            user: null,
+            profile: null,
+            settings,
+            initialized: true,
+            error: profileError?.message || 'Gagal memuat data profil'
+          })
+          return
         }
+
+        if (!isValidRole(loadedProfile?.role)) {
+          await supabase.auth.signOut()
+          set({
+            user: null,
+            profile: null,
+            settings,
+            initialized: true,
+            error: 'Role pengguna tidak valid. Hubungi administrator.'
+          })
+          return
+        }
+
+        profile = loadedProfile
 
         // Blokir jika status nonaktif
         if (profile && profile.status === 'nonaktif') {
@@ -154,15 +231,16 @@ export const useAuthStore = create((set, get) => ({
       const user = authData?.user
       if (!user) throw new Error('User tidak ditemukan')
 
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single()
-
+      const { profile, error: profileError } = await ensureProfile(user)
       if (profileError) {
         logError('Profile error:', profileError)
+        await supabase.auth.signOut()
         throw new Error('Gagal memuat data profil')
+      }
+
+      if (!isValidRole(profile?.role)) {
+        await supabase.auth.signOut()
+        throw new Error('Role pengguna tidak valid. Hubungi administrator.')
       }
 
       if (profile.status === 'nonaktif') {
@@ -216,6 +294,9 @@ export const useAuthStore = create((set, get) => ({
       // Validasi basic
       if (!email || !password || !role || !profileData?.nama) {
         throw new Error('Data registrasi tidak lengkap')
+      }
+      if (!isValidRole(role)) {
+        throw new Error('Role tidak valid')
       }
 
       const normalizedEmail = normalizeEmail(email)
@@ -303,13 +384,17 @@ export const useAuthStore = create((set, get) => ({
     if (!user) return
 
     try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single()
+      const { profile: data, error } = await ensureProfile(user)
 
       if (!error && data) {
+        if (!isValidRole(data.role)) {
+          const { pushToast } = useUIStore.getState()
+          await supabase.auth.signOut()
+          set({ user: null, profile: null })
+          pushToast('error', 'Role pengguna tidak valid. Hubungi administrator.')
+          return
+        }
+
         if (data.status === 'nonaktif') {
           const { pushToast } = useUIStore.getState()
 
@@ -336,6 +421,10 @@ export const useAuthStore = create((set, get) => ({
         set({ profile: data })
       } else if (error) {
         logError('Refresh profile error:', error)
+        const { pushToast } = useUIStore.getState()
+        await supabase.auth.signOut()
+        set({ user: null, profile: null })
+        pushToast('error', error?.message || 'Gagal memuat data profil')
       }
     } catch (err) {
       logError('Refresh profile error (catch):', err)
