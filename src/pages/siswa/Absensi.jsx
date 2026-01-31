@@ -8,6 +8,7 @@ import React, {
 import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
+import ProfileAvatar from '../../components/ProfileAvatar'
 
 /* ======================= Helper ======================= */
 const getToday = () => {
@@ -284,13 +285,11 @@ const RingkasanKelasTable = ({ kelas, mapel, tanggal }) => {
               >
                 <td className="p-2">
                   <div className="flex items-center space-x-2">
-                    <img
-                      src={siswa.foto || '/default-avatar.png'}
-                      alt={siswa.nama}
-                      className="w-7 h-7 rounded-full object-cover border border-gray-300"
-                      onError={(e) => {
-                        e.target.src = '/default-avatar.png'
-                      }}
+                    <ProfileAvatar
+                      src={siswa.foto}
+                      name={siswa.nama}
+                      size={28}
+                      className="border-gray-300"
                     />
                     <span className="font-medium text-gray-900 text-xs">
                       {siswa.nama}

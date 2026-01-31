@@ -2,6 +2,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useUIStore } from '../../store/useUIStore'
+import ProfileAvatar from '../../components/ProfileAvatar'
 
 /* ===========================
    Password Modal Component
@@ -1913,17 +1914,13 @@ export default function ASiswa() {
                         <td className="px-4 py-3 whitespace-nowrap">
                           <div className="flex items-center">
                             <div className="flex-shrink-0 h-10 w-10">
-                              {foto ? (
-                                <img
-                                  src={foto}
-                                  alt={s.nama || 'foto'}
-                                  className="h-10 w-10 rounded-full object-cover border border-gray-200"
-                                />
-                              ) : (
-                                <div className="h-10 w-10 rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center text-sm font-medium text-blue-600">
-                                  {initials(s.nama)}
-                                </div>
-                              )}
+                              <ProfileAvatar
+                                src={foto}
+                                name={s.nama}
+                                size={40}
+                                className="border-gray-200"
+                                fallbackClassName="rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center text-sm font-medium text-blue-600"
+                              />
                             </div>
                             <div className="ml-3">
                               <div className="text-sm font-medium text-gray-900">
@@ -2404,17 +2401,13 @@ export default function ASiswa() {
               <div className="px-6 py-4 border-b bg-gray-50 flex items-start justify-between">
                 <div className="flex items-center space-x-4">
                   <div className="flex-shrink-0 h-12 w-12">
-                    {detailUser?.photo_url ? (
-                      <img
-                        src={detailUser.photo_url}
-                        alt={detailUser.nama || 'foto'}
-                        className="h-12 w-12 rounded-full object-cover border border-gray-200"
-                      />
-                    ) : (
-                      <div className="h-12 w-12 rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center text-base font-semibold text-blue-600">
-                        {initials(detailUser?.nama)}
-                      </div>
-                    )}
+                    <ProfileAvatar
+                      src={detailUser?.photo_url}
+                      name={detailUser?.nama}
+                      size={48}
+                      className="border-gray-200"
+                      fallbackClassName="rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center text-base font-semibold text-blue-600"
+                    />
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center gap-3 flex-wrap">

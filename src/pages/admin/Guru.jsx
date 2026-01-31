@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useUIStore } from '../../store/useUIStore'
+import ProfileAvatar from '../../components/ProfileAvatar'
 
 /* ===== Password Modal Component ===== */
 function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Password", loading = false }) {
@@ -1090,17 +1091,13 @@ export default function AGuru() {
                         <td className="px-4 py-3 whitespace-nowrap">
                           <div className="flex items-center">
                             <div className="flex-shrink-0 h-10 w-10">
-                              {foto ? (
-                                <img
-                                  src={foto}
-                                  alt={g.nama || 'foto'}
-                                  className="h-10 w-10 rounded-full object-cover border border-gray-200"
-                                />
-                              ) : (
-                                <div className="h-10 w-10 rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center text-sm font-medium text-blue-600">
-                                  {initials(g.nama)}
-                                </div>
-                              )}
+                              <ProfileAvatar
+                                src={foto}
+                                name={g.nama}
+                                size={40}
+                                className="border-gray-200"
+                                fallbackClassName="rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center text-sm font-medium text-blue-600"
+                              />
                             </div>
                             <div className="ml-3">
                               <div className="text-sm font-medium text-gray-900">
@@ -1287,17 +1284,13 @@ export default function AGuru() {
               {/* Header */}
               <div className="px-6 py-4 border-b bg-gray-50 flex items-start justify-between">
                 <div className="flex items-center space-x-4">
-                  {selectedGuru.photo_url ? (
-                    <img
-                      src={selectedGuru.photo_url}
-                      alt={selectedGuru.nama}
-                      className="h-12 w-12 rounded-full object-cover border border-gray-200"
-                    />
-                  ) : (
-                    <div className="h-12 w-12 rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center text-base font-semibold text-blue-600">
-                      {initials(selectedGuru.nama)}
-                    </div>
-                  )}
+                  <ProfileAvatar
+                    src={selectedGuru.photo_url}
+                    name={selectedGuru.nama}
+                    size={48}
+                    className="border-gray-200"
+                    fallbackClassName="rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center text-base font-semibold text-blue-600"
+                  />
                   <div>
                     <h3 className="text-lg font-semibold text-gray-900">{selectedGuru.nama}</h3>
                     <p className="text-gray-600 text-sm">{selectedGuru.email}</p>

@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
+import ProfileAvatar from '../../components/ProfileAvatar'
 
 /* ===== Error Boundary Component ===== */
 const ErrorBoundary = ({ children }) => {
@@ -1707,24 +1708,13 @@ function AbsensiGuru() {
                       {index + 1}
                     </td>
                     <td className="px-4 py-3 text-center">
-                      {s.photo_url ? (
-                        <img
-                          src={s.photo_url}
-                          alt={s.nama}
-                          className="w-9 h-9 rounded-full object-cover border border-gray-300 shadow-sm mx-auto"
-                          onError={(e) => {
-                            e.target.style.display = 'none'
-                            e.target.nextSibling.style.display = 'flex'
-                          }}
-                        />
-                      ) : null}
-                      <div
-                        className={`w-9 h-9 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-xs border border-blue-200 mx-auto ${
-                          s.photo_url ? 'hidden' : ''
-                        }`}
-                      >
-                        {initials(s.nama)}
-                      </div>
+                      <ProfileAvatar
+                        src={s.photo_url}
+                        name={s.nama}
+                        size={36}
+                        className="mx-auto border-gray-300"
+                        fallbackClassName="rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-xs border border-blue-200 mx-auto"
+                      />
                     </td>
                     <td className="px-4 py-3 font-semibold text-gray-800">{s.nama}</td>
                     <td className="px-4 py-3">

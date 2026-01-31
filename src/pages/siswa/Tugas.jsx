@@ -10,6 +10,7 @@ import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import FileDropzone from '../../components/FileDropzone'
 import FilePreviewModal from '../../components/FilePreviewModal'
+import { parseSupabaseError } from '../../utils/supabaseError'
 
 /* =========================
    Constants & Helpers
@@ -459,7 +460,8 @@ export default function TugasSiswa() {
       setTugasList(merged)
     } catch (error) {
       console.error('Error load tugas list:', error)
-      pushToast('error', 'Gagal memuat tugas')
+      const parsed = parseSupabaseError(error)
+      pushToast('error', `Gagal memuat tugas: ${parsed.message}`)
     } finally {
       setLoading(false)
     }
@@ -571,7 +573,8 @@ export default function TugasSiswa() {
       }
     } catch (error) {
       console.error('Error open detail:', error)
-      pushToast('error', 'Gagal memuat detail tugas')
+      const parsed = parseSupabaseError(error)
+      pushToast('error', `Gagal memuat detail tugas: ${parsed.message}`)
       setSelectedTugas(null)
     } finally {
       setIsLoadingDetail(false)
@@ -637,7 +640,8 @@ export default function TugasSiswa() {
     } catch (error) {
       console.error('Upload jawaban error:', error)
       setUploadProgress(null)
-      pushToast('error', `Gagal upload file: ${error?.message || 'Unknown error'}`)
+      const parsed = parseSupabaseError(error)
+      pushToast('error', `Gagal upload file: ${parsed.message}`)
     } finally {
       setIsUploading(false)
     }
@@ -654,7 +658,13 @@ export default function TugasSiswa() {
       setLoading(true)
 
       const key = jawabanFileKey || detail?.myJawaban?.file_url
-      await deleteJawabanFileFromStorage(key, selectedTugas.id, user.id)
+      let storageError = null
+      try {
+        await deleteJawabanFileFromStorage(key, selectedTugas.id, user.id)
+      } catch (err) {
+        storageError = err
+        console.warn('Delete storage error (non-blocking):', err)
+      }
 
       const existing = detail?.myJawaban || null
       const currentLink = (jawabanLink || existing?.link_url || '').trim()
@@ -691,10 +701,17 @@ export default function TugasSiswa() {
       setJawabanFileKey('')
       setJawabanFileSize('')
       await loadTugasList()
-      pushToast('success', 'File jawaban dihapus')
+
+      if (storageError) {
+        const parsed = parseSupabaseError(storageError)
+        pushToast('warning', `File di DB dihapus, tapi storage gagal: ${parsed.message}`)
+      } else {
+        pushToast('success', 'File jawaban dihapus')
+      }
     } catch (error) {
       console.error('Delete jawaban file error:', error)
-      pushToast('error', `Gagal menghapus file: ${error?.message || 'Unknown error'}`)
+      const parsed = parseSupabaseError(error)
+      pushToast('error', `Gagal menghapus file: ${parsed.message}`)
     } finally {
       setLoading(false)
     }
@@ -776,7 +793,8 @@ export default function TugasSiswa() {
       if (selectedTugas) await openDetail(selectedTugas)
     } catch (error) {
       console.error('Save jawaban error:', error)
-      pushToast('error', `Gagal mengirim jawaban: ${error?.message || 'Unknown error'}`)
+      const parsed = parseSupabaseError(error)
+      pushToast('error', `Gagal mengirim jawaban: ${parsed.message}`)
     } finally {
       setLoading(false)
     }
@@ -792,7 +810,8 @@ export default function TugasSiswa() {
       setPreviewFile(signed)
     } catch (error) {
       console.error(error)
-      pushToast('error', 'Gagal membuka preview')
+      const parsed = parseSupabaseError(error)
+      pushToast('error', `Gagal membuka preview: ${parsed.message}`)
     }
   }
 

@@ -8,6 +8,7 @@ import React, {
 } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useUIStore } from '../../store/useUIStore'
+import ProfileAvatar from '../../components/ProfileAvatar'
 import {
   Save,
   History,
@@ -1639,15 +1640,11 @@ export default function Scan() {
                           >
                             <td className="px-6 py-4">
                               <div className="flex items-center gap-3">
-                                <img
-                                  src={
-                                    s.photo_url ||
-                                    `https://ui-avatars.com/api/?name=${encodeURIComponent(
-                                      s.nama || 'Siswa'
-                                    )}`
-                                  }
-                                  alt=""
-                                  className="w-8 h-8 rounded-full object-cover border border-gray-200"
+                                <ProfileAvatar
+                                  src={s.photo_url}
+                                  name={s.nama}
+                                  size={32}
+                                  className="border-gray-200"
                                 />
                                 <div>
                                   <div className="font-medium text-gray-900">
@@ -1734,15 +1731,11 @@ export default function Scan() {
                           >
                             <td className="px-6 py-4">
                               <div className="flex items-center gap-3">
-                                <img
-                                  src={
-                                    s.photo_url ||
-                                    `https://ui-avatars.com/api/?name=${encodeURIComponent(
-                                      s.nama || 'Siswa'
-                                    )}`
-                                  }
-                                  alt=""
-                                  className="w-8 h-8 rounded-full object-cover border border-gray-200"
+                                <ProfileAvatar
+                                  src={s.photo_url}
+                                  name={s.nama}
+                                  size={32}
+                                  className="border-gray-200"
                                 />
                                 <div>
                                   <div className="font-medium text-gray-900">
@@ -1901,15 +1894,11 @@ export default function Scan() {
                         >
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-3">
-                              <img
-                                src={
-                                  student.photo_url ||
-                                  `https://ui-avatars.com/api/?name=${encodeURIComponent(
-                                    student.nama || 'Siswa'
-                                  )}`
-                                }
-                                alt=""
-                                className="w-8 h-8 rounded-full object-cover border border-gray-200"
+                              <ProfileAvatar
+                                src={student.photo_url}
+                                name={student.nama}
+                                size={32}
+                                className="border-gray-200"
                               />
                               <div className="font-medium text-gray-900">
                                 {student.nama}

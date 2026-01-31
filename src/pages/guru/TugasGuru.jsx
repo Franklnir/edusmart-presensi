@@ -12,6 +12,7 @@ import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import FileDropzone from '../../components/FileDropzone'
 import FilePreviewModal from '../../components/FilePreviewModal'
+import { parseSupabaseError } from '../../utils/supabaseError'
 
 /* =========================
    Constants & Helpers
@@ -563,7 +564,8 @@ export default function TugasGuru() {
       setListTugas(formatted)
     } catch (error) {
       console.error('Error loading tugas:', error)
-      pushToast('error', 'Gagal memuat data tugas')
+      const parsed = parseSupabaseError(error)
+      pushToast('error', `Gagal memuat data tugas: ${parsed.message}`)
     } finally {
       setLoading(false)
     }
@@ -630,6 +632,8 @@ export default function TugasGuru() {
       setTugasPerluDinilai(Array.from(map.values()).sort((a, b) => b.jumlah - a.jumlah))
     } catch (error) {
       console.error('Error loading tugas perlu dinilai:', error)
+      const parsed = parseSupabaseError(error)
+      pushToast('error', `Gagal memuat tugas perlu dinilai: ${parsed.message}`)
     } finally {
       setIsLoadingTugasPerluDinilai(false)
     }
@@ -724,13 +728,14 @@ export default function TugasGuru() {
           })
           return next
         })
-      } catch (error) {
-        console.error('Error loading detail tugas:', error)
-        pushToast('error', 'Gagal memuat detail tugas')
-      } finally {
-        if (!silent) setIsLoadingDetail(false)
-      }
-    },
+    } catch (error) {
+      console.error('Error loading detail tugas:', error)
+      const parsed = parseSupabaseError(error)
+      pushToast('error', `Gagal memuat detail tugas: ${parsed.message}`)
+    } finally {
+      if (!silent) setIsLoadingDetail(false)
+    }
+  },
     [user?.id, validateTugasAccess, myKelasList, pushToast]
   )
 
@@ -841,12 +846,12 @@ export default function TugasGuru() {
     } catch (error) {
       console.error('Upload error:', error)
       setCompressionProgress(null)
-      const msg = error?.message || 'Unknown error'
+      const parsed = parseSupabaseError(error)
       // bantu diagnosa biar cepat
-      if (String(msg).toLowerCase().includes('row-level security')) {
-        pushToast('error', 'Upload ditolak oleh RLS Storage. Policy INSERT bucket belum mengizinkan path tugas_lampiran/<uid>/...')
+      if (parsed.code === 'rls_denied' || parsed.code === 'storage_policy_recursion') {
+        pushToast('error', `Upload ditolak oleh policy storage: ${parsed.message}`)
       } else {
-        pushToast('error', `Gagal mengupload file: ${msg}`)
+        pushToast('error', `Gagal mengupload file: ${parsed.message}`)
       }
     } finally {
       setIsUploadingFile(false)
@@ -918,7 +923,7 @@ export default function TugasGuru() {
       }
 
       const { error } = await supabase.from('tugas').insert(payload)
-      if (error) throw error
+        if (error) throw error
 
       pushToast('success', 'Tugas berhasil ditambahkan')
       setForm({ judul: '', keterangan: '', deadline: getNowDateTimeLocal(), file_url: '' })
@@ -928,7 +933,8 @@ export default function TugasGuru() {
       await loadTugasPerluDinilai()
     } catch (error) {
       console.error('Error adding tugas:', error)
-      pushToast('error', `Gagal menambahkan tugas: ${error?.message || 'Unknown error'}`)
+      const parsed = parseSupabaseError(error)
+      pushToast('error', `Gagal menambahkan tugas: ${parsed.message}`)
     } finally {
       setLoading(false)
     }
@@ -999,7 +1005,8 @@ export default function TugasGuru() {
       await loadTugas()
     } catch (error) {
       console.error('Error updating tugas:', error)
-      pushToast('error', `Gagal memperbarui tugas: ${error?.message || 'Unknown error'}`)
+      const parsed = parseSupabaseError(error)
+      pushToast('error', `Gagal memperbarui tugas: ${parsed.message}`)
     } finally {
       setLoading(false)
     }
@@ -1042,7 +1049,8 @@ export default function TugasGuru() {
       await loadTugasPerluDinilai()
     } catch (error) {
       console.error('Error deleting tugas:', error)
-      pushToast('error', `Gagal menghapus tugas: ${error?.message || 'Unknown error'}`)
+      const parsed = parseSupabaseError(error)
+      pushToast('error', `Gagal menghapus tugas: ${parsed.message}`)
     } finally {
       setLoading(false)
     }
@@ -1089,6 +1097,7 @@ export default function TugasGuru() {
             status: 'dinilai'
           })
           .eq('id', existing.id)
+          .eq('tugas_id', selectedTugas.id)
 
         if (error) throw error
       } else {
@@ -1107,7 +1116,8 @@ export default function TugasGuru() {
       await loadTugas()
     } catch (error) {
       console.error('Error saving nilai:', error)
-      pushToast('error', `Gagal menyimpan nilai: ${error?.message || 'Unknown error'}`)
+      const parsed = parseSupabaseError(error)
+      pushToast('error', `Gagal menyimpan nilai: ${parsed.message}`)
     } finally {
       setLoading(false)
     }
@@ -1132,11 +1142,11 @@ export default function TugasGuru() {
         setPreviewFile(signed)
       } catch (err) {
         console.error(err)
-        const msg = String(err?.message || '')
-        if (msg.toLowerCase().includes('row-level security') || msg.toLowerCase().includes('permission')) {
-          pushToast('error', 'Gagal membuka preview: policy storage belum mengizinkan akses file ini')
+        const parsed = parseSupabaseError(err)
+        if (parsed.code === 'rls_denied' || parsed.code === 'storage_policy_recursion') {
+          pushToast('error', `Gagal membuka preview: ${parsed.message}`)
         } else {
-          pushToast('error', 'Gagal membuka preview file')
+          pushToast('error', `Gagal membuka preview file: ${parsed.message}`)
         }
       }
     }
@@ -1250,7 +1260,8 @@ export default function TugasGuru() {
                                     setPreviewFile(signed)
                                   } catch (e) {
                                     console.error(e)
-                                    pushToast('error', 'Gagal membuka file jawaban (cek policy storage SELECT)')
+                                    const parsed = parseSupabaseError(e)
+                                    pushToast('error', `Gagal membuka file jawaban: ${parsed.message}`)
                                   }
                                 }}
                                 className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-700 rounded-lg text-xs hover:bg-blue-200 transition-colors"
@@ -1929,7 +1940,8 @@ export default function TugasGuru() {
                               setPreviewFile(signed)
                             } catch (e) {
                               console.error(e)
-                              pushToast('error', 'Gagal membuka lampiran tugas (cek policy storage SELECT)')
+                              const parsed = parseSupabaseError(e)
+                              pushToast('error', `Gagal membuka lampiran tugas: ${parsed.message}`)
                             }
                           }}
                           className="px-4 py-2 rounded-2xl bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors"
