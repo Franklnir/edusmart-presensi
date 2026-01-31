@@ -1,6 +1,11 @@
 // src/pages/siswa/TugasSiswa.jsx
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
-import { supabase, ASSIGNMENT_BUCKET } from '../../lib/supabase'
+import {
+  supabase,
+  ASSIGNMENT_BUCKET,
+  extractObjectPath,
+  getSignedUrlForValue
+} from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import FileDropzone from '../../components/FileDropzone'
@@ -21,8 +26,6 @@ const FILE_SIZE_LIMITS = {
   PRESENTATION: 3 * 1024 * 1024,
   OTHER: 5 * 1024 * 1024
 }
-
-const isHttpUrl = (v = '') => /^https?:\/\//i.test(String(v || ''))
 
 const isValidDate = (d) => d instanceof Date && !Number.isNaN(d.getTime())
 
@@ -205,55 +208,11 @@ const compressFileBeforeUpload = async (file) => {
 /* =========================
    Storage Helpers
 ========================= */
-const extractObjectKeyFromAny = (value) => {
-  if (!value) return ''
-  const v = String(value)
+const extractObjectKeyFromAny = (value) => extractObjectPath(ASSIGNMENT_BUCKET, value || '')
 
-  if (!isHttpUrl(v)) return v
-
-  try {
-    const url = new URL(v)
-    const parts = url.pathname.split('/').filter(Boolean)
-
-    // .../storage/v1/object/public/<bucket>/<key>
-    const idxPublic = parts.indexOf('public')
-    if (idxPublic !== -1 && parts[idxPublic + 1] === ASSIGNMENT_BUCKET) {
-      return parts.slice(idxPublic + 2).join('/')
-    }
-
-    // .../storage/v1/object/sign/<bucket>/<key>
-    const idxSign = parts.indexOf('sign')
-    if (idxSign !== -1 && parts[idxSign + 1] === ASSIGNMENT_BUCKET) {
-      return parts.slice(idxSign + 2).join('/')
-    }
-
-    // .../<bucket>/<key>
-    const bucketIndex = parts.indexOf(ASSIGNMENT_BUCKET)
-    if (bucketIndex !== -1) {
-      const key = parts.slice(bucketIndex + 1).join('/')
-      return key || ''
-    }
-  } catch {
-    // ignore
-  }
-
-  const raw = v.split('?')[0]
-  const urlParts = raw.split('/').filter(Boolean)
-  const fileName = urlParts[urlParts.length - 1]
-  const maybeFolder = urlParts[urlParts.length - 2]
-  if (fileName && maybeFolder) return `${maybeFolder}/${fileName}`
-
-  return ''
-}
-
-const createSignedUrlForKey = async (key, expiresInSeconds = 60 * 60) => {
-  if (!key) return null
-  if (isHttpUrl(key)) return key
-  const { data, error } = await supabase.storage
-    .from(ASSIGNMENT_BUCKET)
-    .createSignedUrl(key, expiresInSeconds)
-  if (error) throw error
-  return data?.signedUrl || null
+const createSignedUrlForKey = async (keyOrUrl, expiresInSeconds = 60 * 60) => {
+  if (!keyOrUrl) return null
+  return getSignedUrlForValue(ASSIGNMENT_BUCKET, keyOrUrl, expiresInSeconds)
 }
 
 /**
@@ -697,8 +656,41 @@ export default function TugasSiswa() {
       const key = jawabanFileKey || detail?.myJawaban?.file_url
       await deleteJawabanFileFromStorage(key, selectedTugas.id, user.id)
 
+      const existing = detail?.myJawaban || null
+      const currentLink = (jawabanLink || existing?.link_url || '').trim()
+
+      if (existing?.id) {
+        if (currentLink) {
+          const { error } = await supabase
+            .from('tugas_jawaban')
+            .update({ file_url: null, updated_at: new Date().toISOString() })
+            .eq('id', existing.id)
+            .eq('user_id', user.id)
+
+          if (error) throw error
+
+          setDetail((prev) => {
+            if (!prev) return prev
+            const nextJawaban = prev.myJawaban ? { ...prev.myJawaban, file_url: null } : null
+            const nextStatus = nextJawaban?.nilai != null ? 'dinilai' : nextJawaban ? 'menunggu' : 'belum'
+            return { ...prev, myJawaban: nextJawaban, myStatus: nextStatus }
+          })
+        } else {
+          const { error } = await supabase
+            .from('tugas_jawaban')
+            .delete()
+            .eq('id', existing.id)
+            .eq('user_id', user.id)
+
+          if (error) throw error
+
+          setDetail((prev) => (prev ? { ...prev, myJawaban: null, myStatus: 'belum' } : prev))
+        }
+      }
+
       setJawabanFileKey('')
       setJawabanFileSize('')
+      await loadTugasList()
       pushToast('success', 'File jawaban dihapus')
     } catch (error) {
       console.error('Delete jawaban file error:', error)

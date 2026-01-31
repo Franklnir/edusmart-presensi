@@ -1,11 +1,8 @@
 // src/pages/guru/profile.jsx
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { supabase } from '../../lib/supabase'
+import { supabase, PROFILE_BUCKET } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
-
-/** Bucket Storage */
-const PHOTO_BUCKET = 'profile-photos'
 
 /** Signed URL expire (detik) */
 const SIGNED_URL_EXPIRES_IN = 60 * 60 * 24 * 7 // 7 hari
@@ -105,7 +102,7 @@ async function compressImageTo100KB(file, maxBytes = MAX_COMPRESSED_BYTES) {
 
 async function createSignedUrlOrThrow(path) {
   const { data, error } = await supabase.storage
-    .from(PHOTO_BUCKET)
+    .from(PROFILE_BUCKET)
     .createSignedUrl(path, SIGNED_URL_EXPIRES_IN)
 
   if (error) throw error
@@ -258,7 +255,7 @@ export default function ProfileGuru() {
       const filePath = `profiles/${user.id}/avatar.jpg`
 
       const { error: uploadError } = await supabase.storage
-        .from(PHOTO_BUCKET)
+        .from(PROFILE_BUCKET)
         .upload(filePath, compressedFile, {
           cacheControl: '3600',
           upsert: true,

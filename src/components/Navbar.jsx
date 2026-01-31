@@ -2,7 +2,15 @@
 import React, { useState, useEffect } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../store/useAuthStore'
-import { supabase } from '../lib/supabase'
+import { supabase, PROFILE_BUCKET, getSignedUrlForValue } from '../lib/supabase'
+
+const isHttpUrl = (value = '') => /^https?:\/\//i.test(String(value || ''))
+
+const addCacheBuster = (url) => {
+  if (!url) return ''
+  const joiner = url.includes('?') ? '&' : '?'
+  return `${url}${joiner}t=${Date.now()}`
+}
 
 const Navbar = () => {
   const navigate = useNavigate()
@@ -13,6 +21,7 @@ const Navbar = () => {
   const [settingsId, setSettingsId] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isCollapsed, setIsCollapsed] = useState(false)
+  const [avatarUrl, setAvatarUrl] = useState('')
 
   // ========== LOAD SETTINGS SEKALI DI AWAL ==========
   useEffect(() => {
@@ -87,6 +96,31 @@ const Navbar = () => {
     }
   }, [settingsId])
 
+  // ========== RESOLVE AVATAR (PATH -> SIGNED URL) ==========
+  useEffect(() => {
+    let cancelled = false
+    const raw = profile?.photo_path || profile?.photo_url || ''
+
+    const resolveAvatar = async () => {
+      if (!raw) {
+        if (!cancelled) setAvatarUrl('')
+        return
+      }
+
+      try {
+        const signed = await getSignedUrlForValue(PROFILE_BUCKET, raw, 60 * 60)
+        if (!cancelled) setAvatarUrl(addCacheBuster(signed))
+      } catch (error) {
+        if (!cancelled) setAvatarUrl(isHttpUrl(raw) ? addCacheBuster(raw) : '')
+      }
+    }
+
+    resolveAvatar()
+    return () => {
+      cancelled = true
+    }
+  }, [profile?.photo_path, profile?.photo_url, profile?.updated_at])
+
   const handleLogout = async () => {
     await logout()
     navigate('/login')
@@ -156,11 +190,12 @@ const Navbar = () => {
 
     return (
       <div className="flex items-center gap-3">
-        {profile?.photo_url ? (
+        {avatarUrl ? (
           <img
-            src={profile.photo_url}
+            src={avatarUrl}
             alt="Profile"
             className={`${sizeClasses[size]} rounded-full object-cover border border-slate-200`}
+            onError={() => setAvatarUrl('')}
           />
         ) : (
           <div className={`${sizeClasses[size]} rounded-full bg-slate-100 flex items-center justify-center border border-slate-200`}>

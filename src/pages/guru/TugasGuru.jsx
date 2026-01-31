@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import {
   supabase,
   ASSIGNMENT_BUCKET,
+  PROFILE_BUCKET,
   extractObjectPath,
   getSignedUrlForValue,
   removeStorageObject
@@ -29,6 +30,12 @@ const FILE_SIZE_LIMITS = {
 }
 
 const isHttpUrl = (v = '') => /^https?:\/\//i.test(String(v || ''))
+
+const addCacheBuster = (url) => {
+  if (!url) return ''
+  const joiner = url.includes('?') ? '&' : '?'
+  return `${url}${joiner}t=${Date.now()}`
+}
 
 const getNowDateTimeLocal = () => {
   const now = new Date()
@@ -215,8 +222,33 @@ const deleteTeacherAttachment = async (urlOrPath, teacherId) => {
 ========================= */
 function Avatar({ src, name }) {
   const [broken, setBroken] = useState(false)
+  const [resolvedSrc, setResolvedSrc] = useState('')
 
-  if (!src || broken) {
+  useEffect(() => {
+    let cancelled = false
+    setBroken(false)
+
+    const resolve = async () => {
+      if (!src) {
+        if (!cancelled) setResolvedSrc('')
+        return
+      }
+
+      try {
+        const signed = await getSignedUrlForValue(PROFILE_BUCKET, src, 60 * 60)
+        if (!cancelled) setResolvedSrc(addCacheBuster(signed))
+      } catch (err) {
+        if (!cancelled) setResolvedSrc(isHttpUrl(src) ? addCacheBuster(src) : '')
+      }
+    }
+
+    resolve()
+    return () => {
+      cancelled = true
+    }
+  }, [src])
+
+  if (!resolvedSrc || broken) {
     return (
       <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center text-white font-semibold text-sm">
         {initials(name)}
@@ -226,7 +258,7 @@ function Avatar({ src, name }) {
 
   return (
     <img
-      src={src}
+      src={resolvedSrc}
       alt={name}
       className="w-10 h-10 rounded-full object-cover border-2 border-slate-200"
       onError={() => setBroken(true)}
@@ -632,12 +664,27 @@ export default function TugasGuru() {
           setJawabanTugas([])
         }
 
-        const siswaPromise = supabase
-          .from('profiles')
-          .select('id, nama, photo_url, kelas, role')
-          .eq('role', 'siswa')
-          .eq('kelas', tugas.kelas)
-          .order('nama')
+        const siswaPromise = (async () => {
+          const baseQuery = supabase
+            .from('profiles')
+            .select('id, nama, photo_url, photo_path, kelas, role')
+            .eq('role', 'siswa')
+            .eq('kelas', tugas.kelas)
+            .order('nama')
+
+          let { data, error } = await baseQuery
+
+          if (error && /photo_path/i.test(error.message || '')) {
+            ;({ data, error } = await supabase
+              .from('profiles')
+              .select('id, nama, photo_url, kelas, role')
+              .eq('role', 'siswa')
+              .eq('kelas', tugas.kelas)
+              .order('nama'))
+          }
+
+          return { data, error }
+        })()
 
         const jawabanPromise = supabase
           .from('tugas_jawaban')
@@ -652,7 +699,13 @@ export default function TugasGuru() {
         if (siswaError) throw siswaError
         if (jawabanError) throw jawabanError
 
-        setSiswaDiKelas(siswaData || [])
+        const normalizedSiswa =
+          siswaData?.map((s) => ({
+            ...s,
+            photo_url: s.photo_path || s.photo_url || ''
+          })) || []
+
+        setSiswaDiKelas(normalizedSiswa)
 
         const formattedJawaban =
           jawabanData?.map((j) => ({
@@ -1004,6 +1057,11 @@ export default function TugasGuru() {
 
     if (!validateTugasAccess(selectedTugas)) {
       pushToast('error', 'Anda tidak memiliki akses ke tugas ini')
+      return
+    }
+
+    if (!siswaDiKelas.some((s) => s.id === siswaId)) {
+      pushToast('error', 'Siswa tidak ditemukan di kelas ini')
       return
     }
 

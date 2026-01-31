@@ -1,11 +1,10 @@
 // src/pages/siswa/EditProfile.jsx
 import React, { useState, useEffect, useRef } from 'react'
-import { supabase } from '../../lib/supabase'
+import { supabase, PROFILE_BUCKET } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 
 // ==================== STORAGE CONFIG ====================
-const PROFILE_BUCKET = 'profile-photos'
 const SIGNED_URL_EXPIRES_IN = 60 * 60 // 1 jam (aman, jangan simpan signed-url ke DB)
 
 // ObjectKey yang aman dan konsisten (anti IDOR + gampang dipolicy)
