@@ -2,8 +2,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuthStore } from '../../store/useAuthStore';
-import { supabase } from '../../lib/supabase';
+import { supabase, PROFILE_BUCKET, getSignedUrlForValue } from '../../lib/supabase';
 import { getRoleHome, isValidRole } from '../../utils/role';
+import { shouldForceAccountSetup } from '../../utils/accountSetup';
 import '../../styles/Login.css';
 
 const Login = () => {
@@ -21,6 +22,7 @@ const Login = () => {
   const [settings, setSettings] = useState(null);
   const [settingsId, setSettingsId] = useState(null);
   const [isLoadingSettings, setIsLoadingSettings] = useState(true);
+  const [logoPreview, setLogoPreview] = useState('');
 
   // Load settings sekali di awal
   useEffect(() => {
@@ -106,6 +108,27 @@ const Login = () => {
     };
   }, [settingsId]);
 
+  // Build signed URL for logo (supports path)
+  useEffect(() => {
+    let active = true;
+    const raw = settings?.logo_url || settings?.logo_path || '';
+    if (!raw) {
+      setLogoPreview('');
+      return () => { active = false; };
+    }
+
+    if (/^https?:\/\//i.test(raw)) {
+      setLogoPreview(raw);
+      return () => { active = false; };
+    }
+
+    getSignedUrlForValue(PROFILE_BUCKET, raw, 60 * 30)
+      .then((url) => { if (active) setLogoPreview(url); })
+      .catch(() => { if (active) setLogoPreview(''); });
+
+    return () => { active = false; };
+  }, [settings?.logo_url, settings?.logo_path]);
+
   // Logic redirect setelah login
   useEffect(() => {
     if (!user || !profile) return;
@@ -128,7 +151,13 @@ const Login = () => {
       return;
     }
 
-    const target = getRoleHome(profile.role);
+    const needsSetup = shouldForceAccountSetup(profile, user?.email);
+
+    const target = needsSetup
+      ? profile.role === 'siswa'
+        ? '/siswa/profile'
+        : '/guru/profile'
+      : getRoleHome(profile.role);
     navigate(target, { replace: true });
   }, [user, profile, navigate]);
 
@@ -137,13 +166,7 @@ const Login = () => {
 
     // Validasi input
     if (!form.email.trim() || !form.password.trim()) {
-      setError('Email dan password harus diisi');
-      return;
-    }
-
-    // Validasi format email sederhana
-    if (!form.email.includes('@')) {
-      setError('Format email tidak valid');
+      setError('Email/NIS dan password harus diisi');
       return;
     }
 
@@ -160,7 +183,7 @@ const Login = () => {
           errorMsg.includes('invalid login credentials') ||
           errorMsg.includes('invalid email or password')
         ) {
-          setError('Email atau password salah');
+          setError('Email/NIS atau password salah');
         } else if (errorMsg.includes('email not confirmed')) {
           setError('Email belum dikonfirmasi. Silakan cek email Anda');
         } else if (errorMsg.includes('too many requests')) {
@@ -194,7 +217,7 @@ const Login = () => {
 
   // Data sekolah dengan fallback
   const schoolName = settings?.nama_sekolah || 'Sekolah';
-  const logoUrl = settings?.logo_url || '';
+  const logoUrl = logoPreview || '';
   const address = settings?.alamat || '';
   const phone = settings?.telepon || '';
   const emailSekolah = settings?.email || '';
@@ -351,8 +374,8 @@ const Login = () => {
                 <div className="login__input-field">
                   <i className="ri-user-3-fill"></i>
                   <input
-                    type="email"
-                    placeholder="Email"
+                    type="text"
+                    placeholder="Email / NIS"
                     value={form.email}
                     onChange={(e) =>
                       setForm((prev) => ({
@@ -362,8 +385,8 @@ const Login = () => {
                     }
                     disabled={isSubmitting}
                     required
-                    autoComplete="email"
-                    aria-label="Email"
+                    autoComplete="username"
+                    aria-label="Email atau NIS"
                   />
                 </div>
 

@@ -13,11 +13,27 @@ export const useUIStore = create((set) => ({
   toasts: [],
   setLoading: (value) => set({ loading: value }),
 
-  pushToast: (type, message) =>
+  pushToast: (type, message, options = {}) =>
     set((state) => {
       const id = makeId()
+      const resolvedOptions =
+        typeof options === 'number'
+          ? { duration: options }
+          : options && typeof options === 'object'
+            ? options
+            : {}
+
       return {
-        toasts: [...state.toasts, { id, type, message }]
+        toasts: [
+          ...state.toasts,
+          {
+            id,
+            type,
+            message,
+            duration: resolvedOptions.duration,
+            title: resolvedOptions.title
+          }
+        ]
       }
     }),
 

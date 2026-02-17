@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useUIStore } from '../../store/useUIStore'
+import PasswordInput from '../../components/PasswordInput'
 
 /* ===== Password Modal Component (Akses Halaman) ===== */
 function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Password", loading = false }) {
@@ -57,8 +58,7 @@ function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Passwor
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Password Admin
             </label>
-            <input
-              type="password"
+            <PasswordInput
               className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
                 error ? 'border-red-500' : 'border-gray-300'
               }`}
@@ -188,8 +188,8 @@ export default function AKelas() {
   const { pushToast } = useUIStore()
 
   /* ---------- LOCK SCREEN STATE ---------- */
-  const [isAuthorized, setIsAuthorized] = useState(false)
-  const [passwordModalOpen, setPasswordModalOpen] = useState(true)
+  const [isAuthorized, setIsAuthorized] = useState(true)
+  const [passwordModalOpen, setPasswordModalOpen] = useState(false)
   const [passwordLoading, setPasswordLoading] = useState(false)
 
   const handlePasswordConfirm = async (password) => {
@@ -575,7 +575,7 @@ export default function AKelas() {
   /* ------- KELAS ------- */
   async function tambahKelas() {
     const grade = (newGrade || '').toUpperCase().trim()
-    const suffix = (newSuffix || '').trim()
+    const suffix = (newSuffix || '').toUpperCase().trim()
     
     if (!GRADE_OPTS.includes(grade)) {
       pushToast('error', 'Pilih grade: VII–XII.')
@@ -1045,7 +1045,7 @@ export default function AKelas() {
 
   /* ============================ RENDER ============================ */
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 py-6">
       {/* Modal Password Akses Halaman */}
       <PasswordModal
         isOpen={passwordModalOpen && !isAuthorized}
@@ -1088,17 +1088,17 @@ export default function AKelas() {
         </div>
       ) : (
         /* ================== KONTEN ASLI HALAMAN ================== */
-        <div className="w-full">
+        <div className="w-full space-y-8 px-4 sm:px-6 lg:px-8 pt-2">
           {/* Header */}
-          <div className="bg-gradient-to-r from-blue-700 to-blue-800 text-white p-6 shadow-lg">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-center space-x-4 mb-4 sm:mb-0">
-                <div className="p-3 bg-white/20 rounded-2xl backdrop-blur-sm">
-                  <span className="text-2xl">🏫</span>
+          <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
+            <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
+              <div className="flex items-center space-x-4">
+                <div className="p-3 bg-blue-100 rounded-2xl">
+                  <span className="text-2xl text-blue-600">🏫</span>
                 </div>
                 <div>
-                  <h1 className="text-2xl font-bold">Manajemen Kelas & Jadwal</h1>
-                  <p className="text-blue-100 mt-1">
+                  <h1 className="text-2xl font-bold text-gray-900">Manajemen Kelas & Jadwal</h1>
+                  <p className="text-gray-600 mt-1">
                     Kelola data kelas, jadwal pelajaran, dan struktur organisasi sekolah
                   </p>
                 </div>
@@ -1107,18 +1107,34 @@ export default function AKelas() {
               {/* Tab Navigation */}
               <div className="flex flex-wrap gap-2">
                 {[
-                  { key: 'kelas', label: 'Kelas & Jadwal', icon: '📚', color: 'blue' },
-                  { key: 'struktur', label: 'Struktur Sekolah', icon: '🏢', color: 'purple' },
-                  { key: 'org', label: 'Organisasi', icon: '👥', color: 'green' }
-                ].map(({ key, label, icon, color }) => {
+                  {
+                    key: 'kelas',
+                    label: 'Kelas & Jadwal',
+                    icon: '📚',
+                    activeClass: 'bg-blue-600 text-white border border-blue-600 shadow-sm',
+                    idleClass: 'bg-gray-50 text-gray-700 border border-gray-200 hover:bg-blue-50 hover:text-blue-700'
+                  },
+                  {
+                    key: 'struktur',
+                    label: 'Struktur Sekolah',
+                    icon: '🏢',
+                    activeClass: 'bg-purple-600 text-white border border-purple-600 shadow-sm',
+                    idleClass: 'bg-gray-50 text-gray-700 border border-gray-200 hover:bg-purple-50 hover:text-purple-700'
+                  },
+                  {
+                    key: 'org',
+                    label: 'Organisasi',
+                    icon: '👥',
+                    activeClass: 'bg-green-600 text-white border border-green-600 shadow-sm',
+                    idleClass: 'bg-gray-50 text-gray-700 border border-gray-200 hover:bg-green-50 hover:text-green-700'
+                  }
+                ].map(({ key, label, icon, activeClass, idleClass }) => {
                   const active = tab === key
                   return (
                     <button
                       key={key}
                       className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 flex items-center space-x-2 ${
-                        active
-                          ? `bg-white text-${color}-600 shadow-lg`
-                          : 'bg-white/10 text-white hover:bg-white/20'
+                        active ? activeClass : idleClass
                       }`}
                       onClick={() => setTab(key)}
                     >
@@ -1132,7 +1148,7 @@ export default function AKelas() {
           </div>
 
           {/* Main Content */}
-          <div className="p-4 md:p-6">
+          <div className="space-y-6">
             {/* Loading Overlay */}
             {(loading || passwordLoading) && (
               <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm">
@@ -1319,7 +1335,7 @@ export default function AKelas() {
                           className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm text-gray-900"
                           placeholder="Contoh: A, IPA 1, atau A IPS"
                           value={newSuffix}
-                          onChange={e => setNewSuffix(e.target.value)}
+                          onChange={e => setNewSuffix(String(e.target.value || '').toUpperCase())}
                         />
                         <p className="text-xs text-gray-500 mt-1">
                           Contoh hasil: VII A, X IPA 1, dll.
@@ -2689,6 +2705,7 @@ function Organisasi({ guruList, siswaList, pushToast }) {
           organisasi_id: orgSel,
           siswa_id: addMemberUid,
           nama: namaSiswa,
+          kelas: siswa?.kelas || '',
           jabatan,
           created_at: new Date().toISOString()
         })

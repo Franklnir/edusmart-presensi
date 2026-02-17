@@ -1,8 +1,25 @@
 // src/pages/admin/ASiswa.jsx
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import * as XLSX from 'xlsx'
 import { supabase } from '../../lib/supabase'
+import { formatDate } from '../../lib/time'
 import { useUIStore } from '../../store/useUIStore'
+import { useAuthStore } from '../../store/useAuthStore'
 import ProfileAvatar from '../../components/ProfileAvatar'
+import PasswordInput from '../../components/PasswordInput'
+import {
+  buildAliasMap,
+  mapRowByAliases,
+  parseDateValue,
+  normalizeGender,
+  toText,
+  buildDefaultPassword,
+  readRowsFromFile,
+  readRowsFromSheetUrl,
+  buildGoogleSheetCsvUrl
+} from '../../utils/importUtils'
+import { isEmailFormat } from '../../utils/accountSetup'
+import { useLocation } from 'react-router-dom'
 
 /* ===========================
    Password Modal Component
@@ -34,8 +51,7 @@ function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Passwor
         </p>
 
         <form onSubmit={handleSubmit}>
-          <input
-            type="password"
+          <PasswordInput
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 mb-4"
             placeholder="Masukkan password"
             value={password}
@@ -180,12 +196,94 @@ const formatPhoneDisplay = (phone) => {
   return phone
 }
 
+const SISWA_ALIAS_MAP = buildAliasMap({
+  nama: ['nama', 'name', 'nama siswa', 'nama lengkap', 'full name'],
+  nis: ['nis', 'nisn', 'nik', 'nip', 'noinduk', 'no induk', 'nomor induk', 'studentid'],
+  kelas: ['kelas', 'class', 'rombel', 'kelas_id', 'kelas siswa', 'tingkat', 'grade'],
+  jk: ['jk', 'jenis kelamin', 'gender', 'kelamin', 'sex'],
+  tanggal_lahir: ['tanggal lahir', 'tgl lahir', 'tgl_lahir', 'dob', 'birthdate'],
+  agama: ['agama', 'religion'],
+  alamat: ['alamat', 'address', 'alamat lengkap'],
+  telp: ['telp', 'telepon', 'phone', 'no hp', 'nohp', 'hp', 'wa', 'whatsapp'],
+  no_hp_siswa: ['no hp siswa', 'hp siswa', 'telp siswa', 'nohp siswa'],
+  no_hp_wali: ['no hp wali', 'hp wali', 'telp wali', 'nohp wali'],
+  email: ['email', 'email siswa'],
+  status: ['status']
+})
+
+const normalizeKelasKey = (value) =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+
+const slugifyKelas = (value) =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+
+const normalizeStatusValue = (value) => {
+  if (!value) return ''
+  const s = String(value).trim().toLowerCase()
+  if (['aktif', 'active'].includes(s)) return 'active'
+  if (['nonaktif', 'inactive'].includes(s)) return 'nonaktif'
+  if (['mutasi', 'pindah'].includes(s)) return 'mutasi'
+  if (['alumni', 'lulus', 'graduate'].includes(s)) return 'alumni'
+  return ''
+}
+
+const calculateAgeFromIsoDate = (isoDate) => {
+  const raw = String(isoDate || '').trim()
+  if (!raw) return null
+
+  const parts = raw.split('-')
+  if (parts.length !== 3) return null
+
+  const year = Number(parts[0])
+  const month = Number(parts[1])
+  const day = Number(parts[2])
+
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+    return null
+  }
+
+  const today = new Date()
+  let age = today.getFullYear() - year
+  const monthDiff = today.getMonth() + 1 - month
+  const dayDiff = today.getDate() - day
+
+  if (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)) {
+    age -= 1
+  }
+
+  return age >= 0 ? age : null
+}
+
+const createClientUuid = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
+    const random = Math.floor(Math.random() * 16)
+    const value = char === 'x' ? random : (random & 0x3) | 0x8
+    return value.toString(16)
+  })
+}
+
+const IMPORT_SOURCE_LABEL = {
+  file: 'Upload File',
+  sheet: 'Google Sheets'
+}
+
 /* ===========================
    UI Components
 =========================== */
 function Card({ children, className = '' }) {
   return (
-    <div className={`bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden ${className}`}>
+    <div className={`bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden ${className}`}>
       {children}
     </div>
   )
@@ -246,7 +344,9 @@ function Button({
   )
 }
 
-function Input({ label, error, className = '', ...props }) {
+function Input({ label, error, className = '', type = 'text', ...props }) {
+  const inputClassName = `block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-white ${className}`
+
   return (
     <div className="space-y-1">
       {label && (
@@ -254,10 +354,11 @@ function Input({ label, error, className = '', ...props }) {
           {label}
         </label>
       )}
-      <input
-        className={`block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-white ${className}`}
-        {...props}
-      />
+      {type === 'password' ? (
+        <PasswordInput className={inputClassName} {...props} />
+      ) : (
+        <input className={inputClassName} type={type} {...props} />
+      )}
       {error && <p className="text-red-600 text-sm">{error}</p>}
     </div>
   )
@@ -296,7 +397,7 @@ function StatCard({ label, value, icon, color = 'blue', description }) {
   }
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+    <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-5 transition-all duration-300 hover:shadow-xl hover:-translate-y-0.5">
       <div className="flex items-center justify-between">
         <div className="flex-1">
           <p className="text-sm font-medium text-gray-600 mb-1">{label}</p>
@@ -320,7 +421,16 @@ function StatCard({ label, value, icon, color = 'blue', description }) {
 ======================================================================= */
 export default function ASiswa() {
   const { pushToast } = useUIStore()
+  const { user, profile } = useAuthStore()
   const [loadingInit, setLoadingInit] = useState(true)
+  const location = useLocation()
+
+  const role = profile?.role
+  const isAdmin = role === 'admin'
+  const isGuru = role === 'guru'
+  const isGuruRoute = location.pathname.startsWith('/guru')
+  const canManage = isAdmin && !isGuruRoute
+  const canManageRfid = isAdmin || isGuru
 
   /* ===== Password Modal State ===== */
   const [passwordModal, setPasswordModal] = useState({
@@ -335,10 +445,13 @@ export default function ASiswa() {
   const [siswa, setSiswa] = useState([])
   const [kelasList, setKelasList] = useState([])
   const [strukturKelas, setStrukturKelas] = useState({})
+  const [waliKelasIds, setWaliKelasIds] = useState([])
+  const [waliChecked, setWaliChecked] = useState(false)
+  const isWaliBlocked = isGuru && waliChecked && !waliKelasIds.length
 
   // Search fields
   const [qNama, setQNama] = useState('')
-  const [qNIK, setQNIK] = useState('')
+  const [qNIS, setQNIS] = useState('')
   const [qKelas, setQKelas] = useState('')
   const [qHasRfid, setQHasRfid] = useState('')
   const [qStatus, setQStatus] = useState('')
@@ -364,7 +477,7 @@ export default function ASiswa() {
     email: '',
     nama: '',
     kelas: '',
-    nik: '',
+    nis: '',
     jk: '',
     password: '',
     confirmPassword: ''
@@ -373,13 +486,10 @@ export default function ASiswa() {
   const [showAddForm, setShowAddForm] = useState(false)
   const [addingSiswa, setAddingSiswa] = useState(false)
 
-  // Soft delete / keluar sekolah
+  // Hapus siswa
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [siswaToDelete, setSiswaToDelete] = useState(null)
   const [deletingSiswa, setDeletingSiswa] = useState(false)
-  const [keluarMode, setKeluarMode] = useState('mutasi')
-  const [keluarYear, setKeluarYear] = useState(String(new Date().getFullYear()))
-  const [keluarReason, setKeluarReason] = useState('')
 
   // RFID
   const [rfidInput, setRfidInput] = useState('')
@@ -419,6 +529,22 @@ export default function ASiswa() {
     no_hp_wali: ''
   })
   const [phoneErrors, setPhoneErrors] = useState({})
+
+  // Import / Export
+  const [importModalOpen, setImportModalOpen] = useState(false)
+  const [importSource, setImportSource] = useState('file')
+  const [importFile, setImportFile] = useState(null)
+  const [sheetUrl, setSheetUrl] = useState('')
+  const [importRows, setImportRows] = useState([])
+  const [importErrors, setImportErrors] = useState([])
+  const [importLoading, setImportLoading] = useState(false)
+  const [importSummary, setImportSummary] = useState(null)
+  const [importHistories, setImportHistories] = useState([])
+  const [importHistoryItems, setImportHistoryItems] = useState([])
+  const [selectedImportHistory, setSelectedImportHistory] = useState(null)
+  const [importHistoryLoading, setImportHistoryLoading] = useState(false)
+  const [importHistoryDetailLoading, setImportHistoryDetailLoading] = useState(false)
+  const [importHistoryActionLoading, setImportHistoryActionLoading] = useState(false)
 
   /* ===== Cleanup channel ===== */
   useEffect(() => {
@@ -460,31 +586,74 @@ export default function ASiswa() {
 
   /* ===== Load initial data ===== */
   useEffect(() => {
+    if (!role || !user?.id) return
     loadAllData()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [role, user?.id])
+
+  const loadWaliKelas = async () => {
+    if (!isGuru || !user?.id) {
+      setWaliKelasIds([])
+      setWaliChecked(true)
+      return []
+    }
+
+    const { data, error } = await supabase
+      .from('kelas_struktur')
+      .select('kelas_id')
+      .eq('wali_guru_id', user.id)
+
+    if (error) throw error
+
+    const ids = (data || []).map(item => item.kelas_id).filter(Boolean)
+    setWaliKelasIds(ids)
+    setWaliChecked(true)
+    return ids
+  }
 
   const loadAllData = async () => {
     try {
       setLoadingInit(true)
+      let waliIds = []
+
+      if (!isAdmin && isGuru) {
+        waliIds = await loadWaliKelas()
+        if (!waliIds.length) {
+          setSiswaRaw([])
+          setSiswa([])
+          setKelasList([])
+          setStrukturKelas({})
+          return
+        }
+      } else {
+        setWaliChecked(true)
+      }
+
       await Promise.all([
-        loadSiswaRaw(),
-        loadKelasList(),
-        loadStrukturKelas()
+        loadSiswaRaw(waliIds),
+        loadKelasList(waliIds),
+        loadStrukturKelas(waliIds)
       ])
     } catch (error) {
       console.error('Error loading data:', error)
       pushToast('error', 'Gagal memuat data')
+      if (isGuru) setWaliChecked(true)
     } finally {
       setLoadingInit(false)
     }
   }
 
-  const loadSiswaRaw = async () => {
-    const { data, error } = await supabase
+  const loadSiswaRaw = async (kelasIds = waliKelasIds) => {
+    let query = supabase
       .from('profiles')
       .select('*')
       .eq('role', 'siswa')
+
+    if (Array.isArray(kelasIds) && kelasIds.length) {
+      query = query.in('kelas', kelasIds)
+    }
+
+    const { data, error } = await query
       .order('kelas', { ascending: true })
       .order('nama', { ascending: true })
 
@@ -493,10 +662,16 @@ export default function ASiswa() {
     setSiswa(data || [])
   }
 
-  const loadKelasList = async () => {
-    const { data, error } = await supabase
+  const loadKelasList = async (kelasIds = []) => {
+    let query = supabase
       .from('kelas')
       .select('*')
+
+    if (Array.isArray(kelasIds) && kelasIds.length) {
+      query = query.in('id', kelasIds)
+    }
+
+    const { data, error } = await query
       .order('grade', { ascending: true })
       .order('suffix', { ascending: true })
 
@@ -504,10 +679,16 @@ export default function ASiswa() {
     setKelasList(data || [])
   }
 
-  const loadStrukturKelas = async () => {
-    const { data, error } = await supabase
+  const loadStrukturKelas = async (kelasIds = []) => {
+    let query = supabase
       .from('kelas_struktur')
       .select('*')
+
+    if (Array.isArray(kelasIds) && kelasIds.length) {
+      query = query.in('kelas_id', kelasIds)
+    }
+
+    const { data, error } = await query
 
     if (error) throw error
 
@@ -524,6 +705,52 @@ export default function ASiswa() {
       grade: kelas.grade
     }))
   }, [kelasList])
+
+  const kelasFilterOptions = useMemo(() => {
+    const mapped = kelasOptions.map(k => ({ value: k.value, label: k.label }))
+
+    if (isGuru) {
+      if (mapped.length <= 1) return mapped
+      return [{ value: '', label: 'Semua Kelas Ampuan' }, ...mapped]
+    }
+
+    return [{ value: '', label: 'Semua Kelas' }, ...mapped]
+  }, [isGuru, kelasOptions])
+
+  const kelasFilterValueSet = useMemo(
+    () => new Set(kelasFilterOptions.map(opt => String(opt.value ?? ''))),
+    [kelasFilterOptions]
+  )
+
+  const kelasLookup = useMemo(() => {
+    const map = new Map()
+    kelasList.forEach((kelas) => {
+      const keys = [
+        kelas.id,
+        kelas.nama,
+        `${kelas.grade || ''} ${kelas.suffix || ''}`.trim(),
+        `${kelas.grade || ''}${kelas.suffix || ''}`.trim(),
+        `${kelas.grade || ''}-${kelas.suffix || ''}`.trim()
+      ]
+        .filter(Boolean)
+        .map(normalizeKelasKey)
+
+      keys.forEach((key) => {
+        if (key) map.set(key, kelas.id)
+      })
+    })
+    return map
+  }, [kelasList])
+
+  const resolveKelasId = (value) => {
+    if (!value) return ''
+    const key = normalizeKelasKey(value)
+    if (kelasLookup.has(key)) return kelasLookup.get(key)
+
+    const slug = slugifyKelas(value)
+    const slugKey = normalizeKelasKey(slug)
+    return kelasLookup.get(slugKey) || ''
+  }
 
   const getNamaKelas = (kelasId) => {
     const kelas = kelasList.find(k => k.id === kelasId)
@@ -542,6 +769,563 @@ export default function ASiswa() {
       s => s.ketua_siswa_id === siswaId
     )
     return struktur ? getNamaKelas(struktur.kelas_id) : null
+  }
+
+  useEffect(() => {
+    if (!isGuru) return
+
+    const onlyKelas = kelasOptions.length === 1 ? (kelasOptions[0]?.value || '') : ''
+    const shouldUseSingleKelas = Boolean(onlyKelas)
+
+    if (qKelas && !kelasFilterValueSet.has(String(qKelas))) {
+      setQKelas(shouldUseSingleKelas ? onlyKelas : '')
+      return
+    }
+
+    if (!qKelas && shouldUseSingleKelas) {
+      setQKelas(onlyKelas)
+    }
+  }, [isGuru, kelasOptions, kelasFilterValueSet, qKelas])
+
+  const normalizeImportRow = (row, index) => {
+    const mapped = mapRowByAliases(row, SISWA_ALIAS_MAP)
+    const hasAny = Object.values(mapped).some((v) => String(v || '').trim() !== '')
+    if (!hasAny) return null
+
+    const kelasRaw = toText(mapped.kelas).toUpperCase()
+    const resolvedKelas = resolveKelasId(kelasRaw)
+    const tanggalLahir = parseDateValue(mapped.tanggal_lahir)
+
+    const telpRaw = toText(mapped.telp)
+    const noHpSiswaRaw = toText(mapped.no_hp_siswa || mapped.telp)
+    const noHpWaliRaw = toText(mapped.no_hp_wali)
+
+    return {
+      __rowNum: index + 2,
+      nama: toText(mapped.nama),
+      nis: toText(mapped.nis),
+      kelas: resolvedKelas,
+      kelas_raw: kelasRaw,
+      jk: normalizeGender(mapped.jk),
+      tanggal_lahir: tanggalLahir,
+      usia: calculateAgeFromIsoDate(tanggalLahir),
+      agama: toText(mapped.agama),
+      alamat: toText(mapped.alamat),
+      telp: telpRaw ? normalizePhoneID(telpRaw) : '',
+      no_hp_siswa: noHpSiswaRaw ? normalizePhoneID(noHpSiswaRaw) : '',
+      no_hp_wali: noHpWaliRaw ? normalizePhoneID(noHpWaliRaw) : '',
+      email: toText(mapped.email).toLowerCase(),
+      status: normalizeStatusValue(mapped.status)
+    }
+  }
+
+  const prepareImportRows = (rawRows) => {
+    const cleaned = []
+    const errors = []
+
+    rawRows.forEach((row, idx) => {
+      const normalized = normalizeImportRow(row, idx)
+      if (!normalized) return
+
+      if (!normalized.nis || !normalized.nama) {
+        errors.push({
+          row: normalized.__rowNum,
+          reason: 'NIS dan Nama wajib diisi'
+        })
+        return
+      }
+
+      if (!normalized.kelas_raw) {
+        errors.push({
+          row: normalized.__rowNum,
+          reason: 'Kelas wajib diisi'
+        })
+        return
+      }
+
+      if (!normalized.kelas) {
+        errors.push({
+          row: normalized.__rowNum,
+          reason: `Kelas tidak ditemukan: ${normalized.kelas_raw}`
+        })
+        return
+      }
+
+      cleaned.push(normalized)
+    })
+
+    setImportRows(cleaned)
+    setImportErrors(errors)
+    setImportSummary(null)
+  }
+
+  const handleImportFileChange = async (file) => {
+    if (!file) return
+    setImportFile(file)
+    setImportLoading(true)
+    try {
+      const rows = await readRowsFromFile(file)
+      prepareImportRows(rows)
+    } catch (error) {
+      pushToast('error', error?.message || 'Gagal membaca file')
+    } finally {
+      setImportLoading(false)
+    }
+  }
+
+  const handleLoadSheet = async () => {
+    const csvUrl = buildGoogleSheetCsvUrl(sheetUrl)
+    if (!csvUrl) {
+      pushToast('error', 'Link Google Sheets tidak valid')
+      return
+    }
+
+    setImportLoading(true)
+    try {
+      const rows = await readRowsFromSheetUrl(csvUrl)
+      prepareImportRows(rows)
+    } catch (error) {
+      pushToast('error', error?.message || 'Gagal mengambil data Google Sheets')
+    } finally {
+      setImportLoading(false)
+    }
+  }
+
+  const resetImportState = () => {
+    setImportFile(null)
+    setSheetUrl('')
+    setImportRows([])
+    setImportErrors([])
+    setImportSummary(null)
+    setImportHistories([])
+    setImportHistoryItems([])
+    setSelectedImportHistory(null)
+    setImportHistoryLoading(false)
+    setImportHistoryDetailLoading(false)
+    setImportHistoryActionLoading(false)
+    setImportSource('file')
+  }
+
+  const loadImportHistoryItems = async (historyId) => {
+    if (!historyId) {
+      setImportHistoryItems([])
+      return []
+    }
+
+    setImportHistoryDetailLoading(true)
+    try {
+      const { data, error } = await supabase
+        .from('import_siswa_history_items')
+        .select('*')
+        .eq('history_id', historyId)
+        .order('id', { ascending: true })
+
+      if (error) throw error
+      const rows = data || []
+      setImportHistoryItems(rows)
+      return rows
+    } catch (error) {
+      console.error('Error loading import history detail:', error)
+      pushToast('error', `Gagal memuat detail riwayat: ${error?.message || 'Unknown error'}`)
+      setImportHistoryItems([])
+      return []
+    } finally {
+      setImportHistoryDetailLoading(false)
+    }
+  }
+
+  const loadImportHistories = async (preferredId = null) => {
+    setImportHistoryLoading(true)
+    try {
+      const { data, error } = await supabase
+        .from('import_siswa_histories')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(50)
+
+      if (error) throw error
+      const rows = data || []
+      setImportHistories(rows)
+
+      const target =
+        rows.find((item) => item.id === preferredId) ||
+        rows.find((item) => item.id === selectedImportHistory?.id) ||
+        rows[0] ||
+        null
+
+      setSelectedImportHistory(target)
+      if (target?.id) {
+        await loadImportHistoryItems(target.id)
+      } else {
+        setImportHistoryItems([])
+      }
+    } catch (error) {
+      console.error('Error loading import histories:', error)
+      pushToast('error', `Gagal memuat riwayat import: ${error?.message || 'Unknown error'}`)
+    } finally {
+      setImportHistoryLoading(false)
+    }
+  }
+
+  const switchImportSource = async (nextSource) => {
+    setImportSource(nextSource)
+    if (nextSource === 'history') {
+      await loadImportHistories()
+    }
+  }
+
+  const openImportHistory = async (history) => {
+    if (!history?.id) return
+    setSelectedImportHistory(history)
+    await loadImportHistoryItems(history.id)
+  }
+
+  const saveSelectedImportHistory = async () => {
+    if (!selectedImportHistory?.id) return
+
+    setImportHistoryActionLoading(true)
+    try {
+      const now = new Date().toISOString()
+      const { error } = await supabase
+        .from('import_siswa_histories')
+        .update({
+          status: 'saved',
+          saved_at: now,
+          updated_at: now
+        })
+        .eq('id', selectedImportHistory.id)
+
+      if (error) throw error
+
+      pushToast('success', 'Riwayat import disimpan')
+      await loadImportHistories(selectedImportHistory.id)
+    } catch (error) {
+      console.error('Error saving import history:', error)
+      pushToast('error', `Gagal menyimpan riwayat: ${error?.message || 'Unknown error'}`)
+    } finally {
+      setImportHistoryActionLoading(false)
+    }
+  }
+
+  const deleteSelectedImportHistory = async () => {
+    if (!selectedImportHistory?.id) return
+
+    const ok = window.confirm(
+      'Hapus riwayat import ini? Akun siswa yang dibuat dari batch ini juga akan ikut dihapus.'
+    )
+    if (!ok) return
+
+    setImportHistoryActionLoading(true)
+    try {
+      let items = importHistoryItems
+      if (!items.length) {
+        items = await loadImportHistoryItems(selectedImportHistory.id)
+      }
+
+      const createdProfileIds = [...new Set(
+        (items || [])
+          .filter((item) => item.created_user && item.profile_id)
+          .map((item) => item.profile_id)
+      )]
+
+      let deletedUsers = 0
+      let failedUsers = 0
+      for (const profileId of createdProfileIds) {
+        // eslint-disable-next-line no-await-in-loop
+        const { error: deleteUserError } = await supabase.admin.deleteUser(profileId)
+        if (deleteUserError) {
+          failedUsers += 1
+          console.warn('Failed deleting imported user:', profileId, deleteUserError)
+        } else {
+          deletedUsers += 1
+        }
+      }
+
+      const { error: deleteItemsError } = await supabase
+        .from('import_siswa_history_items')
+        .delete()
+        .eq('history_id', selectedImportHistory.id)
+      if (deleteItemsError) throw deleteItemsError
+
+      const { error: deleteHistoryError } = await supabase
+        .from('import_siswa_histories')
+        .delete()
+        .eq('id', selectedImportHistory.id)
+      if (deleteHistoryError) throw deleteHistoryError
+
+      pushToast(
+        'success',
+        `Riwayat dihapus. Akun siswa terhapus: ${deletedUsers}${failedUsers ? `, gagal: ${failedUsers}` : ''}`
+      )
+
+      await loadImportHistories()
+      await loadSiswaRaw()
+    } catch (error) {
+      console.error('Error deleting import history:', error)
+      pushToast('error', `Gagal menghapus riwayat: ${error?.message || 'Unknown error'}`)
+    } finally {
+      setImportHistoryActionLoading(false)
+    }
+  }
+
+  const persistImportHistory = async (summary, itemRows) => {
+    const now = new Date().toISOString()
+    const historyId = createClientUuid()
+
+    const historyPayload = {
+      id: historyId,
+      admin_id: user?.id || null,
+      source: importSource === 'sheet' ? 'sheet' : 'file',
+      file_name: importSource === 'file' ? (importFile?.name || null) : null,
+      sheet_url: importSource === 'sheet' ? (sheetUrl.trim() || null) : null,
+      status: 'pending',
+      total_rows: importRows.length,
+      success_rows: summary.created + summary.updated + summary.skipped,
+      created_rows: summary.created,
+      updated_rows: summary.updated,
+      skipped_rows: summary.skipped,
+      failed_rows: summary.failed,
+      saved_at: null,
+      created_at: now,
+      updated_at: now
+    }
+
+    const { error: historyError } = await supabase
+      .from('import_siswa_histories')
+      .insert(historyPayload)
+
+    if (historyError) throw historyError
+
+    if (itemRows.length) {
+      const withHeader = itemRows.map((item) => ({
+        ...item,
+        history_id: historyId,
+        imported_at: item.imported_at || now,
+        created_at: now,
+        updated_at: now
+      }))
+
+      const { error: itemError } = await supabase
+        .from('import_siswa_history_items')
+        .insert(withHeader)
+
+      if (itemError) throw itemError
+    }
+
+    return historyId
+  }
+
+  const upsertSiswaRow = async (row) => {
+    const nis = row.nis
+    const nama = row.nama
+    const emailLower = row.email ? row.email.toLowerCase() : ''
+    const hasEmail = isEmailFormat(emailLower)
+    const emailForAuth = hasEmail ? emailLower : `${nis}@import.local`
+    const isPlaceholderEmail = (value) => /@import\.local$/i.test(String(value || '').trim())
+    const password = buildDefaultPassword(row.tanggal_lahir, nis)
+
+    let { data: existing, error: exError } = await supabase
+      .from('profiles')
+      .select('id, role, email, nis')
+      .eq('nis', nis)
+      .maybeSingle()
+
+    if (exError) throw exError
+
+    if (!existing && hasEmail) {
+      const { data: byEmail } = await supabase
+        .from('profiles')
+        .select('id, role, email, nis')
+        .eq('email', emailLower)
+        .maybeSingle()
+      existing = byEmail || null
+    }
+
+    const payload = {
+      updated_at: new Date().toISOString()
+    }
+
+    if (row.nama) payload.nama = row.nama
+    if (row.nis) payload.nis = row.nis
+    if (row.kelas) payload.kelas = row.kelas
+    if (row.jk) payload.jk = row.jk
+    if (row.tanggal_lahir) payload.tanggal_lahir = row.tanggal_lahir
+    if (Number.isInteger(row.usia) && row.usia >= 0) payload.usia = row.usia
+    if (row.agama) payload.agama = row.agama
+    if (row.alamat) payload.alamat = row.alamat
+    if (row.telp) payload.telp = row.telp
+    if (row.no_hp_siswa) payload.no_hp_siswa = row.no_hp_siswa
+    if (row.no_hp_wali) payload.no_hp_wali = row.no_hp_wali
+    if (row.status) payload.status = row.status
+
+    if (existing?.id) {
+      if (existing.role && existing.role !== 'siswa') {
+        throw new Error('NIS sudah digunakan untuk role lain')
+      }
+
+      const existingEmail = String(existing.email || '').trim().toLowerCase()
+      if (hasEmail) {
+        payload.email = emailLower
+      } else if (!existingEmail || isPlaceholderEmail(existingEmail)) {
+        payload.email = emailForAuth
+      }
+
+      const updateKeys = Object.keys(payload).filter((k) => k !== 'updated_at')
+      if (!updateKeys.length) {
+        return {
+          status: 'skipped',
+          profileId: existing.id
+        }
+      }
+
+      const { error } = await supabase
+        .from('profiles')
+        .update(payload)
+        .eq('id', existing.id)
+
+      if (error) throw error
+      return {
+        status: 'updated',
+        profileId: existing.id
+      }
+    }
+
+    const { data: authData, error: authError } = await supabase.auth.signUp({
+      email: emailForAuth,
+      password,
+      options: {
+        data: {
+          nama,
+          role: 'siswa'
+        }
+      }
+    })
+
+    if (authError) throw authError
+    const userId = authData?.user?.id
+    if (!userId) throw new Error('User gagal dibuat')
+
+    const createPayload = {
+      ...payload,
+      role: 'siswa',
+      email: emailForAuth,
+      status: payload.status || 'active',
+      must_change_password: true
+    }
+
+    const { error: updateError } = await supabase
+      .from('profiles')
+      .update(createPayload)
+      .eq('id', userId)
+
+    if (updateError) throw updateError
+
+    return {
+      status: 'created',
+      profileId: userId
+    }
+  }
+
+  const handleRunImport = async () => {
+    if (!importRows.length) {
+      pushToast('error', 'Tidak ada data untuk diimport')
+      return
+    }
+
+    if (!kelasList.length) {
+      pushToast('error', 'Belum ada data kelas. Buat kelas terlebih dahulu sebelum import siswa.')
+      return
+    }
+
+    setImportLoading(true)
+    const summary = {
+      created: 0,
+      updated: 0,
+      skipped: 0,
+      failed: 0,
+      errors: []
+    }
+    const historyItems = []
+
+    for (const row of importRows) {
+      try {
+        const result = await upsertSiswaRow(row)
+        if (result?.status === 'created') summary.created += 1
+        else if (result?.status === 'updated') summary.updated += 1
+        else summary.skipped += 1
+
+        historyItems.push({
+          profile_id: result?.profileId || null,
+          status: result?.status || 'skipped',
+          created_user: result?.status === 'created',
+          nis: row.nis || null,
+          nama: row.nama || null,
+          kelas: row.kelas_raw || row.kelas || null,
+          error_message: null,
+          imported_at: new Date().toISOString()
+        })
+      } catch (error) {
+        summary.failed += 1
+        const reason = error?.message || 'Gagal memproses'
+        summary.errors.push({
+          row: row.__rowNum,
+          reason
+        })
+        historyItems.push({
+          profile_id: null,
+          status: 'failed',
+          created_user: false,
+          nis: row.nis || null,
+          nama: row.nama || null,
+          kelas: row.kelas_raw || row.kelas || null,
+          error_message: reason,
+          imported_at: new Date().toISOString()
+        })
+      }
+    }
+
+    let historyId = null
+    try {
+      historyId = await persistImportHistory(summary, historyItems)
+    } catch (error) {
+      console.error('Error saving import history:', error)
+      pushToast('warning', `Import selesai, tapi gagal menyimpan riwayat: ${error?.message || 'Unknown error'}`)
+    }
+
+    setImportSummary({
+      ...summary,
+      historyId
+    })
+    setImportLoading(false)
+    await loadSiswaRaw()
+
+    if (historyId) {
+      setImportSource('history')
+      await loadImportHistories(historyId)
+    }
+  }
+
+  const exportSiswaToExcel = () => {
+    const rows = siswa.map((item, idx) => ({
+      No: idx + 1,
+      NIS: item.nis || '',
+      Nama: item.nama || '',
+      Kelas: getNamaKelas(item.kelas),
+      JK: item.jk || '',
+      'Tanggal Lahir': item.tanggal_lahir || '',
+      Agama: item.agama || '',
+      Alamat: item.alamat || '',
+      'HP Siswa': item.no_hp_siswa || item.telp || '',
+      'HP Wali': item.no_hp_wali || '',
+      Email: item.email || '',
+      Status: item.status || 'active'
+    }))
+
+    const worksheet = XLSX.utils.json_to_sheet(rows)
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Siswa')
+    const stamp = new Date().toISOString().slice(0, 10)
+    XLSX.writeFile(workbook, `siswa_${stamp}.xlsx`)
   }
 
   /* ===== Statistik dashboard ===== */
@@ -568,7 +1352,7 @@ export default function ASiswa() {
   /* ===== Filter (debounced, fix logic) ===== */
   const applyFilterNow = () => {
     const namaNeedle = qNama.trim().toLowerCase()
-    const nikNeedle = qNIK.trim().toLowerCase()
+    const nikNeedle = qNIS.trim().toLowerCase()
     const kelasNeedle = qKelas
     const hasRfidNeedle = qHasRfid
     const statusNeedle = qStatus
@@ -580,7 +1364,7 @@ export default function ASiswa() {
         : true
 
       const okNik = nikNeedle
-        ? (String(s.nik || '').toLowerCase().includes(nikNeedle))
+        ? (String(s.nis || '').toLowerCase().includes(nikNeedle))
         : true
 
       const okKls = kelasNeedle
@@ -614,8 +1398,12 @@ export default function ASiswa() {
 
   function resetFilter() {
     setQNama('')
-    setQNIK('')
-    setQKelas('')
+    setQNIS('')
+    if (isGuru && kelasOptions.length === 1) {
+      setQKelas(kelasOptions[0]?.value || '')
+    } else {
+      setQKelas('')
+    }
     setQHasRfid('')
     setQStatus('')
     setSiswa(siswaRaw)
@@ -632,7 +1420,7 @@ export default function ASiswa() {
       if (filterTimerRef.current) clearTimeout(filterTimerRef.current)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [qNama, qNIK, qKelas, qHasRfid, qStatus, siswaRaw])
+  }, [qNama, qNIS, qKelas, qHasRfid, qStatus, siswaRaw])
 
   /* ===== Grade helpers ===== */
   const DEFAULT_GRADES = ['VII', 'VIII', 'IX', 'X', 'XI', 'XII']
@@ -933,80 +1721,118 @@ export default function ASiswa() {
   }
 
   /* ===== Detail modal ===== */
-  const openDetail = (u) => {
-    openPasswordModal(
-      'Konfirmasi Lihat Detail Siswa',
-      async () => {
-        setRfidInput((u.rfid_uid || '').toUpperCase())
-        setRfidLastScan(null)
-        setRfidEnrolling(false)
-        if (rfidChannel) {
-          try { supabase.removeChannel(rfidChannel) } catch {}
-          setRfidChannel(null)
-        }
+  const openDetail = async (u) => {
+    setRfidInput((u.rfid_uid || '').toUpperCase())
+    setRfidLastScan(null)
+    setRfidEnrolling(false)
+    if (rfidChannel) {
+      try { supabase.removeChannel(rfidChannel) } catch {}
+      setRfidChannel(null)
+    }
 
-        setDetailUser(u)
-        setMoveKelas(u.kelas || '')
-        setMoveGrade(getGradeLabel(u.kelas || '') || '')
+    setDetailUser(u)
+    setMoveKelas(u.kelas || '')
+    setMoveGrade(getGradeLabel(u.kelas || '') || '')
 
+    setEditPhoneForm({
+      no_hp_siswa: u.no_hp_siswa || '',
+      no_hp_wali: u.no_hp_wali || ''
+    })
+    setEditingPhone(false)
+
+    // Untuk guru/wali: tampilkan detail segera dari data list, tanpa nunggu fetch tambahan.
+    setDetailLoading(canManage)
+    setDetailOpen(true)
+
+    try {
+      const { data: detailProfile, error: detailProfileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', u.id)
+        .maybeSingle()
+
+      if (detailProfileError) {
+        console.warn('Warn loading profile detail (fallback row list):', detailProfileError)
+      } else if (detailProfile) {
+        setDetailUser(prev => ({
+          ...(prev || {}),
+          ...detailProfile
+        }))
+        setMoveKelas(detailProfile.kelas || '')
+        setMoveGrade(getGradeLabel(detailProfile.kelas || '') || '')
         setEditPhoneForm({
-          no_hp_siswa: u.no_hp_siswa || '',
-          no_hp_wali: u.no_hp_wali || ''
+          no_hp_siswa: detailProfile.no_hp_siswa || '',
+          no_hp_wali: detailProfile.no_hp_wali || ''
         })
-        setEditingPhone(false)
-
-        setDetailLoading(true)
-        setDetailOpen(true)
-
-        try {
-          const { data: orgData, error: orgError } = await supabase
-            .from('organisasi')
-            .select('*')
-
-          if (orgError) throw orgError
-
-          const all = orgData?.map(o => ({ id: o.id, nama: o.nama || o.id })) || []
-          setOrgAll(all)
-
-          const { data: orgAnggotaData, error: orgAnggotaError } = await supabase
-            .from('organisasi_anggota')
-            .select('*')
-            .eq('siswa_id', u.id)
-
-          if (orgAnggotaError) throw orgAnggotaError
-
-          const mine = orgAnggotaData?.map(a => ({
-            orgId: a.organisasi_id,
-            orgNama: all.find(o => o.id === a.organisasi_id)?.nama || a.organisasi_id,
-            status: a.status || 'aktif',
-            bagian: a.bagian || '',
-            jabatan: a.jabatan || 'Anggota'
-          })) || []
-
-          setOrgMember(mine)
-
-          const { data: osisData, error: osisError } = await supabase
-            .from('osis_anggota')
-            .select('*')
-            .eq('siswa_id', u.id)
-            .single()
-
-          if (osisError && osisError.code !== 'PGRST116') throw osisError
-
-          const row = osisData ? {
-            status: osisData.status || 'aktif',
-            bagian: osisData.bagian || '',
-            jabatan: osisData.jabatan || 'Anggota'
-          } : null
-          setOsisRow(row)
-        } catch (error) {
-          console.error('Error loading detail:', error)
-          pushToast('error', 'Gagal memuat detail siswa')
-        } finally {
-          setDetailLoading(false)
-        }
+        setRfidInput((detailProfile.rfid_uid || '').toUpperCase())
       }
-    )
+
+      const [orgRes, orgAnggotaRes, osisRes] = await Promise.allSettled([
+        supabase.from('organisasi').select('*'),
+        supabase.from('organisasi_anggota').select('*').eq('siswa_id', u.id),
+        supabase.from('osis_anggota').select('*').eq('siswa_id', u.id).maybeSingle()
+      ])
+
+      let orgRows = []
+      if (orgRes.status === 'fulfilled') {
+        if (orgRes.value.error) {
+          console.warn('Warn loading organisasi (fallback empty):', orgRes.value.error)
+        } else {
+          orgRows = orgRes.value.data || []
+        }
+      } else {
+        console.warn('Warn loading organisasi (promise rejected):', orgRes.reason)
+      }
+
+      const all = orgRows.map(o => ({ id: o.id, nama: o.nama || o.id }))
+      setOrgAll(all)
+
+      let orgAnggotaRows = []
+      if (orgAnggotaRes.status === 'fulfilled') {
+        if (orgAnggotaRes.value.error) {
+          console.warn('Warn loading organisasi_anggota (fallback empty):', orgAnggotaRes.value.error)
+        } else {
+          orgAnggotaRows = orgAnggotaRes.value.data || []
+        }
+      } else {
+        console.warn('Warn loading organisasi_anggota (promise rejected):', orgAnggotaRes.reason)
+      }
+
+      const mine = orgAnggotaRows.map(a => ({
+        orgId: a.organisasi_id,
+        orgNama: all.find(o => o.id === a.organisasi_id)?.nama || a.organisasi_id,
+        status: a.status || 'aktif',
+        bagian: a.bagian || '',
+        jabatan: a.jabatan || 'Anggota'
+      }))
+      setOrgMember(mine)
+
+      let osisData = null
+      if (osisRes.status === 'fulfilled') {
+        if (osisRes.value.error) {
+          console.warn('Warn loading osis_anggota (fallback empty):', osisRes.value.error)
+        } else {
+          osisData = osisRes.value.data || null
+        }
+      } else {
+        console.warn('Warn loading osis_anggota (promise rejected):', osisRes.reason)
+      }
+
+      setOsisRow(
+        osisData
+          ? {
+              status: osisData.status || 'aktif',
+              bagian: osisData.bagian || '',
+              jabatan: osisData.jabatan || 'Anggota'
+            }
+          : null
+      )
+    } catch (error) {
+      console.error('Error loading detail:', error)
+      pushToast('error', 'Gagal memuat detail siswa')
+    } finally {
+      setDetailLoading(false)
+    }
   }
 
   // Auto pilih kelas ketika grade dipilih (detail modal)
@@ -1296,6 +2122,8 @@ export default function ASiswa() {
 
   /* ===== RFID ===== */
   function toggleRfidListen() {
+    if (!canManageRfid) return
+
     if (rfidEnrolling) {
       if (rfidChannel) {
         try { supabase.removeChannel(rfidChannel) } catch {}
@@ -1326,6 +2154,7 @@ export default function ASiswa() {
   }
 
   async function saveRfid() {
+    if (!canManageRfid) return
     if (!detailUser) return
     const raw = (rfidInput || '').trim()
     const cleaned = raw.toUpperCase().replace(/\s+/g, '')
@@ -1375,6 +2204,7 @@ export default function ASiswa() {
   }
 
   async function clearRfid() {
+    if (!canManageRfid) return
     if (!detailUser) return
     if (!detailUser.rfid_uid && !rfidInput) return
 
@@ -1443,95 +2273,36 @@ export default function ASiswa() {
     }
   }
 
-  /* ===== Soft Delete / Keluar Sekolah ===== */
+  /* ===== Hapus Akun Siswa ===== */
   function openDeleteConfirm(siswa) {
-    openPasswordModal(
-      'Konfirmasi Keluar Sekolah',
-      () => {
-        setSiswaToDelete(siswa)
-        const g = getGradeLabel(siswa?.kelas || '')
-        setKeluarMode(g === 'XII' ? 'alumni' : 'mutasi')
-        setKeluarYear(String(new Date().getFullYear()))
-        setKeluarReason('')
-        setDeleteConfirmOpen(true)
-      }
-    )
+    setSiswaToDelete(siswa)
+    setDeleteConfirmOpen(true)
   }
 
   function closeDeleteConfirm() {
     setDeleteConfirmOpen(false)
     setSiswaToDelete(null)
-    setKeluarReason('')
-    setKeluarMode('mutasi')
-    setKeluarYear(String(new Date().getFullYear()))
   }
 
-  const hapusAkunSiswa = () => {
+  const hapusAkunSiswa = async () => {
     if (!siswaToDelete) return
-    if (!keluarReason.trim()) {
-      pushToast('error', 'Harap masukkan alasan')
-      return
+
+    try {
+      setDeletingSiswa(true)
+      const { error } = await supabase.admin.deleteUser(siswaToDelete.id)
+      if (error) throw error
+
+      pushToast('success', 'Akun siswa berhasil dihapus permanen')
+
+      closeDeleteConfirm()
+      if (detailOpen) closeDetailModal()
+      await loadAllData()
+    } catch (error) {
+      console.error('Error deleting siswa:', error)
+      pushToast('error', 'Gagal menghapus akun siswa: ' + (error.message || 'Unknown error'))
+    } finally {
+      setDeletingSiswa(false)
     }
-
-    openPasswordModal(
-      'Konfirmasi Akhir Keluar Sekolah',
-      async () => {
-        try {
-          setDeletingSiswa(true)
-
-          const now = new Date().toISOString()
-          const lastKelasName = getNamaKelas(siswaToDelete.kelas)
-          const lastKelasRaw = siswaToDelete.kelas || ''
-          const lastInfo = lastKelasName || lastKelasRaw || '-'
-
-          let alasan = keluarReason.trim()
-          const status = keluarMode
-
-          if (status === 'alumni') {
-            const y = parseInt(keluarYear, 10) || new Date().getFullYear()
-            alasan = `Lulus tahun ${y}. Kelas terakhir: ${lastInfo}. ${alasan}`
-          } else if (status === 'mutasi') {
-            alasan = `Mutasi/pindah sekolah. Kelas terakhir: ${lastInfo}. ${alasan}`
-          } else {
-            alasan = `Nonaktif permanen. Kelas terakhir: ${lastInfo}. ${alasan}`
-          }
-
-          const payload = {
-            status,
-            alasan_nonaktif: alasan,
-            disabled_at: now,
-            rfid_uid: null,
-            kelas: ''
-          }
-
-          const { error } = await supabase
-            .from('profiles')
-            .update(payload)
-            .eq('id', siswaToDelete.id)
-
-          if (error) throw error
-
-          // reset ketua kelas jika perlu
-          try {
-            await supabase
-              .from('kelas_struktur')
-              .update({ ketua_siswa_id: null, ketua_siswa_nama: null })
-              .eq('ketua_siswa_id', siswaToDelete.id)
-          } catch {}
-
-          pushToast('success', `Berhasil: ${status === 'alumni' ? 'dijadikan alumni' : status === 'mutasi' ? 'dimutasi' : 'dinonaktifkan'} (riwayat aman)`)
-
-          closeDeleteConfirm()
-          if (detailOpen) closeDetailModal()
-          await loadAllData()
-        } catch (error) {
-          console.error('Error soft-delete/keluar sekolah:', error)
-          pushToast('error', 'Gagal memproses: ' + (error.message || 'Unknown error'))
-        } finally {
-          setDeletingSiswa(false)
-        }
-      }
-    )
   }
 
   /* ===== Tambah Siswa ===== */
@@ -1544,7 +2315,7 @@ export default function ASiswa() {
     if (!form.password) errors.password = 'Password harus diisi'
     else if (form.password.length < 6) errors.password = 'Password minimal 6 karakter'
     if (form.password !== form.confirmPassword) errors.confirmPassword = 'Password dan konfirmasi tidak sama'
-    if (form.nik && !/^\d+$/.test(form.nik)) errors.nik = 'NIK harus berupa angka'
+    if (form.nis && !/^\d+$/.test(form.nis)) errors.nis = 'NIS harus berupa angka'
 
     setFormErrors(errors)
     return Object.keys(errors).length === 0
@@ -1561,7 +2332,7 @@ export default function ASiswa() {
       email: '',
       nama: '',
       kelas: '',
-      nik: '',
+      nis: '',
       jk: '',
       password: '',
       confirmPassword: ''
@@ -1597,7 +2368,7 @@ export default function ASiswa() {
         email: form.email.trim().toLowerCase(),
         nama: form.nama.trim(),
         kelas: form.kelas || '',
-        nik: form.nik || '',
+        nis: form.nis || '',
         jk: form.jk || '',
         role: 'siswa',
         status: 'active',
@@ -1623,9 +2394,26 @@ export default function ASiswa() {
   /* ===========================
      Render
   ============================ */
+  if (isWaliBlocked) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 py-6">
+        <div className="w-full px-4 sm:px-6 lg:px-8">
+          <Card>
+            <div className="p-6">
+              <h2 className="text-xl font-semibold text-gray-900 mb-2">Akses dibatasi</h2>
+              <p className="text-gray-600">
+                Halaman ini hanya tersedia untuk guru yang menjadi wali kelas.
+              </p>
+            </div>
+          </Card>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="min-h-screen bg-gray-50 p-4">
-      <div className="max-w-7xl mx-auto space-y-6">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 py-6">
+      <div className="w-full space-y-8 px-4 sm:px-6 lg:px-8">
         {/* Password Modal */}
         <PasswordModal
           isOpen={passwordModal.isOpen}
@@ -1635,8 +2423,339 @@ export default function ASiswa() {
           loading={passwordModal.loading}
         />
 
+        {importModalOpen && (
+          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl overflow-hidden">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+                <div>
+                  <h3 className="text-lg font-bold text-gray-900">Import Data Siswa</h3>
+                  <p className="text-sm text-gray-500">
+                    Upload Excel/CSV atau Google Sheets untuk membuat akun siswa otomatis.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setImportModalOpen(false)
+                    resetImportState()
+                  }}
+                  className="text-gray-500 hover:text-gray-700 text-sm"
+                >
+                  ✕ Tutup
+                </button>
+              </div>
+
+              <div className="p-6 space-y-5">
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className={`px-4 py-2 rounded-lg text-sm font-medium border ${
+                      importSource === 'file'
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'bg-white text-gray-700 border-gray-200'
+                    }`}
+                    onClick={() => switchImportSource('file')}
+                  >
+                    📁 Upload File
+                  </button>
+                  <button
+                    type="button"
+                    className={`px-4 py-2 rounded-lg text-sm font-medium border ${
+                      importSource === 'sheet'
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'bg-white text-gray-700 border-gray-200'
+                    }`}
+                    onClick={() => switchImportSource('sheet')}
+                  >
+                    📊 Google Sheets
+                  </button>
+                  <button
+                    type="button"
+                    className={`px-4 py-2 rounded-lg text-sm font-medium border ${
+                      importSource === 'history'
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'bg-white text-gray-700 border-gray-200'
+                    }`}
+                    onClick={() => switchImportSource('history')}
+                  >
+                    🕘 Riwayat Import
+                  </button>
+                </div>
+
+                {importSource === 'history' ? (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div className="border border-gray-200 rounded-xl overflow-hidden">
+                      <div className="px-4 py-3 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
+                        <p className="text-sm font-semibold text-gray-900">
+                          Daftar Riwayat
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => loadImportHistories(selectedImportHistory?.id || null)}
+                          className="text-xs px-3 py-1 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+                          disabled={importHistoryLoading || importHistoryActionLoading}
+                        >
+                          Refresh
+                        </button>
+                      </div>
+
+                      <div className="max-h-80 overflow-auto divide-y divide-gray-100">
+                        {importHistoryLoading ? (
+                          <div className="p-4 text-sm text-gray-500">Memuat riwayat...</div>
+                        ) : importHistories.length ? (
+                          importHistories.map((history) => {
+                            const isActive = selectedImportHistory?.id === history.id
+                            const title = history.file_name || (history.source === 'sheet' ? 'Google Sheets' : 'Tanpa nama file')
+                            const sourceLabel = IMPORT_SOURCE_LABEL[history.source] || history.source || 'Unknown'
+                            const statusLabel = history.status === 'saved' ? 'Tersimpan' : 'Draft'
+                            const statusClass = history.status === 'saved'
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : 'bg-amber-100 text-amber-700'
+
+                            return (
+                              <button
+                                key={history.id}
+                                type="button"
+                                onClick={() => openImportHistory(history)}
+                                className={`w-full text-left px-4 py-3 transition-colors ${
+                                  isActive ? 'bg-blue-50' : 'hover:bg-gray-50'
+                                }`}
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <p className="text-sm font-semibold text-gray-900 truncate">{title}</p>
+                                    <p className="text-xs text-gray-500">
+                                      {sourceLabel} • {formatDate(history.created_at)}
+                                    </p>
+                                    <p className="text-xs text-gray-600 mt-1">
+                                      Baru {history.created_rows || 0} • Update {history.updated_rows || 0} • Gagal {history.failed_rows || 0}
+                                    </p>
+                                  </div>
+                                  <span className={`text-[10px] px-2 py-1 rounded-full font-semibold ${statusClass}`}>
+                                    {statusLabel}
+                                  </span>
+                                </div>
+                              </button>
+                            )
+                          })
+                        ) : (
+                          <div className="p-4 text-sm text-gray-500">Belum ada riwayat import.</div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="border border-gray-200 rounded-xl overflow-hidden">
+                      <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
+                        <p className="text-sm font-semibold text-gray-900">
+                          Detail Import
+                        </p>
+                      </div>
+
+                      {!selectedImportHistory ? (
+                        <div className="p-4 text-sm text-gray-500">
+                          Pilih salah satu riwayat untuk melihat detail.
+                        </div>
+                      ) : (
+                        <div className="p-4 space-y-3">
+                          <div className="text-sm text-gray-700 space-y-1">
+                            <p><span className="font-semibold">Sumber:</span> {IMPORT_SOURCE_LABEL[selectedImportHistory.source] || selectedImportHistory.source || 'Unknown'}</p>
+                            <p><span className="font-semibold">File:</span> {selectedImportHistory.file_name || '—'}</p>
+                            <p><span className="font-semibold">Dibuat:</span> {formatDate(selectedImportHistory.created_at)}</p>
+                            <p><span className="font-semibold">Hasil:</span> Baru {selectedImportHistory.created_rows || 0} • Update {selectedImportHistory.updated_rows || 0} • Lewati {selectedImportHistory.skipped_rows || 0} • Gagal {selectedImportHistory.failed_rows || 0}</p>
+                          </div>
+
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={saveSelectedImportHistory}
+                              disabled={importHistoryActionLoading || selectedImportHistory.status === 'saved'}
+                              className="px-3 py-2 text-sm rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                            >
+                              Simpan
+                            </button>
+                            <button
+                              type="button"
+                              onClick={deleteSelectedImportHistory}
+                              disabled={importHistoryActionLoading}
+                              className="px-3 py-2 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+                            >
+                              Hapus Import
+                            </button>
+                          </div>
+
+                          <div className="text-xs text-gray-500">
+                            Jika dihapus, akun siswa yang dibuat dari batch ini akan ikut dihapus.
+                          </div>
+
+                          <div className="border border-gray-200 rounded-lg overflow-hidden">
+                            <div className="max-h-44 overflow-auto">
+                              <table className="w-full text-xs">
+                                <thead className="bg-gray-50">
+                                  <tr>
+                                    <th className="px-2 py-2 text-left font-semibold text-gray-600">NIS</th>
+                                    <th className="px-2 py-2 text-left font-semibold text-gray-600">Nama</th>
+                                    <th className="px-2 py-2 text-left font-semibold text-gray-600">Kelas</th>
+                                    <th className="px-2 py-2 text-left font-semibold text-gray-600">Status</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {importHistoryDetailLoading ? (
+                                    <tr>
+                                      <td colSpan="4" className="px-2 py-3 text-center text-gray-500">
+                                        Memuat detail...
+                                      </td>
+                                    </tr>
+                                  ) : importHistoryItems.length ? (
+                                    importHistoryItems.map((item) => (
+                                      <tr key={item.id} className="border-t border-gray-100">
+                                        <td className="px-2 py-2">{item.nis || '—'}</td>
+                                        <td className="px-2 py-2">{item.nama || '—'}</td>
+                                        <td className="px-2 py-2">{getNamaKelas(item.kelas)}</td>
+                                        <td className="px-2 py-2">
+                                          <span className="font-semibold">{item.status}</span>
+                                          {item.error_message ? (
+                                            <p className="text-red-600 mt-0.5">{item.error_message}</p>
+                                          ) : null}
+                                        </td>
+                                      </tr>
+                                    ))
+                                  ) : (
+                                    <tr>
+                                      <td colSpan="4" className="px-2 py-3 text-center text-gray-500">
+                                        Tidak ada detail item.
+                                      </td>
+                                    </tr>
+                                  )}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {importSource === 'file' && (
+                      <div className="space-y-3">
+                        <input
+                          type="file"
+                          accept=".xlsx,.xls,.csv"
+                          onChange={(e) => handleImportFileChange(e.target.files?.[0])}
+                          className="block w-full text-sm text-gray-700 file:mr-4 file:rounded-lg file:border-0 file:bg-blue-50 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-blue-700 hover:file:bg-blue-100"
+                          disabled={importLoading}
+                        />
+                        {importFile && (
+                          <p className="text-xs text-gray-500">File terpilih: {importFile.name}</p>
+                        )}
+                      </div>
+                    )}
+
+                    {importSource === 'sheet' && (
+                      <div className="space-y-3">
+                        <input
+                          type="text"
+                          placeholder="Tempel link Google Sheets (publik)"
+                          value={sheetUrl}
+                          onChange={(e) => setSheetUrl(e.target.value)}
+                          className="w-full rounded-lg border border-gray-200 px-4 py-2 text-sm"
+                          disabled={importLoading}
+                        />
+                        <button
+                          type="button"
+                          onClick={handleLoadSheet}
+                          className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-60"
+                          disabled={importLoading || !sheetUrl.trim()}
+                        >
+                          Ambil Data
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-800">
+                      <p className="font-semibold mb-1">Catatan penting</p>
+                      <ul className="list-disc list-inside space-y-1">
+                        <li>Kolom wajib: <b>Nama</b>, <b>NIS</b>, dan <b>Kelas</b>.</li>
+                        <li>Password awal otomatis dari <b>tanggal lahir</b> (contoh 05/08/2010 → 05082010).</li>
+                        <li>Usia akan dihitung otomatis dari tanggal lahir yang valid.</li>
+                        <li>Login awal siswa: pakai <b>NIS</b> dan password tanggal lahir.</li>
+                        <li>Nama kelas dari Excel harus sama dengan kelas yang sudah dibuat (otomatis dicocokkan uppercase).</li>
+                        <li>Setelah login, siswa wajib ganti password. Jika email belum ada, isi email dulu.</li>
+                      </ul>
+                    </div>
+
+                    <div className="flex flex-wrap gap-4 text-sm">
+                      <div className="px-4 py-2 rounded-lg bg-gray-50 border border-gray-200">
+                        Data siap import: <b>{importRows.length}</b>
+                      </div>
+                      <div className="px-4 py-2 rounded-lg bg-gray-50 border border-gray-200">
+                        Error validasi: <b>{importErrors.length}</b>
+                      </div>
+                    </div>
+
+                    {importErrors.length > 0 && (
+                      <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
+                        <p className="font-semibold mb-2">Contoh error</p>
+                        <ul className="list-disc list-inside space-y-1 max-h-28 overflow-auto">
+                          {importErrors.slice(0, 5).map((err, idx) => (
+                            <li key={`${err.row}-${idx}`}>
+                              Baris {err.row}: {err.reason}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {importSummary && (
+                      <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-sm text-emerald-800">
+                        <p className="font-semibold mb-2">Hasil Import</p>
+                        <p>Baru: {importSummary.created} • Update: {importSummary.updated} • Lewati: {importSummary.skipped} • Gagal: {importSummary.failed}</p>
+                        {importSummary.historyId ? (
+                          <p className="mt-1 text-emerald-700">Riwayat tersimpan. Buka tab <b>Riwayat Import</b> untuk kelola batch ini.</p>
+                        ) : null}
+                        {importSummary.errors?.length ? (
+                          <ul className="list-disc list-inside space-y-1 mt-2 max-h-28 overflow-auto">
+                            {importSummary.errors.slice(0, 5).map((err, idx) => (
+                              <li key={`${err.row}-${idx}`}>
+                                Baris {err.row}: {err.reason}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
+              <div className="px-6 py-4 border-t border-gray-200 flex flex-wrap justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setImportModalOpen(false)
+                    resetImportState()
+                  }}
+                  className="px-4 py-2 rounded-lg border border-gray-200 text-gray-700 text-sm"
+                >
+                  Tutup
+                </button>
+                {importSource !== 'history' && (
+                  <button
+                    type="button"
+                    onClick={handleRunImport}
+                    disabled={importLoading || !importRows.length}
+                    className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-60"
+                  >
+                    {importLoading ? 'Memproses...' : 'Mulai Import'}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Header */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-center gap-4">
               <div className="p-3 bg-blue-100 rounded-lg">
@@ -1647,23 +2766,42 @@ export default function ASiswa() {
                 <p className="text-gray-600">
                   Kelola data siswa, kelas, organisasi, OSIS, dan kartu RFID
                 </p>
+                {isGuru && (
+                  <p className="text-xs text-amber-700 mt-1">
+                    Mode Wali Kelas: hanya lihat data siswa. Perubahan hanya untuk kartu RFID.
+                  </p>
+                )}
               </div>
             </div>
 
-            <div className="mt-4 lg:mt-0 flex flex-col sm:flex-row gap-2">
-              <button
-                className="bg-indigo-50 text-indigo-700 px-4 py-2 rounded-lg border border-indigo-200 hover:bg-indigo-100 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-all duration-200 font-medium"
-                onClick={openPromotionModal}
-              >
-                ⬆️ Kenaikan Kelas
-              </button>
-              <button
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 font-medium"
-                onClick={() => setShowAddForm(!showAddForm)}
-              >
-                {showAddForm ? '✕ Tutup Form' : '➕ Tambah Siswa'}
-              </button>
-            </div>
+            {canManage && (
+              <div className="mt-4 lg:mt-0 flex flex-col sm:flex-row gap-2">
+                <button
+                  className="bg-emerald-50 text-emerald-700 px-4 py-2 rounded-lg border border-emerald-200 hover:bg-emerald-100 focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 transition-all duration-200 font-medium"
+                  onClick={exportSiswaToExcel}
+                >
+                  ⬇️ Export
+                </button>
+                <button
+                  className="bg-amber-50 text-amber-700 px-4 py-2 rounded-lg border border-amber-200 hover:bg-amber-100 focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 transition-all duration-200 font-medium"
+                  onClick={() => setImportModalOpen(true)}
+                >
+                  ⬆️ Import
+                </button>
+                <button
+                  className="bg-indigo-50 text-indigo-700 px-4 py-2 rounded-lg border border-indigo-200 hover:bg-indigo-100 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-all duration-200 font-medium"
+                  onClick={openPromotionModal}
+                >
+                  ⬆️ Kenaikan Kelas
+                </button>
+                <button
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 font-medium"
+                  onClick={() => setShowAddForm(!showAddForm)}
+                >
+                  {showAddForm ? '✕ Tutup Form' : '➕ Tambah Siswa'}
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -1700,7 +2838,7 @@ export default function ASiswa() {
         </div>
 
         {/* Form Tambah Siswa */}
-        {showAddForm && (
+        {canManage && showAddForm && (
           <Card className="mb-6">
             <div className="bg-blue-50 border-b border-blue-200 p-4">
               <h3 className="text-lg font-semibold text-blue-900 flex items-center gap-2">
@@ -1740,12 +2878,12 @@ export default function ASiswa() {
                   ]}
                 />
                 <Input
-                  label="NIK"
-                  name="nik"
-                  value={form.nik}
+                  label="NIS"
+                  name="nis"
+                  value={form.nis}
                   onChange={handleChange}
                   placeholder="Nomor Induk Siswa"
-                  error={formErrors.nik}
+                  error={formErrors.nis}
                 />
                 <Select
                   label="Jenis Kelamin"
@@ -1817,19 +2955,17 @@ export default function ASiswa() {
                 onChange={e => setQNama(e.target.value)}
               />
               <Input
-                label="NIK"
-                placeholder="Cari NIK"
-                value={qNIK}
-                onChange={e => setQNIK(e.target.value)}
+                label="NIS"
+                placeholder="Cari NIS"
+                value={qNIS}
+                onChange={e => setQNIS(e.target.value)}
               />
               <Select
                 label="Kelas"
                 value={qKelas}
                 onChange={e => setQKelas(e.target.value)}
-                options={[
-                  { value: '', label: 'Semua Kelas' },
-                  ...kelasOptions.map(k => ({ value: k.value, label: k.label }))
-                ]}
+                options={kelasFilterOptions}
+                disabled={isGuru && kelasOptions.length === 1}
               />
               <Select
                 label="Status RFID"
@@ -1895,16 +3031,18 @@ export default function ASiswa() {
                     <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border-b">No</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">Siswa</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">Kelas</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">NIK</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">NIS</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">JK</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">RFID</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">Status</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider border-b">Aksi</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                      {canManage ? 'Aksi' : 'Detail'}
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {siswa.map((s, index) => {
-                    const foto = s.photo_url || s.foto_url || s.foto || ''
+                    const foto = s.photo_path || s.photo_url || s.foto_url || s.foto || ''
                     const isKetua = isKetuaKelas(s.id)
 
                     return (
@@ -1935,7 +3073,7 @@ export default function ASiswa() {
                         </td>
 
                         <td className="px-4 py-3 text-sm text-gray-900">{getNamaKelas(s.kelas)}</td>
-                        <td className="px-4 py-3 text-sm text-gray-900">{s.nik || '—'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-900">{s.nis || '—'}</td>
                         <td className="px-4 py-3 text-sm text-gray-900">{JK_LABEL(s.jk)}</td>
 
                         <td className="px-4 py-3 text-sm">
@@ -1960,13 +3098,17 @@ export default function ASiswa() {
                         <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-medium space-x-1">
                           <Button variant="primary" size="sm" onClick={() => openDetail(s)}>Detail</Button>
 
-                          {(s.status || 'active') === 'active' ? (
-                            <Button variant="warning" size="sm" onClick={() => openNonaktifModal(s)}>Nonaktif</Button>
-                          ) : (
-                            <Button variant="success" size="sm" onClick={() => openAktifkanModal(s)}>Aktifkan</Button>
-                          )}
+                          {canManage && (
+                            <>
+                              {(s.status || 'active') === 'active' ? (
+                                <Button variant="warning" size="sm" onClick={() => openNonaktifModal(s)}>Nonaktif</Button>
+                              ) : (
+                                <Button variant="success" size="sm" onClick={() => openAktifkanModal(s)}>Aktifkan</Button>
+                              )}
 
-                          <Button variant="danger" size="sm" onClick={() => openDeleteConfirm(s)}>Keluar</Button>
+                              <Button variant="danger" size="sm" onClick={() => openDeleteConfirm(s)}>Hapus</Button>
+                            </>
+                          )}
                         </td>
                       </tr>
                     )
@@ -1989,78 +3131,27 @@ export default function ASiswa() {
           </div>
         </Card>
 
-        {/* Modal Konfirmasi Keluar Sekolah */}
-        {deleteConfirmOpen && (
+        {/* Modal Konfirmasi Hapus Siswa */}
+        {canManage && deleteConfirmOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-lg p-6 w-full max-w-md">
               <div className="flex items-center gap-3 mb-4">
                 <div className="p-2 bg-red-100 text-red-600 rounded-lg">
-                  <span className="text-xl">🚪</span>
+                  <span className="text-xl">🗑️</span>
                 </div>
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900">Keluarkan dari Sekolah</h3>
-                  <p className="text-gray-600 text-sm">Tanpa menghapus riwayat absensi / tugas</p>
+                  <h3 className="text-lg font-semibold text-gray-900">Hapus Akun Siswa</h3>
+                  <p className="text-gray-600 text-sm">Tindakan ini permanen dan tidak bisa dibatalkan</p>
                 </div>
               </div>
 
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-4 space-y-3">
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4 space-y-2">
                 <p className="text-gray-800 text-sm">
                   Target: <strong>{siswaToDelete?.nama}</strong> ({siswaToDelete?.email})
                 </p>
-
-                <div className="grid grid-cols-1 gap-3">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Mode</label>
-                    <select
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 bg-white"
-                      value={keluarMode}
-                      onChange={(e) => setKeluarMode(e.target.value)}
-                      disabled={deletingSiswa}
-                    >
-                      <option value="mutasi">📤 Mutasi / Pindah Sekolah</option>
-                      <option value="alumni">🎓 Alumni / Lulus</option>
-                      <option value="nonaktif">⏸️ Nonaktif Permanen</option>
-                    </select>
-                    <p className="text-xs text-gray-500 mt-1">
-                      Catatan: semua mode di atas akan mematikan akses login.
-                    </p>
-                  </div>
-
-                  {keluarMode === 'alumni' && (
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Tahun Lulus</label>
-                      <input
-                        type="number"
-                        min="2000"
-                        max="2100"
-                        value={keluarYear}
-                        onChange={(e) => setKeluarYear(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
-                        placeholder="2025"
-                        disabled={deletingSiswa}
-                      />
-                    </div>
-                  )}
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Alasan *</label>
-                    <textarea
-                      value={keluarReason}
-                      onChange={(e) => setKeluarReason(e.target.value)}
-                      placeholder={
-                        keluarMode === 'alumni'
-                          ? 'Contoh: Lulus sesuai kelulusan sekolah.'
-                          : 'Contoh: Pindah sekolah / mutasi orang tua.'
-                      }
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 bg-white resize-none"
-                      rows={3}
-                      disabled={deletingSiswa}
-                    />
-                    <p className="text-xs text-gray-500 mt-1">
-                      Sistem akan: mengosongkan kelas & RFID agar tidak muncul di daftar aktif, tapi riwayat tetap aman.
-                    </p>
-                  </div>
-                </div>
+                <p className="text-red-700 text-xs">
+                  Semua data akun siswa akan dihapus permanen dari sistem.
+                </p>
               </div>
 
               <div className="flex justify-end space-x-3">
@@ -2069,9 +3160,8 @@ export default function ASiswa() {
                   variant="danger"
                   onClick={hapusAkunSiswa}
                   loading={deletingSiswa}
-                  disabled={!keluarReason.trim()}
                 >
-                  🚪 Proses
+                  🗑️ Ya, Hapus
                 </Button>
               </div>
             </div>
@@ -2079,7 +3169,7 @@ export default function ASiswa() {
         )}
 
         {/* Modal Nonaktifkan */}
-        {nonaktifModalOpen && (
+        {canManage && nonaktifModalOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-lg p-6 w-full max-w-md">
               <div className="flex items-center gap-3 mb-4">
@@ -2131,7 +3221,7 @@ export default function ASiswa() {
         )}
 
         {/* Modal Aktifkan */}
-        {aktifkanModalOpen && (
+        {canManage && aktifkanModalOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-lg p-6 w-full max-w-md">
               <div className="flex items-center gap-3 mb-4">
@@ -2170,7 +3260,7 @@ export default function ASiswa() {
         )}
 
         {/* Modal Kenaikan Kelas */}
-        {promotionModalOpen && (
+        {canManage && promotionModalOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-lg p-6 w-full max-w-lg">
               <div className="flex items-center gap-3 mb-4">
@@ -2402,7 +3492,7 @@ export default function ASiswa() {
                 <div className="flex items-center space-x-4">
                   <div className="flex-shrink-0 h-12 w-12">
                     <ProfileAvatar
-                      src={detailUser?.photo_url}
+                      src={detailUser?.photo_path || detailUser?.photo_url}
                       name={detailUser?.nama}
                       size={48}
                       className="border-gray-200"
@@ -2414,6 +3504,11 @@ export default function ASiswa() {
                       <h3 className="text-lg font-semibold text-gray-900">
                         {detailUser?.nama || detailUser?.email}
                       </h3>
+                      {!canManage && (
+                        <Badge variant="info" className="text-xs">
+                          Wali Kelas • Read-only
+                        </Badge>
+                      )}
                       {isKetuaKelas(detailUser?.id) && (
                         <Badge variant="warning" className="text-xs">
                           👑 Ketua {getKelasKetua(detailUser?.id)}
@@ -2426,25 +3521,28 @@ export default function ASiswa() {
                       )}
                     </div>
                     <p className="text-gray-600 text-sm mt-1">
-                      {detailUser?.email || '—'} • NIK: {detailUser?.nik || '—'}
+                      {detailUser?.email || '—'} • NIS: {detailUser?.nis || '—'}
                     </p>
                   </div>
                 </div>
 
                 <div className="flex items-center space-x-2">
-                  {detailUser?.status === 'active' ? (
-                    <Button variant="warning" size="sm" onClick={() => openNonaktifModal(detailUser)}>
-                      ⏸️ Nonaktif
-                    </Button>
-                  ) : (
-                    <Button variant="success" size="sm" onClick={() => openAktifkanModal(detailUser)}>
-                      ✅ Aktifkan
-                    </Button>
+                  {canManage && (
+                    <>
+                      {detailUser?.status === 'active' ? (
+                        <Button variant="warning" size="sm" onClick={() => openNonaktifModal(detailUser)}>
+                          ⏸️ Nonaktif
+                        </Button>
+                      ) : (
+                        <Button variant="success" size="sm" onClick={() => openAktifkanModal(detailUser)}>
+                          ✅ Aktifkan
+                        </Button>
+                      )}
+                      <Button variant="danger" size="sm" onClick={() => openDeleteConfirm(detailUser)}>
+                        🗑️ Hapus
+                      </Button>
+                    </>
                   )}
-                  {/* FIX label: ini soft-delete/keluar sekolah */}
-                  <Button variant="danger" size="sm" onClick={() => openDeleteConfirm(detailUser)}>
-                    🚪 Keluar
-                  </Button>
                   <button
                     className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"
                     onClick={closeDetailModal}
@@ -2472,35 +3570,59 @@ export default function ASiswa() {
                           <span>🏫</span>
                           Kelas & Status
                         </h4>
-                        <div className="space-y-3">
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                            <Select
-                              label="Tingkatan"
-                              value={moveGrade}
-                              onChange={e => { setMoveGrade(e.target.value); setMoveKelas('') }}
-                              options={[
-                                { value: '', label: 'Pilih tingkatan' },
-                                ...gradeLabels.map(g => ({ value: g, label: g }))
-                              ]}
-                            />
-                            <Select
-                              label="Kelas"
-                              value={moveKelas}
-                              onChange={e => setMoveKelas(e.target.value)}
-                              options={(() => {
-                                const baseGrade = getGradeLabel(detailUser?.kelas || '') || moveGrade
-                                const options = kelasByGrade(baseGrade)
-
-                                if (!baseGrade) return [{ value: '', label: 'Pilih tingkatan dulu' }]
-                                if (options.length === 0) return [{ value: '', label: 'Tidak ada kelas pada tingkatan ini' }]
-
-                                return [
-                                  { value: '', label: 'Pilih kelas' },
-                                  ...options.map(k => ({ value: k.id, label: getKelasDisplayName(k) }))
-                                ]
-                              })()}
-                            />
+                        {!canManage && (
+                          <div className="mb-3 text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+                            Mode baca saja untuk wali kelas. Perubahan data siswa dinonaktifkan.
                           </div>
+                        )}
+                        <div className="space-y-3">
+                          {canManage ? (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              <Select
+                                label="Tingkatan"
+                                value={moveGrade}
+                                onChange={e => { setMoveGrade(e.target.value); setMoveKelas('') }}
+                                disabled={!canManage}
+                                options={[
+                                  { value: '', label: 'Pilih tingkatan' },
+                                  ...gradeLabels.map(g => ({ value: g, label: g }))
+                                ]}
+                              />
+                              <Select
+                                label="Kelas"
+                                value={moveKelas}
+                                onChange={e => setMoveKelas(e.target.value)}
+                                disabled={!canManage}
+                                options={(() => {
+                                  const baseGrade = getGradeLabel(detailUser?.kelas || '') || moveGrade
+                                  const options = kelasByGrade(baseGrade)
+
+                                  if (!baseGrade) return [{ value: '', label: 'Pilih tingkatan dulu' }]
+                                  if (options.length === 0) return [{ value: '', label: 'Tidak ada kelas pada tingkatan ini' }]
+
+                                  return [
+                                    { value: '', label: 'Pilih kelas' },
+                                    ...options.map(k => ({ value: k.id, label: getKelasDisplayName(k) }))
+                                  ]
+                                })()}
+                              />
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              <div className="p-3 rounded-lg bg-gray-50 border border-gray-200">
+                                <p className="text-xs text-gray-500 mb-1">Tingkatan</p>
+                                <p className="text-sm font-semibold text-gray-900">
+                                  {getGradeLabel(detailUser?.kelas || '') || '—'}
+                                </p>
+                              </div>
+                              <div className="p-3 rounded-lg bg-gray-50 border border-gray-200">
+                                <p className="text-xs text-gray-500 mb-1">Kelas</p>
+                                <p className="text-sm font-semibold text-gray-900">
+                                  {getNamaKelas(detailUser?.kelas) || '—'}
+                                </p>
+                              </div>
+                            </div>
+                          )}
 
                           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-3 border-t">
                             <div className="text-sm">
@@ -2509,14 +3631,16 @@ export default function ASiswa() {
                                 {STATUS_META(detailUser?.status || 'active').label}
                               </span>
                             </div>
-                            <div className="flex gap-2">
-                              <Button onClick={simpanPindahKelas} disabled={!moveKelas || moveKelas === detailUser?.kelas} size="sm">
-                                💾 Simpan
-                              </Button>
-                              <Button variant="secondary" onClick={kosongkanKelas} size="sm">
-                                🗑️ Kosongkan
-                              </Button>
-                            </div>
+                            {canManage && (
+                              <div className="flex gap-2">
+                                <Button onClick={simpanPindahKelas} disabled={!moveKelas || moveKelas === detailUser?.kelas} size="sm">
+                                  💾 Simpan
+                                </Button>
+                                <Button variant="secondary" onClick={kosongkanKelas} size="sm">
+                                  🗑️ Kosongkan
+                                </Button>
+                              </div>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -2535,6 +3659,7 @@ export default function ASiswa() {
                               value={rfidInput}
                               onChange={e => setRfidInput(e.target.value.toUpperCase())}
                               placeholder="Tap kartu atau isi manual"
+                              disabled={!canManageRfid}
                             />
                             {detailUser?.rfid_uid && (
                               <p className="text-xs text-gray-500 mt-1">
@@ -2546,26 +3671,28 @@ export default function ASiswa() {
                             )}
                           </div>
 
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                            <Button
-                              variant={rfidEnrolling ? 'warning' : 'primary'}
-                              size="sm"
-                              onClick={toggleRfidListen}
-                            >
-                              {rfidEnrolling ? '⏹️ Stop' : '🎫 Scan'}
-                            </Button>
-                            <Button variant="success" size="sm" onClick={saveRfid} disabled={!rfidInput}>
-                              💾 Simpan
-                            </Button>
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              onClick={clearRfid}
-                              disabled={!detailUser?.rfid_uid && !rfidInput}
-                            >
-                              🗑️ Hapus
-                            </Button>
-                          </div>
+                          {canManageRfid && (
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                              <Button
+                                variant={rfidEnrolling ? 'warning' : 'primary'}
+                                size="sm"
+                                onClick={toggleRfidListen}
+                              >
+                                {rfidEnrolling ? '⏹️ Stop' : '🎫 Scan'}
+                              </Button>
+                              <Button variant="success" size="sm" onClick={saveRfid} disabled={!rfidInput}>
+                                💾 Simpan
+                              </Button>
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={clearRfid}
+                                disabled={!detailUser?.rfid_uid && !rfidInput}
+                              >
+                                🗑️ Hapus
+                              </Button>
+                            </div>
+                          )}
 
                           {rfidLastScan && (
                             <div className="text-xs text-gray-500">
@@ -2583,7 +3710,7 @@ export default function ASiswa() {
                           <span>📱</span>
                           Informasi Kontak
                         </h4>
-                        {!editingPhone && (
+                        {canManage && !editingPhone && (
                           <Button variant="primary" size="sm" onClick={handleEditPhone}>
                             ✏️ Edit
                           </Button>
@@ -2690,7 +3817,9 @@ export default function ASiswa() {
                                 <p className="text-sm font-medium text-gray-900">{row.orgNama}</p>
                                 <p className="text-xs text-gray-500">{row.jabatan} • {row.bagian || '-'}</p>
                               </div>
-                              <Button variant="danger" size="sm" onClick={() => hapusOrg(row.orgId)}>🗑️</Button>
+                              {canManage && (
+                                <Button variant="danger" size="sm" onClick={() => hapusOrg(row.orgId)}>🗑️</Button>
+                              )}
                             </div>
                           ))}
                           {!orgMember.length && (
@@ -2724,9 +3853,11 @@ export default function ASiswa() {
                                 <p className="text-sm text-gray-900">{osisRow.bagian}</p>
                               </div>
                             )}
-                            <div className="flex justify-end">
-                              <Button variant="danger" size="sm" onClick={hapusOsis}>🗑️ Hapus</Button>
-                            </div>
+                            {canManage && (
+                              <div className="flex justify-end">
+                                <Button variant="danger" size="sm" onClick={hapusOsis}>🗑️ Hapus</Button>
+                              </div>
+                            )}
                           </div>
                         ) : (
                           <p className="text-gray-500 text-sm text-center py-4">Belum terdaftar di OSIS</p>
@@ -2750,6 +3881,10 @@ export default function ASiswa() {
                           <p className="text-sm text-gray-900">{detailUser?.usia ? `${detailUser.usia} tahun` : '—'}</p>
                         </div>
                         <div>
+                          <p className="text-sm font-medium text-gray-700">Tanggal Lahir</p>
+                          <p className="text-sm text-gray-900">{formatDate(detailUser?.tanggal_lahir)}</p>
+                        </div>
+                        <div>
                           <p className="text-sm font-medium text-gray-700">Agama</p>
                           <p className="text-sm text-gray-900">{detailUser?.agama || '—'}</p>
                         </div>
@@ -2769,3 +3904,5 @@ export default function ASiswa() {
     </div>
   )
 }
+
+

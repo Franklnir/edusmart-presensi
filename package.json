@@ -9,7 +9,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.81.1",
     "appwrite": "^21.4.0",
     "browser-image-compression": "^2.0.2",
     "clsx": "^2.1.1",
@@ -37,6 +36,7 @@
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^5.1.0",
     "autoprefixer": "^10.4.20",
+    "baseline-browser-mapping": "^2.9.19",
     "envify": "^4.1.0",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.14",

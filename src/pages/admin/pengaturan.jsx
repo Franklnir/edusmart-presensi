@@ -7,7 +7,6 @@ import FileDropzone from '../../components/FileDropzone'
 
 const SUPABASE_BUCKET = 'profile-photos'
 const LOGO_FILE_PATH = 'logo_sekolah.png'
-const RFID_SETTINGS_ID = '00000000-0000-0000-0000-000000000001'
 
 // ✅ Signed URL expire (detik). Bisa kamu naikkan/turunkan sesuai kebutuhan.
 // Catatan: karena DB sekarang menyimpan PATH saja, signed URL dibuat saat runtime.
@@ -264,6 +263,7 @@ export default function APengaturan() {
     rfid_mulai: '07:00',
     rfid_selesai: '15:00'
   })
+  const [rfidSettingsId, setRfidSettingsId] = useState('')
 
   // ✅ Pisahkan PATH vs URL runtime
   const [avatarPath, setAvatarPath] = useState('')       // objectKey
@@ -377,14 +377,19 @@ export default function APengaturan() {
         let { data, error } = await supabase
           .from('absensi_rfid_settings')
           .select('*')
-          .eq('id', RFID_SETTINGS_ID)
-          .single()
+          .order('updated_at', { ascending: false })
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
 
-        if (error && error.code === 'PGRST116') {
+        if (error) throw error
+
+        if (!data) {
+          const newId = makeRandomId()
           const { data: inserted, error: insertError } = await supabase
             .from('absensi_rfid_settings')
             .insert({
-              id: RFID_SETTINGS_ID,
+              id: newId,
               rfid_aktif: false,
               rfid_mulai: '07:00',
               rfid_selesai: '15:00'
@@ -394,11 +399,10 @@ export default function APengaturan() {
 
           if (insertError) throw insertError
           data = inserted
-        } else if (error) {
-          throw error
         }
 
         if (!isCancelled && data) {
+          setRfidSettingsId(data.id || '')
           setRfidSettings({
             rfid_aktif: data.rfid_aktif || false,
             rfid_mulai: normalizeTimeString(data.rfid_mulai) || '07:00',
@@ -513,16 +517,23 @@ export default function APengaturan() {
       )
       .on(
         'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'absensi_rfid_settings',
-          filter: `id=eq.${RFID_SETTINGS_ID}`
-        },
+        rfidSettingsId
+          ? {
+              event: '*',
+              schema: 'public',
+              table: 'absensi_rfid_settings',
+              filter: `id=eq.${rfidSettingsId}`
+            }
+          : {
+              event: '*',
+              schema: 'public',
+              table: 'absensi_rfid_settings'
+            },
         (payload) => {
           const row = payload.new
           if (!row) return
 
+          setRfidSettingsId(row.id || '')
           setRfidSettings({
             rfid_aktif: row.rfid_aktif || false,
             rfid_mulai: normalizeTimeString(row.rfid_mulai) || '07:00',
@@ -535,7 +546,7 @@ export default function APengaturan() {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [settingsId, isAuthorized])
+  }, [settingsId, isAuthorized, rfidSettingsId])
 
   function handleChange(e) {
     const { name, value } = e.target
@@ -640,8 +651,9 @@ export default function APengaturan() {
     setRfidSettings(newRfidSettings)
 
     try {
+      const targetId = rfidSettingsId || makeRandomId()
       const payload = {
-        id: RFID_SETTINGS_ID,
+        id: targetId,
         rfid_aktif: newRfidSettings.rfid_aktif,
         rfid_mulai: newRfidSettings.rfid_mulai || null,
         rfid_selesai: newRfidSettings.rfid_selesai || null,
@@ -653,6 +665,7 @@ export default function APengaturan() {
         .upsert(payload)
 
       if (error) throw error
+      setRfidSettingsId(targetId)
       pushToast('success', 'Pengaturan RFID berhasil diperbarui.')
     } catch (err) {
       pushToast('error', 'Gagal menyimpan pengaturan RFID: ' + err.message)

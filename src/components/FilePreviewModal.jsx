@@ -11,15 +11,23 @@ function clamp(n, min, max) {
 function getSafeExtension(url) {
   if (!url) return ''
   try {
-    // signed url: ambil pathname saja
-    const u = new URL(url)
-    const path = u.pathname || ''
+    // Support absolute URL dan relative URL (/api/storage/object?...).
+    const base =
+      typeof window !== 'undefined' && window.location?.origin
+        ? window.location.origin
+        : 'http://localhost'
+    const u = new URL(url, base)
+    const queryPath = u.searchParams.get('path') || ''
+    const path = queryPath || u.pathname || ''
     const clean = path.split('?')[0].split('#')[0]
     const ext = clean.split('.').pop()?.toLowerCase() || ''
     return ext
   } catch {
-    // bukan URL valid, treat sebagai path biasa
-    const clean = String(url).split('?')[0].split('#')[0]
+    // bukan URL valid, treat sebagai path biasa (dan coba baca query ?path=)
+    const raw = String(url || '')
+    const pathMatch = raw.match(/[?&]path=([^&]+)/i)
+    const decodedPath = pathMatch?.[1] ? decodeURIComponent(pathMatch[1]) : raw
+    const clean = decodedPath.split('?')[0].split('#')[0]
     const ext = clean.split('.').pop()?.toLowerCase() || ''
     return ext
   }
@@ -29,6 +37,8 @@ function detectFileType(fileUrl) {
   const ext = getSafeExtension(fileUrl)
   if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(ext)) return 'image'
   if (ext === 'pdf') return 'pdf'
+  if (['mp4', 'webm', 'ogg', 'mov', 'mkv'].includes(ext)) return 'video'
+  if (['mp3', 'wav', 'm4a', 'aac', 'ogg'].includes(ext)) return 'audio'
   if (['doc', 'docx'].includes(ext)) return 'document'
   if (['xls', 'xlsx'].includes(ext)) return 'spreadsheet'
   if (['ppt', 'pptx'].includes(ext)) return 'presentation'
@@ -238,20 +248,44 @@ const FilePreviewModal = ({ fileUrl, onClose }) => {
           </div>
         )
 
+      case 'video':
+        return (
+          <div className="w-full h-full bg-black flex items-center justify-center p-4">
+            <video
+              src={fileUrl}
+              controls
+              className="max-w-full max-h-full rounded-lg bg-black"
+              preload="metadata"
+            />
+          </div>
+        )
+
+      case 'audio':
+        return (
+          <div className="w-full h-full bg-slate-900 flex items-center justify-center p-4">
+            <audio src={fileUrl} controls className="w-full max-w-xl" preload="metadata" />
+          </div>
+        )
+
       default:
         return (
-          <div className="flex flex-col items-center justify-center h-full text-slate-200 bg-slate-900">
-            <div className="text-6xl mb-4">📄</div>
-            <p className="text-lg font-semibold mb-1">Preview tidak tersedia</p>
-            <p className="text-sm text-slate-300 mb-4">File ini tidak bisa ditampilkan di modal.</p>
-            <a
-              href={fileUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold"
-            >
-              Buka di Tab Baru
-            </a>
+          <div className="w-full h-full bg-slate-900 flex flex-col">
+            <div className="px-4 py-2 text-xs text-slate-300 border-b border-slate-700">
+              Mencoba menampilkan file di dalam overlay...
+            </div>
+            <div className="flex-1">
+              <iframe src={fileUrl} className="w-full h-full border-0 bg-white" title="File Preview" />
+            </div>
+            <div className="px-4 py-3 border-t border-slate-700 bg-slate-900 text-slate-200 text-sm flex items-center justify-between">
+              <span>Jika tidak tampil, unduh file.</span>
+              <a
+                href={fileUrl}
+                download
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold"
+              >
+                Download File
+              </a>
+            </div>
           </div>
         )
     }
@@ -332,11 +366,10 @@ const FilePreviewModal = ({ fileUrl, onClose }) => {
           <div className="flex gap-3">
             <a
               href={fileUrl}
-              target="_blank"
-              rel="noopener noreferrer"
+              download
               className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors font-semibold"
             >
-              Buka di Tab Baru
+              Download
             </a>
 
             <button

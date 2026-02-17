@@ -31,6 +31,47 @@ const formatEskulDays = (hariArray = []) => {
   return hariArray.join(', ')
 }
 
+const toDateTimeLocalValue = (value) => {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+
+  const pad = (n) => String(n).padStart(2, '0')
+  const yyyy = date.getFullYear()
+  const mm = pad(date.getMonth() + 1)
+  const dd = pad(date.getDate())
+  const hh = pad(date.getHours())
+  const mi = pad(date.getMinutes())
+  return `${yyyy}-${mm}-${dd}T${hh}:${mi}`
+}
+
+const toIsoFromDateTimeLocal = (value) => {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  return date.toISOString()
+}
+
+const formatDateTimeLabel = (value) => {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '-'
+  return date.toLocaleString('id-ID', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
+const defaultRegistrationDeadlineLocal = (days = 7) => {
+  const date = new Date()
+  date.setSeconds(0, 0)
+  date.setDate(date.getDate() + Number(days || 0))
+  return toDateTimeLocalValue(date.toISOString())
+}
+
 // Komponen Stat Card
 const StatCard = React.memo(({ label, value, icon, color = 'blue' }) => {
   const colorClasses = {
@@ -371,7 +412,8 @@ export default function AHome() {
     hari: '',
     jam_mulai: '',
     jam_selesai: '',
-    pembina_guru_id: ''
+    pembina_guru_id: '',
+    registration_deadline_at: defaultRegistrationDeadlineLocal(7)
   })
   const [eskulAnggota, setEskulAnggota] = useState([])
   const [eskulAbsensiStats, setEskulAbsensiStats] = useState({})
@@ -407,7 +449,8 @@ export default function AHome() {
           hari: data.hari || '',
           jam_mulai: data.jam_mulai || '',
           jam_selesai: data.jam_selesai || '',
-          pembina_guru_id: data.pembina_guru_id || ''
+          pembina_guru_id: data.pembina_guru_id || '',
+          registration_deadline_at: toDateTimeLocalValue(data.registration_deadline_at)
         })
       }
     } catch (error) {
@@ -473,7 +516,8 @@ export default function AHome() {
         hari: '',
         jam_mulai: '',
         jam_selesai: '',
-        pembina_guru_id: ''
+        pembina_guru_id: '',
+        registration_deadline_at: defaultRegistrationDeadlineLocal(7)
       })
       setEskulAnggota([])
       setEskulAbsensiStats({})
@@ -527,10 +571,48 @@ export default function AHome() {
     })
   }, [])
 
+  const setEskulRegistrationDeadlineByDays = useCallback((days) => {
+    const safeDays = Number(days)
+    if (!Number.isFinite(safeDays) || safeDays <= 0) return
+
+    const date = new Date()
+    date.setSeconds(0, 0)
+    date.setDate(date.getDate() + safeDays)
+
+    setEskulForm((prev) => ({
+      ...prev,
+      registration_deadline_at: toDateTimeLocalValue(date.toISOString())
+    }))
+  }, [])
+
+  const clearEskulRegistrationDeadline = useCallback(() => {
+    setEskulForm((prev) => ({
+      ...prev,
+      registration_deadline_at: ''
+    }))
+  }, [])
+
   const simpanEskul = useCallback(async () => {
     const nama = (eskulForm.nama || '').trim()
     if (!nama) {
       pushToast('error', 'Nama eskul wajib diisi.')
+      return
+    }
+
+    const registrationDeadlineIso = toIsoFromDateTimeLocal(
+      eskulForm.registration_deadline_at
+    )
+    if (!registrationDeadlineIso) {
+      pushToast(
+        'error',
+        'Batas pendaftaran wajib diisi (contoh: +3 hari atau +7 hari).'
+      )
+      return
+    }
+
+    const deadlineDate = new Date(registrationDeadlineIso)
+    if (deadlineDate.getTime() <= Date.now()) {
+      pushToast('error', 'Batas pendaftaran harus di masa depan.')
       return
     }
 
@@ -544,6 +626,7 @@ export default function AHome() {
       jam_mulai: eskulForm.jam_mulai || '',
       jam_selesai: eskulForm.jam_selesai || '',
       pembina_guru_id: pembinaId || null,
+      registration_deadline_at: registrationDeadlineIso,
       updated_at: new Date().toISOString()
     }
 
@@ -673,6 +756,14 @@ export default function AHome() {
       pushToast('error', 'Gagal menghapus anggota')
     }
   }, [eskulSel, loadEskulAnggota, pushToast])
+
+  const registrationDeadlineIso = toIsoFromDateTimeLocal(
+    eskulForm.registration_deadline_at
+  )
+  const registrationDeadlineLabel = formatDateTimeLabel(registrationDeadlineIso)
+  const registrationDeadlineClosed = registrationDeadlineIso
+    ? Date.now() > new Date(registrationDeadlineIso).getTime()
+    : false
 
   if (isLoading) {
     return (
@@ -1122,6 +1213,76 @@ export default function AHome() {
                         }))
                       }
                     />
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-semibold text-gray-700 mb-3">
+                      <span className="flex items-center gap-2">
+                        <span className="w-2 h-2 bg-amber-500 rounded-full" />
+                        Batas Pendaftaran Siswa
+                      </span>
+                    </label>
+                    <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-3">
+                      <input
+                        type="datetime-local"
+                        className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-amber-500 focus:border-amber-500 transition-all duration-200"
+                        value={eskulForm.registration_deadline_at}
+                        min={toDateTimeLocalValue(new Date().toISOString())}
+                        onChange={(e) =>
+                          setEskulForm((f) => ({
+                            ...f,
+                            registration_deadline_at: e.target.value
+                          }))
+                        }
+                      />
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setEskulRegistrationDeadlineByDays(3)}
+                          className="px-3 py-2 text-xs font-semibold rounded-lg border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors"
+                        >
+                          +3 Hari
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEskulRegistrationDeadlineByDays(7)}
+                          className="px-3 py-2 text-xs font-semibold rounded-lg border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors"
+                        >
+                          +7 Hari
+                        </button>
+                        <button
+                          type="button"
+                          onClick={clearEskulRegistrationDeadline}
+                          className="px-3 py-2 text-xs font-semibold rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-100 transition-colors"
+                        >
+                          Reset
+                        </button>
+                      </div>
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+                      <span
+                        className={`inline-flex items-center px-2.5 py-1 rounded-full font-semibold ${
+                          registrationDeadlineIso
+                            ? registrationDeadlineClosed
+                              ? 'bg-rose-100 text-rose-700 border border-rose-200'
+                              : 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                            : 'bg-gray-100 text-gray-600 border border-gray-200'
+                        }`}
+                      >
+                        {registrationDeadlineIso
+                          ? registrationDeadlineClosed
+                            ? 'Pendaftaran Ditutup'
+                            : 'Pendaftaran Dibuka'
+                          : 'Belum Diatur'}
+                      </span>
+                      <span className="text-gray-500">
+                        Batas: {registrationDeadlineLabel}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs text-gray-500">
+                      Setelah batas lewat, siswa tidak bisa daftar atau membatalkan
+                      keikutsertaan eskul.
+                    </p>
                   </div>
 
                   <div className="md:col-span-2">

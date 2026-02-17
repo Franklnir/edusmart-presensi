@@ -1,0 +1,48 @@
+FROM php:8.4-fpm-alpine
+
+RUN apk add --no-cache \
+    $PHPIZE_DEPS \
+    bash \
+    curl \
+    git \
+    icu-dev \
+    libzip-dev \
+    oniguruma-dev \
+    postgresql-dev \
+    sqlite-dev \
+    unzip \
+    && docker-php-ext-install -j"$(nproc)" \
+        bcmath \
+        intl \
+        pcntl \
+        pdo \
+        pdo_pgsql \
+        pdo_sqlite \
+        zip \
+    && pecl install redis \
+    && docker-php-ext-enable redis
+
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
+WORKDIR /var/www/html
+
+COPY backend/composer.json backend/composer.lock ./
+RUN composer install \
+    --no-dev \
+    --no-interaction \
+    --prefer-dist \
+    --optimize-autoloader \
+    --no-scripts
+
+COPY backend/ .
+COPY backend/docker/opcache.prod.ini /usr/local/etc/php/conf.d/99-opcache.ini
+
+RUN chmod +x /var/www/html/docker/entrypoint.prod.sh \
+    && rm -f /var/www/html/bootstrap/cache/*.php \
+    && mkdir -p /var/www/html/storage /var/www/html/bootstrap/cache \
+    && chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
+
+EXPOSE 9000
+
+ENTRYPOINT ["/var/www/html/docker/entrypoint.prod.sh"]
+CMD ["php-fpm", "-F"]

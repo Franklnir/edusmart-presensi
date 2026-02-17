@@ -1,5 +1,5 @@
 // src/pages/guru/TugasGuru.jsx
-import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import {
   supabase,
   ASSIGNMENT_BUCKET,
@@ -44,6 +44,10 @@ const getNowDateTimeLocal = () => {
   return now.toISOString().slice(0, 16)
 }
 
+const maxDateTimeLocal = (a, b) => (a > b ? a : b)
+
+const NEAR_DEADLINE_HOURS = 24
+
 const toDatetimeLocalValue = (isoString) => {
   if (!isoString) return getNowDateTimeLocal()
   const d = new Date(isoString)
@@ -53,6 +57,44 @@ const toDatetimeLocalValue = (isoString) => {
 }
 
 const isValidDate = (d) => d instanceof Date && !Number.isNaN(d.getTime())
+
+const getTaskWindowInfo = (mulai, deadline, stats = {}, nowRef = new Date()) => {
+  const mulaiDate = mulai ? new Date(mulai) : null
+  const deadlineDate = deadline ? new Date(deadline) : null
+
+  const isBeforeStart = mulaiDate ? isValidDate(mulaiDate) && nowRef < mulaiDate : false
+  const isExpired = deadlineDate ? isValidDate(deadlineDate) && nowRef > deadlineDate : false
+  const isNearDeadline =
+    deadlineDate && isValidDate(deadlineDate) && !isExpired
+      ? deadlineDate.getTime() - nowRef.getTime() <= NEAR_DEADLINE_HOURS * 60 * 60 * 1000
+      : false
+
+  const totalSiswa = Number(stats?.total_siswa || 0)
+  const submitted = Number(stats?.total_dikumpulkan || 0)
+  const graded = Number(stats?.sudah || 0)
+  const allSubmittedAndGraded = totalSiswa > 0 && submitted >= totalSiswa && graded >= totalSiswa
+
+  return {
+    isBeforeStart,
+    isExpired,
+    isNearDeadline,
+    allSubmittedAndGraded
+  }
+}
+
+const validateTimelineInput = (mulai, deadline) => {
+  const now = new Date()
+  now.setSeconds(0, 0)
+  const mulaiDate = mulai ? new Date(mulai) : null
+  const deadlineDate = deadline ? new Date(deadline) : null
+
+  if (!mulai || !isValidDate(mulaiDate)) return 'Waktu mulai wajib diisi dan valid'
+  if (!deadline || !isValidDate(deadlineDate)) return 'Deadline wajib diisi dan valid'
+  if (mulaiDate < now) return 'Waktu mulai tidak boleh di masa lalu'
+  if (deadlineDate < now) return 'Deadline tidak boleh di masa lalu'
+  if (deadlineDate <= mulaiDate) return 'Deadline harus setelah waktu mulai'
+  return ''
+}
 
 const formatDateTime = (dateString) => {
   if (!dateString) return '-'
@@ -84,6 +126,33 @@ const formatKelasDisplay = (slug) => {
   } catch {
     return slug
   }
+}
+
+const normalizeKelasKey = (value = '') =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s-]+/g, '-')
+
+const buildKelasVariants = (value = '') => {
+  const raw = String(value || '').trim()
+  if (!raw) return []
+  const dashToSpace = raw.replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim()
+  const spaceToDash = raw.replace(/\s+/g, '-').replace(/-+/g, '-').trim()
+
+  return Array.from(
+    new Set([
+      raw,
+      raw.toLowerCase(),
+      raw.toUpperCase(),
+      dashToSpace,
+      dashToSpace.toLowerCase(),
+      dashToSpace.toUpperCase(),
+      spaceToDash,
+      spaceToDash.toLowerCase(),
+      spaceToDash.toUpperCase()
+    ].filter(Boolean))
+  )
 }
 
 const initials = (name = '?') => {
@@ -297,6 +366,7 @@ export default function TugasGuru() {
   const [form, setForm] = useState({
     judul: '',
     keterangan: '',
+    mulai: getNowDateTimeLocal(),
     deadline: getNowDateTimeLocal(),
     file_url: ''
   })
@@ -332,6 +402,7 @@ export default function TugasGuru() {
 
   // Preview
   const [previewFile, setPreviewFile] = useState(null)
+  const detailLoadIdRef = useRef(0)
 
   /* ---------- Derived: kelas yang guru ampu ---------- */
   const myKelasList = useMemo(() => {
@@ -501,6 +572,7 @@ export default function TugasGuru() {
 
       const tugasIds = tugasData.map((t) => t.id)
       const uniqueKelas = [...new Set(tugasData.map((t) => t.kelas).filter(Boolean))]
+      const uniqueKelasVariants = Array.from(new Set(uniqueKelas.flatMap((k) => buildKelasVariants(k))))
 
       const jawabanPromise =
         tugasIds.length > 0
@@ -508,12 +580,12 @@ export default function TugasGuru() {
           : Promise.resolve({ data: [], error: null })
 
       const siswaPromise =
-        uniqueKelas.length > 0
+        uniqueKelasVariants.length > 0
           ? supabase
               .from('profiles')
               .select('id, kelas')
               .eq('role', 'siswa')
-              .in('kelas', uniqueKelas)
+              .in('kelas', uniqueKelasVariants)
           : Promise.resolve({ data: [], error: null })
 
       const [
@@ -528,7 +600,8 @@ export default function TugasGuru() {
       const siswaArr = siswaData || []
 
       const formatted = tugasData.map((tugas) => {
-        const siswaKelas = siswaArr.filter((s) => s.kelas === tugas.kelas)
+        const kelasKey = normalizeKelasKey(tugas.kelas)
+        const siswaKelas = siswaArr.filter((s) => normalizeKelasKey(s.kelas) === kelasKey)
         const totalSiswa = siswaKelas.length
 
         const jawabanIni = jawabanArr.filter((j) => j.tugas_id === tugas.id)
@@ -544,13 +617,20 @@ export default function TugasGuru() {
         const totalDikumpulkan = uniqueByUser.length
         const belumMengerjakan = Math.max(0, totalSiswa - totalDikumpulkan)
 
-        const deadlineDate = tugas.deadline ? new Date(tugas.deadline) : null
-        const isExpired = deadlineDate ? isValidDate(deadlineDate) && deadlineDate < new Date() : false
+        const windowInfo = getTaskWindowInfo(tugas.mulai, tugas.deadline, {
+          total_siswa: totalSiswa,
+          total_dikumpulkan: totalDikumpulkan,
+          sudah: sudahDinilai
+        })
 
         return {
           ...tugas,
           kelasDisplay: formatKelasDisplay(tugas.kelas),
-          isExpired,
+          isExpired: windowInfo.isExpired,
+          isBeforeStart: windowInfo.isBeforeStart,
+          isNearDeadline: windowInfo.isNearDeadline,
+          allSubmittedAndGraded: windowInfo.allSubmittedAndGraded,
+          hasGradedSubmissions: sudahDinilai > 0,
           stats: {
             sudah: sudahDinilai,
             belum_dinilai: belumDinilai,
@@ -608,7 +688,7 @@ export default function TugasGuru() {
         .from('tugas_jawaban')
         .select('id, tugas_id, user_id, nilai')
         .in('tugas_id', tugasIds)
-        .is('nilai', null)
+        .eq('nilai', null)
 
       if (jawabanError) throw jawabanError
 
@@ -617,11 +697,14 @@ export default function TugasGuru() {
         const tugas = tugasData.find((t) => t.id === j.tugas_id)
         if (!tugas) return
         if (!map.has(j.tugas_id)) {
+          const windowInfo = getTaskWindowInfo(tugas.mulai, tugas.deadline)
           map.set(j.tugas_id, {
             tugas: {
               ...tugas,
               kelasDisplay: formatKelasDisplay(tugas.kelas),
-              isExpired: tugas.deadline ? new Date(tugas.deadline) < new Date() : false
+              isExpired: windowInfo.isExpired,
+              isBeforeStart: windowInfo.isBeforeStart,
+              isNearDeadline: windowInfo.isNearDeadline
             },
             jumlah: 0
           })
@@ -649,6 +732,8 @@ export default function TugasGuru() {
   const loadDetailTugas = useCallback(
     async (tugas, { silent = false } = {}) => {
       if (!tugas || !user?.id) return
+      const loadId = detailLoadIdRef.current + 1
+      detailLoadIdRef.current = loadId
 
       if (!validateTugasAccess(tugas)) {
         pushToast('error', 'Anda tidak memiliki akses ke tugas ini')
@@ -669,11 +754,12 @@ export default function TugasGuru() {
         }
 
         const siswaPromise = (async () => {
+          const kelasVariants = buildKelasVariants(tugas.kelas)
           const baseQuery = supabase
             .from('profiles')
             .select('id, nama, photo_url, photo_path, kelas, role')
             .eq('role', 'siswa')
-            .eq('kelas', tugas.kelas)
+            .in('kelas', kelasVariants)
             .order('nama')
 
           let { data, error } = await baseQuery
@@ -683,7 +769,7 @@ export default function TugasGuru() {
               .from('profiles')
               .select('id, nama, photo_url, kelas, role')
               .eq('role', 'siswa')
-              .eq('kelas', tugas.kelas)
+              .in('kelas', kelasVariants)
               .order('nama'))
           }
 
@@ -699,6 +785,10 @@ export default function TugasGuru() {
           { data: siswaData, error: siswaError },
           { data: jawabanData, error: jawabanError }
         ] = await Promise.all([siswaPromise, jawabanPromise])
+
+        if (loadId !== detailLoadIdRef.current) {
+          return
+        }
 
         if (siswaError) throw siswaError
         if (jawabanError) throw jawabanError
@@ -721,6 +811,48 @@ export default function TugasGuru() {
 
         setJawabanTugas(formattedJawaban)
 
+        const submittedUnique = new Set(formattedJawaban.map((j) => j.user_id)).size
+        const gradedCount = formattedJawaban.filter((j) => j.nilai != null).length
+        const hasGradedSubmissions = gradedCount > 0
+        setSelectedTugas((prev) => {
+          if (!prev || prev.id !== tugas.id) return prev
+          const nextStats = {
+            ...(prev.stats || {}),
+            total_siswa: normalizedSiswa.length,
+            total_dikumpulkan: submittedUnique,
+            sudah: gradedCount,
+            belum_dinilai: Math.max(0, submittedUnique - gradedCount),
+            belum_mengerjakan: Math.max(0, normalizedSiswa.length - submittedUnique)
+          }
+          const windowInfo = getTaskWindowInfo(prev.mulai, prev.deadline, nextStats)
+
+          const prevStats = prev.stats || {}
+          const statsUnchanged =
+            Number(prevStats.total_siswa || 0) === Number(nextStats.total_siswa || 0) &&
+            Number(prevStats.total_dikumpulkan || 0) === Number(nextStats.total_dikumpulkan || 0) &&
+            Number(prevStats.sudah || 0) === Number(nextStats.sudah || 0) &&
+            Number(prevStats.belum_dinilai || 0) === Number(nextStats.belum_dinilai || 0) &&
+            Number(prevStats.belum_mengerjakan || 0) === Number(nextStats.belum_mengerjakan || 0)
+
+          const flagsUnchanged =
+            Boolean(prev.hasGradedSubmissions) === hasGradedSubmissions &&
+            Boolean(prev.isExpired) === Boolean(windowInfo.isExpired) &&
+            Boolean(prev.isBeforeStart) === Boolean(windowInfo.isBeforeStart) &&
+            Boolean(prev.isNearDeadline) === Boolean(windowInfo.isNearDeadline) &&
+            Boolean(prev.allSubmittedAndGraded) === Boolean(windowInfo.allSubmittedAndGraded)
+
+          if (statsUnchanged && flagsUnchanged) {
+            return prev
+          }
+
+          return {
+            ...prev,
+            stats: nextStats,
+            hasGradedSubmissions,
+            ...windowInfo
+          }
+        })
+
         setNilaiInput((prev) => {
           const next = { ...prev }
           formattedJawaban.forEach((j) => {
@@ -729,11 +861,16 @@ export default function TugasGuru() {
           return next
         })
     } catch (error) {
+      if (loadId !== detailLoadIdRef.current) {
+        return
+      }
       console.error('Error loading detail tugas:', error)
       const parsed = parseSupabaseError(error)
       pushToast('error', `Gagal memuat detail tugas: ${parsed.message}`)
     } finally {
-      if (!silent) setIsLoadingDetail(false)
+      if (!silent && loadId === detailLoadIdRef.current) {
+        setIsLoadingDetail(false)
+      }
     }
   },
     [user?.id, validateTugasAccess, myKelasList, pushToast]
@@ -900,12 +1037,18 @@ export default function TugasGuru() {
      12) Create / Update / Delete tugas
 ========================= */
   const tambahTugas = async () => {
-    if (!kelas || !selectedMapel || !form.judul || !form.deadline) {
-      pushToast('error', 'Lengkapi data (Kelas, Mapel, Judul, Deadline)')
+    if (!kelas || !selectedMapel || !form.judul || !form.mulai || !form.deadline) {
+      pushToast('error', 'Lengkapi data (Kelas, Mapel, Judul, Mulai, Deadline)')
       return
     }
     if (!validateKelasAccess(myKelasList, kelas)) {
       pushToast('error', 'Anda tidak memiliki akses ke kelas ini')
+      return
+    }
+
+    const timelineError = validateTimelineInput(form.mulai, form.deadline)
+    if (timelineError) {
+      pushToast('error', timelineError)
       return
     }
 
@@ -917,16 +1060,18 @@ export default function TugasGuru() {
         mapel: selectedMapel,
         judul: form.judul,
         keterangan: form.keterangan,
+        mulai: new Date(form.mulai).toISOString(),
         deadline: new Date(form.deadline).toISOString(),
         file_url: form.file_url, // simpan PATH (bukan URL)
         created_by: user.id
       }
 
       const { error } = await supabase.from('tugas').insert(payload)
-        if (error) throw error
+      if (error) throw error
 
       pushToast('success', 'Tugas berhasil ditambahkan')
-      setForm({ judul: '', keterangan: '', deadline: getNowDateTimeLocal(), file_url: '' })
+      const nowLocal = getNowDateTimeLocal()
+      setForm({ judul: '', keterangan: '', mulai: nowLocal, deadline: nowLocal, file_url: '' })
       setUploadedFileSizeCreate('')
 
       await loadTugas()
@@ -952,9 +1097,11 @@ export default function TugasGuru() {
       mapel: selectedTugas.mapel,
       judul: selectedTugas.judul,
       keterangan: selectedTugas.keterangan || '',
+      mulai: toDatetimeLocalValue(selectedTugas.mulai || selectedTugas.created_at),
       deadline: toDatetimeLocalValue(selectedTugas.deadline),
       file_url: selectedTugas.file_url || '',
-      created_by: selectedTugas.created_by
+      created_by: selectedTugas.created_by,
+      hasGradedSubmissions: Boolean(selectedTugas.hasGradedSubmissions || (selectedTugas.stats?.sudah || 0) > 0)
     })
     setIsEditingTugas(true)
     setUploadedFileSizeEdit('')
@@ -976,12 +1123,19 @@ export default function TugasGuru() {
       return
     }
 
+    const timelineError = validateTimelineInput(editForm.mulai, editForm.deadline)
+    if (timelineError) {
+      pushToast('error', timelineError)
+      return
+    }
+
     try {
       setLoading(true)
 
       const payload = {
         judul: editForm.judul,
         keterangan: editForm.keterangan,
+        mulai: new Date(editForm.mulai).toISOString(),
         deadline: new Date(editForm.deadline).toISOString(),
         file_url: editForm.file_url,
         updated_at: new Date().toISOString()
@@ -996,7 +1150,12 @@ export default function TugasGuru() {
       if (error) throw error
 
       pushToast('success', 'Tugas berhasil diperbarui')
-      setSelectedTugas((prev) => (prev ? { ...prev, ...payload } : prev))
+      setSelectedTugas((prev) => {
+        if (!prev) return prev
+        const merged = { ...prev, ...payload }
+        const windowInfo = getTaskWindowInfo(merged.mulai, merged.deadline, merged.stats)
+        return { ...merged, ...windowInfo }
+      })
       setIsEditingTugas(false)
       setEditForm(null)
       setUploadedFileSizeEdit('')
@@ -1018,6 +1177,15 @@ export default function TugasGuru() {
     const tugas = listTugas.find((t) => t.id === tugasId) || selectedTugas
     if (!tugas || !validateTugasAccess(tugas)) {
       pushToast('error', 'Anda tidak memiliki akses untuk menghapus tugas ini')
+      return
+    }
+
+    const hasGraded =
+      Boolean(tugas?.hasGradedSubmissions) ||
+      Number(tugas?.stats?.sudah || 0) > 0 ||
+      (selectedTugas?.id === tugasId && jawabanTugas.some((j) => j.nilai != null))
+    if (hasGraded) {
+      pushToast('error', 'Tugas yang sudah memiliki nilai tidak boleh dihapus')
       return
     }
 
@@ -1270,14 +1438,13 @@ export default function TugasGuru() {
                               </button>
                             )}
                             {jawaban?.link_url && (
-                              <a
-                                href={jawaban.link_url}
-                                target="_blank"
-                                rel="noopener noreferrer"
+                              <button
+                                type="button"
+                                onClick={() => setPreviewFile(jawaban.link_url)}
                                 className="inline-flex items-center gap-1 px-2 py-1 bg-purple-100 text-purple-700 rounded-lg text-xs hover:bg-purple-200 transition-colors"
                               >
                                 🔗 Link
-                              </a>
+                              </button>
                             )}
                             {!jawaban?.file_url && !jawaban?.link_url && (
                               <span className="text-xs text-slate-500">-</span>
@@ -1365,6 +1532,13 @@ export default function TugasGuru() {
     return { total, active, expired, needGrade }
   }, [listTugas])
 
+  const selectedHasGradedSubmission = useMemo(() => {
+    if (!selectedTugas) return false
+    if (selectedTugas.hasGradedSubmissions) return true
+    if (Number(selectedTugas.stats?.sudah || 0) > 0) return true
+    return jawabanTugas.some((j) => j.nilai != null)
+  }, [selectedTugas, jawabanTugas])
+
   /* =========================
      15) Main Render
 ========================= */
@@ -1436,7 +1610,7 @@ export default function TugasGuru() {
             <span>Buat Tugas Baru</span>
           </h3>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-2">Kelas</label>
               <select
@@ -1485,13 +1659,24 @@ export default function TugasGuru() {
             </div>
 
             <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">Mulai</label>
+              <input
+                type="datetime-local"
+                className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+                value={form.mulai}
+                onChange={(e) => setForm((prev) => ({ ...prev, mulai: e.target.value }))}
+                min={getNowDateTimeLocal()}
+              />
+            </div>
+
+            <div>
               <label className="block text-sm font-semibold text-slate-700 mb-2">Deadline</label>
               <input
                 type="datetime-local"
                 className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
                 value={form.deadline}
                 onChange={(e) => setForm((prev) => ({ ...prev, deadline: e.target.value }))}
-                min={getNowDateTimeLocal()}
+                min={maxDateTimeLocal(getNowDateTimeLocal(), form.mulai || getNowDateTimeLocal())}
               />
             </div>
           </div>
@@ -1586,7 +1771,7 @@ export default function TugasGuru() {
           <button
             className="w-full mt-6 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-bold py-4 px-6 rounded-2xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3 text-base shadow-lg"
             onClick={tambahTugas}
-            disabled={!kelas || !selectedMapel || !form.judul || !form.deadline}
+            disabled={!kelas || !selectedMapel || !form.judul || !form.mulai || !form.deadline}
             type="button"
           >
             <span>💾</span>
@@ -1623,11 +1808,10 @@ export default function TugasGuru() {
                     <button
                       key={item.tugas.id}
                       type="button"
-                      onClick={async () => {
+                      onClick={() => {
                         setSelectedTugas(item.tugas)
                         setIsEditingTugas(false)
                         setEditForm(null)
-                        await loadDetailTugas(item.tugas)
                       }}
                       className="w-full text-left p-4 rounded-2xl border border-slate-200 hover:border-blue-300 hover:bg-blue-50 transition-colors"
                     >
@@ -1796,24 +1980,30 @@ export default function TugasGuru() {
                     const graded = t.stats?.sudah || 0
                     const belum = t.stats?.belum_mengerjakan || 0
 
-                    const deadlineDate = t.deadline ? new Date(t.deadline) : null
-                    const isExpired = deadlineDate ? isValidDate(deadlineDate) && deadlineDate < new Date() : false
+                    const windowInfo = getTaskWindowInfo(t.mulai, t.deadline, t.stats, new Date())
+                    const isExpired = windowInfo.isExpired
+                    const isNearDeadline = windowInfo.isNearDeadline
+                    const allSubmittedAndGraded = windowInfo.allSubmittedAndGraded
+                    const cardTone = allSubmittedAndGraded
+                      ? 'border-green-200 bg-green-50/50'
+                      : isExpired
+                      ? 'border-red-200 bg-red-50/40'
+                      : isNearDeadline
+                      ? 'border-yellow-200 bg-yellow-50/50'
+                      : 'border-slate-200 bg-white'
 
                     return (
                       <button
                         key={t.id}
                         type="button"
-                        onClick={async () => {
+                        onClick={() => {
                           if (!validateTugasAccess(t)) return pushToast('error', 'Akses ditolak')
                           if (!validateKelasAccess(myKelasList, t.kelas)) return pushToast('error', 'Anda tidak punya akses ke kelas ini')
                           setSelectedTugas(t)
                           setIsEditingTugas(false)
                           setEditForm(null)
-                          await loadDetailTugas(t)
                         }}
-                        className={`text-left p-5 rounded-2xl border transition-all hover:shadow-md ${
-                          isExpired ? 'border-red-200 bg-red-50/40' : 'border-slate-200 bg-white'
-                        }`}
+                        className={`text-left p-5 rounded-2xl border transition-all hover:shadow-md ${cardTone}`}
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
@@ -1823,9 +2013,17 @@ export default function TugasGuru() {
                             </div>
                           </div>
 
-                          {needGrade > 0 ? (
+                          {allSubmittedAndGraded ? (
+                            <span className="px-2 py-1 rounded-full bg-green-100 text-green-800 text-xs font-extrabold whitespace-nowrap">
+                              Tuntas ✅
+                            </span>
+                          ) : needGrade > 0 ? (
                             <span className="px-2 py-1 rounded-full bg-yellow-100 text-yellow-800 text-xs font-extrabold whitespace-nowrap">
                               {needGrade} menunggu
+                            </span>
+                          ) : isNearDeadline ? (
+                            <span className="px-2 py-1 rounded-full bg-yellow-100 text-yellow-800 text-xs font-extrabold whitespace-nowrap">
+                              Deadline dekat
                             </span>
                           ) : (
                             <span className="px-2 py-1 rounded-full bg-green-100 text-green-800 text-xs font-extrabold whitespace-nowrap">
@@ -1835,6 +2033,13 @@ export default function TugasGuru() {
                         </div>
 
                         <div className="mt-3 text-xs text-slate-600">
+                          Mulai:{' '}
+                          <span className={`${t.isBeforeStart ? 'text-blue-700 font-semibold' : 'font-semibold'}`}>
+                            {formatDateTime(t.mulai || t.created_at)}
+                          </span>
+                        </div>
+
+                        <div className="mt-1 text-xs text-slate-600">
                           Deadline:{' '}
                           <span className={`${isExpired ? 'text-red-700 font-semibold' : 'font-semibold'}`}>
                             {formatDateTime(t.deadline)}
@@ -1915,8 +2120,17 @@ export default function TugasGuru() {
                         </span>
                         <span
                           className={`px-3 py-1 rounded-full font-semibold ${
-                            selectedTugas.deadline && new Date(selectedTugas.deadline) < new Date()
+                            selectedTugas.isBeforeStart ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-700'
+                          }`}
+                        >
+                          Mulai: {formatDateTime(selectedTugas.mulai || selectedTugas.created_at)}
+                        </span>
+                        <span
+                          className={`px-3 py-1 rounded-full font-semibold ${
+                            selectedTugas.isExpired
                               ? 'bg-red-100 text-red-700'
+                              : selectedTugas.isNearDeadline
+                              ? 'bg-yellow-100 text-yellow-800'
                               : 'bg-green-100 text-green-700'
                           }`}
                         >
@@ -1962,9 +2176,10 @@ export default function TugasGuru() {
                           <button
                             type="button"
                             onClick={() => hapusTugas(selectedTugas.id, selectedTugas.file_url)}
-                            className="px-4 py-2 rounded-2xl bg-red-600 text-white font-semibold hover:bg-red-700 transition-colors"
+                            disabled={selectedHasGradedSubmission}
+                            className="px-4 py-2 rounded-2xl bg-red-600 text-white font-semibold hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            🗑️ Hapus
+                            {selectedHasGradedSubmission ? '🔒 Tidak Bisa Hapus' : '🗑️ Hapus'}
                           </button>
                         </>
                       ) : (
@@ -2009,7 +2224,7 @@ export default function TugasGuru() {
                   {/* Edit Form */}
                   {isEditingTugas && editForm ? (
                     <div className="space-y-5">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div>
                           <label className="block text-sm font-semibold text-slate-700 mb-2">Judul</label>
                           <input
@@ -2021,16 +2236,28 @@ export default function TugasGuru() {
                         </div>
 
                         <div>
+                          <label className="block text-sm font-semibold text-slate-700 mb-2">Mulai</label>
+                          <input
+                            type="datetime-local"
+                            className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+                            value={editForm.mulai}
+                            onChange={(e) => setEditForm((p) => ({ ...p, mulai: e.target.value }))}
+                            min={getNowDateTimeLocal()}
+                          />
+                        </div>
+
+                        <div>
                           <label className="block text-sm font-semibold text-slate-700 mb-2">Deadline</label>
                           <input
                             type="datetime-local"
                             className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
                             value={editForm.deadline}
                             onChange={(e) => setEditForm((p) => ({ ...p, deadline: e.target.value }))}
+                            min={maxDateTimeLocal(getNowDateTimeLocal(), editForm.mulai || getNowDateTimeLocal())}
                           />
                         </div>
 
-                        <div className="md:col-span-2">
+                        <div className="md:col-span-3">
                           <label className="block text-sm font-semibold text-slate-700 mb-2">Keterangan</label>
                           <textarea
                             rows="4"

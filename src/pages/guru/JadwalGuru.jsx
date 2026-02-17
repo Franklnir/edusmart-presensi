@@ -3,6 +3,11 @@ import React, { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
+import {
+  getCertificateDisplayUrl,
+  hydrateCertificateFileUrls,
+  resolveCertificateFileUrl
+} from '../../utils/certificateFiles'
 // Pakai xlsx-js-style agar bisa kasih warna & style di Excel
 // npm install xlsx-js-style
 import * as XLSX from 'xlsx-js-style'
@@ -33,13 +38,16 @@ const formatDateIndo = (dateStr) => {
 // --- KOMPONEN OVERLAY SERTIFIKAT ---
 const SertifikatDetailOverlay = ({ sertifikat, onClose, onDownload }) => {
   const getFileType = (url) => {
-    if (url.includes('.pdf')) return 'pdf'
-    if (url.includes('.jpg') || url.includes('.jpeg')) return 'image'
-    if (url.includes('.png')) return 'image'
+    const safeUrl = String(url || '').toLowerCase()
+    if (!safeUrl) return 'unknown'
+    if (safeUrl.includes('.pdf')) return 'pdf'
+    if (safeUrl.includes('.jpg') || safeUrl.includes('.jpeg')) return 'image'
+    if (safeUrl.includes('.png')) return 'image'
     return 'unknown'
   }
 
-  const fileType = getFileType(sertifikat.file_url)
+  const displayFileUrl = getCertificateDisplayUrl(sertifikat)
+  const fileType = getFileType(sertifikat.file_url || displayFileUrl)
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -81,7 +89,7 @@ const SertifikatDetailOverlay = ({ sertifikat, onClose, onDownload }) => {
                 ) : fileType === 'image' ? (
                   <div className="aspect-[4/3] bg-white rounded-lg border border-gray-200 overflow-hidden">
                     <img
-                      src={sertifikat.file_url}
+                      src={displayFileUrl}
                       alt={`Sertifikat ${sertifikat.event}`}
                       className="w-full h-full object-contain"
                     />
@@ -343,13 +351,35 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
 
         if (error) throw error
 
+        const userIds = Array.from(
+          new Set((data || []).map((anggota) => String(anggota.user_id || '').trim()).filter(Boolean))
+        )
+
+        let profileById = {}
+        if (userIds.length > 0) {
+          const { data: profileRows, error: profileError } = await supabase
+            .from('profiles')
+            .select('id, nama, email, kelas, role')
+            .in('id', userIds)
+
+          if (profileError) throw profileError
+
+          profileById = (profileRows || []).reduce((acc, row) => {
+            acc[String(row.id)] = row
+            return acc
+          }, {})
+        }
+
         const anggotaWithDetails = (data || []).map(anggota => {
-          const siswa = siswaMap[anggota.user_id] || {}
+          const uid = String(anggota.user_id || '')
+          const siswa = profileById[uid] || siswaMap[uid] || {}
+          const fallbackName = uid ? `ID: ${uid.slice(0, 8)}...` : 'Tanpa User ID'
           return {
             id: anggota.id,
             user_id: anggota.user_id,
-            nama: siswa.nama || 'Tidak Diketahui',
+            nama: siswa.nama || siswa.email || fallbackName,
             kelas: siswa.kelas || '—',
+            role: siswa.role || null,
             created_at: anggota.created_at
           }
         }).sort((a, b) => a.kelas.localeCompare(b.kelas) || a.nama.localeCompare(b.nama))
@@ -1028,7 +1058,7 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
 }
 
 // Komponen Overlay Detail Organisasi
-const OrganisasiDetailOverlay = ({ organisasi, onClose }) => {
+const OrganisasiDetailOverlay = ({ organisasi, onClose, siswaMap = {} }) => {
   const { pushToast, setLoading } = useUIStore()
   const [anggotaOrganisasi, setAnggotaOrganisasi] = useState([])
 
@@ -1044,7 +1074,18 @@ const OrganisasiDetailOverlay = ({ organisasi, onClose }) => {
           .order('nama')
 
         if (error) throw error
-        setAnggotaOrganisasi(data || [])
+
+        const normalized = (data || []).map((anggota) => {
+          const siswaId = String(anggota.siswa_id || '').trim()
+          const siswa = siswaMap[siswaId] || null
+          return {
+            ...anggota,
+            nama: anggota.nama || siswa?.nama || siswa?.email || 'Tidak diketahui',
+            kelas: anggota.kelas || siswa?.kelas || '—'
+          }
+        })
+
+        setAnggotaOrganisasi(normalized)
       } catch (error) {
         console.error('Error loading anggota organisasi:', error)
         pushToast('error', 'Gagal memuat data anggota organisasi')
@@ -1056,7 +1097,7 @@ const OrganisasiDetailOverlay = ({ organisasi, onClose }) => {
     if (organisasi) {
       loadAnggotaOrganisasi()
     }
-  }, [organisasi, pushToast, setLoading])
+  }, [organisasi, pushToast, setLoading, siswaMap])
 
   const getJabatanColor = (jabatan) => {
     const jabatanLower = jabatan?.toLowerCase() || ''
@@ -1307,7 +1348,8 @@ export default function JadwalGuru() {
           .order('issued_at', { ascending: false })
 
         if (error) throw error
-        setSertifikatList(data || [])
+        const hydrated = await hydrateCertificateFileUrls(data || [])
+        setSertifikatList(hydrated)
       } catch (error) {
         console.error('Error loading sertifikat:', error)
         pushToast('error', 'Gagal memuat data sertifikat')
@@ -1344,7 +1386,7 @@ export default function JadwalGuru() {
         // Wali Kelas
         const { data: waliData } = await supabase
           .from('kelas_struktur')
-          .select(`kelas_id, wali_guru_id, kelas:kelas_id(id, nama, grade, suffix)`)
+          .select('kelas_id, wali_guru_id, wali_guru_nama')
           .eq('wali_guru_id', user.id)
         setWaliKelasSaya(waliData || [])
 
@@ -1504,7 +1546,13 @@ export default function JadwalGuru() {
   const handleDownloadSertifikat = async (sertifikat) => {
     try {
       setLoading(true)
-      const response = await fetch(sertifikat.file_url)
+      const resolvedUrl =
+        getCertificateDisplayUrl(sertifikat) ||
+        (await resolveCertificateFileUrl(sertifikat?.file_url))
+      if (!resolvedUrl) throw new Error('File sertifikat tidak ditemukan')
+
+      const response = await fetch(resolvedUrl, { credentials: 'include' })
+      if (!response.ok) throw new Error('File sertifikat tidak dapat diakses')
       const blob = await response.blob()
 
       const url = window.URL.createObjectURL(blob)
@@ -1512,7 +1560,8 @@ export default function JadwalGuru() {
       a.style.display = 'none'
       a.href = url
 
-      const fileExtension = sertifikat.file_url.split('.').pop() || 'pdf'
+      const fileExtensionSource = String(sertifikat.file_url || resolvedUrl).split('?')[0]
+      const fileExtension = fileExtensionSource.split('.').pop() || 'pdf'
       const fileName = `Sertifikat_${sertifikat.event}_${sertifikat.nama_penerima}.${fileExtension}`
 
       a.download = fileName
@@ -1567,7 +1616,7 @@ export default function JadwalGuru() {
   // --- RENDER ---
   return (
     <div className="min-h-screen bg-gray-50/50 p-4 md:p-6 pb-20">
-      <div className="max-w-7xl mx-auto space-y-6">
+      <div className="w-full space-y-6">
 
         {/* HEADER */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 relative overflow-hidden">
@@ -1598,7 +1647,7 @@ export default function JadwalGuru() {
                   ))}
                   {waliKelasSaya.map(w => (
                     <span key={w.kelas_id} className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-orange-50 text-orange-700 border border-orange-100">
-                      👨‍🏫 Wali Kelas {getKelasDisplayName(w.kelas)}
+                      👨‍🏫 Wali Kelas {getNamaKelasFromList(w.kelas_id, kelasList) || w.kelas_id}
                     </span>
                   ))}
                 </div>
@@ -2120,6 +2169,7 @@ export default function JadwalGuru() {
         <OrganisasiDetailOverlay
           organisasi={selectedOrganisasi}
           onClose={closeOrganisasiOverlay}
+          siswaMap={siswaMap}
         />
       )}
 

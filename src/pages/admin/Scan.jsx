@@ -393,7 +393,7 @@ export default function Scan() {
         const { data: allStudents, error: errStudents } =
           await supabase
             .from('profiles')
-            .select('id, nama, kelas, photo_url, nik, rfid_uid')
+            .select('id, nama, kelas, photo_url, nis, rfid_uid')
             .in(
               'id',
               uniqueIds.length
@@ -511,7 +511,7 @@ export default function Scan() {
       try {
         const { data: student, error } = await supabase
           .from('profiles')
-          .select('id, nama, kelas, photo_url, rfid_uid, nik, status')
+          .select('id, nama, kelas, photo_url, rfid_uid, nis, status')
           .eq('role', 'siswa')
           .eq('rfid_uid', cleanedUid)
           .single()
@@ -1089,54 +1089,55 @@ export default function Scan() {
   /* ========= RENDER ========= */
 
   return (
-    <div className="min-h-screen bg-gray-50/30">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-6 py-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">
-              Scan & Absensi RFID
-            </h1>
-            <p className="text-gray-600 mt-1">
-              Kelola kehadiran siswa melalui scan kartu RFID dan
-              pantau riwayat kehadiran
-            </p>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <div className="bg-blue-50 px-4 py-2 rounded-lg border border-blue-200">
-              <div className="text-sm text-blue-700 font-medium">
-                {attendanceRate}% Kehadiran
-              </div>
-              <div className="text-xs text-blue-600">
-                {totalScannedStudents} dari {totalStudents} siswa
-              </div>
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 py-6">
+      <div className="w-full space-y-8 px-4 sm:px-6 lg:px-8">
+        {/* Header */}
+        <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
+          <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">
+                Scan & Absensi RFID
+              </h1>
+              <p className="text-gray-600 mt-1">
+                Kelola kehadiran siswa melalui scan kartu RFID dan
+                pantau riwayat kehadiran
+              </p>
             </div>
 
-            <div className="flex bg-white p-1 rounded-lg shadow-sm border border-gray-200">
-              {[
-                { id: 1, label: 'Scan Kehadiran', icon: ScanLine },
-                { id: 2, label: 'Riwayat Scan', icon: History }
-              ].map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${
-                    activeTab === tab.id
-                      ? 'bg-blue-600 text-white shadow-sm'
-                      : 'text-gray-600 hover:bg-gray-50'
-                  }`}
-                >
-                  <tab.icon size={16} />
-                  {tab.label}
-                </button>
-              ))}
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="bg-blue-50 px-4 py-2 rounded-xl border border-blue-200">
+                <div className="text-sm text-blue-700 font-medium">
+                  {attendanceRate}% Kehadiran
+                </div>
+                <div className="text-xs text-blue-600">
+                  {totalScannedStudents} dari {totalStudents} siswa
+                </div>
+              </div>
+
+              <div className="flex bg-white p-1 rounded-xl shadow-sm border border-gray-200">
+                {[
+                  { id: 1, label: 'Scan Kehadiran', icon: ScanLine },
+                  { id: 2, label: 'Riwayat Scan', icon: History }
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                      activeTab === tab.id
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    <tab.icon size={16} />
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <div className="p-6 space-y-6">
+        <div className="space-y-6">
         {/* --- MODE 1: SCANNING MANUAL --- */}
         {activeTab === 1 && (
           <div className="space-y-6">
@@ -1975,6 +1976,7 @@ export default function Scan() {
             </div>
           </div>
         )}
+      </div>
       </div>
     </div>
   )

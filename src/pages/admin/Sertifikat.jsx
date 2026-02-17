@@ -1,12 +1,19 @@
 // src/pages/admin/Sertifikat.jsx
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { supabase } from '../../lib/supabase'
+import {
+  supabase,
+  CERT_BUCKET as APP_CERT_BUCKET,
+  CERT_TEMPLATE_BUCKET as APP_CERT_TEMPLATE_BUCKET,
+  extractObjectPath
+} from '../../lib/supabase'
 import { useUIStore } from '../../store/useUIStore'
 import { useAuthStore } from '../../store/useAuthStore'
 
 // ================== KONFIGURASI BUCKET ==================
-const CERT_BUCKET = 'sertifikat-files'
-const CERT_TEMPLATE_BUCKET = 'sertifikat-templates'
+const CERT_BUCKET = APP_CERT_BUCKET
+const CERT_TEMPLATE_BUCKET = APP_CERT_TEMPLATE_BUCKET
+const CERT_BUCKET_FALLBACKS = Array.from(new Set([CERT_BUCKET, 'sertifikat-files']))
+const CERT_TEMPLATE_BUCKET_FALLBACKS = Array.from(new Set([CERT_TEMPLATE_BUCKET, 'sertifikat-templates']))
 
 // A4 landscape size (points)
 const A4_WIDTH = 842
@@ -56,6 +63,8 @@ const getCssFontFamily = (fontFamily) => {
 /* ================== UTILS ================== */
 const isHttpUrl = (v) => typeof v === 'string' && /^https?:\/\//i.test(v)
 const clamp = (n, min, max) => Math.min(Math.max(n, min), max)
+const uniqueNonEmpty = (values = []) =>
+  Array.from(new Set(values.map((value) => String(value || '').trim()).filter(Boolean)))
 
 const safeSlug = (s) =>
   (s || '')
@@ -110,9 +119,60 @@ const fetchImageAsDataUrl = async (url) => {
 const createSignedUrl = async (bucket, pathOrUrl) => {
   if (!pathOrUrl) return ''
   if (isHttpUrl(pathOrUrl)) return pathOrUrl
-  const { data, error } = await supabase.storage.from(bucket).createSignedUrl(pathOrUrl, SIGNED_EXPIRES)
-  if (error) throw error
-  return data?.signedUrl || ''
+
+  const candidates = uniqueNonEmpty([
+    extractObjectPath(bucket, pathOrUrl),
+    pathOrUrl
+  ])
+
+  let lastError = null
+  for (const candidate of candidates) {
+    const { data, error } = await supabase.storage.from(bucket).createSignedUrl(candidate, SIGNED_EXPIRES)
+    if (error) {
+      lastError = error
+      continue
+    }
+    if (data?.signedUrl) return data.signedUrl
+  }
+
+  if (lastError) throw lastError
+  return ''
+}
+
+const canAccessSignedUrl = async (signedUrl) => {
+  if (!signedUrl) return false
+  try {
+    const response = await fetch(signedUrl, {
+      method: 'HEAD',
+      credentials: 'include'
+    })
+    return response.ok
+  } catch {
+    return false
+  }
+}
+
+const createSignedUrlWithFallbackBuckets = async (buckets, pathOrUrl) => {
+  if (!pathOrUrl) return ''
+  if (isHttpUrl(pathOrUrl)) return pathOrUrl
+
+  let lastError = null
+  let fallbackSignedUrl = ''
+  for (const bucket of buckets) {
+    try {
+      const signed = await createSignedUrl(bucket, pathOrUrl)
+      if (!signed) continue
+      if (!fallbackSignedUrl) fallbackSignedUrl = signed
+      // eslint-disable-next-line no-await-in-loop
+      if (await canAccessSignedUrl(signed)) return signed
+    } catch (error) {
+      lastError = error
+    }
+  }
+
+  if (fallbackSignedUrl) return fallbackSignedUrl
+  if (lastError) throw lastError
+  return ''
 }
 
 // fallback data url type check
@@ -251,7 +311,7 @@ const AdminSertifikat = () => {
   // UX guard saja. RLS harus tetap jadi tameng utama.
   if (profile && profile.role !== 'admin') {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 flex items-center justify-center p-6">
         <div className="bg-white border rounded-2xl p-6 shadow-sm max-w-md w-full text-center">
           <div className="text-4xl mb-3">⛔</div>
           <h1 className="font-bold text-lg text-gray-900">Akses Ditolak</h1>
@@ -264,40 +324,44 @@ const AdminSertifikat = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-800 font-sans">
-      {/* Navbar */}
-      <div className="bg-white border-b sticky top-0 z-30 px-6 py-3 flex justify-between items-center shadow-sm">
-        <div className="flex items-center gap-3">
-          <div className="bg-blue-600 text-white p-2 rounded-lg shadow-sm">🎓</div>
-          <div>
-            <h1 className="font-bold text-lg leading-tight">Certificate Pro</h1>
-            <p className="text-xs text-gray-500">Admin Dashboard Sertifikat</p>
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 text-gray-800 font-sans py-6">
+      <div className="w-full space-y-8 px-4 sm:px-6 lg:px-8">
+        {/* Navbar */}
+        <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
+          <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-blue-600 rounded-xl shadow-sm text-white text-2xl">🎓</div>
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900 leading-tight">Certificate Pro</h1>
+                <p className="text-gray-600 mt-1">Admin Dashboard Sertifikat</p>
+              </div>
+            </div>
+
+            <div className="flex bg-gray-100 p-1 rounded-xl border border-gray-200">
+              {[
+                { id: 'generator', label: 'Generator Massal' },
+                { id: 'template', label: 'Desainer Template' },
+                { id: 'history', label: 'Riwayat' }
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setMode(tab.id)}
+                  className={`px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                    mode === tab.id ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-800'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
-        <div className="flex bg-gray-100 p-1 rounded-lg">
-          {[
-            { id: 'generator', label: 'Generator Massal' },
-            { id: 'template', label: 'Desainer Template' },
-            { id: 'history', label: 'Riwayat' }
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setMode(tab.id)}
-              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
-                mode === tab.id ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-800'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
+        <div className="w-full">
+          {mode === 'generator' && <GeneratorSection templateVersion={templateVersion} />}
+          {mode === 'template' && <TemplateManagerSection onTemplateChanged={bumpTemplateVersion} />}
+          {mode === 'history' && <HistorySection />}
         </div>
-      </div>
-
-      <div className="p-6 max-w-[1600px] mx-auto">
-        {mode === 'generator' && <GeneratorSection templateVersion={templateVersion} />}
-        {mode === 'template' && <TemplateManagerSection onTemplateChanged={bumpTemplateVersion} />}
-        {mode === 'history' && <HistorySection />}
       </div>
     </div>
   )
@@ -306,11 +370,13 @@ const AdminSertifikat = () => {
 /* ================== 1. GENERATOR SECTION ================== */
 const GeneratorSection = ({ templateVersion }) => {
   const { pushToast, setLoading } = useUIStore()
+  const toast = (type, message) => pushToast?.(type, message)
 
   // Data
   const [templateList, setTemplateList] = useState([])
   const [selectedTemplateId, setSelectedTemplateId] = useState('')
   const [kelasList, setKelasList] = useState([])
+  const [ekskulList, setEskulList] = useState([])
 
   // Input
   const [eventName, setEventName] = useState('')
@@ -319,6 +385,7 @@ const GeneratorSection = ({ templateVersion }) => {
   // Peserta
   const [role, setRole] = useState('siswa')
   const [kelasFilter, setKelasFilter] = useState('')
+  const [ekskulFilter, setEskulFilter] = useState('')
   const [peserta, setPeserta] = useState([])
   const [selectedIds, setSelectedIds] = useState([])
 
@@ -330,13 +397,14 @@ const GeneratorSection = ({ templateVersion }) => {
     let alive = true
     const init = async () => {
       try {
-        const [tplRes, klsRes] = await Promise.all([
+        const [tplRes, klsRes, eksRes] = await Promise.all([
           supabase
             .from('templat_sertifikat_publik')
             .select('*')
             .eq('is_active', true)
             .order('created_at', { ascending: false }),
-          supabase.from('kelas').select('*').order('nama')
+          supabase.from('kelas').select('*').order('nama'),
+          supabase.from('ekskul').select('id, nama').order('nama')
         ])
 
         if (!alive) return
@@ -348,7 +416,7 @@ const GeneratorSection = ({ templateVersion }) => {
             const rawBg = t.background_url || ''
             let bgUrl = ''
             try {
-              bgUrl = await createSignedUrl(CERT_TEMPLATE_BUCKET, rawBg)
+              bgUrl = await createSignedUrlWithFallbackBuckets(CERT_TEMPLATE_BUCKET_FALLBACKS, rawBg)
             } catch {
               bgUrl = isHttpUrl(rawBg) ? rawBg : ''
             }
@@ -360,8 +428,9 @@ const GeneratorSection = ({ templateVersion }) => {
         if (resolved.length > 0) setSelectedTemplateId(resolved[0].id)
 
         setKelasList(klsRes.data || [])
+        setEskulList(eksRes.data || [])
       } catch (err) {
-        pushToast?.({ type: 'error', message: err.message || 'Gagal memuat data' })
+        toast('error', err.message || 'Gagal memuat data')
       }
     }
 
@@ -381,17 +450,55 @@ const GeneratorSection = ({ templateVersion }) => {
     setLoading?.(true)
     setPeserta([])
     try {
-      let q = supabase.from('profiles').select('*').eq('role', role).eq('status', 'active')
-      if (role === 'siswa' && kelasFilter) q = q.eq('kelas', kelasFilter)
+      let rows = []
 
-      const { data, error } = await q.order('nama', { ascending: true })
-      if (error) throw error
+      if (role === 'ekskul') {
+        if (!ekskulFilter) throw new Error('Pilih eskul terlebih dahulu')
 
-      setPeserta(data || [])
-      setSelectedIds((data || []).map((p) => p.id))
-      pushToast?.({ type: 'success', message: `${data?.length || 0} data dimuat` })
+        const { data: memberRows, error: memberErr } = await supabase
+          .from('ekskul_anggota')
+          .select('user_id')
+          .eq('ekskul_id', ekskulFilter)
+
+        if (memberErr) throw memberErr
+
+        const userIds = uniqueNonEmpty((memberRows || []).map((m) => m.user_id))
+        if (userIds.length === 0) {
+          setPeserta([])
+          setSelectedIds([])
+          toast('success', '0 data dimuat')
+          return
+        }
+
+        const { data: profileRows, error: profileErr } = await supabase
+          .from('profiles')
+          .select('*')
+          .in('id', userIds)
+          .eq('role', 'siswa')
+          .eq('status', 'active')
+          .order('nama', { ascending: true })
+
+        if (profileErr) throw profileErr
+
+        const selectedEskul = ekskulList.find((e) => e.id === ekskulFilter)
+        rows = (profileRows || []).map((p) => ({
+          ...p,
+          __recipientInfo: selectedEskul?.nama ? `Eskul: ${selectedEskul.nama}` : 'Eskul'
+        }))
+      } else {
+        let q = supabase.from('profiles').select('*').eq('role', role).eq('status', 'active')
+        if (role === 'siswa' && kelasFilter) q = q.eq('kelas', kelasFilter)
+
+        const { data, error } = await q.order('nama', { ascending: true })
+        if (error) throw error
+        rows = data || []
+      }
+
+      setPeserta(rows)
+      setSelectedIds(rows.map((p) => p.id))
+      toast('success', `${rows.length} data dimuat`)
     } catch (err) {
-      pushToast?.({ type: 'error', message: err.message })
+      toast('error', err.message)
     } finally {
       setLoading?.(false)
     }
@@ -435,7 +542,8 @@ const GeneratorSection = ({ templateVersion }) => {
 
   const handleProcess = async (isPreview = false) => {
     if (!selectedTemplate || !eventName?.trim()) {
-      return pushToast?.({ type: 'warning', message: 'Nama event & template wajib diisi' })
+      toast('warning', 'Nama event & template wajib diisi')
+      return
     }
 
     setIsProcessing(true)
@@ -521,14 +629,14 @@ const GeneratorSection = ({ templateVersion }) => {
       }
 
       if (!isPreview) {
-        pushToast?.({ type: 'success', message: `${success} sertifikat berhasil dibuat` })
+        toast('success', `${success} sertifikat berhasil dibuat`)
         await loadPeserta()
       } else {
-        pushToast?.({ type: 'success', message: 'Preview PDF berhasil diunduh' })
+        toast('success', 'Preview PDF berhasil diunduh')
       }
     } catch (err) {
       console.error(err)
-      pushToast?.({ type: 'error', message: err.message || 'Gagal memproses sertifikat' })
+      toast('error', err.message || 'Gagal memproses sertifikat')
     } finally {
       setIsProcessing(false)
       setProgressStatus('')
@@ -629,6 +737,7 @@ const GeneratorSection = ({ templateVersion }) => {
             >
               <option value="siswa">Siswa</option>
               <option value="guru">Guru</option>
+              <option value="ekskul">Anggota Eskul</option>
             </select>
 
             {role === 'siswa' && (
@@ -641,6 +750,21 @@ const GeneratorSection = ({ templateVersion }) => {
                 {kelasList.map((k) => (
                   <option key={k.id} value={k.id}>
                     {k.nama}
+                  </option>
+                ))}
+              </select>
+            )}
+
+            {role === 'ekskul' && (
+              <select
+                className="px-3 py-1.5 border rounded-lg text-sm bg-gray-50"
+                value={ekskulFilter}
+                onChange={(e) => setEskulFilter(e.target.value)}
+              >
+                <option value="">Pilih Eskul</option>
+                {ekskulList.map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.nama}
                   </option>
                 ))}
               </select>
@@ -689,7 +813,7 @@ const GeneratorSection = ({ templateVersion }) => {
                     />
                   </td>
                   <td className="p-3 font-medium text-gray-900">{p.nama}</td>
-                  <td className="p-3 text-gray-500">{p.kelas || p.jabatan || '-'}</td>
+                  <td className="p-3 text-gray-500">{p.kelas || p.jabatan || p.__recipientInfo || '-'}</td>
                   <td className="p-3 text-gray-400">{p.email}</td>
                 </tr>
               ))}
@@ -736,6 +860,7 @@ const GeneratorSection = ({ templateVersion }) => {
 const TemplateManagerSection = ({ onTemplateChanged }) => {
   const { pushToast, setLoading } = useUIStore()
   const { user } = useAuthStore()
+  const toast = (type, message) => pushToast?.(type, message)
 
   const [templates, setTemplates] = useState([])
   const [form, setForm] = useState(defaultForm)
@@ -763,7 +888,7 @@ const TemplateManagerSection = ({ onTemplateChanged }) => {
           const rawBg = t.background_url || ''
           let bgUrl = ''
           try {
-            bgUrl = await createSignedUrl(CERT_TEMPLATE_BUCKET, rawBg)
+            bgUrl = await createSignedUrlWithFallbackBuckets(CERT_TEMPLATE_BUCKET_FALLBACKS, rawBg)
           } catch {
             bgUrl = isHttpUrl(rawBg) ? rawBg : ''
           }
@@ -773,7 +898,7 @@ const TemplateManagerSection = ({ onTemplateChanged }) => {
 
       setTemplates(resolved)
     } catch (err) {
-      pushToast?.({ type: 'error', message: err.message || 'Gagal memuat template' })
+      toast('error', err.message || 'Gagal memuat template')
     }
   }
 
@@ -836,12 +961,12 @@ const TemplateManagerSection = ({ onTemplateChanged }) => {
       if (editingId) {
         const { error } = await supabase.from('templat_sertifikat_publik').update(payload).eq('id', editingId)
         if (error) throw error
-        pushToast?.({ type: 'success', message: 'Template berhasil diperbarui' })
+        toast('success', 'Template berhasil diperbarui')
       } else {
         const ins = { ...payload, created_by: user?.id || null, created_at: new Date().toISOString() }
         const { error } = await supabase.from('templat_sertifikat_publik').insert(ins)
         if (error) throw error
-        pushToast?.({ type: 'success', message: 'Template baru berhasil disimpan' })
+        toast('success', 'Template baru berhasil disimpan')
       }
 
       setForm(defaultForm)
@@ -852,7 +977,7 @@ const TemplateManagerSection = ({ onTemplateChanged }) => {
       onTemplateChanged?.()
     } catch (err) {
       console.error(err)
-      pushToast?.({ type: 'error', message: err.message || 'Gagal menyimpan template' })
+      toast('error', err.message || 'Gagal menyimpan template')
     } finally {
       setLoading?.(false)
     }
@@ -865,7 +990,7 @@ const TemplateManagerSection = ({ onTemplateChanged }) => {
     const rawBg = nt.background_url || ''
     let previewUrl = ''
     try {
-      previewUrl = await createSignedUrl(CERT_TEMPLATE_BUCKET, rawBg)
+      previewUrl = await createSignedUrlWithFallbackBuckets(CERT_TEMPLATE_BUCKET_FALLBACKS, rawBg)
     } catch {
       previewUrl = isHttpUrl(rawBg) ? rawBg : ''
     }
@@ -887,9 +1012,9 @@ const TemplateManagerSection = ({ onTemplateChanged }) => {
       if (error) throw error
       await loadTemplates()
       onTemplateChanged?.()
-      pushToast?.({ type: 'success', message: 'Template terhapus' })
+      toast('success', 'Template terhapus')
     } catch (err) {
-      pushToast?.({ type: 'error', message: err.message || 'Gagal menghapus template' })
+      toast('error', err.message || 'Gagal menghapus template')
     }
   }
 
@@ -1265,6 +1390,7 @@ const HistorySection = () => {
   const [downloadingId, setDownloadingId] = useState(null)
   const [deletingId, setDeletingId] = useState(null)
   const { pushToast } = useUIStore()
+  const toast = (type, message) => pushToast?.(type, message)
 
   const load = async () => {
     const { data, error } = await supabase
@@ -1296,12 +1422,12 @@ const HistorySection = () => {
       const fileUrl = row.file_url
       if (!fileUrl) throw new Error('File tidak ditemukan')
 
-      const signed = await createSignedUrl(CERT_BUCKET, fileUrl)
+      const signed = await createSignedUrlWithFallbackBuckets(CERT_BUCKET_FALLBACKS, fileUrl)
       if (!signed) throw new Error('Gagal membuat signed URL')
 
       window.open(signed, '_blank', 'noopener,noreferrer')
     } catch (err) {
-      pushToast?.({ type: 'error', message: err.message || 'Gagal download' })
+      toast('error', err.message || 'Gagal download')
     } finally {
       setDownloadingId(null)
     }
@@ -1317,17 +1443,21 @@ const HistorySection = () => {
 
       // Best effort: hapus file storage kalau file_url itu path
       if (row.file_url && !isHttpUrl(row.file_url)) {
-        try {
-          await supabase.storage.from(CERT_BUCKET).remove([row.file_url])
-        } catch {
-          // ignore
+        for (const bucket of CERT_BUCKET_FALLBACKS) {
+          const objectPath = extractObjectPath(bucket, row.file_url) || String(row.file_url || '')
+          if (!objectPath) continue
+          try {
+            await supabase.storage.from(bucket).remove([objectPath])
+          } catch {
+            // ignore fallback errors
+          }
         }
       }
 
       setData((p) => p.filter((x) => x.id !== row.id))
-      pushToast?.({ type: 'success', message: 'Sertifikat terhapus' })
+      toast('success', 'Sertifikat terhapus')
     } catch (err) {
-      pushToast?.({ type: 'error', message: err.message || 'Gagal menghapus sertifikat' })
+      toast('error', err.message || 'Gagal menghapus sertifikat')
     } finally {
       setDeletingId(null)
     }

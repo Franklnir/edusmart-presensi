@@ -3,6 +3,11 @@ import { useAuthStore } from '../../store/useAuthStore'
 import { supabase } from '../../lib/supabase'
 import Badge from '../../components/Badge'
 import { useUIStore } from '../../store/useUIStore'
+import {
+  getCertificateDisplayUrl,
+  hydrateCertificateFileUrls,
+  resolveCertificateFileUrl
+} from '../../utils/certificateFiles'
 
 // Helper: render link / gambar lampiran
 const renderLink = (url, text) => {
@@ -30,6 +35,26 @@ const renderLink = (url, text) => {
   } catch {
     return null
   }
+}
+
+const formatDateTimeLabel = (value) => {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '-'
+  return date.toLocaleString('id-ID', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
+const isEskulRegistrationClosed = (deadlineAt) => {
+  if (!deadlineAt) return false
+  const deadline = new Date(deadlineAt)
+  if (Number.isNaN(deadline.getTime())) return false
+  return Date.now() > deadline.getTime()
 }
 
 // Komponen Modal untuk Detail Organisasi
@@ -164,13 +189,16 @@ const SertifikatModal = ({ sertifikat, isOpen, onClose, onDownload }) => {
   if (!isOpen || !sertifikat) return null
 
   const getFileType = (url) => {
-    if (url.includes('.pdf')) return 'pdf'
-    if (url.includes('.jpg') || url.includes('.jpeg')) return 'image'
-    if (url.includes('.png')) return 'image'
+    const safeUrl = String(url || '').toLowerCase()
+    if (!safeUrl) return 'unknown'
+    if (safeUrl.includes('.pdf')) return 'pdf'
+    if (safeUrl.includes('.jpg') || safeUrl.includes('.jpeg')) return 'image'
+    if (safeUrl.includes('.png')) return 'image'
     return 'unknown'
   }
 
-  const fileType = getFileType(sertifikat.file_url)
+  const displayFileUrl = getCertificateDisplayUrl(sertifikat)
+  const fileType = getFileType(sertifikat.file_url || displayFileUrl)
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
@@ -212,7 +240,7 @@ const SertifikatModal = ({ sertifikat, isOpen, onClose, onDownload }) => {
                 ) : fileType === 'image' ? (
                   <div className="aspect-[4/3] bg-white rounded-lg border border-gray-200 overflow-hidden">
                     <img 
-                      src={sertifikat.file_url} 
+                      src={displayFileUrl}
                       alt={`Sertifikat ${sertifikat.event}`}
                       className="w-full h-full object-contain"
                     />
@@ -565,7 +593,8 @@ export default function SHome() {
         .order('issued_at', { ascending: false })
 
       if (error) throw error
-      setSertifikatList(data || [])
+      const hydrated = await hydrateCertificateFileUrls(data || [])
+      setSertifikatList(hydrated)
     } catch (error) {
       console.error('Error loading sertifikat:', error)
       pushToast('error', 'Gagal memuat data sertifikat')
@@ -591,8 +620,13 @@ export default function SHome() {
   // Handler untuk download sertifikat
   const handleDownloadSertifikat = async (sertifikat) => {
     try {
-      // Download file dari URL
-      const response = await fetch(sertifikat.file_url)
+      const resolvedUrl =
+        getCertificateDisplayUrl(sertifikat) ||
+        (await resolveCertificateFileUrl(sertifikat?.file_url))
+      if (!resolvedUrl) throw new Error('File sertifikat tidak ditemukan')
+
+      const response = await fetch(resolvedUrl, { credentials: 'include' })
+      if (!response.ok) throw new Error('File sertifikat tidak dapat diakses')
       const blob = await response.blob()
       
       // Create download link
@@ -602,7 +636,8 @@ export default function SHome() {
       a.href = url
       
       // Extract file extension from URL
-      const fileExtension = sertifikat.file_url.split('.').pop() || 'pdf'
+      const fileExtensionSource = String(sertifikat.file_url || resolvedUrl).split('?')[0]
+      const fileExtension = fileExtensionSource.split('.').pop() || 'pdf'
       const fileName = `Sertifikat_${sertifikat.event}_${sertifikat.nama_penerima}.${fileExtension}`
       
       a.download = fileName
@@ -716,7 +751,7 @@ export default function SHome() {
       ] = await Promise.all([
         supabase
           .from('ekskul')
-          .select('id, nama, keterangan, hari, jam_mulai, jam_selesai, pembina_guru_id')
+          .select('id, nama, keterangan, hari, jam_mulai, jam_selesai, pembina_guru_id, registration_deadline_at')
           .order('nama'),
         supabase
           .from('ekskul_anggota')
@@ -762,6 +797,7 @@ export default function SHome() {
         hari: e.hari || '',
         jam_mulai: e.jam_mulai || '',
         jam_selesai: e.jam_selesai || '',
+        registration_deadline_at: e.registration_deadline_at || null,
         pembina_nama: pembinaMap[e.pembina_guru_id] || '',
         jumlah_anggota: anggotaByEkskul[e.id] || 0,
       }))
@@ -815,6 +851,15 @@ export default function SHome() {
   const toggleEskul = async (item) => {
     if (!userId) return
     const joined = myEskul.has(item.id)
+    const registrationClosed = isEskulRegistrationClosed(item.registration_deadline_at)
+
+    if (registrationClosed) {
+      pushToast(
+        'warning',
+        'Pendaftaran ekskul sudah ditutup. Anda tidak bisa daftar atau membatalkan lagi.'
+      )
+      return
+    }
 
     if (!joined && myEskul.size >= 3) {
       pushToast('error', 'Maksimal 3 ekstrakurikuler yang bisa diikuti')
@@ -1153,11 +1198,19 @@ export default function SHome() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {ekskul.map((x) => {
                       const isJoined = myEskul.has(x.id)
+                      const registrationClosed = isEskulRegistrationClosed(
+                        x.registration_deadline_at
+                      )
+                      const registrationDeadlineLabel = formatDateTimeLabel(
+                        x.registration_deadline_at
+                      )
                       return (
                         <div
                           key={x.id}
                           className={`border-2 rounded-xl p-4 transition-all duration-300 group ${
-                            isJoined
+                            registrationClosed
+                              ? 'border-rose-300 bg-gradient-to-br from-rose-50 to-orange-50 shadow-sm'
+                              : isJoined
                               ? 'border-orange-400 bg-gradient-to-br from-orange-50 to-amber-50 shadow-sm'
                               : 'border-gray-200 hover:border-orange-300 bg-white hover:shadow-md'
                           }`}
@@ -1167,11 +1220,24 @@ export default function SHome() {
                               <h3 className="font-bold text-gray-900 text-base leading-tight flex-1 pr-3 group-hover:text-orange-700 transition-colors">
                                 {x.nama}
                               </h3>
-                              {isJoined && (
-                                <span className="px-2 py-1 bg-orange-500 text-white rounded-lg text-xs font-semibold shadow-sm">
-                                  ✅ Terdaftar
+                              <div className="flex flex-col items-end gap-1">
+                                {isJoined && (
+                                  <span className="px-2 py-1 bg-orange-500 text-white rounded-lg text-xs font-semibold shadow-sm">
+                                    ✅ Terdaftar
+                                  </span>
+                                )}
+                                <span
+                                  className={`px-2 py-1 rounded-lg text-[11px] font-semibold ${
+                                    registrationClosed
+                                      ? 'bg-rose-100 text-rose-700 border border-rose-200'
+                                      : 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                                  }`}
+                                >
+                                  {registrationClosed
+                                    ? 'Pendaftaran ditutup'
+                                    : 'Pendaftaran dibuka'}
                                 </span>
-                              )}
+                              </div>
                             </div>
 
                             <div className="space-y-2 text-sm text-gray-600 mb-3">
@@ -1186,6 +1252,18 @@ export default function SHome() {
                                   {x.jam_mulai && ` • ${x.jam_mulai} - ${x.jam_selesai}`}
                                 </span>
                               </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-gray-500 text-base">⏳</span>
+                                <span
+                                  className={`font-medium text-xs ${
+                                    registrationClosed ? 'text-rose-700' : 'text-emerald-700'
+                                  }`}
+                                >
+                                  {x.registration_deadline_at
+                                    ? `Batas daftar: ${registrationDeadlineLabel}`
+                                    : 'Batas daftar: belum diatur admin'}
+                                </span>
+                              </div>
                             </div>
 
                             {x.keterangan && (
@@ -1197,13 +1275,20 @@ export default function SHome() {
 
                           <button
                             onClick={() => toggleEskul(x)}
-                            className={`w-full py-2.5 px-4 rounded-xl font-semibold transition-all duration-300 text-sm shadow-sm hover:shadow-md ${
-                              isJoined
+                            disabled={registrationClosed}
+                            className={`w-full py-2.5 px-4 rounded-xl font-semibold transition-all duration-300 text-sm shadow-sm ${
+                              registrationClosed
+                                ? 'bg-gray-200 text-gray-500 cursor-not-allowed border border-gray-300'
+                                : isJoined
                                 ? 'bg-white text-orange-600 border-2 border-orange-300 hover:bg-orange-500 hover:text-white hover:border-orange-500'
                                 : 'bg-gradient-to-r from-orange-500 to-amber-500 text-white hover:from-orange-600 hover:to-amber-600'
                             }`}
                           >
-                            {isJoined ? 'Batalkan' : 'Daftar Sekarang'}
+                            {registrationClosed
+                              ? 'Pendaftaran Tutup'
+                              : isJoined
+                                ? 'Batalkan'
+                                : 'Daftar Sekarang'}
                           </button>
                         </div>
                       )

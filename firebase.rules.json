@@ -1,0 +1,23 @@
+{
+  "rules": {
+    ".read": "auth != null",
+    ".write": "auth != null",
+    "users": {
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || root.child('users').child(auth.uid).child('role').val() === 'admin')",
+        ".write": "auth != null && (auth.uid === $uid || root.child('users').child(auth.uid).child('role').val() === 'admin')"
+      }
+    },
+    "absensi": { ".read": "auth != null", ".write": "auth != null" },
+    "absensi_ajuan": { ".read": "auth != null", ".write": "auth != null" },
+    "tugas": { ".read": "auth != null", ".write": "auth != null" },
+    "kumpulan_tugas": { ".read": "auth != null", ".write": "auth != null" },
+    "jadwal": { ".read": "auth != null", ".write": "auth != null" },
+    "kelas": {
+      ".read": "true", 
+      ".write": "auth != null" 
+    },
+    "ekskul": { ".read": "auth != null", ".write": "root.child('users').child(auth.uid).child('role').val() === 'admin'" },
+    "jam_kosong": { ".read": "auth != null", ".write": "auth != null" }
+  }
+}

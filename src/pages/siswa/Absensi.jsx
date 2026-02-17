@@ -3,7 +3,8 @@ import React, {
   useState,
   useEffect,
   useCallback,
-  useRef
+  useRef,
+  useMemo
 } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
@@ -60,12 +61,13 @@ const RealTimeClock = () => {
   }, [])
 
   return (
-    <div className="bg-white border border-gray-300 rounded-lg p-3 shadow-sm">
+    <div className="bg-gradient-to-r from-white to-blue-50 border border-blue-100 rounded-2xl px-4 py-3 shadow-sm">
       <div className="text-center">
-        <div className="text-base font-semibold font-mono text-gray-800">
+        <div className="text-[11px] uppercase tracking-wide text-blue-600 font-semibold mb-1">Waktu Real-time</div>
+        <div className="text-base font-semibold font-mono text-slate-800">
           {currentTime.toLocaleTimeString('id-ID')}
         </div>
-        <div className="text-xs text-gray-600 mt-1">
+        <div className="text-xs text-slate-600 mt-1">
           {currentTime.toLocaleDateString('id-ID', {
             weekday: 'long',
             year: 'numeric',
@@ -81,7 +83,7 @@ const RealTimeClock = () => {
 /* ======================= Badge ======================= */
 const Badge = ({ children, variant = 'default', className = '' }) => {
   const variants = {
-    default: 'bg-gray-100 text-gray-800',
+    default: 'bg-slate-100 text-slate-800 border border-slate-200',
     hadir: 'bg-green-100 text-green-800 border border-green-300',
     izin: 'bg-yellow-100 text-yellow-800 border border-yellow-300',
     sakit: 'bg-blue-100 text-blue-800 border border-blue-300', // 🟦 baru
@@ -102,67 +104,97 @@ const Badge = ({ children, variant = 'default', className = '' }) => {
 }
 
 /* ======================= Tabel Ringkasan Kehadiran Kelas ======================= */
-/**
- * - Hanya tampilkan siswa yang SUDAH punya record absensi (Hadir / Izin / Sakit / Alpha)
- * - Row warna hijau = Hadir, kuning = Izin, biru = Sakit, merah = Alpha
- */
-const RingkasanKelasTable = ({ kelas, mapel, tanggal }) => {
+const RingkasanKelasTable = ({
+  kelas,
+  mapel,
+  tanggal,
+  selfUserId,
+  canClickHadir,
+  canClickIzin,
+  izinDisabledReason,
+  onHadir,
+  onIzin
+}) => {
   const [dataSiswa, setDataSiswa] = useState([])
   const [isLoading, setIsLoading] = useState(false)
 
   const loadDataSiswa = useCallback(async () => {
-    if (!kelas || !mapel || !tanggal) {
+    if (!kelas || !tanggal) {
       setDataSiswa([])
       return
     }
 
     setIsLoading(true)
     try {
-      const { data: absensiData, error: absensiError } = await supabase
-        .from('absensi')
-        .select('uid, status, komentar, oleh, waktu, nama, tanggal, mapel, kelas')
-        .eq('kelas', kelas)
-        .eq('mapel', mapel)
-        .eq('tanggal', tanggal)
-
-      if (absensiError) throw absensiError
-
-      if (!absensiData || absensiData.length === 0) {
-        setDataSiswa([])
-        return
-      }
-
-      const uids = absensiData.map((a) => a.uid).filter(Boolean)
-
       let siswaData = []
-      if (uids.length > 0) {
-        const { data, error: siswaError } = await supabase
-          .from('profiles')
-          .select('id, nama, photo_url, nik, kelas')
-          .in('id', uids)
+      let siswaError = null
 
-        if (siswaError) throw siswaError
-        siswaData = data || []
+      ;({ data: siswaData, error: siswaError } = await supabase
+        .from('profiles')
+        .select('id, nama, photo_url, photo_path, nis, kelas')
+        .eq('role', 'siswa')
+        .eq('kelas', kelas)
+        .order('nama'))
+
+      if (siswaError && /photo_path/i.test(siswaError.message || '')) {
+        ;({ data: siswaData, error: siswaError } = await supabase
+          .from('profiles')
+          .select('id, nama, photo_url, nis, kelas')
+          .eq('role', 'siswa')
+          .eq('kelas', kelas)
+          .order('nama'))
       }
 
-      const mergedData = absensiData
-        .map((abs) => {
-          const siswa = siswaData.find((s) => s.id === abs.uid)
-          return {
+      if (siswaError) throw siswaError
+
+      let absensiData = []
+      if (mapel) {
+        const { data, error: absensiError } = await supabase
+          .from('absensi')
+          .select('uid, status, komentar, oleh, waktu, nama')
+          .eq('kelas', kelas)
+          .eq('mapel', mapel)
+          .eq('tanggal', tanggal)
+
+        if (absensiError) throw absensiError
+        absensiData = data || []
+      }
+
+      const absensiByUid = new Map((absensiData || []).map((a) => [a.uid, a]))
+      const mapped = (siswaData || []).map((s) => {
+        const absen = absensiByUid.get(s.id)
+        return {
+          id: s.id,
+          nama: s.nama || absen?.nama || 'Tanpa Nama',
+          foto: s.photo_path || s.photo_url || null,
+          nis: s.nis || null,
+          kelas: s.kelas || kelas,
+          status: absen?.status || null,
+          komentar: absen?.komentar || '',
+          oleh: absen?.oleh || '',
+          waktu: absen?.waktu || ''
+        }
+      })
+
+      const existingIds = new Set(mapped.map((s) => s.id))
+      ;(absensiData || []).forEach((abs) => {
+        if (!existingIds.has(abs.uid)) {
+          mapped.push({
             id: abs.uid,
-            nama: siswa?.nama || abs.nama || 'Tanpa Nama',
-            foto: siswa?.foto || siswa?.photo_url || null,
-            nik: siswa?.nik || null,
-            kelas: siswa?.kelas || abs.kelas || kelas,
-            status: abs.status,
+            nama: abs.nama || 'Tanpa Nama',
+            foto: null,
+            nis: null,
+            kelas,
+            status: abs.status || null,
             komentar: abs.komentar || '',
             oleh: abs.oleh || '',
             waktu: abs.waktu || ''
-          }
-        })
-        .sort((a, b) => (a.nama || '').localeCompare(b.nama || ''))
+          })
+        }
+      })
 
-      setDataSiswa(mergedData)
+      mapped.sort((a, b) => (a.nama || '').localeCompare(b.nama || ''))
+      setDataSiswa(mapped)
     } catch (error) {
       console.error('Error loading data siswa:', error)
     } finally {
@@ -204,122 +236,192 @@ const RingkasanKelasTable = ({ kelas, mapel, tanggal }) => {
   const getStatusColor = (status) => {
     switch (status) {
       case 'Hadir':
-        return 'bg-green-50 border-l-4 border-green-400'
+        return 'bg-green-50/70 hover:bg-green-50'
       case 'Izin':
-        return 'bg-yellow-50 border-l-4 border-yellow-400'
-      case 'Sakit': // 🟦 biru khusus sakit
-        return 'bg-blue-50 border-l-4 border-blue-400'
+        return 'bg-yellow-50/70 hover:bg-yellow-50'
+      case 'Sakit':
+        return 'bg-blue-50/70 hover:bg-blue-50'
       case 'Alpha':
-        return 'bg-red-50 border-l-4 border-red-400'
+        return 'bg-red-50/70 hover:bg-red-50'
       default:
-        return 'bg-gray-50 border-l-4 border-gray-200'
+        return 'bg-white hover:bg-slate-50'
     }
   }
 
-  const getStatusText = (status) => {
+  const getStatusBadgeClass = (status) => {
+    if (!mapel) return 'bg-slate-100 text-slate-700 border border-slate-200'
     switch (status) {
       case 'Hadir':
-        return 'text-green-800'
+        return 'bg-green-100 text-green-800 border border-green-200'
       case 'Izin':
-        return 'text-yellow-800'
-      case 'Sakit': // 🟦 teks biru
-        return 'text-blue-800'
+        return 'bg-yellow-100 text-yellow-800 border border-yellow-200'
+      case 'Sakit':
+        return 'bg-blue-100 text-blue-800 border border-blue-200'
       case 'Alpha':
-        return 'text-red-800'
+        return 'bg-red-100 text-red-800 border border-red-200'
       default:
-        return 'text-gray-800'
+        return 'bg-slate-100 text-slate-700 border border-slate-200'
     }
   }
 
   const getDetailAbsensi = (siswa) => {
-    if (siswa.status !== 'Hadir') {
-      if (siswa.status === 'Izin' || siswa.status === 'Sakit') {
-        return siswa.komentar || siswa.status
-      }
-      return siswa.status
-    }
-    if (siswa.komentar?.includes('RFID')) return 'Via RFID'
-    if (siswa.komentar?.includes('mandiri')) return 'Manual Mandiri'
+    if (!mapel) return 'Pilih mapel terlebih dahulu'
+    if (!siswa.status) return 'Belum ada absensi'
+    if (siswa.status !== 'Hadir') return siswa.komentar || siswa.status
+    if ((siswa.komentar || '').includes('RFID') || siswa.oleh === 'rfid') return 'Via RFID'
+    if ((siswa.komentar || '').includes('mandiri') || siswa.oleh === 'siswa') return 'Absen Mandiri'
     if (siswa.oleh === 'guru') return 'Diabsen Guru'
     if (siswa.oleh === 'system') return 'Auto System'
-    if (siswa.oleh === 'rfid') return 'RFID'
-    return 'Hadir'
+    return siswa.komentar || 'Hadir'
+  }
+
+  const getJamStatus = (waktu) => {
+    if (!waktu) return '-'
+    const parsed = new Date(waktu)
+    if (Number.isNaN(parsed.getTime())) return '-'
+    return parsed.toLocaleTimeString('id-ID', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    })
   }
 
   if (isLoading) {
     return (
-      <div className="text-center py-4">
+      <div className="text-center py-6">
         <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-        <p className="text-gray-600 text-xs">Memuat data siswa...</p>
+        <p className="text-slate-600 text-xs">Memuat daftar siswa...</p>
       </div>
     )
   }
 
   if (!dataSiswa.length) {
     return (
-      <div className="mt-2 text-xs text-gray-500 italic">
-        Belum ada siswa yang tercatat absen untuk mapel ini pada tanggal ini.
+      <div className="text-xs text-slate-500 italic">
+        Belum ada data siswa untuk kelas ini.
       </div>
     )
   }
 
   return (
-    <div className="mt-4">
-      <div className="overflow-x-auto rounded-lg border border-gray-200">
+    <div className="mt-3">
+      <div className="overflow-x-auto rounded-2xl border border-slate-200/80 bg-white shadow-sm">
         <table className="w-full text-xs">
           <thead>
-            <tr className="bg-gray-50 border-b border-gray-200">
-              <th className="text-left p-2 font-semibold text-gray-700">Siswa</th>
-              <th className="text-left p-2 font-semibold text-gray-700">NIK</th>
-              <th className="text-left p-2 font-semibold text-gray-700">Status</th>
-              <th className="text-left p-2 font-semibold text-gray-700">Detail</th>
+            <tr className="bg-slate-50/90 border-b border-slate-200">
+              <th className="text-left px-3 py-2.5 font-semibold text-slate-700 w-12">No</th>
+              <th className="text-left px-3 py-2.5 font-semibold text-slate-700">Siswa</th>
+              <th className="text-left px-3 py-2.5 font-semibold text-slate-700">NIS</th>
+              <th className="text-left px-3 py-2.5 font-semibold text-slate-700">Status</th>
+              <th className="text-left px-3 py-2.5 font-semibold text-slate-700">Jam</th>
+              <th className="text-left px-3 py-2.5 font-semibold text-slate-700">Detail</th>
+              <th className="text-left px-3 py-2.5 font-semibold text-slate-700">Aksi</th>
             </tr>
           </thead>
           <tbody>
-            {dataSiswa.map((siswa) => (
-              <tr
-                key={siswa.id}
-                className={`border-b border-gray-100 ${getStatusColor(
-                  siswa.status
-                )}`}
-              >
-                <td className="p-2">
-                  <div className="flex items-center space-x-2">
-                    <ProfileAvatar
-                      src={siswa.foto}
-                      name={siswa.nama}
-                      size={28}
-                      className="border-gray-300"
-                    />
-                    <span className="font-medium text-gray-900 text-xs">
-                      {siswa.nama}
+            {dataSiswa.map((siswa, idx) => {
+              const isSelf = siswa.id === selfUserId
+              const hasStatus = !!siswa.status
+
+              return (
+                <tr
+                  key={siswa.id}
+                  className={`border-b border-slate-100 transition-colors ${getStatusColor(
+                    siswa.status
+                  )} ${isSelf ? 'ring-1 ring-inset ring-blue-200' : ''}`}
+                >
+                  <td className="px-3 py-2.5 text-slate-600 font-medium">{idx + 1}</td>
+                  <td className="px-3 py-2.5">
+                    <div className="flex items-center space-x-2">
+                      <ProfileAvatar
+                        src={siswa.foto}
+                        name={siswa.nama}
+                        size={30}
+                        className="border-slate-300"
+                      />
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-slate-900 text-xs">
+                          {siswa.nama}
+                        </span>
+                        {isSelf && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-blue-100 text-blue-700 border border-blue-200 font-semibold">
+                            Anda
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-3 py-2.5 text-slate-600 text-[11px]">
+                    {siswa.nis || '-'}
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <span
+                      className={`inline-flex items-center px-2.5 py-1 rounded-full font-semibold text-[11px] ${getStatusBadgeClass(
+                        siswa.status
+                      )}`}
+                    >
+                      {!mapel ? 'Pilih Mapel' : siswa.status || 'Belum Absen'}
                     </span>
-                  </div>
-                </td>
-                <td className="p-2 text-gray-600 text-[11px]">
-                  {siswa.nik || '-'}
-                </td>
-                <td className="p-2">
-                  <span
-                    className={`font-semibold text-[11px] ${getStatusText(
-                      siswa.status
-                    )}`}
-                  >
-                    {siswa.status}
-                  </span>
-                </td>
-                <td className="p-2">
-                  <span className="text-[11px] text-gray-700">
-                    {getDetailAbsensi(siswa)}
-                  </span>
-                </td>
-              </tr>
-            ))}
+                  </td>
+                  <td className="px-3 py-2.5 text-[11px] font-semibold text-slate-700">
+                    {siswa.status === 'Hadir' ? getJamStatus(siswa.waktu) : '-'}
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <span className="text-[11px] text-slate-700 leading-relaxed">
+                      {getDetailAbsensi(siswa)}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2.5">
+                    {isSelf ? (
+                      hasStatus ? (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+                          Selesai
+                        </span>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={onHadir}
+                            disabled={!canClickHadir}
+                            className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
+                              !canClickHadir
+                                ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                                : 'bg-green-600 hover:bg-green-700 text-white'
+                            }`}
+                          >
+                            Hadir
+                          </button>
+                          <button
+                            type="button"
+                            onClick={onIzin}
+                            disabled={!canClickIzin}
+                            title={
+                              canClickIzin
+                                ? 'Ajukan izin'
+                                : izinDisabledReason || 'Ajukan izin tidak tersedia'
+                            }
+                            className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
+                              !canClickIzin
+                                ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                                : 'bg-yellow-500 hover:bg-yellow-600 text-white'
+                            }`}
+                          >
+                            Ajukan Izin
+                          </button>
+                        </div>
+                      )
+                    ) : (
+                      <span className="text-[11px] text-slate-400">-</span>
+                    )}
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>
-      <div className="mt-2 text-[11px] text-gray-500">
-        Menampilkan {dataSiswa.length} siswa yang sudah tercatat (Hadir / Izin / Sakit / Alpha)
+      <div className="mt-2 text-[11px] text-slate-500">
+        Menampilkan {dataSiswa.length} siswa. Baris akun Anda diberi label <span className="font-semibold">Anda</span>.
       </div>
     </div>
   )
@@ -370,17 +472,17 @@ const JadwalCard = ({
 
   const getCardStyle = () => {
     if (isCurrent && isSesiAktif() && jadwal.mode === 'otomatis' && !jadwal.status) {
-      return 'border-green-500 bg-green-50'
+      return 'border-green-400 bg-green-50'
     }
-    if (isCurrent) return 'border-blue-500 bg-blue-50'
+    if (isCurrent) return 'border-blue-400 bg-blue-50'
     if (jadwal.status) return 'border-blue-300 bg-blue-50'
-    return 'border-gray-200 bg-white'
+    return 'border-slate-200 bg-white'
   }
 
   const isSesiAktifFlag = isSesiAktif()
 
   return (
-    <div className={`rounded-lg border p-3 transition-all duration-200 ${getCardStyle()}`}>
+    <div className={`rounded-2xl border p-4 transition-all duration-200 shadow-sm hover:shadow-md ${getCardStyle()}`}>
       <div className="flex items-start justify-between mb-2">
         <div className="flex items-center space-x-2">
           <div
@@ -391,12 +493,12 @@ const JadwalCard = ({
                 ? 'bg-blue-500'
                 : jadwal.status
                 ? 'bg-blue-400'
-                : 'bg-gray-400'
+                : 'bg-slate-400'
             }`}
           />
           <div>
-            <h3 className="font-semibold text-gray-900 text-sm">{jadwal.mapel}</h3>
-            <p className="text-xs text-gray-600">{jadwal.guru_nama || 'Guru'}</p>
+            <h3 className="font-semibold text-slate-900 text-sm">{jadwal.mapel}</h3>
+            <p className="text-xs text-slate-600">{jadwal.guru_nama || 'Guru'}</p>
           </div>
         </div>
         <div className="flex flex-col items-end space-y-1">
@@ -408,15 +510,15 @@ const JadwalCard = ({
       </div>
 
       <div className="grid grid-cols-2 gap-2 mb-2">
-        <div className="text-center p-2 bg-white rounded border border-gray-200">
-          <div className="text-[11px] text-gray-600">Mulai</div>
-          <div className="font-semibold text-gray-900 text-sm">
+        <div className="text-center p-2 bg-white rounded-xl border border-slate-200">
+          <div className="text-[11px] text-slate-600">Mulai</div>
+          <div className="font-semibold text-slate-900 text-sm">
             {jadwal.jam_mulai}
           </div>
         </div>
-        <div className="text-center p-2 bg-white rounded border border-gray-200">
-          <div className="text-[11px] text-gray-600">Selesai</div>
-          <div className="font-semibold text-gray-900 text-sm">
+        <div className="text-center p-2 bg-white rounded-xl border border-slate-200">
+          <div className="text-[11px] text-slate-600">Selesai</div>
+          <div className="font-semibold text-slate-900 text-sm">
             {jadwal.jam_selesai}
           </div>
         </div>
@@ -446,14 +548,14 @@ const JadwalCard = ({
       <div className="grid grid-cols-2 gap-2">
         {isCurrent && isSesiAktifFlag && jadwal.mode === 'otomatis' && !jadwal.status && (
           <button
-            className="w-full py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-md font-semibold transition-all duration-200 text-[11px]"
+            className="w-full py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl font-semibold transition-all duration-200 text-[11px]"
             onClick={() => onAbsenClick(jadwal)}
           >
             Absen
           </button>
         )}
         <button
-          className="w-full py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-semibold transition-all duration-200 text-[11px]"
+          className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold transition-all duration-200 text-[11px]"
           onClick={() => onCalendarClick(jadwal)}
         >
           Kalender
@@ -552,8 +654,8 @@ const CalendarOverlay = ({ mapel, jadwalMingguIni, onClose, profile, userId }) =
       const status = absensiData[date]
 
       let bgColor = 'bg-white'
-      let textColor = 'text-gray-900'
-      let borderColor = 'border-gray-200'
+      let textColor = 'text-slate-900'
+      let borderColor = 'border-slate-200'
 
       if (hasJadwal) {
         if (status === 'Hadir') {
@@ -578,9 +680,9 @@ const CalendarOverlay = ({ mapel, jadwalMingguIni, onClose, profile, userId }) =
           textColor = 'text-yellow-900'
         }
       } else {
-        bgColor = 'bg-gray-50'
-        textColor = 'text-gray-500'
-        borderColor = 'border-gray-100'
+        bgColor = 'bg-slate-50'
+        textColor = 'text-slate-500'
+        borderColor = 'border-slate-100'
       }
 
       calendar.push({
@@ -601,15 +703,15 @@ const CalendarOverlay = ({ mapel, jadwalMingguIni, onClose, profile, userId }) =
   const calendar = generateCalendar()
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl border border-slate-200 p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto shadow-2xl">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-bold text-gray-900">
+          <h2 className="text-xl font-bold text-slate-900">
             Kalender Absensi - {mapel}
           </h2>
           <button
             onClick={onClose}
-            className="text-gray-500 hover:text-gray-700 text-2xl"
+            className="text-slate-500 hover:text-slate-700 text-2xl"
           >
             ×
           </button>
@@ -618,13 +720,13 @@ const CalendarOverlay = ({ mapel, jadwalMingguIni, onClose, profile, userId }) =
         {/* Filter Bulan */}
         <div className="mb-6">
           <div className="w-64">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-slate-700 mb-1">
               Bulan
             </label>
             <select
               value={selectedMonth}
               onChange={(e) => setSelectedMonth(parseInt(e.target.value, 10))}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-3 py-2 border border-slate-300 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             >
               {bulanList.map((bulan, index) => (
                 <option key={bulan} value={index + 1}>
@@ -639,23 +741,23 @@ const CalendarOverlay = ({ mapel, jadwalMingguIni, onClose, profile, userId }) =
         <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-4">
           <div className="flex items-center space-x-2">
             <div className="w-4 h-4 bg-green-100 border border-green-300 rounded" />
-            <span className="text-xs text-gray-600">Hadir</span>
+            <span className="text-xs text-slate-600">Hadir</span>
           </div>
           <div className="flex items-center space-x-2">
             <div className="w-4 h-4 bg-yellow-100 border border-yellow-300 rounded" />
-            <span className="text-xs text-gray-600">Izin</span>
+            <span className="text-xs text-slate-600">Izin</span>
           </div>
           <div className="flex items-center space-x-2">
             <div className="w-4 h-4 bg-blue-100 border border-blue-300 rounded" />
-            <span className="text-xs text-gray-600">Sakit</span>
+            <span className="text-xs text-slate-600">Sakit</span>
           </div>
           <div className="flex items-center space-x-2">
             <div className="w-4 h-4 bg-red-100 border border-red-300 rounded" />
-            <span className="text-xs text-gray-600">Alpha</span>
+            <span className="text-xs text-slate-600">Alpha</span>
           </div>
           <div className="flex items-center space-x-2">
             <div className="w-4 h-4 bg-yellow-100 border border-yellow-300 rounded" />
-            <span className="text-xs text-gray-600">Belum Absen</span>
+            <span className="text-xs text-slate-600">Belum Absen</span>
           </div>
         </div>
 
@@ -663,16 +765,16 @@ const CalendarOverlay = ({ mapel, jadwalMingguIni, onClose, profile, userId }) =
         {isLoading ? (
           <div className="text-center py-8">
             <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-            <p className="text-gray-600 text-sm">Memuat data absensi...</p>
+            <p className="text-slate-600 text-sm">Memuat data absensi...</p>
           </div>
         ) : (
-          <div className="border border-gray-200 rounded-lg overflow-hidden">
+          <div className="border border-slate-200 rounded-2xl overflow-hidden">
             {/* Header Hari */}
-            <div className="grid grid-cols-7 bg-gray-50 border-b border-gray-200">
+            <div className="grid grid-cols-7 bg-slate-50 border-b border-slate-200">
               {hariList.map((hari) => (
                 <div
                   key={hari}
-                  className="p-3 text-center text-sm font-medium text-gray-700 border-r border-gray-200 last:border-r-0"
+                  className="p-3 text-center text-sm font-medium text-slate-700 border-r border-slate-200 last:border-r-0"
                 >
                   {hari}
                 </div>
@@ -684,8 +786,8 @@ const CalendarOverlay = ({ mapel, jadwalMingguIni, onClose, profile, userId }) =
               {calendar.map((day, index) => (
                 <div
                   key={index}
-                  className={`min-h-[80px] p-2 border-b border-r border-gray-200 last:border-r-0 ${
-                    day ? day.bgColor : 'bg-gray-50'
+                  className={`min-h-[80px] p-2 border-b border-r border-slate-200 last:border-r-0 ${
+                    day ? day.bgColor : 'bg-slate-50'
                   } ${day?.borderColor || ''}`}
                 >
                   {day && (
@@ -730,7 +832,7 @@ const CalendarOverlay = ({ mapel, jadwalMingguIni, onClose, profile, userId }) =
         <div className="mt-6 flex justify-end">
           <button
             onClick={onClose}
-            className="px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white rounded-lg font-medium transition-colors"
+            className="px-4 py-2 bg-slate-700 hover:bg-slate-800 text-white rounded-2xl font-medium transition-colors"
           >
             Tutup
           </button>
@@ -835,6 +937,7 @@ export default function SAbsensi() {
     rfid_mulai: '07:00',
     rfid_selesai: '15:00'
   })
+  const [rfidSettingsId, setRfidSettingsId] = useState('')
 
   // Refs untuk realtime
   const jadwalRef = useRef([])
@@ -876,8 +979,10 @@ export default function SAbsensi() {
         const { data, error } = await supabase
           .from('absensi_rfid_settings')
           .select('*')
-          .eq('id', '00000000-0000-0000-0000-000000000001')
-          .single()
+          .order('updated_at', { ascending: false })
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
 
         if (error && error.code !== 'PGRST116') {
           console.error('Error loading RFID settings:', error)
@@ -885,6 +990,7 @@ export default function SAbsensi() {
         }
 
         if (data) {
+          setRfidSettingsId(data.id || '')
           setRfidSettings({
             rfid_aktif: data.rfid_aktif || false,
             rfid_mulai: data.rfid_mulai || '07:00',
@@ -992,14 +1098,22 @@ export default function SAbsensi() {
           )
           const mode = settingsForMapel?.mode || 'manual'
 
-          const { data: absensi } = await supabase
+          // Hindari maybeSingle agar tidak error jika data lama duplikat.
+          const { data: absensiRows, error: absensiError } = await supabase
             .from('absensi')
-            .select('status')
+            .select('status, waktu')
             .eq('kelas', profile.kelas)
             .eq('tanggal', getToday())
             .eq('mapel', jadwalItem.mapel)
             .eq('uid', userId)
-            .maybeSingle()
+            .order('waktu', { ascending: false })
+            .limit(1)
+
+          if (absensiError) {
+            console.warn('Error load status absensi per mapel:', absensiError)
+          }
+
+          const absensi = (absensiRows || [])[0] || null
 
           const now = currentDateTime.minutes
           const startMinutes = toMinutes(jadwalItem.jam_mulai)
@@ -1204,6 +1318,54 @@ export default function SAbsensi() {
     return () => clearInterval(interval)
   }, [currentJadwal, tgl, currentDateTime.minutes])
 
+  const selectedMapelJadwal = useMemo(() => {
+    if (!mapel) return null
+    return (jadwalHariIni || []).find((j) => j.mapel === mapel) || null
+  }, [mapel, jadwalHariIni])
+
+  const izinAvailability = useMemo(() => {
+    if (!mapel) {
+      return { allowed: false, reason: 'Pilih mapel terlebih dahulu' }
+    }
+    if (status) {
+      return { allowed: false, reason: 'Anda sudah memiliki status absensi' }
+    }
+    if (tgl !== getToday()) {
+      return {
+        allowed: false,
+        reason: 'Izin hanya bisa diajukan pada tanggal hari ini'
+      }
+    }
+    if (!selectedMapelJadwal) {
+      return {
+        allowed: false,
+        reason: 'Mapel tidak ada di jadwal hari ini'
+      }
+    }
+
+    const now = currentDateTime.minutes
+    const startMinutes = toMinutes(selectedMapelJadwal.jam_mulai)
+    const endMinutes = toMinutes(selectedMapelJadwal.jam_selesai)
+
+    if (now < startMinutes) {
+      return { allowed: false, reason: 'Sesi absensi belum dimulai' }
+    }
+    if (now > endMinutes) {
+      return {
+        allowed: false,
+        reason: 'Waktu absensi sudah habis, tidak bisa ajukan izin'
+      }
+    }
+
+    return { allowed: true, reason: '' }
+  }, [
+    mapel,
+    status,
+    tgl,
+    selectedMapelJadwal,
+    currentDateTime.minutes
+  ])
+
   /* ========== Simpan Absensi ========== */
   const saveAbsensi = async (st, komentar) => {
     const nowIso = new Date().toISOString()
@@ -1237,6 +1399,11 @@ export default function SAbsensi() {
   const ajukanIzin = async () => {
     if (!profile?.kelas || !userId || !mapel) {
       pushToast('error', 'Data tidak lengkap')
+      return
+    }
+
+    if (!izinAvailability.allowed) {
+      pushToast('error', izinAvailability.reason)
       return
     }
 
@@ -1418,7 +1585,8 @@ export default function SAbsensi() {
           filter: `kelas=eq.${profile.kelas}`
         },
         (payload) => {
-          if (payload.new.mapel === mapel && payload.new.tanggal === tgl) {
+          const row = payload.new || payload.old
+          if (row && row.mapel === mapel && row.tanggal === tgl) {
             loadRingkasDanStatus()
           }
         }
@@ -1447,14 +1615,21 @@ export default function SAbsensi() {
       .channel('rfid-settings-changes')
       .on(
         'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'absensi_rfid_settings',
-          filter: 'id=eq.00000000-0000-0000-0000-000000000001'
-        },
+        rfidSettingsId
+          ? {
+              event: '*',
+              schema: 'public',
+              table: 'absensi_rfid_settings',
+              filter: `id=eq.${rfidSettingsId}`
+            }
+          : {
+              event: '*',
+              schema: 'public',
+              table: 'absensi_rfid_settings'
+            },
         (payload) => {
           if (payload.new) {
+            setRfidSettingsId(payload.new.id || '')
             setRfidSettings({
               rfid_aktif: payload.new.rfid_aktif || false,
               rfid_mulai: payload.new.rfid_mulai || '07:00',
@@ -1468,7 +1643,7 @@ export default function SAbsensi() {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [])
+  }, [rfidSettingsId])
 
   /* ========== Realtime RFID Scan ========== */
   useEffect(() => {
@@ -1627,13 +1802,23 @@ export default function SAbsensi() {
     isInRfidTimeRange
   ])
 
+  const isHadirActionDisabled =
+    !mapel ||
+    !!status ||
+    isSubmitting ||
+    !isAbsenOpen ||
+    currentJadwal?.mode !== 'otomatis' ||
+    !isManualAbsenAllowed()
+
+  const isIzinActionDisabled = isSubmitting || !izinAvailability.allowed
+
   /* ========== Loading Profile ========== */
   if (!profile) {
     return (
-      <div className="min-h-screen bg-gray-50 p-4 flex items-center justify-center">
-        <div className="bg-white rounded-lg border border-gray-200 p-6 text-center max-w-md w-full">
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-purple-50/30 p-4 flex items-center justify-center">
+        <div className="bg-white rounded-2xl border border-slate-200 p-6 text-center max-w-md w-full shadow-sm">
           <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-          <p className="text-gray-600 font-medium">Memuat data...</p>
+          <p className="text-slate-600 font-medium">Memuat data...</p>
         </div>
       </div>
     )
@@ -1641,64 +1826,50 @@ export default function SAbsensi() {
 
   /* ======================= RENDER ======================= */
   return (
-    <div className="min-h-screen bg-gray-50 py-4">
-      <div className="w-full px-3 sm:px-4 lg:px-5 space-y-4">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-purple-50/30 p-4 sm:p-6">
+      <div className="max-w-full mx-auto space-y-6">
         {/* Header */}
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
-            <div className="flex items-center space-x-3">
-              <div className="p-2 bg-blue-600 rounded-lg">
-                <svg
-                  className="w-5 h-5 text-white"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
-                  />
-                </svg>
-              </div>
+        <div className="bg-white rounded-2xl border border-slate-200/60 p-6 shadow-sm transition-all duration-300 hover:shadow-md">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+            <div className="flex items-center gap-4">
+              <div className="w-3 h-12 bg-gradient-to-b from-blue-500 to-purple-600 rounded-full"></div>
               <div>
-                <h1 className="text-lg font-bold text-gray-900">Absensi Siswa</h1>
-                <p className="text-gray-600 text-sm mt-1">
+                <h1 className="text-2xl lg:text-3xl font-bold text-slate-900">Absensi Siswa</h1>
+                <p className="text-slate-600 text-sm mt-1">
                   {profile.kelas} • {profile.nama}
                 </p>
-                <p className="text-[11px] text-gray-500 mt-0.5">
+                <p className="text-[11px] text-slate-500 mt-1">
                   Rekap Kehadiran <span className="font-semibold">Hari Ini</span>
                 </p>
               </div>
             </div>
 
-            <div className="flex flex-col sm:flex-row gap-2">
+            <div className="flex flex-col lg:flex-row gap-3">
               {/* Statistik Kehadiran HARI INI */}
-              <div className="flex gap-3 bg-gray-50 rounded-lg p-3 border border-gray-200">
+              <div className="grid grid-cols-4 gap-2 bg-slate-50 rounded-2xl p-3 border border-slate-200">
                 <div className="text-center">
                   <div className="text-lg font-bold text-green-600">
                     {statistikKehadiran.Hadir}
                   </div>
-                  <div className="text-xs text-gray-600 font-medium">Hadir</div>
+                  <div className="text-xs text-slate-600 font-medium">Hadir</div>
                 </div>
                 <div className="text-center">
                   <div className="text-lg font-bold text-yellow-600">
                     {statistikKehadiran.Izin}
                   </div>
-                  <div className="text-xs text-gray-600 font-medium">Izin</div>
+                  <div className="text-xs text-slate-600 font-medium">Izin</div>
                 </div>
                 <div className="text-center">
                   <div className="text-lg font-bold text-blue-600">
                     {statistikKehadiran.Sakit}
                   </div>
-                  <div className="text-xs text-gray-600 font-medium">Sakit</div>
+                  <div className="text-xs text-slate-600 font-medium">Sakit</div>
                 </div>
                 <div className="text-center">
                   <div className="text-lg font-bold text-red-600">
                     {statistikKehadiran.Alpha}
                   </div>
-                  <div className="text-xs text-gray-600 font-medium">Alpha</div>
+                  <div className="text-xs text-slate-600 font-medium">Alpha</div>
                 </div>
               </div>
 
@@ -1706,7 +1877,7 @@ export default function SAbsensi() {
               <div className="flex flex-col gap-1">
                 <RealTimeClock />
                 {profile?.rfid_uid && (
-                  <div className="text-xs text-gray-600 bg-white rounded px-2 py-1 border border-gray-300 flex items-center gap-1">
+                  <div className="text-xs text-slate-600 bg-white rounded-2xl px-3 py-2 border border-slate-200 flex items-center gap-2 shadow-sm">
                     <span className="text-green-600">💳</span>
                     <div className="flex-1">
                       <div className="font-medium">
@@ -1734,14 +1905,20 @@ export default function SAbsensi() {
         </div>
 
         {/* Tabs */}
-        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-          <div className="border-b border-gray-200">
-            <div className="flex gap-1 px-3">
+        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm transition-all duration-300 hover:shadow-md">
+          <div className="px-4 py-3 border-b border-slate-100 bg-gradient-to-r from-gray-50 to-white">
+            <div className="flex items-center gap-3">
+              <div className="w-2 h-8 bg-indigo-600 rounded-full"></div>
+              <h2 className="text-xl font-bold text-slate-900">Menu Absensi</h2>
+            </div>
+          </div>
+          <div className="border-b border-slate-200">
+            <div className="flex gap-2 px-3 pt-2">
               <button
-                className={`px-3 py-2 font-medium border-b-2 transition-all duration-200 flex items-center space-x-1 text-sm ${
+                className={`px-3 py-2 font-medium border-b-2 rounded-t-2xl transition-all duration-200 flex items-center space-x-1 text-sm ${
                   tab === 'manual'
                     ? 'border-blue-600 text-blue-600 bg-blue-50/50'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                    : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'
                 }`}
                 onClick={() => setTab('manual')}
               >
@@ -1749,10 +1926,10 @@ export default function SAbsensi() {
                 <span>Absen Manual</span>
               </button>
               <button
-                className={`px-3 py-2 font-medium border-b-2 transition-all duration-200 flex items-center space-x-1 text-sm ${
+                className={`px-3 py-2 font-medium border-b-2 rounded-t-2xl transition-all duration-200 flex items-center space-x-1 text-sm ${
                   tab === 'jadwal'
                     ? 'border-blue-600 text-blue-600 bg-blue-50/50'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                    : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'
                 }`}
                 onClick={() => setTab('jadwal')}
               >
@@ -1765,292 +1942,215 @@ export default function SAbsensi() {
           <div className="p-3">
             {/* === TAB MANUAL === */}
             {tab === 'manual' && (
-              <div className="space-y-4">
-                {/* Filter */}
-                <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
-                  <h3 className="font-semibold text-sm mb-2 text-gray-800 flex items-center space-x-1">
-                    <span>🔍</span>
-                    <span>Pilih Mapel & Tanggal</span>
-                  </h3>
-                  <div className="grid md:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-1">
-                        Tanggal Absen
-                      </label>
-                      <div className="flex gap-2">
-                        <input
-                          type="date"
-                          className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-white text-sm"
-                          value={tgl}
-                          onChange={(e) => setTgl(e.target.value)}
-                          max={getToday()}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setTgl(getToday())}
-                          className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold text-sm shadow-sm whitespace-nowrap"
+              <div className="space-y-5">
+                <div className="grid grid-cols-1 xl:grid-cols-5 gap-4">
+                  {/* Filter */}
+                  <div className="xl:col-span-3 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden transition-all duration-300 hover:shadow-md">
+                    <div className="px-4 py-3 border-b border-blue-100 bg-gradient-to-r from-blue-50 to-indigo-50">
+                      <div className="flex items-center gap-3">
+                        <div className="w-2 h-7 bg-blue-600 rounded-full"></div>
+                        <h3 className="font-semibold text-base text-slate-900">
+                          Pilih Mapel & Tanggal
+                        </h3>
+                      </div>
+                      <p className="text-[11px] text-slate-600 mt-1 ml-5">
+                        Pilih mata pelajaran yang diajar hari itu, lalu lakukan absensi.
+                      </p>
+                    </div>
+                    <div className="p-4 grid md:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-semibold tracking-wide text-slate-600 uppercase mb-1.5">
+                          Tanggal Absen
+                        </label>
+                        <div className="flex gap-2">
+                          <input
+                            type="date"
+                            className="flex-1 px-3 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-white text-sm"
+                            value={tgl}
+                            onChange={(e) => setTgl(e.target.value)}
+                            max={getToday()}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setTgl(getToday())}
+                            className="px-3 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold text-sm shadow-sm whitespace-nowrap"
+                          >
+                            Hari Ini
+                          </button>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold tracking-wide text-slate-600 uppercase mb-1.5">
+                          Mata Pelajaran
+                        </label>
+                        <select
+                          className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-white text-sm"
+                          value={mapel}
+                          onChange={(e) => setMapel(e.target.value)}
                         >
-                          Hari Ini
-                        </button>
+                          <option value="">— Pilih Mapel —</option>
+                          {profile?.kelas && (
+                            <MapelOptions kelas={profile.kelas} tanggal={tgl} />
+                          )}
+                        </select>
                       </div>
                     </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-1">
-                        Mata Pelajaran
-                      </label>
-                      <select
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-white text-sm"
-                        value={mapel}
-                        onChange={(e) => setMapel(e.target.value)}
-                      >
-                        <option value="">— Pilih Mapel —</option>
-                        {profile?.kelas && (
-                          <MapelOptions kelas={profile.kelas} tanggal={tgl} />
-                        )}
-                      </select>
-                    </div>
                   </div>
-                </div>
 
-                {/* Status Sesi */}
-                {currentJadwal && tgl === getToday() && (
+                  {/* Status sesi hari ini */}
                   <div
-                    className={`rounded-lg p-3 border transition-all duration-200 ${
-                      isAbsenOpen && currentJadwal.mode === 'otomatis'
-                        ? 'bg-green-50 border-green-300 text-green-800'
-                        : currentJadwalIndex !== -1
-                        ? 'bg-blue-50 border-blue-300 text-blue-800'
-                        : 'bg-gray-50 border-gray-300 text-gray-700'
+                    className={`xl:col-span-2 rounded-2xl border p-4 shadow-sm transition-all duration-200 ${
+                      currentJadwal && tgl === getToday()
+                        ? isAbsenOpen && currentJadwal.mode === 'otomatis'
+                          ? 'bg-green-50 border-green-200 text-green-900'
+                          : currentJadwalIndex !== -1
+                          ? 'bg-blue-50 border-blue-200 text-blue-900'
+                          : 'bg-slate-50 border-slate-200 text-slate-800'
+                        : 'bg-slate-50 border-slate-200 text-slate-800'
                     }`}
                   >
-                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
-                      <div className="flex-1">
-                        <div className="font-semibold text-sm flex items-center space-x-1">
-                          <span>📚</span>
-                          <span>{currentJadwal.mapel}</span>
-                          {currentJadwalIndex !== -1 && (
-                            <Badge variant="live" className="text-xs">
-                              JADWAL SAAT INI
-                            </Badge>
-                          )}
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <h3 className="font-semibold text-sm flex items-center gap-2">
+                          <span>🛰️</span>
+                          <span>Status Sesi Hari Ini</span>
+                        </h3>
+                        <p className="text-[11px] mt-1 opacity-80">
+                          {tgl === getToday()
+                            ? 'Update real-time berdasarkan jadwal aktif.'
+                            : 'Status sesi detail tampil untuk tanggal hari ini.'}
+                        </p>
+                      </div>
+                      {tgl === getToday() && currentJadwal ? (
+                        isAbsenOpen && currentJadwal.mode === 'otomatis' ? (
+                          <Badge variant="live" className="text-[10px] shrink-0">
+                            SESI DIBUKA
+                          </Badge>
+                        ) : currentJadwalIndex !== -1 ? (
+                          <Badge variant="info" className="text-[10px] shrink-0">
+                            JADWAL AKTIF
+                          </Badge>
+                        ) : (
+                          <Badge variant="warning" className="text-[10px] shrink-0">
+                            {currentJadwal.mode === 'manual'
+                              ? 'MODE MANUAL'
+                              : 'SESI DITUTUP'}
+                          </Badge>
+                        )
+                      ) : null}
+                    </div>
+
+                    {currentJadwal && tgl === getToday() ? (
+                      <div className="mt-3 space-y-2 text-xs">
+                        <div className="font-semibold text-sm">{currentJadwal.mapel}</div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="rounded-xl bg-white/70 border border-white px-2.5 py-2">
+                            <div className="text-[10px] uppercase tracking-wide opacity-70">Jam</div>
+                            <div className="font-medium mt-0.5">
+                              {currentJadwal.jam_mulai} - {currentJadwal.jam_selesai}
+                            </div>
+                          </div>
+                          <div className="rounded-xl bg-white/70 border border-white px-2.5 py-2">
+                            <div className="text-[10px] uppercase tracking-wide opacity-70">Mode</div>
+                            <div className="font-medium mt-0.5">
+                              {currentJadwal.mode === 'otomatis' ? 'Otomatis' : 'Manual'}
+                            </div>
+                          </div>
                         </div>
-                        <div className="text-xs mt-1 space-y-1">
-                          <div className="flex items-center space-x-1">
-                            <span className="font-medium">Jam:</span>
-                            <span>
-                              {currentJadwal.jam_mulai} -{' '}
-                              {currentJadwal.jam_selesai}
+                        {currentJadwal.guru_nama && (
+                          <div className="text-[11px] opacity-90">
+                            Guru: <span className="font-semibold">{currentJadwal.guru_nama}</span>
+                          </div>
+                        )}
+                        {rfidSettings.rfid_aktif && (
+                          <div className="text-[11px] opacity-90">
+                            RFID:{' '}
+                            <span className="font-semibold">
+                              {isInRfidTimeRange() ? 'AKTIF' : 'NON-AKTIF'}
                             </span>
                           </div>
-                          {currentJadwal.guru_nama && (
-                            <div className="flex items-center space-x-1">
-                              <span className="font-medium">Guru:</span>
-                              <span>{currentJadwal.guru_nama}</span>
-                            </div>
-                          )}
-                          <div className="flex items-center space-x-1">
-                            <span className="font-medium">Mode:</span>
-                            <Badge
-                              variant={
-                                currentJadwal.mode === 'otomatis'
-                                  ? 'hadir'
-                                  : 'info'
-                              }
-                            >
-                              {currentJadwal.mode === 'otomatis'
-                                ? 'Otomatis'
-                                : 'Manual'}
-                            </Badge>
-                          </div>
-                          {rfidSettings.rfid_aktif && (
-                            <div className="flex items-center space-x-1">
-                              <span className="font-medium">RFID:</span>
-                              <Badge
-                                variant={
-                                  isInRfidTimeRange() ? 'live' : 'warning'
-                                }
-                              >
-                                {isInRfidTimeRange()
-                                  ? 'AKTIF'
-                                  : 'NON-AKTIF'}
-                              </Badge>
-                            </div>
-                          )}
-                        </div>
+                        )}
                       </div>
-                      {tgl === getToday() && (
-                        <>
-                          {isAbsenOpen && currentJadwal.mode === 'otomatis' ? (
-                            <Badge variant="live" className="text-xs">
-                              <div className="flex items-center space-x-1">
-                                <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
-                                <span>SESI DIBUKA</span>
-                              </div>
-                            </Badge>
-                          ) : currentJadwalIndex !== -1 ? (
-                            <Badge variant="info" className="text-xs">
-                              JADWAL AKTIF
-                            </Badge>
-                          ) : (
-                            <Badge variant="warning" className="text-xs">
-                              {currentJadwal.mode === 'manual'
-                                ? 'MODE MANUAL'
-                                : 'SESI DITUTUP'}
-                            </Badge>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Tombol Absensi – versi kecil */}
-                <div className="bg-white rounded-lg p-3 border border-gray-200">
-                  <h3 className="font-semibold text-sm mb-3 text-gray-800 flex items-center space-x-1">
-                    <span>🎯</span>
-                    <span>Aksi Absensi</span>
-                    {status && (
-                      <Badge
-                        variant={
-                          status === 'Hadir'
-                            ? 'hadir'
-                            : status === 'Izin'
-                            ? 'izin'
-                            : status === 'Sakit'
-                            ? 'sakit'
-                            : 'alpha'
-                        }
-                        className="ml-1"
-                      >
-                        Status: {status}
-                      </Badge>
+                    ) : (
+                      <div className="mt-3 text-xs text-slate-600">
+                        Belum ada sesi aktif yang bisa ditampilkan untuk pilihan saat ini.
+                      </div>
                     )}
-                  </h3>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                    {/* Hadir */}
-                    <button
-                      className={`w-full px-2 py-2 rounded-md border text-xs font-medium transition-all duration-200 ${
-                        !mapel ||
-                        status ||
-                        isSubmitting ||
-                        !isAbsenOpen ||
-                        currentJadwal?.mode !== 'otomatis' ||
-                        !isManualAbsenAllowed()
-                          ? 'bg-gray-100 border-gray-300 text-gray-400 cursor-not-allowed'
-                          : 'bg-green-50 border-green-300 text-green-700 hover:bg-green-100 hover:border-green-400'
-                      }`}
-                      disabled={
-                        !mapel ||
-                        !!status ||
-                        isSubmitting ||
-                        !isAbsenOpen ||
-                        currentJadwal?.mode !== 'otomatis' ||
-                        !isManualAbsenAllowed()
-                      }
-                      onClick={() => submit('Hadir')}
-                    >
-                      <div className="flex flex-col items-center gap-0.5">
-                        <div className="text-sm">✅</div>
-                        <div className="font-semibold text-[11px]">Hadir</div>
-                        <div className="text-[10px] opacity-75 text-center">
-                          {!isManualAbsenAllowed()
-                            ? 'Hanya via RFID'
-                            : 'Tandai kehadiran'}
-                        </div>
-                      </div>
-                    </button>
-
-                    {/* Ajukan Izin */}
-                    <button
-                      className={`w-full px-2 py-2 rounded-md border text-xs font-medium transition-all duration-200 ${
-                        !mapel || status || isSubmitting
-                          ? 'bg-gray-100 border-gray-300 text-gray-400 cursor-not-allowed'
-                          : 'bg-yellow-50 border-yellow-300 text-yellow-700 hover:bg-yellow-100 hover:border-yellow-400'
-                      }`}
-                      disabled={!mapel || !!status || isSubmitting}
-                      onClick={() => setIsIzinModalOpen(true)}
-                    >
-                      <div className="flex flex-col items-center gap-0.5">
-                        <div className="text-sm">📝</div>
-                        <div className="font-semibold text-[11px]">
-                          Ajukan Izin
-                        </div>
-                        <div className="text-[10px] opacity-75 text-center">
-                          Dengan alasan
-                        </div>
-                      </div>
-                    </button>
                   </div>
-
-                  {/* Info RFID */}
-                  {rfidSettings.rfid_aktif && (
-                    <div className="mt-3 p-2 bg-blue-50 border border-blue-200 rounded-lg">
-                      <div className="flex items-center space-x-2 text-xs text-blue-700">
-                        <span>💡</span>
-                        <span>
-                          <strong>Mode RFID Aktif:</strong>{' '}
-                          {isInRfidTimeRange()
-                            ? `Absensi hanya via RFID (${rfidSettings.rfid_mulai} - ${rfidSettings.rfid_selesai})`
-                            : 'Di luar waktu RFID, absensi manual diperbolehkan'}
-                        </span>
-                      </div>
-                    </div>
-                  )}
                 </div>
 
                 {/* Ringkasan kelas */}
-                <div className="bg-white rounded-lg p-3 border border-gray-200">
-                  <h3 className="font-semibold text-sm mb-2 text-gray-800 flex items-center space-x-1">
-                    <span>📊</span>
-                    <span>Ringkasan Kehadiran Kelas</span>
-                    <Badge variant="live" className="ml-1">
-                      Live
-                    </Badge>
-                  </h3>
-
-                  {/* Statistik ringkas */}
-                  <div className="grid grid-cols-4 gap-2 mb-4">
-                    <div className="text-center p-3 bg-green-50 border border-green-300 rounded-lg">
-                      <div className="text-lg font-bold text-green-700">
-                        {ringkas.H}
-                      </div>
-                      <div className="text-xs text-green-600 font-medium mt-1">
-                        Hadir
-                      </div>
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden transition-all duration-300 hover:shadow-md">
+                  <div className="px-4 py-3 border-b border-slate-100 bg-gradient-to-r from-gray-50 to-white flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-3">
+                      <div className="w-2 h-7 bg-emerald-600 rounded-full"></div>
+                      <h3 className="font-semibold text-base text-slate-900">
+                        Daftar Absensi Kelas
+                      </h3>
                     </div>
-                    <div className="text-center p-3 bg-yellow-50 border border-yellow-300 rounded-lg">
-                      <div className="text-lg font-bold text-yellow-700">
-                        {ringkas.I}
-                      </div>
-                      <div className="text-xs text-yellow-600 font-medium mt-1">
-                        Izin
-                      </div>
-                    </div>
-                    <div className="text-center p-3 bg-blue-50 border border-blue-300 rounded-lg">
-                      <div className="text-lg font-bold text-blue-700">
-                        {ringkas.S}
-                      </div>
-                      <div className="text-xs text-blue-600 font-medium mt-1">
-                        Sakit
-                      </div>
-                    </div>
-                    <div className="text-center p-3 bg-red-50 border border-red-300 rounded-lg">
-                      <div className="text-lg font-bold text-red-700">
-                        {ringkas.A}
-                      </div>
-                      <div className="text-xs text-red-600 font-medium mt-1">
-                        Alpha
-                      </div>
-                    </div>
+                    <Badge variant="live" className="text-[10px]">Live</Badge>
                   </div>
 
-                  {/* Tabel detail siswa */}
-                  <RingkasanKelasTable
-                    kelas={profile?.kelas}
-                    mapel={mapel}
-                    tanggal={tgl}
-                  />
+                  <div className="p-4">
+                    <div className="mb-3 flex flex-wrap items-center gap-2">
+                      {status ? (
+                        <Badge
+                          variant={
+                            status === 'Hadir'
+                              ? 'hadir'
+                              : status === 'Izin'
+                              ? 'izin'
+                              : status === 'Sakit'
+                              ? 'sakit'
+                              : 'alpha'
+                          }
+                        >
+                          Status Anda: {status}
+                        </Badge>
+                      ) : (
+                        <Badge variant="warning">
+                          Status Anda: Belum Absen
+                        </Badge>
+                      )}
+                      {rfidSettings.rfid_aktif && (
+                        <span className="text-[11px] text-blue-700 bg-blue-50 border border-blue-200 rounded-full px-2.5 py-1">
+                          RFID {isInRfidTimeRange() ? 'AKTIF' : 'NON-AKTIF'} (
+                          {rfidSettings.rfid_mulai} - {rfidSettings.rfid_selesai})
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+                      <div className="rounded-2xl border border-green-200 bg-green-50 p-3">
+                        <div className="text-[11px] text-green-700 font-semibold">Hadir</div>
+                        <div className="text-2xl font-bold text-green-700 mt-1">{ringkas.H}</div>
+                      </div>
+                      <div className="rounded-2xl border border-yellow-200 bg-yellow-50 p-3">
+                        <div className="text-[11px] text-yellow-700 font-semibold">Izin</div>
+                        <div className="text-2xl font-bold text-yellow-700 mt-1">{ringkas.I}</div>
+                      </div>
+                      <div className="rounded-2xl border border-blue-200 bg-blue-50 p-3">
+                        <div className="text-[11px] text-blue-700 font-semibold">Sakit</div>
+                        <div className="text-2xl font-bold text-blue-700 mt-1">{ringkas.S}</div>
+                      </div>
+                      <div className="rounded-2xl border border-red-200 bg-red-50 p-3">
+                        <div className="text-[11px] text-red-700 font-semibold">Alpha</div>
+                        <div className="text-2xl font-bold text-red-700 mt-1">{ringkas.A}</div>
+                      </div>
+                    </div>
+
+                    <RingkasanKelasTable
+                      kelas={profile?.kelas}
+                      mapel={mapel}
+                      tanggal={tgl}
+                      selfUserId={userId}
+                      canClickHadir={!isHadirActionDisabled}
+                      canClickIzin={!isIzinActionDisabled}
+                      izinDisabledReason={izinAvailability.reason}
+                      onHadir={() => submit('Hadir')}
+                      onIzin={() => setIsIzinModalOpen(true)}
+                    />
+                  </div>
                 </div>
               </div>
             )}
@@ -2058,12 +2158,14 @@ export default function SAbsensi() {
             {/* === TAB JADWAL === */}
             {tab === 'jadwal' && (
               <div className="space-y-4">
-                <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
-                  <h3 className="font-semibold text-sm mb-1 text-gray-800 flex items-center space-x-1">
-                    <span>📅</span>
-                    <span>Jadwal Pelajaran Minggu Ini</span>
-                  </h3>
-                  <p className="text-gray-600 text-xs font-medium">
+                <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
+                  <div className="flex items-center gap-3 mb-1">
+                    <div className="w-2 h-7 bg-indigo-600 rounded-full"></div>
+                    <h3 className="font-semibold text-base text-slate-800">
+                      Jadwal Pelajaran Minggu Ini
+                    </h3>
+                  </div>
+                  <p className="text-slate-600 text-xs font-medium">
                     {getDayName(getToday())},{' '}
                     {new Date().toLocaleDateString('id-ID', {
                       day: '2-digit',
@@ -2076,7 +2178,7 @@ export default function SAbsensi() {
                 {isLoadingJadwalMinggu ? (
                   <div className="text-center py-8">
                     <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-                    <p className="text-gray-600 text-sm">Memuat jadwal...</p>
+                    <p className="text-slate-600 text-sm">Memuat jadwal...</p>
                   </div>
                 ) : (
                   <div className="space-y-4">
@@ -2087,13 +2189,13 @@ export default function SAbsensi() {
                       return (
                         <div
                           key={hari}
-                          className="border border-gray-200 rounded-lg overflow-hidden"
+                          className="border border-slate-200 rounded-2xl overflow-hidden"
                         >
                           <div
                             className={`px-4 py-3 border-b ${
                               isHariIni
                                 ? 'bg-blue-50 border-blue-200'
-                                : 'bg-gray-50 border-gray-200'
+                                : 'bg-slate-50 border-slate-200'
                             }`}
                           >
                             <div className="flex items-center justify-between">
@@ -2101,7 +2203,7 @@ export default function SAbsensi() {
                                 className={`font-semibold ${
                                   isHariIni
                                     ? 'text-blue-800'
-                                    : 'text-gray-700'
+                                    : 'text-slate-700'
                                 }`}
                               >
                                 {hari}
@@ -2135,10 +2237,10 @@ export default function SAbsensi() {
                                 })}
                               </div>
                             ) : (
-                              <div className="text-center py-6 text-gray-500">
-                                <div className="w-12 h-12 mx-auto mb-2 bg-gray-100 rounded-full flex items-center justify-center">
+                              <div className="text-center py-6 text-slate-500">
+                                <div className="w-12 h-12 mx-auto mb-2 bg-slate-100 rounded-full flex items-center justify-center">
                                   <svg
-                                    className="w-6 h-6 text-gray-400"
+                                    className="w-6 h-6 text-slate-400"
                                     fill="none"
                                     stroke="currentColor"
                                     viewBox="0 0 24 24"
@@ -2151,7 +2253,7 @@ export default function SAbsensi() {
                                     />
                                   </svg>
                                 </div>
-                                <div className="font-medium text-gray-600">
+                                <div className="font-medium text-slate-600">
                                   Tidak ada jadwal untuk hari {hari}
                                 </div>
                               </div>
@@ -2171,30 +2273,30 @@ export default function SAbsensi() {
       {/* Modal Izin */}
       {isIzinModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-lg p-4 w-full max-w-md shadow-lg border border-gray-200">
+          <div className="bg-white rounded-2xl p-5 w-full max-w-md shadow-2xl border border-slate-200">
             <div className="flex items-center gap-2 mb-3">
-              <div className="w-8 h-8 bg-yellow-100 rounded flex items-center justify-center text-yellow-600 text-sm">
+              <div className="w-9 h-9 bg-yellow-100 rounded-2xl flex items-center justify-center text-yellow-600 text-sm">
                 📝
               </div>
               <div>
-                <div className="font-semibold text-gray-900 text-sm">
+                <div className="font-semibold text-slate-900 text-sm">
                   Ajukan Izin
                 </div>
-                <div className="text-gray-500 text-xs">
+                <div className="text-slate-500 text-xs">
                   Masukkan alasan izin Anda
                 </div>
               </div>
             </div>
 
             <div className="mb-3 space-y-2">
-              <div className="text-xs text-gray-700 bg-gray-50 p-2 rounded border border-gray-200">
+              <div className="text-xs text-slate-700 bg-slate-50 p-2 rounded-2xl border border-slate-200">
                 <span className="font-medium">Mapel:</span> {mapel}
               </div>
-              <div className="text-xs text-gray-700 bg-gray-50 p-2 rounded border border-gray-200">
+              <div className="text-xs text-slate-700 bg-slate-50 p-2 rounded-2xl border border-slate-200">
                 <span className="font-medium">Tanggal:</span> {tgl}
               </div>
               <textarea
-                className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 resize-none bg-white text-xs"
+                className="w-full px-3 py-2 border border-slate-300 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 resize-none bg-white text-xs"
                 placeholder="Contoh: Sakit, acara keluarga, izin sakit, dll."
                 value={izinReason}
                 onChange={(e) => setIzinReason(e.target.value)}
@@ -2204,15 +2306,15 @@ export default function SAbsensi() {
 
             <div className="flex justify-end gap-2">
               <button
-                className="px-3 py-1 border border-gray-300 text-gray-700 rounded hover:bg-gray-50 transition-all duration-200 font-medium text-xs"
+                className="px-3 py-2 border border-slate-300 text-slate-700 rounded-2xl hover:bg-slate-50 transition-all duration-200 font-medium text-xs"
                 onClick={() => setIsIzinModalOpen(false)}
               >
                 Batal
               </button>
               <button
-                className={`px-3 py-1 rounded font-medium transition-all duration-200 text-xs ${
+                className={`px-3 py-2 rounded-2xl font-medium transition-all duration-200 text-xs ${
                   isSubmitting
-                    ? 'bg-gray-400 cursor-not-allowed text-white'
+                    ? 'bg-slate-400 cursor-not-allowed text-white'
                     : 'bg-blue-600 hover:bg-blue-700 text-white'
                 }`}
                 onClick={ajukanIzin}

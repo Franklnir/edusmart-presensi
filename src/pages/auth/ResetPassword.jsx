@@ -2,12 +2,15 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
+import PasswordInput from '../../components/PasswordInput'
 
 const ResetPassword = () => {
   const navigate = useNavigate()
 
   const [checking, setChecking] = useState(true)
   const [sessionError, setSessionError] = useState('')
+  const [token, setToken] = useState('')
+  const [email, setEmail] = useState('')
 
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -15,33 +18,34 @@ const ResetPassword = () => {
   const [success, setSuccess] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  // Cek apakah ada sesi user dari link recovery
+  // Ambil token & email dari query string
   useEffect(() => {
-    const checkRecoverySession = async () => {
-      try {
-        const { data, error } = await supabase.auth.getUser()
+    try {
+      const params = new URLSearchParams(window.location.search)
+      const tokenParam = params.get('token') || ''
+      const emailParam = params.get('email') || ''
 
-        if (error || !data?.user) {
-          setSessionError(
-            'Sesi reset password tidak ditemukan.\n\n' +
-              'Pastikan kamu membuka link reset password langsung dari email ' +
-              'yang paling terbaru. Jika link sudah pernah dipakai atau sudah ' +
-              'terlalu lama, silakan minta link baru dari halaman Lupa Password.'
-          )
-        }
-      } catch (err) {
-        console.error('checkRecoverySession error:', err)
+      setToken(tokenParam)
+      setEmail(emailParam)
+
+      if (!tokenParam || !emailParam) {
         setSessionError(
-          err?.message ||
-            'Terjadi kesalahan saat memeriksa sesi reset password. ' +
-            'Silakan minta link baru dari halaman Lupa Password.'
+          'Token reset password tidak ditemukan.\n\n' +
+            'Pastikan kamu membuka link reset password langsung dari email ' +
+            'yang paling terbaru. Jika link sudah pernah dipakai atau sudah ' +
+            'terlalu lama, silakan minta link baru dari halaman Lupa Password.'
         )
-      } finally {
-        setChecking(false)
       }
+    } catch (err) {
+      console.error('parse reset token error:', err)
+      setSessionError(
+        err?.message ||
+          'Terjadi kesalahan saat memeriksa token reset password. ' +
+          'Silakan minta link baru dari halaman Lupa Password.'
+      )
+    } finally {
+      setChecking(false)
     }
-
-    checkRecoverySession()
   }, [])
 
   const handleSubmit = async (e) => {
@@ -78,7 +82,11 @@ const ResetPassword = () => {
     setSuccess('')
 
     try {
-      const { data, error } = await supabase.auth.updateUser({ password })
+      const { data, error } = await supabase.auth.resetPassword({
+        email,
+        token,
+        password
+      })
 
       if (error) {
         console.error('updateUser error:', error)
@@ -185,8 +193,7 @@ const ResetPassword = () => {
             <label className="block text-sm font-semibold text-slate-600 mb-2">
               Password Baru
             </label>
-            <input
-              type="password"
+            <PasswordInput
               value={password}
               onChange={(e) => {
                 setPassword(e.target.value)
@@ -203,8 +210,7 @@ const ResetPassword = () => {
             <label className="block text-sm font-semibold text-slate-600 mb-2">
               Konfirmasi Password Baru
             </label>
-            <input
-              type="password"
+            <PasswordInput
               value={confirmPassword}
               onChange={(e) => {
                 setConfirmPassword(e.target.value)

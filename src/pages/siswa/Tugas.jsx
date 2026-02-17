@@ -82,12 +82,38 @@ const buildLast12Months = () => {
   return items
 }
 
-const toDatetimeLocalValue = (isoString) => {
-  if (!isoString) return ''
-  const d = new Date(isoString)
-  if (!isValidDate(d)) return ''
-  d.setMinutes(d.getMinutes() - d.getTimezoneOffset())
-  return d.toISOString().slice(0, 16)
+const NEAR_DEADLINE_HOURS = 24
+
+const getTaskWindowInfo = (mulai, deadline, now = new Date()) => {
+  const mulaiDate = mulai ? new Date(mulai) : null
+  const deadlineDate = deadline ? new Date(deadline) : null
+
+  const isBeforeStart = mulaiDate ? isValidDate(mulaiDate) && now < mulaiDate : false
+  const isExpired = deadlineDate ? isValidDate(deadlineDate) && now > deadlineDate : false
+  const isNearDeadline =
+    deadlineDate && isValidDate(deadlineDate) && !isExpired
+      ? deadlineDate.getTime() - now.getTime() <= NEAR_DEADLINE_HOURS * 60 * 60 * 1000
+      : false
+
+  return {
+    isBeforeStart,
+    isExpired,
+    isNearDeadline
+  }
+}
+
+const getSubmitLockReason = (tugas, myJawaban, myStatus) => {
+  if (!tugas) return ''
+  if (myJawaban?.nilai != null || myStatus === 'dinilai') {
+    return 'Jawaban sudah dinilai, tidak bisa dikumpulkan ulang'
+  }
+  if (tugas.isBeforeStart) {
+    return 'Tugas belum dimulai'
+  }
+  if (tugas.isExpired) {
+    return 'Deadline sudah lewat, tidak bisa mengumpulkan'
+  }
+  return ''
 }
 
 /* =========================
@@ -418,14 +444,16 @@ export default function TugasSiswa() {
 
       let merged = tugasArr.map((t) => {
         const j = jawabanByTugas[t.id]
-        const deadline = t.deadline ? new Date(t.deadline) : null
-        const isExpired = deadline ? isValidDate(deadline) && deadline < new Date() : false
+        const nowRef = new Date()
+        const windowInfo = getTaskWindowInfo(t.mulai, t.deadline, nowRef)
 
         const normalizedStatus = j?.nilai != null ? 'dinilai' : j ? 'menunggu' : 'belum'
 
         return {
           ...t,
-          isExpired,
+          isExpired: windowInfo.isExpired,
+          isBeforeStart: windowInfo.isBeforeStart,
+          isNearDeadline: windowInfo.isNearDeadline,
           myJawaban: j || null,
           myStatus: normalizedStatus
         }
@@ -541,14 +569,18 @@ export default function TugasSiswa() {
 
       if (jErr) throw jErr
 
-      const deadline = tugasData?.deadline ? new Date(tugasData.deadline) : null
-      const isExpired = deadline ? isValidDate(deadline) && deadline < new Date() : false
+      const windowInfo = getTaskWindowInfo(tugasData?.mulai, tugasData?.deadline, new Date())
 
       const myStatus =
         jawabanData?.nilai != null ? 'dinilai' : jawabanData ? 'menunggu' : 'belum'
 
       setDetail({
-        tugas: { ...tugasData, isExpired },
+        tugas: {
+          ...tugasData,
+          isExpired: windowInfo.isExpired,
+          isBeforeStart: windowInfo.isBeforeStart,
+          isNearDeadline: windowInfo.isNearDeadline
+        },
         myJawaban: jawabanData || null,
         myStatus
       })
@@ -606,6 +638,12 @@ export default function TugasSiswa() {
       return
     }
 
+    const lockReason = getSubmitLockReason(detail?.tugas, detail?.myJawaban, detail?.myStatus)
+    if (lockReason) {
+      pushToast('error', lockReason)
+      return
+    }
+
     try {
       setIsUploading(true)
       setUploadProgress('Mengkompresi file...')
@@ -650,6 +688,12 @@ export default function TugasSiswa() {
   const handleDeleteJawabanFile = async () => {
     if (!user?.id || !selectedTugas) return
     if (!jawabanFileKey && !detail?.myJawaban?.file_url) return
+
+    const lockReason = getSubmitLockReason(detail?.tugas, detail?.myJawaban, detail?.myStatus)
+    if (lockReason) {
+      pushToast('error', lockReason)
+      return
+    }
 
     // eslint-disable-next-line no-restricted-globals
     if (!confirm('Hapus file jawaban ini?')) return
@@ -737,9 +781,9 @@ export default function TugasSiswa() {
       return
     }
 
-    // deadline check (boleh tetap kirim kalau aturan kamu mengizinkan, tapi default: blok kalau expired)
-    if (detail.tugas.isExpired) {
-      pushToast('error', 'Deadline sudah lewat, tidak bisa mengumpulkan')
+    const lockReason = getSubmitLockReason(detail?.tugas, detail?.myJawaban, detail?.myStatus)
+    if (lockReason) {
+      pushToast('error', lockReason)
       return
     }
 
@@ -853,6 +897,12 @@ export default function TugasSiswa() {
     const dinilai = tugasList.filter((t) => t.myStatus === 'dinilai').length
     return { total, belum, menunggu, dinilai }
   }, [tugasList])
+
+  const submitLockReason = useMemo(() => {
+    return getSubmitLockReason(detail?.tugas, detail?.myJawaban, detail?.myStatus)
+  }, [detail?.tugas, detail?.myJawaban, detail?.myStatus])
+
+  const isSubmissionLocked = Boolean(submitLockReason)
 
   /* =========================
      Render
@@ -1071,14 +1121,25 @@ export default function TugasSiswa() {
             <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
               {tugasList.map((t) => {
                 const expired = t.isExpired
+                const beforeStart = t.isBeforeStart
+                const nearDeadline = t.isNearDeadline
+                const doneAndGraded = t.myStatus === 'dinilai'
+                const cardTone = doneAndGraded
+                  ? 'border-green-200 bg-green-50/50'
+                  : expired
+                  ? 'border-red-200 bg-red-50/40'
+                  : nearDeadline
+                  ? 'border-yellow-200 bg-yellow-50/50'
+                  : beforeStart
+                  ? 'border-blue-200 bg-blue-50/40'
+                  : 'border-slate-200 bg-white'
+
                 return (
                   <button
                     key={t.id}
                     type="button"
                     onClick={() => openDetail(t)}
-                    className={`text-left p-5 rounded-2xl border transition-all hover:shadow-md ${
-                      expired ? 'border-red-200 bg-red-50/40' : 'border-slate-200 bg-white'
-                    }`}
+                    className={`text-left p-5 rounded-2xl border transition-all hover:shadow-md ${cardTone}`}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
@@ -1095,8 +1156,30 @@ export default function TugasSiswa() {
                       </span>
                     </div>
 
+                    <div className="mt-2 text-xs text-slate-600">
+                      Mulai:{' '}
+                      <span className={`${beforeStart ? 'text-blue-700 font-semibold' : 'font-semibold'}`}>
+                        {formatDateTime(t.mulai)}
+                      </span>
+                    </div>
+
                     <div className="mt-3 flex flex-wrap gap-2">
                       <ScoreBadge nilai={t.myJawaban?.nilai} />
+                      {nearDeadline && !doneAndGraded && !expired && (
+                        <span className="px-3 py-1 rounded-full border bg-yellow-100 text-yellow-800 border-yellow-200 text-xs font-bold">
+                          ⚠️ Deadline dekat
+                        </span>
+                      )}
+                      {beforeStart && (
+                        <span className="px-3 py-1 rounded-full border bg-blue-100 text-blue-700 border-blue-200 text-xs font-bold">
+                          ⏱️ Belum mulai
+                        </span>
+                      )}
+                      {doneAndGraded && (
+                        <span className="px-3 py-1 rounded-full border bg-green-100 text-green-700 border-green-200 text-xs font-bold">
+                          ✅ Sudah dinilai
+                        </span>
+                      )}
                       {t.myJawaban?.file_url && (
                         <span className="px-3 py-1 rounded-full border bg-blue-50 text-blue-700 border-blue-200 text-xs font-bold">
                           📎 Ada file
@@ -1160,9 +1243,17 @@ export default function TugasSiswa() {
                         </span>
                         <span
                           className={`px-3 py-1 rounded-full font-semibold ${
-                            (detail?.tugas?.deadline && new Date(detail.tugas.deadline) < new Date()) ||
-                            selectedTugas.isExpired
+                            detail?.tugas?.isBeforeStart ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-700'
+                          }`}
+                        >
+                          Mulai: {formatDateTime(detail?.tugas?.mulai || selectedTugas.mulai)}
+                        </span>
+                        <span
+                          className={`px-3 py-1 rounded-full font-semibold ${
+                            detail?.tugas?.isExpired || selectedTugas.isExpired
                               ? 'bg-red-100 text-red-700'
+                              : detail?.tugas?.isNearDeadline || selectedTugas.isNearDeadline
+                              ? 'bg-yellow-100 text-yellow-800'
                               : 'bg-green-100 text-green-700'
                           }`}
                         >
@@ -1223,9 +1314,13 @@ export default function TugasSiswa() {
                               </div>
                             </div>
 
-                            {detail?.tugas?.isExpired ? (
+                            {isSubmissionLocked ? (
                               <span className="px-3 py-1 rounded-full bg-red-100 text-red-700 text-xs font-bold border border-red-200">
-                                Deadline lewat
+                                {submitLockReason}
+                              </span>
+                            ) : detail?.tugas?.isNearDeadline ? (
+                              <span className="px-3 py-1 rounded-full bg-yellow-100 text-yellow-800 text-xs font-bold border border-yellow-200">
+                                Deadline mendekat
                               </span>
                             ) : (
                               <span className="px-3 py-1 rounded-full bg-green-100 text-green-700 text-xs font-bold border border-green-200">
@@ -1242,7 +1337,7 @@ export default function TugasSiswa() {
                               value={jawabanLink}
                               onChange={(e) => setJawabanLink(e.target.value)}
                               placeholder="contoh: drive.google.com/..."
-                              disabled={detail?.tugas?.isExpired}
+                              disabled={isSubmissionLocked}
                             />
                             <div className="text-[11px] text-slate-500 mt-1">
                               Boleh tanpa http(s) (nanti otomatis ditambahkan).
@@ -1272,7 +1367,7 @@ export default function TugasSiswa() {
                                     type="button"
                                     onClick={handleDeleteJawabanFile}
                                     className="px-4 py-2 rounded-2xl bg-red-600 text-white font-semibold hover:bg-red-700 transition-colors"
-                                    disabled={detail?.tugas?.isExpired}
+                                    disabled={isSubmissionLocked}
                                   >
                                     🗑️ Hapus
                                   </button>
@@ -1303,7 +1398,7 @@ export default function TugasSiswa() {
                                   <div>
                                     <div className="text-sm font-bold text-green-800">File siap</div>
                                     <div className="text-xs text-green-600">
-                                      {jawabanFileSize || 'Ukuran akan tampil'} • Bisa diganti kapan saja sebelum deadline
+                                      {jawabanFileSize || 'Ukuran akan tampil'} • {isSubmissionLocked ? 'Sudah terkunci' : 'Bisa diganti selama periode pengumpulan'}
                                     </div>
                                   </div>
                                 </div>
@@ -1313,6 +1408,7 @@ export default function TugasSiswa() {
                                   accept="*/*"
                                   maxSize={10 * 1024 * 1024}
                                   label="Ganti file"
+                                  disabled={isSubmissionLocked}
                                   small
                                 />
                               </div>
@@ -1322,7 +1418,7 @@ export default function TugasSiswa() {
                                 accept="*/*"
                                 maxSize={10 * 1024 * 1024}
                                 label="Seret file jawaban ke sini atau klik untuk memilih"
-                                disabled={detail?.tugas?.isExpired}
+                                disabled={isSubmissionLocked}
                               />
                             )}
 
@@ -1342,20 +1438,19 @@ export default function TugasSiswa() {
                             <button
                               type="button"
                               onClick={saveJawaban}
-                              disabled={detail?.tugas?.isExpired}
+                              disabled={isSubmissionLocked}
                               className="flex-1 px-4 py-3 rounded-2xl bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white font-bold transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                               🚀 Kirim Jawaban
                             </button>
                             {detail?.myJawaban?.link_url && (
-                              <a
-                                href={detail.myJawaban.link_url}
-                                target="_blank"
-                                rel="noopener noreferrer"
+                              <button
+                                type="button"
+                                onClick={() => openPreview(detail.myJawaban.link_url)}
                                 className="px-4 py-3 rounded-2xl bg-white border border-slate-200 text-slate-700 font-semibold hover:bg-slate-50 transition-colors text-center"
                               >
-                                🔗 Buka Link Saya
-                              </a>
+                                🔗 Preview Link Saya
+                              </button>
                             )}
                           </div>
 

@@ -3,6 +3,12 @@ import React, { useState, useEffect, useRef } from 'react'
 import { supabase, PROFILE_BUCKET } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
+import PasswordInput from '../../components/PasswordInput'
+import {
+  hasRealLoginEmail,
+  isEmailFormat,
+  shouldForceAccountSetup
+} from '../../utils/accountSetup'
 
 // ==================== STORAGE CONFIG ====================
 const SIGNED_URL_EXPIRES_IN = 60 * 60 // 1 jam (aman, jangan simpan signed-url ke DB)
@@ -164,7 +170,7 @@ export default function EditProfile() {
   const [form, setForm] = useState({
     nama: '',
     jk: '',
-    nik: '',
+    nis: '',
     usia: '',
     kelas: '',
     no_hp_siswa: '',
@@ -181,11 +187,6 @@ export default function EditProfile() {
 
   // Kelas logic
   const [kelasList, setKelasList] = useState([])
-  const [isLoadingKelas, setIsLoadingKelas] = useState(false)
-  const [showKelasWarning, setShowKelasWarning] = useState(false)
-  const [newKelas, setNewKelas] = useState('')
-  const [originalKelas, setOriginalKelas] = useState('')
-  const [kelasChangeUsed, setKelasChangeUsed] = useState(false)
 
   // Photo states (DB simpan PATH saja)
   const [photoPath, setPhotoPath] = useState('') // objectKey (ideal)
@@ -202,11 +203,32 @@ export default function EditProfile() {
   const email = user?.email || profile?.email || ''
   const emailVerified = !!(user?.email_confirmed_at || user?.emailVerified)
 
+  const [accountForm, setAccountForm] = useState({
+    email: '',
+    password: '',
+    confirmPassword: ''
+  })
+  const [accountSaving, setAccountSaving] = useState(false)
+  const [showPasswordFields, setShowPasswordFields] = useState(false)
+
+  const needsAccountSetup = shouldForceAccountSetup(profile, user?.email)
+
+  useEffect(() => {
+    if (!accountForm.email && email) {
+      setAccountForm((prev) => ({ ...prev, email }))
+    }
+  }, [email]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (needsAccountSetup) {
+      setShowPasswordFields(true)
+    }
+  }, [needsAccountSetup])
+
   // ==================== DATA LOAD ====================
 
   const loadKelasList = async () => {
     try {
-      setIsLoadingKelas(true)
       const { data, error } = await supabase
         .from('kelas')
         .select('id, nama, grade, suffix')
@@ -235,8 +257,6 @@ export default function EditProfile() {
       setKelasList(formatted)
     } catch {
       pushToast('error', 'Gagal memuat daftar kelas. Silakan refresh halaman.')
-    } finally {
-      setIsLoadingKelas(false)
     }
   }
 
@@ -304,7 +324,7 @@ export default function EditProfile() {
     const initialForm = {
       nama: profile.nama || '',
       jk: profile.jk || '',
-      nik: profile.nik || '',
+      nis: profile.nis || '',
       usia: profile.usia || '',
       kelas: profile.kelas || '',
       no_hp_siswa: profile.no_hp_siswa || '',
@@ -314,9 +334,6 @@ export default function EditProfile() {
     setForm(initialForm)
     setOriginalForm(initialForm)
     setIsFormDirty(false)
-
-    setOriginalKelas(profile.kelas || '')
-    setKelasChangeUsed(!!profile.kelas_change_used)
 
     // foto: simpan path/url legacy dari DB
     const stored = extractStoredPhotoValue()
@@ -372,21 +389,9 @@ export default function EditProfile() {
   // ==================== FORM HANDLERS ====================
 
   const handleKelasChange = (value) => {
-    // UI helper saja. Enforcement real tetap di trigger DB.
-    if (kelasChangeUsed && originalKelas && value !== originalKelas) {
-      pushToast('error', 'Kelas hanya bisa diubah satu kali. Hubungi admin jika ada kesalahan.', 5000)
-      return
+    if (value !== form.kelas) {
+      pushToast('warning', 'Kelas hanya bisa diubah oleh admin.', 5000)
     }
-
-    if (originalKelas && value !== originalKelas) {
-      setNewKelas(value)
-      setShowKelasWarning(true)
-      return
-    }
-
-    const newForm = { ...form, kelas: value }
-    setForm(newForm)
-    setIsFormDirty(JSON.stringify(newForm) !== JSON.stringify(originalForm))
   }
 
   const handleFieldChange = (key, value) => {
@@ -432,26 +437,6 @@ export default function EditProfile() {
     setIsFormDirty(JSON.stringify(newForm) !== JSON.stringify(originalForm))
   }
 
-  const confirmKelasChange = () => {
-    const newForm = { ...form, kelas: newKelas }
-    setForm(newForm)
-    setShowKelasWarning(false)
-    setKelasChangeUsed(true)
-    setOriginalKelas(newKelas)
-    setIsFormDirty(true)
-    setNewKelas('')
-
-    pushToast('warning', 'Perubahan kelas diproses. Pastikan cek ulang data absensi dan tugas.', 4000)
-  }
-
-  const cancelKelasChange = () => {
-    setNewKelas('')
-    setShowKelasWarning(false)
-    const newForm = { ...form, kelas: originalKelas || '' }
-    setForm(newForm)
-    setIsFormDirty(JSON.stringify(newForm) !== JSON.stringify(originalForm))
-  }
-
   // ==================== PHOTO UPLOAD (PATH ONLY) ====================
 
   const handleFileChange = async (e) => {
@@ -472,7 +457,7 @@ export default function EditProfile() {
       setProgressText('Mengkompresi gambar...')
       let compressed = file
       try {
-        compressed = await compressImageToMaxBytes(file, 100 * 1024)
+        compressed = await compressImageToMaxBytes(file, 50 * 1024)
       } catch {
         // kalau kompres gagal, lanjut pakai file asli
         compressed = file
@@ -487,7 +472,7 @@ export default function EditProfile() {
       // Upload dengan objectKey yang fixed: anti IDOR + gampang RLS
       const objectKey = makeAvatarObjectKey(user.id)
 
-      const { error: uploadError } = await supabase.storage
+      const { data: uploadData, error: uploadError } = await supabase.storage
         .from(PROFILE_BUCKET)
         .upload(objectKey, compressed, {
           upsert: true,
@@ -508,7 +493,11 @@ export default function EditProfile() {
 
       await refreshProfile()
 
-      pushToast('success', `Foto profil berhasil diperbarui (${(compressed.size / 1024).toFixed(1)}KB)`)
+      const finalSizeBytes = Number(uploadData?.uploadedSizeBytes || compressed.size || 0)
+      pushToast(
+        'success',
+        `Foto profil berhasil diperbarui (${(finalSizeBytes / 1024).toFixed(1)}KB)`
+      )
     } catch (err) {
       pushToast('error', `Gagal upload foto: ${err.message || 'Terjadi kesalahan'}`)
       // revert preview ke foto yang ada
@@ -558,7 +547,6 @@ export default function EditProfile() {
   const validateForm = () => {
     if (!form.nama.trim()) return pushToast('error', 'Nama lengkap harus diisi') || false
     if (!form.jk) return pushToast('error', 'Jenis kelamin harus dipilih') || false
-    if (!form.kelas) return pushToast('error', 'Kelas harus dipilih') || false
 
     const namaRegex = /^[a-zA-Z\s.'-]+$/
     if (form.nama && !namaRegex.test(form.nama)) {
@@ -587,18 +575,11 @@ export default function EditProfile() {
       const updateData = {
         nama: form.nama.trim(),
         jk: form.jk,
-        nik: form.nik ? form.nik.trim() : null,
+        nis: form.nis ? form.nis.trim() : null,
         usia: form.usia ? parseInt(form.usia, 10) : null,
-        kelas: form.kelas,
         no_hp_siswa: form.no_hp_siswa ? form.no_hp_siswa.trim() : null,
         no_hp_wali: form.no_hp_wali ? form.no_hp_wali.trim() : null,
         updated_at: new Date().toISOString()
-      }
-
-      // UI helper: tandai kelas_change_used bila berubah.
-      // Enforcement final harus di trigger DB (biar bukan cuma UI).
-      if (form.kelas !== originalKelas && !kelasChangeUsed) {
-        updateData.kelas_change_used = true
       }
 
       const { error } = await supabase.from('profiles').update(updateData).eq('id', user.id)
@@ -606,8 +587,6 @@ export default function EditProfile() {
 
       setOriginalForm(form)
       setIsFormDirty(false)
-      setOriginalKelas(form.kelas)
-      if (form.kelas !== originalKelas && !kelasChangeUsed) setKelasChangeUsed(true)
 
       await refreshProfile()
       pushToast('success', 'Profil berhasil diperbarui')
@@ -619,7 +598,7 @@ export default function EditProfile() {
         const rollback = {
           nama: profile.nama || '',
           jk: profile.jk || '',
-          nik: profile.nik || '',
+          nis: profile.nis || '',
           usia: profile.usia || '',
           kelas: profile.kelas || '',
           no_hp_siswa: profile.no_hp_siswa || '',
@@ -641,6 +620,61 @@ export default function EditProfile() {
     setNoHpSiswaError('')
     setNoHpWaliError('')
     pushToast('info', 'Form telah direset ke data asli')
+  }
+
+  const handleTogglePasswordFields = () => {
+    if (showPasswordFields) {
+      setShowPasswordFields(false)
+      return
+    }
+
+    const nextEmail = (accountForm.email || email || '').trim().toLowerCase()
+    if (!hasRealLoginEmail(nextEmail)) {
+      pushToast('error', 'Email aktif wajib diisi sebelum ganti password')
+      return
+    }
+
+    setShowPasswordFields(true)
+  }
+
+  const handleCompleteAccount = async () => {
+    if (!user?.id) return
+
+    const nextEmail = (accountForm.email || '').trim().toLowerCase()
+    if (!nextEmail) {
+      pushToast('error', 'Email wajib diisi sebelum mengganti password')
+      return
+    }
+    if (!isEmailFormat(nextEmail) || !hasRealLoginEmail(nextEmail)) {
+      pushToast('error', 'Email tidak valid')
+      return
+    }
+    if (!accountForm.password || accountForm.password.length < 6) {
+      pushToast('error', 'Password minimal 6 karakter')
+      return
+    }
+    if (accountForm.password !== accountForm.confirmPassword) {
+      pushToast('error', 'Password dan konfirmasi tidak sama')
+      return
+    }
+
+    setAccountSaving(true)
+    try {
+      const { error } = await supabase.auth.updateUser({
+        email: nextEmail,
+        password: accountForm.password
+      })
+      if (error) throw error
+
+      setAccountForm((prev) => ({ ...prev, password: '', confirmPassword: '' }))
+      setShowPasswordFields(false)
+      await refreshProfile()
+      pushToast('success', 'Email dan password berhasil diperbarui')
+    } catch (err) {
+      pushToast('error', err?.message || 'Gagal memperbarui akun')
+    } finally {
+      setAccountSaving(false)
+    }
   }
 
   // ==================== EMAIL VERIFICATION ====================
@@ -668,8 +702,8 @@ export default function EditProfile() {
   }
 
   const getFilledFieldCount = () => {
-    const required = ['nama', 'jk', 'kelas']
-    const optional = ['nik', 'usia', 'no_hp_siswa', 'no_hp_wali']
+    const required = ['nama', 'jk']
+    const optional = ['nis', 'usia', 'no_hp_siswa', 'no_hp_wali']
     return {
       required: required.filter((f) => form[f]).length,
       optional: optional.filter((f) => form[f]).length,
@@ -683,17 +717,17 @@ export default function EditProfile() {
   // ==================== RENDER ====================
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50 py-6 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-7xl mx-auto">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-purple-50/30 p-4 sm:p-6">
+      <div className="max-w-full mx-auto space-y-6">
         {/* HEADER */}
-        <div className="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg border border-blue-100/50 p-6 mb-8">
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-6">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
             <div className="flex items-center gap-5">
-              <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/25">
+              <div className="w-16 h-16 bg-gradient-to-br from-purple-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg">
                 <span className="text-2xl text-white">👤</span>
               </div>
               <div>
-                <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent mb-2">
+                <h1 className="text-3xl font-bold text-slate-800 mb-2">
                   Profil Siswa
                 </h1>
                 <p className="text-slate-600 text-base">Kelola informasi profil dan foto Anda dengan aman</p>
@@ -701,14 +735,14 @@ export default function EditProfile() {
             </div>
 
             <div className="flex flex-col gap-3">
-              <div className="bg-gradient-to-r from-blue-500 to-blue-600 rounded-2xl px-5 py-3 shadow-lg shadow-blue-500/25">
+              <div className="bg-gradient-to-r from-purple-500 to-purple-600 rounded-2xl px-5 py-3 shadow-lg">
                 <p className="text-white text-center font-medium">
                   <span className="block text-xs opacity-90 mb-1">Status Akun</span>
                   <span className="block text-lg">{profile?.status === 'active' ? '🟢 Aktif' : '🔴 Nonaktif'}</span>
                 </p>
               </div>
 
-              <div className="bg-gradient-to-r from-emerald-500 to-emerald-600 rounded-2xl px-5 py-3 shadow-lg shadow-emerald-500/25">
+              <div className="bg-gradient-to-r from-emerald-500 to-emerald-600 rounded-2xl px-5 py-3 shadow-lg">
                 <p className="text-white text-center font-medium text-sm">
                   <span className="block opacity-90 mb-1">Kelengkapan Data</span>
                   <span className="block">
@@ -720,11 +754,102 @@ export default function EditProfile() {
           </div>
         </div>
 
+        <div
+          className={`rounded-2xl shadow-sm border p-6 ${
+            needsAccountSetup
+              ? 'bg-amber-50/80 border-amber-200/60'
+              : 'bg-purple-50/70 border-purple-200/60'
+          }`}
+        >
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900 mb-2">
+                  {needsAccountSetup ? 'Lengkapi Akun (Wajib)' : 'Keamanan Akun'}
+                </h2>
+                <p className="text-sm text-slate-700">
+                  Email aktif wajib tersedia sebelum mengganti password akun.
+                </p>
+              </div>
+              <div className="text-xs text-slate-700 bg-white px-4 py-2 rounded-xl border border-slate-200">
+                <span className="font-semibold">Login awal siswa:</span> NIS + tanggal lahir.
+              </div>
+            </div>
+
+            <div className="mt-6 grid gap-4 md:grid-cols-3">
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-slate-900">Email Akun</label>
+                <input
+                  type="email"
+                  value={accountForm.email}
+                  onChange={(e) =>
+                    setAccountForm((prev) => ({ ...prev, email: e.target.value }))
+                  }
+                  placeholder="nama@email.com"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
+                />
+                {!isEmailFormat(accountForm.email) && accountForm.email && (
+                  <p className="text-xs text-red-600">Format email tidak valid</p>
+                )}
+              </div>
+
+              {showPasswordFields && (
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-slate-900">Password Baru</label>
+                  <PasswordInput
+                    value={accountForm.password}
+                    onChange={(e) =>
+                      setAccountForm((prev) => ({ ...prev, password: e.target.value }))
+                    }
+                    placeholder="Minimal 6 karakter"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
+                  />
+                </div>
+              )}
+
+              {showPasswordFields && (
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-slate-900">Ulangi Password</label>
+                  <PasswordInput
+                    value={accountForm.confirmPassword}
+                    onChange={(e) =>
+                      setAccountForm((prev) => ({ ...prev, confirmPassword: e.target.value }))
+                    }
+                    placeholder="Ulangi password"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="mt-5 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={handleTogglePasswordFields}
+                className="inline-flex items-center gap-2 rounded-xl bg-slate-700 px-5 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+              >
+                {showPasswordFields ? 'Batal Ganti Password' : 'Ganti Password'}
+              </button>
+
+              {showPasswordFields && (
+                <button
+                  type="button"
+                  onClick={handleCompleteAccount}
+                  disabled={accountSaving}
+                  className="inline-flex items-center gap-2 rounded-xl bg-purple-600 px-5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {accountSaving ? 'Menyimpan...' : 'Simpan Email & Password'}
+                </button>
+              )}
+
+              <p className="text-xs text-slate-700">Password baru akan aktif untuk login berikutnya.</p>
+            </div>
+        </div>
+
         <div className="grid lg:grid-cols-4 gap-6">
           {/* SIDEBAR */}
           <div className="lg:col-span-1 space-y-6">
             {/* PHOTO CARD */}
-            <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg border border-blue-100/50 p-6">
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-6">
               <div className="flex flex-col items-center gap-5">
                 <div className="relative group">
                   <div className="relative w-32 h-32">
@@ -756,8 +881,8 @@ export default function EditProfile() {
                       htmlFor="photo-input"
                       className={`${
                         uploadingPhoto
-                          ? 'bg-gray-400 cursor-not-allowed'
-                          : 'bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 cursor-pointer shadow-lg shadow-blue-500/25'
+                          ? 'bg-slate-400 cursor-not-allowed'
+                          : 'bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 cursor-pointer shadow-sm'
                       } text-white p-3 rounded-2xl transition-all duration-300 transform hover:scale-105`}
                       title="Ubah Foto"
                     >
@@ -796,7 +921,7 @@ export default function EditProfile() {
                   <h2 className="font-bold text-xl text-slate-800 mb-2 line-clamp-2 break-words">
                     {form.nama || profile?.nama || 'Siswa'}
                   </h2>
-                  <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-full text-xs font-medium shadow-md mb-2">
+                  <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-purple-500 to-purple-600 text-white rounded-full text-xs font-medium shadow-md mb-2">
                     <span>🏫</span>
                     <span>{getDisplayKelas(profile?.kelas) || 'Kelas belum ditentukan'}</span>
                   </div>
@@ -812,7 +937,7 @@ export default function EditProfile() {
             </div>
 
             {/* VERIFICATION */}
-            <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg border border-blue-100/50 p-5">
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-5">
               <div className="space-y-4">
                 <div
                   className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium w-full justify-center ${
@@ -838,7 +963,7 @@ export default function EditProfile() {
                   <button
                     onClick={handleSendVerification}
                     disabled={sendingVerify}
-                    className="w-full px-4 py-2.5 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 disabled:from-blue-400 disabled:to-blue-500 text-white font-medium rounded-xl transition-all duration-300 shadow-lg shadow-blue-500/25 transform hover:scale-105 disabled:transform-none text-sm"
+                    className="w-full px-4 py-2.5 bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 disabled:from-purple-400 disabled:to-purple-500 text-white font-medium rounded-xl transition-all duration-300 shadow-sm transform hover:scale-105 disabled:transform-none text-sm"
                   >
                     {sendingVerify ? (
                       <span className="flex items-center justify-center gap-2">
@@ -857,7 +982,7 @@ export default function EditProfile() {
             </div>
 
             {/* SCHOOL INFO */}
-            <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg border border-blue-100/50 p-5">
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-5">
               <h4 className="font-semibold text-slate-700 mb-4 flex items-center gap-2">
                 <span className="text-blue-500">🏫</span>
                 <span>Informasi Sekolah</span>
@@ -884,16 +1009,14 @@ export default function EditProfile() {
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-slate-500">Hak ganti kelas</span>
-                  <span className={`font-semibold text-xs ${kelasChangeUsed ? 'text-red-600' : 'text-green-600'}`}>
-                    {kelasChangeUsed ? 'Sudah digunakan' : 'Masih tersedia'}
-                  </span>
+                  <span className="text-slate-500">Pengubahan kelas</span>
+                  <span className="font-semibold text-xs text-slate-700">Hanya admin</span>
                 </div>
               </div>
             </div>
 
             {/* CONTACT */}
-            <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg border border-blue-100/50 p-5">
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-5">
               <h4 className="font-semibold text-slate-700 mb-4 flex items-center gap-2">
                 <span className="text-blue-500">📱</span>
                 <span>Kontak</span>
@@ -924,7 +1047,7 @@ export default function EditProfile() {
 
           {/* MAIN FORM */}
           <div className="lg:col-span-3">
-            <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg border border-blue-100/50 p-6">
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-6">
               <div className="flex items-center justify-between gap-4 mb-6">
                 <div className="flex items-center gap-4">
                   <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg shadow-purple-500/25">
@@ -975,39 +1098,17 @@ export default function EditProfile() {
                 <div>
                   <label className="flex text-sm font-semibold text-slate-700 mb-2 items-center gap-2">
                     <span className="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
-                    Kelas <span className="text-red-500">*</span>
-                    {originalKelas && (
-                      <span className="ml-1 text-xs font-medium px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
-                        {kelasChangeUsed ? 'Tidak bisa diubah' : 'Bisa diubah 1x'}
-                      </span>
-                    )}
+                    Kelas
                   </label>
-                  <select
-                    className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-3 focus:ring-blue-500/20 focus:border-blue-500 bg-white transition-all duration-300 hover:border-blue-300 disabled:bg-slate-50 disabled:cursor-not-allowed"
-                    value={form.kelas}
-                    onChange={(e) => handleFieldChange('kelas', e.target.value)}
-                    disabled={isLoadingKelas || (kelasChangeUsed && originalKelas)}
-                  >
-                    <option value="">Pilih Kelas</option>
-                    {isLoadingKelas && <option disabled>Memuat daftar kelas...</option>}
-                    {!isLoadingKelas && kelasList.length === 0 && <option disabled>Belum ada kelas tersedia</option>}
-                    {!isLoadingKelas &&
-                      kelasList.map((k) => (
-                        <option key={k.id} value={k.id}>
-                          {k.nama}
-                        </option>
-                      ))}
-                  </select>
-                  {originalKelas && (
-                    <p className="mt-2 text-xs text-orange-600 flex items-center gap-1.5">
-                      <span>💡</span>
-                      <span>
-                        {kelasChangeUsed
-                          ? 'Anda sudah menggunakan hak perubahan kelas. Hubungi admin jika ada kesalahan.'
-                          : 'Anda memiliki 1 kesempatan untuk mengubah kelas. Pastikan pilihan benar.'}
-                      </span>
-                    </p>
-                  )}
+                  <input
+                    type="text"
+                    className="w-full px-4 py-3 border border-slate-200 rounded-xl bg-slate-50 text-slate-700"
+                    value={getDisplayKelas(form.kelas)}
+                    readOnly
+                  />
+                  <p className="mt-2 text-xs text-slate-600">
+                    Kelas dikelola oleh admin dan tidak bisa diubah dari akun siswa.
+                  </p>
                 </div>
 
                 {/* JK */}
@@ -1027,17 +1128,17 @@ export default function EditProfile() {
                   </select>
                 </div>
 
-                {/* NIK */}
+                {/* NIS */}
                 <div>
                   <label className="flex text-sm font-semibold text-slate-700 mb-2 items-center gap-2">
                     <span className="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
-                    NIK
+                    NIS
                   </label>
                   <input
                     type="text"
                     className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-3 focus:ring-blue-500/20 focus:border-blue-500 bg-white transition-all duration-300 hover:border-blue-300 placeholder-slate-400"
-                    value={form.nik}
-                    onChange={(e) => handleFieldChange('nik', e.target.value)}
+                    value={form.nis}
+                    onChange={(e) => handleFieldChange('nis', e.target.value)}
                     placeholder="16 digit (opsional)"
                     maxLength={16}
                   />
@@ -1158,12 +1259,11 @@ export default function EditProfile() {
                       !isFormDirty ||
                       !form.nama.trim() ||
                       !form.jk ||
-                      !form.kelas ||
                       !!namaError ||
                       !!noHpSiswaError ||
                       !!noHpWaliError
                     }
-                    className="px-8 py-3 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 disabled:from-blue-400 disabled:to-blue-500 text-white font-semibold rounded-xl transition-all duration-300 shadow-lg shadow-blue-500/25 transform hover:scale-105 disabled:transform-none disabled:cursor-not-allowed flex items-center gap-2 text-sm"
+                    className="px-8 py-3 bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 disabled:from-purple-400 disabled:to-purple-500 text-white font-semibold rounded-xl transition-all duration-300 shadow-sm transform hover:scale-105 disabled:transform-none disabled:cursor-not-allowed flex items-center gap-2 text-sm"
                   >
                     {saving ? (
                       <>
@@ -1186,48 +1286,6 @@ export default function EditProfile() {
         </div>
       </div>
 
-      {/* MODAL KELAS */}
-      {showKelasWarning && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl border border-orange-200 max-w-md w-full p-6">
-            <div className="text-center mb-4">
-              <div className="w-12 h-12 bg-gradient-to-br from-orange-500 to-orange-600 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg shadow-orange-500/25">
-                <span className="text-xl text-white">⚠️</span>
-              </div>
-              <h3 className="text-xl font-bold text-slate-800 mb-2">Konfirmasi Perubahan Kelas</h3>
-              <div className="bg-orange-50 rounded-xl p-3 border border-orange-200 mb-4">
-                <div className="flex items-center justify-between text-sm mb-2">
-                  <span className="text-slate-700 font-medium">Saat ini:</span>
-                  <span className="font-semibold text-slate-800">{getDisplayKelas(originalKelas)}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-slate-700 font-medium">Akan berubah:</span>
-                  <span className="font-semibold text-blue-600">{getDisplayKelas(newKelas)}</span>
-                </div>
-              </div>
-              <p className="text-xs text-orange-600 font-medium">
-                Anda hanya punya <strong>1 kesempatan</strong> untuk mengubah kelas.
-              </p>
-            </div>
-
-            <div className="flex gap-3">
-              <button
-                onClick={cancelKelasChange}
-                className="flex-1 px-4 py-2.5 border border-slate-300 text-slate-700 rounded-xl hover:bg-slate-50 transition-all duration-300 font-medium text-sm"
-              >
-                Batalkan
-              </button>
-              <button
-                onClick={confirmKelasChange}
-                className="flex-1 px-4 py-2.5 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white rounded-xl font-medium transition-all duration-300 shadow-lg shadow-orange-500/25 flex items-center justify-center gap-1.5 text-sm"
-              >
-                <span>✅</span>
-                <span>Ya, Lanjutkan</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

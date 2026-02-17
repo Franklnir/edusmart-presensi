@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useUIStore } from './useUIStore'
 import { logError } from '../utils/logger'
 import { isValidRole } from '../utils/role'
+import { shouldForceAccountSetup } from '../utils/accountSetup'
 
 // Helper kecil biar konsisten
 const normalizeEmail = (email) => email.trim().toLowerCase()
@@ -72,6 +73,8 @@ export const useAuthStore = create((set, get) => ({
   user: null,
   profile: null,
   settings: null,
+  isSuperAdmin: false,
+  superAdminChecked: false,
   initialized: false,
   isLoading: false,
   error: null,
@@ -152,12 +155,15 @@ export const useAuthStore = create((set, get) => ({
       }
 
       set({ user, profile, settings, initialized: true })
+      await get().loadSuperAdmin(profile)
     } catch (err) {
       logError('Init error:', err)
       set({
         user: null,
         profile: null,
         settings: null,
+        isSuperAdmin: false,
+        superAdminChecked: true,
         initialized: true,
         error: err?.message || 'Gagal inisialisasi auth'
       })
@@ -219,7 +225,7 @@ export const useAuthStore = create((set, get) => ({
         logError('Login auth error:', authError)
 
         if (authError.message.includes('Invalid login credentials')) {
-          throw new Error('Email atau password salah')
+          throw new Error('Email/NIS atau password salah')
         }
         if (authError.message.includes('Email not confirmed')) {
           throw new Error('Email belum diverifikasi. Silakan cek email Anda.')
@@ -266,7 +272,19 @@ export const useAuthStore = create((set, get) => ({
 
       const settings = await get().loadSettings()
 
+      const accountSetupRequired = shouldForceAccountSetup(profile, user?.email)
+
       set({ user, profile, settings, error: null })
+      await get().loadSuperAdmin(profile)
+
+      if (accountSetupRequired) {
+        pushToast(
+          'warning',
+          'Anda harus mengganti password akun sekarang.',
+          5000
+        )
+      }
+
       pushToast('success', 'Login berhasil')
 
       return { user, profile }
@@ -336,7 +354,7 @@ export const useAuthStore = create((set, get) => ({
         alamat: profileData.alamat || null,
         kelas: profileData.kelas || null,
         usia: profileData.usia || null,
-        nik: profileData.nik || null,
+        nis: profileData.nis || null,
         agama: profileData.agama || null,
         jabatan: profileData.jabatan || null,
         created_at: new Date().toISOString()
@@ -370,7 +388,7 @@ export const useAuthStore = create((set, get) => ({
   logout: async () => {
     try {
       await supabase.auth.signOut()
-      set({ user: null, profile: null, error: null })
+      set({ user: null, profile: null, error: null, isSuperAdmin: false, superAdminChecked: false })
     } catch (err) {
       logError('Logout error:', err)
     }
@@ -419,6 +437,7 @@ export const useAuthStore = create((set, get) => ({
         }
 
         set({ profile: data })
+        await get().loadSuperAdmin(data)
       } else if (error) {
         logError('Refresh profile error:', error)
         const { pushToast } = useUIStore.getState()
@@ -429,6 +448,30 @@ export const useAuthStore = create((set, get) => ({
     } catch (err) {
       logError('Refresh profile error (catch):', err)
     }
+  },
+
+  /* ===========================
+     SUPER ADMIN CHECK
+     =========================== */
+  loadSuperAdmin: async (profileOverride = null) => {
+    const user = get().user
+    if (!user) {
+      set({ isSuperAdmin: false, superAdminChecked: true })
+      return false
+    }
+
+    try {
+      const { data, error } = await supabase.super.me()
+      if (!error && data?.is_super_admin) {
+        set({ isSuperAdmin: true, superAdminChecked: true })
+        return true
+      }
+    } catch (err) {
+      logError('Super admin check failed:', err)
+    }
+
+    set({ isSuperAdmin: false, superAdminChecked: true })
+    return false
   },
 
   /* ===========================

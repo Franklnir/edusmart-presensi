@@ -1,7 +1,22 @@
 import React, { useEffect, useState, useMemo } from 'react'
+import * as XLSX from 'xlsx'
 import { supabase } from '../../lib/supabase'
+import { formatDate } from '../../lib/time'
 import { useUIStore } from '../../store/useUIStore'
 import ProfileAvatar from '../../components/ProfileAvatar'
+import PasswordInput from '../../components/PasswordInput'
+import {
+  buildAliasMap,
+  mapRowByAliases,
+  parseDateValue,
+  normalizeGender,
+  toText,
+  buildDefaultPassword,
+  readRowsFromFile,
+  readRowsFromSheetUrl,
+  buildGoogleSheetCsvUrl
+} from '../../utils/importUtils'
+import { isEmailFormat } from '../../utils/accountSetup'
 
 /* ===== Password Modal Component ===== */
 function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Password", loading = false }) {
@@ -31,8 +46,7 @@ function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Passwor
         </p>
         
         <form onSubmit={handleSubmit}>
-          <input
-            type="password"
+          <PasswordInput
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 mb-4"
             placeholder="Masukkan password"
             value={password}
@@ -125,6 +139,48 @@ const formatKelasDisplay = (kelasSlug) => {
   ).join(' ');
 };
 
+const normalizePhoneSimple = (input) => {
+  if (!input) return ''
+  return String(input).replace(/\D/g, '')
+}
+
+const normalizeKelasKey = (value) =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+
+const slugifyKelas = (value) =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+
+const GURU_ALIAS_MAP = buildAliasMap({
+  nama: ['nama', 'name', 'nama guru', 'nama lengkap', 'full name'],
+  nis: ['nis', 'nip', 'nik', 'noinduk', 'nomor induk', 'teacherid'],
+  kelas: ['kelas', 'class', 'rombel', 'kelas_id', 'kelas guru', 'tingkat', 'grade'],
+  jk: ['jk', 'jenis kelamin', 'gender', 'kelamin', 'sex'],
+  tanggal_lahir: ['tanggal lahir', 'tgl lahir', 'tgl_lahir', 'dob', 'birthdate'],
+  agama: ['agama', 'religion'],
+  alamat: ['alamat', 'address'],
+  telp: ['telp', 'telepon', 'phone', 'no hp', 'nohp', 'hp', 'wa', 'whatsapp'],
+  jabatan: ['jabatan', 'position', 'role'],
+  email: ['email', 'email guru'],
+  status: ['status']
+})
+
+const normalizeStatusValue = (value) => {
+  if (!value) return ''
+  const s = String(value).trim().toLowerCase()
+  if (['aktif', 'active'].includes(s)) return 'active'
+  if (['nonaktif', 'inactive'].includes(s)) return 'nonaktif'
+  if (['mutasi', 'pindah'].includes(s)) return 'mutasi'
+  if (['alumni', 'lulus', 'graduate'].includes(s)) return 'alumni'
+  return ''
+}
+
 // Komponen Stat Card
 const GuruStatCard = ({ label, value, icon, color = 'blue', description }) => {
   const colorClasses = {
@@ -137,7 +193,7 @@ const GuruStatCard = ({ label, value, icon, color = 'blue', description }) => {
   }
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+    <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-5 transition-all duration-300 hover:shadow-xl hover:-translate-y-0.5">
       <div className="flex items-center justify-between">
         <div className="flex-1">
           <p className="text-sm font-medium text-gray-600 mb-1">{label}</p>
@@ -164,7 +220,7 @@ const LoadingSkeleton = () => (
         <div key={i} className="bg-gray-200 rounded-lg h-20"></div>
       ))}
     </div>
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+    <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-4">
       <div className="space-y-3">
         {[...Array(5)].map((_, i) => (
           <div key={i} className="flex items-center space-x-3">
@@ -184,7 +240,7 @@ const LoadingSkeleton = () => (
 /* ===== Komponen UI ===== */
 function Card({ children, className = '' }) {
   return (
-    <div className={`bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden ${className}`}>
+    <div className={`bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden ${className}`}>
       {children}
     </div>
   )
@@ -245,7 +301,9 @@ function Button({
   )
 }
 
-function Input({ label, error, className = '', ...props }) {
+function Input({ label, error, className = '', type = 'text', ...props }) {
+  const inputClassName = `block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-white ${className}`
+
   return (
     <div className="space-y-1">
       {label && (
@@ -253,10 +311,11 @@ function Input({ label, error, className = '', ...props }) {
           {label}
         </label>
       )}
-      <input
-        className={`block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-white ${className}`}
-        {...props}
-      />
+      {type === 'password' ? (
+        <PasswordInput className={inputClassName} {...props} />
+      ) : (
+        <input className={inputClassName} type={type} {...props} />
+      )}
       {error && <p className="text-red-600 text-sm">{error}</p>}
     </div>
   )
@@ -299,6 +358,7 @@ export default function AGuru() {
 
   const [guruRaw, setGuruRaw] = useState([])
   const [guru, setGuru] = useState([])
+  const [kelasList, setKelasList] = useState([])
   const [jadwalAll, setJadwalAll] = useState({})
   const [strukturKelasAll, setStrukturKelasAll] = useState({})
   const [strukturSekolah, setStrukturSekolah] = useState({})
@@ -330,6 +390,16 @@ export default function AGuru() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [guruToDelete, setGuruToDelete] = useState(null)
   const [deletingGuru, setDeletingGuru] = useState(false)
+
+  // Import / Export
+  const [importModalOpen, setImportModalOpen] = useState(false)
+  const [importSource, setImportSource] = useState('file')
+  const [importFile, setImportFile] = useState(null)
+  const [sheetUrl, setSheetUrl] = useState('')
+  const [importRows, setImportRows] = useState([])
+  const [importErrors, setImportErrors] = useState([])
+  const [importLoading, setImportLoading] = useState(false)
+  const [importSummary, setImportSummary] = useState(null)
 
   /* ===== Password Modal Functions ===== */
   const openPasswordModal = (title, action) => {
@@ -369,6 +439,7 @@ export default function AGuru() {
       setLoadingInit(true)
       await Promise.all([
         loadGuruRaw(),
+        loadKelasList(),
         loadJadwalAll(),
         loadStrukturKelasAll(),
         loadStrukturSekolah()
@@ -390,6 +461,17 @@ export default function AGuru() {
 
     if (error) throw error
     setGuruRaw(data || [])
+  }
+
+  const loadKelasList = async () => {
+    const { data, error } = await supabase
+      .from('kelas')
+      .select('id, nama, grade, suffix')
+      .order('grade', { ascending: true })
+      .order('suffix', { ascending: true })
+
+    if (error) throw error
+    setKelasList(data || [])
   }
 
   const loadJadwalAll = async () => {
@@ -527,6 +609,309 @@ export default function AGuru() {
     })
     return Array.from(kelasSet).sort()
   }, [guruProcessed])
+
+  const kelasLookup = useMemo(() => {
+    const map = new Map()
+    kelasList.forEach((kelas) => {
+      const keys = [
+        kelas.id,
+        kelas.nama,
+        `${kelas.grade || ''} ${kelas.suffix || ''}`.trim(),
+        `${kelas.grade || ''}${kelas.suffix || ''}`.trim(),
+        `${kelas.grade || ''}-${kelas.suffix || ''}`.trim()
+      ]
+        .filter(Boolean)
+        .map(normalizeKelasKey)
+
+      keys.forEach((key) => {
+        if (key) map.set(key, kelas.id)
+      })
+    })
+    return map
+  }, [kelasList])
+
+  const resolveKelasId = (value) => {
+    if (!value) return ''
+    const key = normalizeKelasKey(value)
+    if (kelasLookup.has(key)) return kelasLookup.get(key)
+
+    const slug = slugifyKelas(value)
+    const slugKey = normalizeKelasKey(slug)
+    return kelasLookup.get(slugKey) || ''
+  }
+
+  const normalizeImportRow = (row, index) => {
+    const mapped = mapRowByAliases(row, GURU_ALIAS_MAP)
+    const hasAny = Object.values(mapped).some((v) => String(v || '').trim() !== '')
+    if (!hasAny) return null
+
+    const telpRaw = toText(mapped.telp)
+    const kelasRaw = toText(mapped.kelas).toUpperCase()
+    const resolvedKelas = resolveKelasId(kelasRaw)
+
+    return {
+      __rowNum: index + 2,
+      nama: toText(mapped.nama),
+      nis: toText(mapped.nis),
+      kelas: resolvedKelas,
+      kelas_raw: kelasRaw,
+      jk: normalizeGender(mapped.jk),
+      tanggal_lahir: parseDateValue(mapped.tanggal_lahir),
+      agama: toText(mapped.agama),
+      alamat: toText(mapped.alamat),
+      telp: telpRaw ? normalizePhoneSimple(telpRaw) : '',
+      jabatan: toText(mapped.jabatan),
+      email: toText(mapped.email).toLowerCase(),
+      status: normalizeStatusValue(mapped.status)
+    }
+  }
+
+  const prepareImportRows = (rawRows) => {
+    const cleaned = []
+    const errors = []
+
+    rawRows.forEach((row, idx) => {
+      const normalized = normalizeImportRow(row, idx)
+      if (!normalized) return
+
+      if (!normalized.nis || !normalized.nama) {
+        errors.push({
+          row: normalized.__rowNum,
+          reason: 'NIS/NIP dan Nama wajib diisi'
+        })
+        return
+      }
+
+      if (!normalized.kelas_raw) {
+        errors.push({
+          row: normalized.__rowNum,
+          reason: 'Kelas wajib diisi'
+        })
+        return
+      }
+
+      if (!normalized.kelas) {
+        errors.push({
+          row: normalized.__rowNum,
+          reason: `Kelas tidak ditemukan: ${normalized.kelas_raw}`
+        })
+        return
+      }
+
+      if (!isEmailFormat(normalized.email)) {
+        errors.push({
+          row: normalized.__rowNum,
+          reason: 'Email guru wajib diisi dan harus valid'
+        })
+        return
+      }
+
+      cleaned.push(normalized)
+    })
+
+    setImportRows(cleaned)
+    setImportErrors(errors)
+    setImportSummary(null)
+  }
+
+  const handleImportFileChange = async (file) => {
+    if (!file) return
+    setImportFile(file)
+    setImportLoading(true)
+    try {
+      const rows = await readRowsFromFile(file)
+      prepareImportRows(rows)
+    } catch (error) {
+      pushToast('error', error?.message || 'Gagal membaca file')
+    } finally {
+      setImportLoading(false)
+    }
+  }
+
+  const handleLoadSheet = async () => {
+    const csvUrl = buildGoogleSheetCsvUrl(sheetUrl)
+    if (!csvUrl) {
+      pushToast('error', 'Link Google Sheets tidak valid')
+      return
+    }
+
+    setImportLoading(true)
+    try {
+      const rows = await readRowsFromSheetUrl(csvUrl)
+      prepareImportRows(rows)
+    } catch (error) {
+      pushToast('error', error?.message || 'Gagal mengambil data Google Sheets')
+    } finally {
+      setImportLoading(false)
+    }
+  }
+
+  const resetImportState = () => {
+    setImportFile(null)
+    setSheetUrl('')
+    setImportRows([])
+    setImportErrors([])
+    setImportSummary(null)
+    setImportSource('file')
+  }
+
+  const upsertGuruRow = async (row) => {
+    const nis = row.nis
+    const nama = row.nama
+    const emailLower = row.email ? row.email.toLowerCase() : ''
+    const hasEmail = isEmailFormat(emailLower)
+    if (!hasEmail) {
+      throw new Error('Email guru wajib diisi dan harus valid')
+    }
+    const emailForAuth = emailLower
+    const password = buildDefaultPassword(row.tanggal_lahir, nis)
+
+    let { data: existing, error: exError } = await supabase
+      .from('profiles')
+      .select('id, role, email, nis')
+      .eq('nis', nis)
+      .maybeSingle()
+
+    if (exError) throw exError
+
+    if (!existing) {
+      const { data: byEmail } = await supabase
+        .from('profiles')
+        .select('id, role, email, nis')
+        .eq('email', emailLower)
+        .maybeSingle()
+      existing = byEmail || null
+    }
+
+    const payload = {
+      updated_at: new Date().toISOString()
+    }
+
+    if (row.nama) payload.nama = row.nama
+    if (row.nis) payload.nis = row.nis
+    if (row.jk) payload.jk = row.jk
+    if (row.kelas) payload.kelas = row.kelas
+    if (row.tanggal_lahir) payload.tanggal_lahir = row.tanggal_lahir
+    if (row.agama) payload.agama = row.agama
+    if (row.alamat) payload.alamat = row.alamat
+    if (row.telp) payload.telp = row.telp
+    if (row.jabatan) payload.jabatan = row.jabatan
+    if (row.status) payload.status = row.status
+
+    if (existing?.id) {
+      if (existing.role && existing.role !== 'guru') {
+        throw new Error('NIS/NIP sudah digunakan untuk role lain')
+      }
+
+      const existingEmail = String(existing.email || '').trim().toLowerCase()
+      if (!existingEmail || existingEmail !== emailLower) {
+        payload.email = emailLower
+      }
+
+      const updateKeys = Object.keys(payload).filter((k) => k !== 'updated_at')
+      if (!updateKeys.length) return 'skipped'
+
+      const { error } = await supabase
+        .from('profiles')
+        .update(payload)
+        .eq('id', existing.id)
+
+      if (error) throw error
+      return 'updated'
+    }
+
+    const { data: authData, error: authError } = await supabase.auth.signUp({
+      email: emailForAuth,
+      password,
+      options: {
+        data: {
+          nama,
+          role: 'guru'
+        }
+      }
+    })
+
+    if (authError) throw authError
+    const userId = authData?.user?.id
+    if (!userId) throw new Error('User gagal dibuat')
+
+    const createPayload = {
+      ...payload,
+      role: 'guru',
+      email: emailForAuth,
+      status: payload.status || 'active',
+      must_change_password: true
+    }
+
+    const { error: updateError } = await supabase
+      .from('profiles')
+      .update(createPayload)
+      .eq('id', userId)
+
+    if (updateError) throw updateError
+
+    return 'created'
+  }
+
+  const handleRunImport = async () => {
+    if (!importRows.length) {
+      pushToast('error', 'Tidak ada data untuk diimport')
+      return
+    }
+
+    if (!kelasList.length) {
+      pushToast('error', 'Belum ada data kelas. Buat kelas terlebih dahulu sebelum import guru.')
+      return
+    }
+
+    setImportLoading(true)
+    const summary = {
+      created: 0,
+      updated: 0,
+      skipped: 0,
+      failed: 0,
+      errors: []
+    }
+
+    for (const row of importRows) {
+      try {
+        const result = await upsertGuruRow(row)
+        if (result === 'created') summary.created += 1
+        else if (result === 'updated') summary.updated += 1
+        else summary.skipped += 1
+      } catch (error) {
+        summary.failed += 1
+        summary.errors.push({
+          row: row.__rowNum,
+          reason: error?.message || 'Gagal memproses'
+        })
+      }
+    }
+
+    setImportSummary(summary)
+    setImportLoading(false)
+    await loadGuruRaw()
+  }
+
+  const exportGuruToExcel = () => {
+    const rows = guru.map((item, idx) => ({
+      No: idx + 1,
+      NIS: item.nis || '',
+      Nama: item.nama || '',
+      Email: item.email || '',
+      Telp: item.telp || '',
+      Jabatan: item.jabatan || item.jabatanUtama || '',
+      Mapel: (item.mapelList || []).join(', '),
+      Kelas: (item.kelasList || []).join(', '),
+      Status: item.status || 'active'
+    }))
+
+    const worksheet = XLSX.utils.json_to_sheet(rows)
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Guru')
+    const stamp = new Date().toISOString().slice(0, 10)
+    XLSX.writeFile(workbook, `guru_${stamp}.xlsx`)
+  }
 
   // Statistik untuk dashboard
   const stats = useMemo(() => {
@@ -723,13 +1108,8 @@ export default function AGuru() {
 
   /* ===== Hapus Akun Guru ===== */
   function openDeleteConfirm(guru) {
-    openPasswordModal(
-      'Konfirmasi Hapus Akun Guru',
-      () => {
-        setGuruToDelete(guru)
-        setDeleteConfirmOpen(true)
-      }
-    )
+    setGuruToDelete(guru)
+    setDeleteConfirmOpen(true)
   }
 
   function closeDeleteConfirm() {
@@ -737,68 +1117,24 @@ export default function AGuru() {
     setGuruToDelete(null)
   }
 
-  const hapusAkunGuru = () => {
+  const hapusAkunGuru = async () => {
     if (!guruToDelete) return
 
-    openPasswordModal(
-      'Konfirmasi Akhir Hapus Akun Guru',
-      async () => {
-        try {
-          setDeletingGuru(true)
+    try {
+      setDeletingGuru(true)
+      const { error } = await supabase.admin.deleteUser(guruToDelete.id)
+      if (error) throw error
 
-          // Hapus data terkait terlebih dahulu
-          await supabase
-            .from('jadwal')
-            .delete()
-            .eq('guru_id', guruToDelete.id)
-
-          await supabase
-            .from('kelas_struktur')
-            .update({ wali_guru_id: null, wali_guru_nama: null })
-            .eq('wali_guru_id', guruToDelete.id)
-
-          await supabase
-            .from('struktur_sekolah')
-            .delete()
-            .eq('guru_id', guruToDelete.id)
-
-          // Hapus dari tabel profiles
-          const { error: profileError } = await supabase
-            .from('profiles')
-            .delete()
-            .eq('id', guruToDelete.id)
-
-          if (profileError) throw profileError
-
-          // Hapus user dari authentication (membutuhkan admin privileges)
-          try {
-            const { error: authError } = await supabase.auth.admin.deleteUser(
-              guruToDelete.id
-            )
-
-            if (authError) {
-              console.warn('Tidak bisa menghapus dari auth, mungkin tidak ada akses admin:', authError)
-              pushToast('warning', 'Akun guru dihapus tetapi mungkin masih ada di sistem authentication')
-            } else {
-              pushToast('success', 'Akun guru berhasil dihapus dari sistem')
-            }
-          } catch (authError) {
-            console.warn('Error menghapus dari auth:', authError)
-            pushToast('warning', 'Akun guru dihapus tetapi mungkin masih ada di sistem authentication')
-          }
-
-          pushToast('success', 'Akun guru berhasil dihapus')
-          closeDeleteConfirm()
-          if (detailModalOpen) closeDetailModal()
-          loadAllData()
-        } catch (error) {
-          console.error('Error deleting guru:', error)
-          pushToast('error', 'Gagal menghapus akun guru: ' + (error.message || 'Unknown error'))
-        } finally {
-          setDeletingGuru(false)
-        }
-      }
-    )
+      pushToast('success', 'Akun guru berhasil dihapus')
+      closeDeleteConfirm()
+      if (detailModalOpen) closeDetailModal()
+      loadAllData()
+    } catch (error) {
+      console.error('Error deleting guru:', error)
+      pushToast('error', 'Gagal menghapus akun guru: ' + (error.message || 'Unknown error'))
+    } finally {
+      setDeletingGuru(false)
+    }
   }
 
   /* ===== Modal Detail Guru ===== */
@@ -835,8 +1171,8 @@ export default function AGuru() {
 
   /* ===== Render ===== */
   return (
-    <div className="min-h-screen bg-gray-50 p-4">
-      <div className="max-w-7xl mx-auto space-y-6">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 py-6">
+      <div className="w-full space-y-8 px-4 sm:px-6 lg:px-8">
         {/* Password Modal */}
         <PasswordModal
           isOpen={passwordModal.isOpen}
@@ -846,8 +1182,166 @@ export default function AGuru() {
           loading={passwordModal.loading}
         />
 
+        {importModalOpen && (
+          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl overflow-hidden">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+                <div>
+                  <h3 className="text-lg font-bold text-gray-900">Import Data Guru</h3>
+                  <p className="text-sm text-gray-500">
+                    Upload Excel/CSV atau Google Sheets untuk membuat akun guru otomatis.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setImportModalOpen(false)
+                    resetImportState()
+                  }}
+                  className="text-gray-500 hover:text-gray-700 text-sm"
+                >
+                  ✕ Tutup
+                </button>
+              </div>
+
+              <div className="p-6 space-y-5">
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className={`px-4 py-2 rounded-lg text-sm font-medium border ${
+                      importSource === 'file'
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'bg-white text-gray-700 border-gray-200'
+                    }`}
+                    onClick={() => setImportSource('file')}
+                  >
+                    📁 Upload File
+                  </button>
+                  <button
+                    type="button"
+                    className={`px-4 py-2 rounded-lg text-sm font-medium border ${
+                      importSource === 'sheet'
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'bg-white text-gray-700 border-gray-200'
+                    }`}
+                    onClick={() => setImportSource('sheet')}
+                  >
+                    📊 Google Sheets
+                  </button>
+                </div>
+
+                {importSource === 'file' && (
+                  <div className="space-y-3">
+                    <input
+                      type="file"
+                      accept=".xlsx,.xls,.csv"
+                      onChange={(e) => handleImportFileChange(e.target.files?.[0])}
+                      className="block w-full text-sm text-gray-700 file:mr-4 file:rounded-lg file:border-0 file:bg-blue-50 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-blue-700 hover:file:bg-blue-100"
+                      disabled={importLoading}
+                    />
+                    {importFile && (
+                      <p className="text-xs text-gray-500">File terpilih: {importFile.name}</p>
+                    )}
+                  </div>
+                )}
+
+                {importSource === 'sheet' && (
+                  <div className="space-y-3">
+                    <input
+                      type="text"
+                      placeholder="Tempel link Google Sheets (publik)"
+                      value={sheetUrl}
+                      onChange={(e) => setSheetUrl(e.target.value)}
+                      className="w-full rounded-lg border border-gray-200 px-4 py-2 text-sm"
+                      disabled={importLoading}
+                    />
+                    <button
+                      type="button"
+                      onClick={handleLoadSheet}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-60"
+                      disabled={importLoading || !sheetUrl.trim()}
+                    >
+                      Ambil Data
+                    </button>
+                  </div>
+                )}
+
+                <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-800">
+                  <p className="font-semibold mb-1">Catatan penting</p>
+                  <ul className="list-disc list-inside space-y-1">
+                    <li>Kolom wajib: <b>Nama</b>, <b>NIS/NIP</b>, <b>Email</b>, dan <b>Kelas</b>.</li>
+                    <li>Password awal otomatis dari <b>tanggal lahir</b> (contoh 05/08/2010 → 05082010).</li>
+                    <li>Login awal guru: pakai <b>Email</b> dan password tanggal lahir.</li>
+                    <li>Nama kelas dari Excel harus sama dengan kelas yang sudah dibuat (otomatis dicocokkan uppercase).</li>
+                    <li>Setelah login, guru wajib mengganti password.</li>
+                  </ul>
+                </div>
+
+                <div className="flex flex-wrap gap-4 text-sm">
+                  <div className="px-4 py-2 rounded-lg bg-gray-50 border border-gray-200">
+                    Data siap import: <b>{importRows.length}</b>
+                  </div>
+                  <div className="px-4 py-2 rounded-lg bg-gray-50 border border-gray-200">
+                    Error validasi: <b>{importErrors.length}</b>
+                  </div>
+                </div>
+
+                {importErrors.length > 0 && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
+                    <p className="font-semibold mb-2">Contoh error</p>
+                    <ul className="list-disc list-inside space-y-1 max-h-28 overflow-auto">
+                      {importErrors.slice(0, 5).map((err, idx) => (
+                        <li key={`${err.row}-${idx}`}>
+                          Baris {err.row}: {err.reason}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {importSummary && (
+                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-sm text-emerald-800">
+                    <p className="font-semibold mb-2">Hasil Import</p>
+                    <p>Baru: {importSummary.created} • Update: {importSummary.updated} • Lewati: {importSummary.skipped} • Gagal: {importSummary.failed}</p>
+                    {importSummary.errors?.length ? (
+                      <ul className="list-disc list-inside space-y-1 mt-2 max-h-28 overflow-auto">
+                        {importSummary.errors.slice(0, 5).map((err, idx) => (
+                          <li key={`${err.row}-${idx}`}>
+                            Baris {err.row}: {err.reason}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+                )}
+              </div>
+
+              <div className="px-6 py-4 border-t border-gray-200 flex flex-wrap justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setImportModalOpen(false)
+                    resetImportState()
+                  }}
+                  className="px-4 py-2 rounded-lg border border-gray-200 text-gray-700 text-sm"
+                >
+                  Tutup
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRunImport}
+                  disabled={importLoading || !importRows.length}
+                  className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-60"
+                >
+                  {importLoading ? 'Memproses...' : 'Mulai Import'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Header */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-center gap-4">
               <div className="p-3 bg-blue-100 rounded-lg">
@@ -858,12 +1352,26 @@ export default function AGuru() {
                 <p className="text-gray-600">Kelola data guru, mata pelajaran, dan penugasan</p>
               </div>
             </div>
-            <button
-              className="mt-4 lg:mt-0 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 font-medium"
-              onClick={() => setShowAddForm(!showAddForm)}
-            >
-              {showAddForm ? '✕ Tutup Form' : '➕ Tambah Guru'}
-            </button>
+            <div className="mt-4 lg:mt-0 flex flex-col sm:flex-row gap-2">
+              <button
+                className="bg-emerald-50 text-emerald-700 px-4 py-2 rounded-lg border border-emerald-200 hover:bg-emerald-100 focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 transition-all duration-200 font-medium"
+                onClick={exportGuruToExcel}
+              >
+                ⬇️ Export
+              </button>
+              <button
+                className="bg-amber-50 text-amber-700 px-4 py-2 rounded-lg border border-amber-200 hover:bg-amber-100 focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 transition-all duration-200 font-medium"
+                onClick={() => setImportModalOpen(true)}
+              >
+                ⬆️ Import
+              </button>
+              <button
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 font-medium"
+                onClick={() => setShowAddForm(!showAddForm)}
+              >
+                {showAddForm ? '✕ Tutup Form' : '➕ Tambah Guru'}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1079,7 +1587,7 @@ export default function AGuru() {
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {guru.map((g, index) => {
-                    const foto = g.photo_url || g.foto_url || g.foto || ''
+                    const foto = g.photo_path || g.photo_url || g.foto_url || g.foto || ''
                     const mapelPreview = listPreview(g.mapelList)
                     const kelasPreview = listPreview(g.kelasList)
                     
@@ -1144,6 +1652,14 @@ export default function AGuru() {
                             onClick={() => openDetailModal(g)}
                           >
                             Detail
+                          </Button>
+                          <Button
+                            variant="danger"
+                            size="sm"
+                            onClick={() => openDeleteConfirm(g)}
+                            disabled={deletingGuru}
+                          >
+                            Hapus
                           </Button>
                           {g.status === 'nonaktif' ? (
                             <Button
@@ -1285,7 +1801,7 @@ export default function AGuru() {
               <div className="px-6 py-4 border-b bg-gray-50 flex items-start justify-between">
                 <div className="flex items-center space-x-4">
                   <ProfileAvatar
-                    src={selectedGuru.photo_url}
+                    src={selectedGuru.photo_path || selectedGuru.photo_url}
                     name={selectedGuru.nama}
                     size={48}
                     className="border-gray-200"
@@ -1337,8 +1853,12 @@ export default function AGuru() {
                       <p className="text-sm text-gray-900">{selectedGuru.telp || '—'}</p>
                     </div>
                     <div>
-                      <p className="text-sm font-medium text-gray-700">NIK</p>
-                      <p className="text-sm text-gray-900">{selectedGuru.nik || '—'}</p>
+                      <p className="text-sm font-medium text-gray-700">NIS</p>
+                      <p className="text-sm text-gray-900">{selectedGuru.nis || '—'}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-700">Tanggal Lahir</p>
+                      <p className="text-sm text-gray-900">{formatDate(selectedGuru.tanggal_lahir)}</p>
                     </div>
                     <div>
                       <p className="text-sm font-medium text-gray-700">Jenis Kelamin</p>

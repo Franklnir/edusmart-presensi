@@ -1,8 +1,9 @@
 // src/pages/auth/Register.jsx
 import React, { useEffect, useMemo, useState } from 'react'
-import { supabase } from '../../lib/supabase'
+import { supabase, PROFILE_BUCKET, getSignedUrlForValue } from '../../lib/supabase'
 import { Link, useNavigate } from 'react-router-dom'
 import '../../styles/Login.css'
+import PasswordInput from '../../components/PasswordInput'
 
 const DEFAULT_SETTINGS = {
   nama_sekolah: 'Sekolah',
@@ -32,6 +33,7 @@ export default function Register() {
   const [settings, setSettings] = useState(DEFAULT_SETTINGS)
   const [settingsId, setSettingsId] = useState(null)
   const [loadingSettings, setLoadingSettings] = useState(true)
+  const [logoPreview, setLogoPreview] = useState('')
 
   const [selectedRole, setSelectedRole] = useState(null)
   const [form, setForm] = useState(initialForm)
@@ -73,6 +75,26 @@ export default function Register() {
     return () => { cancel = true }
   }, [])
 
+  useEffect(() => {
+    let active = true
+    const raw = settings?.logo_url || settings?.logo_path || ''
+    if (!raw) {
+      setLogoPreview('')
+      return () => { active = false }
+    }
+
+    if (/^https?:\/\//i.test(raw)) {
+      setLogoPreview(raw)
+      return () => { active = false }
+    }
+
+    getSignedUrlForValue(PROFILE_BUCKET, raw, 60 * 30)
+      .then((url) => { if (active) setLogoPreview(url) })
+      .catch(() => { if (active) setLogoPreview('') })
+
+    return () => { active = false }
+  }, [settings?.logo_url, settings?.logo_path])
+
   // ========= REALTIME SETTINGS =========
   useEffect(() => {
     if (!settingsId) return
@@ -99,7 +121,7 @@ export default function Register() {
   }, [settings])
 
   const schoolName = settings.nama_sekolah || 'Sekolah'
-  const logoUrl = settings.logo_url || ''
+  const logoUrl = logoPreview || ''
   const address = settings.alamat || ''
   const phone = settings.telepon || ''
   const emailSekolah = settings.email || ''
@@ -131,18 +153,15 @@ export default function Register() {
     if (!email) return 'Email wajib diisi.'
     const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
     if (!emailPattern.test(email)) return 'Format email tidak valid.'
-    if (!email.endsWith('@gmail.com')) {
-      return 'Untuk saat ini, registrasi hanya diperbolehkan menggunakan email Gmail (@gmail.com).'
-    }
-
     if (!form.password) return 'Password wajib diisi.'
     if (form.password.length < 6) return 'Password minimal 6 karakter.'
     if (!/(?=.*[A-Z])/.test(form.password)) return 'Password harus mengandung minimal 1 huruf besar.'
     if (!/(?=.*\d)/.test(form.password)) return 'Password harus mengandung minimal 1 angka.'
     if (form.password !== form.confirmPassword) return 'Konfirmasi password tidak sama.'
 
-    // block admin signup dari UI (lebih aman)
-    if (selectedRole === 'admin') return 'Registrasi admin tidak dibuka lewat halaman ini.'
+    if (selectedRole === 'admin' && !settings.registrasi_admin_aktif) {
+      return 'Registrasi admin tidak dibuka.'
+    }
 
     return null
   }
@@ -185,7 +204,7 @@ export default function Register() {
       // IMPORTANT:
       // Kalau email confirm ON, biasanya data.session = null. Jadi jangan insert profiles di sini.
       // Nanti profiles dibuat saat user login pertama (authenticated).
-      setSuccessMessage('Berhasil mendaftar! Silakan cek email Gmail kamu untuk verifikasi.')
+      setSuccessMessage('Berhasil mendaftar! Silakan cek email kamu untuk verifikasi.')
       setTimeout(() => nav('/login'), 2000)
     } catch (e2) {
       setErrorMessage('Terjadi kesalahan saat mendaftar. Coba beberapa saat lagi.')
@@ -334,6 +353,22 @@ export default function Register() {
                       </span>
                     </button>
                   )}
+
+                  {settings.registrasi_admin_aktif && (
+                    <button type="button" onClick={() => handleSelectRole('admin')}
+                      className={`login__role-btn ${selectedRole === 'admin' ? 'login__role-btn--active' : ''}`}>
+                      <div className="login__role-content">
+                        <i className="ri-shield-user-fill"></i>
+                        <div className="login__role-text">
+                          <span className="login__role-name">Admin</span>
+                          <span className="login__role-desc">Kelola sistem & pengguna</span>
+                        </div>
+                      </div>
+                      <span className={'login__role-badge ' + (selectedRole === 'admin' ? 'login__role-badge--selected' : 'login__role-badge--active')}>
+                        {selectedRole === 'admin' ? 'Dipilih' : 'Dibuka'}
+                      </span>
+                    </button>
+                  )}
                 </div>
 
                 {selectedRole && (
@@ -347,20 +382,20 @@ export default function Register() {
 
                       <div className="login__input-field">
                         <i className="ri-mail-fill"></i>
-                        <input type="email" name="email" placeholder="Email (wajib @gmail.com)"
+                        <input type="email" name="email" placeholder="Email aktif"
                           value={form.email} onChange={handleInputChange} required />
                       </div>
 
                       <div className="login__input-row">
                         <div className="login__input-field">
                           <i className="ri-lock-password-fill"></i>
-                          <input type="password" name="password" placeholder="Password"
+                          <PasswordInput name="password" placeholder="Password"
                             value={form.password} onChange={handleInputChange} required />
                         </div>
 
                         <div className="login__input-field">
                           <i className="ri-lock-password-fill"></i>
-                          <input type="password" name="confirmPassword" placeholder="Konfirmasi Password"
+                          <PasswordInput name="confirmPassword" placeholder="Konfirmasi Password"
                             value={form.confirmPassword} onChange={handleInputChange} required />
                         </div>
                       </div>
