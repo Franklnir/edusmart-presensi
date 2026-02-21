@@ -36,7 +36,7 @@ class EnsureSuperAdminDomain
         $allowRoot = (bool) config('tenancy.allow_root_for_super_admin', false);
 
         if ($root !== '') {
-            $adminHost = $adminSubdomain !== '' ? ($adminSubdomain . '.' . $root) : $root;
+            $adminHost = $adminSubdomain !== '' ? ($adminSubdomain.'.'.$root) : $root;
             if ($host === $adminHost) {
                 return true;
             }
@@ -46,7 +46,7 @@ class EnsureSuperAdminDomain
         }
 
         // Local development fallback.
-        if ($host === $adminSubdomain . '.localhost' || $host === $adminSubdomain . '.127.0.0.1') {
+        if ($host === $adminSubdomain.'.localhost' || $host === $adminSubdomain.'.127.0.0.1') {
             return true;
         }
         if ($allowRoot && ($host === 'localhost' || $host === '127.0.0.1')) {
@@ -64,8 +64,8 @@ class EnsureSuperAdminDomain
             return 'Panel super admin hanya bisa diakses dari domain admin.';
         }
 
-        $adminHost = $adminSubdomain !== '' ? ($adminSubdomain . '.' . $root) : $root;
-        return 'Panel super admin hanya bisa diakses dari ' . $adminHost;
+        $adminHost = $adminSubdomain !== '' ? ($adminSubdomain.'.'.$root) : $root;
+
+        return 'Panel super admin hanya bisa diakses dari '.$adminHost;
     }
 }
-

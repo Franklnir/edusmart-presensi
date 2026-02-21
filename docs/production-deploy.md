@@ -134,13 +134,25 @@ docker compose --env-file .env.production -f docker-compose.prod.yml restart bac
 
 - `APP_ENV=production`
 - `APP_DEBUG=false`
+- `TRUSTED_PROXIES` diisi network proxy/reverse-proxy yang valid (jangan biarkan wildcard di internet publik)
 - `SESSION_SECURE_COOKIE=true`
+- `SESSION_ENCRYPT=true`
 - `AUTH_RATE_LIMIT_PER_MINUTE=12`
 - `AUTH_IP_RATE_LIMIT_PER_MINUTE=90`
 - `AUTH_LOGIN_MAX_ATTEMPTS=5`
+- `STORAGE_WRITE_RATE_LIMIT_PER_MINUTE=90`
+- `STORAGE_READ_RATE_LIMIT_PER_MINUTE=180`
+- `STORAGE_GUEST_RATE_LIMIT_PER_MINUTE=60`
+- `TENANT_ALLOW_HEADER_OVERRIDE=false`
+- validasi `CORS_ALLOWED_ORIGINS` hanya domain produksi kamu (jangan localhost di production)
 - password DB/Redis kuat dan unik
 - hanya expose port yang perlu (`80/443`)
 - backup DB terjadwal
+
+Catatan:
+
+- `deploy/nginx/gateway.prod.conf` sudah diberi rate-limit tambahan untuk `/api/auth/*` dan `/api/*` sebagai lapisan proteksi brute-force di edge.
+- Endpoint file sekarang pakai signed URL dengan masa berlaku + validasi signature untuk akses guest.
 
 ## 7. Deploy Native (Tanpa Docker)
 
@@ -151,3 +163,14 @@ Jika kamu deploy native service di VPS:
   - `deploy/supervisor/laravel-app.conf`
   - `deploy/supervisor/laravel-worker.conf`
   - `deploy/supervisor/laravel-scheduler.conf`
+
+## 8. Release & Rollback
+
+- Checklist release produksi:
+  - `docs/release-checklist.md`
+- Rencana hardening dependency frontend:
+  - `docs/dependency-security-plan.md`
+- Script release otomatis:
+  - `deploy/release-prod.sh`
+- Script rollback cepat:
+  - `deploy/rollback-prod.sh`

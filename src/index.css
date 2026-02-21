@@ -1,32 +1,116 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Basis Reset: Menghilangkan margin dan padding default 
-  dari browser pada elemen HTML dan Body. 
-  Ini memastikan layout merapat sempurna ke pinggir.
-*/
-html, body {
-  /* Hapus margin dan padding bawaan */
-  @apply m-0 p-0; 
-  /* Pastikan lebar penuh */
-  @apply w-full h-full;
-  /* Atur warna latar belakang dan teks default */
-  @apply bg-gray-50 text-gray-900;
-  /* Terapkan font system yang cepat dan modern */
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
-    Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
-  /* Cegah scrollbar horizontal yang tidak perlu */
-  overflow-x: hidden;
-  /* Atur box model secara global */
-  box-sizing: border-box;
+/* ===== CSS Custom Properties ===== */
+:root {
+  --brand-50: #eef2ff;
+  --brand-100: #e0e7ff;
+  --brand-500: #6366f1;
+  --brand-600: #4f46e5;
+  --brand-700: #4338ca;
+
+  --surface-0: #ffffff;
+  --surface-1: #f8fafc;
+  --surface-2: #f1f5f9;
+
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-tertiary: #94a3b8;
+
+  --border-default: #e2e8f0;
+  --border-light: #f1f5f9;
+
+  --shadow-card: 0 1px 3px rgba(0,0,0,0.05), 0 4px 16px rgba(0,0,0,0.04);
+  --shadow-popup: 0 20px 60px rgba(15,23,42,0.14), 0 8px 24px rgba(15,23,42,0.08);
+  --radius: 0.75rem;
 }
 
-/* Reset Box-Sizing: Memastikan box-sizing: border-box 
-  diterapkan ke semua elemen, mempermudah perhitungan layout. 
-*/
-*,
-*::before,
-*::after {
+/* ===== Base Reset ===== */
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  min-height: 100%;
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background-color: #f8fafc;
+  color: var(--text-primary);
+  overflow-x: hidden;
+  box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+*, *::before, *::after {
   box-sizing: inherit;
+}
+
+/* ===== Scrollbar Modern ===== */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 99px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* ===== Global Focus Ring ===== */
+:focus-visible {
+  outline: 2px solid var(--brand-500);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ===== Animations ===== */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.animate-fade-in   { animation: fadeIn  0.25s ease-out both; }
+.animate-slide-up  { animation: slideUp 0.30s ease-out both; }
+.animate-scale-in  { animation: scaleIn 0.20s ease-out both; }
+
+/* ===== Glassmorphism utility ===== */
+.glass {
+  background: rgba(255,255,255,0.80);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255,255,255,0.6);
+}
+.glass-dark {
+  background: rgba(15,23,42,0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+/* ===== Page wrapper default ===== */
+.page-wrapper {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  padding: 1.25rem;
+}
+@media (min-width: 768px) {
+  .page-wrapper {
+    padding: 1.75rem 2rem;
+  }
 }

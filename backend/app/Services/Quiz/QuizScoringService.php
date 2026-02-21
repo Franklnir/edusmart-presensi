@@ -12,23 +12,29 @@ class QuizScoringService
         string $tenantId,
         string $submissionId,
         ?Carbon $finishedAt = null,
-        string $status = 'finished'
+        string $status = 'finished',
+        bool $forceRecalculate = false
     ): ?array {
         $finishedAt = $finishedAt ?: now();
 
-        return DB::transaction(function () use ($tenantId, $submissionId, $finishedAt, $status) {
+        return DB::transaction(function () use ($tenantId, $submissionId, $finishedAt, $status, $forceRecalculate) {
             $submission = DB::table('quiz_submissions')
                 ->where('id', $submissionId)
                 ->where('tenant_id', $tenantId)
                 ->lockForUpdate()
                 ->first();
 
-            if (!$submission) {
+            if (! $submission) {
                 return null;
             }
 
             // Idempotent finalize: return current result when already finalized.
-            if ($submission->status === 'finished' && $submission->score !== null && $submission->total_points !== null) {
+            if (
+                ! $forceRecalculate
+                && $submission->status === 'finished'
+                && $submission->score !== null
+                && $submission->total_points !== null
+            ) {
                 return [
                     'submission_id' => $submissionId,
                     'score' => (int) $submission->score,
@@ -46,7 +52,7 @@ class QuizScoringService
                 ->where('tenant_id', $tenantId)
                 ->first(['penilaian']);
             $penilaian = strtolower(trim((string) ($quiz->penilaian ?? 'poin')));
-            if (!in_array($penilaian, ['poin', 'skala_100'], true)) {
+            if (! in_array($penilaian, ['poin', 'skala_100'], true)) {
                 $penilaian = 'poin';
             }
 
@@ -58,7 +64,7 @@ class QuizScoringService
                 ->keyBy('question_id');
 
             $optionsByQuestion = collect();
-            if (!empty($questionIds)) {
+            if (! empty($questionIds)) {
                 $optionsByQuestion = DB::table('quiz_options')
                     ->whereIn('question_id', $questionIds)
                     ->where('tenant_id', $tenantId)
@@ -120,7 +126,7 @@ class QuizScoringService
             }
         }
 
-        if (!empty($expiredLiveQuizIds)) {
+        if (! empty($expiredLiveQuizIds)) {
             $closeQuery = DB::table('quizzes')
                 ->whereIn('id', $expiredLiveQuizIds)
                 ->where('is_active', true);
@@ -165,7 +171,7 @@ class QuizScoringService
                 }
             }
 
-            if (!$expired) {
+            if (! $expired) {
                 continue;
             }
 
@@ -187,56 +193,93 @@ class QuizScoringService
         string $penilaian
     ): array {
         $totalPoints = 0;
-        $correctPoints = 0;
-        $totalQuestions = $questions->count();
-        $correctQuestions = 0;
+        $achievedPoints = 0.0;
+        $totalScaledQuestions = 0;
+        $achievedScaledQuestions = 0.0;
 
         foreach ($questions as $question) {
             $questionId = (string) $question->id;
-            $point = max(0, (int) ($question->poin ?? 0));
-            $totalPoints += $point;
-
-            $answer = $answersByQuestionId->get($questionId);
-            if (!$answer) {
-                continue;
+            $questionType = strtolower(trim((string) ($question->question_type ?? 'mcq')));
+            if (! in_array($questionType, ['mcq', 'essay'], true)) {
+                $questionType = 'mcq';
             }
+            $point = max(0, (int) ($question->poin ?? 0));
+            $answer = $answersByQuestionId->get($questionId);
+            $answerPoint = 0;
+            $answerIsCorrect = false;
+            $includeInScore = true;
 
-            $options = $optionsByQuestionId->get($questionId, collect());
-            $isCorrect = false;
-            foreach ($options as $option) {
-                if ((string) $option->id === (string) ($answer->option_id ?? '')) {
-                    $isCorrect = (bool) $option->is_correct;
-                    break;
+            if ($questionType === 'essay') {
+                if ($answer && $answer->essay_score !== null) {
+                    $essayScore = (int) $answer->essay_score;
+                    $answerPoint = max(0, min($point, $essayScore));
+                    $answerIsCorrect = $point > 0 && $answerPoint >= $point;
+                } else {
+                    // Mode poin: esai belum dinilai tetap masuk basis skor sebagai 0.
+                    // Mode skala_100: esai belum dinilai dikeluarkan dari basis skor.
+                    if ($penilaian !== 'poin') {
+                        $includeInScore = false;
+                    }
+                }
+            } else {
+                $totalPoints += $point;
+                if ($penilaian === 'skala_100') {
+                    $totalScaledQuestions++;
+                }
+
+                if ($answer) {
+                    $options = $optionsByQuestionId->get($questionId, collect());
+                    foreach ($options as $option) {
+                        if ((string) $option->id === (string) ($answer->option_id ?? '')) {
+                            $answerIsCorrect = (bool) $option->is_correct;
+                            break;
+                        }
+                    }
+                    $answerPoint = $answerIsCorrect ? $point : 0;
+                    if ($penilaian === 'skala_100' && $answerIsCorrect) {
+                        $achievedScaledQuestions += 1;
+                    }
                 }
             }
 
-            if ($isCorrect) {
-                $correctPoints += $point;
-                $correctQuestions++;
+            if ($questionType === 'essay' && $includeInScore) {
+                $totalPoints += $point;
+                if ($penilaian === 'skala_100') {
+                    $totalScaledQuestions++;
+                    if ($point > 0) {
+                        $achievedScaledQuestions += min(1, max(0, $answerPoint / $point));
+                    }
+                }
             }
 
-            DB::table('quiz_answers')
-                ->where('id', $answer->id)
-                ->where('tenant_id', $tenantId)
-                ->update([
-                    'is_correct' => $isCorrect,
-                    'poin' => $isCorrect
-                        ? ($penilaian === 'skala_100' ? 1 : $point)
-                        : 0,
-                    'updated_at' => $now,
-                ]);
+            if ($includeInScore) {
+                $achievedPoints += $answerPoint;
+            }
+
+            if ($answer) {
+                DB::table('quiz_answers')
+                    ->where('id', $answer->id)
+                    ->where('tenant_id', $tenantId)
+                    ->update([
+                        'is_correct' => $answerIsCorrect,
+                        'poin' => $questionType === 'mcq' && $penilaian === 'skala_100'
+                            ? ($answerIsCorrect ? 1 : 0)
+                            : $answerPoint,
+                        'updated_at' => $now,
+                    ]);
+            }
         }
 
         $score = 0;
         $totalBasis = $totalPoints;
 
         if ($penilaian === 'skala_100') {
-            $totalBasis = $totalQuestions;
-            if ($totalQuestions > 0) {
-                $score = (int) round(($correctQuestions / $totalQuestions) * 100);
+            $totalBasis = $totalScaledQuestions;
+            if ($totalScaledQuestions > 0) {
+                $score = (int) round(($achievedScaledQuestions / $totalScaledQuestions) * 100);
             }
         } elseif ($totalPoints > 0) {
-            $score = (int) round(($correctPoints / $totalPoints) * 100);
+            $score = (int) round(($achievedPoints / $totalPoints) * 100);
         }
         $score = max(0, min(100, $score));
 

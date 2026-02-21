@@ -74,31 +74,28 @@ const defaultRegistrationDeadlineLocal = (days = 7) => {
 
 // Komponen Stat Card
 const StatCard = React.memo(({ label, value, icon, color = 'blue' }) => {
-  const colorClasses = {
-    blue: 'from-blue-500 to-blue-600',
-    green: 'from-emerald-500 to-emerald-600',
-    purple: 'from-purple-500 to-purple-600',
-    orange: 'from-orange-500 to-orange-600',
-    red: 'from-rose-500 to-rose-600',
-    indigo: 'from-indigo-500 to-indigo-600'
+  const colorMap = {
+    blue: { bg: 'from-blue-500 to-blue-600', light: 'bg-blue-50', text: 'text-blue-600' },
+    green: { bg: 'from-emerald-500 to-emerald-600', light: 'bg-emerald-50', text: 'text-emerald-600' },
+    purple: { bg: 'from-violet-500 to-violet-600', light: 'bg-violet-50', text: 'text-violet-600' },
+    orange: { bg: 'from-orange-500 to-orange-600', light: 'bg-orange-50', text: 'text-orange-600' },
+    red: { bg: 'from-rose-500 to-rose-600', light: 'bg-rose-50', text: 'text-rose-600' },
+    indigo: { bg: 'from-indigo-500 to-indigo-600', light: 'bg-indigo-50', text: 'text-indigo-600' },
   }
+  const c = colorMap[color] || colorMap.blue
 
   return (
-    <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-lg border border-gray-200 p-6 transition-all duration-300 hover:shadow-xl hover:-translate-y-1">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-medium text-gray-600 mb-2">{label}</p>
-          <p className="text-3xl font-bold text-gray-900">{value}</p>
-        </div>
+    <div className="group bg-white rounded-2xl border border-slate-100 shadow-card p-5 transition-all duration-200 hover:shadow-card-hover hover:-translate-y-0.5">
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{label}</p>
         {icon && (
-          <div
-            className={`text-2xl bg-gradient-to-br ${colorClasses[color]} text-white p-3 rounded-xl`}
-          >
+          <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${c.bg} flex items-center justify-center text-white text-base shadow-sm`}>
             {icon}
           </div>
         )}
       </div>
-      <div className="mt-4 h-1 bg-gradient-to-r from-transparent via-gray-200 to-transparent" />
+      <p className="text-3xl font-extrabold text-slate-900 tabular-nums">{value}</p>
+      <div className="mt-3 h-0.5 rounded-full bg-gradient-to-r from-transparent via-slate-100 to-transparent" />
     </div>
   )
 })
@@ -107,15 +104,15 @@ StatCard.displayName = 'StatCard'
 
 // Loading Skeleton
 const LoadingSkeleton = React.memo(() => (
-  <div className="animate-pulse">
-    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-6">
+  <div className="animate-pulse space-y-6">
+    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
       {[...Array(6)].map((_, i) => (
-        <div key={i} className="bg-gray-200 rounded-2xl h-24" />
+        <div key={i} className="bg-slate-100 rounded-2xl h-24" />
       ))}
     </div>
     <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
       {[...Array(2)].map((_, i) => (
-        <div key={i} className="bg-gray-200 rounded-2xl h-96" />
+        <div key={i} className="bg-slate-100 rounded-2xl h-96" />
       ))}
     </div>
   </div>
@@ -250,9 +247,8 @@ export default function AHome() {
       if (!guruError && guruData) {
         const formattedGuru = guruData.map((guru) => ({
           id: guru.id,
-          name: `${guru.nama || 'Tanpa Nama'}${
-            guru.email ? ` (${guru.email})` : ''
-          }`
+          name: `${guru.nama || 'Tanpa Nama'}${guru.email ? ` (${guru.email})` : ''
+            }`
         }))
         setGuruList(formattedGuru)
       }
@@ -433,7 +429,7 @@ export default function AHome() {
 
   const loadEskulDetail = useCallback(async () => {
     if (!eskulSel) return
-    
+
     try {
       const { data, error } = await supabase
         .from('ekskul')
@@ -489,17 +485,17 @@ export default function AHome() {
       if (absError) throw absError
 
       const stats = {}
-      ;(absData || []).forEach((row) => {
-        const uid = row.user_id
-        if (!stats[uid]) {
-          stats[uid] = { hadir: 0, izin: 0 }
-        }
-        if (row.status === 'Hadir') {
-          stats[uid].hadir += 1
-        } else if (row.status === 'Izin') {
-          stats[uid].izin += 1
-        }
-      })
+        ; (absData || []).forEach((row) => {
+          const uid = row.user_id
+          if (!stats[uid]) {
+            stats[uid] = { hadir: 0, izin: 0 }
+          }
+          if (row.status === 'Hadir') {
+            stats[uid].hadir += 1
+          } else if (row.status === 'Izin') {
+            stats[uid].izin += 1
+          }
+        })
 
       setEskulAbsensiStats(stats)
     } catch (error) {
@@ -767,76 +763,54 @@ export default function AHome() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 py-6">
-        <div className="w-full px-4 sm:px-6 lg:px-8">
-          <LoadingSkeleton />
-        </div>
+      <div className="page-wrapper">
+        <LoadingSkeleton />
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 py-6">
-      <div className="w-full space-y-8 px-4 sm:px-6 lg:px-8">
-        {/* --- DASHBOARD STATISTICS --- */}
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+    <div className="page-wrapper">
+      <div className="w-full space-y-6">
+        {/* ── Header ── */}
+        <div>
+          <h1 className="text-2xl font-extrabold text-slate-900">Dashboard Admin</h1>
+          <p className="text-sm text-slate-500 mt-0.5">Kelola data sekolah, pengumuman, dan ekstrakurikuler</p>
+        </div>
+
+        {/* --- STATISTICS --- */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
           <StatCard label="Total Siswa" value={stats.siswa} icon="👨‍🎓" color="blue" />
           <StatCard label="Total Guru" value={stats.guru} icon="👨‍🏫" color="green" />
           <StatCard label="Kelas" value={stats.kelas} icon="🏫" color="purple" />
           <StatCard label="Absensi" value={stats.absensi} icon="📊" color="orange" />
-          <StatCard
-            label="Informasi"
-            value={stats.pengumuman}
-            icon="📢"
-            color="red"
-          />
-          <StatCard
-            label="Eskul"
-            value={stats.eskul}
-            icon="⚽"
-            color="green"
-          />
+          <StatCard label="Pengumuman" value={stats.pengumuman} icon="📢" color="red" />
+          <StatCard label="Eskul" value={stats.eskul} icon="⚽" color="indigo" />
         </div>
 
         {/* --- FORM PENGUMUMAN & ESKUL --- */}
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
           {/* === KOLOM PENGUMUMAN === */}
-          <div className="space-y-6">
+          <div className="space-y-5">
             {/* --- CARD FORM PENGUMUMAN --- */}
-            <div className="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden transition-all duration-300 hover:shadow-2xl">
-              <div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-6">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="p-3 bg-white/20 rounded-xl">
-                      <span className="text-2xl text-white">📢</span>
-                    </div>
-                    <div>
-                      <h2 className="text-2xl font-bold text-white">
-                        Kelola Pengumuman
-                      </h2>
-                      <p className="text-blue-100 mt-1">
-                        Tambah atau edit pengumuman untuk guru & siswa
-                      </p>
-                    </div>
-                  </div>
-                  <div className="px-4 py-2 bg-white/20 text-white rounded-full text-sm font-medium">
-                    📋 Admin
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-card overflow-hidden">
+              <div className="bg-gradient-to-r from-brand-600 to-brand-700 px-6 py-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center text-white text-base">📢</div>
+                  <div>
+                    <h2 className="text-base font-bold text-white">Kelola Pengumuman</h2>
+                    <p className="text-brand-200 text-xs">Untuk guru & siswa</p>
                   </div>
                 </div>
               </div>
 
-              <div className="p-6">
-                <form className="space-y-6" onSubmit={simpanPengumuman}>
+              <div className="p-5">
+                <form className="space-y-4" onSubmit={simpanPengumuman}>
                   <div className="grid grid-cols-1 gap-4">
                     <div>
-                      <label className="block text-sm font-semibold text-gray-700 mb-3">
-                        <span className="flex items-center gap-2">
-                          <span className="w-2 h-2 bg-blue-500 rounded-full" />
-                          Judul Pengumuman
-                        </span>
-                      </label>
+                      <label className="block text-sm font-semibold text-slate-700 mb-1.5">Judul Pengumuman</label>
                       <input
-                        className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                        className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-all duration-200 bg-slate-50 placeholder-slate-400"
                         placeholder="Cth: Libur Nasional, Rapat Guru"
                         value={pForm.judul}
                         onChange={(e) =>
@@ -845,14 +819,9 @@ export default function AHome() {
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-semibold text-gray-700 mb-3">
-                        <span className="flex items-center gap-2">
-                          <span className="w-2 h-2 bg-green-500 rounded-full" />
-                          Keterangan / Isi
-                        </span>
-                      </label>
+                      <label className="block text-sm font-semibold text-slate-700 mb-1.5">Keterangan / Isi</label>
                       <textarea
-                        className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[120px] transition-all duration-200"
+                        className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 min-h-[100px] transition-all duration-200 bg-slate-50 placeholder-slate-400 resize-none"
                         placeholder="Isi pengumuman..."
                         value={pForm.keterangan}
                         onChange={(e) =>
@@ -861,14 +830,9 @@ export default function AHome() {
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-semibold text-gray-700 mb-3">
-                        <span className="flex items-center gap-2">
-                          <span className="w-2 h-2 bg-purple-500 rounded-full" />
-                          Tampilkan ke
-                        </span>
-                      </label>
+                      <label className="block text-sm font-semibold text-slate-700 mb-1.5">Tampilkan ke</label>
                       <select
-                        className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                        className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-all duration-200 bg-slate-50"
                         value={pForm.target}
                         onChange={(e) =>
                           setPForm((f) => ({ ...f, target: e.target.value }))
@@ -880,31 +844,20 @@ export default function AHome() {
                       </select>
                     </div>
                   </div>
-                  <div className="flex justify-end gap-3 pt-6 border-t border-gray-200">
+                  <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
                     {pEditId && (
-                      <button
-                        type="button"
-                        className="px-6 py-3 text-sm font-semibold text-gray-700 bg-white border-2 border-gray-300 rounded-xl hover:bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 hover:shadow-md"
-                        onClick={cancelEditPengumuman}
-                      >
-                        ✕ Batal Edit
+                      <button type="button"
+                        className="px-4 py-2 text-sm font-semibold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all duration-200"
+                        onClick={cancelEditPengumuman}>
+                        Batal
                       </button>
                     )}
-                    <button
-                      type="submit"
-                      className="px-6 py-3 text-sm font-semibold text-white bg-gradient-to-r from-blue-600 to-indigo-700 rounded-xl hover:from-blue-700 hover:to-indigo-800 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
-                      disabled={loadingPengumuman}
-                    >
+                    <button type="submit"
+                      className="px-5 py-2 text-sm font-semibold text-white bg-brand-600 rounded-xl hover:bg-brand-700 transition-all duration-200 shadow-brand-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                      disabled={loadingPengumuman}>
                       {loadingPengumuman ? (
-                        <span className="flex items-center gap-2">
-                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                          Menyimpan...
-                        </span>
-                      ) : pEditId ? (
-                        '💾 Simpan Perubahan'
-                      ) : (
-                        '📝 Tambah Pengumuman'
-                      )}
+                        <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Menyimpan...</>
+                      ) : pEditId ? 'Simpan Perubahan' : 'Tambah Pengumuman'}
                     </button>
                   </div>
                 </form>
@@ -912,96 +865,41 @@ export default function AHome() {
             </div>
 
             {/* --- CARD DAFTAR PENGUMUMAN --- */}
-            <div className="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden transition-all duration-300 hover:shadow-2xl">
-              <div className="px-6 py-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <span className="p-2 bg-blue-100 text-blue-600 rounded-lg">📋</span>
-                  <div>
-                    <h3 className="text-lg font-bold text-gray-900">
-                      Daftar Pengumuman
-                    </h3>
-                    <p className="text-xs text-gray-500">
-                      {pengumumanList.length} pengumuman tersimpan
-                    </p>
-                  </div>
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-card overflow-hidden">
+              <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-base">📋</span>
+                  <h3 className="text-sm font-bold text-slate-800">Daftar Pengumuman</h3>
+                  <span className="text-xs text-slate-400">({pengumumanList.length})</span>
                 </div>
-                {pengumumanList.length > 0 && (
-                  <span className="px-3 py-1 text-xs font-semibold rounded-full bg-white/70 text-blue-700">
-                    Terbaru di atas
-                  </span>
-                )}
               </div>
 
-              <div className="p-6">
-                <div className="space-y-4 max-h-80 overflow-y-auto pr-2">
+              <div className="p-4">
+                <div className="space-y-2.5 max-h-80 overflow-y-auto">
                   {pengumumanList.map((p, index) => (
-                    <div
-                      key={p.id}
-                      className="flex items-center justify-between p-5 border-2 border-gray-200 rounded-xl hover:border-blue-300 hover:bg-blue-50 transition-all duration-200 group"
-                    >
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
-                          <div className="font-semibold text-gray-900 text-lg group-hover:text-blue-700 transition-colors">
-                            {p.judul}
-                          </div>
-                          {index === 0 && (
-                            <span className="px-3 py-1 text-xs font-bold bg-green-100 text-green-800 rounded-full">
-                              TERBARU
-                            </span>
-                          )}
+                    <div key={p.id}
+                      className="flex items-start gap-3 p-3.5 border border-slate-100 rounded-xl hover:border-brand-200 hover:bg-brand-50/30 transition-all duration-200 group">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="font-semibold text-sm text-slate-800 group-hover:text-brand-700 transition-colors truncate">{p.judul}</span>
+                          {index === 0 && <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full flex-shrink-0">BARU</span>}
                         </div>
-                        <div className="text-gray-600 text-sm leading-relaxed line-clamp-2">
-                          {p.keterangan}
-                        </div>
-                        <div className="flex items-center gap-4 mt-3 text-xs">
-                          <span
-                            className={`px-3 py-1 rounded-full font-medium ${
-                              p.target === 'siswa'
-                                ? 'bg-orange-100 text-orange-800'
-                                : p.target === 'guru'
-                                ? 'bg-purple-100 text-purple-800'
-                                : 'bg-blue-100 text-blue-800'
-                            }`}
-                          >
-                            👥 {p.target || 'semua'}
-                          </span>
-                          <span className="text-gray-500">
-                            📅{' '}
-                            {p.created_at
-                              ? new Date(p.created_at).toLocaleDateString('id-ID', {
-                                  day: 'numeric',
-                                  month: 'long',
-                                  year: 'numeric'
-                                })
-                              : '-'}
-                          </span>
+                        <p className="text-xs text-slate-500 line-clamp-1 mb-1.5">{p.keterangan}</p>
+                        <div className="flex items-center gap-2 text-[10px]">
+                          <span className={`px-2 py-0.5 rounded-full font-semibold ${p.target === 'siswa' ? 'bg-orange-100 text-orange-700' : p.target === 'guru' ? 'bg-purple-100 text-purple-700' : 'bg-brand-100 text-brand-700'}`}>{p.target || 'semua'}</span>
+                          <span className="text-slate-400">{p.created_at ? new Date(p.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}</span>
                         </div>
                       </div>
-                      <div className="flex gap-2 ml-4">
-                        <button
-                          className="px-4 py-2 text-xs font-semibold text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 hover:shadow-md"
-                          onClick={() => startEditPengumuman(p)}
-                        >
-                          ✏️ Edit
-                        </button>
-                        <button
-                          className="px-4 py-2 text-xs font-semibold text-red-600 bg-red-50 rounded-lg hover:bg-red-100 focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-all duration-200 hover:shadow-md"
-                          onClick={() => hapusPengumuman(p.id)}
-                        >
-                          🗑️ Hapus
-                        </button>
+                      <div className="flex gap-1.5 flex-shrink-0">
+                        <button className="px-3 py-1.5 text-xs font-semibold text-brand-600 bg-brand-50 rounded-lg hover:bg-brand-100 transition-colors" onClick={() => startEditPengumuman(p)}>Edit</button>
+                        <button className="px-3 py-1.5 text-xs font-semibold text-red-600 bg-red-50 rounded-lg hover:bg-red-100 transition-colors" onClick={() => hapusPengumuman(p.id)}>Hapus</button>
                       </div>
                     </div>
                   ))}
                   {pengumumanList.length === 0 && (
-                    <div className="text-center py-12">
-                      <div className="text-gray-300 text-6xl mb-4">📢</div>
-                      <p className="text-gray-500 text-lg font-medium">
-                        Belum ada pengumuman
-                      </p>
-                      <p className="text-gray-400 mt-2">
-                        Mulai dengan membuat pengumuman pertama
-                      </p>
+                    <div className="text-center py-10">
+                      <div className="text-4xl mb-2 opacity-30">📢</div>
+                      <p className="text-sm text-slate-500">Belum ada pengumuman</p>
                     </div>
                   )}
                 </div>
@@ -1010,26 +908,15 @@ export default function AHome() {
           </div>
 
           {/* === KOLOM EKSTRAKURIKULER === */}
-          <div className="space-y-6">
+          <div className="space-y-5">
             {/* Form utama eskul */}
-            <div className="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden transition-all duration-300 hover:shadow-2xl">
-              <div className="bg-gradient-to-r from-orange-600 to-amber-700 p-6">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="p-3 bg-white/20 rounded-xl">
-                      <span className="text-2xl text-white">⚽</span>
-                    </div>
-                    <div>
-                      <h2 className="text-2xl font-bold text-white">
-                        Kelola Ekstrakurikuler
-                      </h2>
-                      <p className="text-orange-100 mt-1">
-                        Atur data ekskul, jadwal, dan pembina
-                      </p>
-                    </div>
-                  </div>
-                  <div className="px-4 py-2 bg-white/20 text-white rounded-full text-sm font-medium">
-                    🏆 {eskulList.length} Eskul
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-card overflow-hidden">
+              <div className="bg-gradient-to-r from-orange-500 to-amber-500 px-6 py-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center text-white text-base">⚽</div>
+                  <div>
+                    <h2 className="text-base font-bold text-white">Kelola Ekstrakurikuler</h2>
+                    <p className="text-orange-100 text-xs">{eskulList.length} eskul terdaftar</p>
                   </div>
                 </div>
               </div>
@@ -1261,13 +1148,12 @@ export default function AHome() {
                     </div>
                     <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
                       <span
-                        className={`inline-flex items-center px-2.5 py-1 rounded-full font-semibold ${
-                          registrationDeadlineIso
-                            ? registrationDeadlineClosed
-                              ? 'bg-rose-100 text-rose-700 border border-rose-200'
-                              : 'bg-emerald-100 text-emerald-700 border border-emerald-200'
-                            : 'bg-gray-100 text-gray-600 border border-gray-200'
-                        }`}
+                        className={`inline-flex items-center px-2.5 py-1 rounded-full font-semibold ${registrationDeadlineIso
+                          ? registrationDeadlineClosed
+                            ? 'bg-rose-100 text-rose-700 border border-rose-200'
+                            : 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                          : 'bg-gray-100 text-gray-600 border border-gray-200'
+                          }`}
                       >
                         {registrationDeadlineIso
                           ? registrationDeadlineClosed
@@ -1484,11 +1370,10 @@ export default function AHome() {
                         <td className="py-3 px-3 text-gray-600">{a.email}</td>
                         <td className="py-3 px-3">
                           <span
-                            className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${
-                              isCurrentAdmin
-                                ? 'bg-emerald-100 text-emerald-700'
-                                : 'bg-gray-100 text-gray-600'
-                            }`}
+                            className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${isCurrentAdmin
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : 'bg-gray-100 text-gray-600'
+                              }`}
                           >
                             <span className="w-2 h-2 rounded-full mr-2 bg-current" />
                             {isCurrentAdmin ? 'Online sekarang' : 'Offline'}
@@ -1496,11 +1381,10 @@ export default function AHome() {
                         </td>
                         <td className="py-3 px-3">
                           <span
-                            className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${
-                              isActiveAccount
-                                ? 'bg-blue-100 text-blue-700'
-                                : 'bg-red-100 text-red-700'
-                            }`}
+                            className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${isActiveAccount
+                              ? 'bg-blue-100 text-blue-700'
+                              : 'bg-red-100 text-red-700'
+                              }`}
                           >
                             {isActiveAccount ? 'Akun aktif' : 'Akun nonaktif'}
                           </span>

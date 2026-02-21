@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Profile;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 class ApiController extends Controller
@@ -17,7 +18,9 @@ class ApiController extends Controller
     protected function profile(Request $request): ?Profile
     {
         $user = $this->user($request);
-        if (!$user) return null;
+        if (! $user) {
+            return null;
+        }
 
         if ($user->relationLoaded('profile')) {
             return $user->profile;
@@ -30,12 +33,14 @@ class ApiController extends Controller
         }
         $profile = $query->first();
         $user->setRelation('profile', $profile);
+
         return $profile;
     }
 
     protected function role(Request $request): ?string
     {
         $profile = $this->profile($request);
+
         return $profile?->role;
     }
 
@@ -56,7 +61,7 @@ class ApiController extends Controller
     protected function isSuperAdminIdentity(Request $request): bool
     {
         $user = $this->user($request);
-        if (!$user) {
+        if (! $user) {
             return false;
         }
 
@@ -69,6 +74,7 @@ class ApiController extends Controller
     protected function isGuru(Request $request): bool
     {
         $role = $this->role($request);
+
         return $role === 'guru' || $role === 'teacher';
     }
 
@@ -90,6 +96,37 @@ class ApiController extends Controller
     protected function tenantId(Request $request): ?string
     {
         return $request->attributes->get('tenant_id');
+    }
+
+    protected function profileTenantId(Request $request): ?string
+    {
+        $user = $this->user($request);
+        if (! $user?->id) {
+            return null;
+        }
+
+        try {
+            $tenantId = Profile::query()
+                ->where('id', $user->id)
+                ->value('tenant_id');
+            if (! $tenantId) {
+                return null;
+            }
+
+            return (string) $tenantId;
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    protected function resolveOwnedTenantId(Request $request): ?string
+    {
+        $profileTenantId = $this->profileTenantId($request);
+        if ($profileTenantId) {
+            return $profileTenantId;
+        }
+
+        return $this->tenantId($request);
     }
 
     protected function ok($data = null)
@@ -144,6 +181,92 @@ class ApiController extends Controller
         } catch (\Throwable $e) {
             // jangan block proses utama jika audit gagal
         }
+    }
+
+    protected function getNilaiFreezeState(Request $request): ?array
+    {
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return null;
+        }
+
+        $settings = DB::table('settings')
+            ->where('tenant_id', $tenantId)
+            ->orderBy('id')
+            ->first([
+                'nilai_freeze_enabled',
+                'nilai_freeze_start',
+                'nilai_freeze_end',
+                'nilai_freeze_reason',
+            ]);
+
+        if (! $settings || ! (bool) ($settings->nilai_freeze_enabled ?? false)) {
+            return null;
+        }
+
+        $startAt = null;
+        $endAt = null;
+
+        try {
+            if (! empty($settings->nilai_freeze_start)) {
+                $startAt = Carbon::parse((string) $settings->nilai_freeze_start);
+            }
+        } catch (\Throwable $e) {
+            $startAt = null;
+        }
+
+        try {
+            if (! empty($settings->nilai_freeze_end)) {
+                $endAt = Carbon::parse((string) $settings->nilai_freeze_end);
+            }
+        } catch (\Throwable $e) {
+            $endAt = null;
+        }
+
+        $now = now();
+        $inRange = ($startAt === null || $now->greaterThanOrEqualTo($startAt))
+            && ($endAt === null || $now->lessThanOrEqualTo($endAt));
+
+        if (! $inRange) {
+            return null;
+        }
+
+        return [
+            'enabled' => true,
+            'start' => $startAt ? $startAt->toIso8601String() : null,
+            'end' => $endAt ? $endAt->toIso8601String() : null,
+            'reason' => trim((string) ($settings->nilai_freeze_reason ?? '')) ?: null,
+        ];
+    }
+
+    protected function denyIfNilaiFrozen(Request $request, string $context = 'Perubahan nilai')
+    {
+        $freeze = $this->getNilaiFreezeState($request);
+        if (! $freeze) {
+            return null;
+        }
+
+        $range = [];
+        if (! empty($freeze['start'])) {
+            $range[] = 'mulai '.$freeze['start'];
+        }
+        if (! empty($freeze['end'])) {
+            $range[] = 'sampai '.$freeze['end'];
+        }
+
+        $message = $context.' dikunci karena periode nilai sedang freeze.';
+        if (! empty($range)) {
+            $message .= ' Periode: '.implode(' ', $range).'.';
+        }
+        if (! empty($freeze['reason'])) {
+            $message .= ' Alasan: '.$freeze['reason'].'.';
+        }
+
+        return response()->json([
+            'error' => $message,
+            'code' => 'NILAI_FREEZE_ACTIVE',
+            'freeze' => $freeze,
+        ], 423);
     }
 
     protected function isSuperAdminByIdentity(?string $userId = null, ?string $email = null): bool

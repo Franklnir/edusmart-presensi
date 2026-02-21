@@ -1870,12 +1870,6 @@ function AbsensiGuru() {
         )}
 
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 overflow-hidden transition-all duration-300 hover:shadow-md">
-          <div className="px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-gray-50 to-white">
-            <div className="flex items-center gap-3">
-              <div className="w-2 h-8 bg-indigo-600 rounded-full"></div>
-              <h2 className="text-xl font-bold text-slate-900">Panel Absensi Guru</h2>
-            </div>
-          </div>
           {/* Filters Area */}
           <div className="p-6 bg-gradient-to-r from-slate-50 to-blue-50/40 border-b border-slate-200">
             <div className="flex items-center gap-3 mb-5">
@@ -2068,58 +2062,6 @@ function AbsensiGuru() {
             {/* === TAB: ABSENSI === */}
             {view === 'absen' && (
               <div className="space-y-8">
-                {/* Real-time Status Banner */}
-                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600">
-                        🔄
-                      </div>
-                      <div>
-                        <h4 className="font-bold text-blue-800 text-sm">Sistem Real-time Aktif</h4>
-                        <p className="text-blue-600 text-xs">
-                          Data diperbarui otomatis. Mode:{' '}
-                          <strong>{absenMode === 'otomatis' ? 'Otomatis (RFID)' : 'Manual'}</strong>
-                          {isWithinTolerance && absenMode === 'otomatis' && (
-                            <span className="ml-2 bg-green-100 text-green-700 px-1.5 py-0.5 rounded text-[10px] font-bold">
-                              🔒 Terkunci Otomatis
-                            </span>
-                          )}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-xs text-blue-600 font-medium">
-                        Terakhir update: {lastUpdate.toLocaleTimeString('id-ID')}
-                      </div>
-                      <div className="text-[10px] text-blue-500">
-                        {isOnline ? '● Terhubung' : '○ Offline'}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Auto Alpha Info Banner */}
-                {(tgl < getToday() ||
-                  (tgl === getToday() &&
-                    currentDateTime.minutes > toMinutes(currentSchedule?.jam_selesai || '23:59') + 5)) && (
-                  <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 animate-pulse-slow">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600">
-                        🤖
-                      </div>
-                      <div>
-                        <h4 className="font-bold text-blue-800 text-sm">Sistem Auto Alpha Aktif</h4>
-                        <p className="text-blue-600 text-xs">
-                          {tgl < getToday()
-                            ? `Tanggal ${tgl} sudah lewat - siswa yang belum absen akan otomatis di-set Alpha`
-                            : 'Jam pelajaran sudah berakhir - siswa yang belum absen akan otomatis di-set Alpha'}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
                 {/* Notifikasi Ajuan Izin */}
                 {ajuan.length > 0 && (
                   <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 shadow-sm animate-pulse-slow">

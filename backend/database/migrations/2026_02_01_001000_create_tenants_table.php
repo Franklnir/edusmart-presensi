@@ -21,7 +21,7 @@ return new class extends Migration
 
         $slug = env('TENANT_DEFAULT_SLUG', 'default');
         $exists = DB::table('tenants')->where('slug', $slug)->first();
-        if (!$exists) {
+        if (! $exists) {
             DB::table('tenants')->insert([
                 'id' => (string) Str::uuid(),
                 'name' => 'Default School',

@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import PasswordInput from '../../components/PasswordInput'
+import { validatePassword } from '../../utils/passwordPolicy'
 
 const ResetPassword = () => {
   const navigate = useNavigate()
@@ -31,17 +32,17 @@ const ResetPassword = () => {
       if (!tokenParam || !emailParam) {
         setSessionError(
           'Token reset password tidak ditemukan.\n\n' +
-            'Pastikan kamu membuka link reset password langsung dari email ' +
-            'yang paling terbaru. Jika link sudah pernah dipakai atau sudah ' +
-            'terlalu lama, silakan minta link baru dari halaman Lupa Password.'
+          'Pastikan kamu membuka link reset password langsung dari email ' +
+          'yang paling terbaru. Jika link sudah pernah dipakai atau sudah ' +
+          'terlalu lama, silakan minta link baru dari halaman Lupa Password.'
         )
       }
     } catch (err) {
       console.error('parse reset token error:', err)
       setSessionError(
         err?.message ||
-          'Terjadi kesalahan saat memeriksa token reset password. ' +
-          'Silakan minta link baru dari halaman Lupa Password.'
+        'Terjadi kesalahan saat memeriksa token reset password. ' +
+        'Silakan minta link baru dari halaman Lupa Password.'
       )
     } finally {
       setChecking(false)
@@ -56,19 +57,10 @@ const ResetPassword = () => {
       return
     }
 
-    // Validasi password yang lebih ketat
-    if (password.length < 6) {
-      setError('Password minimal 6 karakter.')
-      return
-    }
-
-    if (!/(?=.*[A-Z])/.test(password)) {
-      setError('Password harus mengandung minimal 1 huruf besar.')
-      return
-    }
-
-    if (!/(?=.*\d)/.test(password)) {
-      setError('Password harus mengandung minimal 1 angka.')
+    // Validasi password dengan centralized policy
+    const pwdCheck = validatePassword(password)
+    if (!pwdCheck.valid) {
+      setError(pwdCheck.errors[0])
       return
     }
 
@@ -95,7 +87,7 @@ const ResetPassword = () => {
         if (msg.includes('jwt expired') || msg.includes('session')) {
           setError(
             'Sesi reset password sudah kedaluwarsa atau tidak valid.\n' +
-              'Silakan minta link reset password yang baru dari halaman Lupa Password.'
+            'Silakan minta link reset password yang baru dari halaman Lupa Password.'
           )
         } else {
           setError(error.message || 'Gagal mengubah password.')

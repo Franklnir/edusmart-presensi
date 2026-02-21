@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
+import { sanitizeExternalUrl, sanitizeMediaUrl } from '../utils/sanitize'
 
 const MIN_SCALE = 0.2
 const MAX_SCALE = 4
@@ -6,6 +7,32 @@ const STEP = 0.2
 
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n))
+}
+
+function isHttpUrl(v = '') {
+  return /^https?:\/\//i.test(String(v || ''))
+}
+
+function resolveUrl(value) {
+  if (!value) return null
+  try {
+    const base =
+      typeof window !== 'undefined' && window.location?.origin
+        ? window.location.origin
+        : 'http://localhost'
+    const rawInput = String(value || '').trim()
+    const normalizedInput = /^(drive\.google\.com|docs\.google\.com|youtu\.be|(?:www\.)?youtube\.com)\//i.test(rawInput)
+      ? `https://${rawInput}`
+      : rawInput
+    const safeValue = sanitizeMediaUrl(normalizedInput)
+    if (!safeValue) return null
+    const normalized = /^(drive\.google\.com|docs\.google\.com|youtu\.be|(?:www\.)?youtube\.com)\//i.test(safeValue)
+      ? `https://${safeValue}`
+      : safeValue
+    return new URL(normalized, base)
+  } catch {
+    return null
+  }
 }
 
 function getSafeExtension(url) {
@@ -33,7 +60,84 @@ function getSafeExtension(url) {
   }
 }
 
+function parseYouTubeStartToSeconds(raw) {
+  if (!raw) return 0
+  const input = String(raw).trim()
+  if (!input) return 0
+  if (/^\d+$/.test(input)) return Number.parseInt(input, 10) || 0
+
+  const match = input.match(/(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?/i)
+  if (!match) return 0
+  const h = Number.parseInt(match[1] || '0', 10) || 0
+  const m = Number.parseInt(match[2] || '0', 10) || 0
+  const s = Number.parseInt(match[3] || '0', 10) || 0
+  return h * 3600 + m * 60 + s
+}
+
+function getYouTubeEmbedUrl(url) {
+  const resolved = resolveUrl(url)
+  if (!resolved) return ''
+  const host = resolved.hostname.toLowerCase()
+
+  let videoId = ''
+  if (host === 'youtu.be') {
+    videoId = resolved.pathname.split('/').filter(Boolean)[0] || ''
+  } else if (host.includes('youtube.com') || host.includes('youtube-nocookie.com')) {
+    const parts = resolved.pathname.split('/').filter(Boolean)
+    if (parts[0] === 'watch') videoId = resolved.searchParams.get('v') || ''
+    if (!videoId && parts[0] === 'embed') videoId = parts[1] || ''
+    if (!videoId && parts[0] === 'shorts') videoId = parts[1] || ''
+    if (!videoId && parts[0] === 'live') videoId = parts[1] || ''
+  }
+
+  if (!videoId) return ''
+
+  const start =
+    parseYouTubeStartToSeconds(resolved.searchParams.get('t')) ||
+    parseYouTubeStartToSeconds(resolved.searchParams.get('start'))
+  const startQuery = start > 0 ? `&start=${start}` : ''
+
+  return `https://www.youtube.com/embed/${encodeURIComponent(videoId)}?rel=0&modestbranding=1${startQuery}`
+}
+
+function getGoogleDriveEmbedUrl(url) {
+  const resolved = resolveUrl(url)
+  if (!resolved) return ''
+  const host = resolved.hostname.toLowerCase()
+  const parts = resolved.pathname.split('/').filter(Boolean)
+
+  if (host === 'drive.google.com') {
+    const byPath = resolved.pathname.match(/\/file\/d\/([^/]+)/i)?.[1] || ''
+    const byParam = resolved.searchParams.get('id') || ''
+    const fileId = byPath || byParam
+    if (!fileId) return ''
+    return `https://drive.google.com/file/d/${encodeURIComponent(fileId)}/preview`
+  }
+
+  if (host === 'docs.google.com') {
+    const docType = parts[0] || ''
+    const dIndex = parts.indexOf('d')
+    const fileId = dIndex >= 0 ? parts[dIndex + 1] || '' : ''
+    if (!fileId) return ''
+
+    if (['document', 'spreadsheets', 'presentation'].includes(docType)) {
+      return `https://docs.google.com/${docType}/d/${encodeURIComponent(fileId)}/preview`
+    }
+  }
+
+  return ''
+}
+
+function getGoogleDocsViewerUrl(url) {
+  const resolved = resolveUrl(url)
+  if (!resolved || !isHttpUrl(resolved.toString())) return ''
+  return `https://docs.google.com/gview?embedded=1&url=${encodeURIComponent(resolved.toString())}`
+}
+
 function detectFileType(fileUrl) {
+  if (getYouTubeEmbedUrl(fileUrl)) return 'youtube'
+  if (getGoogleDriveEmbedUrl(fileUrl)) return 'drive'
+
   const ext = getSafeExtension(fileUrl)
   if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(ext)) return 'image'
   if (ext === 'pdf') return 'pdf'
@@ -55,7 +159,49 @@ const FilePreviewModal = ({ fileUrl, onClose }) => {
   const dragStartRef = useRef({ x: 0, y: 0 })
   const posStartRef = useRef({ x: 0, y: 0 })
 
-  const fileType = useMemo(() => detectFileType(fileUrl), [fileUrl])
+  const previewSource = useMemo(() => {
+    const resolved = resolveUrl(fileUrl)
+    const sourceUrl = resolved ? resolved.toString() : sanitizeMediaUrl(String(fileUrl || ''))
+    const detectedType = detectFileType(sourceUrl)
+
+    if (detectedType === 'youtube') {
+      return {
+        type: 'youtube',
+        sourceUrl,
+        previewUrl: getYouTubeEmbedUrl(sourceUrl),
+        canDownload: false
+      }
+    }
+
+    if (detectedType === 'drive') {
+      return {
+        type: 'drive',
+        sourceUrl,
+        previewUrl: getGoogleDriveEmbedUrl(sourceUrl),
+        canDownload: true
+      }
+    }
+
+    if (['document', 'spreadsheet', 'presentation'].includes(detectedType)) {
+      return {
+        type: detectedType,
+        sourceUrl,
+        previewUrl: getGoogleDocsViewerUrl(sourceUrl) || sourceUrl,
+        canDownload: true
+      }
+    }
+
+    return {
+      type: detectedType,
+      sourceUrl,
+      previewUrl: sourceUrl,
+      canDownload: true
+    }
+  }, [fileUrl])
+
+  const fileType = previewSource.type
+  const openUrl = useMemo(() => sanitizeExternalUrl(previewSource.sourceUrl) || sanitizeMediaUrl(previewSource.sourceUrl), [previewSource.sourceUrl])
+  const downloadUrl = useMemo(() => sanitizeMediaUrl(previewSource.sourceUrl), [previewSource.sourceUrl])
 
   // reset saat file berganti
   useEffect(() => {
@@ -220,7 +366,7 @@ const FilePreviewModal = ({ fileUrl, onClose }) => {
           >
             <img
               ref={imageRef}
-              src={fileUrl}
+              src={previewSource.sourceUrl}
               alt="Preview"
               className="max-w-full max-h-full object-contain will-change-transform"
               style={{
@@ -244,7 +390,7 @@ const FilePreviewModal = ({ fileUrl, onClose }) => {
       case 'pdf':
         return (
           <div ref={containerRef} className="w-full h-full bg-white">
-            <iframe src={fileUrl} className="w-full h-full border-0" title="PDF Preview" />
+            <iframe src={previewSource.previewUrl} className="w-full h-full border-0" title="PDF Preview" />
           </div>
         )
 
@@ -252,7 +398,7 @@ const FilePreviewModal = ({ fileUrl, onClose }) => {
         return (
           <div className="w-full h-full bg-black flex items-center justify-center p-4">
             <video
-              src={fileUrl}
+              src={previewSource.sourceUrl}
               controls
               className="max-w-full max-h-full rounded-lg bg-black"
               preload="metadata"
@@ -263,7 +409,35 @@ const FilePreviewModal = ({ fileUrl, onClose }) => {
       case 'audio':
         return (
           <div className="w-full h-full bg-slate-900 flex items-center justify-center p-4">
-            <audio src={fileUrl} controls className="w-full max-w-xl" preload="metadata" />
+            <audio src={previewSource.sourceUrl} controls className="w-full max-w-xl" preload="metadata" />
+          </div>
+        )
+
+      case 'youtube':
+        return (
+          <div className="w-full h-full bg-black">
+            <iframe
+              src={previewSource.previewUrl}
+              className="w-full h-full border-0"
+              title="YouTube Preview"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+            />
+          </div>
+        )
+
+      case 'drive':
+      case 'document':
+      case 'spreadsheet':
+      case 'presentation':
+        return (
+          <div className="w-full h-full bg-white">
+            <iframe
+              src={previewSource.previewUrl}
+              className="w-full h-full border-0"
+              title="Document Preview"
+              allowFullScreen
+            />
           </div>
         )
 
@@ -274,13 +448,14 @@ const FilePreviewModal = ({ fileUrl, onClose }) => {
               Mencoba menampilkan file di dalam overlay...
             </div>
             <div className="flex-1">
-              <iframe src={fileUrl} className="w-full h-full border-0 bg-white" title="File Preview" />
+              <iframe src={previewSource.previewUrl} className="w-full h-full border-0 bg-white" title="File Preview" />
             </div>
             <div className="px-4 py-3 border-t border-slate-700 bg-slate-900 text-slate-200 text-sm flex items-center justify-between">
               <span>Jika tidak tampil, unduh file.</span>
               <a
-                href={fileUrl}
+                href={downloadUrl || '#'}
                 download
+                onClick={(e) => { if (!downloadUrl) e.preventDefault() }}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold"
               >
                 Download File
@@ -361,16 +536,31 @@ const FilePreviewModal = ({ fileUrl, onClose }) => {
         <div className="flex justify-between items-center p-4 border-t border-slate-200 bg-white rounded-b-2xl">
           <div className="text-sm text-slate-600">
             {fileType === 'image' && 'Scroll untuk zoom • Drag untuk geser • ESC untuk tutup'}
+            {fileType === 'youtube' && 'Mode video YouTube • ESC untuk tutup'}
+            {fileType === 'drive' && 'Preview Google Drive • ESC untuk tutup'}
           </div>
 
           <div className="flex gap-3">
             <a
-              href={fileUrl}
-              download
+              href={openUrl || '#'}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(e) => { if (!openUrl) e.preventDefault() }}
               className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors font-semibold"
             >
-              Download
+              Buka Tab Baru
             </a>
+
+            {previewSource.canDownload && (
+              <a
+                href={downloadUrl || '#'}
+                download
+                onClick={(e) => { if (!downloadUrl) e.preventDefault() }}
+                className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors font-semibold"
+              >
+                Download
+              </a>
+            )}
 
             <button
               onClick={() => onClose?.()}

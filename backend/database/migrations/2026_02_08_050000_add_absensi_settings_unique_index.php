@@ -9,7 +9,7 @@ return new class extends Migration
 {
     public function up(): void
     {
-        if (!Schema::hasTable('absensi_settings')) {
+        if (! Schema::hasTable('absensi_settings')) {
             return;
         }
 
@@ -18,7 +18,7 @@ return new class extends Migration
 
         if ($driver === 'pgsql') {
             if ($hasTenantColumn) {
-                DB::statement("
+                DB::statement('
                     DELETE FROM absensi_settings a
                     USING absensi_settings b
                     WHERE a.ctid < b.ctid
@@ -26,19 +26,20 @@ return new class extends Migration
                       AND a.kelas = b.kelas
                       AND a.tanggal = b.tanggal
                       AND a.mapel = b.mapel
-                ");
+                ');
                 DB::statement('CREATE UNIQUE INDEX IF NOT EXISTS absensi_settings_unique_key ON absensi_settings (tenant_id, kelas, tanggal, mapel)');
             } else {
-                DB::statement("
+                DB::statement('
                     DELETE FROM absensi_settings a
                     USING absensi_settings b
                     WHERE a.ctid < b.ctid
                       AND a.kelas = b.kelas
                       AND a.tanggal = b.tanggal
                       AND a.mapel = b.mapel
-                ");
+                ');
                 DB::statement('CREATE UNIQUE INDEX IF NOT EXISTS absensi_settings_unique_key ON absensi_settings (kelas, tanggal, mapel)');
             }
+
             return;
         }
 
@@ -53,12 +54,13 @@ return new class extends Migration
 
     public function down(): void
     {
-        if (!Schema::hasTable('absensi_settings')) {
+        if (! Schema::hasTable('absensi_settings')) {
             return;
         }
 
         if (DB::getDriverName() === 'pgsql') {
             DB::statement('DROP INDEX IF EXISTS absensi_settings_unique_key');
+
             return;
         }
 
@@ -67,4 +69,3 @@ return new class extends Migration
         });
     }
 };
-

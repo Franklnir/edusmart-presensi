@@ -1,6 +1,8 @@
 // src/pages/auth/Register.jsx
 import React, { useEffect, useMemo, useState } from 'react'
 import { supabase, PROFILE_BUCKET, getSignedUrlForValue } from '../../lib/supabase'
+import { sanitizeExternalUrl, sanitizeInput, sanitizeMediaUrl, sanitizeText } from '../../utils/sanitize'
+import { validatePassword } from '../../utils/passwordPolicy'
 import { Link, useNavigate } from 'react-router-dom'
 import '../../styles/Login.css'
 import PasswordInput from '../../components/PasswordInput'
@@ -83,8 +85,9 @@ export default function Register() {
       return () => { active = false }
     }
 
-    if (/^https?:\/\//i.test(raw)) {
-      setLogoPreview(raw)
+    const safeRawLogoUrl = sanitizeMediaUrl(raw)
+    if (/^https?:\/\//i.test(safeRawLogoUrl)) {
+      setLogoPreview(safeRawLogoUrl)
       return () => { active = false }
     }
 
@@ -131,7 +134,9 @@ export default function Register() {
     { key: 'tiktok', href: settings.link_tiktok, icon: 'ri-tiktok-fill' },
     { key: 'instagram', href: settings.link_instagram, icon: 'ri-instagram-fill' },
     { key: 'youtube', href: settings.link_youtube, icon: 'ri-youtube-fill' }
-  ].filter(s => s.href && s.href.trim() !== '')), [settings])
+  ]
+    .map((s) => ({ ...s, href: sanitizeExternalUrl(s.href) }))
+    .filter(s => s.href && s.href.trim() !== '')), [settings])
 
   const handleSelectRole = (role) => {
     setSelectedRole(role)
@@ -154,9 +159,8 @@ export default function Register() {
     const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
     if (!emailPattern.test(email)) return 'Format email tidak valid.'
     if (!form.password) return 'Password wajib diisi.'
-    if (form.password.length < 6) return 'Password minimal 6 karakter.'
-    if (!/(?=.*[A-Z])/.test(form.password)) return 'Password harus mengandung minimal 1 huruf besar.'
-    if (!/(?=.*\d)/.test(form.password)) return 'Password harus mengandung minimal 1 angka.'
+    const pwdCheck = validatePassword(form.password)
+    if (!pwdCheck.valid) return pwdCheck.errors[0]
     if (form.password !== form.confirmPassword) return 'Konfirmasi password tidak sama.'
 
     if (selectedRole === 'admin' && !settings.registrasi_admin_aktif) {
@@ -182,9 +186,8 @@ export default function Register() {
         email,
         password: form.password,
         options: {
-          // ini yang dipakai saat login pertama untuk bikin profiles
           data: {
-            nama: form.nama.trim(),
+            nama: sanitizeText(form.nama.trim()),
             role: selectedRole
           },
           emailRedirectTo: `${window.location.origin}/login`

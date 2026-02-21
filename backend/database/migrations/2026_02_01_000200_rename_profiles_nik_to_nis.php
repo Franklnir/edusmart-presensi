@@ -8,14 +8,14 @@ return new class extends Migration
 {
     public function up(): void
     {
-        if (Schema::hasColumn('profiles', 'nik') && !Schema::hasColumn('profiles', 'nis')) {
+        if (Schema::hasColumn('profiles', 'nik') && ! Schema::hasColumn('profiles', 'nis')) {
             DB::statement('ALTER TABLE profiles RENAME COLUMN nik TO nis');
         }
     }
 
     public function down(): void
     {
-        if (Schema::hasColumn('profiles', 'nis') && !Schema::hasColumn('profiles', 'nik')) {
+        if (Schema::hasColumn('profiles', 'nis') && ! Schema::hasColumn('profiles', 'nik')) {
             DB::statement('ALTER TABLE profiles RENAME COLUMN nis TO nik');
         }
     }

@@ -1,22 +1,26 @@
 import React, { useState, useEffect } from 'react'
 import { useAuthStore } from '../../store/useAuthStore'
 import { supabase } from '../../lib/supabase'
-import Badge from '../../components/Badge'
+
 import { useUIStore } from '../../store/useUIStore'
 import {
   getCertificateDisplayUrl,
   hydrateCertificateFileUrls,
   resolveCertificateFileUrl
 } from '../../utils/certificateFiles'
+import { sanitizeExternalUrl, sanitizeMediaUrl } from '../../utils/sanitize'
 
 // Helper: render link / gambar lampiran
 const renderLink = (url, text) => {
-  if (!url) return null
+  const safeMediaUrl = sanitizeMediaUrl(url)
+  if (!safeMediaUrl) return null
+
+  const safeExternalUrl = sanitizeExternalUrl(url)
   try {
-    if (/\.(jpeg|jpg|gif|png|webp)$/i.test(url)) {
+    if (/\.(jpeg|jpg|gif|png|webp)$/i.test(safeMediaUrl)) {
       return (
         <img
-          src={url}
+          src={safeMediaUrl}
           alt="lampiran"
           className="max-w-xs max-h-32 rounded-lg mt-1 border border-gray-200 transition-transform duration-200 hover:scale-105"
         />
@@ -24,7 +28,7 @@ const renderLink = (url, text) => {
     }
     return (
       <a
-        href={url}
+        href={safeExternalUrl || safeMediaUrl}
         target="_blank"
         rel="noopener noreferrer"
         className="inline-flex items-center px-2 py-1 text-xs font-medium rounded-lg border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 transition-all duration-200 mt-1"
@@ -124,15 +128,14 @@ const OrganisasiModal = ({ organisasi, isOpen, onClose }) => {
                 {organisasi.anggota?.map((anggota, index) => (
                   <div
                     key={anggota.id}
-                    className={`p-4 rounded-xl border-2 transition-all duration-200 hover:shadow-md ${
-                      anggota.jabatan === 'Ketua' 
-                        ? 'bg-gradient-to-br from-yellow-50 to-amber-50 border-amber-300' 
-                        : anggota.jabatan === 'Wakil Ketua'
+                    className={`p-4 rounded-xl border-2 transition-all duration-200 hover:shadow-md ${anggota.jabatan === 'Ketua'
+                      ? 'bg-gradient-to-br from-yellow-50 to-amber-50 border-amber-300'
+                      : anggota.jabatan === 'Wakil Ketua'
                         ? 'bg-gradient-to-br from-blue-50 to-cyan-50 border-blue-300'
                         : anggota.jabatan?.includes('Sekretaris') || anggota.jabatan?.includes('Bendahara')
-                        ? 'bg-gradient-to-br from-green-50 to-emerald-50 border-green-300'
-                        : 'bg-gray-50 border-gray-300'
-                    }`}
+                          ? 'bg-gradient-to-br from-green-50 to-emerald-50 border-green-300'
+                          : 'bg-gray-50 border-gray-300'
+                      }`}
                   >
                     <div className="flex items-start justify-between mb-2">
                       <div className="flex-1">
@@ -143,15 +146,14 @@ const OrganisasiModal = ({ organisasi, isOpen, onClose }) => {
                       </div>
                     </div>
                     <div className="flex justify-between items-center mt-3">
-                      <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                        anggota.jabatan === 'Ketua' 
-                          ? 'bg-amber-100 text-amber-800 border border-amber-200' 
-                          : anggota.jabatan === 'Wakil Ketua'
+                      <span className={`px-3 py-1 rounded-full text-xs font-semibold ${anggota.jabatan === 'Ketua'
+                        ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                        : anggota.jabatan === 'Wakil Ketua'
                           ? 'bg-blue-100 text-blue-800 border border-blue-200'
                           : anggota.jabatan?.includes('Sekretaris') || anggota.jabatan?.includes('Bendahara')
-                          ? 'bg-green-100 text-green-800 border border-green-200'
-                          : 'bg-gray-100 text-gray-800 border border-gray-200'
-                      }`}>
+                            ? 'bg-green-100 text-green-800 border border-green-200'
+                            : 'bg-gray-100 text-gray-800 border border-gray-200'
+                        }`}>
                         {anggota.jabatan || 'Anggota'}
                       </span>
                     </div>
@@ -228,7 +230,7 @@ const SertifikatModal = ({ sertifikat, isOpen, onClose, onDownload }) => {
             <div className="lg:col-span-2">
               <div className="bg-gray-50 border-2 border-dashed border-gray-300 rounded-xl p-4">
                 <h3 className="font-semibold text-gray-900 mb-4">Preview Sertifikat</h3>
-                
+
                 {fileType === 'pdf' ? (
                   <div className="aspect-[4/3] bg-white rounded-lg border border-gray-200 flex items-center justify-center">
                     <div className="text-center">
@@ -239,7 +241,7 @@ const SertifikatModal = ({ sertifikat, isOpen, onClose, onDownload }) => {
                   </div>
                 ) : fileType === 'image' ? (
                   <div className="aspect-[4/3] bg-white rounded-lg border border-gray-200 overflow-hidden">
-                    <img 
+                    <img
                       src={displayFileUrl}
                       alt={`Sertifikat ${sertifikat.event}`}
                       className="w-full h-full object-contain"
@@ -301,21 +303,18 @@ const SertifikatModal = ({ sertifikat, isOpen, onClose, onDownload }) => {
               </div>
 
               {/* Status Pengiriman */}
-              <div className={`border rounded-xl p-4 ${
-                sertifikat.sent 
-                  ? 'bg-green-50 border-green-200' 
-                  : 'bg-yellow-50 border-yellow-200'
-              }`}>
+              <div className={`border rounded-xl p-4 ${sertifikat.sent
+                ? 'bg-green-50 border-green-200'
+                : 'bg-yellow-50 border-yellow-200'
+                }`}>
                 <h4 className="font-semibold mb-2 flex items-center gap-2">
                   <span>📮</span> Status Pengiriman
                 </h4>
                 <div className="flex items-center gap-2">
-                  <div className={`w-3 h-3 rounded-full ${
-                    sertifikat.sent ? 'bg-green-500' : 'bg-yellow-500'
-                  }`}></div>
-                  <span className={`text-sm font-medium ${
-                    sertifikat.sent ? 'text-green-700' : 'text-yellow-700'
-                  }`}>
+                  <div className={`w-3 h-3 rounded-full ${sertifikat.sent ? 'bg-green-500' : 'bg-yellow-500'
+                    }`}></div>
+                  <span className={`text-sm font-medium ${sertifikat.sent ? 'text-green-700' : 'text-yellow-700'
+                    }`}>
                     {sertifikat.sent ? 'Terkirim ke Sistem' : 'Menunggu Konfirmasi'}
                   </span>
                 </div>
@@ -337,7 +336,7 @@ const SertifikatModal = ({ sertifikat, isOpen, onClose, onDownload }) => {
                   </svg>
                   Download Sertifikat
                 </button>
-                
+
                 <button
                   onClick={onClose}
                   className="w-full py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-semibold transition-colors"
@@ -382,7 +381,7 @@ const RiwayatSertifikatModal = ({ sertifikatList, isOpen, onClose, onSertifikatC
         <div className="p-6 max-h-[calc(90vh-180px)] overflow-y-auto">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {sertifikatList.map((sertifikat) => (
-              <div 
+              <div
                 key={sertifikat.id}
                 className="border-2 border-gray-200 rounded-xl p-4 transition-all duration-300 hover:border-amber-300 hover:shadow-sm cursor-pointer bg-white group"
                 onClick={() => onSertifikatClick(sertifikat)}
@@ -396,15 +395,14 @@ const RiwayatSertifikatModal = ({ sertifikatList, isOpen, onClose, onSertifikatC
                       {sertifikat.nama_penerima}
                     </p>
                   </div>
-                  <span className={`text-xs px-2 py-1 rounded-full ${
-                    sertifikat.sent 
-                      ? 'bg-green-100 text-green-700 border border-green-200' 
-                      : 'bg-yellow-100 text-yellow-700 border border-yellow-200'
-                  }`}>
+                  <span className={`text-xs px-2 py-1 rounded-full ${sertifikat.sent
+                    ? 'bg-green-100 text-green-700 border border-green-200'
+                    : 'bg-yellow-100 text-yellow-700 border border-yellow-200'
+                    }`}>
                     {sertifikat.sent ? 'Terkirim' : 'Pending'}
                   </span>
                 </div>
-                
+
                 <div className="flex items-center justify-between text-xs text-gray-500">
                   <span>
                     {new Date(sertifikat.issued_at).toLocaleDateString('id-ID', {
@@ -419,7 +417,7 @@ const RiwayatSertifikatModal = ({ sertifikatList, isOpen, onClose, onSertifikatC
                 </div>
               </div>
             ))}
-            
+
             {!sertifikatList.length && (
               <div className="col-span-full text-center py-8 bg-gray-50 rounded-xl">
                 <div className="text-gray-300 text-4xl mb-2">🏆</div>
@@ -532,16 +530,16 @@ export default function SHome() {
   const [organisasi, setOrganisasi] = useState([])
   const [selectedOrganisasi, setSelectedOrganisasi] = useState(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
-  
+
   // State untuk sertifikat
   const [sertifikatList, setSertifikatList] = useState([])
   const [selectedSertifikat, setSelectedSertifikat] = useState(null)
   const [isSertifikatModalOpen, setIsSertifikatModalOpen] = useState(false)
   const [isRiwayatSertifikatModalOpen, setIsRiwayatSertifikatModalOpen] = useState(false)
-  
+
   // State untuk struktur sekolah
   const [strukturSekolah, setStrukturSekolah] = useState([])
-  
+
   const [isLoading, setIsLoading] = useState(true)
 
   const getToday = () => {
@@ -584,7 +582,7 @@ export default function SHome() {
   // Load Data Sertifikat
   const loadSertifikat = async () => {
     if (!userId) return
-    
+
     try {
       const { data, error } = await supabase
         .from('certificates')
@@ -628,23 +626,23 @@ export default function SHome() {
       const response = await fetch(resolvedUrl, { credentials: 'include' })
       if (!response.ok) throw new Error('File sertifikat tidak dapat diakses')
       const blob = await response.blob()
-      
+
       // Create download link
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.style.display = 'none'
       a.href = url
-      
+
       // Extract file extension from URL
       const fileExtensionSource = String(sertifikat.file_url || resolvedUrl).split('?')[0]
       const fileExtension = fileExtensionSource.split('.').pop() || 'pdf'
       const fileName = `Sertifikat_${sertifikat.event}_${sertifikat.nama_penerima}.${fileExtension}`
-      
+
       a.download = fileName
       document.body.appendChild(a)
       a.click()
       window.URL.revokeObjectURL(url)
-      
+
       pushToast('success', 'Sertifikat berhasil diunduh')
     } catch (error) {
       console.error('Error downloading sertifikat:', error)
@@ -703,15 +701,15 @@ export default function SHome() {
       const agg = { H: 0, I: 0, A: 0 }
       let myStatus = '-'
 
-      ;(data || []).forEach((row) => {
-        if (row.status === 'Hadir') agg.H++
-        else if (row.status === 'Izin' || row.status === 'Sakit') agg.I++
-        else if (row.status === 'Alpha') agg.A++
+        ; (data || []).forEach((row) => {
+          if (row.status === 'Hadir') agg.H++
+          else if (row.status === 'Izin' || row.status === 'Sakit') agg.I++
+          else if (row.status === 'Alpha') agg.A++
 
-        if (row.uid === userId) {
-          myStatus = row.status || '-'
-        }
-      })
+          if (row.uid === userId) {
+            myStatus = row.status || '-'
+          }
+        })
 
       setRingkas(agg)
       setStatusUser(myStatus)
@@ -781,14 +779,14 @@ export default function SHome() {
       const anggotaByEkskul = {}
       const myEskulSet = new Set()
 
-      ;(anggotaData || []).forEach((row) => {
-        if (!row.ekskul_id) return
-        anggotaByEkskul[row.ekskul_id] =
-          (anggotaByEkskul[row.ekskul_id] || 0) + 1
-        if (row.user_id === userId) {
-          myEskulSet.add(row.ekskul_id)
-        }
-      })
+        ; (anggotaData || []).forEach((row) => {
+          if (!row.ekskul_id) return
+          anggotaByEkskul[row.ekskul_id] =
+            (anggotaByEkskul[row.ekskul_id] || 0) + 1
+          if (row.user_id === userId) {
+            myEskulSet.add(row.ekskul_id)
+          }
+        })
 
       const formattedEskul = (eskulData || []).map((e) => ({
         id: e.id,
@@ -812,7 +810,7 @@ export default function SHome() {
 
   const loadOrganisasi = async () => {
     if (!userId) return
-    
+
     try {
       const { data: organisasiData, error: organisasiError } = await supabase
         .from('organisasi')
@@ -919,674 +917,343 @@ export default function SHome() {
   /* ============================
    *          RENDER
    * ============================ */
+  const greetingHour = new Date().getHours()
+  const greeting = greetingHour < 12 ? 'Selamat Pagi' : greetingHour < 15 ? 'Selamat Siang' : greetingHour < 18 ? 'Selamat Sore' : 'Selamat Malam'
 
-  if (isLoading) {
-    return <SkeletonLoader />
-  }
+  if (isLoading) return <SkeletonLoader />
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 py-6">
-      <div className="w-full px-4 sm:px-6 lg:px-8 space-y-6">
-        
-        {/* --- HEADER WELCOME --- */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 transition-all duration-300 hover:shadow-md">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between">
-            <div className="flex items-center gap-4">
-              <div className="w-3 h-12 bg-gradient-to-b from-blue-500 to-purple-600 rounded-full"></div>
-              <div>
-                <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-1">
-                  Selamat Datang, {profile?.nama || 'Siswa'}! 👋
-                </h1>
-                <p className="text-gray-600 text-base">Pantau aktivitas dan perkembangan akademik Anda</p>
-              </div>
-            </div>
-            {profile?.kelas && (
-              <div className="mt-4 md:mt-0">
-                <span className="inline-flex items-center px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-xl text-sm font-semibold shadow-sm">
-                  🏫 Kelas {profile.kelas}
-                </span>
-              </div>
-            )}
+    <div className="page-wrapper animate-fade-in">
+      <div className="w-full space-y-6">
+
+        {/* ── Greeting Header ── */}
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-brand-600 via-brand-700 to-indigo-700 p-6 text-white shadow-brand">
+          <div className="relative z-10">
+            <p className="text-sm font-semibold text-brand-200 mb-0.5">{greeting} 👋</p>
+            <h1 className="text-2xl font-extrabold">{profile?.nama || 'Siswa'}</h1>
+            <p className="text-sm text-brand-200 mt-1">
+              Kelas <span className="font-bold text-white">{profile?.kelas || '—'}</span>
+            </p>
           </div>
+          <div className="absolute -right-8 -top-8 w-40 h-40 rounded-full bg-white/5" />
+          <div className="absolute -right-4 -bottom-10 w-28 h-28 rounded-full bg-white/5" />
         </div>
 
+        {/* ── Main grid ── */}
         <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
-          {/* MAIN CONTENT - 3/4 width */}
+
+          {/* ── LEFT: Main Content (3/4) ── */}
           <div className="xl:col-span-3 space-y-6">
-            
+
             {/* --- PENGUMUMAN --- */}
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden transition-all duration-300 hover:shadow-md">
-              <div className="flex items-center gap-3 p-6 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-white">
-                <div className="w-2 h-8 bg-blue-600 rounded-full"></div>
-                <div className="flex items-center justify-between flex-1">
-                  <h2 className="text-xl font-bold text-gray-900">📢 Pengumuman Terbaru</h2>
-                  <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-semibold">
-                    {pengumuman.length} Items
-                  </span>
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-card overflow-hidden">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white">
+                <div className="flex items-center gap-3">
+                  <div className="w-2 h-8 bg-brand-600 rounded-full" />
+                  <h2 className="text-lg font-bold text-slate-900">Pengumuman</h2>
+                </div>
+                <span className="px-3 py-1 bg-brand-50 text-brand-700 rounded-full text-xs font-semibold">
+                  {pengumuman.length} Baru
+                </span>
+              </div>
+              <div className="divide-y divide-slate-50">
+                {pengumuman.map((p) => (
+                  <div key={p.id} className="px-6 py-4 hover:bg-slate-50/60 transition-colors">
+                    <div className="flex items-start justify-between gap-3 mb-1">
+                      <h3 className="font-semibold text-slate-800 text-sm">{p.judul}</h3>
+                      {p.target && p.target !== 'semua' && (
+                        <span className="flex-shrink-0 text-[10px] px-2 py-0.5 rounded-full bg-brand-100 text-brand-700 font-semibold">{p.target}</span>
+                      )}
+                    </div>
+                    <p className="text-slate-600 text-sm leading-relaxed whitespace-pre-line break-words max-h-60 overflow-y-auto pr-1">
+                      {p.keterangan}
+                    </p>
+                    <p className="text-slate-400 text-xs mt-1.5">
+                      {new Date(p.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
+                    </p>
+                  </div>
+                ))}
+                {!pengumuman.length && (
+                  <div className="text-center py-10">
+                    <div className="text-4xl mb-2 opacity-30">📢</div>
+                    <p className="text-slate-500 text-sm font-medium">Tidak ada pengumuman baru</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* --- TUGAS & ORGANISASI grid --- */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+              {/* --- TUGAS --- */}
+              <div className="bg-white rounded-2xl border border-slate-100 shadow-card overflow-hidden">
+                <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white">
+                  <div className="flex items-center gap-3">
+                    <div className="w-2 h-7 bg-violet-600 rounded-full" />
+                    <h2 className="text-base font-bold text-slate-900">Tugas Mendatang</h2>
+                  </div>
+                  <span className="px-2.5 py-1 bg-violet-50 text-violet-700 rounded-full text-xs font-semibold">{tugas.length}</span>
+                </div>
+                <div className="max-h-72 overflow-y-auto divide-y divide-slate-50">
+                  {tugas.map((t) => (
+                    <div key={t.id} className="px-5 py-4 hover:bg-slate-50/60 transition-colors group">
+                      <div className="flex items-start justify-between gap-2 mb-1">
+                        <h3 className="font-semibold text-slate-800 text-sm group-hover:text-violet-700 transition-colors">{t.judul}</h3>
+                        <span className="flex-shrink-0 text-[10px] px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 border border-violet-100 font-semibold">{t.mapel}</span>
+                      </div>
+                      <p className="text-slate-500 text-xs line-clamp-2 mb-2">{t.keterangan || 'Tidak ada keterangan'}</p>
+                      <div className="flex items-center gap-1.5 text-xs text-violet-600 font-medium">
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        {t.deadline ? new Date(t.deadline).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Tidak ada deadline'}
+                      </div>
+                      <div className="flex flex-wrap gap-2 mt-2">{renderLink(t.file_url, '📎 File')}{renderLink(t.link, '🔗 Link')}</div>
+                    </div>
+                  ))}
+                  {!tugas.length && (
+                    <div className="text-center py-8">
+                      <div className="text-4xl mb-2 opacity-30">📚</div>
+                      <p className="text-slate-500 text-sm">Tidak ada tugas baru</p>
+                    </div>
+                  )}
                 </div>
               </div>
-              
-              <div className="max-h-80 overflow-y-auto">
-                <div className="p-6 space-y-4">
-                  {pengumuman.map((p, index) => (
-                    <div
-                      key={p.id}
-                      className={`p-4 rounded-xl border-2 transition-all duration-300 hover:shadow-md cursor-pointer ${
-                        index === 0 
-                          ? 'bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-300 shadow-sm' 
-                          : 'border-gray-200 hover:border-blue-300 bg-white'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-3">
-                            <h3 className="font-bold text-gray-900 text-lg leading-tight">{p.judul}</h3>
-                            {index === 0 && (
-                              <span className="px-2 py-1 text-xs font-semibold bg-blue-500 text-white rounded-full">
-                                🆕 Terbaru
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-gray-700 text-sm leading-relaxed line-clamp-2 mb-3">
-                            {p.keterangan}
-                          </p>
-                          <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
-                            <span className="flex items-center gap-2 bg-gray-100 px-3 py-1 rounded-full">
-                              <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
-                              <span className="capitalize font-medium">{p.target || 'semua'}</span>
-                            </span>
-                            <span className="flex items-center gap-2 bg-gray-100 px-3 py-1 rounded-full">
-                              <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-                              <span className="font-medium">
-                                {p.created_at ? new Date(p.created_at).toLocaleDateString('id-ID', {
-                                  day: 'numeric',
-                                  month: 'short',
-                                  year: 'numeric'
-                                }) : ''}
-                              </span>
-                            </span>
+
+              {/* --- ORGANISASI --- */}
+              <div className="bg-white rounded-2xl border border-slate-100 shadow-card overflow-hidden">
+                <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white">
+                  <div className="flex items-center gap-3">
+                    <div className="w-2 h-7 bg-indigo-600 rounded-full" />
+                    <h2 className="text-base font-bold text-slate-900">Organisasi</h2>
+                  </div>
+                  <span className="px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-full text-xs font-semibold">{organisasi.length}</span>
+                </div>
+                <div className="max-h-72 overflow-y-auto divide-y divide-slate-50">
+                  {organisasi.map((org) => (
+                    <div key={org.id} className="px-5 py-4 hover:bg-slate-50/60 transition-colors cursor-pointer group" onClick={() => handleOrganisasiClick(org)}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-semibold text-slate-800 text-sm group-hover:text-indigo-700 transition-colors truncate">{org.nama}</h3>
+                          <p className="text-slate-500 text-xs mt-0.5 truncate">{org.pembina_guru_nama || 'Belum ada pembina'}</p>
+                          <div className="flex flex-wrap gap-1.5 mt-2">
+                            {org.anggota?.filter(a => ['Ketua', 'Wakil Ketua', 'Sekretaris'].includes(a.jabatan)).slice(0, 2).map((a, i) => (
+                              <span key={i} className={`text-[10px] px-2 py-0.5 rounded-full font-semibold border ${a.jabatan === 'Ketua' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`}>{a.jabatan}</span>
+                            ))}
                           </div>
                         </div>
+                        <svg className="w-4 h-4 text-slate-300 group-hover:text-indigo-500 transition-colors flex-shrink-0 ml-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
                       </div>
                     </div>
                   ))}
-                  {!pengumuman.length && (
-                    <div className="text-center py-8 bg-gray-50 rounded-xl">
-                      <div className="text-gray-300 text-5xl mb-3">📢</div>
-                      <p className="text-gray-500 text-base font-medium">Tidak ada pengumuman baru</p>
+                  {!organisasi.length && (
+                    <div className="text-center py-8">
+                      <div className="text-4xl mb-2 opacity-30">🏛️</div>
+                      <p className="text-slate-500 text-sm">Belum ada organisasi</p>
                     </div>
                   )}
                 </div>
               </div>
             </div>
 
-            {/* Tugas and Organisasi Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              
-              {/* --- TUGAS --- */}
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden transition-all duration-300 hover:shadow-md">
-                <div className="flex items-center justify-between p-6 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-white">
-                  <div className="flex items-center gap-3">
-                    <div className="w-2 h-8 bg-purple-600 rounded-full"></div>
-                    <h2 className="text-xl font-bold text-gray-900">📚 Tugas Mendatang</h2>
-                  </div>
-                  <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-semibold">
-                    {tugas.length} Tugas
-                  </span>
-                </div>
-
-                <div className="max-h-72 overflow-y-auto">
-                  <div className="p-6">
-                    <div className="space-y-4">
-                      {tugas.map((t) => (
-                        <div
-                          key={t.id}
-                          className="border-2 border-gray-200 rounded-xl p-4 transition-all duration-300 hover:border-purple-300 hover:shadow-sm cursor-pointer bg-white group"
-                        >
-                          <div className="flex items-start justify-between mb-3">
-                            <h3 className="font-bold text-gray-900 text-base leading-tight flex-1 pr-3 group-hover:text-purple-700 transition-colors">
-                              {t.judul}
-                            </h3>
-                            <span className="px-2 py-1 bg-gray-100 text-gray-700 rounded-lg text-xs font-semibold whitespace-nowrap">
-                              {t.mapel}
-                            </span>
-                          </div>
-                          
-                          <div className="flex items-center gap-2 text-xs text-gray-600 mb-3">
-                            <span className="flex items-center gap-2 bg-purple-50 px-3 py-1 rounded-lg border border-purple-200">
-                              <span className="text-sm">⏰</span>
-                              <span className="font-semibold">
-                                {t.deadline ? new Date(t.deadline).toLocaleString('id-ID', {
-                                  day: 'numeric',
-                                  month: 'short',
-                                  hour: '2-digit',
-                                  minute: '2-digit'
-                                }) : 'Tidak ada deadline'}
-                              </span>
-                            </span>
-                          </div>
-
-                          <p className="text-gray-700 text-sm leading-relaxed line-clamp-2 mb-3">
-                            {t.keterangan || 'Tidak ada keterangan tambahan'}
-                          </p>
-
-                          <div className="flex flex-wrap gap-2">
-                            {renderLink(t.file_url, '📎 File')}
-                            {renderLink(t.link, '🔗 Link')}
-                          </div>
-                        </div>
-                      ))}
-                      
-                      {!tugas.length && (
-                        <div className="text-center py-6 bg-gray-50 rounded-xl">
-                          <div className="text-gray-300 text-4xl mb-2">📚</div>
-                          <p className="text-gray-500 text-base font-medium">Tidak ada tugas baru</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* --- ORGANISASI --- */}
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden transition-all duration-300 hover:shadow-md">
-                <div className="flex items-center justify-between p-6 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-white">
-                  <div className="flex items-center gap-3">
-                    <div className="w-2 h-8 bg-indigo-600 rounded-full"></div>
-                    <div>
-                      <h2 className="text-xl font-bold text-gray-900">🏛️ Organisasi</h2>
-                    </div>
-                  </div>
-                  <div className="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-xs font-semibold">
-                    {organisasi.length} Organisasi
-                  </div>
-                </div>
-
-                <div className="max-h-72 overflow-y-auto">
-                  <div className="p-6">
-                    <div className="grid grid-cols-1 gap-4">
-                      {organisasi.map((org) => (
-                        <div
-                          key={org.id}
-                          className="border-2 border-gray-200 rounded-xl p-4 transition-all duration-300 hover:border-indigo-300 hover:shadow-md cursor-pointer bg-white group"
-                          onClick={() => handleOrganisasiClick(org)}
-                        >
-                          <div className="flex items-start justify-between mb-3">
-                            <div className="flex-1">
-                              <h3 className="font-bold text-gray-900 text-base leading-tight mb-2 group-hover:text-indigo-700 transition-colors">
-                                {org.nama}
-                              </h3>
-                              
-                              <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600 mb-3">
-                                <span className="flex items-center gap-2 bg-indigo-50 px-3 py-1 rounded-lg border border-indigo-200">
-                                  <span className="text-indigo-600 text-sm">👨‍🏫</span>
-                                  <span className="font-medium truncate">{org.pembina_guru_nama || 'Belum ada pembina'}</span>
-                                </span>
-                                <span className="flex items-center gap-2 bg-indigo-50 px-3 py-1 rounded-lg border border-indigo-200">
-                                  <span className="text-indigo-600 text-sm">👥</span>
-                                  <span className="font-medium">{org.anggota?.length || 0}</span>
-                                </span>
-                              </div>
-
-                              {/* Preview Jabatan */}
-                              <div className="flex flex-wrap gap-2">
-                                {org.anggota
-                                  ?.filter(anggota => 
-                                    ['Ketua', 'Wakil Ketua', 'Sekretaris', 'Bendahara'].includes(anggota.jabatan)
-                                  )
-                                  .slice(0, 2)
-                                  .map((anggota, idx) => (
-                                    <span
-                                      key={idx}
-                                      className={`px-2 py-1 rounded-lg text-xs font-semibold border ${
-                                        anggota.jabatan === 'Ketua' 
-                                          ? 'bg-amber-100 text-amber-800 border-amber-300' 
-                                          : anggota.jabatan === 'Wakil Ketua'
-                                          ? 'bg-blue-100 text-blue-800 border-blue-300'
-                                          : 'bg-green-100 text-green-800 border-green-300'
-                                      }`}
-                                    >
-                                      {anggota.jabatan}
-                                    </span>
-                                  ))}
-                                {org.anggota?.length > 2 && (
-                                  <span className="px-2 py-1 bg-gray-100 text-gray-600 rounded-lg text-xs font-semibold border border-gray-300">
-                                    +{org.anggota.length - 2} lainnya
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                            
-                            <div className="text-indigo-600 opacity-0 group-hover:opacity-100 transition-all duration-300 text-lg transform group-hover:translate-x-1">
-                              →
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                      
-                      {!organisasi.length && (
-                        <div className="text-center py-6 bg-gray-50 rounded-xl">
-                          <div className="text-gray-300 text-4xl mb-2">🏛️</div>
-                          <p className="text-gray-500 text-base font-medium">Belum ada organisasi</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* --- EKSKUL --- */}
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden transition-all duration-300 hover:shadow-md">
-              <div className="flex items-center justify-between p-6 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-white">
+            {/* --- EKSTRAKURIKULER --- */}
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-card overflow-hidden">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white">
                 <div className="flex items-center gap-3">
-                  <div className="w-2 h-8 bg-orange-600 rounded-full"></div>
+                  <div className="w-2 h-8 bg-orange-500 rounded-full" />
                   <div>
-                    <h2 className="text-xl font-bold text-gray-900">⚽ Ekstrakurikuler</h2>
-                    <p className="text-gray-600 text-sm mt-1">
-                      Maksimal <span className="font-semibold text-orange-600">3 ekskul</span> yang bisa diikuti
-                    </p>
+                    <h2 className="text-base font-bold text-slate-900">Ekstrakurikuler</h2>
+                    <p className="text-slate-500 text-xs">Maks. <span className="font-semibold text-orange-600">3 ekskul</span></p>
                   </div>
                 </div>
-                <div className="px-3 py-1 bg-orange-100 text-orange-700 rounded-full text-xs font-semibold">
-                  {myEskul.size}/3 Terdaftar
-                </div>
+                <span className="px-3 py-1 bg-orange-50 text-orange-700 rounded-full text-xs font-semibold">{myEskul.size}/3 Terdaftar</span>
               </div>
-
-              <div className="max-h-80 overflow-y-auto">
-                <div className="p-6">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {ekskul.map((x) => {
-                      const isJoined = myEskul.has(x.id)
-                      const registrationClosed = isEskulRegistrationClosed(
-                        x.registration_deadline_at
-                      )
-                      const registrationDeadlineLabel = formatDateTimeLabel(
-                        x.registration_deadline_at
-                      )
-                      return (
-                        <div
-                          key={x.id}
-                          className={`border-2 rounded-xl p-4 transition-all duration-300 group ${
-                            registrationClosed
-                              ? 'border-rose-300 bg-gradient-to-br from-rose-50 to-orange-50 shadow-sm'
-                              : isJoined
-                              ? 'border-orange-400 bg-gradient-to-br from-orange-50 to-amber-50 shadow-sm'
-                              : 'border-gray-200 hover:border-orange-300 bg-white hover:shadow-md'
-                          }`}
-                        >
-                          <div className="mb-4">
-                            <div className="flex items-start justify-between mb-3">
-                              <h3 className="font-bold text-gray-900 text-base leading-tight flex-1 pr-3 group-hover:text-orange-700 transition-colors">
-                                {x.nama}
-                              </h3>
-                              <div className="flex flex-col items-end gap-1">
-                                {isJoined && (
-                                  <span className="px-2 py-1 bg-orange-500 text-white rounded-lg text-xs font-semibold shadow-sm">
-                                    ✅ Terdaftar
-                                  </span>
-                                )}
-                                <span
-                                  className={`px-2 py-1 rounded-lg text-[11px] font-semibold ${
-                                    registrationClosed
-                                      ? 'bg-rose-100 text-rose-700 border border-rose-200'
-                                      : 'bg-emerald-100 text-emerald-700 border border-emerald-200'
-                                  }`}
-                                >
-                                  {registrationClosed
-                                    ? 'Pendaftaran ditutup'
-                                    : 'Pendaftaran dibuka'}
-                                </span>
-                              </div>
-                            </div>
-
-                            <div className="space-y-2 text-sm text-gray-600 mb-3">
-                              <div className="flex items-center gap-2">
-                                <span className="text-gray-500 text-base">👨‍🏫</span>
-                                <span className="font-medium truncate">{x.pembina_nama || 'Belum ada pembina'}</span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <span className="text-gray-500 text-base">📅</span>
-                                <span className="font-medium text-xs">
-                                  {x.hari || 'TBA'} 
-                                  {x.jam_mulai && ` • ${x.jam_mulai} - ${x.jam_selesai}`}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <span className="text-gray-500 text-base">⏳</span>
-                                <span
-                                  className={`font-medium text-xs ${
-                                    registrationClosed ? 'text-rose-700' : 'text-emerald-700'
-                                  }`}
-                                >
-                                  {x.registration_deadline_at
-                                    ? `Batas daftar: ${registrationDeadlineLabel}`
-                                    : 'Batas daftar: belum diatur admin'}
-                                </span>
-                              </div>
-                            </div>
-
-                            {x.keterangan && (
-                              <p className="text-gray-700 text-sm leading-relaxed line-clamp-2 bg-gray-50 p-2 rounded-lg border border-gray-200">
-                                {x.keterangan}
-                              </p>
-                            )}
+              <div className="p-5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {ekskul.map((x) => {
+                    const isJoined = myEskul.has(x.id)
+                    const registrationClosed = isEskulRegistrationClosed(x.registration_deadline_at)
+                    const registrationDeadlineLabel = formatDateTimeLabel(x.registration_deadline_at)
+                    return (
+                      <div key={x.id} className={`rounded-xl border-2 p-4 transition-all duration-200 group ${registrationClosed ? 'border-rose-200 bg-rose-50/50' : isJoined ? 'border-orange-300 bg-orange-50/50' : 'border-slate-200 hover:border-orange-300 bg-white hover:shadow-card'}`}>
+                        <div className="flex items-start justify-between mb-3">
+                          <h3 className="font-bold text-slate-800 text-sm leading-tight flex-1 pr-2 group-hover:text-orange-700 transition-colors">{x.nama}</h3>
+                          <div className="flex flex-col items-end gap-1">
+                            {isJoined && <span className="text-[10px] px-2 py-0.5 rounded-full bg-orange-500 text-white font-semibold">✓ Terdaftar</span>}
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold border ${registrationClosed ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
+                              {registrationClosed ? 'Tutup' : 'Buka'}
+                            </span>
                           </div>
-
-                          <button
-                            onClick={() => toggleEskul(x)}
-                            disabled={registrationClosed}
-                            className={`w-full py-2.5 px-4 rounded-xl font-semibold transition-all duration-300 text-sm shadow-sm ${
-                              registrationClosed
-                                ? 'bg-gray-200 text-gray-500 cursor-not-allowed border border-gray-300'
-                                : isJoined
-                                ? 'bg-white text-orange-600 border-2 border-orange-300 hover:bg-orange-500 hover:text-white hover:border-orange-500'
-                                : 'bg-gradient-to-r from-orange-500 to-amber-500 text-white hover:from-orange-600 hover:to-amber-600'
-                            }`}
-                          >
-                            {registrationClosed
-                              ? 'Pendaftaran Tutup'
-                              : isJoined
-                                ? 'Batalkan'
-                                : 'Daftar Sekarang'}
-                          </button>
                         </div>
-                      )
-                    })}
-                    
-                    {!ekskul.length && (
-                      <div className="col-span-full text-center py-8 bg-gray-50 rounded-xl">
-                        <div className="text-gray-300 text-5xl mb-3">⚽</div>
-                        <p className="text-gray-500 text-base font-medium">Belum ada ekskul tersedia</p>
+                        <div className="space-y-1.5 text-xs text-slate-600 mb-3">
+                          <div className="flex items-center gap-1.5">
+                            <svg className="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                            <span className="truncate font-medium">{x.pembina_nama || 'Belum ada pembina'}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <svg className="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                            <span>{x.hari || 'TBA'}{x.jam_mulai ? ` · ${x.jam_mulai}–${x.jam_selesai}` : ''}</span>
+                          </div>
+                          <div className={`flex items-center gap-1.5 ${registrationClosed ? 'text-rose-600' : 'text-emerald-600'} font-medium`}>
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                            <span>{x.registration_deadline_at ? `Batas: ${registrationDeadlineLabel}` : 'Belum diatur'}</span>
+                          </div>
+                        </div>
+                        {x.keterangan && <p className="text-slate-600 text-xs line-clamp-2 mb-3 bg-slate-50 rounded-lg px-2 py-1.5">{x.keterangan}</p>}
+                        <button onClick={() => toggleEskul(x)} disabled={registrationClosed} className={`w-full py-2 rounded-xl font-semibold transition-all duration-200 text-xs ${registrationClosed ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : isJoined ? 'bg-white text-orange-600 border-2 border-orange-300 hover:bg-orange-500 hover:text-white hover:border-orange-500' : 'bg-gradient-to-r from-orange-500 to-amber-500 text-white hover:from-orange-600 hover:to-amber-600 shadow-sm'}`}>
+                          {registrationClosed ? 'Pendaftaran Tutup' : isJoined ? 'Batalkan' : 'Daftar Sekarang'}
+                        </button>
                       </div>
-                    )}
-                  </div>
+                    )
+                  })}
+                  {!ekskul.length && (
+                    <div className="col-span-full text-center py-10">
+                      <div className="text-4xl mb-2 opacity-30">⚽</div>
+                      <p className="text-slate-500 text-sm">Belum ada ekskul tersedia</p>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
           </div>
 
-          {/* SIDEBAR - 1/4 width */}
-          <div className="space-y-6">
-            
-            {/* --- ABSENSI --- */}
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 transition-all duration-300 hover:shadow-md">
-              <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-3">
-                  <div className="w-2 h-8 bg-emerald-600 rounded-full"></div>
-                  <h2 className="text-xl font-bold text-gray-900">📊 Absensi</h2>
-                </div>
-                <Badge variant="live">Live</Badge>
-              </div>
-              
-              {/* Status Saya */}
-              <div className="mb-6 p-4 bg-gradient-to-br from-blue-50 to-indigo-100 rounded-xl border-2 border-blue-300 shadow-sm">
-                <h3 className="text-sm font-semibold text-gray-900 mb-2 flex items-center gap-2">
-                  <span className="text-blue-600">👤</span>
-                  Status Anda Hari Ini
-                </h3>
-                <div className={`text-2xl font-bold mb-1 transition-all duration-300 ${
-                  statusUser === 'Hadir' ? 'text-emerald-600' :
-                  statusUser === 'Izin' || statusUser === 'Sakit' ? 'text-amber-600' :
-                  statusUser === 'Alpha' ? 'text-rose-600' : 'text-blue-600'
-                }`}>
-                  {statusUser}
-                </div>
-                <p className="text-xs text-blue-600 font-medium">
-                  Status kehadiran hari ini di kelas {profile?.kelas}
-                </p>
-              </div>
+          {/* ── RIGHT: Sidebar (1/4) ── */}
+          <div className="space-y-5">
 
+            {/* --- ABSENSI --- */}
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-card p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-2 h-7 bg-emerald-500 rounded-full" />
+                  <h2 className="text-base font-bold text-slate-900">Absensi</h2>
+                </div>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700 border border-green-200 animate-pulse">● Live</span>
+              </div>
+              {/* Status Saya */}
+              <div className="mb-4 p-3.5 rounded-xl border-2 border-brand-100 bg-gradient-to-br from-brand-50 to-indigo-50">
+                <p className="text-xs font-semibold text-slate-600 mb-1">Status Anda Hari Ini</p>
+                <p className={`text-2xl font-extrabold ${statusUser === 'Hadir' ? 'text-emerald-600' : statusUser === 'Izin' || statusUser === 'Sakit' ? 'text-amber-600' : statusUser === 'Alpha' ? 'text-rose-600' : 'text-brand-600'}`}>{statusUser}</p>
+                <p className="text-xs text-slate-500 mt-0.5">Kelas {profile?.kelas || '—'}</p>
+              </div>
               {/* Ringkasan Kelas */}
-              <div>
-                <h3 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                  <span className="text-emerald-600">📈</span>
-                  Ringkasan Kelas
-                </h3>
-                <div className="grid grid-cols-3 gap-3">
-                  {[
-                    { 
-                      label: 'Hadir', 
-                      value: ringkas.H, 
-                      icon: '✅',
-                      bgColor: 'bg-emerald-50',
-                      borderColor: 'border-emerald-300',
-                      textColor: 'text-emerald-700'
-                    },
-                    { 
-                      label: 'Izin', 
-                      value: ringkas.I, 
-                      icon: '⚠️',
-                      bgColor: 'bg-amber-50',
-                      borderColor: 'border-amber-300',
-                      textColor: 'text-amber-700'
-                    },
-                    { 
-                      label: 'Alpha', 
-                      value: ringkas.A, 
-                      icon: '❌',
-                      bgColor: 'bg-rose-50',
-                      borderColor: 'border-rose-300',
-                      textColor: 'text-rose-700'
-                    }
-                  ].map((item, index) => (
-                    <div
-                      key={index}
-                      className={`${item.bgColor} ${item.borderColor} rounded-xl p-3 text-center border-2 transition-all duration-300 hover:shadow-sm`}
-                    >
-                      <div className="text-xl mb-2">{item.icon}</div>
-                      <div className="text-xs font-semibold text-gray-600 mb-1">{item.label}</div>
-                      <div className={`text-xl font-bold ${item.textColor}`}>
-                        {item.value}
-                      </div>
-                    </div>
-                  ))}
+              <p className="text-xs font-semibold text-slate-500 mb-2.5 uppercase tracking-wider">Ringkasan Kelas</p>
+              <div className="grid grid-cols-3 gap-2">
+                <div className="rounded-xl p-2.5 text-center bg-emerald-50 border border-emerald-100">
+                  <div className="text-xl font-extrabold text-emerald-600">{ringkas.H}</div>
+                  <div className="text-[10px] font-semibold text-emerald-700 mt-0.5">Hadir</div>
+                </div>
+                <div className="rounded-xl p-2.5 text-center bg-amber-50 border border-amber-100">
+                  <div className="text-xl font-extrabold text-amber-600">{ringkas.I}</div>
+                  <div className="text-[10px] font-semibold text-amber-700 mt-0.5">Izin</div>
+                </div>
+                <div className="rounded-xl p-2.5 text-center bg-rose-50 border border-rose-100">
+                  <div className="text-xl font-extrabold text-rose-600">{ringkas.A}</div>
+                  <div className="text-[10px] font-semibold text-rose-700 mt-0.5">Alpha</div>
                 </div>
               </div>
             </div>
 
-            {/* --- STRUKTUR SEKOLAH --- */}
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 transition-all duration-300 hover:shadow-md">
-              <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-3">
-                  <div className="w-2 h-8 bg-red-600 rounded-full"></div>
-                  <h2 className="text-xl font-bold text-gray-900">🏫 Struktur Sekolah</h2>
+            {/* --- RINGKASAN CEPAT --- */}
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-card p-5">
+              <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider mb-3">Ringkasan</h3>
+              <div className="space-y-2">
+                <div className="flex justify-between items-center p-2.5 bg-slate-50 rounded-lg">
+                  <span className="text-sm text-slate-600 font-medium">Pengumuman</span>
+                  <span className="px-2 py-0.5 bg-brand-100 text-brand-700 rounded-lg text-xs font-bold">{pengumuman.length}</span>
                 </div>
-                <div className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-xs font-semibold">
-                  {strukturSekolah.length} Posisi
+                <div className="flex justify-between items-center p-2.5 bg-slate-50 rounded-lg">
+                  <span className="text-sm text-slate-600 font-medium">Tugas Aktif</span>
+                  <span className="px-2 py-0.5 bg-violet-100 text-violet-700 rounded-lg text-xs font-bold">{tugas.length}</span>
                 </div>
-              </div>
-
-              <div className="space-y-4 max-h-72 overflow-y-auto">
-                {strukturSekolah.map((jabatan, index) => (
-                  <div 
-                    key={jabatan.id}
-                    className="border-2 border-gray-200 rounded-xl p-4 transition-all duration-300 hover:border-red-300 hover:shadow-sm bg-white group"
-                  >
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex-1">
-                        <h3 className="font-bold text-gray-900 text-base leading-tight group-hover:text-red-600 transition-colors">
-                          {jabatan.jabatan}
-                        </h3>
-                        <p className="text-sm text-gray-600 mt-1">
-                          {jabatan.guru_nama || 'Belum ditentukan'}
-                        </p>
-                      </div>
-                      <span className={`text-xs px-2 py-1 rounded-full ${
-                        jabatan.guru_nama 
-                          ? 'bg-green-100 text-green-700 border border-green-200' 
-                          : 'bg-yellow-100 text-yellow-700 border border-yellow-200'
-                      }`}>
-                        {jabatan.guru_nama ? 'Terisi' : 'Kosong'}
-                      </span>
-                    </div>
-                    
-                    <div className="flex items-center justify-between text-xs text-gray-500">
-                      <span className="flex items-center gap-1">
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                        </svg>
-                        Staff Sekolah
-                      </span>
-                    </div>
-                  </div>
-                ))}
-                
-                {!strukturSekolah.length && (
-                  <div className="text-center py-6 bg-gray-50 rounded-xl">
-                    <div className="text-gray-300 text-4xl mb-2">🏫</div>
-                    <p className="text-gray-500 text-base font-medium">Belum ada data struktur</p>
-                    <p className="text-gray-400 text-sm mt-1">Struktur sekolah akan muncul di sini</p>
-                  </div>
-                )}
+                <div className="flex justify-between items-center p-2.5 bg-slate-50 rounded-lg">
+                  <span className="text-sm text-slate-600 font-medium">Ekskul Diikuti</span>
+                  <span className="px-2 py-0.5 bg-orange-100 text-orange-700 rounded-lg text-xs font-bold">{myEskul.size}/3</span>
+                </div>
+                <div className="flex justify-between items-center p-2.5 bg-slate-50 rounded-lg">
+                  <span className="text-sm text-slate-600 font-medium">Sertifikat</span>
+                  <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded-lg text-xs font-bold">{sertifikatList.length}</span>
+                </div>
               </div>
             </div>
 
             {/* --- SERTIFIKAT SAYA --- */}
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 transition-all duration-300 hover:shadow-md">
-              <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-3">
-                  <div className="w-2 h-8 bg-amber-600 rounded-full"></div>
-                  <h2 className="text-xl font-bold text-gray-900">🏆 Sertifikat Saya</h2>
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-card overflow-hidden">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-2 h-7 bg-amber-500 rounded-full" />
+                  <h2 className="text-base font-bold text-slate-900">Sertifikat</h2>
                 </div>
-                <div className="px-3 py-1 bg-amber-100 text-amber-700 rounded-full text-xs font-semibold">
-                  {sertifikatList.length} Sertifikat
-                </div>
+                <span className="px-2.5 py-1 bg-amber-50 text-amber-700 rounded-full text-xs font-semibold">{sertifikatList.length}</span>
               </div>
-
-              <div className="space-y-4 max-h-72 overflow-y-auto">
+              <div className="divide-y divide-slate-50 max-h-64 overflow-y-auto">
                 {sertifikatList.slice(0, 5).map((sertifikat) => (
-                  <div 
-                    key={sertifikat.id}
-                    className="border-2 border-gray-200 rounded-xl p-4 transition-all duration-300 hover:border-amber-300 hover:shadow-sm cursor-pointer bg-white group"
-                    onClick={() => handleSertifikatClick(sertifikat)}
-                  >
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex-1">
-                        <h3 className="font-bold text-gray-900 text-base leading-tight group-hover:text-amber-600 transition-colors line-clamp-2">
-                          {sertifikat.event}
-                        </h3>
-                        <p className="text-sm text-gray-600 mt-1">
-                          {sertifikat.nama_penerima}
-                        </p>
-                      </div>
-                      <span className={`text-xs px-2 py-1 rounded-full ${
-                        sertifikat.sent 
-                          ? 'bg-green-100 text-green-700 border border-green-200' 
-                          : 'bg-yellow-100 text-yellow-700 border border-yellow-200'
-                      }`}>
-                        {sertifikat.sent ? 'Terkirim' : 'Pending'}
-                      </span>
+                  <div key={sertifikat.id} className="px-5 py-3.5 hover:bg-slate-50/60 transition-colors cursor-pointer group" onClick={() => handleSertifikatClick(sertifikat)}>
+                    <div className="flex items-start justify-between gap-2 mb-1">
+                      <h3 className="font-semibold text-slate-800 text-xs line-clamp-2 group-hover:text-amber-600 transition-colors flex-1">{sertifikat.event}</h3>
+                      <span className={`flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full border font-semibold ${sertifikat.sent ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>{sertifikat.sent ? 'Terkirim' : 'Pending'}</span>
                     </div>
-                    
-                    <div className="flex items-center justify-between text-xs text-gray-500">
-                      <span>
-                        {new Date(sertifikat.issued_at).toLocaleDateString('id-ID', {
-                          day: 'numeric',
-                          month: 'short',
-                          year: 'numeric'
-                        })}
-                      </span>
-                      <div className="flex gap-2">
-                        <button 
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleDownloadSertifikat(sertifikat)
-                          }}
-                          className="text-amber-600 hover:text-amber-700 font-medium flex items-center gap-1"
-                        >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                          </svg>
-                          Download
-                        </button>
-                      </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 text-[10px]">{new Date(sertifikat.issued_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                      <button onClick={(e) => { e.stopPropagation(); handleDownloadSertifikat(sertifikat) }} className="text-amber-600 hover:text-amber-700 text-[10px] font-semibold flex items-center gap-1">
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                        Download
+                      </button>
                     </div>
                   </div>
                 ))}
-                
-                {/* Tombol Lihat Riwayat */}
                 {sertifikatList.length > 5 && (
-                  <button
-                    onClick={handleRiwayatSertifikat}
-                    className="w-full py-3 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl font-semibold hover:from-amber-600 hover:to-orange-600 transition-all duration-300 shadow-sm hover:shadow-md flex items-center justify-center gap-2"
-                  >
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                    </svg>
-                    Lihat Riwayat Sertifikat ({sertifikatList.length - 5} lainnya)
-                  </button>
+                  <div className="p-4">
+                    <button onClick={handleRiwayatSertifikat} className="w-full py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl font-semibold text-xs hover:from-amber-600 hover:to-orange-600 transition-all shadow-sm">
+                      Lihat Riwayat ({sertifikatList.length - 5} lainnya)
+                    </button>
+                  </div>
                 )}
-                
                 {!sertifikatList.length && (
-                  <div className="text-center py-6 bg-gray-50 rounded-xl">
-                    <div className="text-gray-300 text-4xl mb-2">🏆</div>
-                    <p className="text-gray-500 text-base font-medium">Belum ada sertifikat</p>
-                    <p className="text-gray-400 text-sm mt-1">Sertifikat akan muncul di sini setelah diterbitkan</p>
+                  <div className="text-center py-8">
+                    <div className="text-3xl mb-2 opacity-30">🏆</div>
+                    <p className="text-slate-500 text-sm">Belum ada sertifikat</p>
                   </div>
                 )}
               </div>
             </div>
 
-            {/* Quick Stats */}
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 transition-all duration-300 hover:shadow-md">
-              <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
-                <span className="text-purple-600">📋</span>
-                Ringkasan Cepat
-              </h3>
-              <div className="space-y-3">
-                <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg border border-gray-200">
-                  <span className="text-sm font-medium text-gray-700">Total Pengumuman</span>
-                  <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded-lg text-xs font-bold">
-                    {pengumuman.length}
-                  </span>
+            {/* --- STRUKTUR SEKOLAH --- */}
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-card overflow-hidden">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-2 h-7 bg-rose-500 rounded-full" />
+                  <h2 className="text-base font-bold text-slate-900">Struktur Sekolah</h2>
                 </div>
-                <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg border border-gray-200">
-                  <span className="text-sm font-medium text-gray-700">Tugas Aktif</span>
-                  <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded-lg text-xs font-bold">
-                    {tugas.length}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg border border-gray-200">
-                  <span className="text-sm font-medium text-gray-700">Ekskul Diikuti</span>
-                  <span className="px-2 py-1 bg-orange-100 text-orange-700 rounded-lg text-xs font-bold">
-                    {myEskul.size}/3
-                  </span>
-                </div>
-                <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg border border-gray-200">
-                  <span className="text-sm font-medium text-gray-700">Sertifikat</span>
-                  <span className="px-2 py-1 bg-amber-100 text-amber-700 rounded-lg text-xs font-bold">
-                    {sertifikatList.length}
-                  </span>
-                </div>
+                <span className="px-2.5 py-1 bg-rose-50 text-rose-700 rounded-full text-xs font-semibold">{strukturSekolah.length} Posisi</span>
+              </div>
+              <div className="divide-y divide-slate-50 max-h-64 overflow-y-auto">
+                {strukturSekolah.map((jabatan) => (
+                  <div key={jabatan.id} className="px-5 py-3.5 hover:bg-slate-50/60 transition-colors group">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-semibold text-slate-800 text-xs group-hover:text-rose-600 transition-colors truncate">{jabatan.jabatan}</h3>
+                        <p className="text-slate-500 text-xs mt-0.5 truncate">{jabatan.guru_nama || 'Belum ditentukan'}</p>
+                      </div>
+                      <span className={`flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full border font-semibold ml-2 ${jabatan.guru_nama ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
+                        {jabatan.guru_nama ? 'Terisi' : 'Kosong'}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+                {!strukturSekolah.length && (
+                  <div className="text-center py-8">
+                    <div className="text-3xl mb-2 opacity-30">🏫</div>
+                    <p className="text-slate-500 text-sm">Belum ada data struktur</p>
+                  </div>
+                )}
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Modal Organisasi */}
-      <OrganisasiModal 
-        organisasi={selectedOrganisasi}
-        isOpen={isModalOpen}
-        onClose={closeModal}
-      />
-
-      {/* Modal Sertifikat */}
-      <SertifikatModal 
-        sertifikat={selectedSertifikat}
-        isOpen={isSertifikatModalOpen}
-        onClose={closeSertifikatModal}
-        onDownload={handleDownloadSertifikat}
-      />
-
-      {/* Modal Riwayat Sertifikat */}
-      <RiwayatSertifikatModal 
-        sertifikatList={sertifikatList}
-        isOpen={isRiwayatSertifikatModalOpen}
-        onClose={() => setIsRiwayatSertifikatModalOpen(false)}
-        onSertifikatClick={handleSertifikatClickFromRiwayat}
-      />
+      {/* Modals */}
+      <OrganisasiModal organisasi={selectedOrganisasi} isOpen={isModalOpen} onClose={closeModal} />
+      <SertifikatModal sertifikat={selectedSertifikat} isOpen={isSertifikatModalOpen} onClose={closeSertifikatModal} onDownload={handleDownloadSertifikat} />
+      <RiwayatSertifikatModal sertifikatList={sertifikatList} isOpen={isRiwayatSertifikatModalOpen} onClose={() => setIsRiwayatSertifikatModalOpen(false)} onSertifikatClick={handleSertifikatClickFromRiwayat} />
     </div>
   )
 }

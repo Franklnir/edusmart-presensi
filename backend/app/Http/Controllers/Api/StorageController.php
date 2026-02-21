@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
@@ -13,11 +14,77 @@ class StorageController extends ApiController
     private array $tenantColumnCache = [];
 
     private const PROFILE_IMAGE_MAX_BYTES = 50 * 1024;
+
     private const ASSIGNMENT_IMAGE_MAX_BYTES = 100 * 1024;
+
+    private const QUIZ_MEDIA_IMAGE_MAX_BYTES = 70 * 1024;
+
+    private const MAX_SIGNED_URL_EXPIRES_SECONDS = 3600;
+
+    private const MIN_SIGNED_URL_EXPIRES_SECONDS = 60;
+
+    private const MAX_STORAGE_PATH_LENGTH = 240;
+
+    private const DANGEROUS_EXTENSIONS = [
+        'php', 'php3', 'php4', 'php5', 'php7', 'php8', 'phtml', 'phar',
+        'exe', 'dll', 'so', 'bat', 'cmd', 'com', 'msi', 'ps1', 'vbs', 'wsf', 'hta', 'sh',
+        'cgi', 'pl', 'py', 'rb', 'jar', 'asp', 'aspx', 'jsp',
+    ];
+
+    private const UPLOAD_POLICY = [
+        'profile-photos' => [
+            'max_bytes' => 2 * 1024 * 1024,
+            'extensions' => ['jpg', 'jpeg', 'png', 'webp'],
+            'mimes' => ['image/jpeg', 'image/png', 'image/webp'],
+        ],
+        'assignments' => [
+            'max_bytes' => 15 * 1024 * 1024,
+            'extensions' => ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'jpg', 'jpeg', 'png', 'webp'],
+            'mimes' => [
+                'application/pdf',
+                'application/msword',
+                'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'application/vnd.ms-excel',
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'application/vnd.ms-powerpoint',
+                'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                'text/plain',
+                'image/jpeg',
+                'image/png',
+                'image/webp',
+            ],
+        ],
+        'quiz-media' => [
+            'max_bytes' => 2 * 1024 * 1024,
+            'extensions' => ['jpg', 'jpeg', 'png'],
+            'mimes' => ['image/jpeg', 'image/png'],
+        ],
+        'certificates' => [
+            'max_bytes' => 10 * 1024 * 1024,
+            'extensions' => ['pdf', 'jpg', 'jpeg', 'png'],
+            'mimes' => ['application/pdf', 'image/jpeg', 'image/png'],
+        ],
+        'sertifikat-files' => [
+            'max_bytes' => 10 * 1024 * 1024,
+            'extensions' => ['pdf', 'jpg', 'jpeg', 'png'],
+            'mimes' => ['application/pdf', 'image/jpeg', 'image/png'],
+        ],
+        'certificate-templates' => [
+            'max_bytes' => 8 * 1024 * 1024,
+            'extensions' => ['jpg', 'jpeg', 'png', 'webp'],
+            'mimes' => ['image/jpeg', 'image/png', 'image/webp'],
+        ],
+        'sertifikat-templates' => [
+            'max_bytes' => 8 * 1024 * 1024,
+            'extensions' => ['jpg', 'jpeg', 'png', 'webp'],
+            'mimes' => ['image/jpeg', 'image/png', 'image/webp'],
+        ],
+    ];
 
     private array $allowedBuckets = [
         'profile-photos',
         'assignments',
+        'quiz-media',
         'certificates',
         'sertifikat-files',
         'certificate-templates',
@@ -31,19 +98,35 @@ class StorageController extends ApiController
         $file = $request->file('file');
         $upsert = filter_var($request->input('upsert', false), FILTER_VALIDATE_BOOLEAN);
 
-        if (!$bucket || !$path || !$file) {
+        if (! $bucket || ! $path || ! $file) {
             return $this->deny('Bucket, path, dan file wajib diisi', 422);
         }
 
-        if (!in_array($bucket, $this->allowedBuckets, true)) {
+        if (! in_array($bucket, $this->allowedBuckets, true)) {
             return $this->deny('Bucket tidak diizinkan', 400);
         }
 
-        $path = $this->sanitizePath($path);
-        if (!$path) return $this->deny('Path tidak valid', 422);
+        if (! $file instanceof UploadedFile || ! $file->isValid()) {
+            return $this->deny('File upload tidak valid', 422);
+        }
 
-        if (!$this->canWrite($request, $bucket, $path)) {
+        $path = $this->sanitizePath($path);
+        if (! $path) {
+            return $this->deny('Path tidak valid', 422);
+        }
+
+        if (! $this->canWrite($request, $bucket, $path)) {
             return $this->deny('Akses upload ditolak');
+        }
+
+        $quizMediaTypeError = $this->validateQuizMediaTypePolicy($bucket, $file);
+        if ($quizMediaTypeError) {
+            return $quizMediaTypeError;
+        }
+
+        $uploadPolicyError = $this->validateUploadPolicy($bucket, $file);
+        if ($uploadPolicyError) {
+            return $uploadPolicyError;
         }
 
         $imageRuleError = $this->validateImageSizePolicy($bucket, $path, $file);
@@ -54,11 +137,21 @@ class StorageController extends ApiController
         $storage = Storage::disk('local');
         $fullPath = $this->buildStoragePath($bucket, $path);
 
-        if (!$upsert && $storage->exists($fullPath)) {
+        if (! $upsert && $storage->exists($fullPath)) {
             return response()->json(['error' => 'File sudah ada'], 409);
         }
 
-        $storage->put($fullPath, file_get_contents($file->getRealPath()));
+        $stream = fopen($file->getRealPath(), 'rb');
+        if (! $stream) {
+            return $this->deny('Gagal membaca file upload', 422);
+        }
+
+        try {
+            $storage->put($fullPath, $stream);
+        } finally {
+            fclose($stream);
+        }
+
         $uploadedSizeBytes = (int) ($storage->size($fullPath) ?: 0);
 
         return response()->json([
@@ -68,7 +161,7 @@ class StorageController extends ApiController
                 'bucket' => $bucket,
                 'uploadedSizeBytes' => $uploadedSizeBytes,
                 'uploadedSizeLabel' => $this->formatBytes($uploadedSizeBytes),
-            ]
+            ],
         ]);
     }
 
@@ -76,25 +169,27 @@ class StorageController extends ApiController
     {
         $bucket = $request->input('bucket');
         $paths = $request->input('paths');
-        if (!$paths) {
+        if (! $paths) {
             $path = $request->input('path');
             $paths = $path ? [$path] : [];
         }
 
-        if (!$bucket || empty($paths)) {
+        if (! $bucket || empty($paths)) {
             return $this->deny('Bucket dan path wajib diisi', 422);
         }
 
-        if (!in_array($bucket, $this->allowedBuckets, true)) {
+        if (! in_array($bucket, $this->allowedBuckets, true)) {
             return $this->deny('Bucket tidak diizinkan', 400);
         }
 
         $storage = Storage::disk('local');
         foreach ($paths as $path) {
             $path = $this->sanitizePath($path);
-            if (!$path) continue;
+            if (! $path) {
+                continue;
+            }
 
-            if (!$this->canWrite($request, $bucket, $path)) {
+            if (! $this->canWrite($request, $bucket, $path)) {
                 return $this->deny('Akses hapus ditolak');
             }
 
@@ -111,52 +206,80 @@ class StorageController extends ApiController
     {
         $bucket = $request->query('bucket');
         $path = $request->query('path');
+        $expiresIn = $this->normalizeExpiresIn($request->query('expires'));
 
-        if (!$bucket || !$path) {
+        if (! $bucket || ! $path) {
             return $this->deny('Bucket dan path wajib diisi', 422);
         }
 
-        if (!in_array($bucket, $this->allowedBuckets, true)) {
+        if (! in_array($bucket, $this->allowedBuckets, true)) {
             return $this->deny('Bucket tidak diizinkan', 400);
         }
 
         $path = $this->sanitizePath($path);
-        if (!$path) return $this->deny('Path tidak valid', 422);
+        if (! $path) {
+            return $this->deny('Path tidak valid', 422);
+        }
 
-        if (!$this->canRead($request, $bucket, $path)) {
+        if (! $this->canRead($request, $bucket, $path)) {
             return $this->deny('Akses baca ditolak');
         }
 
+        $tenantId = (string) ($this->tenantId($request) ?? '');
+        $userId = (string) ($request->user()?->id ?? '');
+        $expiresAt = now()->addSeconds($expiresIn)->timestamp;
+        $signature = $this->signObjectAccess($bucket, $path, $expiresAt, $tenantId, $userId);
+
         // Return relative path to keep the same browser origin (host+port).
         // This prevents signed URL from accidentally pointing to host port 80 when app runs on custom port.
-        $url = '/api/storage/object?bucket=' . urlencode($bucket) . '&path=' . urlencode($path);
-        return response()->json(['data' => ['signedUrl' => $url]]);
+        $url = '/api/storage/object?bucket='.urlencode($bucket)
+            .'&path='.urlencode($path)
+            .'&expires='.$expiresAt
+            .'&sig='.$signature;
+
+        return response()->json([
+            'data' => [
+                'signedUrl' => $url,
+                'expiresAt' => $expiresAt,
+            ],
+        ]);
     }
 
     public function object(Request $request)
     {
         $bucket = $request->query('bucket');
         $path = $request->query('path');
+        $expires = $request->query('expires');
+        $signature = (string) $request->query('sig', '');
 
-        if (!$bucket || !$path) {
+        if (! $bucket || ! $path) {
             return $this->deny('Bucket dan path wajib diisi', 422);
         }
 
-        if (!in_array($bucket, $this->allowedBuckets, true)) {
+        if (! in_array($bucket, $this->allowedBuckets, true)) {
             return $this->deny('Bucket tidak diizinkan', 400);
         }
 
         $path = $this->sanitizePath($path);
-        if (!$path) return $this->deny('Path tidak valid', 422);
+        if (! $path) {
+            return $this->deny('Path tidak valid', 422);
+        }
 
-        if (!$this->canRead($request, $bucket, $path)) {
+        $userId = (string) ($request->user()?->id ?? '');
+        if ($userId === '') {
+            if (! $this->hasValidObjectSignature($bucket, $path, $expires, $signature, (string) ($this->tenantId($request) ?? ''), '')) {
+                return $this->deny('URL file tidak valid atau sudah kedaluwarsa', 403);
+            }
+        }
+
+        if (! $this->canRead($request, $bucket, $path)) {
             return $this->deny('Akses baca ditolak');
         }
 
         $storage = Storage::disk('local');
         $fullPath = $this->buildStoragePath($bucket, $path);
 
-        if (!$storage->exists($fullPath)) {
+        if (! $storage->exists($fullPath)) {
             return $this->deny('File tidak ditemukan', 404);
         }
 
@@ -164,24 +287,54 @@ class StorageController extends ApiController
         $contents = $storage->get($fullPath);
         $filename = str_replace('"', '', basename($path));
         $dispositionType = $this->isInlineRenderableMime($mime) ? 'inline' : 'attachment';
+        $cacheControl = $request->user()
+            ? 'no-store, private'
+            : 'public, max-age=300, stale-while-revalidate=60';
 
         return response($contents, 200, [
             'Content-Type' => $mime,
-            'Content-Disposition' => $dispositionType . '; filename="' . $filename . '"',
+            'Content-Disposition' => $dispositionType.'; filename="'.$filename.'"',
             'X-Content-Type-Options' => 'nosniff',
+            'Cache-Control' => $cacheControl,
+            'X-Frame-Options' => 'SAMEORIGIN',
         ]);
     }
 
     private function buildStoragePath(string $bucket, string $path): string
     {
-        return 'private/' . $bucket . '/' . ltrim($path, '/');
+        return 'private/'.$bucket.'/'.ltrim($path, '/');
     }
 
     private function sanitizePath(string $path): ?string
     {
+        $path = trim((string) $path);
+        if ($path === '') {
+            return null;
+        }
+
         $path = str_replace('\\', '/', $path);
         $path = ltrim($path, '/');
-        if ($path === '' || str_contains($path, '..')) return null;
+        if ($path === '' || strlen($path) > self::MAX_STORAGE_PATH_LENGTH) {
+            return null;
+        }
+
+        if (str_contains($path, "\0") || str_contains($path, '..') || str_contains($path, '//') || str_contains($path, '://')) {
+            return null;
+        }
+
+        if (! preg_match('#^[A-Za-z0-9._/\-]+$#', $path)) {
+            return null;
+        }
+
+        foreach (explode('/', $path) as $segment) {
+            if ($segment === '' || $segment === '.' || $segment === '..') {
+                return null;
+            }
+            if (str_starts_with($segment, '.')) {
+                return null;
+            }
+        }
+
         return $path;
     }
 
@@ -192,11 +345,17 @@ class StorageController extends ApiController
         $userId = $user?->id;
         $tenantId = $this->tenantId($request);
 
-        if ($this->isAdmin($request)) return true;
+        if ($this->isAdmin($request)) {
+            return true;
+        }
 
-        if (!$user) {
-            // allow public read for logo
-            return $bucket === 'profile-photos' && $this->isLogoPath($request, $path);
+        if (! $user) {
+            // Guest access is limited strictly to school logo path.
+            if ($bucket === 'profile-photos' && $this->isLogoPath($request, $path)) {
+                return true;
+            }
+
+            return false;
         }
 
         if ($bucket === 'profile-photos') {
@@ -204,8 +363,12 @@ class StorageController extends ApiController
         }
 
         if ($bucket === 'assignments') {
-            if ($this->isGuru($request) && $userId && Str::startsWith($path, 'tugas_lampiran/' . $userId . '/')) return true;
-            if ($this->isSiswa($request) && $userId && preg_match('/^[^\/]+\/' . preg_quote($userId, '/') . '-/i', $path)) return true;
+            if ($this->isGuru($request) && $userId && Str::startsWith($path, 'tugas_lampiran/'.$userId.'/')) {
+                return true;
+            }
+            if ($this->isSiswa($request) && $userId && preg_match('/^[^\/]+\/'.preg_quote($userId, '/').'-/i', $path)) {
+                return true;
+            }
 
             if ($this->isSiswa($request)) {
                 $kelas = $profile?->kelas;
@@ -213,20 +376,26 @@ class StorageController extends ApiController
                     $existsQuery = DB::table('tugas')->where('kelas', $kelas);
                     $this->applyTenantScope($existsQuery, 'tugas', $tenantId);
                     $exists = $this->queryHasMatchingPath($existsQuery, 'file_url', $path);
-                    if ($exists) return true;
+                    if ($exists) {
+                        return true;
+                    }
                 }
 
                 $ownQuery = DB::table('tugas_jawaban')->where('user_id', $userId);
                 $this->applyTenantScope($ownQuery, 'tugas_jawaban', $tenantId);
                 $own = $this->queryHasMatchingPath($ownQuery, 'file_url', $path);
-                if ($own) return true;
+                if ($own) {
+                    return true;
+                }
             }
 
             if ($this->isGuru($request)) {
                 $ownAttachmentQuery = DB::table('tugas')->where('created_by', $userId);
                 $this->applyTenantScope($ownAttachmentQuery, 'tugas', $tenantId);
                 $ownAttachment = $this->queryHasMatchingPath($ownAttachmentQuery, 'file_url', $path);
-                if ($ownAttachment) return true;
+                if ($ownAttachment) {
+                    return true;
+                }
 
                 $existsQuery = DB::table('tugas_jawaban')
                     ->join('tugas', 'tugas.id', '=', 'tugas_jawaban.tugas_id')
@@ -234,13 +403,21 @@ class StorageController extends ApiController
                 $this->applyTenantScope($existsQuery, 'tugas', $tenantId);
                 $this->applyTenantScope($existsQuery, 'tugas_jawaban', $tenantId);
                 $exists = $this->queryHasMatchingPath($existsQuery, 'tugas_jawaban.file_url', $path);
-                if ($exists) return true;
+                if ($exists) {
+                    return true;
+                }
             }
+        }
+
+        if ($bucket === 'quiz-media') {
+            // Quiz question media is readable for authenticated users in tenant scope.
+            return true;
         }
 
         if (in_array($bucket, ['certificates', 'sertifikat-files'], true)) {
             $certQuery = DB::table('certificates')->where('user_id', $userId);
             $this->applyTenantScope($certQuery, 'certificates', $tenantId);
+
             return $this->queryHasMatchingPath($certQuery, 'file_url', $path);
         }
 
@@ -252,17 +429,30 @@ class StorageController extends ApiController
         $user = $request->user();
         $userId = $user?->id;
 
-        if (!$user) return false;
-        if ($this->isAdmin($request)) return true;
+        if (! $user) {
+            return false;
+        }
+        if ($this->isAdmin($request)) {
+            return true;
+        }
 
         if ($bucket === 'profile-photos') {
-            return $userId && Str::startsWith($path, 'profiles/' . $userId . '/');
+            return $userId && Str::startsWith($path, 'profiles/'.$userId.'/');
         }
 
         if ($bucket === 'assignments') {
-            if ($this->isGuru($request) && $userId && Str::startsWith($path, 'tugas_lampiran/' . $userId . '/')) return true;
-            if ($this->isSiswa($request) && $userId && preg_match('/^[^\/]+\/' . preg_quote($userId, '/') . '-/i', $path)) return true;
+            if ($this->isGuru($request) && $userId && Str::startsWith($path, 'tugas_lampiran/'.$userId.'/')) {
+                return true;
+            }
+            if ($this->isSiswa($request) && $userId && preg_match('/^[^\/]+\/'.preg_quote($userId, '/').'-/i', $path)) {
+                return true;
+            }
+
             return false;
+        }
+
+        if ($bucket === 'quiz-media') {
+            return $this->isGuru($request) && $userId && Str::startsWith($path, 'quiz-media/'.$userId.'/');
         }
 
         return false;
@@ -270,7 +460,9 @@ class StorageController extends ApiController
 
     private function isLogoPath(Request $request, string $path): bool
     {
-        if ($path === 'logo_sekolah.png') return true;
+        if ($path === 'logo_sekolah.png') {
+            return true;
+        }
 
         $tenantId = $this->tenantId($request);
         $query = DB::table('settings')->orderBy('id');
@@ -279,30 +471,46 @@ class StorageController extends ApiController
         }
 
         $logoPath = $query->value('logo_path');
-        if ($logoPath && $logoPath === $path) return true;
+        if ($logoPath && $logoPath === $path) {
+            return true;
+        }
 
         $logoUrl = $query->value('logo_url');
-        if ($logoUrl && $this->matchesStoredPath($logoUrl, $path)) return true;
+        if ($logoUrl && $this->matchesStoredPath($logoUrl, $path)) {
+            return true;
+        }
 
         $logoLegacy = $query->value('logourl');
-        if ($logoLegacy && $this->matchesStoredPath($logoLegacy, $path)) return true;
+        if ($logoLegacy && $this->matchesStoredPath($logoLegacy, $path)) {
+            return true;
+        }
 
         return false;
     }
 
     private function matchesStoredPath(?string $stored, string $path): bool
     {
-        if (!$stored) return false;
+        if (! $stored) {
+            return false;
+        }
 
         $normalizedPath = ltrim(str_replace('\\', '/', $path), '/');
-        if ($normalizedPath === '') return false;
+        if ($normalizedPath === '') {
+            return false;
+        }
 
         $candidate = trim((string) $stored);
-        if ($candidate === '') return false;
+        if ($candidate === '') {
+            return false;
+        }
 
         $candidateNormalized = ltrim(str_replace('\\', '/', $candidate), '/');
-        if ($candidateNormalized === $normalizedPath) return true;
-        if (str_ends_with($candidateNormalized, '/' . $normalizedPath)) return true;
+        if ($candidateNormalized === $normalizedPath) {
+            return true;
+        }
+        if (str_ends_with($candidateNormalized, '/'.$normalizedPath)) {
+            return true;
+        }
 
         if (filter_var($candidate, FILTER_VALIDATE_URL)) {
             $parts = parse_url($candidate);
@@ -313,32 +521,43 @@ class StorageController extends ApiController
                     $queryPath = $params['path'] ?? null;
                     if (is_string($queryPath)) {
                         $queryPath = ltrim(str_replace('\\', '/', $queryPath), '/');
-                        if ($queryPath === $normalizedPath) return true;
+                        if ($queryPath === $normalizedPath) {
+                            return true;
+                        }
                     }
                 }
 
                 $urlPath = ltrim(str_replace('\\', '/', (string) ($parts['path'] ?? '')), '/');
-                if ($urlPath !== '' && ($urlPath === $normalizedPath || str_ends_with($urlPath, '/' . $normalizedPath))) {
+                if ($urlPath !== '' && ($urlPath === $normalizedPath || str_ends_with($urlPath, '/'.$normalizedPath))) {
                     return true;
                 }
             }
         }
 
         $decoded = ltrim(str_replace('\\', '/', rawurldecode($candidateNormalized)), '/');
-        if ($decoded === $normalizedPath) return true;
-        if (str_ends_with($decoded, '/' . $normalizedPath)) return true;
+        if ($decoded === $normalizedPath) {
+            return true;
+        }
+        if (str_ends_with($decoded, '/'.$normalizedPath)) {
+            return true;
+        }
 
         return false;
     }
 
     private function queryHasMatchingPath($query, string $column, string $path): bool
     {
-        $alias = 'matched_path_value';
+        $column = trim($column);
+        if (! preg_match('/^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$/', $column)) {
+            return false;
+        }
+
+        $columnAlias = str_contains($column, '.') ? explode('.', $column)[1] : $column;
         $candidateQuery = clone $query;
-        $candidateQuery->selectRaw($column . ' as ' . $alias)->whereNotNull($column);
+        $candidateQuery->select($column)->whereNotNull($column);
 
         foreach ($candidateQuery->cursor() as $row) {
-            $stored = (string) ($row->{$alias} ?? '');
+            $stored = (string) ($row->{$columnAlias} ?? '');
             if ($this->matchesStoredPath($stored, $path)) {
                 return true;
             }
@@ -367,12 +586,12 @@ class StorageController extends ApiController
 
     private function validateImageSizePolicy(string $bucket, string $path, $file): ?\Illuminate\Http\JsonResponse
     {
-        if (!$this->isImageUpload($file)) {
+        if (! $this->isImageUpload($file)) {
             return null;
         }
 
         $maxBytes = $this->resolveImageMaxBytes($bucket, $path);
-        if (!$maxBytes) {
+        if (! $maxBytes) {
             return null;
         }
 
@@ -383,7 +602,7 @@ class StorageController extends ApiController
 
         $bucketLabel = $bucket === 'assignments'
             ? 'gambar tugas'
-            : 'foto profil/logo';
+            : ($bucket === 'quiz-media' ? 'gambar quiz' : 'foto profil/logo');
 
         return response()->json([
             'error' => sprintf(
@@ -391,7 +610,7 @@ class StorageController extends ApiController
                 $bucketLabel,
                 $this->formatBytes($maxBytes),
                 $this->formatBytes($actualBytes)
-            )
+            ),
         ], 422);
     }
 
@@ -407,12 +626,149 @@ class StorageController extends ApiController
             }
         }
 
+        if ($bucket === 'quiz-media') {
+            return self::QUIZ_MEDIA_IMAGE_MAX_BYTES;
+        }
+
         return null;
+    }
+
+    private function validateQuizMediaTypePolicy(string $bucket, $file): ?\Illuminate\Http\JsonResponse
+    {
+        if ($bucket !== 'quiz-media') {
+            return null;
+        }
+        if (! $file) {
+            return response()->json(['error' => 'File gambar wajib diisi'], 422);
+        }
+
+        $ext = strtolower((string) $file->getClientOriginalExtension());
+        $mime = strtolower((string) ($file->getMimeType() ?: $file->getClientMimeType() ?: ''));
+        $allowedExt = ['jpg', 'jpeg', 'png'];
+        $allowedMime = ['image/jpeg', 'image/png'];
+
+        if (! in_array($ext, $allowedExt, true)) {
+            return response()->json(['error' => 'Format file quiz hanya JPG atau PNG'], 422);
+        }
+
+        if ($mime !== '' && ! in_array($mime, $allowedMime, true)) {
+            return response()->json(['error' => 'File quiz harus berupa gambar JPG atau PNG'], 422);
+        }
+
+        return null;
+    }
+
+    private function validateUploadPolicy(string $bucket, UploadedFile $file): ?\Illuminate\Http\JsonResponse
+    {
+        $policy = self::UPLOAD_POLICY[$bucket] ?? null;
+        if (! is_array($policy)) {
+            return response()->json(['error' => 'Kebijakan upload untuk bucket ini belum tersedia'], 422);
+        }
+
+        $maxBytes = (int) ($policy['max_bytes'] ?? 0);
+        $fileBytes = (int) ($file->getSize() ?: 0);
+        if ($maxBytes > 0 && $fileBytes > $maxBytes) {
+            return response()->json([
+                'error' => sprintf(
+                    'Ukuran file melebihi batas (%s). Maksimal %s.',
+                    $this->formatBytes($fileBytes),
+                    $this->formatBytes($maxBytes)
+                ),
+            ], 422);
+        }
+
+        $extension = $this->normalizeExtension($file);
+        if ($extension === '' || in_array($extension, self::DANGEROUS_EXTENSIONS, true)) {
+            return response()->json(['error' => 'Ekstensi file tidak diizinkan'], 422);
+        }
+
+        $allowedExtensions = array_map('strtolower', (array) ($policy['extensions'] ?? []));
+        if (! empty($allowedExtensions) && ! in_array($extension, $allowedExtensions, true)) {
+            return response()->json(['error' => 'Ekstensi file tidak sesuai kebijakan bucket'], 422);
+        }
+
+        $mime = $this->normalizeMime($file);
+        if ($mime === '') {
+            return response()->json(['error' => 'MIME type file tidak valid'], 422);
+        }
+
+        $allowedMimes = array_map('strtolower', (array) ($policy['mimes'] ?? []));
+        if (! empty($allowedMimes) && ! in_array($mime, $allowedMimes, true)) {
+            return response()->json(['error' => 'Tipe file tidak diizinkan'], 422);
+        }
+
+        return null;
+    }
+
+    private function normalizeMime(UploadedFile $file): string
+    {
+        return strtolower(trim((string) ($file->getMimeType() ?: $file->getClientMimeType() ?: '')));
+    }
+
+    private function normalizeExtension(UploadedFile $file): string
+    {
+        return strtolower(trim((string) $file->getClientOriginalExtension()));
+    }
+
+    private function normalizeExpiresIn($value): int
+    {
+        if (! is_numeric($value)) {
+            return 900;
+        }
+
+        return max(
+            self::MIN_SIGNED_URL_EXPIRES_SECONDS,
+            min(self::MAX_SIGNED_URL_EXPIRES_SECONDS, (int) $value)
+        );
+    }
+
+    private function signObjectAccess(string $bucket, string $path, int $expiresAt, string $tenantId, string $userId): string
+    {
+        $payload = implode('|', [$bucket, $path, $expiresAt, $tenantId, $userId]);
+
+        return hash_hmac('sha256', $payload, $this->signatureKey());
+    }
+
+    private function hasValidObjectSignature(
+        string $bucket,
+        string $path,
+        $expires,
+        string $signature,
+        string $tenantId,
+        string $userId
+    ): bool {
+        if (! is_numeric($expires) || $signature === '' || ! preg_match('/^[a-f0-9]{64}$/', $signature)) {
+            return false;
+        }
+
+        $expiresAt = (int) $expires;
+        if ($expiresAt < now()->timestamp || $expiresAt > now()->addSeconds(self::MAX_SIGNED_URL_EXPIRES_SECONDS + 120)->timestamp) {
+            return false;
+        }
+
+        $expected = $this->signObjectAccess($bucket, $path, $expiresAt, $tenantId, $userId);
+
+        return hash_equals($expected, $signature);
+    }
+
+    private function signatureKey(): string
+    {
+        $appKey = (string) config('app.key', '');
+        if (str_starts_with($appKey, 'base64:')) {
+            $decoded = base64_decode(substr($appKey, 7), true);
+            if ($decoded !== false && $decoded !== '') {
+                return $decoded;
+            }
+        }
+
+        return $appKey !== '' ? $appKey : hash('sha256', __FILE__.php_uname('n'));
     }
 
     private function isImageUpload($file): bool
     {
-        if (!$file) return false;
+        if (! $file) {
+            return false;
+        }
 
         $mime = strtolower((string) ($file->getMimeType() ?: $file->getClientMimeType() ?: ''));
         if (str_starts_with($mime, 'image/')) {
@@ -420,12 +776,15 @@ class StorageController extends ApiController
         }
 
         $ext = strtolower((string) $file->getClientOriginalExtension());
+
         return in_array($ext, ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'tif', 'tiff', 'heic', 'heif', 'avif'], true);
     }
 
     private function formatBytes(int $bytes): string
     {
-        if ($bytes <= 0) return '0 B';
+        if ($bytes <= 0) {
+            return '0 B';
+        }
 
         $units = ['B', 'KB', 'MB', 'GB'];
         $size = $bytes;
@@ -437,16 +796,17 @@ class StorageController extends ApiController
         }
 
         $precision = $idx === 0 ? 0 : 2;
-        return round($size, $precision) . ' ' . $units[$idx];
+
+        return round($size, $precision).' '.$units[$idx];
     }
 
     private function applyTenantScope($query, string $table, ?string $tenantId): void
     {
-        if (!$tenantId || !$this->hasTenantColumn($table)) {
+        if (! $tenantId || ! $this->hasTenantColumn($table)) {
             return;
         }
 
-        $query->where($table . '.tenant_id', $tenantId);
+        $query->where($table.'.tenant_id', $tenantId);
     }
 
     private function hasTenantColumn(string $table): bool

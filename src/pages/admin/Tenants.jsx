@@ -4,6 +4,7 @@ import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import { formatDateTime } from '../../lib/time'
 import PasswordInput from '../../components/PasswordInput'
+import { loadExcelJsBrowser } from '../../utils/excelBrowser'
 
 const slugify = (value = '') =>
   value
@@ -50,6 +51,19 @@ const BACKUP_PERIOD_OPTIONS = [
   { value: '12', label: '12 Bulan Terakhir' },
   { value: '24', label: '24 Bulan Terakhir' }
 ]
+
+const TENANT_STATUS_OPTIONS = [
+  { value: 'active', label: 'Aktif' },
+  { value: 'suspended', label: 'Suspended' },
+  { value: 'archived', label: 'Archived' }
+]
+
+const tenantStatusBadgeClass = (status) => {
+  if (status === 'active') return 'bg-emerald-100 text-emerald-700'
+  if (status === 'suspended') return 'bg-amber-100 text-amber-700'
+  if (status === 'archived') return 'bg-rose-100 text-rose-700'
+  return 'bg-slate-100 text-slate-600'
+}
 
 const toNumber = (value) => Number(value || 0)
 
@@ -165,8 +179,7 @@ const buildBackupFileName = (tenant = {}, mode = 'full') => {
 }
 
 const createWorkbookBufferFromBackupPayload = async (payload) => {
-  const excelModule = await import('exceljs')
-  const ExcelJS = excelModule?.default || excelModule
+  const ExcelJS = await loadExcelJsBrowser()
   const workbook = new ExcelJS.Workbook()
   workbook.creator = 'EduSmart Super Admin'
   workbook.created = new Date()
@@ -303,6 +316,13 @@ const Tenants = () => {
   const [backupLoading, setBackupLoading] = useState(false)
   const [backupMode, setBackupMode] = useState('full')
   const [backupMonths, setBackupMonths] = useState('all')
+  const [statusSaving, setStatusSaving] = useState(false)
+  const [restoreLoading, setRestoreLoading] = useState(false)
+  const [restoreApplying, setRestoreApplying] = useState(false)
+  const [restoreFileName, setRestoreFileName] = useState('')
+  const [restorePayload, setRestorePayload] = useState(null)
+  const [restorePreview, setRestorePreview] = useState(null)
+  const [restoreIncludeTables, setRestoreIncludeTables] = useState('')
 
   const [form, setForm] = useState({
     name: '',
@@ -452,6 +472,10 @@ const Tenants = () => {
     if (!tenantId) return
     setSelectedTenantId(tenantId)
     setTemporaryPasswords({})
+    setRestorePreview(null)
+    setRestorePayload(null)
+    setRestoreFileName('')
+    setRestoreIncludeTables('')
     await loadTenantDetail(tenantId)
   }
 
@@ -489,6 +513,136 @@ const Tenants = () => {
       pushToast('error', err?.message || 'Gagal membuat backup tenant')
     } finally {
       setBackupLoading(false)
+    }
+  }
+
+  const parseRestoreIncludeTables = () => {
+    return restoreIncludeTables
+      .split(/[,;\n\r]+/g)
+      .map((item) => item.trim())
+      .filter(Boolean)
+  }
+
+  const handleTenantStatusUpdate = async (nextStatus) => {
+    const tenantId = tenantDetail?.tenant?.id || selectedTenantId
+    const currentStatus = String(tenantDetail?.tenant?.status || '').toLowerCase()
+    if (!tenantId || !nextStatus || statusSaving) return
+
+    if (currentStatus === nextStatus) {
+      pushToast('info', `Status tenant sudah ${nextStatus}`)
+      return
+    }
+
+    let reason = ''
+    if (nextStatus !== 'active') {
+      reason = window.prompt('Alasan perubahan status tenant (opsional):', '') || ''
+    }
+
+    const confirmed = window.confirm(
+      `Ubah status tenant menjadi ${nextStatus}? ${
+        nextStatus === 'active' ? 'Tenant akan bisa login kembali.' : 'Login tenant akan diblokir.'
+      }`
+    )
+    if (!confirmed) return
+
+    setStatusSaving(true)
+    try {
+      const { data, error } = await supabase.super.updateTenantStatus(tenantId, {
+        status: nextStatus,
+        reason: reason || undefined
+      })
+      if (error) throw error
+
+      pushToast('success', `Status tenant diubah ke ${nextStatus}`)
+      if (data) {
+        setTenantDetail((prev) => {
+          if (!prev) return prev
+          return { ...prev, tenant: { ...(prev.tenant || {}), ...data } }
+        })
+      }
+      await loadTenants()
+      await loadTenantDetail(tenantId, { silent: true, suppressToast: true })
+    } catch (err) {
+      pushToast('error', err?.message || 'Gagal mengubah status tenant')
+    } finally {
+      setStatusSaving(false)
+    }
+  }
+
+  const handleRestoreFileChange = async (event) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    try {
+      const text = await file.text()
+      const parsed = JSON.parse(text)
+      if (!parsed || !Array.isArray(parsed.tables)) {
+        throw new Error('Format JSON backup tidak valid (tables tidak ditemukan)')
+      }
+
+      setRestorePayload(parsed)
+      setRestoreFileName(file.name || 'backup.json')
+      setRestorePreview(null)
+      pushToast('success', `File backup siap dipreview: ${file.name}`)
+    } catch (err) {
+      setRestorePayload(null)
+      setRestoreFileName('')
+      setRestorePreview(null)
+      pushToast('error', err?.message || 'Gagal membaca file backup JSON')
+    } finally {
+      event.target.value = ''
+    }
+  }
+
+  const handleRestorePreview = async () => {
+    const tenantId = tenantDetail?.tenant?.id || selectedTenantId
+    if (!tenantId || !restorePayload || restoreLoading) return
+
+    setRestoreLoading(true)
+    try {
+      const includeTables = parseRestoreIncludeTables()
+      const { data, error } = await supabase.super.restoreTenant(tenantId, {
+        backup: restorePayload,
+        dry_run: true,
+        include_tables: includeTables.length ? includeTables : undefined
+      })
+      if (error) throw error
+      setRestorePreview(data?.result || null)
+      pushToast('success', 'Dry-run restore selesai. Cek hasil preview sebelum apply.')
+    } catch (err) {
+      pushToast('error', err?.message || 'Gagal menjalankan dry-run restore')
+    } finally {
+      setRestoreLoading(false)
+    }
+  }
+
+  const handleApplyRestore = async () => {
+    const tenantId = tenantDetail?.tenant?.id || selectedTenantId
+    if (!tenantId || !restorePayload || restoreApplying) return
+
+    const confirmed = window.confirm(
+      'Jalankan restore nyata sekarang? Data tenant akan ditimpa sesuai payload backup.'
+    )
+    if (!confirmed) return
+
+    setRestoreApplying(true)
+    try {
+      const includeTables = parseRestoreIncludeTables()
+      const { data, error } = await supabase.super.restoreTenant(tenantId, {
+        backup: restorePayload,
+        dry_run: false,
+        confirm: true,
+        include_tables: includeTables.length ? includeTables : undefined
+      })
+      if (error) throw error
+
+      setRestorePreview(data?.result || null)
+      pushToast('success', 'Restore selesai diterapkan ke tenant.')
+      await loadTenantDetail(tenantId, { silent: true, suppressToast: true })
+    } catch (err) {
+      pushToast('error', err?.message || 'Gagal apply restore tenant')
+    } finally {
+      setRestoreApplying(false)
     }
   }
 
@@ -681,11 +835,9 @@ const Tenants = () => {
                     </td>
                     <td className="py-2 pr-4">
                       <span
-                        className={`text-xs px-2 py-0.5 rounded-full ${
-                          tenant.status === 'active'
-                            ? 'bg-green-100 text-green-700'
-                            : 'bg-slate-100 text-slate-600'
-                        }`}
+                        className={`text-xs px-2 py-0.5 rounded-full ${tenantStatusBadgeClass(
+                          tenant.status
+                        )}`}
                       >
                         {tenant.status || 'unknown'}
                       </span>
@@ -721,8 +873,62 @@ const Tenants = () => {
               <p className="text-xs text-slate-500 mt-1">
                 {detailTenant?.slug ? `${detailTenant.slug}.${rootDomain}` : '-'}
               </p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span
+                  className={`text-xs px-2 py-0.5 rounded-full ${tenantStatusBadgeClass(
+                    detailTenant?.status
+                  )}`}
+                >
+                  {detailTenant?.status || 'unknown'}
+                </span>
+                {detailTenant?.status_reason && (
+                  <span className="text-xs text-slate-500">
+                    Alasan: {detailTenant.status_reason}
+                  </span>
+                )}
+                {detailTenant?.status_changed_at && (
+                  <span className="text-xs text-slate-400">
+                    Update: {formatDateTime(detailTenant.status_changed_at)}
+                  </span>
+                )}
+              </div>
             </div>
             <div className="flex items-center gap-2">
+              <div className="hidden lg:flex items-center gap-1">
+                {TENANT_STATUS_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => handleTenantStatusUpdate(option.value)}
+                    disabled={statusSaving || detailLoading || detailTenant?.status === option.value}
+                    className={`text-xs px-3 py-1.5 rounded-full border disabled:opacity-60 ${
+                      option.value === 'active'
+                        ? 'border-emerald-200 text-emerald-700 hover:bg-emerald-50'
+                        : option.value === 'suspended'
+                          ? 'border-amber-200 text-amber-700 hover:bg-amber-50'
+                          : 'border-rose-200 text-rose-700 hover:bg-rose-50'
+                    }`}
+                  >
+                    {statusSaving && detailTenant?.status !== option.value
+                      ? 'Menyimpan...'
+                      : option.label}
+                  </button>
+                ))}
+              </div>
+              <div className="lg:hidden">
+                <select
+                  value={detailTenant?.status || ''}
+                  onChange={(e) => handleTenantStatusUpdate(e.target.value)}
+                  disabled={statusSaving || detailLoading}
+                  className="text-xs px-2.5 py-1.5 rounded-full border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-60"
+                >
+                  {TENANT_STATUS_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <div className="flex items-center gap-2">
                 <label htmlFor="tenant-backup-mode" className="text-xs font-semibold text-slate-600">
                   Mode Backup
@@ -790,6 +996,10 @@ const Tenants = () => {
                   setTenantDetail(null)
                   setDetailError('')
                   setTemporaryPasswords({})
+                  setRestorePayload(null)
+                  setRestoreFileName('')
+                  setRestorePreview(null)
+                  setRestoreIncludeTables('')
                 }}
                 className="text-xs px-3 py-1.5 rounded-full border border-slate-200 hover:bg-slate-50"
               >
@@ -889,6 +1099,121 @@ const Tenants = () => {
                     </tbody>
                   </table>
                 </div>
+              </div>
+
+              <div className="rounded-2xl border border-indigo-200 bg-indigo-50/40 p-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-semibold text-slate-900">
+                    Restore Backup Tenant (JSON + Dry-Run)
+                  </h3>
+                  {restoreFileName ? (
+                    <span className="text-xs px-2 py-1 rounded-full bg-indigo-100 text-indigo-700 border border-indigo-200">
+                      File: {restoreFileName}
+                    </span>
+                  ) : null}
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                  <div className="lg:col-span-1">
+                    <label className="text-xs font-semibold text-slate-600">Upload JSON Backup</label>
+                    <input
+                      type="file"
+                      accept="application/json,.json"
+                      onChange={handleRestoreFileChange}
+                      className="mt-1 block w-full text-xs text-slate-600 file:mr-2 file:rounded-full file:border-0 file:bg-indigo-100 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-indigo-700 hover:file:bg-indigo-200"
+                    />
+                  </div>
+                  <div className="lg:col-span-1">
+                    <label className="text-xs font-semibold text-slate-600">
+                      Include Tabel (opsional, pisah koma)
+                    </label>
+                    <input
+                      type="text"
+                      value={restoreIncludeTables}
+                      onChange={(e) => setRestoreIncludeTables(e.target.value)}
+                      placeholder="contoh: profiles,kelas,jadwal"
+                      className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div className="lg:col-span-1 flex items-end gap-2">
+                    <button
+                      type="button"
+                      onClick={handleRestorePreview}
+                      disabled={!restorePayload || restoreLoading || restoreApplying}
+                      className="text-xs px-3 py-2 rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50 disabled:opacity-60"
+                    >
+                      {restoreLoading ? 'Dry-Run...' : 'Preview Dry-Run'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleApplyRestore}
+                      disabled={!restorePayload || restoreApplying || restoreLoading}
+                      className="text-xs px-3 py-2 rounded-lg border border-rose-200 text-rose-700 hover:bg-rose-50 disabled:opacity-60"
+                    >
+                      {restoreApplying ? 'Applying...' : 'Apply Restore'}
+                    </button>
+                  </div>
+                </div>
+
+                {restorePreview ? (
+                  <div className="rounded-xl border border-indigo-200 bg-white p-3 space-y-2">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                      <div className="rounded-lg border border-slate-200 p-2">
+                        <p className="text-slate-500">Incoming Rows</p>
+                        <p className="font-semibold text-slate-900">
+                          {numberFormatter.format(toNumber(restorePreview.summary?.incoming_rows))}
+                        </p>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 p-2">
+                        <p className="text-slate-500">Would Insert</p>
+                        <p className="font-semibold text-indigo-700">
+                          {numberFormatter.format(toNumber(restorePreview.summary?.would_insert))}
+                        </p>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 p-2">
+                        <p className="text-slate-500">Would Update</p>
+                        <p className="font-semibold text-indigo-700">
+                          {numberFormatter.format(toNumber(restorePreview.summary?.would_update))}
+                        </p>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 p-2">
+                        <p className="text-slate-500">Errors</p>
+                        <p className="font-semibold text-rose-700">
+                          {numberFormatter.format(toNumber(restorePreview.summary?.errors))}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full text-xs">
+                        <thead>
+                          <tr className="text-left text-slate-500">
+                            <th className="py-2 pr-3">Tabel</th>
+                            <th className="py-2 pr-3">Incoming</th>
+                            <th className="py-2 pr-3">Would Insert</th>
+                            <th className="py-2 pr-3">Would Update</th>
+                            <th className="py-2 pr-3">Errors</th>
+                          </tr>
+                        </thead>
+                        <tbody className="text-slate-700">
+                          {(restorePreview.tables || []).map((item) => (
+                            <tr key={item.table} className="border-t border-slate-100">
+                              <td className="py-2 pr-3 font-medium text-slate-900">{item.table}</td>
+                              <td className="py-2 pr-3">{numberFormatter.format(toNumber(item.incoming_rows))}</td>
+                              <td className="py-2 pr-3">{numberFormatter.format(toNumber(item.would_insert || item.inserted))}</td>
+                              <td className="py-2 pr-3">{numberFormatter.format(toNumber(item.would_update || item.updated))}</td>
+                              <td className="py-2 pr-3 text-rose-700">{numberFormatter.format(toNumber(item.errors))}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500">
+                    Jalankan dry-run dulu untuk melihat simulasi insert/update dan error sebelum apply restore.
+                  </p>
+                )}
               </div>
 
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">

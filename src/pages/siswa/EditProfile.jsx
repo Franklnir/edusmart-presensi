@@ -9,6 +9,8 @@ import {
   isEmailFormat,
   shouldForceAccountSetup
 } from '../../utils/accountSetup'
+import { sanitizeText } from '../../utils/sanitize'
+import { validatePassword } from '../../utils/passwordPolicy'
 
 // ==================== STORAGE CONFIG ====================
 const SIGNED_URL_EXPIRES_IN = 60 * 60 // 1 jam (aman, jangan simpan signed-url ke DB)
@@ -293,7 +295,7 @@ export default function EditProfile() {
         photo_url: objectKeyOrNull,
         updated_at: new Date().toISOString()
       }
-      ;({ error } = await supabase.from('profiles').update(fallbackPayload).eq('id', uid))
+        ; ({ error } = await supabase.from('profiles').update(fallbackPayload).eq('id', uid))
     }
 
     if (error) throw error
@@ -649,8 +651,9 @@ export default function EditProfile() {
       pushToast('error', 'Email tidak valid')
       return
     }
-    if (!accountForm.password || accountForm.password.length < 6) {
-      pushToast('error', 'Password minimal 6 karakter')
+    const pwdCheck = validatePassword(accountForm.password)
+    if (!pwdCheck.valid) {
+      pushToast('error', pwdCheck.errors[0])
       return
     }
     if (accountForm.password !== accountForm.confirmPassword) {
@@ -714,6 +717,98 @@ export default function EditProfile() {
 
   const fieldStats = getFilledFieldCount()
 
+  const securityAccountCard = (
+    <div
+      className={`rounded-2xl shadow-sm border p-6 ${needsAccountSetup
+          ? 'bg-amber-50/80 border-amber-200/60'
+          : 'bg-purple-50/70 border-purple-200/60'
+        }`}
+    >
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+        <div>
+          <h2 className="text-xl font-bold text-slate-900 mb-2">
+            {needsAccountSetup ? 'Lengkapi Akun (Wajib)' : 'Keamanan Akun'}
+          </h2>
+          <p className="text-sm text-slate-700">
+            Email aktif wajib tersedia sebelum mengganti password akun.
+          </p>
+        </div>
+        <div className="text-xs text-slate-700 bg-white px-4 py-2 rounded-xl border border-slate-200">
+          <span className="font-semibold">Login awal siswa:</span> NIS + tanggal lahir.
+        </div>
+      </div>
+
+      <div className="mt-6 grid gap-4 md:grid-cols-3">
+        <div className="space-y-1">
+          <label className="text-sm font-medium text-slate-900">Email Akun</label>
+          <input
+            type="email"
+            value={accountForm.email}
+            onChange={(e) =>
+              setAccountForm((prev) => ({ ...prev, email: e.target.value }))
+            }
+            placeholder="nama@email.com"
+            className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
+          />
+          {!isEmailFormat(accountForm.email) && accountForm.email && (
+            <p className="text-xs text-red-600">Format email tidak valid</p>
+          )}
+        </div>
+
+        {showPasswordFields && (
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-slate-900">Password Baru</label>
+            <PasswordInput
+              value={accountForm.password}
+              onChange={(e) =>
+                setAccountForm((prev) => ({ ...prev, password: e.target.value }))
+              }
+              placeholder="Minimal 6 karakter"
+              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
+            />
+          </div>
+        )}
+
+        {showPasswordFields && (
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-slate-900">Ulangi Password</label>
+            <PasswordInput
+              value={accountForm.confirmPassword}
+              onChange={(e) =>
+                setAccountForm((prev) => ({ ...prev, confirmPassword: e.target.value }))
+              }
+              placeholder="Ulangi password"
+              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
+            />
+          </div>
+        )}
+      </div>
+
+      <div className="mt-5 flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={handleTogglePasswordFields}
+          className="inline-flex items-center gap-2 rounded-xl bg-slate-700 px-5 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+        >
+          {showPasswordFields ? 'Batal Ganti Password' : 'Ganti Password'}
+        </button>
+
+        {showPasswordFields && (
+          <button
+            type="button"
+            onClick={handleCompleteAccount}
+            disabled={accountSaving}
+            className="inline-flex items-center gap-2 rounded-xl bg-purple-600 px-5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            {accountSaving ? 'Menyimpan...' : 'Simpan Email & Password'}
+          </button>
+        )}
+
+        <p className="text-xs text-slate-700">Password baru akan aktif untuk login berikutnya.</p>
+      </div>
+    </div>
+  )
+
   // ==================== RENDER ====================
 
   return (
@@ -754,97 +849,6 @@ export default function EditProfile() {
           </div>
         </div>
 
-        <div
-          className={`rounded-2xl shadow-sm border p-6 ${
-            needsAccountSetup
-              ? 'bg-amber-50/80 border-amber-200/60'
-              : 'bg-purple-50/70 border-purple-200/60'
-          }`}
-        >
-            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-              <div>
-                <h2 className="text-xl font-bold text-slate-900 mb-2">
-                  {needsAccountSetup ? 'Lengkapi Akun (Wajib)' : 'Keamanan Akun'}
-                </h2>
-                <p className="text-sm text-slate-700">
-                  Email aktif wajib tersedia sebelum mengganti password akun.
-                </p>
-              </div>
-              <div className="text-xs text-slate-700 bg-white px-4 py-2 rounded-xl border border-slate-200">
-                <span className="font-semibold">Login awal siswa:</span> NIS + tanggal lahir.
-              </div>
-            </div>
-
-            <div className="mt-6 grid gap-4 md:grid-cols-3">
-              <div className="space-y-1">
-                <label className="text-sm font-medium text-slate-900">Email Akun</label>
-                <input
-                  type="email"
-                  value={accountForm.email}
-                  onChange={(e) =>
-                    setAccountForm((prev) => ({ ...prev, email: e.target.value }))
-                  }
-                  placeholder="nama@email.com"
-                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
-                />
-                {!isEmailFormat(accountForm.email) && accountForm.email && (
-                  <p className="text-xs text-red-600">Format email tidak valid</p>
-                )}
-              </div>
-
-              {showPasswordFields && (
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-slate-900">Password Baru</label>
-                  <PasswordInput
-                    value={accountForm.password}
-                    onChange={(e) =>
-                      setAccountForm((prev) => ({ ...prev, password: e.target.value }))
-                    }
-                    placeholder="Minimal 6 karakter"
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
-                  />
-                </div>
-              )}
-
-              {showPasswordFields && (
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-slate-900">Ulangi Password</label>
-                  <PasswordInput
-                    value={accountForm.confirmPassword}
-                    onChange={(e) =>
-                      setAccountForm((prev) => ({ ...prev, confirmPassword: e.target.value }))
-                    }
-                    placeholder="Ulangi password"
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
-                  />
-                </div>
-              )}
-            </div>
-
-            <div className="mt-5 flex flex-wrap items-center gap-3">
-              <button
-                type="button"
-                onClick={handleTogglePasswordFields}
-                className="inline-flex items-center gap-2 rounded-xl bg-slate-700 px-5 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-              >
-                {showPasswordFields ? 'Batal Ganti Password' : 'Ganti Password'}
-              </button>
-
-              {showPasswordFields && (
-                <button
-                  type="button"
-                  onClick={handleCompleteAccount}
-                  disabled={accountSaving}
-                  className="inline-flex items-center gap-2 rounded-xl bg-purple-600 px-5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-70"
-                >
-                  {accountSaving ? 'Menyimpan...' : 'Simpan Email & Password'}
-                </button>
-              )}
-
-              <p className="text-xs text-slate-700">Password baru akan aktif untuk login berikutnya.</p>
-            </div>
-        </div>
-
         <div className="grid lg:grid-cols-4 gap-6">
           {/* SIDEBAR */}
           <div className="lg:col-span-1 space-y-6">
@@ -879,11 +883,10 @@ export default function EditProfile() {
                   <div className="absolute -bottom-2 -right-2 flex gap-2">
                     <label
                       htmlFor="photo-input"
-                      className={`${
-                        uploadingPhoto
+                      className={`${uploadingPhoto
                           ? 'bg-slate-400 cursor-not-allowed'
                           : 'bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 cursor-pointer shadow-sm'
-                      } text-white p-3 rounded-2xl transition-all duration-300 transform hover:scale-105`}
+                        } text-white p-3 rounded-2xl transition-all duration-300 transform hover:scale-105`}
                       title="Ubah Foto"
                     >
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -940,11 +943,10 @@ export default function EditProfile() {
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-5">
               <div className="space-y-4">
                 <div
-                  className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium w-full justify-center ${
-                    emailVerified
+                  className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium w-full justify-center ${emailVerified
                       ? 'bg-gradient-to-r from-green-500 to-green-600 text-white shadow-lg shadow-green-500/25'
                       : 'bg-gradient-to-r from-yellow-500 to-yellow-600 text-white shadow-lg shadow-yellow-500/25'
-                  }`}
+                    }`}
                 >
                   {emailVerified ? (
                     <>
@@ -1001,10 +1003,10 @@ export default function EditProfile() {
                   <span className="font-semibold text-slate-800 text-xs">
                     {profile?.created_at
                       ? new Date(profile.created_at).toLocaleDateString('id-ID', {
-                          day: 'numeric',
-                          month: 'long',
-                          year: 'numeric'
-                        })
+                        day: 'numeric',
+                        month: 'long',
+                        year: 'numeric'
+                      })
                       : '-'}
                   </span>
                 </div>
@@ -1078,9 +1080,8 @@ export default function EditProfile() {
                   </label>
                   <input
                     type="text"
-                    className={`w-full px-4 py-3 border rounded-xl focus:outline-none focus:ring-3 focus:ring-blue-500/20 focus:border-blue-500 bg-white transition-all duration-300 ${
-                      namaError ? 'border-red-300 bg-red-50' : 'border-slate-200 hover:border-blue-300'
-                    }`}
+                    className={`w-full px-4 py-3 border rounded-xl focus:outline-none focus:ring-3 focus:ring-blue-500/20 focus:border-blue-500 bg-white transition-all duration-300 ${namaError ? 'border-red-300 bg-red-50' : 'border-slate-200 hover:border-blue-300'
+                      }`}
                     value={form.nama}
                     onChange={(e) => handleFieldChange('nama', e.target.value)}
                     placeholder="Masukkan nama lengkap Anda"
@@ -1184,9 +1185,8 @@ export default function EditProfile() {
                     </div>
                     <input
                       type="tel"
-                      className={`w-full px-4 py-3 pl-12 border rounded-xl focus:outline-none focus:ring-3 focus:ring-blue-500/20 focus:border-blue-500 bg-white transition-all duration-300 ${
-                        noHpSiswaError ? 'border-red-300 bg-red-50' : 'border-slate-200 hover:border-blue-300'
-                      }`}
+                      className={`w-full px-4 py-3 pl-12 border rounded-xl focus:outline-none focus:ring-3 focus:ring-blue-500/20 focus:border-blue-500 bg-white transition-all duration-300 ${noHpSiswaError ? 'border-red-300 bg-red-50' : 'border-slate-200 hover:border-blue-300'
+                        }`}
                       value={form.no_hp_siswa}
                       onChange={(e) => handleFieldChange('no_hp_siswa', e.target.value)}
                       placeholder="81234567890"
@@ -1213,9 +1213,8 @@ export default function EditProfile() {
                     </div>
                     <input
                       type="tel"
-                      className={`w-full px-4 py-3 pl-12 border rounded-xl focus:outline-none focus:ring-3 focus:ring-blue-500/20 focus:border-blue-500 bg-white transition-all duration-300 ${
-                        noHpWaliError ? 'border-red-300 bg-red-50' : 'border-slate-200 hover:border-blue-300'
-                      }`}
+                      className={`w-full px-4 py-3 pl-12 border rounded-xl focus:outline-none focus:ring-3 focus:ring-blue-500/20 focus:border-blue-500 bg-white transition-all duration-300 ${noHpWaliError ? 'border-red-300 bg-red-50' : 'border-slate-200 hover:border-blue-300'
+                        }`}
                       value={form.no_hp_wali}
                       onChange={(e) => handleFieldChange('no_hp_wali', e.target.value)}
                       placeholder="81234567890"
@@ -1284,6 +1283,7 @@ export default function EditProfile() {
             </div>
           </div>
         </div>
+        {securityAccountCard}
       </div>
 
     </div>

@@ -11,11 +11,30 @@ use Illuminate\Support\Str;
 
 class DbController extends ApiController
 {
+    private const CRITICAL_MAKER_CHECKER_TABLES = [
+        'settings',
+        'absensi',
+        'absensi_settings',
+        'absensi_rfid_settings',
+        'tugas_jawaban',
+        'quiz_submissions',
+        'quiz_answers',
+    ];
+
+    private const MAX_DB_FILTER_FIELDS = 40;
+
+    private const MAX_DB_ORDER_FIELDS = 8;
+
+    private const MAX_DB_PAYLOAD_ROWS = 500;
+
+    private const MAX_DB_STRING_VALUE_LENGTH = 20000;
+
     private array $allowedTables = [
         'settings',
         'profiles',
         'kelas',
         'mata_pelajaran',
+        'guru_mapel_bobot',
         'struktur_sekolah',
         'kelas_struktur',
         'jadwal',
@@ -50,6 +69,7 @@ class DbController extends ApiController
         'quiz_submissions',
         'quiz_answers',
         'quiz_violation_logs',
+        'user_presence',
         'import_siswa_histories',
         'import_siswa_history_items',
     ];
@@ -59,6 +79,7 @@ class DbController extends ApiController
         'profiles',
         'kelas',
         'mata_pelajaran',
+        'guru_mapel_bobot',
         'struktur_sekolah',
         'kelas_struktur',
         'jadwal',
@@ -93,6 +114,7 @@ class DbController extends ApiController
         'quiz_submissions',
         'quiz_answers',
         'quiz_violation_logs',
+        'user_presence',
         'import_siswa_histories',
         'import_siswa_history_items',
     ];
@@ -100,13 +122,21 @@ class DbController extends ApiController
     private ?string $currentTenantId = null;
 
     private array $guruKelasCache = [];
+
     private array $guruWaliKelasCache = [];
+
     private array $guruEskulCache = [];
+
     private array $guruStudentRfidCache = [];
+
     private array $guruQuizCache = [];
+
     private array $kelasQuizCache = [];
+
     private array $quizQuestionCache = [];
+
     private array $tableColumnCache = [];
+
     private array $tableJsonColumnCache = [];
 
     private array $knownJsonColumns = [
@@ -120,12 +150,17 @@ class DbController extends ApiController
         $table = $request->input('table');
         $action = $request->input('action', 'select');
 
-        if (!in_array($table, $this->allowedTables, true)) {
+        if (! in_array($table, $this->allowedTables, true)) {
             return $this->deny('Table tidak diizinkan', 400);
         }
 
-        if (!in_array($action, ['select', 'insert', 'update', 'delete', 'upsert'], true)) {
+        if (! in_array($action, ['select', 'insert', 'update', 'delete', 'upsert'], true)) {
             return $this->deny('Aksi tidak diizinkan', 400);
+        }
+
+        $validationError = $this->validateDbRequestShape($request);
+        if ($validationError !== null) {
+            return $this->deny($validationError, 422);
         }
 
         $user = $request->user();
@@ -134,7 +169,7 @@ class DbController extends ApiController
         $tenantId = $this->currentTenantId;
         $tenantScoped = in_array($table, $this->tenantScopedTables, true);
 
-        if (!$user && !($action === 'select' && $table === 'settings')) {
+        if (! $user && ! ($action === 'select' && $table === 'settings')) {
             return response()->json(['error' => 'Unauthenticated'], 401);
         }
 
@@ -142,7 +177,7 @@ class DbController extends ApiController
         $query = DB::table($table);
 
         if ($tenantScoped) {
-            if (!$tenantId) {
+            if (! $tenantId) {
                 return $this->deny('Tenant tidak valid', 400);
             }
             $query->where('tenant_id', $tenantId);
@@ -156,9 +191,9 @@ class DbController extends ApiController
         $filters = $request->input('filters', []);
         $this->applyFilters($query, $filters);
 
-        if (in_array($action, ['update', 'delete'], true) && !$this->isAdmin($request)) {
+        if (in_array($action, ['update', 'delete'], true) && ! $this->isAdmin($request)) {
             $hasFilters = $this->hasAnyFilter($filters);
-            if (!$hasFilters) {
+            if (! $hasFilters) {
                 return $this->deny('Filter wajib untuk update/delete');
             }
         }
@@ -166,8 +201,37 @@ class DbController extends ApiController
         $orders = $request->input('order', []);
         $this->applyOrder($query, $orders);
 
+        $maxSelectLimit = $this->isAdmin($request)
+            ? (int) env('DB_MAX_SELECT_LIMIT_ADMIN', 10000)
+            : (int) env('DB_MAX_SELECT_LIMIT', 5000);
+        $maxSelectLimit = max(100, min(50000, $maxSelectLimit));
+
         $limit = $request->input('limit');
+        if ($limit !== null) {
+            $limit = min($maxSelectLimit, max(0, (int) $limit));
+        }
+
         $offset = $request->input('offset');
+        if ($offset !== null) {
+            $offset = min(100000, max(0, (int) $offset));
+        }
+
+        if ($action !== 'select') {
+            $approvalResponse = $this->queueCriticalChangeApprovalIfNeeded(
+                $request,
+                $table,
+                $action,
+                $payload,
+                $filters,
+                $orders,
+                $limit,
+                $offset,
+                $tenantId
+            );
+            if ($approvalResponse !== null) {
+                return $approvalResponse;
+            }
+        }
 
         if ($action === 'select') {
             $countRequested = $request->input('count');
@@ -189,18 +253,18 @@ class DbController extends ApiController
             $columns = $request->input('columns', '*');
             if ($columns && $columns !== '*') {
                 $parsed = $this->parseColumns($table, $columns);
-                if (!empty($parsed)) {
+                if (! empty($parsed)) {
                     $query->select($parsed);
                 }
             }
 
             $data = $head ? [] : $query->get();
 
-            if (!$head && $table === 'settings' && !$user) {
+            if (! $head && $table === 'settings' && ! $user) {
                 $data = $this->sanitizePublicSettingsRows($data);
             }
 
-            if (!$head && $table === 'profiles' && !$this->isAdmin($request)) {
+            if (! $head && $table === 'profiles' && ! $this->isAdmin($request)) {
                 $viewerRole = strtolower((string) ($profile?->role ?? ''));
                 $waliKelas = [];
                 if ($viewerRole === 'guru' && $user?->id) {
@@ -230,8 +294,13 @@ class DbController extends ApiController
             } catch (\InvalidArgumentException $e) {
                 return $this->deny($e->getMessage(), 422);
             }
+            $rows = $this->filterRowsToExistingColumns($table, $rows);
+            if (empty($rows)) {
+                return $this->deny('Payload tidak memiliki kolom yang valid', 422);
+            }
             if ($table === 'settings') {
                 $saved = $this->saveSettingsSingletonRows($rows, $tenantId, $tenantScoped);
+
                 return response()->json(['data' => $saved]);
             }
             if ($table === 'absensi_rfid_settings') {
@@ -240,15 +309,43 @@ class DbController extends ApiController
                     return $this->deny('Tenant tidak valid', 400);
                 }
                 $saved = $this->saveTenantSingletonRows($table, $rows, $singletonTenantId);
+
                 return response()->json(['data' => $saved]);
             }
+
+            $beforeRows = [];
+            $shouldAuditNilai = $table === 'tugas_jawaban' && $this->isNilaiAuditActor($request);
+            if ($shouldAuditNilai) {
+                $beforeRows = $this->fetchTugasJawabanRowsForPayload($rows, $tenantId);
+            }
+
             DB::table($table)->insert($rows);
+
+            if ($shouldAuditNilai) {
+                $afterRows = $this->fetchTugasJawabanRowsForPayload($rows, $tenantId);
+                $this->logAudit(
+                    $request,
+                    'tugas_jawaban',
+                    'bulk',
+                    'INSERT',
+                    $beforeRows,
+                    $afterRows,
+                    $tenantId
+                );
+            }
+
             return response()->json(['data' => $rows]);
         }
 
         if ($action === 'update') {
-            if (!is_array($payload) || empty($payload)) {
+            if (! is_array($payload) || empty($payload)) {
                 return $this->deny('Payload tidak valid', 422);
+            }
+
+            $beforeRows = [];
+            $shouldAuditNilai = $table === 'tugas_jawaban' && $this->isNilaiAuditActor($request);
+            if ($shouldAuditNilai) {
+                $beforeRows = $this->queryRowsToArray(clone $query);
             }
 
             if ($table === 'profiles' && array_key_exists('tanggal_lahir', $payload)) {
@@ -263,6 +360,10 @@ class DbController extends ApiController
                 $payload = $this->normalizeJsonRowForTable($table, $payload);
             } catch (\InvalidArgumentException $e) {
                 return $this->deny($e->getMessage(), 422);
+            }
+            $payload = $this->filterPayloadToExistingColumns($table, $payload);
+            if (empty($payload)) {
+                return $this->deny('Payload tidak memiliki kolom yang valid', 422);
             }
 
             $profileIdForEmailSync = null;
@@ -311,10 +412,29 @@ class DbController extends ApiController
                 throw $e;
             }
 
+            if ($shouldAuditNilai && $updated > 0) {
+                $afterRows = $this->queryRowsToArray(clone $query);
+                $this->logAudit(
+                    $request,
+                    'tugas_jawaban',
+                    'bulk',
+                    'UPDATE',
+                    $beforeRows,
+                    $afterRows,
+                    $tenantId
+                );
+            }
+
             return response()->json(['data' => $updated]);
         }
 
         if ($action === 'delete') {
+            $beforeRows = [];
+            $shouldAuditNilai = $table === 'tugas_jawaban' && $this->isNilaiAuditActor($request);
+            if ($shouldAuditNilai) {
+                $beforeRows = $this->queryRowsToArray(clone $query);
+            }
+
             if ($table === 'profiles' && $this->isAdmin($request)) {
                 $updated = $query->update([
                     'status' => 'nonaktif',
@@ -323,10 +443,36 @@ class DbController extends ApiController
                     'deleted_at' => now(),
                     'updated_at' => now(),
                 ]);
+
+                if ($shouldAuditNilai && $updated > 0) {
+                    $this->logAudit(
+                        $request,
+                        'tugas_jawaban',
+                        'bulk',
+                        'DELETE',
+                        $beforeRows,
+                        [],
+                        $tenantId
+                    );
+                }
+
                 return response()->json(['data' => $updated]);
             }
 
             $deleted = $query->delete();
+
+            if ($shouldAuditNilai && $deleted > 0) {
+                $this->logAudit(
+                    $request,
+                    'tugas_jawaban',
+                    'bulk',
+                    'DELETE',
+                    $beforeRows,
+                    [],
+                    $tenantId
+                );
+            }
+
             return response()->json(['data' => $deleted]);
         }
 
@@ -343,8 +489,20 @@ class DbController extends ApiController
             } catch (\InvalidArgumentException $e) {
                 return $this->deny($e->getMessage(), 422);
             }
+            $rows = $this->filterRowsToExistingColumns($table, $rows);
+            if (empty($rows)) {
+                return $this->deny('Payload tidak memiliki kolom yang valid', 422);
+            }
+
+            $beforeRows = [];
+            $shouldAuditNilai = $table === 'tugas_jawaban' && $this->isNilaiAuditActor($request);
+            if ($shouldAuditNilai) {
+                $beforeRows = $this->fetchTugasJawabanRowsForPayload($rows, $tenantId);
+            }
+
             if ($table === 'settings') {
                 $saved = $this->saveSettingsSingletonRows($rows, $tenantId, $tenantScoped);
+
                 return response()->json(['data' => $saved]);
             }
             if ($table === 'absensi_rfid_settings') {
@@ -353,6 +511,7 @@ class DbController extends ApiController
                     return $this->deny('Tenant tidak valid', 400);
                 }
                 $saved = $this->saveTenantSingletonRows($table, $rows, $singletonTenantId);
+
                 return response()->json(['data' => $saved]);
             }
 
@@ -361,6 +520,12 @@ class DbController extends ApiController
                 $uniqueBy = array_values(array_filter(array_map('trim', explode(',', $onConflict))));
             } else {
                 $uniqueBy = [];
+            }
+            if (! empty($uniqueBy)) {
+                $uniqueBy = array_values(array_filter(
+                    $uniqueBy,
+                    fn ($column) => $this->isSelectableColumn($table, (string) $column)
+                ));
             }
 
             if (
@@ -383,6 +548,7 @@ class DbController extends ApiController
                         $updateQuery->where('tenant_id', $tenantId);
                     }
                     $updateQuery->update($rows[0]);
+
                     return response()->json(['data' => $rows]);
                 }
             }
@@ -393,12 +559,26 @@ class DbController extends ApiController
                     $uniqueBy = ['id'];
                 } else {
                     DB::table($table)->insert($rows);
+
+                    if ($shouldAuditNilai) {
+                        $afterRows = $this->fetchTugasJawabanRowsForPayload($rows, $tenantId);
+                        $this->logAudit(
+                            $request,
+                            'tugas_jawaban',
+                            'bulk',
+                            'UPDATE',
+                            $beforeRows,
+                            $afterRows,
+                            $tenantId
+                        );
+                    }
+
                     return response()->json(['data' => $rows]);
                 }
             }
 
             $updateColumns = array_keys($rows[0]);
-            if (in_array($table, ['absensi', 'absensi_settings'], true) && !empty($uniqueBy)) {
+            if (in_array($table, ['absensi', 'absensi_settings'], true) && ! empty($uniqueBy)) {
                 $resolved = [];
                 try {
                     DB::table($table)->upsert($rows, $uniqueBy, $updateColumns);
@@ -412,10 +592,25 @@ class DbController extends ApiController
                         throw $e;
                     }
                 }
+
                 return response()->json(['data' => $resolved]);
             }
 
             DB::table($table)->upsert($rows, $uniqueBy, $updateColumns);
+
+            if ($shouldAuditNilai) {
+                $afterRows = $this->fetchTugasJawabanRowsForPayload($rows, $tenantId);
+                $this->logAudit(
+                    $request,
+                    'tugas_jawaban',
+                    'bulk',
+                    'UPDATE',
+                    $beforeRows,
+                    $afterRows,
+                    $tenantId
+                );
+            }
+
             return response()->json(['data' => $rows]);
         }
 
@@ -427,7 +622,7 @@ class DbController extends ApiController
         $user = $request->user();
         $userId = $user?->id;
 
-        if ($user && !$profile && !$this->isSuperAdmin($request) && $table !== 'profiles' && $table !== 'settings') {
+        if ($user && ! $profile && ! $this->isSuperAdmin($request) && $table !== 'profiles' && $table !== 'settings') {
             return $this->deny('Profil belum tersedia', 403);
         }
 
@@ -436,30 +631,45 @@ class DbController extends ApiController
             if ($action === 'select') {
                 return true;
             }
-            if (!$this->isAdmin($request)) {
+            if (! $this->isAdmin($request)) {
                 return $this->deny();
             }
+
+            $normalizeError = $this->normalizeSettingsGovernancePayload($payload, $userId);
+            if ($normalizeError !== null) {
+                return $this->deny($normalizeError, 422);
+            }
+
             return true;
+        }
+
+        if ($this->isNilaiFreezeMutationTarget($table, $action, $request)) {
+            $freezeResponse = $this->denyIfNilaiFrozen($request, 'Perubahan nilai');
+            if ($freezeResponse !== null) {
+                return $freezeResponse;
+            }
         }
 
         // PROFILES
         if ($table === 'profiles') {
             if ($action === 'select') {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
 
                 $query->where(function ($q) use ($request, $profile, $userId) {
                     $q->where('id', $userId);
 
                     if ($this->isGuru($request)) {
                         $kelas = $this->guruKelasIds($userId);
-                        if (!empty($kelas)) {
+                        if (! empty($kelas)) {
                             $q->orWhere(function ($q2) use ($kelas) {
                                 $q2->where('role', 'siswa')->whereIn('kelas', $kelas);
                             });
                         }
 
                         $ekskulIds = $this->guruEskulIds($userId);
-                        if (!empty($ekskulIds)) {
+                        if (! empty($ekskulIds)) {
                             $q->orWhere(function ($q2) use ($ekskulIds) {
                                 $q2->where('role', 'siswa')
                                     ->whereIn('id', function ($sub) use ($ekskulIds) {
@@ -487,16 +697,18 @@ class DbController extends ApiController
             }
 
             if ($action === 'insert') {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
 
-                $this->mapPayload($payload, function ($row) use ($userId, $request) {
+                $this->mapPayload($payload, function ($row) use ($userId) {
                     $row = $this->filterPayload($row, [
                         'id', 'email', 'nama', 'role', 'kelas', 'jk', 'usia', 'telp', 'photo_url',
                         'nis', 'agama', 'jabatan', 'alamat', 'status', 'created_at', 'updated_at',
-                        'no_hp_siswa', 'no_hp_wali', 'tanggal_lahir', 'photo_path', 'photo_updated_at'
+                        'no_hp_siswa', 'no_hp_wali', 'tanggal_lahir', 'photo_path', 'photo_updated_at',
                     ]);
 
-                    if (!isset($row['id']) || $row['id'] !== $userId) {
+                    if (! isset($row['id']) || $row['id'] !== $userId) {
                         $row['id'] = $userId;
                     }
 
@@ -504,8 +716,12 @@ class DbController extends ApiController
                         unset($row['role']);
                     }
 
-                    if (!isset($row['created_at'])) $row['created_at'] = now();
-                    if (!isset($row['updated_at'])) $row['updated_at'] = now();
+                    if (! isset($row['created_at'])) {
+                        $row['created_at'] = now();
+                    }
+                    if (! isset($row['updated_at'])) {
+                        $row['updated_at'] = now();
+                    }
 
                     return $row;
                 });
@@ -514,7 +730,9 @@ class DbController extends ApiController
             }
 
             if ($action === 'update') {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
 
                 $query->where('id', $userId);
 
@@ -522,7 +740,7 @@ class DbController extends ApiController
                     $payload = $this->filterPayload($payload, [
                         'nama', 'jk', 'usia', 'telp', 'photo_url', 'photo_path', 'photo_updated_at',
                         'nis', 'agama', 'jabatan', 'alamat', 'no_hp_siswa', 'no_hp_wali', 'tanggal_lahir',
-                        'updated_at'
+                        'updated_at',
                     ]);
 
                     $payload['updated_at'] = now();
@@ -536,8 +754,55 @@ class DbController extends ApiController
             }
 
             if ($action === 'delete') {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
+
                 return $this->deny();
+            }
+
+            return $this->deny();
+        }
+
+        // USER PRESENCE (read monitoring)
+        if ($table === 'user_presence') {
+            if ($action === 'select') {
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
+
+                if ($this->isGuru($request)) {
+                    $kelas = $this->guruKelasIds($userId);
+                    $tenantId = $this->currentTenantId;
+                    $query->where(function ($q) use ($userId, $kelas, $tenantId) {
+                        $q->where('user_id', $userId);
+                        if (! empty($kelas)) {
+                            $q->orWhereIn('user_id', function ($sub) use ($kelas, $tenantId) {
+                                $sub->select('id')
+                                    ->from('profiles')
+                                    ->where('role', 'siswa')
+                                    ->whereIn('kelas', $kelas);
+                                if ($tenantId) {
+                                    $sub->where('tenant_id', $tenantId);
+                                }
+                            });
+                        }
+                    });
+
+                    return true;
+                }
+
+                if ($this->isSiswa($request)) {
+                    $query->where('user_id', $userId);
+
+                    return true;
+                }
+
+                return $this->deny();
+            }
+
+            if ($this->isAdmin($request)) {
+                return true;
             }
 
             return $this->deny();
@@ -554,19 +819,135 @@ class DbController extends ApiController
         ];
 
         if (in_array($table, $publicReadTables, true)) {
-            if ($action === 'select') return true;
-            if (!$this->isAdmin($request)) return $this->deny();
+            if ($action === 'select') {
+                return true;
+            }
+            if (! $this->isAdmin($request)) {
+                return $this->deny();
+            }
+
             return true;
+        }
+
+        // GURU_MAPEL_BOBOT
+        if ($table === 'guru_mapel_bobot') {
+            if ($action === 'select') {
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
+                if ($this->isGuru($request)) {
+                    $query->where('guru_id', $userId);
+
+                    return true;
+                }
+
+                return $this->deny();
+            }
+
+            if (in_array($action, ['insert', 'upsert'], true)) {
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
+                if (! $this->isGuru($request)) {
+                    return $this->deny();
+                }
+
+                $this->mapPayload($payload, function ($row) use ($userId) {
+                    $row = $this->filterPayload($row, [
+                        'id',
+                        'guru_id',
+                        'mapel',
+                        'bobot_tugas_pr',
+                        'bobot_quiz_reguler',
+                        'bobot_quiz_uts',
+                        'bobot_quiz_uas',
+                        'created_at',
+                        'updated_at',
+                    ]);
+                    $row['guru_id'] = $userId;
+                    if (! isset($row['id']) || trim((string) $row['id']) === '') {
+                        $row['id'] = (string) Str::uuid();
+                    }
+                    if (! isset($row['created_at'])) {
+                        $row['created_at'] = now();
+                    }
+                    $row['updated_at'] = now();
+
+                    return $row;
+                });
+
+                $validationError = $this->validateGuruMapelBobotPayload($payload, true);
+                if ($validationError !== null) {
+                    return $this->deny($validationError, 422);
+                }
+                $ownershipError = $this->validateGuruMapelBobotOwnership($payload, (string) $userId);
+                if ($ownershipError !== null) {
+                    return $this->deny($ownershipError, 422);
+                }
+
+                return true;
+            }
+
+            if ($action === 'update') {
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
+                if (! $this->isGuru($request)) {
+                    return $this->deny();
+                }
+
+                $query->where('guru_id', $userId);
+                if (is_array($payload)) {
+                    $payload = $this->filterPayload($payload, [
+                        'mapel',
+                        'bobot_tugas_pr',
+                        'bobot_quiz_reguler',
+                        'bobot_quiz_uts',
+                        'bobot_quiz_uas',
+                        'updated_at',
+                    ]);
+                    $payload['updated_at'] = now();
+
+                    $validationError = $this->validateGuruMapelBobotPayload($payload, true);
+                    if ($validationError !== null) {
+                        return $this->deny($validationError, 422);
+                    }
+                    $ownershipError = $this->validateGuruMapelBobotOwnership($payload, (string) $userId);
+                    if ($ownershipError !== null) {
+                        return $this->deny($ownershipError, 422);
+                    }
+                }
+
+                return true;
+            }
+
+            if ($action === 'delete') {
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
+                if (! $this->isGuru($request)) {
+                    return $this->deny();
+                }
+                $query->where('guru_id', $userId);
+
+                return true;
+            }
+
+            return $this->deny();
         }
 
         // OSIS_ANGGOTA
         if ($table === 'osis_anggota') {
             if ($action === 'select') {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
 
                 if ($this->isGuru($request)) {
                     $kelas = $this->guruKelasIds($userId);
-                    if (empty($kelas)) return $this->deny();
+                    if (empty($kelas)) {
+                        return $this->deny();
+                    }
 
                     $tenantId = $this->currentTenantId;
                     $query->whereIn('siswa_id', function ($q) use ($kelas, $tenantId) {
@@ -584,30 +965,43 @@ class DbController extends ApiController
 
                 if ($this->isSiswa($request)) {
                     $query->where('siswa_id', $userId);
+
                     return true;
                 }
 
                 return $this->deny();
             }
 
-            if (!$this->isAdmin($request)) return $this->deny();
+            if (! $this->isAdmin($request)) {
+                return $this->deny();
+            }
+
             return true;
         }
 
         // CERTIFICATES
         if ($table === 'certificates') {
             if ($action === 'select') {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 $query->where('user_id', $userId);
+
                 return true;
             }
-            if (!$this->isAdmin($request)) return $this->deny();
+            if (! $this->isAdmin($request)) {
+                return $this->deny();
+            }
+
             return true;
         }
 
         // AUDIT LOG (read-only)
         if ($table === 'audit_log') {
-            if ($action === 'select' && $this->isAdmin($request)) return true;
+            if ($action === 'select' && $this->isAdmin($request)) {
+                return true;
+            }
+
             return $this->deny();
         }
 
@@ -625,19 +1019,28 @@ class DbController extends ApiController
         ];
 
         if (in_array($table, $adminOnlyTables, true)) {
-            if (!$this->isAdmin($request)) return $this->deny();
+            if (! $this->isAdmin($request)) {
+                return $this->deny();
+            }
+
             return true;
         }
 
         // PENGUMUMAN
         if ($table === 'pengumuman') {
             if ($action === 'select') {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
 
                 $role = $profile?->role;
                 $targets = ['semua', 'all', ''];
-                if ($role === 'siswa') $targets[] = 'siswa';
-                if ($role === 'guru' || $role === 'teacher') $targets[] = 'guru';
+                if ($role === 'siswa') {
+                    $targets[] = 'siswa';
+                }
+                if ($role === 'guru' || $role === 'teacher') {
+                    $targets[] = 'guru';
+                }
 
                 $query->where(function ($q) use ($targets) {
                     $q->whereNull('target')
@@ -647,61 +1050,85 @@ class DbController extends ApiController
                 return true;
             }
 
-            if (!$this->isAdmin($request)) return $this->deny();
+            if (! $this->isAdmin($request)) {
+                return $this->deny();
+            }
+
             return true;
         }
 
         // KELAS_STRUKTUR
         if ($table === 'kelas_struktur') {
             if ($action === 'select') {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isGuru($request)) {
                     $query->where('wali_guru_id', $userId);
+
                     return true;
                 }
                 if ($this->isSiswa($request)) {
                     $query->where('kelas_id', $profile?->kelas);
+
                     return true;
                 }
+
                 return $this->deny();
             }
 
-            if (!$this->isAdmin($request)) return $this->deny();
+            if (! $this->isAdmin($request)) {
+                return $this->deny();
+            }
+
             return true;
         }
 
         // JADWAL
         if ($table === 'jadwal') {
             if ($action === 'select') {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isGuru($request)) {
                     $query->where('guru_id', $userId);
+
                     return true;
                 }
                 if ($this->isSiswa($request)) {
                     $query->where('kelas_id', $profile?->kelas);
+
                     return true;
                 }
+
                 return $this->deny();
             }
 
-            if (!$this->isAdmin($request)) return $this->deny();
+            if (! $this->isAdmin($request)) {
+                return $this->deny();
+            }
+
             return true;
         }
 
         // EKSKUL_ANGGOTA
         if ($table === 'ekskul_anggota') {
-            if ($action === 'select') return true;
+            if ($action === 'select') {
+                return true;
+            }
 
-            if ($this->isAdmin($request)) return true;
+            if ($this->isAdmin($request)) {
+                return true;
+            }
 
-            if (!$this->isSiswa($request)) {
+            if (! $this->isSiswa($request)) {
                 return $this->deny();
             }
 
             if (in_array($action, ['insert', 'upsert'], true)) {
                 $this->mapPayload($payload, function ($row) use ($userId) {
                     $row['user_id'] = $userId;
+
                     return $row;
                 });
 
@@ -728,56 +1155,70 @@ class DbController extends ApiController
         // QUIZZES
         if ($table === 'quizzes') {
             if ($action === 'select') {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isGuru($request)) {
                     $wali = $this->guruWaliKelasIds($userId);
                     $query->where(function ($q) use ($userId, $wali) {
                         $q->where('guru_id', $userId);
-                        if (!empty($wali)) {
+                        if (! empty($wali)) {
                             $q->orWhereIn('kelas_id', $wali);
                         }
                     });
+
                     return true;
                 }
                 if ($this->isSiswa($request)) {
                     $query->where('kelas_id', $profile?->kelas);
+
                     return true;
                 }
+
                 return $this->deny();
             }
 
             if (in_array($action, ['insert', 'upsert'], true)) {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isGuru($request)) {
                     $this->mapPayload($payload, function ($row) use ($userId) {
                         $row = $this->filterPayload($row, [
                             'id', 'guru_id', 'kelas_id', 'mapel', 'nama', 'starts_at', 'deadline_at',
-                            'penilaian', 'mode', 'is_live', 'is_active', 'live_started_at',
-                            'duration_minutes', 'created_at', 'updated_at'
+                            'penilaian', 'result_visible_to_students', 'mode', 'is_live', 'is_active', 'live_started_at',
+                            'duration_minutes', 'created_at', 'updated_at',
                         ]);
                         $row['guru_id'] = $userId;
-                        if (!isset($row['created_at'])) $row['created_at'] = now();
+                        if (! isset($row['created_at'])) {
+                            $row['created_at'] = now();
+                        }
                         $row['updated_at'] = now();
+
                         return $row;
                     });
                     $quizValidationError = $this->validateGuruQuizCreatePayload($payload, $userId);
                     if ($quizValidationError !== null) {
                         return $this->deny($quizValidationError, 422);
                     }
+
                     return true;
                 }
+
                 return $this->deny();
             }
 
             if (in_array($action, ['update', 'delete'], true)) {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isGuru($request)) {
                     $query->where('guru_id', $userId);
                     if ($action === 'update' && is_array($payload)) {
                         $payload = $this->filterPayload($payload, [
                             'kelas_id', 'mapel', 'nama', 'starts_at', 'deadline_at', 'penilaian',
-                            'mode', 'is_live', 'is_active', 'live_started_at', 'duration_minutes',
-                            'updated_at'
+                            'result_visible_to_students', 'mode', 'is_live', 'is_active', 'live_started_at', 'duration_minutes',
+                            'updated_at',
                         ]);
                         $payload['updated_at'] = now();
 
@@ -786,8 +1227,10 @@ class DbController extends ApiController
                             return $this->deny($quizValidationError, 422);
                         }
                     }
+
                     return true;
                 }
+
                 return $this->deny();
             }
         }
@@ -795,56 +1238,82 @@ class DbController extends ApiController
         // QUIZ_QUESTIONS
         if ($table === 'quiz_questions') {
             if ($action === 'select') {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isGuru($request)) {
                     $quizIds = $this->guruQuizIds($userId);
-                    if (empty($quizIds)) return $this->deny();
+                    if (empty($quizIds)) {
+                        return $this->deny();
+                    }
                     $query->whereIn('quiz_id', $quizIds);
+
                     return true;
                 }
                 if ($this->isSiswa($request)) {
                     $quizIds = $this->kelasQuizIds($profile?->kelas);
-                    if (empty($quizIds)) return $this->deny();
+                    if (empty($quizIds)) {
+                        return $this->deny();
+                    }
                     $query->whereIn('quiz_id', $quizIds);
+
                     return true;
                 }
+
                 return $this->deny();
             }
 
             if (in_array($action, ['insert', 'upsert'], true)) {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isGuru($request)) {
                     $quizIds = $this->guruQuizIds($userId);
                     $this->mapPayload($payload, function ($row) {
                         $row = $this->filterPayload($row, [
-                            'id', 'quiz_id', 'nomor', 'soal', 'poin', 'created_at', 'updated_at'
+                            'id', 'quiz_id', 'nomor', 'soal', 'image_path', 'poin', 'question_type', 'created_at', 'updated_at',
                         ]);
-                        if (!isset($row['created_at'])) $row['created_at'] = now();
+                        $row['question_type'] = $this->normalizeQuestionType($row['question_type'] ?? null);
+                        if (! isset($row['created_at'])) {
+                            $row['created_at'] = now();
+                        }
                         $row['updated_at'] = now();
+
                         return $row;
                     });
                     if ($this->payloadHasInvalidQuiz($payload, $quizIds)) {
                         return $this->deny('Quiz tidak diizinkan');
                     }
+
                     return true;
                 }
+
                 return $this->deny();
             }
 
             if (in_array($action, ['update', 'delete'], true)) {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isGuru($request)) {
                     $quizIds = $this->guruQuizIds($userId);
-                    if (empty($quizIds)) return $this->deny();
+                    if (empty($quizIds)) {
+                        return $this->deny();
+                    }
                     $query->whereIn('quiz_id', $quizIds);
                     if ($action === 'update' && is_array($payload)) {
                         $payload = $this->filterPayload($payload, [
-                            'nomor', 'soal', 'poin', 'updated_at'
+                            'nomor', 'soal', 'image_path', 'poin', 'question_type', 'updated_at',
                         ]);
+                        if (array_key_exists('question_type', $payload)) {
+                            $payload['question_type'] = $this->normalizeQuestionType($payload['question_type']);
+                        }
                         $payload['updated_at'] = now();
                     }
+
                     return true;
                 }
+
                 return $this->deny();
             }
         }
@@ -852,67 +1321,89 @@ class DbController extends ApiController
         // QUIZ_OPTIONS
         if ($table === 'quiz_options') {
             if ($action === 'select') {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isGuru($request)) {
                     $quizIds = $this->guruQuizIds($userId);
                     $questionIds = $this->questionIdsByQuizIds($quizIds);
-                    if (empty($questionIds)) return $this->deny();
+                    if (empty($questionIds)) {
+                        return $this->deny();
+                    }
                     $query->whereIn('question_id', $questionIds);
+
                     return true;
                 }
                 if ($this->isSiswa($request)) {
                     $quizIds = $this->kelasQuizIds($profile?->kelas);
                     $questionIds = $this->questionIdsByQuizIds($quizIds);
-                    if (empty($questionIds)) return $this->deny();
+                    if (empty($questionIds)) {
+                        return $this->deny();
+                    }
                     $query->whereIn('question_id', $questionIds);
                     $columns = $request->input('columns', '*');
                     if ($columns === '*' || str_contains($columns, 'is_correct')) {
                         $request->merge([
-                            'columns' => 'id,question_id,label,text,created_at,updated_at'
+                            'columns' => 'id,question_id,label,text,image_path,created_at,updated_at',
                         ]);
                     }
+
                     return true;
                 }
+
                 return $this->deny();
             }
 
             if (in_array($action, ['insert', 'upsert'], true)) {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isGuru($request)) {
                     $quizIds = $this->guruQuizIds($userId);
                     $questionIds = $this->questionIdsByQuizIds($quizIds);
                     $this->mapPayload($payload, function ($row) {
                         $row = $this->filterPayload($row, [
-                            'id', 'question_id', 'label', 'text', 'is_correct',
-                            'created_at', 'updated_at'
+                            'id', 'question_id', 'label', 'text', 'image_path', 'is_correct',
+                            'created_at', 'updated_at',
                         ]);
-                        if (!isset($row['created_at'])) $row['created_at'] = now();
+                        if (! isset($row['created_at'])) {
+                            $row['created_at'] = now();
+                        }
                         $row['updated_at'] = now();
+
                         return $row;
                     });
                     if ($this->payloadHasInvalidQuestion($payload, $questionIds)) {
                         return $this->deny('Soal tidak diizinkan');
                     }
+
                     return true;
                 }
+
                 return $this->deny();
             }
 
             if (in_array($action, ['update', 'delete'], true)) {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isGuru($request)) {
                     $quizIds = $this->guruQuizIds($userId);
                     $questionIds = $this->questionIdsByQuizIds($quizIds);
-                    if (empty($questionIds)) return $this->deny();
+                    if (empty($questionIds)) {
+                        return $this->deny();
+                    }
                     $query->whereIn('question_id', $questionIds);
                     if ($action === 'update' && is_array($payload)) {
                         $payload = $this->filterPayload($payload, [
-                            'label', 'text', 'is_correct', 'updated_at'
+                            'label', 'text', 'image_path', 'is_correct', 'updated_at',
                         ]);
                         $payload['updated_at'] = now();
                     }
+
                     return true;
                 }
+
                 return $this->deny();
             }
         }
@@ -920,22 +1411,31 @@ class DbController extends ApiController
         // QUIZ_SUBMISSIONS
         if ($table === 'quiz_submissions') {
             if ($action === 'select') {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isGuru($request)) {
                     $quizIds = $this->guruQuizIdsForWali($userId);
-                    if (empty($quizIds)) return $this->deny();
+                    if (empty($quizIds)) {
+                        return $this->deny();
+                    }
                     $query->whereIn('quiz_id', $quizIds);
+
                     return true;
                 }
                 if ($this->isSiswa($request)) {
                     $query->where('siswa_id', $userId);
+
                     return true;
                 }
+
                 return $this->deny();
             }
 
             if (in_array($action, ['insert', 'upsert'], true)) {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isGuru($request)) {
                     return $this->deny('Nilai quiz dihitung otomatis oleh sistem');
                 }
@@ -943,13 +1443,18 @@ class DbController extends ApiController
                     $kelasQuizIds = $this->kelasQuizIds($profile?->kelas);
                     $this->mapPayload($payload, function ($row) use ($userId) {
                         $row = $this->filterPayload($row, [
-                            'id', 'quiz_id', 'siswa_id', 'started_at', 'status', 'created_at', 'updated_at'
+                            'id', 'quiz_id', 'siswa_id', 'started_at', 'status', 'created_at', 'updated_at',
                         ]);
                         $row['siswa_id'] = $userId;
-                        if (!isset($row['started_at'])) $row['started_at'] = now();
+                        if (! isset($row['started_at'])) {
+                            $row['started_at'] = now();
+                        }
                         $row['status'] = 'ongoing';
-                        if (!isset($row['created_at'])) $row['created_at'] = now();
+                        if (! isset($row['created_at'])) {
+                            $row['created_at'] = now();
+                        }
                         $row['updated_at'] = now();
+
                         return $row;
                     });
                     if ($this->payloadHasInvalidQuiz($payload, $kelasQuizIds)) {
@@ -958,21 +1463,28 @@ class DbController extends ApiController
                     if ($this->payloadHasUnavailableQuizForSiswa($payload, $profile?->kelas)) {
                         return $this->deny('Quiz belum tersedia atau sudah berakhir');
                     }
+
                     return true;
                 }
+
                 return $this->deny();
             }
 
             if (in_array($action, ['update', 'delete'], true)) {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isGuru($request)) {
                     $quizIds = $this->guruQuizIds($userId);
-                    if (empty($quizIds)) return $this->deny();
+                    if (empty($quizIds)) {
+                        return $this->deny();
+                    }
                     $query->whereIn('quiz_id', $quizIds);
                     if ($action === 'update' && is_array($payload)) {
                         $payload = $this->filterPayload($payload, ['updated_at']);
                         $payload['updated_at'] = now();
                     }
+
                     return true;
                 }
                 if ($this->isSiswa($request)) {
@@ -981,8 +1493,10 @@ class DbController extends ApiController
                         $payload = $this->filterPayload($payload, ['updated_at']);
                         $payload['updated_at'] = now();
                     }
+
                     return true;
                 }
+
                 return $this->deny();
             }
         }
@@ -990,33 +1504,47 @@ class DbController extends ApiController
         // QUIZ_ANSWERS
         if ($table === 'quiz_answers') {
             if ($action === 'select') {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isGuru($request)) {
                     $quizIds = $this->guruQuizIds($userId);
                     $submissionIds = $this->submissionIdsByQuizIds($quizIds);
-                    if (empty($submissionIds)) return $this->deny();
+                    if (empty($submissionIds)) {
+                        return $this->deny();
+                    }
                     $query->whereIn('submission_id', $submissionIds);
+
                     return true;
                 }
                 if ($this->isSiswa($request)) {
                     $submissionIds = $this->submissionIdsByUser($userId);
-                    if (empty($submissionIds)) return $this->deny();
+                    if (empty($submissionIds)) {
+                        return $this->deny();
+                    }
                     $query->whereIn('submission_id', $submissionIds);
+
                     return true;
                 }
+
                 return $this->deny();
             }
 
             if (in_array($action, ['insert', 'upsert'], true)) {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isSiswa($request)) {
                     $submissionIds = $this->submissionIdsByUser($userId);
                     $this->mapPayload($payload, function ($row) {
                         $row = $this->filterPayload($row, [
-                            'id', 'submission_id', 'question_id', 'option_id', 'created_at', 'updated_at'
+                            'id', 'submission_id', 'question_id', 'option_id', 'essay_answer', 'created_at', 'updated_at',
                         ]);
-                        if (!isset($row['created_at'])) $row['created_at'] = now();
+                        if (! isset($row['created_at'])) {
+                            $row['created_at'] = now();
+                        }
                         $row['updated_at'] = now();
+
                         return $row;
                     });
                     if ($this->payloadHasInvalidSubmission($payload, $submissionIds)) {
@@ -1025,36 +1553,47 @@ class DbController extends ApiController
                     if ($this->payloadHasInvalidQuizAnswerForSiswa($payload, $userId)) {
                         return $this->deny('Jawaban tidak valid atau quiz sudah berakhir');
                     }
+
                     return true;
                 }
+
                 return $this->deny();
             }
 
             if (in_array($action, ['update', 'delete'], true)) {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isGuru($request)) {
                     $quizIds = $this->guruQuizIds($userId);
                     $submissionIds = $this->submissionIdsByQuizIds($quizIds);
-                    if (empty($submissionIds)) return $this->deny();
+                    if (empty($submissionIds)) {
+                        return $this->deny();
+                    }
                     $query->whereIn('submission_id', $submissionIds);
                     if ($action === 'update' && is_array($payload)) {
                         $payload = $this->filterPayload($payload, [
-                            'is_correct', 'poin', 'updated_at'
+                            'is_correct', 'poin', 'updated_at',
                         ]);
                         $payload['updated_at'] = now();
                     }
+
                     return true;
                 }
                 if ($this->isSiswa($request)) {
                     $submissionIds = $this->submissionIdsByUser($userId);
-                    if (empty($submissionIds)) return $this->deny();
+                    if (empty($submissionIds)) {
+                        return $this->deny();
+                    }
                     $query->whereIn('submission_id', $submissionIds);
                     if ($action === 'update' && is_array($payload)) {
                         $payload = $this->filterPayload($payload, ['updated_at']);
                         $payload['updated_at'] = now();
                     }
+
                     return true;
                 }
+
                 return $this->deny();
             }
         }
@@ -1062,35 +1601,47 @@ class DbController extends ApiController
         // QUIZ_VIOLATION_LOGS
         if ($table === 'quiz_violation_logs') {
             if ($action === 'select') {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isGuru($request)) {
                     $quizIds = $this->guruQuizIdsForWali($userId);
-                    if (empty($quizIds)) return $this->deny();
+                    if (empty($quizIds)) {
+                        return $this->deny();
+                    }
                     $query->whereIn('quiz_id', $quizIds);
+
                     return true;
                 }
                 if ($this->isSiswa($request)) {
                     $query->where('siswa_id', $userId);
+
                     return true;
                 }
+
                 return $this->deny();
             }
 
             if (in_array($action, ['insert', 'upsert'], true)) {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isSiswa($request)) {
                     $kelasQuizIds = $this->kelasQuizIds($profile?->kelas);
                     $submissionIds = $this->submissionIdsByUser($userId);
                     $this->mapPayload($payload, function ($row) use ($userId) {
                         $row = $this->filterPayload($row, [
                             'id', 'quiz_id', 'submission_id', 'siswa_id', 'event_type', 'event_message',
-                            'event_meta', 'created_at'
+                            'event_meta', 'created_at',
                         ]);
                         $row['siswa_id'] = $userId;
-                        if (!isset($row['event_type']) || trim((string) $row['event_type']) === '') {
+                        if (! isset($row['event_type']) || trim((string) $row['event_type']) === '') {
                             $row['event_type'] = 'warning';
                         }
-                        if (!isset($row['created_at'])) $row['created_at'] = now();
+                        if (! isset($row['created_at'])) {
+                            $row['created_at'] = now();
+                        }
+
                         return $row;
                     });
                     if ($this->payloadHasInvalidQuiz($payload, $kelasQuizIds)) {
@@ -1099,13 +1650,18 @@ class DbController extends ApiController
                     if ($this->payloadHasInvalidSubmission($payload, $submissionIds)) {
                         return $this->deny('Submission tidak diizinkan');
                     }
+
                     return true;
                 }
+
                 return $this->deny();
             }
 
             if (in_array($action, ['update', 'delete'], true)) {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
+
                 return $this->deny();
             }
         }
@@ -1113,29 +1669,43 @@ class DbController extends ApiController
         // ABSENSI
         if ($table === 'absensi') {
             if ($action === 'select') {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isGuru($request)) {
                     $kelas = $this->guruKelasIds($userId);
-                    if (empty($kelas)) return $this->deny();
+                    if (empty($kelas)) {
+                        return $this->deny();
+                    }
                     $query->whereIn('kelas', $kelas);
+
                     return true;
                 }
                 if ($this->isSiswa($request)) {
                     $query->where('kelas', $profile?->kelas);
+
                     return true;
                 }
+
                 return $this->deny();
             }
 
             if (in_array($action, ['insert', 'upsert'], true)) {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
 
                 if ($this->isGuru($request)) {
                     $kelasList = $this->guruKelasIds($userId);
-                    if (empty($kelasList)) return $this->deny();
+                    if (empty($kelasList)) {
+                        return $this->deny();
+                    }
                     $invalid = $this->payloadHasInvalidKelas($payload, $kelasList);
-                    if ($invalid) return $this->deny('Kelas tidak diizinkan');
+                    if ($invalid) {
+                        return $this->deny('Kelas tidak diizinkan');
+                    }
                     $this->normalizeAbsensiPayloadForGuru($payload, $userId);
+
                     return true;
                 }
 
@@ -1145,9 +1715,13 @@ class DbController extends ApiController
                     $this->mapPayload($payload, function ($row) use ($userId, $kelas, $nama) {
                         $row['uid'] = $userId;
                         $row['kelas'] = $kelas;
-                        if (!isset($row['nama'])) $row['nama'] = $nama;
+                        if (! isset($row['nama'])) {
+                            $row['nama'] = $nama;
+                        }
+
                         return $row;
                     });
+
                     return true;
                 }
 
@@ -1155,15 +1729,21 @@ class DbController extends ApiController
             }
 
             if (in_array($action, ['update', 'delete'], true)) {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isGuru($request)) {
                     $kelas = $this->guruKelasIds($userId);
-                    if (empty($kelas)) return $this->deny();
+                    if (empty($kelas)) {
+                        return $this->deny();
+                    }
                     $query->whereIn('kelas', $kelas);
+
                     return true;
                 }
                 if ($this->isSiswa($request)) {
                     $query->where('uid', $userId);
+
                     return true;
                 }
             }
@@ -1172,46 +1752,66 @@ class DbController extends ApiController
         // ABSENSI_AJUAN
         if ($table === 'absensi_ajuan') {
             if ($action === 'select') {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isGuru($request)) {
                     $kelas = $this->guruKelasIds($userId);
-                    if (empty($kelas)) return $this->deny();
+                    if (empty($kelas)) {
+                        return $this->deny();
+                    }
                     $query->whereIn('kelas', $kelas);
+
                     return true;
                 }
                 if ($this->isSiswa($request)) {
                     $query->where('uid', $userId);
+
                     return true;
                 }
+
                 return $this->deny();
             }
 
             if (in_array($action, ['insert', 'upsert'], true)) {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isSiswa($request)) {
                     $kelas = $profile?->kelas;
                     $nama = $profile?->nama;
                     $this->mapPayload($payload, function ($row) use ($userId, $kelas, $nama) {
                         $row['uid'] = $userId;
                         $row['kelas'] = $kelas;
-                        if (!isset($row['nama'])) $row['nama'] = $nama;
+                        if (! isset($row['nama'])) {
+                            $row['nama'] = $nama;
+                        }
+
                         return $row;
                     });
+
                     return true;
                 }
+
                 return $this->deny();
             }
 
             if (in_array($action, ['update', 'delete'], true)) {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isGuru($request)) {
                     $kelas = $this->guruKelasIds($userId);
-                    if (empty($kelas)) return $this->deny();
+                    if (empty($kelas)) {
+                        return $this->deny();
+                    }
                     $query->whereIn('kelas', $kelas);
+
                     return true;
                 }
                 if ($this->isSiswa($request)) {
                     $query->where('uid', $userId);
+
                     return true;
                 }
             }
@@ -1220,129 +1820,195 @@ class DbController extends ApiController
         // ABSENSI_SETTINGS
         if ($table === 'absensi_settings') {
             if ($action === 'select') {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isGuru($request)) {
                     $kelas = $this->guruKelasIds($userId);
-                    if (empty($kelas)) return $this->deny();
+                    if (empty($kelas)) {
+                        return $this->deny();
+                    }
                     $query->whereIn('kelas', $kelas);
+
                     return true;
                 }
                 if ($this->isSiswa($request)) {
                     $query->where('kelas', $profile?->kelas);
+
                     return true;
                 }
+
                 return $this->deny();
             }
 
             if (in_array($action, ['insert', 'upsert'], true)) {
-                if ($this->isAdmin($request)) return true;
-                if ($this->isGuru($request)) {
-                    $kelasList = $this->guruKelasIds($userId);
-                    if (empty($kelasList)) return $this->deny();
-                    $invalid = $this->payloadHasInvalidKelas($payload, $kelasList);
-                    if ($invalid) return $this->deny('Kelas tidak diizinkan');
+                if ($this->isAdmin($request)) {
                     return true;
                 }
+                if ($this->isGuru($request)) {
+                    $kelasList = $this->guruKelasIds($userId);
+                    if (empty($kelasList)) {
+                        return $this->deny();
+                    }
+                    $invalid = $this->payloadHasInvalidKelas($payload, $kelasList);
+                    if ($invalid) {
+                        return $this->deny('Kelas tidak diizinkan');
+                    }
+
+                    return true;
+                }
+
                 return $this->deny();
             }
 
             if ($action === 'update') {
-                if ($this->isAdmin($request)) return true;
-                if ($this->isGuru($request)) {
-                    $kelasList = $this->guruKelasIds($userId);
-                    if (empty($kelasList)) return $this->deny();
-                    $query->whereIn('kelas', $kelasList);
+                if ($this->isAdmin($request)) {
                     return true;
                 }
+                if ($this->isGuru($request)) {
+                    $kelasList = $this->guruKelasIds($userId);
+                    if (empty($kelasList)) {
+                        return $this->deny();
+                    }
+                    $query->whereIn('kelas', $kelasList);
+
+                    return true;
+                }
+
                 return $this->deny();
             }
 
             if ($action === 'delete') {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
+
                 return $this->deny();
             }
         }
 
         // ABSENSI_RFID_SETTINGS
         if ($table === 'absensi_rfid_settings') {
-            if ($action === 'select') return true;
-            if (!$this->isAdmin($request)) return $this->deny();
+            if ($action === 'select') {
+                return true;
+            }
+            if (! $this->isAdmin($request)) {
+                return $this->deny();
+            }
+
             return true;
         }
 
         // ABSENSI_ESKUL
         if ($table === 'absensi_eskul') {
             if ($action === 'select') {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isGuru($request)) {
                     $ekskul = $this->guruEskulIds($userId);
-                    if (empty($ekskul)) return $this->deny();
+                    if (empty($ekskul)) {
+                        return $this->deny();
+                    }
                     $query->whereIn('ekskul_id', $ekskul);
+
                     return true;
                 }
                 if ($this->isSiswa($request)) {
                     $query->where('user_id', $userId);
+
                     return true;
                 }
+
                 return $this->deny();
             }
 
             if (in_array($action, ['insert', 'upsert', 'update', 'delete'], true)) {
-                if ($this->isAdmin($request)) return true;
-                if ($this->isGuru($request)) {
-                    $ekskul = $this->guruEskulIds($userId);
-                    if (empty($ekskul)) return $this->deny();
-                    $query->whereIn('ekskul_id', $ekskul);
+                if ($this->isAdmin($request)) {
                     return true;
                 }
+                if ($this->isGuru($request)) {
+                    $ekskul = $this->guruEskulIds($userId);
+                    if (empty($ekskul)) {
+                        return $this->deny();
+                    }
+                    $query->whereIn('ekskul_id', $ekskul);
+
+                    return true;
+                }
+
                 return $this->deny();
             }
         }
 
         // ABSENSI_SCAN_TEMP
         if ($table === 'absensi_scan_temp') {
-            if (!$this->isAdmin($request)) return $this->deny();
+            if (! $this->isAdmin($request)) {
+                return $this->deny();
+            }
+
             return true;
         }
 
         // RFID_SCANS
         if ($table === 'rfid_scans') {
             if ($action === 'select') {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isSiswa($request)) {
                     $card = $profile?->rfid_uid;
-                    if (!$card) return $this->deny();
+                    if (! $card) {
+                        return $this->deny();
+                    }
                     $query->where('card_uid', $card);
+
                     return true;
                 }
                 if ($this->isGuru($request)) {
                     $cards = $this->guruStudentRfidUids($userId);
-                    if (empty($cards)) return $this->deny();
+                    if (empty($cards)) {
+                        return $this->deny();
+                    }
                     $query->whereIn('card_uid', $cards);
+
                     return true;
                 }
+
                 return $this->deny();
             }
 
             if (in_array($action, ['insert', 'upsert'], true)) {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
+
                 return $this->deny();
             }
 
             if (in_array($action, ['update', 'delete'], true)) {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isSiswa($request)) {
                     $card = $profile?->rfid_uid;
-                    if (!$card) return $this->deny();
+                    if (! $card) {
+                        return $this->deny();
+                    }
                     $query->where('card_uid', $card);
+
                     return true;
                 }
                 if ($this->isGuru($request)) {
                     $cards = $this->guruStudentRfidUids($userId);
-                    if (empty($cards)) return $this->deny();
+                    if (empty($cards)) {
+                        return $this->deny();
+                    }
                     $query->whereIn('card_uid', $cards);
+
                     return true;
                 }
+
                 return $this->deny();
             }
         }
@@ -1350,28 +2016,40 @@ class DbController extends ApiController
         // JAM_KOSONG
         if ($table === 'jam_kosong') {
             if ($action === 'select') {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isGuru($request)) {
                     $query->where('created_by', $userId);
+
                     return true;
                 }
                 if ($this->isSiswa($request)) {
                     $query->where('kelas', $profile?->kelas);
+
                     return true;
                 }
+
                 return $this->deny();
             }
 
             if (in_array($action, ['insert', 'upsert', 'update', 'delete'], true)) {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isGuru($request)) {
                     $query->where('created_by', $userId);
                     $this->mapPayload($payload, function ($row) use ($userId) {
-                        if (!isset($row['created_by'])) $row['created_by'] = $userId;
+                        if (! isset($row['created_by'])) {
+                            $row['created_by'] = $userId;
+                        }
+
                         return $row;
                     });
+
                     return true;
                 }
+
                 return $this->deny();
             }
         }
@@ -1379,26 +2057,33 @@ class DbController extends ApiController
         // TUGAS
         if ($table === 'tugas') {
             if ($action === 'select') {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isGuru($request)) {
                     $wali = $this->guruWaliKelasIds($userId);
                     $query->where(function ($q) use ($userId, $wali) {
                         $q->where('created_by', $userId);
-                        if (!empty($wali)) {
+                        if (! empty($wali)) {
                             $q->orWhereIn('kelas', $wali);
                         }
                     });
+
                     return true;
                 }
                 if ($this->isSiswa($request)) {
                     $query->where('kelas', $profile?->kelas);
+
                     return true;
                 }
+
                 return $this->deny();
             }
 
             if (in_array($action, ['insert', 'upsert'], true)) {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isGuru($request)) {
                     $this->mapPayload($payload, function ($row) use ($userId) {
                         $row = $this->filterPayload($row, [
@@ -1415,8 +2100,11 @@ class DbController extends ApiController
                             'updated_at',
                         ]);
                         $row['created_by'] = $userId;
-                        if (!isset($row['created_at'])) $row['created_at'] = now();
+                        if (! isset($row['created_at'])) {
+                            $row['created_at'] = now();
+                        }
                         $row['updated_at'] = now();
+
                         return $row;
                     });
 
@@ -1427,11 +2115,14 @@ class DbController extends ApiController
 
                     return true;
                 }
+
                 return $this->deny();
             }
 
             if (in_array($action, ['update', 'delete'], true)) {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isGuru($request)) {
                     $query->where('created_by', $userId);
 
@@ -1463,6 +2154,7 @@ class DbController extends ApiController
 
                     return true;
                 }
+
                 return $this->deny();
             }
         }
@@ -1470,30 +2162,37 @@ class DbController extends ApiController
         // TUGAS_JAWABAN
         if ($table === 'tugas_jawaban') {
             if ($action === 'select') {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isGuru($request)) {
                     $wali = $this->guruWaliKelasIds($userId);
                     $tenantId = $this->currentTenantId;
                     $query->whereIn('tugas_id', function ($q) use ($userId, $wali, $tenantId) {
                         $q->select('id')->from('tugas')->where('created_by', $userId);
-                        if (!empty($wali)) {
+                        if (! empty($wali)) {
                             $q->orWhereIn('kelas', $wali);
                         }
                         if ($tenantId) {
                             $q->where('tenant_id', $tenantId);
                         }
                     });
+
                     return true;
                 }
                 if ($this->isSiswa($request)) {
                     $query->where('user_id', $userId);
+
                     return true;
                 }
+
                 return $this->deny();
             }
 
             if (in_array($action, ['insert', 'upsert'], true)) {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isSiswa($request)) {
                     $kelas = $profile?->kelas;
                     $this->mapPayload($payload, function ($row) use ($userId) {
@@ -1505,13 +2204,13 @@ class DbController extends ApiController
                             'file_name',
                             'waktu_submit',
                             'status',
-                            'updated_at',
                         ]);
                         $row['user_id'] = $userId;
                         $row['status'] = 'menunggu';
-                        if (!isset($row['waktu_submit'])) {
+                        if (! isset($row['waktu_submit'])) {
                             $row['waktu_submit'] = now();
                         }
+
                         return $row;
                     });
 
@@ -1527,11 +2226,14 @@ class DbController extends ApiController
 
                     return true;
                 }
+
                 return $this->deny();
             }
 
             if (in_array($action, ['update', 'delete'], true)) {
-                if ($this->isAdmin($request)) return true;
+                if ($this->isAdmin($request)) {
+                    return true;
+                }
                 if ($this->isGuru($request)) {
                     $tenantId = $this->currentTenantId;
                     $query->whereIn('tugas_id', function ($q) use ($userId, $tenantId) {
@@ -1540,6 +2242,7 @@ class DbController extends ApiController
                             $q->where('tenant_id', $tenantId);
                         }
                     });
+
                     return true;
                 }
                 if ($this->isSiswa($request)) {
@@ -1552,13 +2255,11 @@ class DbController extends ApiController
                             'file_name',
                             'waktu_submit',
                             'status',
-                            'updated_at',
                         ]);
                         $payload['status'] = 'menunggu';
-                        if (!isset($payload['waktu_submit'])) {
+                        if (! isset($payload['waktu_submit'])) {
                             $payload['waktu_submit'] = now();
                         }
-                        $payload['updated_at'] = now();
                     }
 
                     $kelas = $profile?->kelas;
@@ -1569,6 +2270,7 @@ class DbController extends ApiController
 
                     return true;
                 }
+
                 return $this->deny();
             }
         }
@@ -1578,21 +2280,29 @@ class DbController extends ApiController
 
     private function applyFilters($query, $filters): void
     {
-        if (!is_array($filters)) return;
+        if (! is_array($filters)) {
+            return;
+        }
 
         foreach (['eq', 'is', 'gt', 'gte', 'lt', 'lte'] as $op) {
-            if (!empty($filters[$op]) && is_array($filters[$op])) {
+            if (! empty($filters[$op]) && is_array($filters[$op])) {
                 foreach ($filters[$op] as $field => $value) {
                     $field = $this->sanitizeIdentifier($field);
-                    if (!$field) continue;
+                    if (! $field) {
+                        continue;
+                    }
 
                     if ($value === null || ($op === 'is' && is_string($value) && strtolower($value) === 'null')) {
-                        if ($op === 'eq' || $op === 'is') $query->whereNull($field);
+                        if ($op === 'eq' || $op === 'is') {
+                            $query->whereNull($field);
+                        }
+
                         continue;
                     }
 
                     if ($op === 'is' && is_string($value) && strtolower($value) === 'not.null') {
                         $query->whereNotNull($field);
+
                         continue;
                     }
 
@@ -1609,11 +2319,15 @@ class DbController extends ApiController
             }
         }
 
-        if (!empty($filters['in']) && is_array($filters['in'])) {
+        if (! empty($filters['in']) && is_array($filters['in'])) {
             foreach ($filters['in'] as $field => $values) {
                 $field = $this->sanitizeIdentifier($field);
-                if (!$field) continue;
-                if (!is_array($values)) $values = [$values];
+                if (! $field) {
+                    continue;
+                }
+                if (! is_array($values)) {
+                    $values = [$values];
+                }
                 if (empty($values)) {
                     $query->whereRaw('1 = 0');
                 } else {
@@ -1625,26 +2339,162 @@ class DbController extends ApiController
 
     private function hasAnyFilter($filters): bool
     {
-        if (!is_array($filters)) return false;
-        foreach (['eq', 'is', 'gt', 'gte', 'lt', 'lte', 'in'] as $op) {
-            if (!empty($filters[$op])) return true;
+        if (! is_array($filters)) {
+            return false;
         }
+        foreach (['eq', 'is', 'gt', 'gte', 'lt', 'lte', 'in'] as $op) {
+            if (! empty($filters[$op])) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function validateDbRequestShape(Request $request): ?string
+    {
+        $columns = $request->input('columns');
+        if ($columns !== null && ! is_string($columns)) {
+            return 'Format columns tidak valid';
+        }
+        if (is_string($columns) && strlen($columns) > 4000) {
+            return 'Panjang columns melebihi batas';
+        }
+
+        $filters = $request->input('filters', []);
+        if (! is_array($filters)) {
+            return 'Format filters tidak valid';
+        }
+
+        foreach (['eq', 'is', 'gt', 'gte', 'lt', 'lte', 'in'] as $op) {
+            if (! isset($filters[$op])) {
+                continue;
+            }
+            if (! is_array($filters[$op])) {
+                return "Format filters.{$op} tidak valid";
+            }
+            if (count($filters[$op]) > self::MAX_DB_FILTER_FIELDS) {
+                return "Jumlah filters.{$op} melebihi batas";
+            }
+
+            foreach ($filters[$op] as $field => $value) {
+                if (! is_string($field) || $this->sanitizeIdentifier($field) === null) {
+                    return 'Nama kolom filter tidak valid';
+                }
+                if (! $this->isReasonableDbValue($value, 0)) {
+                    return 'Nilai filter tidak valid';
+                }
+            }
+        }
+
+        $order = $request->input('order', []);
+        if ($order !== null && ! is_array($order)) {
+            return 'Format order tidak valid';
+        }
+        $orderItems = is_array($order) && isset($order['field']) ? [$order] : (is_array($order) ? $order : []);
+        if (count($orderItems) > self::MAX_DB_ORDER_FIELDS) {
+            return 'Jumlah order melebihi batas';
+        }
+
+        foreach ($orderItems as $item) {
+            if (! is_array($item)) {
+                return 'Format item order tidak valid';
+            }
+            $field = (string) ($item['field'] ?? '');
+            if ($field === '' || $this->sanitizeIdentifier($field) === null) {
+                return 'Kolom order tidak valid';
+            }
+        }
+
+        $limit = $request->input('limit');
+        if ($limit !== null && (! is_numeric($limit) || (int) $limit < 0)) {
+            return 'Nilai limit tidak valid';
+        }
+
+        $offset = $request->input('offset');
+        if ($offset !== null && (! is_numeric($offset) || (int) $offset < 0)) {
+            return 'Nilai offset tidak valid';
+        }
+
+        $action = strtolower((string) $request->input('action', 'select'));
+        if (in_array($action, ['insert', 'upsert'], true)) {
+            $payload = $request->input('payload');
+            if ($payload === null) {
+                return null;
+            }
+
+            if (is_array($payload) && array_is_list($payload) && count($payload) > self::MAX_DB_PAYLOAD_ROWS) {
+                return 'Jumlah payload melebihi batas';
+            }
+
+            if (! $this->isReasonableDbValue($payload, 0)) {
+                return 'Payload tidak valid';
+            }
+        }
+
+        if ($action === 'update') {
+            $payload = $request->input('payload');
+            if ($payload !== null && (! is_array($payload) || ! $this->isReasonableDbValue($payload, 0))) {
+                return 'Payload update tidak valid';
+            }
+        }
+
+        return null;
+    }
+
+    private function isReasonableDbValue($value, int $depth): bool
+    {
+        if ($depth > 4) {
+            return false;
+        }
+
+        if ($value === null || is_bool($value) || is_int($value) || is_float($value)) {
+            return true;
+        }
+
+        if (is_string($value)) {
+            return strlen($value) <= self::MAX_DB_STRING_VALUE_LENGTH;
+        }
+
+        if (is_array($value)) {
+            if (count($value) > 500) {
+                return false;
+            }
+
+            foreach ($value as $key => $item) {
+                if (is_string($key) && strlen($key) > 120) {
+                    return false;
+                }
+                if (! $this->isReasonableDbValue($item, $depth + 1)) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         return false;
     }
 
     private function applyOrder($query, $orders): void
     {
-        if (empty($orders)) return;
+        if (empty($orders)) {
+            return;
+        }
 
         $list = $orders;
-        if (!is_array($orders) || isset($orders['field'])) {
+        if (! is_array($orders) || isset($orders['field'])) {
             $list = [$orders];
         }
 
         foreach ($list as $order) {
-            if (!is_array($order)) continue;
+            if (! is_array($order)) {
+                continue;
+            }
             $field = $this->sanitizeIdentifier($order['field'] ?? '');
-            if (!$field) continue;
+            if (! $field) {
+                continue;
+            }
             $dir = strtolower($order['dir'] ?? 'asc') === 'desc' ? 'desc' : 'asc';
             $query->orderBy($field, $dir);
         }
@@ -1697,7 +2547,7 @@ class DbController extends ApiController
             if (
                 $field
                 && (
-                    (!empty($tableColumnWhitelist)
+                    (! empty($tableColumnWhitelist)
                         ? in_array($field, $tableColumnWhitelist, true)
                         : $this->isSelectableColumn($table, $field))
                 )
@@ -1729,7 +2579,9 @@ class DbController extends ApiController
 
     private function isSelectableColumn(string $table, string $column): bool
     {
-        if (!$table || !$column) return false;
+        if (! $table || ! $column) {
+            return false;
+        }
 
         $connection = DB::connection();
         $cacheKey = implode('|', [
@@ -1738,7 +2590,7 @@ class DbController extends ApiController
             $table,
         ]);
 
-        if (!isset($this->tableColumnCache[$cacheKey])) {
+        if (! isset($this->tableColumnCache[$cacheKey])) {
             try {
                 $columns = Schema::getColumnListing($table);
                 $this->tableColumnCache[$cacheKey] = array_fill_keys($columns, true);
@@ -1763,6 +2615,7 @@ class DbController extends ApiController
             if ($char === '(') {
                 $depth++;
                 $buffer .= $char;
+
                 continue;
             }
 
@@ -1771,6 +2624,7 @@ class DbController extends ApiController
                     $depth--;
                 }
                 $buffer .= $char;
+
                 continue;
             }
 
@@ -1780,6 +2634,7 @@ class DbController extends ApiController
                     $parts[] = $trimmed;
                 }
                 $buffer = '';
+
                 continue;
             }
 
@@ -1796,8 +2651,13 @@ class DbController extends ApiController
 
     private function normalizeRows($payload): array
     {
-        if (!is_array($payload)) return [];
-        if ($this->isAssoc($payload)) return [$payload];
+        if (! is_array($payload)) {
+            return [];
+        }
+        if ($this->isAssoc($payload)) {
+            return [$payload];
+        }
+
         return array_values(array_filter($payload, fn ($row) => is_array($row)));
     }
 
@@ -1811,9 +2671,53 @@ class DbController extends ApiController
         return array_intersect_key($payload, array_flip($allowed));
     }
 
+    private function filterPayloadToExistingColumns(string $table, array $payload): array
+    {
+        $filtered = [];
+
+        foreach ($payload as $column => $value) {
+            if (! is_string($column)) {
+                continue;
+            }
+
+            $normalizedColumn = $this->sanitizeIdentifier($column);
+            if (! $normalizedColumn) {
+                continue;
+            }
+
+            if (! $this->isSelectableColumn($table, $normalizedColumn)) {
+                continue;
+            }
+
+            $filtered[$normalizedColumn] = $value;
+        }
+
+        return $filtered;
+    }
+
+    private function filterRowsToExistingColumns(string $table, array $rows): array
+    {
+        $filteredRows = [];
+
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+
+            $filteredRow = $this->filterPayloadToExistingColumns($table, $row);
+            if (! empty($filteredRow)) {
+                $filteredRows[] = $filteredRow;
+            }
+        }
+
+        return $filteredRows;
+    }
+
     private function mapPayload(&$payload, callable $fn): void
     {
-        if (!is_array($payload)) return;
+        if (! is_array($payload)) {
+            return;
+        }
         if ($this->isAssoc($payload)) {
             $payload = $fn($payload);
         } else {
@@ -1824,8 +2728,11 @@ class DbController extends ApiController
     private function attachTenantRows(array $rows, string $tenantId): array
     {
         return array_map(function ($row) use ($tenantId) {
-            if (!is_array($row)) return $row;
+            if (! is_array($row)) {
+                return $row;
+            }
             $row['tenant_id'] = $tenantId;
+
             return $row;
         }, $rows);
     }
@@ -1838,7 +2745,7 @@ class DbController extends ApiController
         $hasId = Schema::hasColumn($table, 'id');
 
         foreach ($rows as $row) {
-            if (!is_array($row)) {
+            if (! is_array($row)) {
                 continue;
             }
 
@@ -1851,7 +2758,7 @@ class DbController extends ApiController
             if ($hasCreatedAt) {
                 $existingQuery->orderByDesc('created_at');
             }
-            if (!$hasUpdatedAt && !$hasCreatedAt && $hasId) {
+            if (! $hasUpdatedAt && ! $hasCreatedAt && $hasId) {
                 $existingQuery->orderByDesc('id');
             }
             $existing = $existingQuery->first();
@@ -1862,11 +2769,12 @@ class DbController extends ApiController
                 if ($hasCreatedAt) {
                     unset($update['created_at']);
                 }
-                if ($hasUpdatedAt && !array_key_exists('updated_at', $update)) {
+                if ($hasUpdatedAt && ! array_key_exists('updated_at', $update)) {
                     $update['updated_at'] = now();
                 }
                 if (empty($update)) {
                     $results[] = $existing;
+
                     continue;
                 }
 
@@ -1874,16 +2782,17 @@ class DbController extends ApiController
 
                 $fresh = DB::table($table)->where('id', $existing->id)->first();
                 $results[] = $fresh ?: (object) array_merge((array) $existing, $update);
+
                 continue;
             }
 
             $insert = $row;
             $insert['id'] = (string) Str::uuid();
             $insert['tenant_id'] = $tenantId;
-            if ($hasCreatedAt && !array_key_exists('created_at', $insert)) {
+            if ($hasCreatedAt && ! array_key_exists('created_at', $insert)) {
                 $insert['created_at'] = now();
             }
-            if ($hasUpdatedAt && !array_key_exists('updated_at', $insert)) {
+            if ($hasUpdatedAt && ! array_key_exists('updated_at', $insert)) {
                 $insert['updated_at'] = now();
             }
 
@@ -1903,7 +2812,7 @@ class DbController extends ApiController
         $hasTenantId = Schema::hasColumn($table, 'tenant_id');
 
         foreach ($rows as $row) {
-            if (!is_array($row)) {
+            if (! is_array($row)) {
                 continue;
             }
 
@@ -1927,24 +2836,25 @@ class DbController extends ApiController
                 if ($hasCreatedAt) {
                     unset($update['created_at']);
                 }
-                if ($hasUpdatedAt && !array_key_exists('updated_at', $update)) {
+                if ($hasUpdatedAt && ! array_key_exists('updated_at', $update)) {
                     $update['updated_at'] = now();
                 }
 
-                if (!empty($update)) {
+                if (! empty($update)) {
                     DB::table($table)->where('id', $existing->id)->update($update);
                 }
 
                 $fresh = DB::table($table)->where('id', $existing->id)->first();
                 $results[] = $fresh ?: (object) array_merge((array) $existing, $update);
+
                 continue;
             }
 
             $insert = $row;
-            if ($hasCreatedAt && !array_key_exists('created_at', $insert)) {
+            if ($hasCreatedAt && ! array_key_exists('created_at', $insert)) {
                 $insert['created_at'] = now();
             }
-            if ($hasUpdatedAt && !array_key_exists('updated_at', $insert)) {
+            if ($hasUpdatedAt && ! array_key_exists('updated_at', $insert)) {
                 $insert['updated_at'] = now();
             }
 
@@ -1959,9 +2869,10 @@ class DbController extends ApiController
     private function normalizeJsonRowsForTable(string $table, array $rows): array
     {
         return array_map(function ($row) use ($table) {
-            if (!is_array($row)) {
+            if (! is_array($row)) {
                 return $row;
             }
+
             return $this->normalizeJsonRowForTable($table, $row);
         }, $rows);
     }
@@ -1976,7 +2887,7 @@ class DbController extends ApiController
         $jsonColumnMap = array_flip($jsonColumns);
 
         foreach ($row as $column => $value) {
-            if (!isset($jsonColumnMap[$column])) {
+            if (! isset($jsonColumnMap[$column])) {
                 continue;
             }
 
@@ -2068,6 +2979,7 @@ class DbController extends ApiController
         ))));
 
         $this->tableJsonColumnCache[$cacheKey] = $columns;
+
         return $columns;
     }
 
@@ -2089,19 +3001,19 @@ class DbController extends ApiController
                 'dikonfirmasi',
             ]);
 
-            if (!isset($row['oleh']) || $row['oleh'] === '') {
+            if (! isset($row['oleh']) || $row['oleh'] === '') {
                 $row['oleh'] = $userId;
             }
-            if (!isset($row['waktu'])) {
+            if (! isset($row['waktu'])) {
                 $row['waktu'] = now();
             }
-            if (!isset($row['komentar']) && isset($row['status'])) {
-                $row['komentar'] = $row['status'] . ' (Manual Guru)';
+            if (! isset($row['komentar']) && isset($row['status'])) {
+                $row['komentar'] = $row['status'].' (Manual Guru)';
             }
 
             if (isset($row['status'])) {
                 $status = (string) $row['status'];
-                if (!in_array($status, $allowedStatus, true)) {
+                if (! in_array($status, $allowedStatus, true)) {
                     $row['status'] = 'Alpha';
                 }
             }
@@ -2116,7 +3028,9 @@ class DbController extends ApiController
         $hasTenantColumn = $tenantId && Schema::hasColumn($table, 'tenant_id');
 
         foreach ($rows as $row) {
-            if (!is_array($row)) continue;
+            if (! is_array($row)) {
+                continue;
+            }
 
             $hasKeys = true;
             $query = DB::table($table);
@@ -2126,7 +3040,7 @@ class DbController extends ApiController
             }
 
             foreach ($uniqueBy as $col) {
-                if (!array_key_exists($col, $row)) {
+                if (! array_key_exists($col, $row)) {
                     $hasKeys = false;
                     break;
                 }
@@ -2143,12 +3057,13 @@ class DbController extends ApiController
                     }
                     DB::table($table)->where('id', $existing->id)->update($update);
                     $results[] = (object) array_merge((array) $existing, $update);
+
                     continue;
                 }
             }
 
             $insert = $row;
-            if ($hasTenantColumn && !isset($insert['tenant_id'])) {
+            if ($hasTenantColumn && ! isset($insert['tenant_id'])) {
                 $insert['tenant_id'] = $tenantId;
             }
 
@@ -2179,7 +3094,9 @@ class DbController extends ApiController
         $hasTenantColumn = $tenantId && Schema::hasColumn($table, 'tenant_id');
 
         foreach ($rows as $row) {
-            if (!is_array($row)) continue;
+            if (! is_array($row)) {
+                continue;
+            }
 
             $query = DB::table($table);
             if ($hasTenantColumn) {
@@ -2188,15 +3105,16 @@ class DbController extends ApiController
 
             $hasKeys = true;
             foreach ($uniqueBy as $col) {
-                if (!array_key_exists($col, $row)) {
+                if (! array_key_exists($col, $row)) {
                     $hasKeys = false;
                     break;
                 }
                 $query->where($col, $row[$col]);
             }
 
-            if (!$hasKeys) {
+            if (! $hasKeys) {
                 $results[] = $row;
+
                 continue;
             }
 
@@ -2213,8 +3131,13 @@ class DbController extends ApiController
 
     private function sanitizeIdentifier(string $name): ?string
     {
-        if ($name === '') return null;
-        if (!preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $name)) return null;
+        if ($name === '') {
+            return null;
+        }
+        if (! preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $name)) {
+            return null;
+        }
+
         return $name;
     }
 
@@ -2251,6 +3174,7 @@ class DbController extends ApiController
 
         $merged = array_values(array_unique(array_merge($kelas, $wali)));
         $this->guruKelasCache[$userId] = $merged;
+
         return $merged;
     }
 
@@ -2270,6 +3194,7 @@ class DbController extends ApiController
             ->all();
 
         $this->guruWaliKelasCache[$userId] = $wali;
+
         return $wali;
     }
 
@@ -2280,6 +3205,7 @@ class DbController extends ApiController
         foreach ($wali as $kelasId) {
             $quizIds = array_merge($quizIds, $this->kelasQuizIds($kelasId));
         }
+
         return array_values(array_unique($quizIds));
     }
 
@@ -2298,6 +3224,7 @@ class DbController extends ApiController
             ->all();
 
         $this->guruEskulCache[$userId] = $ekskul;
+
         return $ekskul;
     }
 
@@ -2310,6 +3237,7 @@ class DbController extends ApiController
         $kelas = $this->guruKelasIds($userId);
         if (empty($kelas)) {
             $this->guruStudentRfidCache[$userId] = [];
+
             return [];
         }
 
@@ -2324,18 +3252,26 @@ class DbController extends ApiController
             ->all();
 
         $this->guruStudentRfidCache[$userId] = $cards;
+
         return $cards;
     }
 
     private function payloadHasInvalidKelas($payload, array $allowed): bool
     {
-        if (!is_array($payload)) return true;
+        if (! is_array($payload)) {
+            return true;
+        }
         $rows = $this->isAssoc($payload) ? [$payload] : $payload;
         foreach ($rows as $row) {
-            if (!is_array($row)) continue;
+            if (! is_array($row)) {
+                continue;
+            }
             $kelas = $row['kelas'] ?? null;
-            if (!$kelas || !in_array($kelas, $allowed, true)) return true;
+            if (! $kelas || ! in_array($kelas, $allowed, true)) {
+                return true;
+            }
         }
+
         return false;
     }
 
@@ -2354,7 +3290,7 @@ class DbController extends ApiController
 
     private function validateSiswaEskulJoinPayload($payload, string $userId): ?string
     {
-        if (!is_array($payload) || $userId === '') {
+        if (! is_array($payload) || $userId === '') {
             return 'Data ekstrakurikuler tidak valid';
         }
 
@@ -2362,7 +3298,7 @@ class DbController extends ApiController
         $ekskulIds = [];
 
         foreach ($rows as $row) {
-            if (!is_array($row)) {
+            if (! is_array($row)) {
                 continue;
             }
 
@@ -2396,7 +3332,7 @@ class DbController extends ApiController
         $now = now();
         foreach ($ekskulIds as $ekskulId) {
             $ekskul = $ekskulMap[$ekskulId] ?? null;
-            if (!$ekskul) {
+            if (! $ekskul) {
                 return 'Ekstrakurikuler tidak ditemukan';
             }
 
@@ -2438,7 +3374,7 @@ class DbController extends ApiController
             return null;
         }
 
-        if (!Schema::hasColumn('ekskul', 'registration_deadline_at')) {
+        if (! Schema::hasColumn('ekskul', 'registration_deadline_at')) {
             return null;
         }
 
@@ -2466,7 +3402,7 @@ class DbController extends ApiController
         $now = now();
         foreach ($ekskulIds as $ekskulId) {
             $ekskul = $ekskulMap[$ekskulId] ?? null;
-            if (!$ekskul) {
+            if (! $ekskul) {
                 return 'Ekstrakurikuler tidak ditemukan';
             }
 
@@ -2494,6 +3430,7 @@ class DbController extends ApiController
             ->all();
 
         $this->guruQuizCache[$userId] = $ids;
+
         return $ids;
     }
 
@@ -2504,8 +3441,9 @@ class DbController extends ApiController
             return $this->kelasQuizCache[$key];
         }
 
-        if (!$kelasId) {
+        if (! $kelasId) {
             $this->kelasQuizCache[$key] = [];
+
             return [];
         }
 
@@ -2518,6 +3456,7 @@ class DbController extends ApiController
             ->all();
 
         $this->kelasQuizCache[$key] = $ids;
+
         return $ids;
     }
 
@@ -2528,7 +3467,9 @@ class DbController extends ApiController
             return $this->quizQuestionCache[$key];
         }
 
-        if (empty($quizIds)) return [];
+        if (empty($quizIds)) {
+            return [];
+        }
 
         $questionQuery = DB::table('quiz_questions')->whereIn('quiz_id', $quizIds);
         $this->applyTenantFilter($questionQuery);
@@ -2539,15 +3480,19 @@ class DbController extends ApiController
             ->all();
 
         $this->quizQuestionCache[$key] = $ids;
+
         return $ids;
     }
 
     private function submissionIdsByQuizIds(array $quizIds): array
     {
-        if (empty($quizIds)) return [];
+        if (empty($quizIds)) {
+            return [];
+        }
 
         $submissionQuery = DB::table('quiz_submissions')->whereIn('quiz_id', $quizIds);
         $this->applyTenantFilter($submissionQuery);
+
         return $submissionQuery->pluck('id')->filter()->values()->all();
     }
 
@@ -2555,55 +3500,77 @@ class DbController extends ApiController
     {
         $submissionQuery = DB::table('quiz_submissions')->where('siswa_id', $userId);
         $this->applyTenantFilter($submissionQuery);
+
         return $submissionQuery->pluck('id')->filter()->values()->all();
     }
 
     private function payloadHasInvalidQuiz($payload, array $allowedQuizIds): bool
     {
-        if (!is_array($payload)) return true;
+        if (! is_array($payload)) {
+            return true;
+        }
         $rows = $this->isAssoc($payload) ? [$payload] : $payload;
         foreach ($rows as $row) {
-            if (!is_array($row)) continue;
+            if (! is_array($row)) {
+                continue;
+            }
             $quizId = $row['quiz_id'] ?? null;
-            if (!$quizId || !in_array($quizId, $allowedQuizIds, true)) return true;
+            if (! $quizId || ! in_array($quizId, $allowedQuizIds, true)) {
+                return true;
+            }
         }
+
         return false;
     }
 
     private function payloadHasInvalidQuestion($payload, array $allowedQuestionIds): bool
     {
-        if (!is_array($payload)) return true;
+        if (! is_array($payload)) {
+            return true;
+        }
         $rows = $this->isAssoc($payload) ? [$payload] : $payload;
         foreach ($rows as $row) {
-            if (!is_array($row)) continue;
+            if (! is_array($row)) {
+                continue;
+            }
             $qid = $row['question_id'] ?? null;
-            if (!$qid || !in_array($qid, $allowedQuestionIds, true)) return true;
+            if (! $qid || ! in_array($qid, $allowedQuestionIds, true)) {
+                return true;
+            }
         }
+
         return false;
     }
 
     private function payloadHasInvalidSubmission($payload, array $allowedSubmissionIds): bool
     {
-        if (!is_array($payload)) return true;
+        if (! is_array($payload)) {
+            return true;
+        }
         $rows = $this->isAssoc($payload) ? [$payload] : $payload;
         foreach ($rows as $row) {
-            if (!is_array($row)) continue;
+            if (! is_array($row)) {
+                continue;
+            }
             $sid = $row['submission_id'] ?? null;
-            if (!$sid || !in_array($sid, $allowedSubmissionIds, true)) return true;
+            if (! $sid || ! in_array($sid, $allowedSubmissionIds, true)) {
+                return true;
+            }
         }
+
         return false;
     }
 
     private function payloadHasUnavailableQuizForSiswa($payload, ?string $kelas): bool
     {
-        if (!is_array($payload) || !$kelas) {
+        if (! is_array($payload) || ! $kelas) {
             return true;
         }
 
         $rows = $this->isAssoc($payload) ? [$payload] : $payload;
         $quizIds = [];
         foreach ($rows as $row) {
-            if (!is_array($row)) {
+            if (! is_array($row)) {
                 continue;
             }
             $quizId = trim((string) ($row['quiz_id'] ?? ''));
@@ -2632,10 +3599,10 @@ class DbController extends ApiController
         $now = now()->startOfMinute();
         foreach ($quizIds as $quizId) {
             $quiz = $quizMap[$quizId] ?? null;
-            if (!$quiz) {
+            if (! $quiz) {
                 return true;
             }
-            if (!$this->quizIsAvailableForStudent($quiz, $now)) {
+            if (! $this->quizIsAvailableForStudent($quiz, $now)) {
                 return true;
             }
         }
@@ -2646,7 +3613,7 @@ class DbController extends ApiController
     private function quizIsAvailableForStudent(object $quiz, Carbon $now): bool
     {
         $startsAtRaw = $quiz->starts_at ?? null;
-        if (!$startsAtRaw) {
+        if (! $startsAtRaw) {
             // Draft quiz belum dijadwalkan.
             return false;
         }
@@ -2662,7 +3629,7 @@ class DbController extends ApiController
             }
 
             $liveStartedAt = $quiz->live_started_at ?? $startsAtRaw;
-            if (!$liveStartedAt) {
+            if (! $liveStartedAt) {
                 return false;
             }
 
@@ -2680,7 +3647,7 @@ class DbController extends ApiController
         }
 
         $deadlineRaw = $quiz->deadline_at ?? null;
-        if (!$deadlineRaw) {
+        if (! $deadlineRaw) {
             return false;
         }
         $deadlineAt = Carbon::parse($deadlineRaw);
@@ -2693,7 +3660,7 @@ class DbController extends ApiController
 
     private function payloadHasInvalidQuizAnswerForSiswa($payload, string $userId): bool
     {
-        if (!is_array($payload)) {
+        if (! is_array($payload)) {
             return true;
         }
 
@@ -2704,19 +3671,20 @@ class DbController extends ApiController
         $now = now();
 
         foreach ($rows as $row) {
-            if (!is_array($row)) {
+            if (! is_array($row)) {
                 continue;
             }
 
             $submissionId = trim((string) ($row['submission_id'] ?? ''));
             $questionId = trim((string) ($row['question_id'] ?? ''));
             $optionId = trim((string) ($row['option_id'] ?? ''));
+            $essayAnswerRaw = $row['essay_answer'] ?? null;
 
             if ($submissionId === '' || $questionId === '') {
                 return true;
             }
 
-            if (!isset($submissionCache[$submissionId])) {
+            if (! isset($submissionCache[$submissionId])) {
                 $submissionQuery = DB::table('quiz_submissions as s')
                     ->join('quizzes as q', 'q.id', '=', 's.quiz_id')
                     ->select(
@@ -2743,7 +3711,7 @@ class DbController extends ApiController
             }
 
             $submission = $submissionCache[$submissionId];
-            if (!$submission) {
+            if (! $submission) {
                 return true;
             }
 
@@ -2751,7 +3719,7 @@ class DbController extends ApiController
                 return true;
             }
 
-            if (!$this->quizIsAvailableForStudent((object) [
+            if (! $this->quizIsAvailableForStudent((object) [
                 'is_live' => $submission->is_live,
                 'is_active' => $submission->is_active,
                 'starts_at' => $submission->starts_at,
@@ -2762,30 +3730,49 @@ class DbController extends ApiController
                 return true;
             }
 
-            $questionKey = $submission->quiz_id . '|' . $questionId;
-            if (!isset($questionCache[$questionKey])) {
+            $questionKey = $submission->quiz_id.'|'.$questionId;
+            if (! isset($questionCache[$questionKey])) {
                 $questionQuery = DB::table('quiz_questions')
                     ->where('id', $questionId)
                     ->where('quiz_id', $submission->quiz_id);
                 $this->applyTenantFilter($questionQuery);
-                $questionCache[$questionKey] = $questionQuery->exists();
+                $questionCache[$questionKey] = $questionQuery->first(['id', 'question_type']);
             }
 
-            if (!$questionCache[$questionKey]) {
+            $question = $questionCache[$questionKey];
+            if (! $question) {
                 return true;
             }
 
-            if ($optionId !== '') {
-                $optionKey = $questionId . '|' . $optionId;
-                if (!isset($optionCache[$optionKey])) {
-                    $optionQuery = DB::table('quiz_options')
-                        ->where('id', $optionId)
-                        ->where('question_id', $questionId);
-                    $this->applyTenantFilter($optionQuery);
-                    $optionCache[$optionKey] = $optionQuery->exists();
-                }
-                if (!$optionCache[$optionKey]) {
+            $questionType = $this->normalizeQuestionType($question->question_type ?? null);
+            $essayAnswer = '';
+            if ($essayAnswerRaw !== null) {
+                if (is_array($essayAnswerRaw) || is_object($essayAnswerRaw)) {
                     return true;
+                }
+                $essayAnswer = trim((string) $essayAnswerRaw);
+            }
+
+            if ($questionType === 'essay') {
+                if ($optionId !== '') {
+                    return true;
+                }
+            } else {
+                if ($essayAnswer !== '') {
+                    return true;
+                }
+                if ($optionId !== '') {
+                    $optionKey = $questionId.'|'.$optionId;
+                    if (! isset($optionCache[$optionKey])) {
+                        $optionQuery = DB::table('quiz_options')
+                            ->where('id', $optionId)
+                            ->where('question_id', $questionId);
+                        $this->applyTenantFilter($optionQuery);
+                        $optionCache[$optionKey] = $optionQuery->exists();
+                    }
+                    if (! $optionCache[$optionKey]) {
+                        return true;
+                    }
                 }
             }
         }
@@ -2806,6 +3793,16 @@ class DbController extends ApiController
         }
     }
 
+    private function normalizeQuestionType($value): string
+    {
+        $type = strtolower(trim((string) ($value ?? 'mcq')));
+        if (! in_array($type, ['mcq', 'essay'], true)) {
+            return 'mcq';
+        }
+
+        return $type;
+    }
+
     private function normalizeQuizMode($value, bool $isLiveFallback = false, bool $strict = false): ?string
     {
         $raw = strtolower(trim((string) ($value ?? '')));
@@ -2822,7 +3819,7 @@ class DbController extends ApiController
             return 'uts';
         }
 
-        if (!$strict && in_array($raw, ['ujian', 'exam'], true)) {
+        if (! $strict && in_array($raw, ['ujian', 'exam'], true)) {
             return 'uts';
         }
 
@@ -2836,11 +3833,160 @@ class DbController extends ApiController
             return 'poin';
         }
 
-        if (in_array($raw, ['poin', 'skala_100'], true)) {
-            return $raw;
+        if ($raw === 'poin') {
+            return 'poin';
+        }
+
+        // Backward compatibility: mode skala lama dipaksa ke poin.
+        if ($raw === 'skala_100') {
+            return 'poin';
         }
 
         return null;
+    }
+
+    private function validateGuruMapelBobotPayload(&$payload, bool $requireAllFields = true): ?string
+    {
+        if (! is_array($payload)) {
+            return null;
+        }
+
+        $error = null;
+        $weightRules = [
+            'bobot_tugas_pr' => ['min' => 20, 'max' => 40, 'label' => 'Bobot Tugas/PR'],
+            'bobot_quiz_reguler' => ['min' => 10, 'max' => 30, 'label' => 'Bobot Quiz Reguler'],
+            'bobot_quiz_uts' => ['min' => 20, 'max' => 30, 'label' => 'Bobot Quiz UTS'],
+            'bobot_quiz_uas' => ['min' => 30, 'max' => 40, 'label' => 'Bobot Quiz UAS'],
+        ];
+
+        $this->mapPayload($payload, function ($row) use (&$error, $weightRules, $requireAllFields) {
+            if ($error !== null || ! is_array($row)) {
+                return $row;
+            }
+
+            $mapel = trim((string) ($row['mapel'] ?? ''));
+            if ($requireAllFields && $mapel === '') {
+                $error = 'Mapel untuk bobot penilaian wajib diisi';
+
+                return $row;
+            }
+            if ($mapel !== '') {
+                $row['mapel'] = $mapel;
+            }
+
+            $weights = [];
+            foreach ($weightRules as $key => $rule) {
+                if (! array_key_exists($key, $row)) {
+                    if ($requireAllFields) {
+                        $error = $rule['label'].' wajib diisi';
+
+                        return $row;
+                    }
+
+                    continue;
+                }
+
+                $raw = $row[$key];
+                if ($raw === '' || $raw === null || ! is_numeric($raw)) {
+                    $error = $rule['label'].' harus berupa angka';
+
+                    return $row;
+                }
+
+                $weight = round((float) $raw, 2);
+                $min = (float) $rule['min'];
+                $max = (float) $rule['max'];
+                if ($weight < $min || $weight > $max) {
+                    $error = sprintf(
+                        '%s harus di antara %s%% sampai %s%%',
+                        $rule['label'],
+                        rtrim(rtrim(number_format($min, 2, '.', ''), '0'), '.'),
+                        rtrim(rtrim(number_format($max, 2, '.', ''), '0'), '.')
+                    );
+
+                    return $row;
+                }
+
+                $row[$key] = $weight;
+                $weights[$key] = $weight;
+            }
+
+            if (count($weights) === count($weightRules)) {
+                $total = array_sum($weights);
+                if (abs($total - 100) > 0.01) {
+                    $error = 'Total bobot Tugas/PR + Quiz Reguler + Quiz UTS + Quiz UAS harus tepat 100%';
+
+                    return $row;
+                }
+            } elseif ($requireAllFields) {
+                $error = 'Bobot mapel belum lengkap';
+
+                return $row;
+            }
+
+            return $row;
+        });
+
+        return $error;
+    }
+
+    private function getGuruAmpuMapelLookup(string $guruId): array
+    {
+        $guruId = trim($guruId);
+        if ($guruId === '') {
+            return [];
+        }
+
+        $jadwalQuery = DB::table('jadwal')
+            ->where('guru_id', $guruId)
+            ->whereNotNull('mapel');
+        $this->applyTenantFilter($jadwalQuery);
+
+        $lookup = [];
+        foreach ($jadwalQuery->pluck('mapel')->all() as $mapel) {
+            $normalized = strtolower(trim((string) $mapel));
+            if ($normalized !== '') {
+                $lookup[$normalized] = true;
+            }
+        }
+
+        return $lookup;
+    }
+
+    private function validateGuruMapelBobotOwnership($payload, string $guruId): ?string
+    {
+        if (! is_array($payload)) {
+            return null;
+        }
+
+        $allowedMapelLookup = $this->getGuruAmpuMapelLookup($guruId);
+        if (empty($allowedMapelLookup)) {
+            return 'Anda belum memiliki mapel di jadwal mengajar, sehingga bobot mapel belum bisa disimpan';
+        }
+
+        $error = null;
+        $rows = $this->normalizeRows($payload);
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+
+            $mapel = trim((string) ($row['mapel'] ?? ''));
+            if ($mapel === '') {
+                continue;
+            }
+
+            $normalizedMapel = strtolower($mapel);
+            if (! isset($allowedMapelLookup[$normalizedMapel])) {
+                $error = sprintf(
+                    'Mapel "%s" tidak ada di jadwal mengajar Anda. Bobot hanya boleh diatur untuk mapel yang diampu',
+                    $mapel
+                );
+                break;
+            }
+        }
+
+        return $error;
     }
 
     private function guruCanTeachMapelInKelas(string $guruId, string $kelasId, string $mapel): bool
@@ -2868,7 +4014,7 @@ class DbController extends ApiController
 
     private function validateGuruQuizCreatePayload(&$payload, string $userId): ?string
     {
-        if (!is_array($payload)) {
+        if (! is_array($payload)) {
             return 'Payload quiz tidak valid';
         }
 
@@ -2881,7 +4027,7 @@ class DbController extends ApiController
         $normalizedRows = [];
 
         foreach ($rows as $row) {
-            if (!is_array($row)) {
+            if (! is_array($row)) {
                 continue;
             }
 
@@ -2895,7 +4041,7 @@ class DbController extends ApiController
             if ($kelasId === '' || $mapel === '') {
                 return 'Kelas dan mata pelajaran quiz wajib diisi';
             }
-            if (!$this->guruCanTeachMapelInKelas($userId, $kelasId, $mapel)) {
+            if (! $this->guruCanTeachMapelInKelas($userId, $kelasId, $mapel)) {
                 return 'Kelas dan mapel quiz harus sesuai yang diampu guru';
             }
 
@@ -2922,13 +4068,13 @@ class DbController extends ApiController
             $normalized['mode'] = $mode;
             $startsAtInput = $row['starts_at'] ?? null;
             $startsAt = $this->parseQuizDateTime($startsAtInput);
-            if ($startsAtInput !== null && $startsAtInput !== '' && !$startsAt) {
+            if ($startsAtInput !== null && $startsAtInput !== '' && ! $startsAt) {
                 return 'Tanggal mulai quiz tidak valid';
             }
             $normalized['starts_at'] = $startsAt;
 
             // Draft mode: quiz boleh dibuat dulu tanpa jadwal.
-            if (!$startsAt) {
+            if (! $startsAt) {
                 $normalized['deadline_at'] = null;
                 $normalized['live_started_at'] = null;
                 $normalized['is_active'] = false;
@@ -2944,6 +4090,7 @@ class DbController extends ApiController
                     $normalized['duration_minutes'] = $duration;
                 }
                 $normalizedRows[] = $normalized;
+
                 continue;
             }
 
@@ -2953,10 +4100,10 @@ class DbController extends ApiController
 
             if ($mode === 'regular') {
                 $deadline = $this->parseQuizDateTime($row['deadline_at'] ?? null);
-                if (!$deadline) {
+                if (! $deadline) {
                     return 'Tanggal selesai quiz wajib diisi untuk mode reguler';
                 }
-                if (!$deadline->gt($startsAt)) {
+                if (! $deadline->gt($startsAt)) {
                     return 'Tanggal selesai quiz harus setelah tanggal mulai';
                 }
                 if ($deadline->lt($now)) {
@@ -2971,7 +4118,7 @@ class DbController extends ApiController
             } else {
                 $duration = (int) ($row['duration_minutes'] ?? 0);
                 if ($duration < 10) {
-                    return 'Durasi quiz UTS/UAS minimal 10 menit';
+                    return 'Durasi quiz ujian minimal 10 menit';
                 }
 
                 $normalized['is_live'] = true;
@@ -3015,7 +4162,7 @@ class DbController extends ApiController
             $payload['penilaian'] = $penilaian;
         }
 
-        if (!$touchOwnedTarget && !$touchTimeline) {
+        if (! $touchOwnedTarget && ! $touchTimeline) {
             return null;
         }
 
@@ -3051,12 +4198,12 @@ class DbController extends ApiController
         if ($kelasId === '' || $mapel === '') {
             return 'Kelas dan mata pelajaran quiz wajib diisi';
         }
-        if (!$this->guruCanTeachMapelInKelas($userId, $kelasId, $mapel)) {
+        if (! $this->guruCanTeachMapelInKelas($userId, $kelasId, $mapel)) {
             return 'Kelas dan mapel quiz harus sesuai yang diampu guru';
         }
 
         $startsAt = $this->parseQuizDateTime($payload['starts_at'] ?? $target->starts_at);
-        if (!$startsAt) {
+        if (! $startsAt) {
             return 'Tanggal mulai quiz tidak valid';
         }
         if (array_key_exists('starts_at', $payload) && $startsAt->lt($now)) {
@@ -3083,10 +4230,10 @@ class DbController extends ApiController
 
         if ($mode === 'regular') {
             $deadline = $this->parseQuizDateTime($payload['deadline_at'] ?? $target->deadline_at);
-            if (!$deadline) {
+            if (! $deadline) {
                 return 'Tanggal selesai quiz wajib diisi untuk mode reguler';
             }
-            if (!$deadline->gt($startsAt)) {
+            if (! $deadline->gt($startsAt)) {
                 return 'Tanggal selesai quiz harus setelah tanggal mulai';
             }
             if (array_key_exists('deadline_at', $payload) && $deadline->lt($now)) {
@@ -3104,7 +4251,7 @@ class DbController extends ApiController
 
         $duration = (int) ($payload['duration_minutes'] ?? $target->duration_minutes ?? 0);
         if ($duration < 10) {
-            return 'Durasi quiz UTS/UAS minimal 10 menit';
+            return 'Durasi quiz ujian minimal 10 menit';
         }
 
         $payload['duration_minutes'] = $duration;
@@ -3149,12 +4296,13 @@ class DbController extends ApiController
         if (($jawaban->nilai ?? null) !== null) {
             return true;
         }
+
         return strtolower((string) ($jawaban->status ?? '')) === 'dinilai';
     }
 
     private function validateGuruTugasTimelinePayload($payload, bool $requireMulaiAndDeadline): ?string
     {
-        if (!is_array($payload)) {
+        if (! is_array($payload)) {
             return 'Payload tugas tidak valid';
         }
 
@@ -3162,21 +4310,21 @@ class DbController extends ApiController
         $now = now();
 
         foreach ($rows as $row) {
-            if (!is_array($row)) {
+            if (! is_array($row)) {
                 continue;
             }
 
             $hasMulai = array_key_exists('mulai', $row);
             $hasDeadline = array_key_exists('deadline', $row);
 
-            if ($requireMulaiAndDeadline && (!$hasMulai || !$hasDeadline)) {
+            if ($requireMulaiAndDeadline && (! $hasMulai || ! $hasDeadline)) {
                 return 'Waktu mulai dan deadline wajib diisi';
             }
 
             $mulai = null;
             if ($hasMulai) {
                 $mulai = $this->parseTugasDateTime($row['mulai'] ?? null);
-                if (!$mulai) {
+                if (! $mulai) {
                     return 'Waktu mulai tidak valid';
                 }
                 if ($mulai->lt($now)) {
@@ -3187,7 +4335,7 @@ class DbController extends ApiController
             $deadline = null;
             if ($hasDeadline) {
                 $deadline = $this->parseTugasDateTime($row['deadline'] ?? null);
-                if (!$deadline) {
+                if (! $deadline) {
                     return 'Deadline tidak valid';
                 }
                 if ($deadline->lt($now)) {
@@ -3195,7 +4343,7 @@ class DbController extends ApiController
                 }
             }
 
-            if ($mulai && $deadline && !$deadline->gt($mulai)) {
+            if ($mulai && $deadline && ! $deadline->gt($mulai)) {
                 return 'Deadline harus setelah waktu mulai';
             }
         }
@@ -3208,14 +4356,14 @@ class DbController extends ApiController
         $touchMulai = array_key_exists('mulai', $payload);
         $touchDeadline = array_key_exists('deadline', $payload);
 
-        if (!$touchMulai && !$touchDeadline) {
+        if (! $touchMulai && ! $touchDeadline) {
             return null;
         }
 
         $mulaiInput = null;
         if ($touchMulai) {
             $mulaiInput = $this->parseTugasDateTime($payload['mulai'] ?? null);
-            if (!$mulaiInput) {
+            if (! $mulaiInput) {
                 return 'Waktu mulai tidak valid';
             }
             if ($mulaiInput->lt(now()->startOfMinute())) {
@@ -3226,7 +4374,7 @@ class DbController extends ApiController
         $deadlineInput = null;
         if ($touchDeadline) {
             $deadlineInput = $this->parseTugasDateTime($payload['deadline'] ?? null);
-            if (!$deadlineInput) {
+            if (! $deadlineInput) {
                 return 'Deadline tidak valid';
             }
             if ($deadlineInput->lt(now()->startOfMinute())) {
@@ -3248,7 +4396,7 @@ class DbController extends ApiController
                 ? $deadlineInput
                 : $this->parseTugasDateTime($target->deadline ?? null);
 
-            if ($mulai && $deadline && !$deadline->gt($mulai)) {
+            if ($mulai && $deadline && ! $deadline->gt($mulai)) {
                 return 'Deadline harus setelah waktu mulai';
             }
         }
@@ -3285,7 +4433,7 @@ class DbController extends ApiController
         string $userId,
         bool $isInsert
     ): ?string {
-        if (!$kelas || !is_array($payload)) {
+        if (! $kelas || ! is_array($payload)) {
             return 'Tugas tidak diizinkan';
         }
 
@@ -3293,7 +4441,7 @@ class DbController extends ApiController
         $tugasIds = [];
 
         foreach ($rows as $row) {
-            if (!is_array($row)) {
+            if (! is_array($row)) {
                 continue;
             }
 
@@ -3329,7 +4477,7 @@ class DbController extends ApiController
         $existingByTugas = [];
         foreach ($existingRows as $row) {
             $key = (string) $row->tugas_id;
-            if (!isset($existingByTugas[$key])) {
+            if (! isset($existingByTugas[$key])) {
                 $existingByTugas[$key] = [];
             }
             $existingByTugas[$key][] = $row;
@@ -3338,7 +4486,7 @@ class DbController extends ApiController
         $now = now();
         foreach ($tugasIds as $tugasId) {
             $tugas = $tugasMap[$tugasId] ?? null;
-            if (!$tugas) {
+            if (! $tugas) {
                 return 'Tugas tidak diizinkan';
             }
 
@@ -3354,7 +4502,7 @@ class DbController extends ApiController
                 }
             }
 
-            if ($isInsert && !empty($existingList)) {
+            if ($isInsert && ! empty($existingList)) {
                 return 'Jawaban sudah pernah dikirim, gunakan update';
             }
         }
@@ -3367,7 +4515,7 @@ class DbController extends ApiController
         string $userId,
         ?string $kelas
     ): ?string {
-        if (!$kelas) {
+        if (! $kelas) {
             return 'Profil kelas tidak valid';
         }
 
@@ -3404,7 +4552,7 @@ class DbController extends ApiController
 
             $tugasId = (string) ($row->tugas_id ?? '');
             $tugas = $tugasMap[$tugasId] ?? null;
-            if (!$tugas) {
+            if (! $tugas) {
                 return 'Tugas tidak diizinkan';
             }
 
@@ -3419,7 +4567,7 @@ class DbController extends ApiController
 
     private function payloadHasInvalidTugasForSiswa($payload, ?string $kelas): bool
     {
-        if (!$kelas || !is_array($payload)) {
+        if (! $kelas || ! is_array($payload)) {
             return true;
         }
 
@@ -3427,7 +4575,7 @@ class DbController extends ApiController
         $tugasIds = [];
 
         foreach ($rows as $row) {
-            if (!is_array($row)) {
+            if (! is_array($row)) {
                 continue;
             }
 
@@ -3456,7 +4604,7 @@ class DbController extends ApiController
             $query->pluck('id')->filter()->values()->all()
         );
         foreach ($tugasIds as $tugasId) {
-            if (!in_array((string) $tugasId, $allowed, true)) {
+            if (! in_array((string) $tugasId, $allowed, true)) {
                 return true;
             }
         }
@@ -3491,8 +4639,7 @@ class DbController extends ApiController
         string $currentUserId,
         string $viewerRole = '',
         array $viewerWaliKelas = []
-    ): array
-    {
+    ): array {
         if ($currentUserId === '') {
             return [];
         }
@@ -3540,6 +4687,7 @@ class DbController extends ApiController
 
             if ($rowUserId === $currentUserId) {
                 $out[] = (object) $item;
+
                 continue;
             }
 
@@ -3547,13 +4695,14 @@ class DbController extends ApiController
             $rowKelas = (string) ($item['kelas'] ?? '');
             $isWaliViewingOwnedStudent = (
                 $viewerRole === 'guru'
-                && !empty($viewerWaliKelasMap)
+                && ! empty($viewerWaliKelasMap)
                 && $rowRole === 'siswa'
                 && isset($viewerWaliKelasMap[$rowKelas])
             );
 
             if ($isWaliViewingOwnedStudent) {
                 $out[] = (object) array_intersect_key($item, $allowedForWaliStudentMap);
+
                 continue;
             }
 
@@ -3576,19 +4725,636 @@ class DbController extends ApiController
         return $out;
     }
 
+    private function isNilaiAuditActor(Request $request): bool
+    {
+        return $this->isAdmin($request) || $this->isGuru($request);
+    }
+
+    private function isNilaiFreezeMutationTarget(string $table, string $action, Request $request): bool
+    {
+        if (! $this->isNilaiAuditActor($request)) {
+            return false;
+        }
+
+        if (! in_array($action, ['insert', 'update', 'upsert', 'delete'], true)) {
+            return false;
+        }
+
+        return in_array($table, ['tugas_jawaban', 'quiz_answers', 'quiz_submissions'], true);
+    }
+
+    private function queryRowsToArray($query): array
+    {
+        try {
+            return $query
+                ->get()
+                ->map(fn ($row) => (array) $row)
+                ->values()
+                ->all();
+        } catch (\Throwable $e) {
+            return [];
+        }
+    }
+
+    private function fetchTugasJawabanRowsForPayload(array $rows, ?string $tenantId): array
+    {
+        $ids = [];
+        $pairs = [];
+
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+
+            $id = trim((string) ($row['id'] ?? ''));
+            if ($id !== '') {
+                $ids[] = $id;
+            }
+
+            $userId = trim((string) ($row['user_id'] ?? ''));
+            $tugasId = trim((string) ($row['tugas_id'] ?? ''));
+            if ($userId !== '' && $tugasId !== '') {
+                $pairs[] = [$userId, $tugasId];
+            }
+        }
+
+        if (empty($ids) && empty($pairs)) {
+            return [];
+        }
+
+        $query = DB::table('tugas_jawaban');
+        if ($tenantId) {
+            $query->where('tenant_id', $tenantId);
+        }
+
+        $query->where(function ($q) use ($ids, $pairs) {
+            if (! empty($ids)) {
+                $q->whereIn('id', array_values(array_unique($ids)));
+            }
+
+            foreach ($pairs as [$userId, $tugasId]) {
+                $q->orWhere(function ($nested) use ($userId, $tugasId) {
+                    $nested
+                        ->where('user_id', $userId)
+                        ->where('tugas_id', $tugasId);
+                });
+            }
+        });
+
+        return $this->queryRowsToArray($query);
+    }
+
+    private function queueCriticalChangeApprovalIfNeeded(
+        Request $request,
+        string $table,
+        string $action,
+        $payload,
+        array $filters,
+        array $orders,
+        ?int $limit,
+        ?int $offset,
+        ?string $tenantId
+    ) {
+        if ($request->attributes->get('approval_exec') === true) {
+            return null;
+        }
+
+        if (! in_array($action, ['insert', 'update', 'delete', 'upsert'], true)) {
+            return null;
+        }
+
+        if (! in_array($table, self::CRITICAL_MAKER_CHECKER_TABLES, true)) {
+            return null;
+        }
+
+        if ($this->isSuperAdmin($request)) {
+            return null;
+        }
+
+        if (! $this->isAdmin($request) && ! $this->isGuru($request)) {
+            return null;
+        }
+
+        if (! $tenantId) {
+            return null;
+        }
+
+        if (! $this->isMakerCheckerEnabledForTenant($tenantId)) {
+            return null;
+        }
+
+        if (! $this->hasTable('approval_requests')) {
+            return null;
+        }
+
+        $user = $request->user();
+        $profile = $this->profile($request);
+        $rowEstimate = $this->estimateAffectedRowsFromPayload($payload);
+        if ($action === 'delete' && $rowEstimate < 1) {
+            $rowEstimate = 1;
+        }
+
+        $riskLevel = $this->deriveRiskLevelForApproval($table, $action, $rowEstimate);
+        $summary = $this->summarizeApprovalChange($table, $action, $rowEstimate);
+
+        $changePayload = [
+            'table' => $table,
+            'action' => $action,
+            'payload' => $payload,
+            'filters' => $filters,
+            'order' => $orders,
+            'onConflict' => $request->input('onConflict'),
+            'limit' => $limit,
+            'offset' => $offset,
+            'requested_at' => now()->toIso8601String(),
+        ];
+
+        $requestId = (string) Str::uuid();
+        DB::table('approval_requests')->insert([
+            'id' => $requestId,
+            'tenant_id' => $tenantId,
+            'status' => 'pending',
+            'target_table' => $table,
+            'target_action' => strtoupper($action),
+            'target_record_id' => $this->extractApprovalTargetRecordId($filters, $payload),
+            'change_payload' => json_encode($changePayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            'change_summary' => $summary,
+            'affected_rows_estimate' => max(1, $rowEstimate),
+            'risk_level' => $riskLevel,
+            'requested_by' => $user?->id ? (string) $user->id : null,
+            'requested_by_role' => $profile?->role,
+            'requested_at' => now(),
+            'request_note' => trim((string) $request->input('approval_note', '')) ?: null,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->logAudit(
+            $request,
+            'approval_requests',
+            $requestId,
+            'INSERT',
+            null,
+            [
+                'tenant_id' => $tenantId,
+                'target_table' => $table,
+                'target_action' => strtoupper($action),
+                'risk_level' => $riskLevel,
+                'affected_rows_estimate' => max(1, $rowEstimate),
+            ],
+            $tenantId
+        );
+
+        return response()->json([
+            'data' => [
+                'approval_required' => true,
+                'approval_id' => $requestId,
+                'status' => 'pending',
+                'summary' => $summary,
+                'risk_level' => $riskLevel,
+                'affected_rows_estimate' => max(1, $rowEstimate),
+            ],
+            'message' => 'Perubahan kritikal masuk antrian maker-checker dan menunggu approval.',
+        ], 202);
+    }
+
+    private function hasTable(string $table): bool
+    {
+        try {
+            return Schema::hasTable($table);
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
+    private function isMakerCheckerEnabledForTenant(string $tenantId): bool
+    {
+        if (! Schema::hasTable('settings')) {
+            return false;
+        }
+
+        if (! Schema::hasColumn('settings', 'approval_maker_checker_enabled')) {
+            return true;
+        }
+
+        try {
+            $row = DB::table('settings')
+                ->where('tenant_id', $tenantId)
+                ->orderBy('id')
+                ->first(['approval_maker_checker_enabled']);
+            if (! $row) {
+                return true;
+            }
+
+            return (bool) ($row->approval_maker_checker_enabled ?? true);
+        } catch (\Throwable $e) {
+            return true;
+        }
+    }
+
+    private function estimateAffectedRowsFromPayload($payload): int
+    {
+        if (is_array($payload)) {
+            if (array_is_list($payload)) {
+                return count($payload);
+            }
+
+            return 1;
+        }
+
+        return 1;
+    }
+
+    private function summarizeApprovalChange(string $table, string $action, int $rows): string
+    {
+        $actionLabel = strtoupper($action);
+        $rowLabel = $rows > 1 ? "{$rows} baris" : '1 baris';
+
+        return "{$actionLabel} pada {$table} ({$rowLabel})";
+    }
+
+    private function deriveRiskLevelForApproval(string $table, string $action, int $rows): string
+    {
+        if (strtolower($action) === 'delete') {
+            return 'high';
+        }
+        if ($table === 'settings') {
+            return 'high';
+        }
+        if ($rows >= 20) {
+            return 'high';
+        }
+        if ($rows >= 5) {
+            return 'medium';
+        }
+
+        return 'low';
+    }
+
+    private function extractApprovalTargetRecordId(array $filters, $payload): ?string
+    {
+        $filterId = $filters['eq']['id'] ?? null;
+        if (is_string($filterId) && trim($filterId) !== '') {
+            return trim($filterId);
+        }
+
+        if (is_array($payload)) {
+            if (array_key_exists('id', $payload) && $payload['id'] !== null) {
+                $candidate = trim((string) $payload['id']);
+                if ($candidate !== '') {
+                    return $candidate;
+                }
+            }
+
+            if (array_is_list($payload) && isset($payload[0]) && is_array($payload[0]) && isset($payload[0]['id'])) {
+                $candidate = trim((string) $payload[0]['id']);
+                if ($candidate !== '') {
+                    return $candidate;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private function normalizeSettingsGovernancePayload(&$payload, ?string $userId): ?string
+    {
+        if (! is_array($payload)) {
+            return null;
+        }
+
+        $error = null;
+        $now = now();
+
+        $this->mapPayload($payload, function ($row) use (&$error, $userId, $now) {
+            if ($error !== null || ! is_array($row)) {
+                return $row;
+            }
+
+            $touchRankingPolicy = false;
+            $touchFreezePolicy = false;
+
+            $weightKeys = [
+                'ranking_weight_tugas',
+                'ranking_weight_quiz',
+                'ranking_weight_absensi',
+            ];
+            $weightValues = [];
+            foreach ($weightKeys as $key) {
+                if (! array_key_exists($key, $row)) {
+                    continue;
+                }
+
+                $touchRankingPolicy = true;
+                $raw = $row[$key];
+                if ($raw === '' || $raw === null) {
+                    $row[$key] = 0;
+                    $weightValues[$key] = 0.0;
+
+                    continue;
+                }
+                if (! is_numeric($raw)) {
+                    $error = 'Bobot ranking harus berupa angka';
+
+                    return $row;
+                }
+
+                $weight = round((float) $raw, 2);
+                if ($weight < 0) {
+                    $error = 'Bobot ranking tidak boleh negatif';
+
+                    return $row;
+                }
+
+                $row[$key] = $weight;
+                $weightValues[$key] = $weight;
+            }
+
+            if (count($weightValues) === count($weightKeys)) {
+                $total = array_sum($weightValues);
+                if (abs($total - 100) > 0.01) {
+                    $error = 'Total bobot tugas + quiz + absensi harus tepat 100';
+
+                    return $row;
+                }
+            }
+
+            if (array_key_exists('ranking_tiebreak_order', $row)) {
+                $touchRankingPolicy = true;
+                $normalizedTieBreak = $this->normalizeSettingsTieBreakOrder($row['ranking_tiebreak_order']);
+                if ($normalizedTieBreak === null) {
+                    $error = 'Format urutan tie-break ranking tidak valid';
+
+                    return $row;
+                }
+                $row['ranking_tiebreak_order'] = json_encode(
+                    $normalizedTieBreak,
+                    JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+                );
+            }
+
+            if (array_key_exists('ranking_core_mapel', $row)) {
+                $touchRankingPolicy = true;
+                $normalizedCoreMapel = $this->normalizeSettingsMapelList($row['ranking_core_mapel']);
+                if ($normalizedCoreMapel === null) {
+                    $error = 'Format mapel inti tidak valid';
+
+                    return $row;
+                }
+                $row['ranking_core_mapel'] = json_encode(
+                    $normalizedCoreMapel,
+                    JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+                );
+            }
+
+            foreach ([
+                'approval_maker_checker_enabled',
+                'approval_require_second_approver',
+                'anomaly_alert_enabled',
+            ] as $boolKey) {
+                if (! array_key_exists($boolKey, $row)) {
+                    continue;
+                }
+
+                $normalizedBool = filter_var($row[$boolKey], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+                $row[$boolKey] = $normalizedBool ?? false;
+            }
+
+            if (array_key_exists('anomaly_bulk_threshold', $row)) {
+                if (! is_numeric($row['anomaly_bulk_threshold'])) {
+                    $error = 'Ambang anomali bulk harus berupa angka';
+
+                    return $row;
+                }
+
+                $threshold = (int) $row['anomaly_bulk_threshold'];
+                if ($threshold < 5 || $threshold > 1000) {
+                    $error = 'Ambang anomali bulk harus di antara 5 sampai 1000';
+
+                    return $row;
+                }
+
+                $row['anomaly_bulk_threshold'] = $threshold;
+            }
+
+            foreach (['nilai_freeze_enabled', 'nilai_freeze_start', 'nilai_freeze_end', 'nilai_freeze_reason'] as $key) {
+                if (array_key_exists($key, $row)) {
+                    $touchFreezePolicy = true;
+                }
+            }
+
+            if (array_key_exists('nilai_freeze_enabled', $row)) {
+                $row['nilai_freeze_enabled'] = filter_var(
+                    $row['nilai_freeze_enabled'],
+                    FILTER_VALIDATE_BOOLEAN,
+                    FILTER_NULL_ON_FAILURE
+                );
+                if ($row['nilai_freeze_enabled'] === null) {
+                    $row['nilai_freeze_enabled'] = false;
+                }
+            }
+
+            if (array_key_exists('nilai_freeze_start', $row)) {
+                if ($row['nilai_freeze_start'] === '' || $row['nilai_freeze_start'] === null) {
+                    $row['nilai_freeze_start'] = null;
+                } elseif (! $this->isValidDateTimeValue($row['nilai_freeze_start'])) {
+                    $error = 'Tanggal mulai freeze nilai tidak valid';
+
+                    return $row;
+                }
+            }
+
+            if (array_key_exists('nilai_freeze_end', $row)) {
+                if ($row['nilai_freeze_end'] === '' || $row['nilai_freeze_end'] === null) {
+                    $row['nilai_freeze_end'] = null;
+                } elseif (! $this->isValidDateTimeValue($row['nilai_freeze_end'])) {
+                    $error = 'Tanggal akhir freeze nilai tidak valid';
+
+                    return $row;
+                }
+            }
+
+            if (
+                array_key_exists('nilai_freeze_start', $row)
+                && array_key_exists('nilai_freeze_end', $row)
+                && $row['nilai_freeze_start']
+                && $row['nilai_freeze_end']
+            ) {
+                try {
+                    $start = Carbon::parse((string) $row['nilai_freeze_start']);
+                    $end = Carbon::parse((string) $row['nilai_freeze_end']);
+                    if ($start->gt($end)) {
+                        $error = 'Tanggal akhir freeze nilai harus setelah tanggal mulai';
+
+                        return $row;
+                    }
+                } catch (\Throwable $e) {
+                    $error = 'Rentang tanggal freeze nilai tidak valid';
+
+                    return $row;
+                }
+            }
+
+            if (array_key_exists('nilai_freeze_reason', $row)) {
+                $reason = trim((string) ($row['nilai_freeze_reason'] ?? ''));
+                $row['nilai_freeze_reason'] = $reason === '' ? null : Str::limit($reason, 500, '');
+            }
+
+            if ($touchRankingPolicy) {
+                $row['ranking_policy_updated_at'] = $now;
+            }
+
+            if ($touchFreezePolicy) {
+                $row['nilai_freeze_updated_at'] = $now;
+                $row['nilai_freeze_updated_by'] = $userId ?: null;
+            }
+
+            return $row;
+        });
+
+        return $error;
+    }
+
+    private function isValidDateTimeValue($value): bool
+    {
+        try {
+            Carbon::parse((string) $value);
+
+            return true;
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
+    private function normalizeSettingsTieBreakOrder($value): ?array
+    {
+        $defaultOrder = ['nilai_akhir', 'mapel_inti', 'absensi', 'nama'];
+        $normalized = [];
+
+        $source = $value;
+        if (is_string($source)) {
+            $trimmed = trim($source);
+            if ($trimmed === '') {
+                return $defaultOrder;
+            }
+
+            $decoded = null;
+            if (str_starts_with($trimmed, '[')) {
+                $decoded = json_decode($trimmed, true);
+            }
+
+            if (is_array($decoded)) {
+                $source = $decoded;
+            } else {
+                $source = preg_split('/[,;\\n\\r]+/', $trimmed) ?: [];
+            }
+        }
+
+        if (! is_array($source)) {
+            return null;
+        }
+
+        foreach ($source as $item) {
+            $token = strtolower(trim((string) $item));
+            if ($token === '') {
+                continue;
+            }
+
+            $mapped = match ($token) {
+                'nilai_akhir', 'nilaiakhir', 'final_score', 'akhir' => 'nilai_akhir',
+                'mapel_inti', 'mapelinti', 'core_mapel', 'core' => 'mapel_inti',
+                'absensi', 'attendance' => 'absensi',
+                'nama', 'name' => 'nama',
+                default => null,
+            };
+
+            if ($mapped === null) {
+                return null;
+            }
+
+            if (! in_array($mapped, $normalized, true)) {
+                $normalized[] = $mapped;
+            }
+        }
+
+        foreach ($defaultOrder as $fallback) {
+            if (! in_array($fallback, $normalized, true)) {
+                $normalized[] = $fallback;
+            }
+        }
+
+        return $normalized;
+    }
+
+    private function normalizeSettingsMapelList($value): ?array
+    {
+        if ($value === null || $value === '') {
+            return [];
+        }
+
+        $source = $value;
+        if (is_string($source)) {
+            $trimmed = trim($source);
+            if ($trimmed === '') {
+                return [];
+            }
+
+            $decoded = null;
+            if (str_starts_with($trimmed, '[')) {
+                $decoded = json_decode($trimmed, true);
+            }
+
+            if (is_array($decoded)) {
+                $source = $decoded;
+            } else {
+                $source = preg_split('/[,;\\n\\r]+/', $trimmed) ?: [];
+            }
+        }
+
+        if (! is_array($source)) {
+            return null;
+        }
+
+        $result = [];
+        foreach ($source as $item) {
+            $name = trim((string) $item);
+            if ($name === '') {
+                continue;
+            }
+            if (! in_array($name, $result, true)) {
+                $result[] = $name;
+            }
+        }
+
+        return $result;
+    }
+
     private function payloadHasInvalidScore($payload): bool
     {
-        if (!is_array($payload)) return false;
+        if (! is_array($payload)) {
+            return false;
+        }
         $rows = $this->isAssoc($payload) ? [$payload] : $payload;
         foreach ($rows as $row) {
-            if (!is_array($row)) continue;
-            if (!array_key_exists('score', $row)) continue;
+            if (! is_array($row)) {
+                continue;
+            }
+            if (! array_key_exists('score', $row)) {
+                continue;
+            }
             $value = $row['score'];
-            if ($value === null || $value === '') continue;
-            if (!is_numeric($value)) return true;
+            if ($value === null || $value === '') {
+                continue;
+            }
+            if (! is_numeric($value)) {
+                return true;
+            }
             $score = (int) $value;
-            if ($score < 0 || $score > 100) return true;
+            if ($score < 0 || $score > 100) {
+                return true;
+            }
         }
+
         return false;
     }
 }

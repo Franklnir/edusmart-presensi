@@ -515,8 +515,8 @@ class DbSecurityTest extends TestCase
     {
         $user = User::query()->create([
             'id' => (string) Str::uuid(),
-            'name' => $role . ' test',
-            'email' => $role . '_' . Str::random(8) . '@example.com',
+            'name' => $role.' test',
+            'email' => $role.'_'.Str::random(8).'@example.com',
             'password' => Hash::make('password123'),
         ]);
 

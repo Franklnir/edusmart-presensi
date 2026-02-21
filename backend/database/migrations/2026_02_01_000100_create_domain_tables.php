@@ -484,9 +484,9 @@ return new class extends Migration
         });
 
         if ($this->isPostgres()) {
-            DB::statement("alter table profiles add constraint profiles_no_hp_siswa_len check (no_hp_siswa is null or length(no_hp_siswa) <= 14)");
-            DB::statement("alter table profiles add constraint profiles_no_hp_wali_len check (no_hp_wali is null or length(no_hp_wali) <= 14)");
-            DB::statement("alter table tugas_jawaban add constraint tugas_jawaban_nilai_check check (nilai is null or (nilai >= 0 and nilai <= 100))");
+            DB::statement('alter table profiles add constraint profiles_no_hp_siswa_len check (no_hp_siswa is null or length(no_hp_siswa) <= 14)');
+            DB::statement('alter table profiles add constraint profiles_no_hp_wali_len check (no_hp_wali is null or length(no_hp_wali) <= 14)');
+            DB::statement('alter table tugas_jawaban add constraint tugas_jawaban_nilai_check check (nilai is null or (nilai >= 0 and nilai <= 100))');
         }
     }
 

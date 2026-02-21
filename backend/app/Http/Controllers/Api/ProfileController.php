@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers\Api;
 
-use App\Models\Profile;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -12,20 +11,23 @@ class ProfileController extends ApiController
     public function me(Request $request)
     {
         $profile = $this->profile($request);
+
         return response()->json(['data' => $profile]);
     }
 
     public function updateMe(Request $request)
     {
         $profile = $this->profile($request);
-        if (!$profile) return $this->deny('User tidak ditemukan', 404);
+        if (! $profile) {
+            return $this->deny('User tidak ditemukan', 404);
+        }
         $tenantId = $this->tenantId($request);
 
         $payload = $request->all();
         $allowed = [
             'nama', 'jk', 'nis', 'usia', 'kelas', 'no_hp_siswa', 'no_hp_wali',
             'alamat', 'telp', 'agama', 'jabatan', 'photo_url', 'photo_path',
-            'tanggal_lahir', 'rfid_uid'
+            'tanggal_lahir', 'rfid_uid',
         ];
         $data = array_intersect_key($payload, array_flip($allowed));
 
@@ -46,6 +48,7 @@ class ProfileController extends ApiController
             $freshQuery->where('tenant_id', $tenantId);
         }
         $fresh = $freshQuery->first();
+
         return response()->json(['data' => $fresh]);
     }
 
@@ -80,10 +83,10 @@ class ProfileController extends ApiController
             $uid = $request->user()->id;
             $query->where(function ($q) use ($kelas, $uid) {
                 $q->where('id', $uid)
-                  ->orWhere('role', 'guru')
-                  ->orWhere(function ($sq) use ($kelas) {
-                      $sq->where('role', 'siswa')->where('kelas', $kelas);
-                  });
+                    ->orWhere('role', 'guru')
+                    ->orWhere(function ($sq) use ($kelas) {
+                        $sq->where('role', 'siswa')->where('kelas', $kelas);
+                    });
             });
         }
 
@@ -104,9 +107,11 @@ class ProfileController extends ApiController
 
     public function store(Request $request)
     {
-        if (!$this->isAdmin($request)) return $this->deny();
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
         $tenantId = $this->tenantId($request);
-        if (!$tenantId) {
+        if (! $tenantId) {
             return $this->deny('Tenant tidak valid', 400);
         }
 
@@ -125,14 +130,17 @@ class ProfileController extends ApiController
 
         $payload['tenant_id'] = $tenantId;
         DB::table('profiles')->insert($payload);
+
         return response()->json(['data' => $payload], 201);
     }
 
     public function update(Request $request, string $id)
     {
-        if (!$this->isAdmin($request)) return $this->deny();
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
         $tenantId = $this->tenantId($request);
-        if (!$tenantId) {
+        if (! $tenantId) {
             return $this->deny('Tenant tidak valid', 400);
         }
 
@@ -140,17 +148,21 @@ class ProfileController extends ApiController
         $payload['updated_at'] = now();
         DB::table('profiles')->where('id', $id)->where('tenant_id', $tenantId)->update($payload);
         $row = DB::table('profiles')->where('id', $id)->where('tenant_id', $tenantId)->first();
+
         return response()->json(['data' => $row]);
     }
 
     public function destroy(Request $request, string $id)
     {
-        if (!$this->isAdmin($request)) return $this->deny();
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
         $tenantId = $this->tenantId($request);
-        if (!$tenantId) {
+        if (! $tenantId) {
             return $this->deny('Tenant tidak valid', 400);
         }
         DB::table('profiles')->where('id', $id)->where('tenant_id', $tenantId)->delete();
+
         return response()->json(['data' => 'deleted']);
     }
 }

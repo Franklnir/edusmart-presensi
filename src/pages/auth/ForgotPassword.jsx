@@ -1,5 +1,5 @@
 // src/pages/auth/ForgotPassword.jsx
-import React, { useState } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 
@@ -9,6 +9,26 @@ const ForgotPassword = () => {
   const [success, setSuccess] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
+  // Rate limiting: 60s cooldown setelah submit
+  const [cooldownEnd, setCooldownEnd] = useState(0)
+  const [cooldownLeft, setCooldownLeft] = useState(0)
+  const timerRef = useRef(null)
+
+  useEffect(() => {
+    if (cooldownEnd <= 0) return
+    const tick = () => {
+      const left = Math.max(0, Math.ceil((cooldownEnd - Date.now()) / 1000))
+      setCooldownLeft(left)
+      if (left <= 0) {
+        clearInterval(timerRef.current)
+        setCooldownEnd(0)
+      }
+    }
+    tick()
+    timerRef.current = setInterval(tick, 500)
+    return () => clearInterval(timerRef.current)
+  }, [cooldownEnd])
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
@@ -16,6 +36,12 @@ const ForgotPassword = () => {
 
     if (!email) {
       setError('Email harus diisi.')
+      return
+    }
+
+    // Rate limit check
+    if (cooldownEnd > Date.now()) {
+      setError(`Tunggu ${cooldownLeft} detik sebelum mengirim ulang.`)
       return
     }
 
@@ -34,6 +60,9 @@ const ForgotPassword = () => {
         setSuccess(
           'Link reset password telah dikirim ke email kamu. Silakan cek inbox/spam.'
         )
+        // Start 60s cooldown
+        setCooldownEnd(Date.now() + 60000)
+        setCooldownLeft(60)
       }
     } catch (err) {
       console.error('resetPasswordForEmail error:', err)
@@ -88,7 +117,7 @@ const ForgotPassword = () => {
 
           <button
             type="submit"
-            disabled={isSubmitting}
+            disabled={isSubmitting || cooldownEnd > Date.now()}
             className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-semibold py-3 px-4 rounded-xl transition-colors flex items-center justify-center gap-2 shadow-md shadow-indigo-600/30"
           >
             {isSubmitting ? (
@@ -96,6 +125,8 @@ const ForgotPassword = () => {
                 <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                 Mengirim link...
               </>
+            ) : cooldownEnd > Date.now() ? (
+              `Tunggu ${cooldownLeft} detik...`
             ) : (
               'Kirim Link Reset Password'
             )}

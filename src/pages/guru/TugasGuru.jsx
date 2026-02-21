@@ -23,14 +23,45 @@ const MONTH_NAMES_ID = [
 ]
 
 const FILE_SIZE_LIMITS = {
-  IMAGE: 70 * 1024,
+  IMAGE: 100 * 1024,
   PDF: 2 * 1024 * 1024,
   DOCUMENT: 2 * 1024 * 1024,
-  PRESENTATION: 3 * 1024 * 1024,
-  OTHER: 5 * 1024 * 1024
+  PRESENTATION: 3 * 1024 * 1024
 }
 
 const isHttpUrl = (v = '') => /^https?:\/\//i.test(String(v || ''))
+const looksLikeDomainUrl = (v = '') => /^[a-z0-9-]+(\.[a-z0-9-]+)+(?::\d+)?(\/|$)/i.test(String(v || '').trim())
+
+const normalizeOptionalUrl = (value = '') => {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  const normalized = isHttpUrl(raw) ? raw : looksLikeDomainUrl(raw) ? `https://${raw}` : ''
+  if (!normalized) return ''
+  try {
+    return new URL(normalized).toString()
+  } catch {
+    return ''
+  }
+}
+
+const hasUsableValue = (value = '') => {
+  const raw = String(value || '').trim()
+  if (!raw) return false
+  const normalized = raw.toLowerCase()
+  return !['null', 'undefined', '-', 'n/a'].includes(normalized)
+}
+
+const ASSIGNMENT_FILE_ACCEPT = {
+  'image/*': ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'],
+  'application/pdf': ['.pdf'],
+  'application/msword': ['.doc'],
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+  'application/vnd.oasis.opendocument.text': ['.odt'],
+  'application/rtf': ['.rtf'],
+  'application/vnd.ms-powerpoint': ['.ppt'],
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'],
+  'application/vnd.oasis.opendocument.presentation': ['.odp']
+}
 
 const addCacheBuster = (url) => {
   if (!url) return ''
@@ -177,7 +208,7 @@ const validateKelasAccess = (userKelasList, kelasId) => {
 /* =========================
    Compression Helpers
 ========================= */
-const compressImage = async (file, maxSizeKB = 70, initialQuality = 0.9) => {
+const compressImage = async (file, maxSizeKB = 100, initialQuality = 0.9) => {
   return new Promise((resolve, reject) => {
     if (!file?.type?.startsWith('image/')) return reject(new Error('File bukan gambar'))
     if (file.size <= maxSizeKB * 1024) return resolve(file)
@@ -259,7 +290,10 @@ const compressFileBeforeUpload = async (file) => {
   ) {
     return ensureMax(FILE_SIZE_LIMITS.DOCUMENT, 'dokumen')
   }
-  return ensureMax(FILE_SIZE_LIMITS.OTHER, 'lainnya')
+
+  throw new Error(
+    'Tipe file tidak didukung. Gunakan gambar (JPG/PNG), PDF/Dokumen, atau PPT.'
+  )
 }
 
 /* =========================
@@ -271,7 +305,11 @@ const normalizeAssignmentKey = (urlOrPath) => extractObjectPath(ASSIGNMENT_BUCKE
 
 const createSignedUrlForAssignment = async (urlOrPath, expiresInSec = 60 * 15) => {
   const key = normalizeAssignmentKey(urlOrPath)
-  if (!key) throw new Error('Path file tidak valid')
+  if (!key) {
+    const normalizedExternal = normalizeOptionalUrl(urlOrPath)
+    if (normalizedExternal) return normalizedExternal
+    throw new Error('Path file tidak valid')
+  }
   // getSignedUrlForValue sudah handle url/path dan akan membuat signed url baru
   return getSignedUrlForValue(ASSIGNMENT_BUCKET, key, expiresInSec)
 }
@@ -366,6 +404,7 @@ export default function TugasGuru() {
   const [form, setForm] = useState({
     judul: '',
     keterangan: '',
+    link: '',
     mulai: getNowDateTimeLocal(),
     deadline: getNowDateTimeLocal(),
     file_url: ''
@@ -1052,6 +1091,12 @@ export default function TugasGuru() {
       return
     }
 
+    const safeLink = normalizeOptionalUrl(form.link)
+    if (String(form.link || '').trim() && !safeLink) {
+      pushToast('error', 'Link referensi tidak valid')
+      return
+    }
+
     try {
       setLoading(true)
 
@@ -1060,6 +1105,7 @@ export default function TugasGuru() {
         mapel: selectedMapel,
         judul: form.judul,
         keterangan: form.keterangan,
+        link: safeLink || null,
         mulai: new Date(form.mulai).toISOString(),
         deadline: new Date(form.deadline).toISOString(),
         file_url: form.file_url, // simpan PATH (bukan URL)
@@ -1071,7 +1117,7 @@ export default function TugasGuru() {
 
       pushToast('success', 'Tugas berhasil ditambahkan')
       const nowLocal = getNowDateTimeLocal()
-      setForm({ judul: '', keterangan: '', mulai: nowLocal, deadline: nowLocal, file_url: '' })
+      setForm({ judul: '', keterangan: '', link: '', mulai: nowLocal, deadline: nowLocal, file_url: '' })
       setUploadedFileSizeCreate('')
 
       await loadTugas()
@@ -1097,6 +1143,7 @@ export default function TugasGuru() {
       mapel: selectedTugas.mapel,
       judul: selectedTugas.judul,
       keterangan: selectedTugas.keterangan || '',
+      link: selectedTugas.link || '',
       mulai: toDatetimeLocalValue(selectedTugas.mulai || selectedTugas.created_at),
       deadline: toDatetimeLocalValue(selectedTugas.deadline),
       file_url: selectedTugas.file_url || '',
@@ -1129,12 +1176,19 @@ export default function TugasGuru() {
       return
     }
 
+    const safeLink = normalizeOptionalUrl(editForm.link)
+    if (String(editForm.link || '').trim() && !safeLink) {
+      pushToast('error', 'Link referensi tidak valid')
+      return
+    }
+
     try {
       setLoading(true)
 
       const payload = {
         judul: editForm.judul,
         keterangan: editForm.keterangan,
+        link: safeLink || null,
         mulai: new Date(editForm.mulai).toISOString(),
         deadline: new Date(editForm.deadline).toISOString(),
         file_url: editForm.file_url,
@@ -1294,8 +1348,29 @@ export default function TugasGuru() {
   /* =========================
      14) Render helpers
 ========================= */
+  const openPreviewAny = async (keyOrUrl, errorPrefix = 'Gagal membuka preview') => {
+    const raw = String(keyOrUrl || '').trim()
+    if (!hasUsableValue(raw)) {
+      pushToast('error', 'File atau link tidak tersedia')
+      return
+    }
+
+    try {
+      const signed = await createSignedUrlForAssignment(raw, 60 * 30)
+      setPreviewFile(signed)
+    } catch (err) {
+      console.error(err)
+      const parsed = parseSupabaseError(err)
+      if (parsed.code === 'rls_denied' || parsed.code === 'storage_policy_recursion') {
+        pushToast('error', `${errorPrefix}: ${parsed.message}`)
+      } else {
+        pushToast('error', `${errorPrefix}: ${parsed.message}`)
+      }
+    }
+  }
+
   const renderFileButton = (keyOrUrl, text, fileSize = '') => {
-    if (!keyOrUrl) return null
+    if (!hasUsableValue(keyOrUrl)) return null
 
     const raw = String(keyOrUrl)
     const ext = raw.split('?')[0].split('.').pop()?.toLowerCase() || ''
@@ -1305,18 +1380,7 @@ export default function TugasGuru() {
     const handlePreview = async (e) => {
       e.preventDefault()
       e.stopPropagation()
-      try {
-        const signed = await createSignedUrlForAssignment(keyOrUrl, 60 * 30)
-        setPreviewFile(signed)
-      } catch (err) {
-        console.error(err)
-        const parsed = parseSupabaseError(err)
-        if (parsed.code === 'rls_denied' || parsed.code === 'storage_policy_recursion') {
-          pushToast('error', `Gagal membuka preview: ${parsed.message}`)
-        } else {
-          pushToast('error', `Gagal membuka preview file: ${parsed.message}`)
-        }
-      }
+      await openPreviewAny(keyOrUrl, 'Gagal membuka preview file')
     }
 
     return (
@@ -1685,13 +1749,26 @@ export default function TugasGuru() {
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-2">Keterangan Tugas</label>
               <textarea
-                rows="4"
+                rows="7"
                 className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white resize-none text-sm"
                 value={form.keterangan}
                 onChange={(e) => setForm((prev) => ({ ...prev, keterangan: e.target.value }))}
                 placeholder="Tambahkan instruksi pengerjaan tugas..."
                 maxLength={1000}
               />
+
+              <div className="mt-4">
+                <label className="block text-sm font-semibold text-slate-700 mb-2">Link Referensi (opsional)</label>
+                <input
+                  className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+                  value={form.link}
+                  onChange={(e) => setForm((prev) => ({ ...prev, link: e.target.value }))}
+                  placeholder="contoh: drive.google.com/... / youtube.com/... / website"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Link akan bisa dipreview overlay (Google Drive / YouTube / Website).
+                </p>
+              </div>
             </div>
 
             <div>
@@ -1750,8 +1827,7 @@ export default function TugasGuru() {
               ) : (
                 <FileDropzone
                   onFiles={(files) => handleFileUpload(files, 'create')}
-                  accept="*/*"
-                  maxSize={10 * 1024 * 1024}
+                  accept={ASSIGNMENT_FILE_ACCEPT}
                   label="Seret file lampiran ke sini atau klik untuk memilih"
                 />
               )}
@@ -1759,10 +1835,9 @@ export default function TugasGuru() {
               <div className="mt-3 p-3 bg-slate-50 rounded-xl border border-slate-200">
                 <p className="text-xs font-semibold text-slate-700 mb-2">📋 Batas Ukuran File:</p>
                 <ul className="text-xs text-slate-600 space-y-1">
-                  <li>🖼️ Gambar: maks 70KB (otomatis dikompresi)</li>
+                  <li>🖼️ Gambar: maks 100KB (otomatis dikompresi)</li>
                   <li>📄 PDF/Dokumen: maks 2MB</li>
                   <li>📊 PPT: maks 3MB</li>
-                  <li>📦 Lainnya: maks 5MB</li>
                 </ul>
               </div>
             </div>
@@ -2046,6 +2121,21 @@ export default function TugasGuru() {
                           </span>
                         </div>
 
+                        {(t.file_url || t.link) && (
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {t.file_url && (
+                              <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 text-[11px] font-semibold">
+                                📎 Lampiran
+                              </span>
+                            )}
+                            {t.link && (
+                              <span className="px-2 py-1 rounded-full bg-purple-50 text-purple-700 border border-purple-200 text-[11px] font-semibold">
+                                🔗 Link
+                              </span>
+                            )}
+                          </div>
+                        )}
+
                         <div className="mt-4 grid grid-cols-4 gap-2 text-center">
                           <div className="p-2 rounded-xl bg-slate-50 border border-slate-200">
                             <div className="text-[11px] text-slate-500">Siswa</div>
@@ -2141,6 +2231,11 @@ export default function TugasGuru() {
                             Ada Lampiran
                           </span>
                         )}
+                        {selectedTugas.link && (
+                          <span className="px-3 py-1 rounded-full bg-purple-100 text-purple-700 font-semibold">
+                            Ada Link
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -2148,19 +2243,19 @@ export default function TugasGuru() {
                       {selectedTugas.file_url && (
                         <button
                           type="button"
-                          onClick={async () => {
-                            try {
-                              const signed = await createSignedUrlForAssignment(selectedTugas.file_url, 60 * 30)
-                              setPreviewFile(signed)
-                            } catch (e) {
-                              console.error(e)
-                              const parsed = parseSupabaseError(e)
-                              pushToast('error', `Gagal membuka lampiran tugas: ${parsed.message}`)
-                            }
-                          }}
+                          onClick={() => openPreviewAny(selectedTugas.file_url, 'Gagal membuka lampiran tugas')}
                           className="px-4 py-2 rounded-2xl bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors"
                         >
                           📎 Lampiran
+                        </button>
+                      )}
+                      {selectedTugas.link && (
+                        <button
+                          type="button"
+                          onClick={() => openPreviewAny(selectedTugas.link, 'Gagal membuka link referensi')}
+                          className="px-4 py-2 rounded-2xl bg-purple-600 text-white font-semibold hover:bg-purple-700 transition-colors"
+                        >
+                          🔗 Link Referensi
                         </button>
                       )}
 
@@ -2260,11 +2355,21 @@ export default function TugasGuru() {
                         <div className="md:col-span-3">
                           <label className="block text-sm font-semibold text-slate-700 mb-2">Keterangan</label>
                           <textarea
-                            rows="4"
+                            rows="7"
                             className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm resize-none"
                             value={editForm.keterangan}
                             onChange={(e) => setEditForm((p) => ({ ...p, keterangan: e.target.value }))}
                             maxLength={1000}
+                          />
+                        </div>
+
+                        <div className="md:col-span-3">
+                          <label className="block text-sm font-semibold text-slate-700 mb-2">Link Referensi (opsional)</label>
+                          <input
+                            className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+                            value={editForm.link || ''}
+                            onChange={(e) => setEditForm((p) => ({ ...p, link: e.target.value }))}
+                            placeholder="contoh: drive.google.com/... / youtube.com/... / website"
                           />
                         </div>
                       </div>
@@ -2310,8 +2415,7 @@ export default function TugasGuru() {
 
                         <FileDropzone
                           onFiles={handleEditFileUpload}
-                          accept="*/*"
-                          maxSize={10 * 1024 * 1024}
+                          accept={ASSIGNMENT_FILE_ACCEPT}
                           label={editForm.file_url ? 'Ganti file lampiran (opsional)' : 'Seret file lampiran baru ke sini atau klik untuk memilih'}
                         />
                       </div>
@@ -2330,6 +2434,20 @@ export default function TugasGuru() {
                           ) : (
                             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-slate-500">
                               <div className="font-semibold">Tidak ada keterangan.</div>
+                            </div>
+                          )}
+
+                          {selectedTugas.link && (
+                            <div className="bg-white border border-slate-200 rounded-2xl p-4">
+                              <div className="text-sm font-bold text-slate-800 mb-2">🔗 Link Referensi</div>
+                              <div className="text-xs text-slate-500 break-all mb-3">{selectedTugas.link}</div>
+                              <button
+                                type="button"
+                                onClick={() => openPreviewAny(selectedTugas.link, 'Gagal membuka link referensi')}
+                                className="px-4 py-2 rounded-xl bg-purple-600 text-white text-sm font-semibold hover:bg-purple-700 transition-colors"
+                              >
+                                👁️ Preview Link
+                              </button>
                             </div>
                           )}
 
@@ -2387,15 +2505,19 @@ export default function TugasGuru() {
                             </div>
                           )}
 
-                          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
-                            <div className="text-sm font-bold text-slate-800 mb-2">🛡️ Catatan Anti-IDOR</div>
-                            <ul className="text-xs text-slate-600 space-y-1 list-disc pl-5">
-                              <li>Query tugas dibatasi <b>created_by = guru</b>.</li>
-                              <li>Detail divalidasi: pemilik tugas + kelas yang diampu.</li>
-                              <li>Upload lampiran masuk ke <b>tugas_lampiran/&lt;guruId&gt;/</b>.</li>
-                              <li>Hapus lampiran hanya untuk folder guru sendiri.</li>
-                            </ul>
-                          </div>
+                          {selectedTugas.link && (
+                            <div className="bg-white border border-slate-200 rounded-2xl p-4">
+                              <div className="text-sm font-bold text-slate-800 mb-2">🔗 Link Referensi</div>
+                              <button
+                                type="button"
+                                onClick={() => openPreviewAny(selectedTugas.link, 'Gagal membuka link referensi')}
+                                className="w-full px-4 py-3 rounded-2xl bg-purple-600 text-white font-bold hover:bg-purple-700 transition-colors"
+                              >
+                                👁️ Preview Link
+                              </button>
+                            </div>
+                          )}
+
                         </div>
                       </div>
                     </>

@@ -60,4 +60,3 @@ return new class extends Migration
         Schema::dropIfExists('import_siswa_histories');
     }
 };
-

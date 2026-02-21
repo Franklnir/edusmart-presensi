@@ -1,4 +1,8 @@
-import * as XLSX from 'xlsx'
+import {
+  parseExcelSerialDate,
+  readRowsFromCsvText as readRowsFromCsvTextSafe,
+  readRowsFromSpreadsheetFile
+} from './spreadsheet'
 
 export const normalizeHeader = (value) =>
   String(value || '')
@@ -40,14 +44,8 @@ export const parseDateValue = (value) => {
   }
 
   if (typeof value === 'number') {
-    const parsed = XLSX.SSF.parse_date_code(value)
-    if (parsed && parsed.y && parsed.m && parsed.d) {
-      return `${parsed.y}-${pad2(parsed.m)}-${pad2(parsed.d)}`
-    }
-    const excelEpoch = new Date(Math.round((value - 25569) * 86400 * 1000))
-    if (!Number.isNaN(excelEpoch.getTime())) {
-      return `${excelEpoch.getFullYear()}-${pad2(excelEpoch.getMonth() + 1)}-${pad2(excelEpoch.getDate())}`
-    }
+    const excelDate = parseExcelSerialDate(value)
+    if (excelDate) return excelDate
   }
 
   const raw = String(value).trim()
@@ -103,19 +101,11 @@ export const buildDefaultPassword = (tanggalLahir, nis) => {
 }
 
 export const readRowsFromFile = async (file) => {
-  const buffer = await file.arrayBuffer()
-  const workbook = XLSX.read(buffer, { type: 'array', cellDates: true })
-  const sheetName = workbook.SheetNames[0]
-  const sheet = workbook.Sheets[sheetName]
-  const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' })
-  return rows
+  return readRowsFromSpreadsheetFile(file)
 }
 
 export const readRowsFromCsvText = (csvText) => {
-  const workbook = XLSX.read(csvText, { type: 'string', cellDates: true })
-  const sheetName = workbook.SheetNames[0]
-  const sheet = workbook.Sheets[sheetName]
-  return XLSX.utils.sheet_to_json(sheet, { defval: '' })
+  return readRowsFromCsvTextSafe(csvText)
 }
 
 export const readRowsFromSheetUrl = async (url) => {

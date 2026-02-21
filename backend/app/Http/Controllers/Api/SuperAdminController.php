@@ -4,7 +4,9 @@ namespace App\Http\Controllers\Api;
 
 use App\Models\Profile;
 use App\Models\User;
+use App\Traits\HasTenantRestoreLogic;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
@@ -14,12 +16,23 @@ use Illuminate\Support\Str;
 
 class SuperAdminController extends ApiController
 {
+    use HasTenantRestoreLogic;
+
     private array $tableExistenceCache = [];
+
     private array $tableColumnExistenceCache = [];
 
     private const BACKUP_MODE_STUDENTS = 'students';
+
     private const BACKUP_MODE_TEACHERS = 'teachers';
+
     private const BACKUP_MODE_FULL = 'full';
+
+    private const TENANT_STATUS_ACTIVE = 'active';
+
+    private const TENANT_STATUS_SUSPENDED = 'suspended';
+
+    private const TENANT_STATUS_ARCHIVED = 'archived';
 
     private const MONITORED_STORAGE_BUCKETS = [
         'profile-photos',
@@ -36,6 +49,7 @@ class SuperAdminController extends ApiController
         'admin_users',
         'kelas',
         'mata_pelajaran',
+        'guru_mapel_bobot',
         'struktur_sekolah',
         'kelas_struktur',
         'jadwal',
@@ -67,6 +81,7 @@ class SuperAdminController extends ApiController
         'allowed_registrations',
         'registration_otps',
         'audit_log',
+        'approval_requests',
         'anggota_eksku1',
         'anggota_ekskul',
         'import_siswa_histories',
@@ -75,7 +90,7 @@ class SuperAdminController extends ApiController
 
     public function me(Request $request)
     {
-        if (!$this->isSuperAdmin($request)) {
+        if (! $this->isSuperAdmin($request)) {
             return $this->deny();
         }
 
@@ -84,7 +99,7 @@ class SuperAdminController extends ApiController
 
     public function index(Request $request)
     {
-        if (!$this->isSuperAdmin($request)) {
+        if (! $this->isSuperAdmin($request)) {
             return $this->deny();
         }
 
@@ -92,21 +107,30 @@ class SuperAdminController extends ApiController
             ->select('id', 'name', 'slug', 'status', 'created_at', 'updated_at')
             ->orderBy('created_at', 'desc');
 
+        foreach (['status_reason', 'status_changed_at', 'status_changed_by', 'archived_at'] as $column) {
+            if ($this->tableHasColumn('tenants', $column)) {
+                $query->addSelect($column);
+            } else {
+                $query->addSelect(DB::raw("null as {$column}"));
+            }
+        }
+
         $this->applyPagination($query, $request);
 
         $tenants = $query->get();
+
         return $this->ok($tenants);
     }
 
     public function showTenant(Request $request, string $id)
     {
-        if (!$this->isSuperAdmin($request)) {
+        if (! $this->isSuperAdmin($request)) {
             return $this->deny();
         }
 
         $tenant = $this->findTenantByIdOrSlug($id);
 
-        if (!$tenant) {
+        if (! $tenant) {
             return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
         }
 
@@ -154,7 +178,7 @@ class SuperAdminController extends ApiController
                 'p.updated_at',
                 'pr.last_seen_at',
                 'u.email_verified_at',
-                DB::raw("case when sa.user_id is not null then true else false end as is_super_admin")
+                DB::raw('case when sa.user_id is not null then true else false end as is_super_admin')
             )
             ->orderBy('p.created_at', 'desc')
             ->get();
@@ -168,6 +192,10 @@ class SuperAdminController extends ApiController
                     'name' => $tenant->name,
                     'slug' => $tenant->slug,
                     'status' => $tenant->status,
+                    'status_reason' => $tenant->status_reason ?? null,
+                    'status_changed_at' => $tenant->status_changed_at ?? null,
+                    'status_changed_by' => $tenant->status_changed_by ?? null,
+                    'archived_at' => $tenant->archived_at ?? null,
                     'created_at' => $tenant->created_at,
                     'updated_at' => $tenant->updated_at,
                 ],
@@ -187,18 +215,18 @@ class SuperAdminController extends ApiController
                     'can_view_existing_password' => false,
                     'note' => 'Password lama tidak bisa ditampilkan karena disimpan dalam hash.',
                 ],
-            ]
+            ],
         ]);
     }
 
     public function backupTenant(Request $request, string $id)
     {
-        if (!$this->isSuperAdmin($request)) {
+        if (! $this->isSuperAdmin($request)) {
             return $this->deny();
         }
 
         $tenant = $this->findTenantByIdOrSlug($id);
-        if (!$tenant) {
+        if (! $tenant) {
             return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
         }
 
@@ -227,6 +255,10 @@ class SuperAdminController extends ApiController
                     'name' => $tenant->name,
                     'slug' => $tenant->slug,
                     'status' => $tenant->status,
+                    'status_reason' => $tenant->status_reason ?? null,
+                    'status_changed_at' => $tenant->status_changed_at ?? null,
+                    'status_changed_by' => $tenant->status_changed_by ?? null,
+                    'archived_at' => $tenant->archived_at ?? null,
                     'created_at' => $tenant->created_at,
                     'updated_at' => $tenant->updated_at,
                 ],
@@ -244,13 +276,274 @@ class SuperAdminController extends ApiController
                     'total_rows' => $totalRows,
                 ],
                 'tables' => $tables,
-            ]
+            ],
+        ]);
+    }
+
+    public function updateTenantStatus(Request $request, string $id)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenant = $this->findTenantByIdOrSlug($id);
+        if (! $tenant) {
+            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+        }
+
+        $payload = $request->only(['status', 'reason']);
+        $validator = Validator::make($payload, [
+            'status' => 'required|string|in:active,suspended,archived',
+            'reason' => 'nullable|string|max:500',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['error' => $validator->errors()->first()], 422);
+        }
+
+        $nextStatus = strtolower(trim((string) $payload['status']));
+        $reason = trim((string) ($payload['reason'] ?? ''));
+        $actorId = (string) ($request->user()?->id ?? '');
+        $oldData = (array) $tenant;
+
+        $updates = [
+            'status' => $nextStatus,
+            'updated_at' => now(),
+        ];
+        if ($this->tableHasColumn('tenants', 'status_reason')) {
+            $updates['status_reason'] = $reason !== '' ? $reason : null;
+        }
+        if ($this->tableHasColumn('tenants', 'status_changed_at')) {
+            $updates['status_changed_at'] = now();
+        }
+        if ($this->tableHasColumn('tenants', 'status_changed_by')) {
+            $updates['status_changed_by'] = $actorId !== '' ? $actorId : null;
+        }
+
+        if ($nextStatus === self::TENANT_STATUS_ARCHIVED && $this->tableHasColumn('tenants', 'archived_at')) {
+            $updates['archived_at'] = now();
+        } elseif ($nextStatus === self::TENANT_STATUS_ACTIVE && $this->tableHasColumn('tenants', 'archived_at')) {
+            $updates['archived_at'] = null;
+        }
+
+        DB::table('tenants')->where('id', $tenant->id)->update($updates);
+        $updatedTenant = DB::table('tenants')->where('id', $tenant->id)->first();
+
+        $this->logAudit(
+            $request,
+            'tenants',
+            (string) $tenant->id,
+            'UPDATE',
+            $oldData,
+            (array) ($updatedTenant ?? []),
+            (string) $tenant->id
+        );
+
+        return response()->json(['data' => $updatedTenant]);
+    }
+
+    public function restoreTenant(Request $request, string $id)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenant = $this->findTenantByIdOrSlug($id);
+        if (! $tenant) {
+            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+        }
+
+        $backupPayload = $this->normalizeRestoreBackupPayload($request->input('backup'));
+        if (! $backupPayload) {
+            return $this->deny('Payload backup tidak valid. Gunakan format JSON backup yang benar.', 422);
+        }
+
+        $dryRun = filter_var($request->input('dry_run', true), FILTER_VALIDATE_BOOLEAN);
+        $truncateBeforeRestore = filter_var($request->input('truncate_before_restore', false), FILTER_VALIDATE_BOOLEAN);
+        $includeTables = $request->input('include_tables', []);
+        if (! is_array($includeTables)) {
+            $includeTables = [];
+        }
+
+        if (! $dryRun && ! filter_var($request->input('confirm', false), FILTER_VALIDATE_BOOLEAN)) {
+            return $this->deny('Untuk menjalankan restore nyata, kirim confirm=true.', 422);
+        }
+
+        try {
+            $result = $this->restoreBackupPayloadForTenant(
+                (string) $tenant->id,
+                $backupPayload,
+                $dryRun,
+                $truncateBeforeRestore,
+                $includeTables
+            );
+        } catch (\Throwable $e) {
+            return $this->deny('Restore gagal: '.trim((string) $e->getMessage()), 422);
+        }
+
+        if (! $dryRun) {
+            $this->logAudit(
+                $request,
+                'tenants',
+                (string) $tenant->id,
+                'UPDATE',
+                null,
+                [
+                    'type' => 'tenant_restore',
+                    'tenant_id' => $tenant->id,
+                    'summary' => $result['summary'] ?? [],
+                    'tables' => array_map(
+                        fn ($table) => [
+                            'table' => $table['table'] ?? null,
+                            'inserted' => $table['inserted'] ?? 0,
+                            'updated' => $table['updated'] ?? 0,
+                            'errors' => $table['errors'] ?? 0,
+                        ],
+                        is_array($result['tables'] ?? null) ? $result['tables'] : []
+                    ),
+                ],
+                (string) $tenant->id
+            );
+        }
+
+        return response()->json([
+            'data' => [
+                'tenant' => [
+                    'id' => $tenant->id,
+                    'name' => $tenant->name,
+                    'slug' => $tenant->slug,
+                ],
+                'dry_run' => $dryRun,
+                'result' => $result,
+            ],
+        ]);
+    }
+
+    public function auditTrail(Request $request)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
+        }
+
+        if (! $this->hasTable('audit_log')) {
+            return response()->json([
+                'data' => [
+                    'rows' => [],
+                    'anomalies' => [],
+                    'summary' => [
+                        'total' => 0,
+                    ],
+                ],
+            ]);
+        }
+
+        $query = DB::table('audit_log as a')
+            ->leftJoin('profiles as p', 'p.id', '=', 'a.user_id')
+            ->leftJoin('tenants as t', 't.id', '=', 'a.tenant_id')
+            ->select(
+                'a.id',
+                'a.tenant_id',
+                't.name as tenant_name',
+                'a.table_name',
+                'a.record_id',
+                'a.action',
+                'a.user_id',
+                'a.user_role',
+                'p.nama as user_name',
+                'a.timestamp',
+                'a.old_data',
+                'a.new_data'
+            );
+
+        $tenantId = trim((string) $request->query('tenant_id', ''));
+        if ($tenantId !== '' && $this->tableHasColumn('audit_log', 'tenant_id')) {
+            $query->where('a.tenant_id', $tenantId);
+        }
+
+        $table = trim((string) $request->query('table', ''));
+        if ($table !== '') {
+            $query->where('a.table_name', $table);
+        }
+
+        $action = strtoupper(trim((string) $request->query('action', '')));
+        if ($action !== '') {
+            $query->where('a.action', $action);
+        }
+
+        $q = trim((string) $request->query('q', ''));
+        if ($q !== '') {
+            $like = '%'.strtolower($q).'%';
+            $query->where(function ($builder) use ($like) {
+                $builder
+                    ->whereRaw('LOWER(COALESCE(a.table_name, \'\')) LIKE ?', [$like])
+                    ->orWhereRaw('LOWER(COALESCE(a.record_id, \'\')) LIKE ?', [$like])
+                    ->orWhereRaw('LOWER(COALESCE(p.nama, \'\')) LIKE ?', [$like])
+                    ->orWhereRaw('LOWER(COALESCE(t.name, \'\')) LIKE ?', [$like]);
+            });
+        }
+
+        $from = trim((string) $request->query('from', ''));
+        if ($from !== '') {
+            try {
+                $query->where('a.timestamp', '>=', Carbon::parse($from));
+            } catch (\Throwable $e) {
+                // ignore invalid filter
+            }
+        }
+
+        $to = trim((string) $request->query('to', ''));
+        if ($to !== '') {
+            try {
+                $query->where('a.timestamp', '<=', Carbon::parse($to));
+            } catch (\Throwable $e) {
+                // ignore invalid filter
+            }
+        }
+
+        $limit = (int) $request->query('limit', 100);
+        $limit = max(1, min(300, $limit));
+
+        $rows = $query
+            ->orderByDesc('a.timestamp')
+            ->limit($limit)
+            ->get()
+            ->map(function ($row) {
+                $row->old_data = $this->decodeAuditJson($row->old_data);
+                $row->new_data = $this->decodeAuditJson($row->new_data);
+
+                return $row;
+            })
+            ->values();
+
+        $summaryQuery = DB::table('audit_log as a');
+        if ($tenantId !== '' && $this->tableHasColumn('audit_log', 'tenant_id')) {
+            $summaryQuery->where('a.tenant_id', $tenantId);
+        }
+
+        $summary = $summaryQuery
+            ->selectRaw('count(*) as total')
+            ->selectRaw("sum(case when action = 'INSERT' then 1 else 0 end) as inserts")
+            ->selectRaw("sum(case when action = 'UPDATE' then 1 else 0 end) as updates")
+            ->selectRaw("sum(case when action = 'DELETE' then 1 else 0 end) as deletes")
+            ->first();
+
+        return response()->json([
+            'data' => [
+                'rows' => $rows,
+                'summary' => [
+                    'total' => (int) ($summary->total ?? 0),
+                    'inserts' => (int) ($summary->inserts ?? 0),
+                    'updates' => (int) ($summary->updates ?? 0),
+                    'deletes' => (int) ($summary->deletes ?? 0),
+                ],
+                'anomalies' => $this->buildAuditAnomalies($tenantId !== '' ? $tenantId : null),
+            ],
         ]);
     }
 
     public function store(Request $request)
     {
-        if (!$this->isSuperAdmin($request)) {
+        if (! $this->isSuperAdmin($request)) {
             return $this->deny();
         }
 
@@ -269,7 +562,7 @@ class SuperAdminController extends ApiController
         }
 
         $slug = $this->normalizeSlug($payload['slug']);
-        if ($slug === '' || !$this->isValidSlug($slug)) {
+        if ($slug === '' || ! $this->isValidSlug($slug)) {
             return response()->json(['error' => 'Subdomain tidak valid'], 422);
         }
 
@@ -378,7 +671,7 @@ class SuperAdminController extends ApiController
 
     public function admins(Request $request)
     {
-        if (!$this->isSuperAdmin($request)) {
+        if (! $this->isSuperAdmin($request)) {
             return $this->deny();
         }
 
@@ -401,7 +694,7 @@ class SuperAdminController extends ApiController
 
     public function storeAdmin(Request $request)
     {
-        if (!$this->isSuperAdmin($request)) {
+        if (! $this->isSuperAdmin($request)) {
             return $this->deny();
         }
 
@@ -427,20 +720,20 @@ class SuperAdminController extends ApiController
         $slug = $payload['tenant_slug'] ?? '';
         $slug = $slug !== '' ? $this->normalizeSlug($slug) : strtolower(trim((string) config('tenancy.default_slug', 'default')));
 
-        if ($slug === '' || !$this->isValidSlug($slug)) {
+        if ($slug === '' || ! $this->isValidSlug($slug)) {
             return response()->json(['error' => 'Subdomain tidak valid'], 422);
         }
 
         $tenant = DB::table('tenants')->where('slug', $slug)->first();
-        if (!$tenant) {
+        if (! $tenant) {
             return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
         }
 
         $existingUser = User::query()->where('email', $email)->first();
-        if (!$existingUser && empty($payload['password'])) {
+        if (! $existingUser && empty($payload['password'])) {
             return response()->json(['error' => 'Password wajib diisi untuk user baru'], 422);
         }
-        if ($existingUser && !empty($payload['password']) && $this->isSuperAdminByIdentity((string) $existingUser->id, $email)) {
+        if ($existingUser && ! empty($payload['password']) && $this->isSuperAdminByIdentity((string) $existingUser->id, $email)) {
             return response()->json(['error' => 'Password super admin tidak bisa direset lewat endpoint ini'], 403);
         }
 
@@ -450,7 +743,7 @@ class SuperAdminController extends ApiController
 
         DB::transaction(function () use ($email, $name, $payload, $tenant, $existingUser, &$result, &$createdSuper, &$superAdminId) {
             $user = $existingUser;
-            if (!$user) {
+            if (! $user) {
                 $user = User::query()->create([
                     'id' => (string) Str::uuid(),
                     'name' => $name,
@@ -462,10 +755,10 @@ class SuperAdminController extends ApiController
                 if ($name !== '' && $user->name !== $name) {
                     $updates['name'] = $name;
                 }
-                if (!empty($payload['password'])) {
+                if (! empty($payload['password'])) {
                     $updates['password'] = Hash::make($payload['password']);
                 }
-                if (!empty($updates)) {
+                if (! empty($updates)) {
                     $updates['updated_at'] = now();
                     User::query()->where('id', $user->id)->update($updates);
                 }
@@ -480,7 +773,7 @@ class SuperAdminController extends ApiController
                 throw new \RuntimeException('User ini sudah terdaftar sebagai non-admin.');
             }
 
-            if (!$existingProfile) {
+            if (! $existingProfile) {
                 Profile::query()->create([
                     'id' => $user->id,
                     'tenant_id' => $tenant->id,
@@ -494,7 +787,7 @@ class SuperAdminController extends ApiController
             }
 
             $existsAdmin = DB::table('admin_users')->where('id', $user->id)->exists();
-            if (!$existsAdmin) {
+            if (! $existsAdmin) {
                 DB::table('admin_users')->insert([
                     'id' => $user->id,
                     'tenant_id' => $tenant->id,
@@ -503,7 +796,7 @@ class SuperAdminController extends ApiController
             }
 
             $existsSuper = DB::table('super_admins')->where('user_id', $user->id)->first();
-            if (!$existsSuper) {
+            if (! $existsSuper) {
                 $superAdminId = (string) Str::uuid();
                 DB::table('super_admins')->insert([
                     'id' => $superAdminId,
@@ -546,7 +839,7 @@ class SuperAdminController extends ApiController
 
     public function deleteAdmin(Request $request, string $id)
     {
-        if (!$this->isSuperAdmin($request)) {
+        if (! $this->isSuperAdmin($request)) {
             return $this->deny();
         }
 
@@ -555,7 +848,7 @@ class SuperAdminController extends ApiController
             ->orWhere('user_id', $id)
             ->first();
 
-        if (!$row) {
+        if (! $row) {
             return response()->json(['error' => 'Super admin tidak ditemukan'], 404);
         }
 
@@ -586,7 +879,7 @@ class SuperAdminController extends ApiController
 
     public function resetTenantAdminPassword(Request $request, string $tenantId, string $userId)
     {
-        if (!$this->isSuperAdmin($request)) {
+        if (! $this->isSuperAdmin($request)) {
             return $this->deny();
         }
 
@@ -598,7 +891,7 @@ class SuperAdminController extends ApiController
             $tenantQuery->where('slug', $normalizedTenant);
         }
         $tenant = $tenantQuery->first();
-        if (!$tenant) {
+        if (! $tenant) {
             return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
         }
 
@@ -616,12 +909,12 @@ class SuperAdminController extends ApiController
             ->where('role', 'admin')
             ->first();
 
-        if (!$profile) {
+        if (! $profile) {
             return response()->json(['error' => 'Admin tenant tidak ditemukan'], 404);
         }
 
         $user = User::query()->where('id', $profile->id)->first();
-        if (!$user) {
+        if (! $user) {
             return response()->json(['error' => 'User admin tidak ditemukan'], 404);
         }
         if ($this->isSuperAdminByIdentity((string) $user->id, (string) ($user->email ?? ''))) {
@@ -666,7 +959,7 @@ class SuperAdminController extends ApiController
                 'generated' => $generated,
                 // Returned only once; frontend should mask by default.
                 'temporary_password' => $newPassword,
-            ]
+            ],
         ]);
     }
 
@@ -675,6 +968,7 @@ class SuperAdminController extends ApiController
         $normalized = strtolower(trim($slug));
         $normalized = preg_replace('/[^a-z0-9-]+/i', '-', $normalized);
         $normalized = preg_replace('/-+/', '-', $normalized);
+
         return trim($normalized ?? '', '-');
     }
 
@@ -687,6 +981,7 @@ class SuperAdminController extends ApiController
     {
         $reserved = config('tenancy.reserved_subdomains', []);
         $reserved = array_map('strtolower', $reserved);
+
         return in_array(strtolower($slug), $reserved, true);
     }
 
@@ -703,12 +998,13 @@ class SuperAdminController extends ApiController
             $symbols[random_int(0, strlen($symbols) - 1)],
         ];
 
-        $all = $letters . $digits . $symbols;
+        $all = $letters.$digits.$symbols;
         while (count($seed) < $length) {
             $seed[] = $all[random_int(0, strlen($all) - 1)];
         }
 
         shuffle($seed);
+
         return implode('', $seed);
     }
 
@@ -745,13 +1041,13 @@ class SuperAdminController extends ApiController
                     continue;
                 }
 
-                $fullPath = 'private/' . $candidateBucket . '/' . ltrim($candidatePath, '/');
+                $fullPath = 'private/'.$candidateBucket.'/'.ltrim($candidatePath, '/');
                 if (array_key_exists($fullPath, $seenFiles)) {
                     $resolved = true;
                     break;
                 }
 
-                if (!$storage->exists($fullPath)) {
+                if (! $storage->exists($fullPath)) {
                     continue;
                 }
 
@@ -883,7 +1179,7 @@ class SuperAdminController extends ApiController
         string $source,
         array $fallbackBuckets = []
     ): void {
-        if (!$this->tableHasColumn($table, 'tenant_id') || !$this->tableHasColumn($table, $column)) {
+        if (! $this->tableHasColumn($table, 'tenant_id') || ! $this->tableHasColumn($table, $column)) {
             return;
         }
 
@@ -897,7 +1193,7 @@ class SuperAdminController extends ApiController
         }
 
         foreach ($rows as $value) {
-            if (!is_scalar($value)) {
+            if (! is_scalar($value)) {
                 continue;
             }
 
@@ -943,8 +1239,8 @@ class SuperAdminController extends ApiController
 
         $candidates = [];
         foreach (self::MONITORED_STORAGE_BUCKETS as $candidateBucket) {
-            $privatePrefix = 'private/' . $candidateBucket . '/';
-            $plainPrefix = $candidateBucket . '/';
+            $privatePrefix = 'private/'.$candidateBucket.'/';
+            $plainPrefix = $candidateBucket.'/';
 
             if (str_starts_with($path, $privatePrefix)) {
                 $candidates[] = [
@@ -962,7 +1258,7 @@ class SuperAdminController extends ApiController
                 break;
             }
 
-            $marker = '/private/' . $candidateBucket . '/';
+            $marker = '/private/'.$candidateBucket.'/';
             $markerPos = strpos($path, $marker);
             if ($markerPos !== false) {
                 $candidates[] = [
@@ -990,7 +1286,7 @@ class SuperAdminController extends ApiController
                 continue;
             }
 
-            $key = $candidateBucket . '|' . $candidatePath;
+            $key = $candidateBucket.'|'.$candidatePath;
             if (isset($unique[$key])) {
                 continue;
             }
@@ -1069,12 +1365,14 @@ class SuperAdminController extends ApiController
         }
 
         $precision = $index === 0 ? 0 : 2;
-        return round($size, $precision) . ' ' . $units[$index];
+
+        return round($size, $precision).' '.$units[$index];
     }
 
     private function normalizeBackupMode(?string $value): string
     {
         $mode = strtolower(trim((string) $value));
+
         return match ($mode) {
             self::BACKUP_MODE_STUDENTS => self::BACKUP_MODE_STUDENTS,
             self::BACKUP_MODE_TEACHERS => self::BACKUP_MODE_TEACHERS,
@@ -1097,7 +1395,7 @@ class SuperAdminController extends ApiController
         if ($raw === '' || $raw === 'all' || $raw === '0') {
             return null;
         }
-        if (!is_numeric($raw)) {
+        if (! is_numeric($raw)) {
             return null;
         }
 
@@ -1115,7 +1413,7 @@ class SuperAdminController extends ApiController
             return 'Semua data';
         }
 
-        return 'Data ' . $months . ' bulan terakhir';
+        return 'Data '.$months.' bulan terakhir';
     }
 
     private function buildFullBackupTables(string $tenantId): array
@@ -1124,7 +1422,7 @@ class SuperAdminController extends ApiController
         $backupTables = $this->backupTablesForTenant();
 
         foreach ($backupTables as $tableName) {
-            if (!$this->tableHasColumn($tableName, 'tenant_id')) {
+            if (! $this->tableHasColumn($tableName, 'tenant_id')) {
                 continue;
             }
 
@@ -1159,7 +1457,7 @@ class SuperAdminController extends ApiController
         }
 
         $userRows = [];
-        if (!empty($profileIds) && $this->hasTable('users')) {
+        if (! empty($profileIds) && $this->hasTable('users')) {
             try {
                 $userRows = DB::table('users')
                     ->whereIn('id', $profileIds)
@@ -1193,7 +1491,7 @@ class SuperAdminController extends ApiController
                 ['id', 'nama', 'email', 'kelas', 'nis', 'status', 'jk', 'no_hp_siswa', 'no_hp_wali', 'jabatan'],
                 fn ($column) => $this->tableHasColumn('profiles', $column)
             ));
-            if (!in_array('id', $columns, true)) {
+            if (! in_array('id', $columns, true)) {
                 $columns[] = 'id';
             }
 
@@ -1259,13 +1557,13 @@ class SuperAdminController extends ApiController
 
         $mapelDiikutiRows = [];
         if (
-            !empty($studentOrder)
+            ! empty($studentOrder)
             && $this->hasTable('jadwal')
             && $this->allTableColumnsExist('jadwal', ['tenant_id', 'kelas_id', 'mapel'])
         ) {
             try {
                 $kelasList = array_values(array_filter(array_keys($studentIdsByClass), fn ($value) => $value !== '' && $value !== '-'));
-                if (!empty($kelasList)) {
+                if (! empty($kelasList)) {
                     $selectColumns = ['j.kelas_id', 'j.mapel'];
                     if ($this->tableHasColumn('jadwal', 'hari')) {
                         $selectColumns[] = 'j.hari';
@@ -1294,8 +1592,8 @@ class SuperAdminController extends ApiController
                             continue;
                         }
                         $mapel = $this->normalizeBackupMapel($row->mapel ?? null);
-                        $key = $kelas . '|' . $mapel;
-                        if (!isset($mapelByClass[$key])) {
+                        $key = $kelas.'|'.$mapel;
+                        if (! isset($mapelByClass[$key])) {
                             $mapelByClass[$key] = [
                                 'kelas' => $kelas,
                                 'mapel' => $mapel,
@@ -1336,7 +1634,7 @@ class SuperAdminController extends ApiController
                         $studentIds = $studentIdsByClass[$kelas] ?? [];
                         foreach ($studentIds as $studentId) {
                             $meta = $studentMeta[$studentId] ?? null;
-                            if (!$meta) {
+                            if (! $meta) {
                                 continue;
                             }
 
@@ -1364,7 +1662,7 @@ class SuperAdminController extends ApiController
         $nilaiByStudent = [];
 
         if (
-            !empty($studentOrder)
+            ! empty($studentOrder)
             && $this->hasTable('tugas_jawaban')
             && $this->hasTable('tugas')
             && $this->allTableColumnsExist('tugas_jawaban', ['tenant_id', 'user_id', 'tugas_id', 'nilai'])
@@ -1400,13 +1698,13 @@ class SuperAdminController extends ApiController
 
                 foreach ($tugasScores as $row) {
                     $studentId = (string) ($row->siswa_id ?? '');
-                    if ($studentId === '' || !isset($summaryByStudent[$studentId])) {
+                    if ($studentId === '' || ! isset($summaryByStudent[$studentId])) {
                         continue;
                     }
 
                     $mapel = $this->normalizeBackupMapel($row->mapel ?? null);
-                    $key = $studentId . '|' . $mapel;
-                    if (!isset($nilaiByStudentMapel[$key])) {
+                    $key = $studentId.'|'.$mapel;
+                    if (! isset($nilaiByStudentMapel[$key])) {
                         $nilaiByStudentMapel[$key] = [
                             'siswa_id' => $studentId,
                             'mapel' => $mapel,
@@ -1426,7 +1724,7 @@ class SuperAdminController extends ApiController
         }
 
         if (
-            !empty($studentOrder)
+            ! empty($studentOrder)
             && $this->hasTable('quiz_submissions')
             && $this->hasTable('quizzes')
             && $this->allTableColumnsExist('quiz_submissions', ['tenant_id', 'siswa_id', 'quiz_id', 'score'])
@@ -1464,13 +1762,13 @@ class SuperAdminController extends ApiController
 
                 foreach ($quizScores as $row) {
                     $studentId = (string) ($row->siswa_id ?? '');
-                    if ($studentId === '' || !isset($summaryByStudent[$studentId])) {
+                    if ($studentId === '' || ! isset($summaryByStudent[$studentId])) {
                         continue;
                     }
 
                     $mapel = $this->normalizeBackupMapel($row->mapel ?? null);
-                    $key = $studentId . '|' . $mapel;
-                    if (!isset($nilaiByStudentMapel[$key])) {
+                    $key = $studentId.'|'.$mapel;
+                    if (! isset($nilaiByStudentMapel[$key])) {
                         $nilaiByStudentMapel[$key] = [
                             'siswa_id' => $studentId,
                             'mapel' => $mapel,
@@ -1500,7 +1798,7 @@ class SuperAdminController extends ApiController
         $nilaiMapelRows = [];
         foreach ($studentOrder as $studentId) {
             $meta = $studentMeta[$studentId] ?? null;
-            if (!$meta) {
+            if (! $meta) {
                 continue;
             }
 
@@ -1532,7 +1830,7 @@ class SuperAdminController extends ApiController
 
         $tugasDetailRows = [];
         if (
-            !empty($studentOrder)
+            ! empty($studentOrder)
             && $this->hasTable('tugas_jawaban')
             && $this->hasTable('tugas')
             && $this->allTableColumnsExist('tugas_jawaban', ['tenant_id', 'user_id', 'tugas_id'])
@@ -1605,7 +1903,7 @@ class SuperAdminController extends ApiController
                 foreach ($tugasDetails as $row) {
                     $studentId = (string) ($row->siswa_id ?? '');
                     $meta = $studentMeta[$studentId] ?? null;
-                    if (!$meta) {
+                    if (! $meta) {
                         continue;
                     }
 
@@ -1637,7 +1935,7 @@ class SuperAdminController extends ApiController
 
         $quizDetailRows = [];
         if (
-            !empty($studentOrder)
+            ! empty($studentOrder)
             && $this->hasTable('quiz_submissions')
             && $this->hasTable('quizzes')
             && $this->allTableColumnsExist('quiz_submissions', ['tenant_id', 'siswa_id', 'quiz_id'])
@@ -1721,7 +2019,7 @@ class SuperAdminController extends ApiController
                 foreach ($quizDetails as $row) {
                     $studentId = (string) ($row->siswa_id ?? '');
                     $meta = $studentMeta[$studentId] ?? null;
-                    if (!$meta) {
+                    if (! $meta) {
                         continue;
                     }
 
@@ -1769,7 +2067,7 @@ class SuperAdminController extends ApiController
         $absensiMapelRows = [];
         $absensiDetailRows = [];
         if (
-            !empty($studentOrder)
+            ! empty($studentOrder)
             && $this->hasTable('absensi')
             && $this->allTableColumnsExist('absensi', ['tenant_id', 'uid', 'status', 'mapel'])
         ) {
@@ -1796,7 +2094,7 @@ class SuperAdminController extends ApiController
 
                 foreach ($absensiRows as $row) {
                     $studentId = (string) ($row->siswa_id ?? '');
-                    if ($studentId === '' || !isset($summaryByStudent[$studentId])) {
+                    if ($studentId === '' || ! isset($summaryByStudent[$studentId])) {
                         continue;
                     }
 
@@ -1856,7 +2154,7 @@ class SuperAdminController extends ApiController
                 foreach ($absensiDetails as $row) {
                     $studentId = (string) ($row->siswa_id ?? '');
                     $meta = $studentMeta[$studentId] ?? null;
-                    if (!$meta) {
+                    if (! $meta) {
                         continue;
                     }
 
@@ -1879,7 +2177,7 @@ class SuperAdminController extends ApiController
 
         $eskulAttendanceRows = [];
         if (
-            !empty($studentOrder)
+            ! empty($studentOrder)
             && $this->hasTable('absensi_eskul')
             && $this->allTableColumnsExist('absensi_eskul', ['tenant_id', 'user_id', 'status', 'ekskul_id'])
         ) {
@@ -1920,7 +2218,7 @@ class SuperAdminController extends ApiController
 
                 foreach ($attendanceRows as $row) {
                     $studentId = (string) ($row->siswa_id ?? '');
-                    if ($studentId === '' || !isset($summaryByStudent[$studentId])) {
+                    if ($studentId === '' || ! isset($summaryByStudent[$studentId])) {
                         continue;
                     }
 
@@ -1957,7 +2255,7 @@ class SuperAdminController extends ApiController
 
         $eskulMemberRows = [];
         if (
-            !empty($studentOrder)
+            ! empty($studentOrder)
             && $this->hasTable('ekskul_anggota')
             && $this->allTableColumnsExist('ekskul_anggota', ['tenant_id', 'ekskul_id', 'user_id'])
         ) {
@@ -1998,8 +2296,8 @@ class SuperAdminController extends ApiController
                     'ea.user_id as siswa_id',
                     $hasEkskulJoin ? DB::raw("COALESCE(e.nama, 'Tanpa Eskul') as nama_ekskul") : DB::raw("'Tanpa Eskul' as nama_ekskul"),
                     ($hasEkskulJoin && $this->tableHasColumn('ekskul', 'hari')) ? DB::raw("COALESCE(e.hari, '-') as hari") : DB::raw("'-' as hari"),
-                    ($hasEkskulJoin && $this->tableHasColumn('ekskul', 'jam_mulai')) ? DB::raw("e.jam_mulai as jam_mulai") : DB::raw("null as jam_mulai"),
-                    ($hasEkskulJoin && $this->tableHasColumn('ekskul', 'jam_selesai')) ? DB::raw("e.jam_selesai as jam_selesai") : DB::raw("null as jam_selesai"),
+                    ($hasEkskulJoin && $this->tableHasColumn('ekskul', 'jam_mulai')) ? DB::raw('e.jam_mulai as jam_mulai') : DB::raw('null as jam_mulai'),
+                    ($hasEkskulJoin && $this->tableHasColumn('ekskul', 'jam_selesai')) ? DB::raw('e.jam_selesai as jam_selesai') : DB::raw('null as jam_selesai'),
                     $hasPembinaJoin ? DB::raw("COALESCE(pg.nama, '-') as pembina") : DB::raw("'-' as pembina"),
                 ];
 
@@ -2011,11 +2309,11 @@ class SuperAdminController extends ApiController
                 $seenMemberKey = [];
                 foreach ($memberRows as $row) {
                     $studentId = (string) ($row->siswa_id ?? '');
-                    if ($studentId === '' || !isset($studentMeta[$studentId])) {
+                    if ($studentId === '' || ! isset($studentMeta[$studentId])) {
                         continue;
                     }
 
-                    $key = $studentId . '|' . (string) ($row->ekskul_id ?? '');
+                    $key = $studentId.'|'.(string) ($row->ekskul_id ?? '');
                     if (isset($seenMemberKey[$key])) {
                         continue;
                     }
@@ -2049,11 +2347,11 @@ class SuperAdminController extends ApiController
         $orgRowNumber = 1;
         foreach ($studentOrder as $studentId) {
             $meta = $studentMeta[$studentId] ?? null;
-            if (!$meta) {
+            if (! $meta) {
                 continue;
             }
             if (($meta['jabatan'] ?? '-') !== '-') {
-                $summaryByStudent[$studentId]['organisasi_keys']['profile:' . $meta['jabatan']] = true;
+                $summaryByStudent[$studentId]['organisasi_keys']['profile:'.$meta['jabatan']] = true;
                 $organisasiRows[] = [
                     'no' => $orgRowNumber++,
                     'kelas' => $meta['kelas'],
@@ -2068,7 +2366,7 @@ class SuperAdminController extends ApiController
         }
 
         if (
-            !empty($studentOrder)
+            ! empty($studentOrder)
             && $this->hasTable('kelas_struktur')
             && $this->allTableColumnsExist('kelas_struktur', ['tenant_id', 'kelas_id', 'ketua_siswa_id'])
         ) {
@@ -2081,11 +2379,11 @@ class SuperAdminController extends ApiController
                 foreach ($kelasStructRows as $row) {
                     $studentId = (string) ($row->ketua_siswa_id ?? '');
                     $meta = $studentMeta[$studentId] ?? null;
-                    if (!$meta) {
+                    if (! $meta) {
                         continue;
                     }
 
-                    $orgKey = 'kelas:' . (string) ($row->kelas_id ?? '');
+                    $orgKey = 'kelas:'.(string) ($row->kelas_id ?? '');
                     $summaryByStudent[$studentId]['organisasi_keys'][$orgKey] = true;
                     $organisasiRows[] = [
                         'no' => $orgRowNumber++,
@@ -2093,7 +2391,7 @@ class SuperAdminController extends ApiController
                         'nis' => $meta['nis'],
                         'nama_siswa' => $meta['nama'],
                         'sumber' => 'Kelas',
-                        'organisasi' => 'Kelas ' . (string) ($row->kelas_id ?? '-'),
+                        'organisasi' => 'Kelas '.(string) ($row->kelas_id ?? '-'),
                         'jabatan' => 'Ketua Kelas',
                         'status_keanggotaan' => 'aktif',
                     ];
@@ -2104,7 +2402,7 @@ class SuperAdminController extends ApiController
         }
 
         if (
-            !empty($studentOrder)
+            ! empty($studentOrder)
             && $this->hasTable('organisasi_anggota')
             && $this->allTableColumnsExist('organisasi_anggota', ['tenant_id', 'siswa_id'])
         ) {
@@ -2140,13 +2438,13 @@ class SuperAdminController extends ApiController
                 foreach ($orgRows as $row) {
                     $studentId = (string) ($row->siswa_id ?? '');
                     $meta = $studentMeta[$studentId] ?? null;
-                    if (!$meta) {
+                    if (! $meta) {
                         continue;
                     }
 
                     $orgName = trim((string) ($row->nama_organisasi ?? '')) ?: 'Organisasi';
                     $jabatan = trim((string) ($row->jabatan ?? '')) ?: 'Anggota';
-                    $summaryByStudent[$studentId]['organisasi_keys']['org:' . $orgName . ':' . $jabatan] = true;
+                    $summaryByStudent[$studentId]['organisasi_keys']['org:'.$orgName.':'.$jabatan] = true;
                     $organisasiRows[] = [
                         'no' => $orgRowNumber++,
                         'kelas' => $meta['kelas'],
@@ -2164,7 +2462,7 @@ class SuperAdminController extends ApiController
         }
 
         if (
-            !empty($studentOrder)
+            ! empty($studentOrder)
             && $this->hasTable('osis_anggota')
             && $this->allTableColumnsExist('osis_anggota', ['tenant_id', 'siswa_id'])
         ) {
@@ -2188,13 +2486,13 @@ class SuperAdminController extends ApiController
                 foreach ($osisRows as $row) {
                     $studentId = (string) ($row->siswa_id ?? '');
                     $meta = $studentMeta[$studentId] ?? null;
-                    if (!$meta) {
+                    if (! $meta) {
                         continue;
                     }
 
                     $jabatan = trim((string) ($row->bagian ?? '')) ?: 'Anggota';
                     $status = trim((string) ($row->status ?? '')) ?: 'aktif';
-                    $summaryByStudent[$studentId]['organisasi_keys']['osis:' . $jabatan] = true;
+                    $summaryByStudent[$studentId]['organisasi_keys']['osis:'.$jabatan] = true;
                     $organisasiRows[] = [
                         'no' => $orgRowNumber++,
                         'kelas' => $meta['kelas'],
@@ -2215,12 +2513,12 @@ class SuperAdminController extends ApiController
         foreach ($studentOrder as $studentId) {
             $meta = $studentMeta[$studentId] ?? null;
             $summary = $summaryByStudent[$studentId] ?? null;
-            if (!$meta || !$summary) {
+            if (! $meta || ! $summary) {
                 continue;
             }
 
             $nilaiValues = $summary['nilai_values'] ?? [];
-            $rataAkademik = !empty($nilaiValues)
+            $rataAkademik = ! empty($nilaiValues)
                 ? round(array_sum($nilaiValues) / count($nilaiValues), 2)
                 : null;
 
@@ -2280,7 +2578,7 @@ class SuperAdminController extends ApiController
                 ['id', 'nama', 'email', 'status'],
                 fn ($column) => $this->tableHasColumn('profiles', $column)
             ));
-            if (!in_array('id', $columns, true)) {
+            if (! in_array('id', $columns, true)) {
                 $columns[] = 'id';
             }
 
@@ -2316,7 +2614,7 @@ class SuperAdminController extends ApiController
                 ['id', 'nama', 'nis', 'kelas'],
                 fn ($column) => $this->tableHasColumn('profiles', $column)
             ));
-            if (!in_array('id', $columns, true)) {
+            if (! in_array('id', $columns, true)) {
                 $columns[] = 'id';
             }
 
@@ -2357,9 +2655,9 @@ class SuperAdminController extends ApiController
             }
             $kelasNormalized = trim($kelas) !== '' ? trim($kelas) : '-';
             $mapelNormalized = $this->normalizeBackupMapel($mapel);
-            $key = $guruId . '|' . $kelasNormalized . '|' . $mapelNormalized;
+            $key = $guruId.'|'.$kelasNormalized.'|'.$mapelNormalized;
 
-            if (!isset($teachMap[$key])) {
+            if (! isset($teachMap[$key])) {
                 $guru = $guruMap[$guruId] ?? null;
                 $teachMap[$key] = [
                     'guru_id' => $guruId,
@@ -2400,12 +2698,12 @@ class SuperAdminController extends ApiController
                     $kelas = (string) ($row->kelas ?? '');
                     $mapel = (string) ($row->mapel ?? '');
                     $key = $ensureTeachKey($guruId, $kelas, $mapel);
-                    if (!$key) {
+                    if (! $key) {
                         continue;
                     }
 
                     $teachMap[$key]['total_jadwal'] += (int) ($row->total_jadwal ?? 0);
-                    if ($teachMap[$key]['guru_nama'] === '-' && !empty($row->guru_nama)) {
+                    if ($teachMap[$key]['guru_nama'] === '-' && ! empty($row->guru_nama)) {
                         $teachMap[$key]['guru_nama'] = trim((string) $row->guru_nama);
                     }
                 }
@@ -2436,7 +2734,7 @@ class SuperAdminController extends ApiController
                     $kelas = (string) ($row->kelas ?? '');
                     $mapel = (string) ($row->mapel ?? '');
                     $key = $ensureTeachKey($guruId, $kelas, $mapel);
-                    if (!$key) {
+                    if (! $key) {
                         continue;
                     }
                     $teachMap[$key]['total_tugas'] += (int) ($row->total_tugas ?? 0);
@@ -2468,7 +2766,7 @@ class SuperAdminController extends ApiController
                     $kelas = (string) ($row->kelas ?? '');
                     $mapel = (string) ($row->mapel ?? '');
                     $key = $ensureTeachKey($guruId, $kelas, $mapel);
-                    if (!$key) {
+                    if (! $key) {
                         continue;
                     }
                     $teachMap[$key]['total_quiz'] += (int) ($row->total_quiz ?? 0);
@@ -2488,6 +2786,7 @@ class SuperAdminController extends ApiController
             if ($cmpKelas !== 0) {
                 return $cmpKelas;
             }
+
             return strcasecmp((string) ($a['mapel'] ?? ''), (string) ($b['mapel'] ?? ''));
         });
 
@@ -2543,7 +2842,7 @@ class SuperAdminController extends ApiController
                         continue;
                     }
 
-                    $key = $guruId . '|' . $kelas . '|' . $mapel . '|' . $studentId;
+                    $key = $guruId.'|'.$kelas.'|'.$mapel.'|'.$studentId;
                     $taskScoreMap[$key] = [
                         'avg_tugas' => $this->toFloatOrNull($row->avg_tugas ?? null),
                         'jumlah_tugas' => (int) ($row->jumlah_tugas ?? 0),
@@ -2588,7 +2887,7 @@ class SuperAdminController extends ApiController
                         continue;
                     }
 
-                    $key = $guruId . '|' . $kelas . '|' . $mapel . '|' . $studentId;
+                    $key = $guruId.'|'.$kelas.'|'.$mapel.'|'.$studentId;
                     $quizScoreMap[$key] = [
                         'avg_quiz' => $this->toFloatOrNull($row->avg_quiz ?? null),
                         'jumlah_quiz' => (int) ($row->jumlah_quiz ?? 0),
@@ -2623,7 +2922,7 @@ class SuperAdminController extends ApiController
                     if ($studentId === '') {
                         continue;
                     }
-                    $key = $kelas . '|' . $mapel . '|' . $studentId;
+                    $key = $kelas.'|'.$mapel.'|'.$studentId;
                     $attendanceMap[$key] = [
                         'hadir' => (int) ($row->hadir ?? 0),
                         'izin' => (int) ($row->izin ?? 0),
@@ -2642,7 +2941,7 @@ class SuperAdminController extends ApiController
             $guruId = (string) ($entry['guru_id'] ?? '');
             $kelas = (string) ($entry['kelas'] ?? '-');
             $mapel = (string) ($entry['mapel'] ?? 'Tanpa Mapel');
-            $rekapKey = $guruId . '|' . $kelas . '|' . $mapel;
+            $rekapKey = $guruId.'|'.$kelas.'|'.$mapel;
 
             $studentsInClass = $studentsByClass[$kelas] ?? [];
             $rekapMapel[$rekapKey] = [
@@ -2666,10 +2965,10 @@ class SuperAdminController extends ApiController
                     continue;
                 }
 
-                $scoreKey = $guruId . '|' . $kelas . '|' . $mapel . '|' . $studentId;
+                $scoreKey = $guruId.'|'.$kelas.'|'.$mapel.'|'.$studentId;
                 $taskInfo = $taskScoreMap[$scoreKey] ?? [];
                 $quizInfo = $quizScoreMap[$scoreKey] ?? [];
-                $attendance = $attendanceMap[$kelas . '|' . $mapel . '|' . $studentId] ?? [
+                $attendance = $attendanceMap[$kelas.'|'.$mapel.'|'.$studentId] ?? [
                     'hadir' => 0,
                     'izin' => 0,
                     'sakit' => 0,
@@ -2717,9 +3016,9 @@ class SuperAdminController extends ApiController
 
         $rekapMapelRows = [];
         foreach ($teachEntries as $index => $entry) {
-            $key = (string) ($entry['guru_id'] ?? '') . '|' . (string) ($entry['kelas'] ?? '-') . '|' . (string) ($entry['mapel'] ?? 'Tanpa Mapel');
+            $key = (string) ($entry['guru_id'] ?? '').'|'.(string) ($entry['kelas'] ?? '-').'|'.(string) ($entry['mapel'] ?? 'Tanpa Mapel');
             $rekap = $rekapMapel[$key] ?? null;
-            if (!$rekap) {
+            if (! $rekap) {
                 continue;
             }
 
@@ -2862,14 +3161,14 @@ class SuperAdminController extends ApiController
                         $izin = (int) ($row->izin ?? 0);
                         $alpha = (int) ($row->alpha ?? 0);
 
-                        if (!isset($ekskulStatusByEkskul[$ekskulId])) {
+                        if (! isset($ekskulStatusByEkskul[$ekskulId])) {
                             $ekskulStatusByEkskul[$ekskulId] = ['hadir' => 0, 'izin' => 0, 'alpha' => 0];
                         }
 
                         $ekskulStatusByEkskul[$ekskulId]['hadir'] += $hadir;
                         $ekskulStatusByEkskul[$ekskulId]['izin'] += $izin;
                         $ekskulStatusByEkskul[$ekskulId]['alpha'] += $alpha;
-                        $ekskulStatusByMember[$ekskulId . '|' . $userId] = [
+                        $ekskulStatusByMember[$ekskulId.'|'.$userId] = [
                             'hadir' => $hadir,
                             'izin' => $izin,
                             'alpha' => $alpha,
@@ -2906,7 +3205,7 @@ class SuperAdminController extends ApiController
 
                 $members = $memberRowsByEkskul[$ekskulId] ?? [];
                 foreach ($members as $member) {
-                    $memberKey = $ekskulId . '|' . (string) ($member['user_id'] ?? '');
+                    $memberKey = $ekskulId.'|'.(string) ($member['user_id'] ?? '');
                     $memberStatus = $ekskulStatusByMember[$memberKey] ?? ['hadir' => 0, 'izin' => 0, 'alpha' => 0];
                     $ekskulMemberDetailRows[] = [
                         'guru_nama' => $guru['nama'] ?? '-',
@@ -2938,6 +3237,105 @@ class SuperAdminController extends ApiController
         return $tables;
     }
 
+    private function decodeAuditJson($value)
+    {
+        if (is_array($value)) {
+            return $value;
+        }
+        if (is_object($value)) {
+            return (array) $value;
+        }
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $trimmed = trim($value);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        try {
+            return json_decode($trimmed, true, 512, JSON_THROW_ON_ERROR);
+        } catch (\Throwable $e) {
+            return $trimmed;
+        }
+    }
+
+    private function buildAuditAnomalies(?string $tenantId = null): array
+    {
+        $anomalies = [];
+        $now = now();
+        $criticalTables = ['settings', 'absensi', 'absensi_settings', 'tugas_jawaban', 'quiz_submissions', 'quiz_answers'];
+
+        if ($this->hasTable('audit_log')) {
+            $deleteQuery = DB::table('audit_log')
+                ->where('action', 'DELETE')
+                ->whereIn('table_name', $criticalTables)
+                ->where('timestamp', '>=', $now->copy()->subDay());
+            if ($tenantId && $this->tableHasColumn('audit_log', 'tenant_id')) {
+                $deleteQuery->where('tenant_id', $tenantId);
+            }
+            $criticalDeleteCount = (int) $deleteQuery->count();
+            if ($criticalDeleteCount >= 3) {
+                $anomalies[] = [
+                    'severity' => 'high',
+                    'code' => 'CRITICAL_DELETE_SPIKE',
+                    'message' => "Terdeteksi {$criticalDeleteCount} aksi DELETE pada tabel kritikal dalam 24 jam terakhir.",
+                ];
+            }
+
+            $settingsChangeQuery = DB::table('audit_log')
+                ->where('table_name', 'settings')
+                ->where('action', 'UPDATE')
+                ->where('timestamp', '>=', $now->copy()->subHour());
+            if ($tenantId && $this->tableHasColumn('audit_log', 'tenant_id')) {
+                $settingsChangeQuery->where('tenant_id', $tenantId);
+            }
+            $settingsChangeCount = (int) $settingsChangeQuery->count();
+            if ($settingsChangeCount >= 8) {
+                $anomalies[] = [
+                    'severity' => 'medium',
+                    'code' => 'SETTINGS_CHANGE_BURST',
+                    'message' => "Perubahan settings tinggi ({$settingsChangeCount} update/jam).",
+                ];
+            }
+
+            $actorBurstQuery = DB::table('audit_log')
+                ->select('user_id', DB::raw('count(*) as total'))
+                ->where('timestamp', '>=', $now->copy()->subHour())
+                ->groupBy('user_id')
+                ->havingRaw('count(*) >= 40');
+            if ($tenantId && $this->tableHasColumn('audit_log', 'tenant_id')) {
+                $actorBurstQuery->where('tenant_id', $tenantId);
+            }
+            $burstActors = $actorBurstQuery->get();
+            foreach ($burstActors as $actor) {
+                $anomalies[] = [
+                    'severity' => 'medium',
+                    'code' => 'ACTIVITY_BURST',
+                    'message' => 'Akun '.((string) ($actor->user_id ?? 'unknown'))." membuat {$actor->total} perubahan dalam 1 jam.",
+                ];
+            }
+        }
+
+        if ($this->hasTable('approval_requests')) {
+            $pendingQuery = DB::table('approval_requests')->where('status', 'pending');
+            if ($tenantId && $this->tableHasColumn('approval_requests', 'tenant_id')) {
+                $pendingQuery->where('tenant_id', $tenantId);
+            }
+            $pendingCount = (int) $pendingQuery->count();
+            if ($pendingCount >= 15) {
+                $anomalies[] = [
+                    'severity' => 'medium',
+                    'code' => 'APPROVAL_QUEUE_BACKLOG',
+                    'message' => "Antrian approval menumpuk ({$pendingCount} request pending).",
+                ];
+            }
+        }
+
+        return $anomalies;
+    }
+
     private function hasTable(string $table): bool
     {
         if (array_key_exists($table, $this->tableExistenceCache)) {
@@ -2955,12 +3353,12 @@ class SuperAdminController extends ApiController
 
     private function allTableColumnsExist(string $table, array $columns): bool
     {
-        if (!$this->hasTable($table)) {
+        if (! $this->hasTable($table)) {
             return false;
         }
 
         foreach ($columns as $column) {
-            if (!$this->tableHasColumn($table, (string) $column)) {
+            if (! $this->tableHasColumn($table, (string) $column)) {
                 return false;
             }
         }
@@ -2987,9 +3385,10 @@ class SuperAdminController extends ApiController
         if ($value === null || $value === '') {
             return null;
         }
-        if (!is_numeric($value)) {
+        if (! is_numeric($value)) {
             return null;
         }
+
         return round((float) $value, 2);
     }
 
@@ -3004,22 +3403,24 @@ class SuperAdminController extends ApiController
         if ($quizScore !== null) {
             return round($quizScore, 2);
         }
+
         return null;
     }
 
     private function normalizeBackupMapel($value): string
     {
         $mapel = trim((string) ($value ?? ''));
+
         return $mapel !== '' ? $mapel : 'Tanpa Mapel';
     }
 
     private function tableHasColumn(string $table, string $column): bool
     {
-        if (!$this->hasTable($table)) {
+        if (! $this->hasTable($table)) {
             return false;
         }
 
-        $cacheKey = $table . '.' . $column;
+        $cacheKey = $table.'.'.$column;
         if (array_key_exists($cacheKey, $this->tableColumnExistenceCache)) {
             return $this->tableColumnExistenceCache[$cacheKey];
         }
@@ -3044,6 +3445,7 @@ class SuperAdminController extends ApiController
         }
 
         $tenant = $tenantQuery->first();
+
         return $tenant ?: null;
     }
 
@@ -3070,7 +3472,7 @@ class SuperAdminController extends ApiController
             if (in_array($tableName, ['tenants', 'users', 'super_admins', 'migrations'], true)) {
                 continue;
             }
-            if (!in_array($tableName, $tables, true) && $this->tableHasColumn($tableName, 'tenant_id')) {
+            if (! in_array($tableName, $tables, true) && $this->tableHasColumn($tableName, 'tenant_id')) {
                 $tables[] = $tableName;
             }
         }
@@ -3085,11 +3487,13 @@ class SuperAdminController extends ApiController
             if (is_array($value) || is_object($value)) {
                 $encoded = json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
                 $normalized[$key] = $encoded === false ? '' : $encoded;
+
                 continue;
             }
 
             if (is_bool($value)) {
                 $normalized[$key] = $value ? 1 : 0;
+
                 continue;
             }
 
@@ -3098,5 +3502,4 @@ class SuperAdminController extends ApiController
 
         return $normalized;
     }
-
 }

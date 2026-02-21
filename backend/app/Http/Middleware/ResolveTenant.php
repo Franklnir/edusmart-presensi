@@ -11,13 +11,25 @@ class ResolveTenant
     public function handle(Request $request, Closure $next)
     {
         $slug = $this->resolveSlug($request);
-        if (!$slug) {
+        if (! $slug) {
             $slug = config('tenancy.default_slug', 'default');
         }
 
         $tenant = DB::table('tenants')->where('slug', $slug)->first();
-        if (!$tenant) {
+        if (! $tenant) {
             return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+        }
+
+        $isAdminHost = $this->isAdminHost((string) $request->getHost());
+        if (
+            ! $isAdminHost
+            && ! $request->is('api/health')
+            && $this->isTenantBlocked((string) ($tenant->status ?? 'active'))
+        ) {
+            return response()->json([
+                'error' => 'Tenant saat ini tidak aktif. Hubungi super admin untuk aktivasi ulang.',
+                'tenant_status' => $tenant->status,
+            ], 423);
         }
 
         $request->attributes->set('tenant_id', $tenant->id);
@@ -37,6 +49,7 @@ class ResolveTenant
             if ($isAdminHost && $this->isAdminSlug($fromHeader)) {
                 return null;
             }
+
             return $fromHeader;
         }
 
@@ -70,6 +83,7 @@ class ResolveTenant
     private function isReserved(string $slug): bool
     {
         $reserved = config('tenancy.reserved_subdomains', []);
+
         return in_array(strtolower($slug), array_map('strtolower', $reserved), true);
     }
 
@@ -90,7 +104,7 @@ class ResolveTenant
         $allowRoot = (bool) config('tenancy.allow_root_for_super_admin', false);
 
         if ($root !== '') {
-            $adminHost = $adminSubdomain !== '' ? ($adminSubdomain . '.' . $root) : $root;
+            $adminHost = $adminSubdomain !== '' ? ($adminSubdomain.'.'.$root) : $root;
             if ($host === $adminHost) {
                 return true;
             }
@@ -99,7 +113,7 @@ class ResolveTenant
             }
         }
 
-        if ($host === $adminSubdomain . '.localhost' || $host === $adminSubdomain . '.127.0.0.1') {
+        if ($host === $adminSubdomain.'.localhost' || $host === $adminSubdomain.'.127.0.0.1') {
             return true;
         }
 
@@ -118,12 +132,23 @@ class ResolveTenant
         }
 
         $adminSubdomain = strtolower(trim((string) config('tenancy.admin_subdomain', 'admin')));
+
         return $slug === $adminSubdomain;
     }
 
     private function isLocalHost(string $host): bool
     {
-        if ($host === 'localhost' || $host === '127.0.0.1') return true;
+        if ($host === 'localhost' || $host === '127.0.0.1') {
+            return true;
+        }
+
         return filter_var($host, FILTER_VALIDATE_IP) !== false;
+    }
+
+    private function isTenantBlocked(string $status): bool
+    {
+        $normalized = strtolower(trim($status));
+
+        return in_array($normalized, ['suspended', 'archived', 'inactive', 'disabled'], true);
     }
 }

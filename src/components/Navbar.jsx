@@ -6,11 +6,53 @@ import { supabase, PROFILE_BUCKET, getSignedUrlForValue } from '../lib/supabase'
 import { formatDateTime } from '../lib/time'
 
 const isHttpUrl = (value = '') => /^https?:\/\//i.test(String(value || ''))
-
 const addCacheBuster = (url) => {
   if (!url) return ''
   const joiner = url.includes('?') ? '&' : '?'
   return `${url}${joiner}t=${Date.now()}`
+}
+
+/* ===== SVG Icons ===== */
+const Icon = ({ name, className = 'w-5 h-5' }) => {
+  const icons = {
+    home: <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />,
+    calendar: <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />,
+    check: <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />,
+    brain: <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25zm.75-12h9v9h-9v-9z" />,
+    book: <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />,
+    chart: <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 14.25v2.25m3-4.5v4.5m3-6.75v6.75m3-9v9M6 20.25h12A2.25 2.25 0 0020.25 18V6A2.25 2.25 0 0018 3.75H6A2.25 2.25 0 003.75 6v12A2.25 2.25 0 006 20.25z" />,
+    user: <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />,
+    school: <path strokeLinecap="round" strokeLinejoin="round" d="M4.26 10.147a60.438 60.438 0 00-.491 6.347A48.62 48.62 0 0112 20.904a48.62 48.62 0 018.232-4.41 60.46 60.46 0 00-.491-6.347m-15.482 0a50.636 50.636 0 00-2.658-.813A59.906 59.906 0 0112 3.493a59.903 59.903 0 0110.399 5.84c-.896.248-1.783.52-2.658.814m-15.482 0A50.717 50.717 0 0112 13.489a50.702 50.702 0 017.74-3.342M6.75 15a.75.75 0 100-1.5.75.75 0 000 1.5zm0 0v-3.675A55.378 55.378 0 0112 8.443m-7.007 11.55A5.981 5.981 0 006.75 15.75v-1.5" />,
+    scan: <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0113.5 9.375v-4.5z" />,
+    certificate: <path strokeLinecap="round" strokeLinejoin="round" d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z" />,
+    backup: <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 2.625c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125m16.5 5.625c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125" />,
+    cog: <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z" />,
+    logout: <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />,
+    chevronLeft: <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />,
+    chevronRight: <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />,
+    monitor: <path strokeLinecap="round" strokeLinejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0H3" />,
+    shield: <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />,
+    signal: <path strokeLinecap="round" strokeLinejoin="round" d="M8.288 15.038a5.25 5.25 0 017.424 0M5.106 11.856c3.807-3.808 9.98-3.808 13.788 0M1.924 8.674c5.565-5.565 14.587-5.565 20.152 0M12.53 18.22l-.53.53-.53-.53a.75.75 0 011.06 0z" />,
+    pencil: <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />,
+    users: <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />,
+    teacher: <path strokeLinecap="round" strokeLinejoin="round" d="M4.26 10.147a60.438 60.438 0 00-.491 6.347A48.62 48.62 0 0112 20.904a48.62 48.62 0 018.232-4.41 60.46 60.46 0 00-.491-6.347m-15.482 0a50.636 50.636 0 00-2.658-.813A59.906 59.906 0 0112 3.493a59.903 59.903 0 0110.399 5.84c-.896.248-1.783.52-2.658.814m-15.482 0A50.717 50.717 0 0112 13.489a50.702 50.702 0 017.74-3.342M6.75 15a.75.75 0 100-1.5.75.75 0 000 1.5zm0 0v-3.675A55.378 55.378 0 0112 8.443m-7.007 11.55A5.981 5.981 0 006.75 15.75v-1.5" />,
+  }
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+      strokeWidth={1.8} stroke="currentColor" className={className}>
+      {icons[name] || null}
+    </svg>
+  )
+}
+
+const NavigationIcon = ({ name }) => {
+  const map = {
+    '🏠': 'home', '📅': 'calendar', '✅': 'check', '🧠': 'brain',
+    '📚': 'book', '📝': 'pencil', '📊': 'chart', '👤': 'user',
+    '🏫': 'school', '📱': 'scan', '👨‍🏫': 'teacher', '👨‍🎓': 'users',
+    '📜': 'certificate', '🗄️': 'backup', '⚙️': 'cog', '🛡️': 'shield',
+  }
+  return <Icon name={map[name] || 'home'} className="w-[18px] h-[18px]" />
 }
 
 const Navbar = () => {
@@ -29,10 +71,8 @@ const Navbar = () => {
   const [monitorData, setMonitorData] = useState({ students: [], teachers: [], generated_at: null })
   const [monitorError, setMonitorError] = useState('')
 
-  // ========== LOAD SETTINGS SEKALI DI AWAL ==========
   useEffect(() => {
     let isCancelled = false
-
     const loadSettings = async () => {
       try {
         let { data, error } = await supabase
@@ -41,152 +81,77 @@ const Navbar = () => {
           .order('id', { ascending: true })
           .limit(1)
           .single()
-
-        // PGRST116 = tidak ada row
-        if (error && error.code === 'PGRST116') {
-          data = null
-        } else if (error) {
-          throw error
-        }
-
-        if (!isCancelled && data) {
-          setSettings(data || {})
-          setSettingsId(data.id)
-        }
+        if (error && error.code === 'PGRST116') { data = null }
+        else if (error) { throw error }
+        if (!isCancelled && data) { setSettings(data || {}); setSettingsId(data.id) }
       } catch (error) {
-        if (!isCancelled) {
-          console.error('Error loading settings:', error)
-        }
+        if (!isCancelled) console.error('Error loading settings:', error)
       } finally {
-        if (!isCancelled) {
-          setIsLoading(false)
-        }
+        if (!isCancelled) setIsLoading(false)
       }
     }
-
     loadSettings()
-
-    return () => {
-      isCancelled = true
-    }
+    return () => { isCancelled = true }
   }, [])
 
-  // ========== REALTIME UPDATE SETTINGS ==========
   useEffect(() => {
     if (!settingsId) return
-
-    const channel = supabase
-      .channel('navbar_settings_realtime')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'settings',
-          filter: `id=eq.${settingsId}`
-        },
-        (payload) => {
-          const row = payload.new
-          if (!row) return
-
-          setSettings(prev => ({
-            ...prev,
-            ...row
-          }))
-        }
-      )
+    const channel = supabase.channel('navbar_settings_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'settings', filter: `id=eq.${settingsId}` },
+        (payload) => { const row = payload.new; if (!row) return; setSettings(prev => ({ ...prev, ...row })) })
       .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
-    }
+    return () => { supabase.removeChannel(channel) }
   }, [settingsId])
 
-  // ========== RESOLVE AVATAR (PATH -> SIGNED URL) ==========
   useEffect(() => {
     let cancelled = false
     const raw = profile?.photo_path || profile?.photo_url || ''
-
     const resolveAvatar = async () => {
-      if (!raw) {
-        if (!cancelled) setAvatarUrl('')
-        return
-      }
-
+      if (!raw) { if (!cancelled) setAvatarUrl(''); return }
       try {
         const signed = await getSignedUrlForValue(PROFILE_BUCKET, raw, 60 * 60)
         if (!cancelled) setAvatarUrl(addCacheBuster(signed))
-      } catch (error) {
-        if (!cancelled) setAvatarUrl(isHttpUrl(raw) ? addCacheBuster(raw) : '')
-      }
+      } catch { if (!cancelled) setAvatarUrl(isHttpUrl(raw) ? addCacheBuster(raw) : '') }
     }
-
     resolveAvatar()
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [profile?.photo_path, profile?.photo_url, profile?.updated_at])
 
-  // ========== CEK WALI KELAS (UNTUK MENU GURU) ==========
   useEffect(() => {
     let cancelled = false
-
     const loadWaliKelas = async () => {
-      if (profile?.role !== 'guru' || !user?.id) {
-        if (!cancelled) setIsWaliKelas(false)
-        return
-      }
-
+      if (profile?.role !== 'guru' || !user?.id) { if (!cancelled) setIsWaliKelas(false); return }
       try {
-        const { data, error } = await supabase
-          .from('kelas_struktur')
-          .select('kelas_id')
-          .eq('wali_guru_id', user.id)
-          .limit(1)
-
+        const { data, error } = await supabase.from('kelas_struktur').select('kelas_id').eq('wali_guru_id', user.id).limit(1)
         if (error) throw error
         if (!cancelled) setIsWaliKelas((data || []).length > 0)
-      } catch (error) {
-        if (!cancelled) setIsWaliKelas(false)
-      }
+      } catch { if (!cancelled) setIsWaliKelas(false) }
     }
-
     loadWaliKelas()
     return () => { cancelled = true }
   }, [profile?.role, user?.id])
 
-  const handleLogout = async () => {
-    await logout()
-    navigate('/login')
-  }
-
-  const toggleSidebar = () => {
-    setIsCollapsed(prev => !prev)
-  }
+  const handleLogout = async () => { await logout(); navigate('/login') }
+  const toggleSidebar = () => setIsCollapsed(prev => !prev)
 
   const role = profile?.role
   const effectiveRole = isSuperAdmin ? 'admin' : role
-  const schoolName = settings?.nama_sekolah || 'Storage'
+  const schoolName = settings?.nama_sekolah || 'EduSmart'
   const userName = profile?.nama || user?.email?.split('@')[0] || 'User'
   const userInitial = (profile?.nama?.[0] || user?.email?.[0] || 'U').toUpperCase()
   const students = monitorData?.students || []
   const teachers = monitorData?.teachers || []
-  const onlineCount =
-    students.filter((u) => u.online).length + teachers.filter((u) => u.online).length
+  const onlineCount = students.filter(u => u.online).length + teachers.filter(u => u.online).length
 
   const loadMonitoring = async () => {
     if (effectiveRole !== 'admin') return
-    setMonitorLoading(true)
-    setMonitorError('')
+    setMonitorLoading(true); setMonitorError('')
     try {
       const { data, error } = await supabase.admin.monitoring()
       if (error) throw error
       setMonitorData(data || { students: [], teachers: [], generated_at: null })
-    } catch (err) {
-      setMonitorError(err?.message || 'Gagal memuat monitoring')
-    } finally {
-      setMonitorLoading(false)
-    }
+    } catch (err) { setMonitorError(err?.message || 'Gagal memuat monitoring') }
+    finally { setMonitorLoading(false) }
   }
 
   useEffect(() => {
@@ -197,11 +162,8 @@ const Navbar = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [monitorOpen, role])
 
-  useEffect(() => {
-    if (effectiveRole !== 'admin') setMonitorOpen(false)
-  }, [effectiveRole])
+  useEffect(() => { if (effectiveRole !== 'admin') setMonitorOpen(false) }, [effectiveRole])
 
-  // Navigation links configuration
   const navigationConfig = {
     siswa: [
       { to: '/siswa/home', label: 'Home', icon: '🏠' },
@@ -219,12 +181,14 @@ const Navbar = () => {
       { to: '/guru/profile', label: 'Profil', icon: '👤' }
     ],
     admin: [
-      { to: '/admin/home', label: 'Home', icon: '🏠' },
+      { to: '/admin/home', label: 'Dashboard', icon: '🏠' },
       { to: '/admin/kelas', label: 'Kelas', icon: '🏫' },
       { to: '/admin/scan', label: 'Scan', icon: '📱' },
       { to: '/admin/guru', label: 'Guru', icon: '👨‍🏫' },
       { to: '/admin/siswa', label: 'Siswa', icon: '👨‍🎓' },
       { to: '/admin/sertifikat', label: 'Sertifikat', icon: '📜' },
+      { to: '/admin/backup', label: 'Backup', icon: '🗄️' },
+      { to: '/admin/approvals', label: 'Approval', icon: '🛡️' },
       { to: '/admin/pengaturan', label: 'Pengaturan', icon: '⚙️' }
     ]
   }
@@ -232,240 +196,127 @@ const Navbar = () => {
   let navLinks = navigationConfig[effectiveRole] || []
   if (role === 'guru' && isWaliKelas) {
     const siswaLink = { to: '/guru/siswa', label: 'Siswa', icon: '👨‍🎓' }
-    const profileIndex = navLinks.findIndex((link) => link.to === '/guru/profile')
-    navLinks =
-      profileIndex >= 0
-        ? [...navLinks.slice(0, profileIndex), siswaLink, ...navLinks.slice(profileIndex)]
-        : [...navLinks, siswaLink]
+    const profileIndex = navLinks.findIndex(link => link.to === '/guru/profile')
+    navLinks = profileIndex >= 0
+      ? [...navLinks.slice(0, profileIndex), siswaLink, ...navLinks.slice(profileIndex)]
+      : [...navLinks, siswaLink]
   }
   if (isSuperAdmin) {
-    navLinks = [
-      ...navLinks,
-      { to: '/admin/tenants', label: 'Sekolah', icon: '🏫' },
-      { to: '/admin/super-admins', label: 'Super Admin', icon: '🛡️' }
+    navLinks = [...navLinks,
+    { to: '/admin/tenants', label: 'Sekolah', icon: '🏫' },
+    { to: '/admin/super-admins', label: 'Super Admin', icon: '🛡️' },
+    { to: '/admin/audit-trail', label: 'Audit Trail', icon: '📊' }
     ]
   }
 
-  // Abstract Logo Component
-  const AbstractLogo = ({ size = 'medium' }) => {
-    const sizeClasses = {
-      small: 'h-8 w-8',
-      medium: 'h-9 w-9',
-      large: 'h-10 w-10'
-    }
-
-    return (
-      <div className={`relative ${sizeClasses[size]}`}>
-        <div className="absolute inset-0 rounded-full bg-indigo-500" />
-        <div className="absolute -top-1 -left-1 h-3 w-3 rounded-full bg-indigo-300" />
-        <div className="absolute -bottom-1 -right-1 h-2.5 w-2.5 rounded-full bg-indigo-400" />
-      </div>
-    )
+  /* ---- Role badge color ---- */
+  const roleBadge = {
+    admin: { bg: 'bg-violet-100', text: 'text-violet-700', label: 'Admin' },
+    guru: { bg: 'bg-sky-100', text: 'text-sky-700', label: 'Guru' },
+    siswa: { bg: 'bg-emerald-100', text: 'text-emerald-700', label: 'Siswa' },
   }
+  const rb = roleBadge[role] || { bg: 'bg-slate-100', text: 'text-slate-600', label: role || 'User' }
 
-  // User Avatar Component
-  const UserAvatar = ({ size = 'medium', showInfo = true }) => {
-    const sizeClasses = {
-      small: 'h-8 w-8',
-      medium: 'h-9 w-9',
-      large: 'h-10 w-10'
-    }
-
-    return (
-      <div className="flex items-center gap-3">
-        {avatarUrl ? (
-          <img
-            src={avatarUrl}
-            alt="Profile"
-            className={`${sizeClasses[size]} rounded-full object-cover border border-slate-200`}
-            onError={() => setAvatarUrl('')}
-          />
-        ) : (
-          <div className={`${sizeClasses[size]} rounded-full bg-slate-100 flex items-center justify-center border border-slate-200`}>
-            <span className={`${size === 'small' ? 'text-xs' : 'text-sm'} font-semibold text-slate-600`}>
-              {userInitial}
-            </span>
-          </div>
-        )}
-        {showInfo && !isCollapsed && (
-          <div className="flex flex-col min-w-0">
-            <span className="text-sm font-semibold text-slate-900 truncate">
-              {userName}
-            </span>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-500 truncate">
-                {user?.email}
-              </span>
-
-              {/* Tombol logout kecil (ADMIN ONLY) */}
-              {role === 'admin' && (
-                <button
-                  type="button"
-                  onClick={handleLogout}
-                  className="text-[10px] px-2 py-0.5 rounded-full border border-red-200 text-red-500 hover:bg-red-50 hover:border-red-300 flex-shrink-0"
-                >
-                  Logout
-                </button>
-              )}
-            </div>
-          </div>
-        )}
+  /* ---- Avatar ---- */
+  const AvatarImg = ({ size = 40, className = '' }) => (
+    avatarUrl
+      ? <img src={avatarUrl} alt="Avatar" onError={() => setAvatarUrl('')}
+        className={`rounded-full object-cover ${className}`}
+        style={{ width: size, height: size }} />
+      : <div className={`rounded-full bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center font-bold text-white ${className}`}
+        style={{ width: size, height: size, fontSize: size * 0.38 }}>
+        {userInitial}
       </div>
-    )
-  }
-
-  const showTopProfileCard = role === 'guru' || role === 'siswa'
-
-  const SidebarProfileCard = ({ placement = 'top' }) => (
-    <div
-      className={`px-3 ${
-        placement === 'bottom'
-          ? isCollapsed
-            ? 'pt-2 pb-3'
-            : 'pt-2 pb-4'
-          : isCollapsed
-            ? 'pt-3 pb-2'
-            : 'pt-3 pb-4'
-      }`}
-    >
-      <div
-        className={`relative rounded-[24px] border border-slate-100 bg-white shadow-[0_16px_30px_rgba(15,23,42,0.08)] ${
-          isCollapsed ? 'p-2.5 flex justify-center' : 'px-3 pb-3 pt-8'
-        }`}
-      >
-        {isCollapsed ? (
-          <UserAvatar size="small" showInfo={false} />
-        ) : (
-          <>
-            <div className="absolute left-1/2 -top-8 -translate-x-1/2">
-              {avatarUrl ? (
-                <img
-                  src={avatarUrl}
-                  alt="Profile"
-                  className="h-16 w-16 rounded-full object-cover border-4 border-white shadow-md"
-                  onError={() => setAvatarUrl('')}
-                />
-              ) : (
-                <div className="h-16 w-16 rounded-full bg-slate-200 border-4 border-white shadow-md flex items-center justify-center">
-                  <span className="text-base font-semibold text-slate-600">{userInitial}</span>
-                </div>
-              )}
-            </div>
-
-            <button
-              type="button"
-              className="w-full mt-2 h-10 rounded-2xl border border-slate-200 bg-slate-50/80 px-3 flex items-center justify-between text-slate-700"
-              title={userName}
-            >
-              <span className="text-sm font-semibold truncate">{userName}</span>
-              <span className="text-xs text-slate-500">⌄</span>
-            </button>
-          </>
-        )}
-      </div>
-    </div>
   )
 
+  /* ---- NavLink item ---- */
+  const NavItem = ({ link, collapsed }) => {
+    const isActive = location.pathname === link.to || location.pathname.startsWith(link.to + '/')
+    return (
+      <Link
+        to={link.to}
+        title={collapsed ? link.label : undefined}
+        className={`
+          group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium
+          transition-all duration-200 select-none
+          ${isActive
+            ? 'bg-brand-600 text-white shadow-brand-sm'
+            : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+          }
+          ${collapsed ? 'justify-center' : ''}
+        `}
+      >
+        <span className={`flex-shrink-0 transition-transform duration-200 group-hover:scale-110 ${isActive ? 'text-white' : 'text-slate-500 group-hover:text-brand-600'}`}>
+          <NavigationIcon name={link.icon} />
+        </span>
+        {!collapsed && <span className="truncate">{link.label}</span>}
+        {isActive && !collapsed && (
+          <span className="ml-auto w-1.5 h-1.5 rounded-full bg-white/70 flex-shrink-0" />
+        )}
+        {collapsed && (
+          <div className="absolute left-full ml-2 px-2.5 py-1.5 bg-slate-900 text-white text-xs rounded-lg whitespace-nowrap
+            opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity duration-150 z-50 shadow-lg">
+            {link.label}
+          </div>
+        )}
+      </Link>
+    )
+  }
+
+  /* ===== Monitoring Modal ===== */
   const MonitoringModal = () => {
     if (!monitorOpen) return null
-
     const renderRow = (u, showKelas = false) => {
       const multiDevice = (u.active_devices || 0) >= 2
       const lastSeen = u.last_seen_at ? formatDateTime(u.last_seen_at) : 'Belum pernah online'
       return (
-        <div
-          key={u.id}
-          className={`flex items-center justify-between gap-3 p-3 rounded-lg border ${
-            multiDevice ? 'border-red-300 bg-red-50' : 'border-slate-200 bg-white'
-          }`}
-        >
+        <div key={u.id} className={`flex items-center justify-between gap-3 p-3 rounded-xl border text-sm ${multiDevice ? 'border-red-200 bg-red-50' : 'border-slate-100 bg-white'}`}>
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-semibold text-slate-900 truncate">{u.nama || u.email || 'Tanpa Nama'}</span>
-              {showKelas && u.kelas && (
-                <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
-                  {u.kelas}
-                </span>
-              )}
-              {multiDevice && (
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-600 text-white">
-                  Multi Device
-                </span>
-              )}
+              <span className="font-semibold text-slate-800 truncate">{u.nama || u.email || 'Tanpa Nama'}</span>
+              {showKelas && u.kelas && <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{u.kelas}</span>}
+              {multiDevice && <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-600 text-white font-semibold">Multi Device</span>}
             </div>
-            <div className="text-xs text-slate-500 mt-1">
-              {u.online ? 'Online sekarang' : `Offline • Terakhir online: ${lastSeen}`}
-            </div>
+            <div className="text-xs text-slate-400 mt-0.5">{u.online ? 'Online sekarang' : `Offline · ${lastSeen}`}</div>
           </div>
-
-          <div className="flex items-center gap-3">
-            <div
-              className={`text-[10px] px-2 py-1 rounded-full font-semibold ${
-                u.online ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'
-              }`}
-            >
+          <div className="flex items-center gap-3 shrink-0">
+            <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold ${u.online ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
               {u.online ? 'ONLINE' : 'OFFLINE'}
-            </div>
-            <div className="text-xs text-slate-600">
-              Aktivitas: <span className="font-semibold">{u.activity_count || 0}</span>
-            </div>
+            </span>
+            <span className="text-xs text-slate-500">Aktivitas: <strong>{u.activity_count || 0}</strong></span>
           </div>
         </div>
       )
     }
 
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
-        <div className="bg-white w-full max-w-3xl rounded-2xl shadow-xl border border-slate-200">
-          <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4 animate-fade-in">
+        <div className="bg-white w-full max-w-2xl rounded-2xl shadow-[var(--shadow-popup)] border border-slate-100 overflow-hidden animate-scale-in">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white">
             <div>
-              <h3 className="text-lg font-bold text-slate-900">Log Monitoring User</h3>
-              <p className="text-xs text-slate-500">
-                Online: {onlineCount} • Update: {monitorData?.generated_at ? formatDateTime(monitorData.generated_at) : '—'}
+              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <span className="p-1.5 bg-brand-100 rounded-lg text-brand-600"><Icon name="monitor" className="w-4 h-4" /></span>
+                Monitoring User
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Online: <strong>{onlineCount}</strong> · Update: {monitorData?.generated_at ? formatDateTime(monitorData.generated_at) : '—'}
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={loadMonitoring}
-                className="text-xs px-3 py-1.5 rounded-full border border-slate-200 hover:bg-slate-50"
-              >
-                Refresh
-              </button>
-              <button
-                type="button"
-                onClick={() => setMonitorOpen(false)}
-                className="text-sm px-3 py-1.5 rounded-full bg-slate-900 text-white hover:bg-slate-800"
-              >
-                Tutup
-              </button>
+              <button onClick={loadMonitoring} className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors font-medium">Refresh</button>
+              <button onClick={() => setMonitorOpen(false)} className="text-xs px-3 py-1.5 rounded-lg bg-slate-900 text-white hover:bg-slate-800 transition-colors font-medium">Tutup</button>
             </div>
           </div>
-
-          <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
-            {monitorLoading && (
-              <div className="text-sm text-slate-500">Memuat data monitoring...</div>
-            )}
-            {monitorError && (
-              <div className="text-sm text-red-600">{monitorError}</div>
-            )}
-
+          <div className="p-5 space-y-4 max-h-[60vh] overflow-y-auto bg-slate-50/50">
+            {monitorLoading && <p className="text-sm text-slate-500 text-center py-4">Memuat data monitoring...</p>}
+            {monitorError && <p className="text-sm text-red-500">{monitorError}</p>}
             <div>
-              <h4 className="text-sm font-bold text-slate-700 mb-2">Siswa</h4>
-              <div className="space-y-2">
-                {students.length ? students.map((u) => renderRow(u, true)) : (
-                  <div className="text-xs text-slate-500">Tidak ada data siswa.</div>
-                )}
-              </div>
+              <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Siswa ({students.length})</h4>
+              <div className="space-y-2">{students.length ? students.map(u => renderRow(u, true)) : <p className="text-xs text-slate-400">Tidak ada data siswa.</p>}</div>
             </div>
-
             <div>
-              <h4 className="text-sm font-bold text-slate-700 mb-2">Guru</h4>
-              <div className="space-y-2">
-                {teachers.length ? teachers.map((u) => renderRow(u, false)) : (
-                  <div className="text-xs text-slate-500">Tidak ada data guru.</div>
-                )}
-              </div>
+              <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Guru ({teachers.length})</h4>
+              <div className="space-y-2">{teachers.length ? teachers.map(u => renderRow(u, false)) : <p className="text-xs text-slate-400">Tidak ada data guru.</p>}</div>
             </div>
           </div>
         </div>
@@ -473,166 +324,137 @@ const Navbar = () => {
     )
   }
 
-  // Desktop Sidebar Component
+  /* ===== Desktop Sidebar ===== */
   const DesktopSidebar = () => (
-    <aside
-      className={`hidden md:flex flex-col h-screen sticky top-0 bg-white border-r border-slate-200 shadow-sm transition-all duration-300 ${
-        isCollapsed ? 'w-20' : 'w-64'
-      }`}
-    >
-      {/* Header */}
-      <div className="px-3 pt-5 pb-3 border-b border-slate-100">
-        <div className="flex items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 px-3 py-2.5 shadow-sm">
-          <div className="flex items-center gap-3">
-            <AbstractLogo />
-            {!isCollapsed && (
-              <div className="flex flex-col">
-                <span className="text-xs font-semibold tracking-wide text-indigo-400 uppercase">
-                  {role ? `${role} panel` : 'Panel'}
-                </span>
-                <span className="text-lg font-semibold text-slate-900 leading-snug truncate">
-                  {schoolName}
-                </span>
-              </div>
-            )}
+    <>
+      <div className={`hidden md:block flex-shrink-0 transition-all duration-300 ease-in-out ${isCollapsed ? 'w-[72px]' : 'w-60'}`} />
+
+      <aside className={`hidden md:flex fixed inset-y-0 left-0 flex-col z-40 bg-white border-r border-slate-100 shadow-sidebar transition-all duration-300 ease-in-out ${isCollapsed ? 'w-[72px]' : 'w-60'}`}>
+        {/* Header */}
+        <div className="flex items-center gap-2.5 px-3 pt-4 pb-3 border-b border-slate-100">
+          <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 shadow-brand-sm flex-shrink-0">
+            <span className="font-extrabold text-white text-sm">{schoolName.charAt(0).toUpperCase()}</span>
           </div>
-
-          <button
-            onClick={toggleSidebar}
-            className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
-            title={isCollapsed ? 'Perlebar sidebar' : 'Perkecil sidebar'}
-          >
-            {isCollapsed ? '➡️' : '⬅️'}
+          {!isCollapsed && (
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] font-semibold text-brand-600 uppercase tracking-widest leading-none mb-0.5">{rb.label} Panel</p>
+              <p className="text-sm font-bold text-slate-900 truncate leading-tight">{schoolName}</p>
+            </div>
+          )}
+          <button onClick={toggleSidebar}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-all duration-200 ml-auto flex-shrink-0"
+            title={isCollapsed ? 'Perlebar sidebar' : 'Perkecil sidebar'}>
+            {isCollapsed ? <Icon name="chevronRight" className="w-4 h-4" /> : <Icon name="chevronLeft" className="w-4 h-4" />}
           </button>
         </div>
-      </div>
 
-      {role === 'admin' && (
-        <div className={`mt-3 px-4 ${isCollapsed ? 'flex justify-center' : ''}`}>
-          <button
-            type="button"
-            onClick={() => setMonitorOpen(true)}
-            className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${
-              isCollapsed
-                ? 'bg-slate-100 text-slate-600'
-                : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
-            }`}
-            title="Monitoring User"
-          >
-            <span>📡</span>
-            {!isCollapsed && <span>Monitoring</span>}
-            {!isCollapsed && (
-              <span className="ml-1 text-[10px] px-2 py-0.5 rounded-full bg-indigo-600 text-white">
-                {onlineCount}
-              </span>
-            )}
-          </button>
-        </div>
-      )}
+        {/* Monitor button (admin) */}
+        {effectiveRole === 'admin' && (
+          <div className={`px-3 pt-3 ${isCollapsed ? 'flex justify-center' : ''}`}>
+            <button onClick={() => setMonitorOpen(true)} title="Monitoring User"
+              className={`flex items-center gap-2 text-xs font-semibold rounded-xl transition-all duration-200
+              ${isCollapsed ? 'p-2 bg-brand-50 text-brand-600 hover:bg-brand-100' : 'w-full px-3 py-2 bg-brand-50 text-brand-700 hover:bg-brand-100'}`}>
+              <Icon name="signal" className="w-4 h-4 flex-shrink-0" />
+              {!isCollapsed && (
+                <>
+                  <span>Monitoring</span>
+                  <span className="ml-auto min-w-[20px] text-center px-1.5 py-0.5 rounded-full bg-brand-600 text-white text-[10px] font-bold">{onlineCount}</span>
+                </>
+              )}
+            </button>
+          </div>
+        )}
 
-      {/* Navigation */}
-      <nav className="flex-1 px-3 py-4 space-y-2 overflow-y-auto">
-        {navLinks.map((link) => {
-          const isActive = location.pathname === link.to
-          return (
-            <Link
-              key={link.to}
-              to={link.to}
-              className={`flex w-full min-h-[48px] items-center rounded-2xl px-4 py-2.5 text-sm font-semibold transition-all ${
-                isActive
-                  ? 'bg-indigo-500 text-white shadow-[0_10px_25px_rgba(79,70,229,0.35)]'
-                  : 'text-slate-600 bg-white border border-slate-200 hover:text-indigo-600 hover:bg-indigo-50 hover:border-indigo-100'
-              }`}
-              title={isCollapsed ? link.label : ''}
-            >
-              <span className={`text-lg flex-shrink-0 ${isActive ? 'opacity-100' : 'opacity-80'}`}>
-                {link.icon}
-              </span>
-              {!isCollapsed && <span className="ml-3 truncate">{link.label}</span>}
-            </Link>
-          )
-        })}
-      </nav>
+        {/* Nav links */}
+        <nav className="flex-1 px-3 py-3 space-y-1 overflow-y-hidden">
+          {navLinks.map(link => <NavItem key={link.to} link={link} collapsed={isCollapsed} />)}
+        </nav>
 
-      {/* User Info */}
-      {showTopProfileCard ? (
-        <div className="border-t border-slate-100 bg-white/80">
-          <SidebarProfileCard placement="bottom" />
+        {/* User info / Logout */}
+        <div className={`border-t border-slate-100 ${isCollapsed ? 'p-3' : 'p-3'}`}>
+          {isCollapsed ? (
+            <div className="flex flex-col items-center gap-2">
+              <AvatarImg size={36} />
+              <button onClick={handleLogout} title="Keluar"
+                className="p-2 rounded-xl text-slate-400 hover:text-red-500 hover:bg-red-50 transition-all duration-200">
+                <Icon name="logout" className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2.5">
+              <AvatarImg size={36} className="flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-slate-800 truncate leading-tight">{userName}</p>
+                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${rb.bg} ${rb.text}`}>{rb.label}</span>
+              </div>
+              <button onClick={handleLogout} title="Keluar"
+                className="p-2 rounded-xl text-slate-400 hover:text-red-500 hover:bg-red-50 transition-all duration-200 flex-shrink-0">
+                <Icon name="logout" className="w-4 h-4" />
+              </button>
+            </div>
+          )}
         </div>
-      ) : (
-        <div className="px-4 py-4 border-t border-slate-100 bg-white/80">
-          <UserAvatar showInfo={!isCollapsed} />
-        </div>
-      )}
-    </aside>
+      </aside>
+    </>
   )
 
-  // Mobile Navigation Component
-  const MobileNavbar = () => (
-    <nav className="md:hidden bg-white border-b border-slate-200 shadow-sm">
-      <div className="w-full px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
-          {/* Logo and School Name */}
-          <div className="flex items-center gap-3">
-            <AbstractLogo size="small" />
-            <div className="flex flex-col">
-              <span className="text-base font-semibold text-slate-900 leading-tight">
-                {schoolName}
-              </span>
-              {role && (
-                <span className="text-xs text-indigo-500 capitalize">
-                  {role} panel
-                </span>
-              )}
+  /* ===== Mobile Top Bar + Bottom Nav ===== */
+  const MobileNav = () => (
+    <>
+      {/* Top Bar */}
+      <div className="md:hidden sticky top-0 z-30 glass border-b border-slate-100 shadow-navbar">
+        <div className="flex items-center justify-between px-4 h-14">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center flex-shrink-0">
+              <span className="font-extrabold text-white text-xs">{schoolName.charAt(0).toUpperCase()}</span>
+            </div>
+            <div>
+              <p className="text-sm font-bold text-slate-900 leading-tight">{schoolName}</p>
+              <p className="text-[10px] text-brand-600 font-semibold uppercase tracking-wide">{rb.label}</p>
             </div>
           </div>
-
           <div className="flex items-center gap-2">
-            {role === 'admin' && (
-              <button
-                type="button"
-                onClick={() => setMonitorOpen(true)}
-                className="flex items-center gap-1 px-2 py-1 rounded-full bg-indigo-50 text-indigo-600 text-xs font-semibold"
-                title="Monitoring User"
-              >
-                📡
+            {effectiveRole === 'admin' && (
+              <button onClick={() => setMonitorOpen(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-brand-50 text-brand-700 text-xs font-bold">
+                <Icon name="signal" className="w-3.5 h-3.5" />
                 <span>{onlineCount}</span>
               </button>
             )}
-            <UserAvatar size="small" showInfo={false} />
-          </div>
-        </div>
-
-        {/* Navigation Links */}
-        <div className="border-t border-slate-200 pt-3 pb-3">
-          <div className="flex overflow-x-auto gap-2 pb-1">
-            {navLinks.map((link) => {
-              const isActive = location.pathname === link.to
-              return (
-                <Link
-                  key={link.to}
-                  to={link.to}
-                  className={`flex items-center rounded-full px-4 py-2 text-xs font-semibold whitespace-nowrap transition-colors ${
-                    isActive
-                      ? 'bg-indigo-500 text-white shadow-sm'
-                      : 'bg-slate-50 text-slate-600 hover:bg-indigo-50 hover:text-indigo-600'
-                  }`}
-                >
-                  <span className="mr-2 text-sm">{link.icon}</span>
-                  {link.label}
-                </Link>
-              )
-            })}
+            <AvatarImg size={32} />
           </div>
         </div>
       </div>
-    </nav>
+
+      {/* Bottom Tab Bar */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 glass border-t border-slate-100 shadow-navbar">
+        <div className="flex items-center justify-around px-1 py-1.5 safe-area-inset-bottom">
+          {navLinks.slice(0, 5).map(link => {
+            const isActive = location.pathname === link.to || location.pathname.startsWith(link.to + '/')
+            return (
+              <Link key={link.to} to={link.to}
+                className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-all duration-200 min-w-0 flex-1
+                  ${isActive ? 'text-brand-600' : 'text-slate-500 hover:text-slate-700'}`}>
+                <span className={`transition-all duration-200 ${isActive ? 'scale-110' : ''}`}>
+                  <NavigationIcon name={link.icon} />
+                </span>
+                <span className="text-[10px] font-semibold truncate">{link.label}</span>
+                {isActive && <span className="w-1 h-1 rounded-full bg-brand-600 mt-0.5" />}
+              </Link>
+            )
+          })}
+        </div>
+      </nav>
+    </>
   )
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <div className="animate-pulse text-slate-400">Memuat...</div>
+      <div className="hidden md:flex flex-col h-screen sticky top-0 w-60 bg-white border-r border-slate-100">
+        <div className="animate-pulse p-4">
+          <div className="h-9 bg-slate-100 rounded-xl mb-4" />
+          <div className="space-y-2">{[...Array(6)].map((_, i) => <div key={i} className="h-9 bg-slate-100 rounded-xl" />)}</div>
+        </div>
       </div>
     )
   }
@@ -640,7 +462,7 @@ const Navbar = () => {
   return (
     <>
       <DesktopSidebar />
-      <MobileNavbar />
+      <MobileNav />
       <MonitoringModal />
     </>
   )

@@ -1,13 +1,14 @@
 <?php
 
+use App\Http\Controllers\Api\AdminBackupController;
 use App\Http\Controllers\Api\AdminController;
+use App\Http\Controllers\Api\ApprovalController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\DbController;
 use App\Http\Controllers\Api\PresenceController;
 use App\Http\Controllers\Api\QuizController;
 use App\Http\Controllers\Api\StorageController;
 use App\Http\Controllers\Api\SuperAdminController;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/health', function () {
@@ -30,16 +31,24 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->post('/presence/ping', [Pre
 Route::middleware(['auth:sanctum', 'throttle:api'])->post('/quiz/submit', [QuizController::class, 'submit']);
 Route::middleware(['auth:sanctum', 'throttle:api'])->post('/quiz/retake', [QuizController::class, 'retake']);
 Route::middleware(['auth:sanctum', 'throttle:api'])->get('/quiz/retake-history', [QuizController::class, 'retakeHistory']);
+Route::middleware(['auth:sanctum', 'throttle:api'])->post('/quiz/restore-retake-score', [QuizController::class, 'restoreRetakeScore']);
+Route::middleware(['auth:sanctum', 'throttle:api'])->post('/quiz/grade-essay', [QuizController::class, 'gradeEssay']);
+Route::middleware(['auth:sanctum', 'throttle:api'])->post('/quiz/complete-essay-review', [QuizController::class, 'completeEssayReview']);
 
 Route::post('/db', [DbController::class, 'handle'])->middleware('throttle:db');
 
-Route::post('/storage/upload', [StorageController::class, 'upload'])->middleware('throttle:api');
-Route::post('/storage/remove', [StorageController::class, 'remove'])->middleware('throttle:api');
-Route::get('/storage/signed', [StorageController::class, 'signed'])->middleware('throttle:api');
-Route::get('/storage/object', [StorageController::class, 'object'])->middleware('throttle:api');
+Route::post('/storage/upload', [StorageController::class, 'upload'])->middleware(['auth:sanctum', 'throttle:storage']);
+Route::post('/storage/remove', [StorageController::class, 'remove'])->middleware(['auth:sanctum', 'throttle:storage']);
+Route::get('/storage/signed', [StorageController::class, 'signed'])->middleware('throttle:storage');
+Route::get('/storage/object', [StorageController::class, 'object'])->middleware('throttle:storage');
 
 Route::middleware(['auth:sanctum', 'throttle:api'])->delete('/admin/users/{id}', [AdminController::class, 'deleteUser']);
 Route::middleware(['auth:sanctum', 'throttle:api'])->get('/admin/monitoring', [AdminController::class, 'monitoring']);
+Route::middleware(['auth:sanctum', 'throttle:api'])->get('/admin/backup', [AdminBackupController::class, 'backup']);
+Route::middleware(['auth:sanctum', 'throttle:api'])->post('/admin/backup/restore', [AdminBackupController::class, 'restore']);
+Route::middleware(['auth:sanctum', 'throttle:api'])->get('/admin/approvals', [ApprovalController::class, 'index']);
+Route::middleware(['auth:sanctum', 'throttle:api'])->post('/admin/approvals/{id}/approve', [ApprovalController::class, 'approve']);
+Route::middleware(['auth:sanctum', 'throttle:api'])->post('/admin/approvals/{id}/reject', [ApprovalController::class, 'reject']);
 
 Route::middleware(['auth:sanctum', 'throttle:super', 'super.domain'])->group(function () {
     Route::get('/super/me', [SuperAdminController::class, 'me']);
@@ -47,8 +56,11 @@ Route::middleware(['auth:sanctum', 'throttle:super', 'super.domain'])->group(fun
     Route::post('/super/tenants', [SuperAdminController::class, 'store']);
     Route::get('/super/tenants/{id}', [SuperAdminController::class, 'showTenant']);
     Route::get('/super/tenants/{id}/backup', [SuperAdminController::class, 'backupTenant']);
+    Route::post('/super/tenants/{id}/restore', [SuperAdminController::class, 'restoreTenant']);
+    Route::patch('/super/tenants/{id}/status', [SuperAdminController::class, 'updateTenantStatus']);
     Route::post('/super/tenants/{tenantId}/admins/{userId}/reset-password', [SuperAdminController::class, 'resetTenantAdminPassword']);
     Route::get('/super/admins', [SuperAdminController::class, 'admins']);
     Route::post('/super/admins', [SuperAdminController::class, 'storeAdmin']);
     Route::delete('/super/admins/{id}', [SuperAdminController::class, 'deleteAdmin']);
+    Route::get('/super/audit-trail', [SuperAdminController::class, 'auditTrail']);
 });

@@ -1,9 +1,10 @@
 // src/pages/admin/APengaturan.jsx
 import React, { useEffect, useState, useRef } from 'react'
-import { supabase } from '../../lib/supabase'
-import { useUIStore } from '../../store/useUIStore'
+import { supabase, PROFILE_BUCKET, getSignedUrlForValue } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
+import { useUIStore } from '../../store/useUIStore'
 import FileDropzone from '../../components/FileDropzone'
+import { sanitizeText, sanitizeUrl } from '../../utils/sanitize'
 
 const SUPABASE_BUCKET = 'profile-photos'
 const LOGO_FILE_PATH = 'logo_sekolah.png'
@@ -12,6 +13,103 @@ const LOGO_FILE_PATH = 'logo_sekolah.png'
 // Catatan: karena DB sekarang menyimpan PATH saja, signed URL dibuat saat runtime.
 // Kalau banyak halaman publik menampilkan logo, pertimbangkan expiry lebih panjang (mis. 1-7 hari).
 const SIGNED_URL_EXPIRES_IN = 60 * 60 * 24 * 7 // 7 hari
+
+const RANKING_TIE_BREAK_KEYS = ['nilai_akhir', 'mapel_inti', 'absensi', 'nama']
+const RANKING_TIE_BREAK_OPTIONS = [
+  { value: 'nilai_akhir', label: 'Nilai Akhir Berbobot' },
+  { value: 'mapel_inti', label: 'Nilai Mapel Inti' },
+  { value: 'absensi', label: 'Skor Absensi' },
+  { value: 'nama', label: 'Nama Siswa' }
+]
+
+const DEFAULT_RANKING_FORM = {
+  ranking_weight_tugas: 40,
+  ranking_weight_quiz: 40,
+  ranking_weight_absensi: 20,
+  ranking_tiebreak_order: ['nilai_akhir', 'mapel_inti', 'absensi', 'nama'],
+  ranking_core_mapel_text: '',
+  nilai_freeze_enabled: false,
+  nilai_freeze_start: '',
+  nilai_freeze_end: '',
+  nilai_freeze_reason: ''
+}
+
+const parseArrayLikeValue = (value) => {
+  if (Array.isArray(value)) return value
+  if (value === null || value === undefined) return []
+  if (typeof value !== 'string') return []
+
+  const trimmed = value.trim()
+  if (!trimmed) return []
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed)
+      if (Array.isArray(parsed)) return parsed
+    } catch {
+      // fallback ke split delimiter
+    }
+  }
+  return trimmed.split(/[,;\n\r]+/g).map((item) => item.trim())
+}
+
+const normalizeTieBreakToken = (value) => {
+  const token = String(value || '').trim().toLowerCase()
+  if (!token) return null
+  if (['nilai_akhir', 'nilaiakhir', 'final_score', 'akhir'].includes(token)) return 'nilai_akhir'
+  if (['mapel_inti', 'mapelinti', 'core_mapel', 'core'].includes(token)) return 'mapel_inti'
+  if (['absensi', 'attendance'].includes(token)) return 'absensi'
+  if (['nama', 'name'].includes(token)) return 'nama'
+  return null
+}
+
+const normalizeTieBreakOrder = (value) => {
+  const raw = parseArrayLikeValue(value)
+  const normalized = []
+  raw.forEach((item) => {
+    const token = normalizeTieBreakToken(item)
+    if (token && !normalized.includes(token)) {
+      normalized.push(token)
+    }
+  })
+  RANKING_TIE_BREAK_KEYS.forEach((key) => {
+    if (!normalized.includes(key)) normalized.push(key)
+  })
+  return normalized
+}
+
+const normalizeCoreMapelList = (value) => {
+  const raw = parseArrayLikeValue(value)
+  const result = []
+  raw.forEach((item) => {
+    const name = String(item || '').trim()
+    if (!name) return
+    if (!result.includes(name)) result.push(name)
+  })
+  return result
+}
+
+const toDateTimeLocalValue = (value) => {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
+    date.getHours()
+  )}:${pad(date.getMinutes())}`
+}
+
+const toIsoOrNull = (value) => {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  return date.toISOString()
+}
+
+const normalizeRankingWeight = (value, fallback) => {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback
+  return Math.round(parsed * 100) / 100
+}
 
 function normalizeTimeString(timeValue) {
   if (!timeValue) return ''
@@ -236,8 +334,8 @@ export default function APengaturan() {
   const { pushToast } = useUIStore()
   const { user, profile, logout } = useAuthStore()
 
-  const [isAuthorized, setIsAuthorized] = useState(false)
-  const [passwordModalOpen, setPasswordModalOpen] = useState(true)
+  const [isAuthorized, setIsAuthorized] = useState(true)
+  const [passwordModalOpen, setPasswordModalOpen] = useState(false)
   const [passwordLoading, setPasswordLoading] = useState(false)
 
   // ✅ form.logo_url sekarang DIANGGAP objectKey/path (bukan URL)
@@ -255,7 +353,8 @@ export default function APengaturan() {
     link_tiktok: '',
     registrasi_siswa_aktif: true,
     registrasi_guru_aktif: true,
-    registrasi_admin_aktif: false
+    registrasi_admin_aktif: false,
+    ...DEFAULT_RANKING_FORM
   })
 
   const [rfidSettings, setRfidSettings] = useState({
@@ -277,6 +376,7 @@ export default function APengaturan() {
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
   const [selectedLogoFile, setSelectedLogoFile] = useState(null)
   const [settingsId, setSettingsId] = useState(null)
+  const [mapelOptions, setMapelOptions] = useState([])
 
   const autoSaveTimerRef = useRef(null)
 
@@ -458,7 +558,25 @@ export default function APengaturan() {
             link_tiktok: data.link_tiktok || '',
             registrasi_siswa_aktif: data.registrasi_siswa_aktif ?? true,
             registrasi_guru_aktif: data.registrasi_guru_aktif ?? true,
-            registrasi_admin_aktif: data.registrasi_admin_aktif ?? false
+            registrasi_admin_aktif: data.registrasi_admin_aktif ?? false,
+            ranking_weight_tugas: normalizeRankingWeight(
+              data.ranking_weight_tugas,
+              DEFAULT_RANKING_FORM.ranking_weight_tugas
+            ),
+            ranking_weight_quiz: normalizeRankingWeight(
+              data.ranking_weight_quiz,
+              DEFAULT_RANKING_FORM.ranking_weight_quiz
+            ),
+            ranking_weight_absensi: normalizeRankingWeight(
+              data.ranking_weight_absensi,
+              DEFAULT_RANKING_FORM.ranking_weight_absensi
+            ),
+            ranking_tiebreak_order: normalizeTieBreakOrder(data.ranking_tiebreak_order),
+            ranking_core_mapel_text: normalizeCoreMapelList(data.ranking_core_mapel).join('\n'),
+            nilai_freeze_enabled: data.nilai_freeze_enabled ?? false,
+            nilai_freeze_start: toDateTimeLocalValue(data.nilai_freeze_start),
+            nilai_freeze_end: toDateTimeLocalValue(data.nilai_freeze_end),
+            nilai_freeze_reason: data.nilai_freeze_reason || ''
           }))
         }
 
@@ -476,6 +594,45 @@ export default function APengaturan() {
       isCancelled = true
     }
   }, [pushToast, isAuthorized])
+
+  useEffect(() => {
+    if (!isAuthorized) return
+
+    let isCancelled = false
+
+    async function loadMapelOptions() {
+      try {
+        const { data, error } = await supabase
+          .from('mata_pelajaran')
+          .select('id,nama')
+          .order('nama', { ascending: true })
+
+        if (error) throw error
+
+        const options = Array.from(
+          new Set(
+            (data || [])
+              .map((row) => String(row?.nama || '').trim())
+              .filter(Boolean)
+          )
+        ).sort((a, b) => a.localeCompare(b, 'id'))
+
+        if (!isCancelled) {
+          setMapelOptions(options)
+        }
+      } catch {
+        if (!isCancelled) {
+          setMapelOptions([])
+        }
+      }
+    }
+
+    loadMapelOptions()
+
+    return () => {
+      isCancelled = true
+    }
+  }, [isAuthorized])
 
   useEffect(() => {
     if (!settingsId || !isAuthorized) return
@@ -511,7 +668,25 @@ export default function APengaturan() {
             link_tiktok: row.link_tiktok || '',
             registrasi_siswa_aktif: row.registrasi_siswa_aktif ?? true,
             registrasi_guru_aktif: row.registrasi_guru_aktif ?? true,
-            registrasi_admin_aktif: row.registrasi_admin_aktif ?? false
+            registrasi_admin_aktif: row.registrasi_admin_aktif ?? false,
+            ranking_weight_tugas: normalizeRankingWeight(
+              row.ranking_weight_tugas,
+              DEFAULT_RANKING_FORM.ranking_weight_tugas
+            ),
+            ranking_weight_quiz: normalizeRankingWeight(
+              row.ranking_weight_quiz,
+              DEFAULT_RANKING_FORM.ranking_weight_quiz
+            ),
+            ranking_weight_absensi: normalizeRankingWeight(
+              row.ranking_weight_absensi,
+              DEFAULT_RANKING_FORM.ranking_weight_absensi
+            ),
+            ranking_tiebreak_order: normalizeTieBreakOrder(row.ranking_tiebreak_order),
+            ranking_core_mapel_text: normalizeCoreMapelList(row.ranking_core_mapel).join('\n'),
+            nilai_freeze_enabled: row.nilai_freeze_enabled ?? false,
+            nilai_freeze_start: toDateTimeLocalValue(row.nilai_freeze_start),
+            nilai_freeze_end: toDateTimeLocalValue(row.nilai_freeze_end),
+            nilai_freeze_reason: row.nilai_freeze_reason || ''
           }))
         }
       )
@@ -519,16 +694,16 @@ export default function APengaturan() {
         'postgres_changes',
         rfidSettingsId
           ? {
-              event: '*',
-              schema: 'public',
-              table: 'absensi_rfid_settings',
-              filter: `id=eq.${rfidSettingsId}`
-            }
+            event: '*',
+            schema: 'public',
+            table: 'absensi_rfid_settings',
+            filter: `id=eq.${rfidSettingsId}`
+          }
           : {
-              event: '*',
-              schema: 'public',
-              table: 'absensi_rfid_settings'
-            },
+            event: '*',
+            schema: 'public',
+            table: 'absensi_rfid_settings'
+          },
         (payload) => {
           const row = payload.new
           if (!row) return
@@ -553,6 +728,53 @@ export default function APengaturan() {
     setForm((prev) => ({ ...prev, [name]: value }))
   }
 
+  function handleFormBooleanChange(e) {
+    const { name, checked } = e.target
+    setForm((prev) => ({ ...prev, [name]: checked }))
+  }
+
+  function handleTieBreakOrderChange(index, nextValue) {
+    const normalizedNext = normalizeTieBreakToken(nextValue)
+    if (!normalizedNext) return
+
+    setForm((prev) => {
+      const current = normalizeTieBreakOrder(prev.ranking_tiebreak_order)
+      const next = [...current]
+      const currentValue = next[index]
+      if (currentValue === normalizedNext) return prev
+
+      const otherIndex = next.findIndex((item, idx) => idx !== index && item === normalizedNext)
+      if (otherIndex >= 0) {
+        next[otherIndex] = currentValue
+      }
+      next[index] = normalizedNext
+
+      return {
+        ...prev,
+        ranking_tiebreak_order: next
+      }
+    })
+  }
+
+  function handleCoreMapelToggle(mapelName, checked) {
+    const normalizedName = String(mapelName || '').trim()
+    if (!normalizedName) return
+
+    setForm((prev) => {
+      const selected = new Set(normalizeCoreMapelList(prev.ranking_core_mapel_text))
+      if (checked) {
+        selected.add(normalizedName)
+      } else {
+        selected.delete(normalizedName)
+      }
+
+      return {
+        ...prev,
+        ranking_core_mapel_text: Array.from(selected).join('\n')
+      }
+    })
+  }
+
   useEffect(() => {
     if (!settingsId || !isAuthorized) return
 
@@ -567,7 +789,16 @@ export default function APengaturan() {
       link_instagram,
       link_facebook,
       link_youtube,
-      link_tiktok
+      link_tiktok,
+      ranking_weight_tugas,
+      ranking_weight_quiz,
+      ranking_weight_absensi,
+      ranking_tiebreak_order,
+      ranking_core_mapel_text,
+      nilai_freeze_enabled,
+      nilai_freeze_start,
+      nilai_freeze_end,
+      nilai_freeze_reason
     } = form
 
     const hasContent =
@@ -581,7 +812,16 @@ export default function APengaturan() {
       link_instagram ||
       link_facebook ||
       link_youtube ||
-      link_tiktok
+      link_tiktok ||
+      ranking_weight_tugas !== '' ||
+      ranking_weight_quiz !== '' ||
+      ranking_weight_absensi !== '' ||
+      (Array.isArray(ranking_tiebreak_order) && ranking_tiebreak_order.length > 0) ||
+      ranking_core_mapel_text ||
+      nilai_freeze_enabled ||
+      nilai_freeze_start ||
+      nilai_freeze_end ||
+      nilai_freeze_reason
 
     if (!hasContent) return
 
@@ -608,7 +848,16 @@ export default function APengaturan() {
     form.link_instagram,
     form.link_facebook,
     form.link_youtube,
-    form.link_tiktok
+    form.link_tiktok,
+    form.ranking_weight_tugas,
+    form.ranking_weight_quiz,
+    form.ranking_weight_absensi,
+    JSON.stringify(form.ranking_tiebreak_order || []),
+    form.ranking_core_mapel_text,
+    form.nilai_freeze_enabled,
+    form.nilai_freeze_start,
+    form.nilai_freeze_end,
+    form.nilai_freeze_reason
   ])
 
   async function handleCheckboxChange(e) {
@@ -677,22 +926,67 @@ export default function APengaturan() {
     try {
       if (!settingsId) return
 
+      const rankingWeightTugas = normalizeRankingWeight(
+        form.ranking_weight_tugas,
+        DEFAULT_RANKING_FORM.ranking_weight_tugas
+      )
+      const rankingWeightQuiz = normalizeRankingWeight(
+        form.ranking_weight_quiz,
+        DEFAULT_RANKING_FORM.ranking_weight_quiz
+      )
+      const rankingWeightAbsensi = normalizeRankingWeight(
+        form.ranking_weight_absensi,
+        DEFAULT_RANKING_FORM.ranking_weight_absensi
+      )
+      const rankingWeightTotal = rankingWeightTugas + rankingWeightQuiz + rankingWeightAbsensi
+      if (Math.abs(rankingWeightTotal - 100) > 0.01) {
+        if (showToast) {
+          pushToast('error', 'Total bobot ranking tugas + quiz + absensi harus tepat 100%.')
+        }
+        return
+      }
+
+      const rankingTieBreakOrder = normalizeTieBreakOrder(form.ranking_tiebreak_order)
+      const rankingCoreMapel = normalizeCoreMapelList(form.ranking_core_mapel_text)
+
+      const nilaiFreezeStart = toIsoOrNull(form.nilai_freeze_start)
+      const nilaiFreezeEnd = toIsoOrNull(form.nilai_freeze_end)
+      if (nilaiFreezeStart && nilaiFreezeEnd) {
+        const startDate = new Date(nilaiFreezeStart)
+        const endDate = new Date(nilaiFreezeEnd)
+        if (!Number.isNaN(startDate.getTime()) && !Number.isNaN(endDate.getTime()) && startDate > endDate) {
+          if (showToast) {
+            pushToast('error', 'Tanggal akhir freeze harus setelah tanggal mulai.')
+          }
+          return
+        }
+      }
+
       // ✅ logo_url adalah PATH, bukan URL
       const dataToSave = {
-        nama_sekolah: form.nama_sekolah,
-        email: form.email,
-        telepon: form.telepon,
-        alamat: form.alamat,
+        nama_sekolah: sanitizeText(form.nama_sekolah),
+        email: sanitizeText(form.email),
+        telepon: sanitizeText(form.telepon),
+        alamat: sanitizeText(form.alamat),
         logo_url: form.logo_url || null,
-        visi: form.visi,
-        misi: form.misi,
-        link_instagram: form.link_instagram,
-        link_facebook: form.link_facebook,
-        link_youtube: form.link_youtube,
-        link_tiktok: form.link_tiktok,
+        visi: sanitizeText(form.visi),
+        misi: sanitizeText(form.misi),
+        link_instagram: sanitizeUrl(form.link_instagram),
+        link_facebook: sanitizeUrl(form.link_facebook),
+        link_youtube: sanitizeUrl(form.link_youtube),
+        link_tiktok: sanitizeUrl(form.link_tiktok),
         registrasi_siswa_aktif: form.registrasi_siswa_aktif,
         registrasi_guru_aktif: form.registrasi_guru_aktif,
         registrasi_admin_aktif: form.registrasi_admin_aktif,
+        ranking_weight_tugas: rankingWeightTugas,
+        ranking_weight_quiz: rankingWeightQuiz,
+        ranking_weight_absensi: rankingWeightAbsensi,
+        ranking_tiebreak_order: rankingTieBreakOrder,
+        ranking_core_mapel: rankingCoreMapel,
+        nilai_freeze_enabled: Boolean(form.nilai_freeze_enabled),
+        nilai_freeze_start: nilaiFreezeStart,
+        nilai_freeze_end: nilaiFreezeEnd,
+        nilai_freeze_reason: sanitizeText(form.nilai_freeze_reason),
         updated_at: new Date().toISOString()
       }
 
@@ -815,7 +1109,7 @@ export default function APengaturan() {
   const localStorageAvatarPath =
     typeof window !== 'undefined' && user?.id
       ? localStorage.getItem(`user_avatar_path_${user.id}`) ||
-        extractObjectKeyFromMaybeUrl(localStorage.getItem(`user_avatar_${user.id}`) || '', SUPABASE_BUCKET) // support legacy
+      extractObjectKeyFromMaybeUrl(localStorage.getItem(`user_avatar_${user.id}`) || '', SUPABASE_BUCKET) // support legacy
       : null
 
   const fallbackAvatarPath = avatarPath || localStorageAvatarPath || extractObjectKeyFromMaybeUrl(profile?.photo_url || '', SUPABASE_BUCKET) || ''
@@ -827,14 +1121,14 @@ export default function APengaturan() {
     if (!fallbackAvatarPath) return
 
     let cancelled = false
-    ;(async () => {
-      try {
-        const signed = await createSignedUrlSafe(SUPABASE_BUCKET, fallbackAvatarPath)
-        if (!cancelled) setAvatarSignedUrl(signed)
-      } catch {
-        // ignore
-      }
-    })()
+      ; (async () => {
+        try {
+          const signed = await createSignedUrlSafe(SUPABASE_BUCKET, fallbackAvatarPath)
+          if (!cancelled) setAvatarSignedUrl(signed)
+        } catch {
+          // ignore
+        }
+      })()
 
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -843,71 +1137,56 @@ export default function APengaturan() {
   const finalAvatarUrl = avatarSignedUrl || ''
   const displayName = profile?.nama || user?.email || 'Admin'
   const roleLabel = (profile?.role || 'admin').toUpperCase()
+  const rankingTieBreakOrder = normalizeTieBreakOrder(form.ranking_tiebreak_order)
+  const rankingCoreMapelSelected = normalizeCoreMapelList(form.ranking_core_mapel_text)
+  const rankingCoreMapelOptions = Array.from(
+    new Set([...mapelOptions, ...rankingCoreMapelSelected])
+  ).sort((a, b) => a.localeCompare(b, 'id'))
+  const rankingWeightTotal =
+    Number(form.ranking_weight_tugas || 0) +
+    Number(form.ranking_weight_quiz || 0) +
+    Number(form.ranking_weight_absensi || 0)
+  const rankingWeightValid = Math.abs(rankingWeightTotal - 100) <= 0.01
+  const freezeStartDate = form.nilai_freeze_start ? new Date(form.nilai_freeze_start) : null
+  const freezeEndDate = form.nilai_freeze_end ? new Date(form.nilai_freeze_end) : null
+  const freezeWindowInvalid =
+    freezeStartDate &&
+    freezeEndDate &&
+    !Number.isNaN(freezeStartDate.getTime()) &&
+    !Number.isNaN(freezeEndDate.getTime()) &&
+    freezeStartDate > freezeEndDate
 
   return (
     <div className="min-h-screen bg-gray-50 p-0">
-      <PasswordModal
-        isOpen={passwordModalOpen && !isAuthorized}
-        onClose={handlePasswordClose}
-        onConfirm={handlePasswordConfirm}
-        title="Akses Pengaturan Sistem"
-        loading={passwordLoading}
-      />
-
-      {!isAuthorized ? (
-        <div className="min-h-screen flex items-center justify-center px-4">
-          <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6 w-full max-w-md">
-            <div className="flex items-center mb-4">
-              <div className="p-3 bg-blue-100 rounded-xl mr-3">
-                <span className="text-2xl">🔒</span>
+      <div className="w-full mx-auto">
+        <div className="sticky top-14 md:top-0 z-30 bg-white/95 backdrop-blur shadow-lg p-6 border-b border-gray-200">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center space-x-4">
+              <div className="p-3 bg-blue-600 rounded-xl">
+                <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
               </div>
               <div>
-                <h1 className="text-xl font-bold text-gray-900">Halaman Terkunci</h1>
-                <p className="text-gray-600 text-sm">
-                  Untuk membuka Pengaturan Sistem, silakan konfirmasi password akun admin Anda.
+                <h1 className="text-2xl font-bold text-gray-900">Pengaturan Sistem</h1>
+                <p className="text-gray-600 mt-1">
+                  Kelola identitas sekolah, pengaturan registrasi, dan absensi RFID
                 </p>
               </div>
             </div>
-
-            <button
-              type="button"
-              onClick={() => setPasswordModalOpen(true)}
-              className="w-full bg-blue-600 text-white py-2.5 px-4 rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 text-sm font-medium transition-all duration-200"
-            >
-              Masukkan Password
-            </button>
           </div>
         </div>
-      ) : (
-        <div className="w-full mx-auto">
-          <div className="bg-white shadow-lg p-6 border-b border-gray-200">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-center space-x-4">
-                <div className="p-3 bg-blue-600 rounded-xl">
-                  <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  </svg>
-                </div>
-                <div>
-                  <h1 className="text-2xl font-bold text-gray-900">Pengaturan Sistem</h1>
-                  <p className="text-gray-600 mt-1">
-                    Kelola identitas sekolah, pengaturan registrasi, dan absensi RFID
-                  </p>
-                </div>
+
+        <div className="p-4 md:p-6">
+          {loading && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 backdrop-blur-sm">
+              <div className="bg-white rounded-2xl p-6 flex items-center space-x-3 shadow-2xl">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                <span className="text-gray-700 font-medium">Memuat pengaturan...</span>
               </div>
             </div>
-          </div>
-
-          <div className="p-4 md:p-6">
-            {loading && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 backdrop-blur-sm">
-                <div className="bg-white rounded-2xl p-6 flex items-center space-x-3 shadow-2xl">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                  <span className="text-gray-700 font-medium">Memuat pengaturan...</span>
-                </div>
-              </div>
-            )}
+          )}
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               <div className="lg:col-span-2 space-y-6">
@@ -1121,9 +1400,8 @@ export default function APengaturan() {
                         </p>
                       </div>
                       <div
-                        className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${
-                          rfidSettings.rfid_aktif ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                        }`}
+                        className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${rfidSettings.rfid_aktif ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                          }`}
                       >
                         {rfidSettings.rfid_aktif ? 'AKTIF' : 'NON-AKTIF'}
                       </div>
@@ -1157,6 +1435,225 @@ export default function APengaturan() {
                   </div>
                 </div>
 
+                {/* ====== Kebijakan Ranking & Freeze Nilai ====== */}
+                <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
+                  <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center space-x-2">
+                    <span>🏆</span>
+                    <span>Kebijakan Ranking & Freeze Nilai</span>
+                  </h2>
+
+                  <div className="space-y-5">
+                    <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
+                      <p className="text-sm text-indigo-700 font-semibold">
+                        Cara kerja ranking wali kelas:
+                      </p>
+                      <ul className="mt-2 space-y-1 text-sm text-indigo-700">
+                        <li>1. Nilai akhir siswa dihitung per mapel dengan bobot Tugas, Quiz, dan Absensi.</li>
+                        <li>2. Bobot total wajib tepat 100% agar perhitungan valid.</li>
+                        <li>3. Jika nilai akhir sama, sistem pakai tie-break sesuai urutan prioritas resmi.</li>
+                        <li>4. Saat prioritas tie-break memakai mapel inti, sistem melihat daftar mapel inti di bawah.</li>
+                      </ul>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Bobot Tugas (%)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.01"
+                          name="ranking_weight_tugas"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                          value={form.ranking_weight_tugas}
+                          onChange={handleChange}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Bobot Quiz (%)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.01"
+                          name="ranking_weight_quiz"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                          value={form.ranking_weight_quiz}
+                          onChange={handleChange}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Bobot Absensi (%)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.01"
+                          name="ranking_weight_absensi"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                          value={form.ranking_weight_absensi}
+                          onChange={handleChange}
+                        />
+                      </div>
+                    </div>
+
+                    <div
+                      className={`text-sm px-3 py-2 rounded-lg border ${
+                        rankingWeightValid
+                          ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                          : 'bg-red-50 border-red-200 text-red-700'
+                      }`}
+                    >
+                      Total bobot saat ini: <strong>{rankingWeightTotal}%</strong>
+                      {!rankingWeightValid && ' (harus tepat 100%)'}
+                    </div>
+
+                    <div className="border-t pt-5">
+                      <h3 className="text-base font-semibold text-gray-900 mb-3">Urutan Tie-Break Resmi</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {rankingTieBreakOrder.map((item, idx) => (
+                          <div key={`tie-break-${idx}`}>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Prioritas {idx + 1}
+                            </label>
+                            <select
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                              value={item}
+                              onChange={(e) => handleTieBreakOrderChange(idx, e.target.value)}
+                            >
+                              {RANKING_TIE_BREAK_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Daftar Mapel Inti (Checklist)
+                      </label>
+                      <p className="text-xs text-gray-500 mb-2">
+                        Centang satu atau lebih mapel inti yang dipakai untuk tie-break.
+                      </p>
+                      <div className="w-full max-h-[220px] overflow-auto px-3 py-2 border border-gray-300 rounded-lg bg-gray-50">
+                        {rankingCoreMapelOptions.map((mapelName) => {
+                          const checked = rankingCoreMapelSelected.includes(mapelName)
+                          return (
+                            <label
+                              key={mapelName}
+                              className="flex items-center gap-3 py-2 px-2 rounded-md hover:bg-white transition-colors duration-200 cursor-pointer"
+                            >
+                              <input
+                                type="checkbox"
+                                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                checked={checked}
+                                onChange={(e) => handleCoreMapelToggle(mapelName, e.target.checked)}
+                              />
+                              <span className="text-sm text-gray-800">{mapelName}</span>
+                            </label>
+                          )
+                        })}
+                      </div>
+                      {rankingCoreMapelOptions.length === 0 && (
+                        <p className="text-xs text-amber-700 mt-2">
+                          Belum ada data mapel pada master `mata_pelajaran`.
+                        </p>
+                      )}
+                      <p className="text-xs text-gray-600 mt-2">
+                        {rankingCoreMapelSelected.length > 0
+                          ? `Terpilih: ${rankingCoreMapelSelected.join(', ')}`
+                          : 'Belum ada mapel inti dipilih.'}
+                      </p>
+                    </div>
+
+                    <div className="border-t pt-5">
+                      <h3 className="text-base font-semibold text-gray-900 mb-3">Freeze Periode Nilai</h3>
+
+                      <label className="flex items-center space-x-3 p-4 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors duration-200">
+                        <input
+                          type="checkbox"
+                          name="nilai_freeze_enabled"
+                          checked={Boolean(form.nilai_freeze_enabled)}
+                          onChange={handleFormBooleanChange}
+                          className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 transition-all duration-200"
+                        />
+                        <div className="flex-1">
+                          <span className="text-gray-900 font-medium">Aktifkan Freeze Nilai</span>
+                          <p className="text-sm text-gray-500 mt-1">
+                            Jika aktif, guru/admin tidak bisa mengubah nilai pada rentang periode freeze.
+                          </p>
+                        </div>
+                        <div
+                          className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${
+                            form.nilai_freeze_enabled
+                              ? 'bg-red-100 text-red-700'
+                              : 'bg-gray-100 text-gray-700'
+                          }`}
+                        >
+                          {form.nilai_freeze_enabled ? 'FREEZE ON' : 'FREEZE OFF'}
+                        </div>
+                      </label>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Mulai Freeze
+                          </label>
+                          <input
+                            type="datetime-local"
+                            name="nilai_freeze_start"
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 disabled:bg-gray-100 disabled:text-gray-500"
+                            value={form.nilai_freeze_start || ''}
+                            onChange={handleChange}
+                            disabled={!form.nilai_freeze_enabled}
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Selesai Freeze
+                          </label>
+                          <input
+                            type="datetime-local"
+                            name="nilai_freeze_end"
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 disabled:bg-gray-100 disabled:text-gray-500"
+                            value={form.nilai_freeze_end || ''}
+                            onChange={handleChange}
+                            disabled={!form.nilai_freeze_enabled}
+                          />
+                        </div>
+                      </div>
+
+                      {freezeWindowInvalid && (
+                        <p className="text-sm text-red-600 mt-2">
+                          Rentang freeze tidak valid: tanggal akhir harus setelah tanggal mulai.
+                        </p>
+                      )}
+
+                      <div className="mt-4">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Alasan Freeze (opsional)
+                        </label>
+                        <textarea
+                          name="nilai_freeze_reason"
+                          rows="2"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y transition-all duration-200 disabled:bg-gray-100 disabled:text-gray-500"
+                          value={form.nilai_freeze_reason}
+                          onChange={handleChange}
+                          placeholder="Contoh: Finalisasi rapor semester ganjil."
+                          disabled={!form.nilai_freeze_enabled}
+                        ></textarea>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 {/* ====== Pengaturan Registrasi ====== */}
                 <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
                   <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center space-x-2">
@@ -1184,9 +1681,8 @@ export default function APengaturan() {
                         <p className="text-sm text-gray-500 mt-1">Siswa dapat membuat akun sendiri melalui halaman registrasi publik</p>
                       </div>
                       <div
-                        className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${
-                          form.registrasi_siswa_aktif ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                        }`}
+                        className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${form.registrasi_siswa_aktif ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                          }`}
                       >
                         {form.registrasi_siswa_aktif ? 'AKTIF' : 'NON-AKTIF'}
                       </div>
@@ -1205,9 +1701,8 @@ export default function APengaturan() {
                         <p className="text-sm text-gray-500 mt-1">Guru dapat membuat akun sendiri melalui halaman registrasi publik</p>
                       </div>
                       <div
-                        className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${
-                          form.registrasi_guru_aktif ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                        }`}
+                        className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${form.registrasi_guru_aktif ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                          }`}
                       >
                         {form.registrasi_guru_aktif ? 'AKTIF' : 'NON-AKTIF'}
                       </div>
@@ -1226,9 +1721,8 @@ export default function APengaturan() {
                         <p className="text-sm text-gray-500 mt-1">Admin dapat membuat akun sendiri melalui halaman registrasi publik</p>
                       </div>
                       <div
-                        className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${
-                          form.registrasi_admin_aktif ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                        }`}
+                        className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${form.registrasi_admin_aktif ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                          }`}
                       >
                         {form.registrasi_admin_aktif ? 'AKTIF' : 'NON-AKTIF'}
                       </div>
@@ -1420,7 +1914,6 @@ export default function APengaturan() {
             </div>
           </div>
         </div>
-      )}
     </div>
   )
 }

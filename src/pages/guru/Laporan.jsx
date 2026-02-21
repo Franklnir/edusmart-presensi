@@ -3,13 +3,13 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
+import { loadExcelJsBrowser } from '../../utils/excelBrowser'
 
 // === Dynamic imports (Hanya ExcelJS) ===
 let ExcelJS
 const loadExcelLibrary = async () => {
   try {
-    const excelModule = await import('exceljs')
-    ExcelJS = excelModule.default
+    ExcelJS = await loadExcelJsBrowser()
     return true
   } catch (e) {
     console.error('Error loading ExcelJS:', e)
@@ -72,6 +72,83 @@ const getGrade = (v) => {
   return 'E'
 }
 
+const PREDIKAT_GRADE = {
+  A: 'Sangat Baik',
+  B: 'Baik',
+  C: 'Cukup',
+  D: 'Kurang',
+  E: 'Sangat Kurang',
+  '-': 'Belum ada data'
+}
+
+const getPredikatLabel = (nilai) => {
+  const grade = getGrade(nilai)
+  return `${grade} - ${PREDIKAT_GRADE[grade] || 'Belum ada data'}`
+}
+
+const getKetuntasanStatus = (nilai, kkm = KKM_NILAI_TUGAS) => {
+  const angka = toNumberOrNull(nilai)
+  if (angka == null) return 'Belum ada data'
+  return angka >= kkm ? 'Tuntas' : 'Remedial'
+}
+
+const getIntervensiStatus = ({ nilaiAkhir, skorAbsensi, persenKetuntasanMapel }) => {
+  const nilai = toNumberOrNull(nilaiAkhir)
+  const absensi = toNumberOrNull(skorAbsensi)
+  const ketuntasan = toNumberOrNull(persenKetuntasanMapel)
+
+  if (nilai == null) return 'Belum ada data'
+  if (nilai < KKM_NILAI_TUGAS - 10 || (absensi != null && absensi < 75)) return 'Intervensi Intensif'
+  if (nilai < KKM_NILAI_TUGAS || (absensi != null && absensi < 85) || (ketuntasan != null && ketuntasan < 70)) {
+    return 'Perlu Pendampingan'
+  }
+  return 'Aman'
+}
+
+const buildCatatanWaliOtomatis = ({ nama, nilaiAkhir, skorAbsensi, persenKetuntasanMapel }) => {
+  const siswaNama = String(nama || 'Siswa')
+  const statusKetuntasan = getKetuntasanStatus(nilaiAkhir)
+  const statusIntervensi = getIntervensiStatus({ nilaiAkhir, skorAbsensi, persenKetuntasanMapel })
+  const predikat = getPredikatLabel(nilaiAkhir)
+
+  if (statusKetuntasan === 'Belum ada data') {
+    return `${siswaNama} belum memiliki data nilai yang cukup untuk evaluasi akhir.`
+  }
+  if (statusIntervensi === 'Intervensi Intensif') {
+    return `${siswaNama} perlu intervensi intensif: program remedial terstruktur, pendampingan belajar rutin, dan koordinasi orang tua.`
+  }
+  if (statusIntervensi === 'Perlu Pendampingan') {
+    return `${siswaNama} perlu pendampingan berkala untuk meningkatkan konsistensi akademik/kehadiran. Predikat saat ini ${predikat}.`
+  }
+  return `${siswaNama} menunjukkan capaian stabil dengan predikat ${predikat}. Pertahankan disiplin dan kualitas belajar.`
+}
+
+const hitungStatistikNilai = (values = []) => {
+  const numbers = values
+    .map((value) => toNumberOrNull(value))
+    .filter((value) => value != null)
+    .sort((a, b) => a - b)
+
+  if (!numbers.length) {
+    return {
+      count: 0,
+      min: null,
+      max: null,
+      median: null,
+      mean: null
+    }
+  }
+
+  const count = numbers.length
+  const min = numbers[0]
+  const max = numbers[count - 1]
+  const mean = round2(numbers.reduce((sum, value) => sum + value, 0) / count)
+  const mid = Math.floor(count / 2)
+  const median = count % 2 === 0 ? round2((numbers[mid - 1] + numbers[mid]) / 2) : round2(numbers[mid])
+
+  return { count, min, max, median, mean }
+}
+
 // HELPER WARNA: Hijau (A), Kuning (C), Merah (D/E)
 const getColorClass = (val) => {
   if (val === '-' || val === null || val === undefined || val === '') return ''
@@ -113,18 +190,111 @@ const bulanList = [
 ]
 
 const KKM_NILAI_TUGAS = 75
-const REKAP_WALI_BOBOT = {
-  akademik: 80,
-  absensi: 20
-}
 const REKAP_WALI_STATUS_BOBOT = {
   Hadir: 1,
   Izin: 0.8,
   Sakit: 0.8,
   Alpha: 0
 }
+const RANKING_TIE_BREAK_KEYS = ['nilai_akhir', 'mapel_inti', 'absensi', 'nama']
+const RANKING_TIE_BREAK_LABELS = {
+  nilai_akhir: 'Nilai akhir berbobot',
+  mapel_inti: 'Nilai mapel inti',
+  absensi: 'Skor absensi',
+  nama: 'Nama'
+}
+const DEFAULT_RANKING_POLICY = {
+  weights: {
+    tugas: 40,
+    quiz: 40,
+    absensi: 20
+  },
+  tieBreakOrder: ['nilai_akhir', 'mapel_inti', 'absensi', 'nama'],
+  coreMapel: []
+}
+const MAPEL_COMPONENT_WEIGHT_RULES = [
+  { key: 'bobot_tugas_pr', label: 'Tugas/PR', min: 20, max: 40, default: 30 },
+  { key: 'bobot_quiz_reguler', label: 'Quiz Reguler', min: 10, max: 30, default: 20 },
+  { key: 'bobot_quiz_uts', label: 'Quiz UTS', min: 20, max: 30, default: 20 },
+  { key: 'bobot_quiz_uas', label: 'Quiz UAS', min: 30, max: 40, default: 30 }
+]
+const DEFAULT_MAPEL_COMPONENT_WEIGHTS = MAPEL_COMPONENT_WEIGHT_RULES.reduce((acc, item) => {
+  acc[item.key] = item.default
+  return acc
+}, {})
 
 const round2 = (num) => Math.round(num * 100) / 100
+
+const getCellTextLength = (value) => {
+  if (value === null || value === undefined) return 0
+  if (typeof value === 'object') {
+    if (Array.isArray(value.richText)) {
+      return value.richText.map((part) => part?.text || '').join('').length
+    }
+    if (value.text) return String(value.text).length
+    return String(value).length
+  }
+  return String(value).length
+}
+
+const autoFitWorksheetColumns = (
+  worksheet,
+  {
+    min = 10,
+    max = 60,
+    padding = 2,
+    hardMin = {},
+    hardMax = {}
+  } = {}
+) => {
+  worksheet.columns.forEach((column, index) => {
+    const colIndex = index + 1
+    let longest = 0
+
+    column.eachCell({ includeEmpty: true }, (cell) => {
+      longest = Math.max(longest, getCellTextLength(cell.value))
+    })
+
+    const columnMin = hardMin[colIndex] ?? min
+    const columnMax = hardMax[colIndex] ?? max
+    const calculated = Math.min(Math.max(longest + padding, columnMin), columnMax)
+    const current = Number(column.width || 0)
+    column.width = Math.max(current, calculated)
+  })
+}
+
+const SELECTED_ROW_CLASS =
+  '!bg-sky-100 shadow-inner ring-1 ring-sky-300/70 [&>td]:!bg-sky-100 [&>td]:!text-slate-900 [&>td]:!border-sky-200'
+
+const buildSelectableRowClass = (isSelected, defaultClass = 'hover:bg-gray-50') =>
+  `cursor-pointer transition-colors ${isSelected ? SELECTED_ROW_CLASS : defaultClass}`
+
+const makeLocalId = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return `id-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+const normalizeQuizMode = (quiz) => {
+  const raw = String(quiz?.mode || '').trim().toLowerCase()
+  if (raw === 'regular') return 'regular'
+  if (raw === 'uts') return 'uts'
+  if (raw === 'uas') return 'uas'
+  if (raw === 'ulangan') return 'uts'
+  return quiz?.is_live ? 'uts' : 'regular'
+}
+
+const normalizeMapelName = (value) => {
+  const raw = String(value || '').trim()
+  return raw || 'Tanpa Mapel'
+}
+
+const normalizeMapelKey = (value) =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
 
 const hitungSkorAbsensiWali = (absensi = {}, totalPertemuanKelas = null) => {
   const hadir = Number(absensi.Hadir || 0)
@@ -165,41 +335,353 @@ const hitungSkorAbsensiWali = (absensi = {}, totalPertemuanKelas = null) => {
   }
 }
 
-const hitungRataAkhirWali = (rataAkademik, skorAbsensi) => {
-  const nilaiAkademik =
-    typeof rataAkademik === 'number' && !Number.isNaN(rataAkademik)
-      ? rataAkademik
-      : null
-  const nilaiAbsensi =
-    typeof skorAbsensi === 'number' && !Number.isNaN(skorAbsensi)
-      ? skorAbsensi
-      : null
-
-  const totalBobot = REKAP_WALI_BOBOT.akademik + REKAP_WALI_BOBOT.absensi
-  if (nilaiAkademik == null && nilaiAbsensi == null) return '-'
-
-  // Untuk wali kelas, siswa tanpa nilai akademik tidak diberikan rata-rata akhir numerik.
-  // Mereka tetap diurutkan di bawah siswa yang sudah dinilai (lihat comparator rank).
-  if (nilaiAkademik == null) {
-    return '-'
-  }
-
-  // Jika absensi belum tersedia (mis. belum ada sesi), pakai akademik penuh.
-  if (nilaiAbsensi == null) return round2(nilaiAkademik)
-
-  const hasil =
-    (nilaiAkademik * REKAP_WALI_BOBOT.akademik +
-      nilaiAbsensi * REKAP_WALI_BOBOT.absensi) /
-    totalBobot
-
-  return round2(hasil)
-}
-
 const toNumberOrNull = (value) => {
   if (value === null || value === undefined || value === '') return null
   if (value === '-') return null
-  const parsed = Number(value)
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null
+
+  const normalized =
+    typeof value === 'string'
+      ? value
+          .normalize('NFKC')
+          .replace(/[\u200B-\u200D\uFEFF]/g, '')
+          .trim()
+          .replace(/\s+/g, '')
+          .replace(/[^0-9,.\-+]/g, '')
+      : value
+
+  if (
+    normalized === '' ||
+    normalized === '-' ||
+    normalized === '+' ||
+    normalized === '.' ||
+    normalized === ','
+  ) {
+    return null
+  }
+
+  let numeric = normalized
+  const hasComma = numeric.includes(',')
+  const hasDot = numeric.includes('.')
+  if (hasComma && hasDot) {
+    const lastComma = numeric.lastIndexOf(',')
+    const lastDot = numeric.lastIndexOf('.')
+    const decimalIndex = Math.max(lastComma, lastDot)
+    const intPart = numeric.slice(0, decimalIndex).replace(/[.,]/g, '')
+    const fracPart = numeric.slice(decimalIndex + 1).replace(/[.,]/g, '')
+    numeric = `${intPart}.${fracPart}`
+  } else if (hasComma) {
+    numeric = numeric.replace(',', '.')
+  }
+
+  const dotParts = numeric.split('.')
+  if (dotParts.length > 2) {
+    numeric = `${dotParts.slice(0, -1).join('')}.${dotParts[dotParts.length - 1]}`
+  }
+
+  const parsed = Number(numeric)
   return Number.isFinite(parsed) ? parsed : null
+}
+
+const parseArrayLikeValue = (value) => {
+  if (Array.isArray(value)) return value
+  if (value === null || value === undefined) return []
+  if (typeof value !== 'string') return []
+
+  const trimmed = value.trim()
+  if (!trimmed) return []
+
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed)
+      if (Array.isArray(parsed)) return parsed
+    } catch {
+      // Fallback ke parser delimiter biasa
+    }
+  }
+
+  return trimmed.split(/[,;\n\r]+/g).map((item) => item.trim())
+}
+
+const normalizeWeight = (value, fallback) => {
+  const parsed = toNumberOrNull(value)
+  if (parsed == null || parsed < 0) return fallback
+  return round2(parsed)
+}
+
+const normalizeMapelComponentWeights = (source) => {
+  const normalized = {}
+
+  MAPEL_COMPONENT_WEIGHT_RULES.forEach((rule) => {
+    const parsed = toNumberOrNull(source?.[rule.key])
+    normalized[rule.key] = parsed == null ? rule.default : round2(parsed)
+  })
+
+  const total = MAPEL_COMPONENT_WEIGHT_RULES.reduce(
+    (sum, rule) => sum + Number(normalized[rule.key] || 0),
+    0
+  )
+  if (Math.abs(total - 100) > 0.01) {
+    return { ...DEFAULT_MAPEL_COMPONENT_WEIGHTS }
+  }
+
+  return normalized
+}
+
+const getMapelWeightValidation = (source) => {
+  const normalized = {}
+  const errors = []
+
+  MAPEL_COMPONENT_WEIGHT_RULES.forEach((rule) => {
+    const parsed = toNumberOrNull(source?.[rule.key])
+    if (parsed == null) {
+      errors.push(`${rule.label} wajib diisi`)
+      normalized[rule.key] = null
+      return
+    }
+    const value = round2(parsed)
+    normalized[rule.key] = value
+    if (value < rule.min || value > rule.max) {
+      errors.push(`${rule.label} harus ${rule.min}% - ${rule.max}%`)
+    }
+  })
+
+  const total = MAPEL_COMPONENT_WEIGHT_RULES.reduce(
+    (sum, rule) => sum + Number(normalized[rule.key] || 0),
+    0
+  )
+  if (Math.abs(total - 100) > 0.01) {
+    errors.push('Total bobot komponen mapel harus tepat 100%')
+  }
+
+  return {
+    normalized,
+    total: round2(total),
+    isValid: errors.length === 0,
+    errors
+  }
+}
+
+const normalizeTieBreakToken = (value) => {
+  const token = String(value || '').trim().toLowerCase()
+  if (!token) return null
+
+  if (['nilai_akhir', 'nilaiakhir', 'final_score', 'akhir'].includes(token)) {
+    return 'nilai_akhir'
+  }
+  if (['mapel_inti', 'mapelinti', 'core_mapel', 'core'].includes(token)) {
+    return 'mapel_inti'
+  }
+  if (['absensi', 'attendance'].includes(token)) {
+    return 'absensi'
+  }
+  if (['nama', 'name'].includes(token)) {
+    return 'nama'
+  }
+  return null
+}
+
+const normalizeTieBreakOrder = (value) => {
+  const raw = parseArrayLikeValue(value)
+  const normalized = []
+
+  raw.forEach((item) => {
+    const token = normalizeTieBreakToken(item)
+    if (token && !normalized.includes(token)) {
+      normalized.push(token)
+    }
+  })
+
+  RANKING_TIE_BREAK_KEYS.forEach((token) => {
+    if (!normalized.includes(token)) {
+      normalized.push(token)
+    }
+  })
+
+  return normalized
+}
+
+const normalizeCoreMapelList = (value) => {
+  const raw = parseArrayLikeValue(value)
+  const normalized = []
+  raw.forEach((item) => {
+    const name = String(item || '').trim()
+    if (!name) return
+    if (!normalized.includes(name)) {
+      normalized.push(name)
+    }
+  })
+  return normalized
+}
+
+const normalizeRankingPolicy = (settingsRow) => {
+  const fallback = DEFAULT_RANKING_POLICY
+  const source = settingsRow || {}
+  const nestedWeights = source.weights || {}
+
+  const weights = {
+    tugas: normalizeWeight(
+      source.ranking_weight_tugas ?? nestedWeights.tugas,
+      fallback.weights.tugas
+    ),
+    quiz: normalizeWeight(
+      source.ranking_weight_quiz ?? nestedWeights.quiz,
+      fallback.weights.quiz
+    ),
+    absensi: normalizeWeight(
+      source.ranking_weight_absensi ?? nestedWeights.absensi,
+      fallback.weights.absensi
+    )
+  }
+
+  const totalWeight = weights.tugas + weights.quiz + weights.absensi
+  if (Math.abs(totalWeight - 100) > 0.01) {
+    weights.tugas = fallback.weights.tugas
+    weights.quiz = fallback.weights.quiz
+    weights.absensi = fallback.weights.absensi
+  }
+
+  return {
+    weights,
+    tieBreakOrder: normalizeTieBreakOrder(
+      source.ranking_tiebreak_order ?? source.tieBreakOrder
+    ),
+    coreMapel: normalizeCoreMapelList(source.ranking_core_mapel ?? source.coreMapel)
+  }
+}
+
+const describeRankingPolicy = (inputPolicy) => {
+  const policy = normalizeRankingPolicy(inputPolicy)
+  const tieBreakLabels = policy.tieBreakOrder.map(
+    (key) => RANKING_TIE_BREAK_LABELS[key] || key
+  )
+
+  return {
+    ...policy,
+    tieBreakLabels,
+    tieBreakText: tieBreakLabels.join(' -> '),
+    coreMapelText: policy.coreMapel.length ? policy.coreMapel.join(', ') : 'Tidak diatur'
+  }
+}
+
+const toDateOrNull = (value) => {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  return date
+}
+
+const formatMiniDate = (value) => {
+  const date = toDateOrNull(value)
+  if (!date) return '-'
+  return date.toLocaleDateString('id-ID', {
+    day: '2-digit',
+    month: '2-digit',
+    year: '2-digit'
+  })
+}
+
+const getNilaiFreezeStateFromSettings = (settingsRow) => {
+  const enabled = Boolean(settingsRow?.nilai_freeze_enabled)
+  const startDate = toDateOrNull(settingsRow?.nilai_freeze_start)
+  const endDate = toDateOrNull(settingsRow?.nilai_freeze_end)
+  const reason = String(settingsRow?.nilai_freeze_reason || '').trim()
+
+  if (!enabled) {
+    return {
+      enabled: false,
+      active: false,
+      start: startDate ? startDate.toISOString() : null,
+      end: endDate ? endDate.toISOString() : null,
+      reason: reason || null
+    }
+  }
+
+  const now = new Date()
+  const active = (!startDate || now >= startDate) && (!endDate || now <= endDate)
+
+  return {
+    enabled: true,
+    active,
+    start: startDate ? startDate.toISOString() : null,
+    end: endDate ? endDate.toISOString() : null,
+    reason: reason || null
+  }
+}
+
+const buildFreezeMessage = (freezeState) => {
+  if (!freezeState?.enabled) return ''
+
+  const periods = []
+  if (freezeState.start) periods.push(`mulai ${freezeState.start}`)
+  if (freezeState.end) periods.push(`sampai ${freezeState.end}`)
+
+  let message = 'Perubahan nilai sedang dikunci (freeze).'
+  if (periods.length) {
+    message += ` Periode: ${periods.join(' ')}.`
+  }
+  if (freezeState.reason) {
+    message += ` Alasan: ${freezeState.reason}.`
+  }
+
+  return message
+}
+
+const hitungRataSederhana = (values = []) => {
+  const numbers = values
+    .map((value) => toNumberOrNull(value))
+    .filter((value) => value != null)
+  if (!numbers.length) return null
+  const total = numbers.reduce((sum, value) => sum + value, 0)
+  return round2(total / numbers.length)
+}
+
+const hitungRataBerbobot = (components = []) => {
+  let totalNilaiBobot = 0
+  let totalBobot = 0
+
+  components.forEach((component) => {
+    const nilai = toNumberOrNull(component?.nilai)
+    const bobot = toNumberOrNull(component?.bobot)
+    if (nilai == null || bobot == null || bobot <= 0) return
+    totalNilaiBobot += nilai * bobot
+    totalBobot += bobot
+  })
+
+  if (!totalBobot) return null
+  return round2(totalNilaiBobot / totalBobot)
+}
+
+const hitungNilaiMapelBerbobot = ({
+  rataTugasMapel,
+  rataQuizRegulerMapel,
+  rataQuizUtsMapel,
+  rataQuizUasMapel,
+  bobotMapel
+}) => {
+  const activeBobotMapel = normalizeMapelComponentWeights(bobotMapel)
+  return hitungRataBerbobot([
+    { nilai: rataTugasMapel, bobot: activeBobotMapel.bobot_tugas_pr },
+    { nilai: rataQuizRegulerMapel, bobot: activeBobotMapel.bobot_quiz_reguler },
+    { nilai: rataQuizUtsMapel, bobot: activeBobotMapel.bobot_quiz_uts },
+    { nilai: rataQuizUasMapel, bobot: activeBobotMapel.bobot_quiz_uas }
+  ])
+}
+
+const hitungRataAkhirWali = (rataAkademik, skorAbsensi, rankingPolicy) => {
+  const policy = normalizeRankingPolicy(rankingPolicy)
+  const nilaiAkademik = toNumberOrNull(rataAkademik)
+  if (nilaiAkademik == null) {
+    return null
+  }
+
+  return hitungRataBerbobot([
+    {
+      nilai: nilaiAkademik,
+      bobot: policy.weights.tugas + policy.weights.quiz
+    },
+    { nilai: skorAbsensi, bobot: policy.weights.absensi }
+  ])
 }
 
 const compareNumberDescNullLast = (a, b) => {
@@ -212,41 +694,92 @@ const compareNumberDescNullLast = (a, b) => {
   return 0
 }
 
-const isSameRankGroup = (a, b) => {
-  const nilaiAkademikA = toNumberOrNull(a?.rataAkademik)
-  const nilaiAkademikB = toNumberOrNull(b?.rataAkademik)
-  const absensiA = toNumberOrNull(a?.skorAbsensi)
-  const absensiB = toNumberOrNull(b?.skorAbsensi)
-  const alphaA = Number(a?.absensi?.Alpha || 0)
-  const alphaB = Number(b?.absensi?.Alpha || 0)
-  const hadirA = Number(a?.absensi?.Hadir || 0)
-  const hadirB = Number(b?.absensi?.Hadir || 0)
-  return (
-    nilaiAkademikA === nilaiAkademikB &&
-    absensiA === absensiB &&
-    alphaA === alphaB &&
-    hadirA === hadirB
-  )
+const getRankMetricValue = (row, key) => {
+  if (key === 'nilai_akhir') {
+    return toNumberOrNull(row?.nilaiAkhir ?? row?.rataRata)
+  }
+  if (key === 'mapel_inti') {
+    return toNumberOrNull(row?.nilaiMapelInti)
+  }
+  if (key === 'absensi') {
+    return toNumberOrNull(row?.skorAbsensi)
+  }
+  if (key === 'nama') {
+    return String(row?.nama || '')
+  }
+  return null
 }
 
-const compareRankWali = (a, b) => {
-  // Urutan ranking wali kelas:
-  // 1) Rata akademik (utama), 2) Skor absensi, 3) Alpha paling sedikit, 4) Hadir terbanyak
-  const byAcademic = compareNumberDescNullLast(a?.rataAkademik, b?.rataAkademik)
-  if (byAcademic) return byAcademic
+const compareNamaAsc = (a, b) =>
+  String(a?.nama || '').localeCompare(String(b?.nama || ''), 'id')
 
-  const byAbsensi = compareNumberDescNullLast(a?.skorAbsensi, b?.skorAbsensi)
-  if (byAbsensi) return byAbsensi
+const compareRankWali = (a, b, rankingPolicy = DEFAULT_RANKING_POLICY) => {
+  const policy = normalizeRankingPolicy(rankingPolicy)
 
-  const alphaA = Number(a?.absensi?.Alpha || 0)
-  const alphaB = Number(b?.absensi?.Alpha || 0)
-  if (alphaA !== alphaB) return alphaA - alphaB
+  for (const key of policy.tieBreakOrder) {
+    if (key === 'nama') {
+      const cmpNama = compareNamaAsc(a, b)
+      if (cmpNama !== 0) return cmpNama
+      continue
+    }
 
-  const hadirA = Number(a?.absensi?.Hadir || 0)
-  const hadirB = Number(b?.absensi?.Hadir || 0)
-  if (hadirB !== hadirA) return hadirB - hadirA
+    const cmpNumber = compareNumberDescNullLast(
+      getRankMetricValue(a, key),
+      getRankMetricValue(b, key)
+    )
+    if (cmpNumber !== 0) return cmpNumber
+  }
 
-  return String(a?.nama || '').localeCompare(String(b?.nama || ''), 'id')
+  const cmpNama = compareNamaAsc(a, b)
+  if (cmpNama !== 0) return cmpNama
+  return String(a?.id || '').localeCompare(String(b?.id || ''), 'id')
+}
+
+const isSameRankGroup = (a, b, rankingPolicy = DEFAULT_RANKING_POLICY) => {
+  const policy = normalizeRankingPolicy(rankingPolicy)
+  const groupKeys = policy.tieBreakOrder.filter((key) => key !== 'nama')
+
+  if (!groupKeys.length) {
+    return compareNamaAsc(a, b) === 0
+  }
+
+  return groupKeys.every((key) => {
+    const av = getRankMetricValue(a, key)
+    const bv = getRankMetricValue(b, key)
+    const numA = toNumberOrNull(av)
+    const numB = toNumberOrNull(bv)
+    if (numA == null || numB == null) return numA == null && numB == null
+    return numA === numB
+  })
+}
+
+const rankSiswaWali = (rows = [], rankingPolicy = DEFAULT_RANKING_POLICY) => {
+  const sorted = [...rows].sort((a, b) => compareRankWali(a, b, rankingPolicy))
+  return sorted.reduce((acc, s, idx) => {
+    if (idx === 0) {
+      acc.push({ ...s, rank: 1 })
+      return acc
+    }
+
+    const prevSource = sorted[idx - 1]
+    const prevRanked = acc[idx - 1]
+    const rank = isSameRankGroup(s, prevSource, rankingPolicy) ? prevRanked.rank : idx + 1
+    acc.push({ ...s, rank })
+    return acc
+  }, [])
+}
+
+const isSameRankOrder = (currentRows = [], nextRows = []) => {
+  if (currentRows.length !== nextRows.length) return false
+
+  for (let idx = 0; idx < currentRows.length; idx += 1) {
+    const current = currentRows[idx] || {}
+    const next = nextRows[idx] || {}
+    if (String(current.id || '') !== String(next.id || '')) return false
+    if (Number(current.rank || 0) !== Number(next.rank || 0)) return false
+  }
+
+  return true
 }
 
 // ==============================
@@ -267,6 +800,10 @@ export default function LaporanRekap() {
   const [selectedWaliKelas, setSelectedWaliKelas] = useState('')
   const [jadwalGuru, setJadwalGuru] = useState([])
   const [mapelList, setMapelList] = useState([])
+  const [mapelComponentWeightRows, setMapelComponentWeightRows] = useState([])
+  const [selectedWeightMapel, setSelectedWeightMapel] = useState('')
+  const [mapelWeightForm, setMapelWeightForm] = useState({ ...DEFAULT_MAPEL_COMPONENT_WEIGHTS })
+  const [savingMapelWeight, setSavingMapelWeight] = useState(false)
 
   // -- Selection State (Default Kosong) --
   const [selectedKelas, setSelectedKelas] = useState('')
@@ -281,16 +818,38 @@ export default function LaporanRekap() {
   const [tugasData, setTugasData] = useState(null)
   const [quizData, setQuizData] = useState(null)
   const [rekapWaliData, setRekapWaliData] = useState(null)
+  const [rankingPolicy, setRankingPolicy] = useState(DEFAULT_RANKING_POLICY)
   const [editingNilai, setEditingNilai] = useState(null)
+  const [editingQuizNilai, setEditingQuizNilai] = useState(null)
   const [excelReady, setExcelReady] = useState(false)
   const [detailSiswaOpen, setDetailSiswaOpen] = useState(false)
   const [detailSiswaLoading, setDetailSiswaLoading] = useState(false)
   const [detailSiswaData, setDetailSiswaData] = useState(null)
+  const [selectedAbsensiRowId, setSelectedAbsensiRowId] = useState(null)
+  const [selectedTugasRowId, setSelectedTugasRowId] = useState(null)
+  const [selectedQuizRowId, setSelectedQuizRowId] = useState(null)
+  const [selectedRekapRowId, setSelectedRekapRowId] = useState(null)
+  const [selectedEskulRowId, setSelectedEskulRowId] = useState(null)
+  const [selectedDetailNilaiRowKey, setSelectedDetailNilaiRowKey] = useState(null)
 
   // Pencarian siswa di tab Absensi
   const [searchNama, setSearchNama] = useState('')
   const [searchRekapWali, setSearchRekapWali] = useState('')
+  const [rekapStatusFilter, setRekapStatusFilter] = useState('semua')
   const [searchRekapEskul, setSearchRekapEskul] = useState('')
+
+  useEffect(() => {
+    if (!rekapWaliData?.siswa?.length) return
+
+    const activePolicy = rekapWaliData?.policy || rankingPolicy
+    const normalizedRank = rankSiswaWali(rekapWaliData.siswa, activePolicy)
+    if (isSameRankOrder(rekapWaliData.siswa, normalizedRank)) return
+
+    setRekapWaliData((prev) => {
+      if (!prev) return prev
+      return { ...prev, siswa: normalizedRank }
+    })
+  }, [rekapWaliData?.siswa, rekapWaliData?.policy, rankingPolicy])
 
   // 1. Initial Load (Lib & Click Outside)
   useEffect(() => {
@@ -400,6 +959,146 @@ export default function LaporanRekap() {
     if (mapels.length && !selectedMapel) setSelectedMapel(mapels[0])
     else if (!mapels.length) setSelectedMapel('')
   }, [selectedKelas, jadwalGuru, selectedMapel])
+
+  useEffect(() => {
+    const loadMapelComponentWeights = async () => {
+      if (!user?.id) {
+        setMapelComponentWeightRows([])
+        return
+      }
+      try {
+        const { data, error } = await supabase
+          .from('guru_mapel_bobot')
+          .select('*')
+          .eq('guru_id', user.id)
+          .order('mapel')
+
+        if (error) throw error
+        setMapelComponentWeightRows(data || [])
+      } catch (error) {
+        console.error('Gagal memuat bobot komponen mapel:', error)
+        setMapelComponentWeightRows([])
+      }
+    }
+
+    loadMapelComponentWeights()
+  }, [user?.id])
+
+  const mapelAmpuOptions = useMemo(() => {
+    const dedup = new Map()
+    ;(jadwalGuru || []).forEach((item) => {
+      const mapel = normalizeMapelName(item?.mapel)
+      const key = normalizeMapelKey(mapel)
+      if (!key) return
+      if (!dedup.has(key)) {
+        dedup.set(key, mapel)
+      }
+    })
+    return Array.from(dedup.values()).sort((a, b) => String(a || '').localeCompare(String(b || ''), 'id'))
+  }, [jadwalGuru])
+
+  const mapelWeightByMapelKey = useMemo(() => {
+    const lookup = new Map()
+    ;(mapelComponentWeightRows || []).forEach((row) => {
+      const mapelKey = normalizeMapelKey(row?.mapel)
+      if (!mapelKey) return
+      lookup.set(mapelKey, normalizeMapelComponentWeights(row))
+    })
+    return lookup
+  }, [mapelComponentWeightRows])
+  const mapelWeightedKeySet = useMemo(
+    () => new Set(Array.from(mapelWeightByMapelKey.keys())),
+    [mapelWeightByMapelKey]
+  )
+
+  useEffect(() => {
+    if (!mapelAmpuOptions.length) {
+      setSelectedWeightMapel('')
+      setMapelWeightForm({ ...DEFAULT_MAPEL_COMPONENT_WEIGHTS })
+      return
+    }
+
+    if (!selectedWeightMapel || !mapelAmpuOptions.includes(selectedWeightMapel)) {
+      setSelectedWeightMapel(mapelAmpuOptions[0])
+      return
+    }
+
+    const saved = mapelWeightByMapelKey.get(normalizeMapelKey(selectedWeightMapel))
+    setMapelWeightForm(saved ? { ...saved } : { ...DEFAULT_MAPEL_COMPONENT_WEIGHTS })
+  }, [selectedWeightMapel, mapelAmpuOptions, mapelWeightByMapelKey])
+
+  const mapelWeightValidation = useMemo(
+    () => getMapelWeightValidation(mapelWeightForm),
+    [mapelWeightForm]
+  )
+  const selectedMapelWeightRow = useMemo(() => {
+    if (!selectedWeightMapel) return null
+    const selectedMapelKey = normalizeMapelKey(selectedWeightMapel)
+    return (mapelComponentWeightRows || []).find(
+      (row) => normalizeMapelKey(row?.mapel) === selectedMapelKey
+    ) || null
+  }, [selectedWeightMapel, mapelComponentWeightRows])
+
+  const handleSaveMapelWeight = useCallback(async () => {
+    if (!user?.id) return
+    if (!selectedWeightMapel) {
+      pushToast('error', 'Pilih mapel terlebih dahulu.')
+      return
+    }
+
+    if (!mapelWeightValidation.isValid) {
+      pushToast('error', mapelWeightValidation.errors[0] || 'Bobot mapel belum valid.')
+      return
+    }
+
+    const selectedMapelKey = normalizeMapelKey(selectedWeightMapel)
+    const existing = (mapelComponentWeightRows || []).find(
+      (row) => normalizeMapelKey(row?.mapel) === selectedMapelKey
+    )
+    const nowIso = new Date().toISOString()
+    const payload = {
+      id: existing?.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `id-${Date.now()}`),
+      guru_id: user.id,
+      mapel: selectedWeightMapel,
+      bobot_tugas_pr: mapelWeightValidation.normalized.bobot_tugas_pr,
+      bobot_quiz_reguler: mapelWeightValidation.normalized.bobot_quiz_reguler,
+      bobot_quiz_uts: mapelWeightValidation.normalized.bobot_quiz_uts,
+      bobot_quiz_uas: mapelWeightValidation.normalized.bobot_quiz_uas,
+      created_at: existing?.created_at || nowIso,
+      updated_at: nowIso
+    }
+
+    try {
+      setSavingMapelWeight(true)
+      const { data, error } = await supabase
+        .from('guru_mapel_bobot')
+        .upsert(payload, { onConflict: 'tenant_id,guru_id,mapel' })
+        .select('*')
+        .single()
+      if (error) throw error
+
+      setMapelComponentWeightRows((prev) => {
+        const next = [...(prev || [])]
+        const idx = next.findIndex((row) => normalizeMapelKey(row?.mapel) === selectedMapelKey)
+        if (idx >= 0) next[idx] = data
+        else next.push(data)
+        return next
+      })
+
+      pushToast('success', `Bobot mapel ${selectedWeightMapel} berhasil disimpan.`)
+    } catch (error) {
+      console.error('Gagal menyimpan bobot mapel:', error)
+      pushToast('error', error?.message || 'Gagal menyimpan bobot mapel')
+    } finally {
+      setSavingMapelWeight(false)
+    }
+  }, [
+    user?.id,
+    selectedWeightMapel,
+    mapelWeightValidation,
+    mapelComponentWeightRows,
+    pushToast
+  ])
 
   // Toggle Checkbox Bulan
   const handleToggleBulan = (val) => {
@@ -625,9 +1324,9 @@ export default function LaporanRekap() {
         .in('quiz_id', quizIds.length ? quizIds : [-1])
 
       const submissionMap = new Map()
-      ;(submissionList || []).forEach((s) => {
-        submissionMap.set(`${s.siswa_id}|${s.quiz_id}`, s)
-      })
+        ; (submissionList || []).forEach((s) => {
+          submissionMap.set(`${s.siswa_id}|${s.quiz_id}`, s)
+        })
 
       const formatted = (siswaData || []).map((s) => {
         const nilaiQuiz = {}
@@ -683,6 +1382,24 @@ export default function LaporanRekap() {
         return
       }
 
+      let settingsRow = null
+      const { data: settingsData, error: settingsErr } = await supabase
+        .from('settings')
+        .select('*')
+        .order('id', { ascending: true })
+        .limit(1)
+        .maybeSingle()
+      if (settingsErr) {
+        console.error('Gagal memuat kebijakan ranking, fallback ke default:', settingsErr)
+      } else {
+        settingsRow = settingsData || null
+      }
+
+      const activePolicy = normalizeRankingPolicy(settingsRow)
+      const policySummary = describeRankingPolicy(activePolicy)
+      const freezeState = getNilaiFreezeStateFromSettings(settingsRow)
+      setRankingPolicy(activePolicy)
+
       const waliKelasNama = getNamaKelasFromList(selectedWaliKelas, waliKelasList)
       const kelasAliasesRaw = Array.from(
         new Set(
@@ -719,6 +1436,11 @@ export default function LaporanRekap() {
       const startDate = `${dateStrings[0]}T00:00:00`
       const endDate = `${dateStrings[dateStrings.length - 1]}T23:59:59`
 
+      const { data: jadwalKelasList } = await supabase
+        .from('jadwal')
+        .select('mapel, guru_id')
+        .eq('kelas_id', selectedWaliKelas)
+
       const { data: tugasList } = await supabase
         .from('tugas')
         .select('*')
@@ -738,6 +1460,23 @@ export default function LaporanRekap() {
         .eq('kelas_id', selectedWaliKelas)
         .gte('created_at', startDate)
         .lte('created_at', endDate)
+
+      const guruIdsPengampu = Array.from(
+        new Set((jadwalKelasList || []).map((item) => String(item?.guru_id || '').trim()).filter(Boolean))
+      )
+      let guruMapelWeightRows = []
+      if (guruIdsPengampu.length) {
+        const { data, error } = await supabase
+          .from('guru_mapel_bobot')
+          .select('*')
+          .in('guru_id', guruIdsPengampu)
+        if (error) {
+          console.warn('Bobot mapel belum tersedia, memakai default:', error)
+          guruMapelWeightRows = []
+        } else {
+          guruMapelWeightRows = data || []
+        }
+      }
 
       const quizIds = (quizList || []).map((q) => q.id)
       const { data: submissionList } = await supabase
@@ -791,31 +1530,103 @@ export default function LaporanRekap() {
       }
 
       const jawabByKey = new Map()
-      ;(jawabanList || []).forEach((j) => {
-        jawabByKey.set(`${j.user_id}|${j.tugas_id}`, j)
-      })
+        ; (jawabanList || []).forEach((j) => {
+          jawabByKey.set(`${j.user_id}|${j.tugas_id}`, j)
+        })
 
       const subByKey = new Map()
-      ;(submissionList || []).forEach((s) => {
-        subByKey.set(`${s.siswa_id}|${s.quiz_id}`, s)
+        ; (submissionList || []).forEach((s) => {
+          subByKey.set(`${s.siswa_id}|${s.quiz_id}`, s)
+        })
+
+      const mapelGuruIdsByKey = new Map()
+      ;(jadwalKelasList || []).forEach((item) => {
+        const mapelKey = normalizeMapelKey(item?.mapel)
+        const guruId = String(item?.guru_id || '').trim()
+        if (!mapelKey || !guruId) return
+        if (!mapelGuruIdsByKey.has(mapelKey)) {
+          mapelGuruIdsByKey.set(mapelKey, new Set())
+        }
+        mapelGuruIdsByKey.get(mapelKey).add(guruId)
       })
+
+      const mapelWeightLookup = new Map()
+      ;(guruMapelWeightRows || []).forEach((row) => {
+        const mapelKey = normalizeMapelKey(row?.mapel)
+        const guruId = String(row?.guru_id || '').trim()
+        if (!mapelKey || !guruId) return
+        mapelWeightLookup.set(
+          `${guruId}|${mapelKey}`,
+          normalizeMapelComponentWeights(row)
+        )
+      })
+
+      const resolveMapelWeightsByKey = (mapelKey) => {
+        const guruIds = Array.from(mapelGuruIdsByKey.get(mapelKey) || [])
+        for (const guruId of guruIds) {
+          const found = mapelWeightLookup.get(`${guruId}|${mapelKey}`)
+          if (found) return found
+        }
+        return { ...DEFAULT_MAPEL_COMPONENT_WEIGHTS }
+      }
+
+      const mapelBuckets = new Map()
+      const ensureMapelBucket = (rawMapel) => {
+        const mapelLabel = normalizeMapelName(rawMapel)
+        const mapelKey = normalizeMapelKey(mapelLabel)
+        if (!mapelBuckets.has(mapelKey)) {
+          mapelBuckets.set(mapelKey, {
+            key: mapelKey,
+            mapel: mapelLabel,
+            tugas: [],
+            quiz: [],
+            bobotKomponen: resolveMapelWeightsByKey(mapelKey)
+          })
+        }
+        const bucket = mapelBuckets.get(mapelKey)
+        if (bucket.mapel === 'Tanpa Mapel' && mapelLabel !== 'Tanpa Mapel') {
+          bucket.mapel = mapelLabel
+        }
+        bucket.bobotKomponen = resolveMapelWeightsByKey(mapelKey)
+        return bucket
+      }
+
+        ; (tugasList || []).forEach((t) => {
+          ensureMapelBucket(t?.mapel).tugas.push(t)
+        })
+
+        ; (quizList || []).forEach((q) => {
+          ensureMapelBucket(q?.mapel).quiz.push(q)
+        })
+
+        ; (policySummary.coreMapel || []).forEach((mapel) => {
+          ensureMapelBucket(mapel)
+        })
+
+      const mapelUrutan = Array.from(mapelBuckets.values()).sort((a, b) =>
+        String(a?.mapel || '').localeCompare(String(b?.mapel || ''), 'id')
+      )
+
+      const coreMapelNormSet = new Set(
+        policySummary.coreMapel.map((item) => normalizeMapelKey(item))
+      )
 
       const absensiByUser = new Map()
-      ;(absensiList || []).forEach((a) => {
-        const key = a.uid
-        if (!absensiByUser.has(key)) {
-          absensiByUser.set(key, { Hadir: 0, Izin: 0, Sakit: 0, Alpha: 0 })
-        }
-        if (absensiByUser.get(key)[a.status] != null) {
-          absensiByUser.get(key)[a.status] += 1
-        }
-      })
+        ; (absensiList || []).forEach((a) => {
+          const key = a.uid
+          if (!absensiByUser.has(key)) {
+            absensiByUser.set(key, { Hadir: 0, Izin: 0, Sakit: 0, Alpha: 0 })
+          }
+          if (absensiByUser.get(key)[a.status] != null) {
+            absensiByUser.get(key)[a.status] += 1
+          }
+        })
 
       const sesiKelasSet = new Set()
-      ;(absensiList || []).forEach((a) => {
-        if (!a?.tanggal) return
-        sesiKelasSet.add(`${a.tanggal}|${a.mapel || '-'}`)
-      })
+        ; (absensiList || []).forEach((a) => {
+          if (!a?.tanggal) return
+          sesiKelasSet.add(`${a.tanggal}|${a.mapel || '-'}`)
+        })
       const totalPertemuanKelas = sesiKelasSet.size
 
       const makeEskulStat = () => ({ Hadir: 0, Izin: 0, Sakit: 0, Alpha: 0, total: 0 })
@@ -823,28 +1634,28 @@ export default function LaporanRekap() {
         (ekskulList || []).map((e) => [String(e.id), e.nama || String(e.id)])
       )
       const anggotaEskulByUser = new Map()
-      ;(ekskulAnggotaList || []).forEach((row) => {
-        const uid = String(row.user_id || '')
-        const eksId = String(row.ekskul_id || '')
-        if (!uid || !eksId) return
-        if (!anggotaEskulByUser.has(uid)) anggotaEskulByUser.set(uid, new Set())
-        anggotaEskulByUser.get(uid).add(eksId)
-      })
+        ; (ekskulAnggotaList || []).forEach((row) => {
+          const uid = String(row.user_id || '')
+          const eksId = String(row.ekskul_id || '')
+          if (!uid || !eksId) return
+          if (!anggotaEskulByUser.has(uid)) anggotaEskulByUser.set(uid, new Set())
+          anggotaEskulByUser.get(uid).add(eksId)
+        })
 
       const absensiEskulByPair = new Map()
-      ;(absensiEskulList || []).forEach((row) => {
-        const uid = String(row.user_id || '')
-        const eksId = String(row.ekskul_id || '')
-        const status = String(row.status || '')
-        if (!uid || !eksId) return
-        const key = `${uid}|${eksId}`
-        if (!absensiEskulByPair.has(key)) absensiEskulByPair.set(key, makeEskulStat())
-        const bucket = absensiEskulByPair.get(key)
-        if (bucket[status] != null) {
-          bucket[status] += 1
-          bucket.total += 1
-        }
-      })
+        ; (absensiEskulList || []).forEach((row) => {
+          const uid = String(row.user_id || '')
+          const eksId = String(row.ekskul_id || '')
+          const status = String(row.status || '')
+          if (!uid || !eksId) return
+          const key = `${uid}|${eksId}`
+          if (!absensiEskulByPair.has(key)) absensiEskulByPair.set(key, makeEskulStat())
+          const bucket = absensiEskulByPair.get(key)
+          if (bucket[status] != null) {
+            bucket[status] += 1
+            bucket.total += 1
+          }
+        })
 
       const rekapEskulSiswa = (siswaData || []).map((s) => {
         const uid = String(s.id || '')
@@ -900,21 +1711,98 @@ export default function LaporanRekap() {
       const siswaRows = (siswaData || []).map((s) => {
         let totalTugas = 0
         let totalQuiz = 0
-        let countScore = 0
+        let jumlahNilaiTugas = 0
+        let jumlahNilaiQuiz = 0
+        let totalQuizReguler = 0
+        let totalQuizUts = 0
+        let totalQuizUas = 0
+        let jumlahQuizReguler = 0
+        let jumlahQuizUts = 0
+        let jumlahQuizUas = 0
 
-        ;(tugasList || []).forEach((t) => {
-          const j = jawabByKey.get(`${s.id}|${t.id}`)
-          if (j?.nilai != null && j?.nilai !== '-') {
-            totalTugas += Number(j.nilai)
-            countScore += 1
-          }
-        })
+        const mapelScores = mapelUrutan.map((mapelInfo) => {
+          const daftarTugas = mapelInfo?.tugas || []
+          const daftarQuiz = mapelInfo?.quiz || []
 
-        ;(quizList || []).forEach((q) => {
-          const sub = subByKey.get(`${s.id}|${q.id}`)
-          if (sub?.score != null) {
-            totalQuiz += Number(sub.score)
-            countScore += 1
+          const nilaiTugasMapel = daftarTugas
+            .map((t) => {
+              const j = jawabByKey.get(`${s.id}|${t.id}`)
+              return toNumberOrNull(j?.nilai)
+            })
+            .filter((nilai) => nilai != null)
+
+          const nilaiQuizMapel = []
+          const nilaiQuizRegulerMapel = []
+          const nilaiQuizUtsMapel = []
+          const nilaiQuizUasMapel = []
+
+          daftarQuiz.forEach((q) => {
+            const sub = subByKey.get(`${s.id}|${q.id}`)
+            const nilai = toNumberOrNull(sub?.score)
+            if (nilai == null) return
+
+            nilaiQuizMapel.push(nilai)
+            const modeQuiz = normalizeQuizMode(q)
+            if (modeQuiz === 'regular') {
+              nilaiQuizRegulerMapel.push(nilai)
+            } else if (modeQuiz === 'uas') {
+              nilaiQuizUasMapel.push(nilai)
+            } else {
+              nilaiQuizUtsMapel.push(nilai)
+            }
+          })
+
+          nilaiTugasMapel.forEach((nilai) => {
+            totalTugas += nilai
+            jumlahNilaiTugas += 1
+          })
+
+          nilaiQuizMapel.forEach((nilai) => {
+            totalQuiz += nilai
+            jumlahNilaiQuiz += 1
+          })
+          nilaiQuizRegulerMapel.forEach((nilai) => {
+            totalQuizReguler += nilai
+            jumlahQuizReguler += 1
+          })
+          nilaiQuizUtsMapel.forEach((nilai) => {
+            totalQuizUts += nilai
+            jumlahQuizUts += 1
+          })
+          nilaiQuizUasMapel.forEach((nilai) => {
+            totalQuizUas += nilai
+            jumlahQuizUas += 1
+          })
+
+          const rataTugasMapel = hitungRataSederhana(nilaiTugasMapel)
+          const rataQuizMapel = hitungRataSederhana(nilaiQuizMapel)
+          const rataQuizRegulerMapel = hitungRataSederhana(nilaiQuizRegulerMapel)
+          const rataQuizUtsMapel = hitungRataSederhana(nilaiQuizUtsMapel)
+          const rataQuizUasMapel = hitungRataSederhana(nilaiQuizUasMapel)
+          const bobotKomponenMapel = normalizeMapelComponentWeights(mapelInfo?.bobotKomponen)
+          const nilaiAkhirMapel = hitungNilaiMapelBerbobot({
+            rataTugasMapel,
+            rataQuizRegulerMapel,
+            rataQuizUtsMapel,
+            rataQuizUasMapel,
+            bobotMapel: bobotKomponenMapel
+          })
+
+          return {
+            mapel: mapelInfo?.mapel || 'Tanpa Mapel',
+            mapelKey: mapelInfo?.key || normalizeMapelKey(mapelInfo?.mapel || 'Tanpa Mapel'),
+            bobotKomponen: bobotKomponenMapel,
+            rataTugas: rataTugasMapel,
+            rataQuiz: rataQuizMapel,
+            rataQuizReguler: rataQuizRegulerMapel,
+            rataQuizUts: rataQuizUtsMapel,
+            rataQuizUas: rataQuizUasMapel,
+            nilaiAkhir: nilaiAkhirMapel,
+            jumlahTugasDinilai: nilaiTugasMapel.length,
+            jumlahQuizDinilai: nilaiQuizMapel.length,
+            jumlahQuizRegulerDinilai: nilaiQuizRegulerMapel.length,
+            jumlahQuizUtsDinilai: nilaiQuizUtsMapel.length,
+            jumlahQuizUasDinilai: nilaiQuizUasMapel.length
           }
         })
 
@@ -929,27 +1817,78 @@ export default function LaporanRekap() {
           totalPertemuanKelas
         )
         const abs = absensiEfektif
-        const totalNilai = totalTugas + totalQuiz
-        const rataAkademik = countScore ? round2(totalNilai / countScore) : null
-        const rataRata = hitungRataAkhirWali(rataAkademik, skorAbsensi)
+        const totalNilai = round2(totalTugas + totalQuiz)
+        const jumlahPenilaian = jumlahNilaiTugas + jumlahNilaiQuiz
+        const rataTugas = jumlahNilaiTugas ? round2(totalTugas / jumlahNilaiTugas) : null
+        const rataQuiz = jumlahNilaiQuiz ? round2(totalQuiz / jumlahNilaiQuiz) : null
+        const rataQuizReguler = jumlahQuizReguler ? round2(totalQuizReguler / jumlahQuizReguler) : null
+        const rataQuizUts = jumlahQuizUts ? round2(totalQuizUts / jumlahQuizUts) : null
+        const rataQuizUas = jumlahQuizUas ? round2(totalQuizUas / jumlahQuizUas) : null
+        const mapelDinilaiRows = mapelScores.filter((item) => toNumberOrNull(item.nilaiAkhir) != null)
+        const rataAkademik = hitungRataSederhana(mapelDinilaiRows.map((item) => item.nilaiAkhir))
+        const mapelIntiDinilaiRows = mapelScores.filter(
+          (item) =>
+            coreMapelNormSet.has(item.mapelKey) &&
+            toNumberOrNull(item.nilaiAkhir) != null
+        )
+        const nilaiMapelInti = hitungRataSederhana(
+          mapelIntiDinilaiRows.map((item) => item.nilaiAkhir)
+        )
+        const nilaiAkhir = hitungRataAkhirWali(rataAkademik, skorAbsensi, activePolicy)
+        const mapelTuntas = mapelDinilaiRows.filter(
+          (item) => toNumberOrNull(item.nilaiAkhir) != null && Number(item.nilaiAkhir) >= KKM_NILAI_TUGAS
+        ).length
+        const persenKetuntasanMapel = mapelDinilaiRows.length
+          ? round2((mapelTuntas / mapelDinilaiRows.length) * 100)
+          : null
+        const statusKetuntasan = getKetuntasanStatus(nilaiAkhir)
+        const statusIntervensi = getIntervensiStatus({
+          nilaiAkhir,
+          skorAbsensi,
+          persenKetuntasanMapel
+        })
+        const predikatAkhir = getPredikatLabel(nilaiAkhir)
+        const catatanWali = buildCatatanWaliOtomatis({
+          nama: s.nama,
+          nilaiAkhir,
+          skorAbsensi,
+          persenKetuntasanMapel
+        })
 
         return {
           id: s.id,
           nama: s.nama,
           nis: s.nis,
           kelas: s.kelas,
-          totalTugas,
-          totalQuiz,
+          totalTugas: round2(totalTugas),
+          totalQuiz: round2(totalQuiz),
           totalNilai,
+          jumlahPenilaian,
+          rataTugas: rataTugas ?? '-',
+          rataQuiz: rataQuiz ?? '-',
+          rataQuizReguler: rataQuizReguler ?? '-',
+          rataQuizUts: rataQuizUts ?? '-',
+          rataQuizUas: rataQuizUas ?? '-',
           rataAkademik: rataAkademik ?? '-',
+          nilaiMapelInti: nilaiMapelInti ?? '-',
           skorAbsensi: skorAbsensi ?? '-',
-          rataRata,
+          nilaiAkhir: nilaiAkhir ?? '-',
+          rataRata: nilaiAkhir ?? '-',
+          statusKetuntasan,
+          statusIntervensi,
+          predikatAkhir,
+          catatanWali,
+          mapelTuntas,
+          persenKetuntasanMapel: persenKetuntasanMapel ?? '-',
+          mapelScores,
           absensi: abs,
           eskul: rekapEskulByUser.get(String(s.id)) || makeEmptyEskulRekap(),
           audit: {
             tanpaNilaiAkademik: rataAkademik == null,
             sesiTercatat: sesiTercatatRaw,
-            sesiTanpaCatatan: Math.max(0, totalPertemuanKelas - sesiTercatatRaw)
+            sesiTanpaCatatan: Math.max(0, totalPertemuanKelas - sesiTercatatRaw),
+            mapelDinilai: mapelDinilaiRows.length,
+            mapelTanpaNilai: Math.max(0, mapelUrutan.length - mapelDinilaiRows.length)
           }
         }
       })
@@ -987,20 +1926,20 @@ export default function LaporanRekap() {
         makeEskulStat()
       )
 
-      const sorted = [...siswaRows].sort(compareRankWali)
-
-      const ranked = sorted.reduce((acc, s, idx) => {
-        if (idx === 0) {
-          acc.push({ ...s, rank: 1 })
-          return acc
-        }
-
-        const prevSource = sorted[idx - 1]
-        const prevRanked = acc[idx - 1]
-        const rank = isSameRankGroup(s, prevSource) ? prevRanked.rank : idx + 1
-        acc.push({ ...s, rank })
-        return acc
-      }, [])
+      const ranked = rankSiswaWali(siswaRows, activePolicy)
+      const statistikNilaiAkhir = hitungStatistikNilai(
+        ranked.map((row) => row.nilaiAkhir ?? row.rataRata)
+      )
+      const jumlahTuntas = ranked.filter((row) => row.statusKetuntasan === 'Tuntas').length
+      const jumlahRemedial = ranked.filter((row) => row.statusKetuntasan === 'Remedial').length
+      const jumlahBelumData = ranked.filter((row) => row.statusKetuntasan === 'Belum ada data').length
+      const jumlahPerluPendampingan = ranked.filter(
+        (row) => row.statusIntervensi === 'Perlu Pendampingan'
+      ).length
+      const jumlahIntervensiIntensif = ranked.filter(
+        (row) => row.statusIntervensi === 'Intervensi Intensif'
+      ).length
+      const persenKetuntasanKelas = totalSiswa ? round2((jumlahTuntas / totalSiswa) * 100) : 0
 
       const namaBulanTerpilih = selectedBulan
         .map((b) => bulanList.find((bl) => b === bl.value)?.label)
@@ -1011,7 +1950,10 @@ export default function LaporanRekap() {
         periode: `${namaBulanTerpilih} ${tahun}`,
         totalTugas: tugasList?.length || 0,
         totalQuiz: quizList?.length || 0,
+        totalMapel: mapelUrutan.length,
         totalPertemuanKelas,
+        policy: policySummary,
+        freeze: freezeState,
         eskul: {
           summary: {
             totalEkskul: ekskulIds.length,
@@ -1021,6 +1963,18 @@ export default function LaporanRekap() {
             totalAbsensi: totalAbsensiEskul
           },
           siswa: rekapEskulSiswa
+        },
+        ringkasanAkademik: {
+          rataNilaiAkhir: statistikNilaiAkhir.mean ?? '-',
+          medianNilaiAkhir: statistikNilaiAkhir.median ?? '-',
+          nilaiTertinggi: statistikNilaiAkhir.max ?? '-',
+          nilaiTerendah: statistikNilaiAkhir.min ?? '-',
+          jumlahTuntas,
+          jumlahRemedial,
+          jumlahBelumData,
+          persenKetuntasanKelas,
+          jumlahPerluPendampingan,
+          jumlahIntervensiIntensif
         },
         audit: {
           totalSiswa,
@@ -1073,7 +2027,7 @@ export default function LaporanRekap() {
         const endDate = `${dateStrings[dateStrings.length - 1]}T23:59:59`
 
         const [jadwalRes, tugasRes, quizRes] = await Promise.all([
-          supabase.from('jadwal').select('mapel').eq('kelas_id', selectedWaliKelas),
+          supabase.from('jadwal').select('mapel, guru_id').eq('kelas_id', selectedWaliKelas),
           supabase
             .from('tugas')
             .select('id, mapel')
@@ -1082,7 +2036,7 @@ export default function LaporanRekap() {
             .lte('created_at', endDate),
           supabase
             .from('quizzes')
-            .select('id, mapel')
+            .select('id, mapel, mode, is_live')
             .eq('kelas_id', selectedWaliKelas)
             .gte('created_at', startDate)
             .lte('created_at', endDate)
@@ -1095,6 +2049,23 @@ export default function LaporanRekap() {
         const jadwalList = jadwalRes.data || []
         const tugasList = tugasRes.data || []
         const quizList = quizRes.data || []
+
+        const guruIdsPengampu = Array.from(
+          new Set((jadwalList || []).map((item) => String(item?.guru_id || '').trim()).filter(Boolean))
+        )
+        let guruMapelWeightRows = []
+        if (guruIdsPengampu.length) {
+          const { data, error } = await supabase
+            .from('guru_mapel_bobot')
+            .select('*')
+            .in('guru_id', guruIdsPengampu)
+          if (error) {
+            console.warn('Bobot mapel detail siswa belum tersedia, memakai default:', error)
+            guruMapelWeightRows = []
+          } else {
+            guruMapelWeightRows = data || []
+          }
+        }
 
         const tugasIds = tugasList.map((t) => t.id).filter(Boolean)
         const quizIds = quizList.map((q) => q.id).filter(Boolean)
@@ -1126,70 +2097,147 @@ export default function LaporanRekap() {
         tugasList.forEach((t) => mapelSet.add(normalizeMapel(t?.mapel)))
         quizList.forEach((q) => mapelSet.add(normalizeMapel(q?.mapel)))
 
+        const mapelGuruIdsByKey = new Map()
+        ;(jadwalList || []).forEach((item) => {
+          const mapelKey = normalizeMapelKey(item?.mapel)
+          const guruId = String(item?.guru_id || '').trim()
+          if (!mapelKey || !guruId) return
+          if (!mapelGuruIdsByKey.has(mapelKey)) mapelGuruIdsByKey.set(mapelKey, new Set())
+          mapelGuruIdsByKey.get(mapelKey).add(guruId)
+        })
+
+        const mapelWeightLookup = new Map()
+        ;(guruMapelWeightRows || []).forEach((row) => {
+          const mapelKey = normalizeMapelKey(row?.mapel)
+          const guruId = String(row?.guru_id || '').trim()
+          if (!mapelKey || !guruId) return
+          mapelWeightLookup.set(
+            `${guruId}|${mapelKey}`,
+            normalizeMapelComponentWeights(row)
+          )
+        })
+
+        const resolveMapelWeightsByKey = (mapelKey) => {
+          const guruIds = Array.from(mapelGuruIdsByKey.get(mapelKey) || [])
+          for (const guruId of guruIds) {
+            const found = mapelWeightLookup.get(`${guruId}|${mapelKey}`)
+            if (found) return found
+          }
+          return { ...DEFAULT_MAPEL_COMPONENT_WEIGHTS }
+        }
+
         const bucketMap = new Map()
         const ensureBucket = (mapel) => {
           if (!bucketMap.has(mapel)) {
+            const mapelKey = normalizeMapelKey(mapel)
             bucketMap.set(mapel, {
               mapel,
+              mapelKey,
+              bobotKomponen: resolveMapelWeightsByKey(mapelKey),
+              nilaiTugasList: [],
+              nilaiQuizRegulerList: [],
+              nilaiQuizUtsList: [],
+              nilaiQuizUasList: [],
               nilaiTugas: 0,
               nilaiQuiz: 0,
               totalNilai: 0,
               jumlahPenilaian: 0,
               jumlahTugasDinilai: 0,
               jumlahQuizDinilai: 0,
+              jumlahQuizRegulerDinilai: 0,
+              jumlahQuizUtsDinilai: 0,
+              jumlahQuizUasDinilai: 0,
               rataAkademik: '-',
               grade: '-'
             })
           }
-          return bucketMap.get(mapel)
+          const bucket = bucketMap.get(mapel)
+          bucket.bobotKomponen = resolveMapelWeightsByKey(bucket.mapelKey)
+          return bucket
         }
 
         Array.from(mapelSet).forEach((mapel) => ensureBucket(mapel))
 
         const tugasById = new Map(tugasList.map((t) => [t.id, t]))
-        ;(jawabanList || []).forEach((jawaban) => {
-          const tugas = tugasById.get(jawaban.tugas_id)
-          if (!tugas) return
-          const nilai = toNumberOrNull(jawaban.nilai)
-          if (nilai == null) return
+          ; (jawabanList || []).forEach((jawaban) => {
+            const tugas = tugasById.get(jawaban.tugas_id)
+            if (!tugas) return
+            const nilai = toNumberOrNull(jawaban.nilai)
+            if (nilai == null) return
 
-          const mapel = normalizeMapel(tugas.mapel)
-          const bucket = ensureBucket(mapel)
-          bucket.nilaiTugas = round2(bucket.nilaiTugas + nilai)
-          bucket.totalNilai = round2(bucket.totalNilai + nilai)
-          bucket.jumlahPenilaian += 1
-          bucket.jumlahTugasDinilai += 1
-        })
+            const mapel = normalizeMapel(tugas.mapel)
+            const bucket = ensureBucket(mapel)
+            bucket.nilaiTugasList.push(nilai)
+            bucket.nilaiTugas = round2(bucket.nilaiTugas + nilai)
+            bucket.totalNilai = round2(bucket.totalNilai + nilai)
+            bucket.jumlahPenilaian += 1
+            bucket.jumlahTugasDinilai += 1
+          })
 
         const quizById = new Map(quizList.map((q) => [q.id, q]))
-        ;(submissionList || []).forEach((sub) => {
-          const quiz = quizById.get(sub.quiz_id)
-          if (!quiz) return
-          const nilai = toNumberOrNull(sub.score)
-          if (nilai == null) return
+          ; (submissionList || []).forEach((sub) => {
+            const quiz = quizById.get(sub.quiz_id)
+            if (!quiz) return
+            const nilai = toNumberOrNull(sub.score)
+            if (nilai == null) return
 
-          const mapel = normalizeMapel(quiz.mapel)
-          const bucket = ensureBucket(mapel)
-          bucket.nilaiQuiz = round2(bucket.nilaiQuiz + nilai)
-          bucket.totalNilai = round2(bucket.totalNilai + nilai)
-          bucket.jumlahPenilaian += 1
-          bucket.jumlahQuizDinilai += 1
-        })
+            const mapel = normalizeMapel(quiz.mapel)
+            const bucket = ensureBucket(mapel)
+            const modeQuiz = normalizeQuizMode(quiz)
+            if (modeQuiz === 'regular') {
+              bucket.nilaiQuizRegulerList.push(nilai)
+              bucket.jumlahQuizRegulerDinilai += 1
+            } else if (modeQuiz === 'uas') {
+              bucket.nilaiQuizUasList.push(nilai)
+              bucket.jumlahQuizUasDinilai += 1
+            } else {
+              bucket.nilaiQuizUtsList.push(nilai)
+              bucket.jumlahQuizUtsDinilai += 1
+            }
+            bucket.nilaiQuiz = round2(bucket.nilaiQuiz + nilai)
+            bucket.totalNilai = round2(bucket.totalNilai + nilai)
+            bucket.jumlahPenilaian += 1
+            bucket.jumlahQuizDinilai += 1
+          })
 
         const rows = Array.from(bucketMap.values())
           .map((row) => {
-            if (row.jumlahPenilaian > 0) {
-              const rataAkademik = round2(row.totalNilai / row.jumlahPenilaian)
-              return {
-                ...row,
-                rataAkademik,
-                grade: getGrade(rataAkademik)
-              }
+            const rataTugasMapel = hitungRataSederhana(row.nilaiTugasList)
+            const rataQuizRegulerMapel = hitungRataSederhana(row.nilaiQuizRegulerList)
+            const rataQuizUtsMapel = hitungRataSederhana(row.nilaiQuizUtsList)
+            const rataQuizUasMapel = hitungRataSederhana(row.nilaiQuizUasList)
+            const rataAkademik = hitungNilaiMapelBerbobot({
+              rataTugasMapel,
+              rataQuizRegulerMapel,
+              rataQuizUtsMapel,
+              rataQuizUasMapel,
+              bobotMapel: row.bobotKomponen
+            })
+            const totalKomponenQuiz = [
+              ...row.nilaiQuizRegulerList,
+              ...row.nilaiQuizUtsList,
+              ...row.nilaiQuizUasList
+            ]
+            const statusKetuntasan = getKetuntasanStatus(rataAkademik)
+            return {
+              ...row,
+              rataTugas: rataTugasMapel ?? '-',
+              rataQuizReguler: rataQuizRegulerMapel ?? '-',
+              rataQuizUts: rataQuizUtsMapel ?? '-',
+              rataQuizUas: rataQuizUasMapel ?? '-',
+              rataQuiz: hitungRataSederhana(totalKomponenQuiz) ?? '-',
+              rataAkademik: rataAkademik ?? '-',
+              grade: getGrade(rataAkademik),
+              statusKetuntasan,
+              tindakLanjutMapel: statusKetuntasan === 'Remedial' ? 'Remedial mapel ini' : 'Pertahankan'
             }
-            return row
           })
           .sort((a, b) => {
-            if (b.totalNilai !== a.totalNilai) return b.totalNilai - a.totalNilai
+            const aNilai = toNumberOrNull(a.rataAkademik)
+            const bNilai = toNumberOrNull(b.rataAkademik)
+            if (aNilai != null && bNilai != null && bNilai !== aNilai) return bNilai - aNilai
+            if (aNilai == null && bNilai != null) return 1
+            if (aNilai != null && bNilai == null) return -1
             return String(a.mapel).localeCompare(String(b.mapel), 'id')
           })
 
@@ -1198,8 +2246,12 @@ export default function LaporanRekap() {
         const totalMapel = rows.length
         const mapelDenganNilai = rows.filter((r) => Number(r.jumlahPenilaian || 0) > 0).length
         const mapelTanpaNilai = Math.max(0, totalMapel - mapelDenganNilai)
-        const rataKeseluruhan =
-          totalPenilaian > 0 ? round2(totalNilai / totalPenilaian) : '-'
+        const mapelTuntas = rows.filter((r) => r.statusKetuntasan === 'Tuntas').length
+        const mapelRemedial = rows.filter((r) => r.statusKetuntasan === 'Remedial').length
+        const nilaiAkhirMapelRows = rows
+          .map((row) => toNumberOrNull(row.rataAkademik))
+          .filter((nilai) => nilai != null)
+        const rataKeseluruhan = hitungRataSederhana(nilaiAkhirMapelRows) ?? '-'
 
         const namaBulanTerpilih = selectedBulan
           .map((b) => bulanList.find((bl) => b === bl.value)?.label)
@@ -1214,6 +2266,8 @@ export default function LaporanRekap() {
             totalMapel,
             mapelDenganNilai,
             mapelTanpaNilai,
+            mapelTuntas,
+            mapelRemedial,
             totalPenilaian,
             totalNilai: round2(totalNilai),
             rataKeseluruhan,
@@ -1395,30 +2449,68 @@ export default function LaporanRekap() {
     }
   }, [absensiData, filteredAbsensiSiswa, searchNama])
 
-  const filteredRekapWaliSiswa = useMemo(() => {
-    if (!rekapWaliData?.siswa) return []
-    const q = searchRekapWali.trim().toLowerCase()
-    if (!q) return rekapWaliData.siswa
+  const rankedRekapWaliSiswa = useMemo(
+    () => rankSiswaWali(rekapWaliData?.siswa || [], rekapWaliData?.policy || rankingPolicy),
+    [rekapWaliData?.siswa, rekapWaliData?.policy, rankingPolicy]
+  )
 
-    return rekapWaliData.siswa.filter((s) => {
+  const filteredRekapWaliSiswa = useMemo(() => {
+    if (!rankedRekapWaliSiswa.length) return []
+    const q = searchRekapWali.trim().toLowerCase()
+    return rankedRekapWaliSiswa.filter((s) => {
       const nama = String(s.nama || '').toLowerCase()
       const nis = String(s.nis || '').toLowerCase()
-      return nama.includes(q) || nis.includes(q)
+      const matchSearch = !q || nama.includes(q) || nis.includes(q)
+      if (!matchSearch) return false
+
+      if (rekapStatusFilter === 'semua') return true
+      if (rekapStatusFilter === 'tuntas') return s.statusKetuntasan === 'Tuntas'
+      if (rekapStatusFilter === 'remedial') return s.statusKetuntasan === 'Remedial'
+      if (rekapStatusFilter === 'pendampingan') return s.statusIntervensi === 'Perlu Pendampingan'
+      if (rekapStatusFilter === 'intensif') return s.statusIntervensi === 'Intervensi Intensif'
+      if (rekapStatusFilter === 'belum_data') return s.statusKetuntasan === 'Belum ada data'
+      return true
     })
-  }, [rekapWaliData, searchRekapWali])
+  }, [rankedRekapWaliSiswa, searchRekapWali, rekapStatusFilter])
 
   const filteredRekapEskulSiswa = useMemo(() => {
-    if (!rekapWaliData?.siswa) return []
+    if (!rankedRekapWaliSiswa.length) return []
     const q = searchRekapEskul.trim().toLowerCase()
-    if (!q) return rekapWaliData.siswa
+    if (!q) return rankedRekapWaliSiswa
 
-    return rekapWaliData.siswa.filter((s) => {
+    return rankedRekapWaliSiswa.filter((s) => {
       const nama = String(s.nama || '').toLowerCase()
       const nis = String(s.nis || '').toLowerCase()
       const daftarEskul = String((s.eskul?.eskulList || []).join(', ')).toLowerCase()
       return nama.includes(q) || nis.includes(q) || daftarEskul.includes(q)
     })
-  }, [rekapWaliData, searchRekapEskul])
+  }, [rankedRekapWaliSiswa, searchRekapEskul])
+
+  const loadNilaiFreezeState = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('settings')
+      .select('*')
+      .order('id', { ascending: true })
+      .limit(1)
+      .maybeSingle()
+    if (error) throw error
+    return getNilaiFreezeStateFromSettings(data)
+  }, [])
+
+  const ensureNilaiMutationAllowed = useCallback(async () => {
+    try {
+      const freezeState = await loadNilaiFreezeState()
+      if (freezeState?.enabled && freezeState?.active) {
+        pushToast('error', buildFreezeMessage(freezeState))
+        return false
+      }
+      return true
+    } catch (error) {
+      console.error('Gagal cek status freeze nilai:', error)
+      pushToast('error', 'Tidak bisa memverifikasi status freeze nilai. Coba lagi.')
+      return false
+    }
+  }, [loadNilaiFreezeState, pushToast])
 
   // ==============================
   // ===== CRUD & ACTIONS =========
@@ -1427,6 +2519,9 @@ export default function LaporanRekap() {
   const updateNilaiTugas = async (siswaId, tugasId, nilaiBaru) => {
     if (!tugasData) return
     try {
+      const isAllowed = await ensureNilaiMutationAllowed()
+      if (!isAllowed) return
+
       setLoading(true)
       let nilaiFinal = null
       if (nilaiBaru !== '' && nilaiBaru !== null) {
@@ -1477,7 +2572,89 @@ export default function LaporanRekap() {
       setEditingNilai(null)
     } catch (e) {
       console.error('Error:', e)
-      pushToast('error', `Gagal menyimpan: ${e.message}`)
+      pushToast('error', `Gagal menyimpan: ${e?.message || 'Terjadi kesalahan'}`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const updateNilaiQuiz = async (siswaId, quizId, nilaiBaru) => {
+    if (!quizData) return
+    try {
+      const isAllowed = await ensureNilaiMutationAllowed()
+      if (!isAllowed) return
+
+      setLoading(true)
+      let scoreFinal = null
+      if (nilaiBaru !== '' && nilaiBaru !== null) {
+        const n = Number(nilaiBaru)
+        if (Number.isNaN(n) || n < 0 || n > 100) {
+          pushToast('error', 'Nilai harus 0–100')
+          setLoading(false)
+          return
+        }
+        scoreFinal = Math.round(n)
+      }
+
+      const { data: existing, error: fetchErr } = await supabase
+        .from('quiz_submissions')
+        .select('id, status, created_at')
+        .eq('siswa_id', siswaId)
+        .eq('quiz_id', quizId)
+        .maybeSingle()
+      if (fetchErr) throw fetchErr
+
+      const nowIso = new Date().toISOString()
+      if (existing) {
+        const payload = {
+          score: scoreFinal,
+          updated_at: nowIso
+        }
+        if (scoreFinal !== null) {
+          payload.status = 'finished'
+          payload.finished_at = nowIso
+        }
+
+        const { error } = await supabase
+          .from('quiz_submissions')
+          .update(payload)
+          .eq('id', existing.id)
+        if (error) throw error
+      } else if (scoreFinal !== null) {
+        const { error } = await supabase
+          .from('quiz_submissions')
+          .insert({
+            id: makeLocalId(),
+            quiz_id: quizId,
+            siswa_id: siswaId,
+            status: 'finished',
+            score: scoreFinal,
+            started_at: nowIso,
+            finished_at: nowIso,
+            created_at: nowIso,
+            updated_at: nowIso
+          })
+        if (error) throw error
+      }
+
+      setQuizData((prev) => {
+        if (!prev) return prev
+        const siswaBaru = prev.siswa.map((s) => {
+          if (s.id !== siswaId) return s
+          const nilaiQuiz = {
+            ...s.nilaiQuiz,
+            [quizId]: { ...s.nilaiQuiz[quizId], nilai: scoreFinal }
+          }
+          const { rataRata, grade } = hitungRataRataDanGrade(nilaiQuiz)
+          return { ...s, nilaiQuiz, rataRata, grade }
+        })
+        return { ...prev, siswa: siswaBaru }
+      })
+      pushToast('success', 'Nilai quiz tersimpan')
+      setEditingQuizNilai(null)
+    } catch (e) {
+      console.error('Error:', e)
+      pushToast('error', `Gagal menyimpan nilai quiz: ${e?.message || 'Terjadi kesalahan'}`)
     } finally {
       setLoading(false)
     }
@@ -1530,15 +2707,15 @@ export default function LaporanRekap() {
 
     const title = ws.addRow([`DETAIL NILAI MATA PELAJARAN - ${siswa.nama || 'Siswa'}`])
     title.font = { bold: true, size: 12 }
-    ws.mergeCells(1, 1, 1, 8)
+    ws.mergeCells(1, 1, 1, 10)
     title.alignment = { horizontal: 'center' }
 
     ws.addRow([`NIS: ${siswa.nis || '-'}`])
-    ws.mergeCells(2, 1, 2, 8)
+    ws.mergeCells(2, 1, 2, 10)
     ws.addRow([`Kelas: ${summary.kelas || '-'}`])
-    ws.mergeCells(3, 1, 3, 8)
+    ws.mergeCells(3, 1, 3, 10)
     ws.addRow([`Periode: ${summary.periode || '-'}`])
-    ws.mergeCells(4, 1, 4, 8)
+    ws.mergeCells(4, 1, 4, 10)
     ws.addRow([])
 
     const header = ws.addRow([
@@ -1549,7 +2726,9 @@ export default function LaporanRekap() {
       'Total Nilai',
       'Jumlah Penilaian',
       'Rata Akademik',
-      'Grade'
+      'Grade',
+      'Ketuntasan',
+      'Tindak Lanjut'
     ])
     header.font = { bold: true }
     header.eachCell((cell) => {
@@ -1571,11 +2750,13 @@ export default function LaporanRekap() {
         row.totalNilai,
         row.jumlahPenilaian,
         row.rataAkademik === '-' ? null : row.rataAkademik,
-        row.grade
+        row.grade,
+        row.statusKetuntasan || '-',
+        row.tindakLanjutMapel || '-'
       ])
       excelRow.eachCell((cell, col) => {
         cell.border = borderAll
-        if (col === 2) cell.alignment = { horizontal: 'left' }
+        if (col === 2 || col === 10) cell.alignment = { horizontal: 'left' }
         else cell.alignment = { horizontal: 'center' }
       })
     })
@@ -1589,7 +2770,9 @@ export default function LaporanRekap() {
       summary.totalNilai ?? 0,
       summary.totalPenilaian ?? 0,
       summary.rataKeseluruhan === '-' ? null : summary.rataKeseluruhan,
-      summary.gradeKeseluruhan || '-'
+      summary.gradeKeseluruhan || '-',
+      '',
+      `Tuntas ${summary.mapelTuntas ?? 0} | Remedial ${summary.mapelRemedial ?? 0}`
     ])
     summaryRow.font = { bold: true }
     summaryRow.eachCell((cell, col) => {
@@ -1612,6 +2795,8 @@ export default function LaporanRekap() {
     ws.getColumn(6).width = 16
     ws.getColumn(7).width = 14
     ws.getColumn(8).width = 10
+    ws.getColumn(9).width = 14
+    ws.getColumn(10).width = 30
 
     const safeName = String(siswa.nama || 'siswa').replace(/[^a-zA-Z0-9_-]+/g, '_')
     const buf = await wb.xlsx.writeBuffer()
@@ -1818,11 +3003,25 @@ export default function LaporanRekap() {
         csv += `${i + 1}${sep}"${s.nama}"${sep}'${s.nis}'${sep}${vals}${sep}${s.rataRata}${sep}"${s.grade}"\n`
       })
     } else if (type === 'rekap' && rekapWaliData) {
-      csv += `Rank${sep}Nama${sep}NIS${sep}Total Tugas${sep}Total Quiz${sep}Total Nilai${sep}Rata Akademik${sep}Skor Absensi${sep}Rata-rata Akhir${sep}Hadir${sep}Izin${sep}Sakit${sep}Alpha${sep}Jml Eskul${sep}Daftar Eskul${sep}Eskul H${sep}Eskul I${sep}Eskul S${sep}Eskul A${sep}Total Presensi Eskul\n`
-      rekapWaliData.siswa.forEach((s) => {
+      csv += `Rank${sep}Nama${sep}NIS${sep}Total Tugas${sep}Total Quiz${sep}Rata Tugas${sep}Rata Quiz${sep}Rata Akademik (Mapel)${sep}Nilai Mapel Inti${sep}Skor Absensi${sep}Nilai Akhir Berbobot${sep}Predikat${sep}Ketuntasan${sep}Tindak Lanjut${sep}Catatan Wali${sep}Hadir${sep}Izin${sep}Sakit${sep}Alpha\n`
+      const rankedRows = rankSiswaWali(
+        rekapWaliData.siswa || [],
+        rekapWaliData.policy || rankingPolicy
+      )
+      rankedRows.forEach((s) => {
+        const safeCatatan = String(s.catatanWali || '-').replace(/"/g, '""')
+        csv += `${s.rank}${sep}"${s.nama}"${sep}'${s.nis}'${sep}${s.totalTugas}${sep}${s.totalQuiz}${sep}${s.rataTugas}${sep}${s.rataQuiz}${sep}${s.rataAkademik}${sep}${s.nilaiMapelInti}${sep}${s.skorAbsensi}${sep}${s.nilaiAkhir ?? s.rataRata}${sep}"${s.predikatAkhir || getPredikatLabel(s.nilaiAkhir ?? s.rataRata)}"${sep}"${s.statusKetuntasan || getKetuntasanStatus(s.nilaiAkhir ?? s.rataRata)}"${sep}"${s.statusIntervensi || '-'}"${sep}"${safeCatatan}"${sep}${s.absensi.Hadir}${sep}${s.absensi.Izin}${sep}${s.absensi.Sakit}${sep}${s.absensi.Alpha}\n`
+      })
+    } else if (type === 'rekap_eskul' && rekapWaliData) {
+      csv += `No${sep}Nama${sep}NIS${sep}Jml Eskul${sep}Daftar Eskul${sep}Eskul H${sep}Eskul I${sep}Eskul S${sep}Eskul A${sep}Total Presensi Eskul\n`
+      const rankedRows = rankSiswaWali(
+        rekapWaliData.siswa || [],
+        rekapWaliData.policy || rankingPolicy
+      )
+      rankedRows.forEach((s, i) => {
         const daftarEskul = (s.eskul?.eskulList || []).join(', ')
         const safeDaftarEskul = String(daftarEskul || '-').replace(/"/g, '""')
-        csv += `${s.rank}${sep}"${s.nama}"${sep}'${s.nis}'${sep}${s.totalTugas}${sep}${s.totalQuiz}${sep}${s.totalNilai}${sep}${s.rataAkademik}${sep}${s.skorAbsensi}${sep}${s.rataRata}${sep}${s.absensi.Hadir}${sep}${s.absensi.Izin}${sep}${s.absensi.Sakit}${sep}${s.absensi.Alpha}${sep}${s.eskul?.jumlahEkskul || 0}${sep}"${safeDaftarEskul}"${sep}${s.eskul?.totalAbsensi?.Hadir || 0}${sep}${s.eskul?.totalAbsensi?.Izin || 0}${sep}${s.eskul?.totalAbsensi?.Sakit || 0}${sep}${s.eskul?.totalAbsensi?.Alpha || 0}${sep}${s.eskul?.totalAbsensi?.total || 0}\n`
+        csv += `${i + 1}${sep}"${s.nama}"${sep}'${s.nis}'${sep}${s.eskul?.jumlahEkskul || 0}${sep}"${safeDaftarEskul}"${sep}${s.eskul?.totalAbsensi?.Hadir || 0}${sep}${s.eskul?.totalAbsensi?.Izin || 0}${sep}${s.eskul?.totalAbsensi?.Sakit || 0}${sep}${s.eskul?.totalAbsensi?.Alpha || 0}${sep}${s.eskul?.totalAbsensi?.total || 0}\n`
       })
     }
 
@@ -1909,21 +3108,20 @@ export default function LaporanRekap() {
       'NIS',
       'Total Tugas',
       'Total Quiz',
-      'Total Nilai',
-      'Rata Akademik',
+      'Rata Tugas',
+      'Rata Quiz',
+      'Rata Akademik (Mapel)',
+      'Nilai Mapel Inti',
       'Skor Absensi',
-      'Rata-rata Akhir',
+      'Nilai Akhir Berbobot',
+      'Predikat',
+      'Ketuntasan',
+      'Tindak Lanjut',
+      'Catatan Wali',
       'Hadir',
       'Izin',
       'Sakit',
-      'Alpha',
-      'Jml Eskul',
-      'Daftar Eskul',
-      'Eskul H',
-      'Eskul I',
-      'Eskul S',
-      'Eskul A',
-      'Total Presensi Eskul'
+      'Alpha'
     ]
 
     const r = ws.addRow(headers)
@@ -1943,21 +3141,131 @@ export default function LaporanRekap() {
       cell.alignment = { horizontal: 'center' }
     })
 
-    rekapWaliData.siswa.forEach((s) => {
+    const rankedRows = rankSiswaWali(
+      rekapWaliData.siswa || [],
+      rekapWaliData.policy || rankingPolicy
+    )
+    rankedRows.forEach((s) => {
       const row = ws.addRow([
         s.rank,
         s.nama,
         s.nis,
         s.totalTugas,
         s.totalQuiz,
-        s.totalNilai,
+        s.rataTugas,
+        s.rataQuiz,
         s.rataAkademik,
+        s.nilaiMapelInti,
         s.skorAbsensi,
-        s.rataRata,
+        s.nilaiAkhir ?? s.rataRata,
+        s.predikatAkhir || getPredikatLabel(s.nilaiAkhir ?? s.rataRata),
+        s.statusKetuntasan || getKetuntasanStatus(s.nilaiAkhir ?? s.rataRata),
+        s.statusIntervensi || '-',
+        s.catatanWali || '-',
         s.absensi.Hadir,
         s.absensi.Izin,
         s.absensi.Sakit,
-        s.absensi.Alpha,
+        s.absensi.Alpha
+      ])
+      row.getCell(2).alignment = { horizontal: 'left' }
+      row.getCell(15).alignment = { horizontal: 'left', wrapText: true, vertical: 'top' }
+    })
+
+    ws.columns = [
+      { width: 8 },  // Rank
+      { width: 28 }, // Nama
+      { width: 18 }, // NIS
+      { width: 16 }, // Total Tugas
+      { width: 16 }, // Total Quiz
+      { width: 14 }, // Rata Tugas
+      { width: 14 }, // Rata Quiz
+      { width: 20 }, // Rata Akademik
+      { width: 18 }, // Nilai Mapel Inti
+      { width: 16 }, // Skor Absensi
+      { width: 20 }, // Nilai Akhir
+      { width: 22 }, // Predikat
+      { width: 14 }, // Ketuntasan
+      { width: 24 }, // Tindak lanjut
+      { width: 52 }, // Catatan wali
+      { width: 10 }, // H
+      { width: 10 }, // I
+      { width: 10 }, // S
+      { width: 10 }  // A
+    ]
+
+    autoFitWorksheetColumns(ws, {
+      min: 10,
+      max: 60,
+      hardMin: {
+        1: 8,
+        2: 24,
+        3: 16,
+        15: 40
+      },
+      hardMax: {
+        15: 80
+      }
+    })
+
+    ws.eachRow((excelRow, rowNumber) => {
+      excelRow.eachCell((cell, colNumber) => {
+        cell.border = {
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          bottom: { style: 'thin' },
+          right: { style: 'thin' }
+        }
+        if (rowNumber === 1) {
+          cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
+        } else if (colNumber === 2 || colNumber === 15) {
+          cell.alignment = { horizontal: 'left', vertical: 'top', wrapText: colNumber === 15 }
+        } else {
+          cell.alignment = { horizontal: 'center', vertical: 'middle' }
+        }
+      })
+    })
+
+    const buf = await wb.xlsx.writeBuffer()
+    saveBlob(buf, 'Rekap_Wali_Kelas_Akademik.xlsx')
+  }
+
+  const exportRekapEskulToExcel = async () => {
+    if (!rekapWaliData) return
+    if (!excelReady) {
+      pushToast('error', 'Library Excel belum siap, coba beberapa detik lagi')
+      return
+    }
+
+    const wb = new ExcelJS.Workbook()
+    const ws = wb.addWorksheet('Rekap Ekskul')
+    const headers = ['No', 'Nama', 'NIS', 'Jml Eskul', 'Daftar Eskul', 'Eskul H', 'Eskul I', 'Eskul S', 'Eskul A', 'Total Presensi Eskul']
+
+    const r = ws.addRow(headers)
+    r.font = { bold: true }
+    r.eachCell((cell) => {
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFD1D5DB' }
+      }
+      cell.border = {
+        top: { style: 'thin' },
+        left: { style: 'thin' },
+        bottom: { style: 'thin' },
+        right: { style: 'thin' }
+      }
+      cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
+    })
+
+    const rankedRows = rankSiswaWali(
+      rekapWaliData.siswa || [],
+      rekapWaliData.policy || rankingPolicy
+    )
+    rankedRows.forEach((s, i) => {
+      const row = ws.addRow([
+        i + 1,
+        s.nama,
+        s.nis,
         s.eskul?.jumlahEkskul || 0,
         (s.eskul?.eskulList || []).join(', ') || '-',
         s.eskul?.totalAbsensi?.Hadir || 0,
@@ -1966,17 +3274,55 @@ export default function LaporanRekap() {
         s.eskul?.totalAbsensi?.Alpha || 0,
         s.eskul?.totalAbsensi?.total || 0
       ])
-      row.getCell(2).alignment = { horizontal: 'left' }
-      row.getCell(15).alignment = { horizontal: 'left' }
+
+      row.getCell(2).alignment = { horizontal: 'left', vertical: 'middle' }
+      row.getCell(5).alignment = { horizontal: 'left', vertical: 'top', wrapText: true }
     })
 
-    ws.getColumn(1).width = 6
-    ws.getColumn(2).width = 30
-    ws.getColumn(3).width = 15
-    ws.getColumn(15).width = 34
+    ws.columns = [
+      { width: 8 },
+      { width: 30 },
+      { width: 18 },
+      { width: 14 },
+      { width: 44 },
+      { width: 10 },
+      { width: 10 },
+      { width: 10 },
+      { width: 10 },
+      { width: 20 }
+    ]
+
+    autoFitWorksheetColumns(ws, {
+      min: 10,
+      max: 55,
+      hardMin: {
+        1: 8,
+        2: 24,
+        3: 16,
+        5: 36
+      },
+      hardMax: {
+        5: 70
+      }
+    })
+
+    ws.eachRow((excelRow, rowNumber) => {
+      if (rowNumber === 1) return
+      excelRow.eachCell((cell, colNumber) => {
+        cell.border = {
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          bottom: { style: 'thin' },
+          right: { style: 'thin' }
+        }
+        if (colNumber !== 2 && colNumber !== 5) {
+          cell.alignment = { horizontal: 'center', vertical: 'middle' }
+        }
+      })
+    })
 
     const buf = await wb.xlsx.writeBuffer()
-    saveBlob(buf, 'Rekap_Wali_Kelas.xlsx')
+    saveBlob(buf, 'Rekap_Wali_Kelas_Ekskul.xlsx')
   }
 
   // === TUGAS – RINGKAS (No, Nama, Rata-rata, Grade) ===
@@ -2365,9 +3711,8 @@ export default function LaporanRekap() {
 
         {/* === CONTROLS === */}
         <div
-          className={`bg-white p-6 rounded-2xl shadow-sm border border-slate-200/60 grid grid-cols-1 ${
-            activeTab === 'rekap' ? 'md:grid-cols-3' : 'md:grid-cols-4'
-          } gap-4 print:hidden`}
+          className={`bg-white p-6 rounded-2xl shadow-sm border border-slate-200/60 grid grid-cols-1 ${activeTab === 'rekap' ? 'md:grid-cols-3' : 'md:grid-cols-4'
+            } gap-4 print:hidden`}
         >
           {/* Kelas */}
           <div>
@@ -2418,11 +3763,10 @@ export default function LaporanRekap() {
               onClick={() => setShowBulanDropdown(!showBulanDropdown)}
             >
               <span
-                className={`block truncate ${
-                  selectedBulan.length === 0
-                    ? 'text-gray-400'
-                    : 'text-gray-900'
-                }`}
+                className={`block truncate ${selectedBulan.length === 0
+                  ? 'text-gray-400'
+                  : 'text-gray-900'
+                  }`}
               >
                 {selectedBulan.length === 0
                   ? 'Pilih Bulan...'
@@ -2469,20 +3813,20 @@ export default function LaporanRekap() {
 
             {/* Shortcut Bulan */}
             <div className="mt-2 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={handleSelectCurrentMonth}
-                  className="text-xs px-2 py-1 rounded-lg border border-slate-300 text-gray-700 hover:bg-gray-100"
-                >
-                  Bulan ini
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSelectAllMonths}
-                  className="text-xs px-2 py-1 rounded-lg border border-slate-300 text-gray-700 hover:bg-gray-100"
-                >
-                  Semua bulan
-                </button>
+              <button
+                type="button"
+                onClick={handleSelectCurrentMonth}
+                className="text-xs px-2 py-1 rounded-lg border border-slate-300 text-gray-700 hover:bg-gray-100"
+              >
+                Bulan ini
+              </button>
+              <button
+                type="button"
+                onClick={handleSelectAllMonths}
+                className="text-xs px-2 py-1 rounded-lg border border-slate-300 text-gray-700 hover:bg-gray-100"
+              >
+                Semua bulan
+              </button>
             </div>
           </div>
 
@@ -2505,45 +3849,176 @@ export default function LaporanRekap() {
           </div>
         </div>
 
+        {activeTab !== 'rekap' && (
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200/60 print:hidden">
+          <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+            <div>
+              <h3 className="text-base font-bold text-slate-800">Bobot Penilaian Per Mapel (Guru Pengampu)</h3>
+              <p className="text-sm text-slate-600 mt-1">
+                Atur bobot nilai untuk mapel yang Anda ampu. Setiap mapel harus total tepat 100%.
+              </p>
+            </div>
+            <div className="text-xs text-slate-500 max-w-2xl leading-relaxed">
+              Rumus mapel: Nilai Akhir Mapel = (RTugasxBTugas + RRegulerxBReguler + RUTSxBUTS + RUASxBUAS) /
+              total bobot komponen yang memiliki nilai.
+            </div>
+          </div>
+
+          {!mapelAmpuOptions.length ? (
+            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 text-amber-700 px-4 py-3 text-sm">
+              Belum ada mapel yang terdeteksi di jadwal Anda.
+            </div>
+          ) : (
+            <div className="mt-4 space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
+                <div className="lg:col-span-2">
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Mapel Pengampu (Checklist Bobot)</label>
+                  <div className="w-full border border-slate-300 rounded-xl bg-white max-h-44 overflow-y-auto divide-y divide-slate-100">
+                    {mapelAmpuOptions.map((item) => (
+                      <button
+                        key={item}
+                        type="button"
+                        onClick={() => setSelectedWeightMapel(item)}
+                        className={`w-full px-3 py-2.5 text-left flex items-center justify-between gap-2 ${
+                          selectedWeightMapel === item
+                            ? 'bg-indigo-50'
+                            : 'hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={mapelWeightedKeySet.has(normalizeMapelKey(item))}
+                            readOnly
+                            className="rounded text-emerald-600 focus:ring-emerald-500 pointer-events-none"
+                          />
+                          <span
+                            className={`text-sm ${
+                              selectedWeightMapel === item
+                                ? 'font-semibold text-indigo-700'
+                                : 'text-slate-700'
+                            }`}
+                          >
+                            {item}
+                          </span>
+                        </div>
+                        <span
+                          className={`text-[11px] px-2 py-0.5 rounded-full border ${
+                            mapelWeightedKeySet.has(normalizeMapelKey(item))
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : 'bg-slate-50 text-slate-500 border-slate-200'
+                          }`}
+                        >
+                          {mapelWeightedKeySet.has(normalizeMapelKey(item)) ? 'Dibobot' : 'Default'}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Centang berarti mapel sudah punya bobot khusus. Klik baris mapel untuk mengedit bobotnya.
+                  </p>
+                </div>
+
+                {MAPEL_COMPONENT_WEIGHT_RULES.map((rule) => (
+                  <div key={rule.key}>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">
+                      {rule.label} ({rule.min}-{rule.max}%)
+                    </label>
+                    <input
+                      type="number"
+                      min={rule.min}
+                      max={rule.max}
+                      step="0.01"
+                      className="w-full border border-slate-300 rounded-xl px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      value={mapelWeightForm[rule.key] ?? ''}
+                      onChange={(e) => setMapelWeightForm((prev) => ({ ...prev, [rule.key]: e.target.value }))}
+                    />
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span
+                  className={`px-2.5 py-1 rounded-full border ${
+                    mapelWeightValidation.isValid
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      : 'bg-red-50 text-red-700 border-red-200'
+                  }`}
+                >
+                  Total bobot: {mapelWeightValidation.total}%
+                </span>
+                {selectedMapelWeightRow?.updated_at && (
+                  <span className="px-2.5 py-1 rounded-full border bg-slate-50 text-slate-600 border-slate-200">
+                    Tersimpan: {new Date(selectedMapelWeightRow.updated_at).toLocaleString('id-ID')}
+                  </span>
+                )}
+                {!mapelWeightValidation.isValid && (
+                  <span className="text-red-600">{mapelWeightValidation.errors[0]}</span>
+                )}
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600 leading-relaxed">
+                <p>Nilai akhir wali kelas dihitung adil dengan 3 tahap:</p>
+                <p>1. Nilai akhir per mapel berbobot komponen di atas.</p>
+                <p>2. Normalisasi adil: komponen yang belum punya nilai tidak dihitung penyebutnya.</p>
+                <p>3. Rata akademik = rata-rata nilai akhir mapel yang punya data.</p>
+                <p>4. Nilai akhir wali = rata berbobot (akademik + absensi) sesuai kebijakan ranking sekolah.</p>
+                <p>
+                  Batas resmi komponen: Tugas/PR 20-40%, Quiz Reguler 10-30%, Quiz UTS 20-30%, Quiz UAS 30-40%,
+                  total wajib tepat 100%.
+                </p>
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  disabled={savingMapelWeight || !mapelWeightValidation.isValid}
+                  onClick={handleSaveMapelWeight}
+                  className="px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {savingMapelWeight ? 'Menyimpan...' : 'Simpan Bobot Mapel'}
+                </button>
+              </div>
+            </div>
+          )}
+          </div>
+        )}
+
         {/* === TABS === */}
         <div className="flex flex-wrap gap-1 bg-slate-200 p-1.5 rounded-2xl w-fit print:hidden">
           <button
-            className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${
-              activeTab === 'absensi'
-                ? 'bg-white shadow text-blue-700'
-                : 'text-gray-600 hover:bg-slate-300'
-            }`}
+            className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${activeTab === 'absensi'
+              ? 'bg-white shadow text-blue-700'
+              : 'text-gray-600 hover:bg-slate-300'
+              }`}
             onClick={() => setActiveTab('absensi')}
           >
             Absensi
           </button>
           <button
-            className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${
-              activeTab === 'tugas'
-                ? 'bg-white shadow text-blue-700'
-                : 'text-gray-600 hover:bg-slate-300'
-            }`}
+            className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${activeTab === 'tugas'
+              ? 'bg-white shadow text-blue-700'
+              : 'text-gray-600 hover:bg-slate-300'
+              }`}
             onClick={() => setActiveTab('tugas')}
           >
             Nilai Tugas
           </button>
           <button
-            className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${
-              activeTab === 'quiz'
-                ? 'bg-white shadow text-blue-700'
-                : 'text-gray-600 hover:bg-slate-300'
-            }`}
+            className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${activeTab === 'quiz'
+              ? 'bg-white shadow text-blue-700'
+              : 'text-gray-600 hover:bg-slate-300'
+              }`}
             onClick={() => setActiveTab('quiz')}
           >
             Nilai Quiz
           </button>
           {waliKelasList.length > 0 && (
             <button
-              className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${
-                activeTab === 'rekap'
-                  ? 'bg-white shadow text-blue-700'
-                  : 'text-gray-600 hover:bg-slate-300'
-              }`}
+              className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${activeTab === 'rekap'
+                ? 'bg-white shadow text-blue-700'
+                : 'text-gray-600 hover:bg-slate-300'
+                }`}
               onClick={() => setActiveTab('rekap')}
             >
               Rekap Wali Kelas
@@ -2731,9 +4206,8 @@ export default function LaporanRekap() {
                       return (
                         <th
                           key={ds}
-                          className={`px-1 py-3 text-center w-8 border-l border-gray-200 ${
-                            isSun ? 'bg-red-100 text-red-600' : ''
-                          }`}
+                          className={`px-1 py-3 text-center w-8 border-l border-gray-200 ${isSun ? 'bg-red-100 text-red-600' : ''
+                            }`}
                         >
                           {dateNum}
                         </th>
@@ -2754,8 +4228,16 @@ export default function LaporanRekap() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {filteredAbsensiSiswa.map((s, idx) => (
-                    <tr key={s.id} className="hover:bg-gray-50">
+                  {filteredAbsensiSiswa.map((s, idx) => {
+                    const isRowSelected = selectedAbsensiRowId === s.id
+                    return (
+                    <tr
+                      key={s.id}
+                      onClick={() =>
+                        setSelectedAbsensiRowId((prev) => (prev === s.id ? null : s.id))
+                      }
+                      className={buildSelectableRowClass(isRowSelected)}
+                    >
                       <td className="px-3 py-2 text-center">{idx + 1}</td>
                       <td className="px-3 py-2 font-medium text-gray-900">
                         {s.nama}
@@ -2766,21 +4248,19 @@ export default function LaporanRekap() {
                         return (
                           <td
                             key={ds}
-                            className={`px-1 py-2 text-center border-l border-gray-100 ${
-                              isSun ? 'bg-red-50' : ''
-                            }`}
+                            className={`px-1 py-2 text-center border-l border-gray-100 ${isSun ? 'bg-red-50' : ''
+                              }`}
                           >
                             {st ? (
                               <span
-                                className={`font-bold ${
-                                  st === 'Hadir'
-                                    ? 'text-green-600'
-                                    : st === 'Izin'
+                                className={`font-bold ${st === 'Hadir'
+                                  ? 'text-green-600'
+                                  : st === 'Izin'
                                     ? 'text-blue-600'
                                     : st === 'Sakit'
-                                    ? 'text-amber-600'
-                                    : 'text-red-600'
-                                }`}
+                                      ? 'text-amber-600'
+                                      : 'text-red-600'
+                                  }`}
                               >
                                 {st.charAt(0)}
                               </span>
@@ -2801,7 +4281,8 @@ export default function LaporanRekap() {
                         {s.total.Hadir}
                       </td>
                     </tr>
-                  ))}
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -2920,7 +4401,10 @@ export default function LaporanRekap() {
                         className="px-2 py-3 text-center min-w-[60px]"
                         title={t.judul}
                       >
-                        T{i + 1}
+                        <span className="block">T{i + 1}</span>
+                        <span className="block mt-0.5 text-[10px] leading-tight font-medium normal-case tracking-normal text-slate-500">
+                          {formatMiniDate(t.deadline || t.mulai || t.created_at)}
+                        </span>
                       </th>
                     ))}
                     <th className="px-4 py-3 text-center bg-blue-50">Rata</th>
@@ -2930,8 +4414,16 @@ export default function LaporanRekap() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {tugasData.siswa.map((s, idx) => (
-                    <tr key={s.id} className="hover:bg-gray-50">
+                  {tugasData.siswa.map((s, idx) => {
+                    const isRowSelected = selectedTugasRowId === s.id
+                    return (
+                    <tr
+                      key={s.id}
+                      onClick={() =>
+                        setSelectedTugasRowId((prev) => (prev === s.id ? null : s.id))
+                      }
+                      className={buildSelectableRowClass(isRowSelected)}
+                    >
                       <td className="px-4 py-2 text-center">{idx + 1}</td>
                       <td className="px-4 py-2 font-medium">{s.nama}</td>
                       {tugasData.tugas.map((t) => {
@@ -2945,14 +4437,13 @@ export default function LaporanRekap() {
                         return (
                           <td key={t.id} className="px-1 py-1 text-center">
                             {editingNilai?.siswaId === s.id &&
-                            editingNilai?.tugasId === t.id ? (
+                              editingNilai?.tugasId === t.id ? (
                               <input
                                 autoFocus
-                                className={`w-12 text-center border-2 rounded px-1 outline-none ${
-                                  isNilaiRendah
-                                    ? 'border-red-500 text-red-700'
-                                    : 'border-blue-500'
-                                }`}
+                                className={`w-12 text-center border-2 rounded px-1 outline-none ${isNilaiRendah
+                                  ? 'border-red-500 text-red-700'
+                                  : 'border-blue-500'
+                                  }`}
                                 defaultValue={nilaiSiswa ?? ''}
                                 onBlur={(e) =>
                                   updateNilaiTugas(
@@ -2998,7 +4489,8 @@ export default function LaporanRekap() {
                         </span>
                       </td>
                     </tr>
-                  ))}
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -3066,7 +4558,10 @@ export default function LaporanRekap() {
                         className="px-2 py-3 text-center min-w-[60px]"
                         title={q.nama}
                       >
-                        Q{i + 1}
+                        <span className="block">Q{i + 1}</span>
+                        <span className="block mt-0.5 text-[10px] leading-tight font-medium normal-case tracking-normal text-slate-500">
+                          {formatMiniDate(q.starts_at || q.deadline_at || q.created_at)}
+                        </span>
                       </th>
                     ))}
                     <th className="px-4 py-3 text-center bg-blue-50">Rata</th>
@@ -3076,8 +4571,16 @@ export default function LaporanRekap() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {quizData.siswa.map((s, idx) => (
-                    <tr key={s.id} className="hover:bg-gray-50">
+                  {quizData.siswa.map((s, idx) => {
+                    const isRowSelected = selectedQuizRowId === s.id
+                    return (
+                    <tr
+                      key={s.id}
+                      onClick={() =>
+                        setSelectedQuizRowId((prev) => (prev === s.id ? null : s.id))
+                      }
+                      className={buildSelectableRowClass(isRowSelected)}
+                    >
                       <td className="px-4 py-2 text-center">{idx + 1}</td>
                       <td className="px-4 py-2 font-medium">{s.nama}</td>
                       {quizData.quizzes.map((q) => {
@@ -3090,15 +4593,38 @@ export default function LaporanRekap() {
                           Number(nilaiSiswa) < 70
                         return (
                           <td key={q.id} className="px-1 py-1 text-center">
-                            <div
-                              className={`rounded px-2 py-1 mx-auto w-fit ${
-                                isNilaiRendah
-                                  ? 'bg-red-100 text-red-700 font-bold'
-                                  : getColorClass(nilaiSiswa)
-                              }`}
-                            >
-                              {nilaiSiswa ?? '-'}
-                            </div>
+                            {editingQuizNilai?.siswaId === s.id &&
+                            editingQuizNilai?.quizId === q.id ? (
+                              <input
+                                autoFocus
+                                className={`w-12 text-center border-2 rounded px-1 outline-none ${
+                                  isNilaiRendah ? 'border-red-500 text-red-700' : 'border-blue-500'
+                                }`}
+                                defaultValue={nilaiSiswa ?? ''}
+                                onBlur={(e) => updateNilaiQuiz(s.id, q.id, e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') e.target.blur()
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                            ) : (
+                              <div
+                                className={`cursor-pointer rounded px-2 py-1 mx-auto w-fit transition ${
+                                  isNilaiRendah
+                                    ? 'bg-red-100 text-red-700 font-bold'
+                                    : getColorClass(nilaiSiswa)
+                                } hover:brightness-95`}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setEditingQuizNilai({
+                                    siswaId: s.id,
+                                    quizId: q.id
+                                  })
+                                }}
+                              >
+                                {nilaiSiswa ?? '-'}
+                              </div>
+                            )}
                           </td>
                         )
                       })}
@@ -3115,7 +4641,8 @@ export default function LaporanRekap() {
                         </span>
                       </td>
                     </tr>
-                  ))}
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -3133,14 +4660,32 @@ export default function LaporanRekap() {
                 </h3>
                 <div className="text-xs text-gray-500">
                   Periode: {rekapWaliData.periode} • Total Tugas: {rekapWaliData.totalTugas} • Total Quiz: {rekapWaliData.totalQuiz} •
+                  Total mapel: {rekapWaliData.totalMapel || 0} •
                   Total pertemuan absensi: {rekapWaliData.totalPertemuanKelas || 0}
                 </div>
                 <div className="text-[11px] text-gray-500">
                   Sesi tanpa catatan absensi siswa dihitung sebagai Alpha pada rekap.
                 </div>
                 <div className="text-[11px] text-gray-500">
-                  Urutan rank: Rata akademik, skor absensi, Alpha paling sedikit, Hadir terbanyak, lalu nama.
+                  Bobot nilai akhir wali: Akademik {(rekapWaliData.policy?.weights?.tugas ?? 40) + (rekapWaliData.policy?.weights?.quiz ?? 40)}%
+                  • Absensi {rekapWaliData.policy?.weights?.absensi ?? 20}%.
                 </div>
+                <div className="text-[11px] text-gray-500">
+                  Urutan tie-break resmi: {rekapWaliData.policy?.tieBreakText || '-'}.
+                  Mapel inti: {rekapWaliData.policy?.coreMapelText || 'Tidak diatur'}.
+                </div>
+                {rekapWaliData.freeze?.enabled && (
+                  <div
+                    className={`mt-2 inline-flex px-2.5 py-1 rounded-full text-[11px] border ${
+                      rekapWaliData.freeze?.active
+                        ? 'bg-red-50 text-red-700 border-red-200'
+                        : 'bg-amber-50 text-amber-700 border-amber-200'
+                    }`}
+                  >
+                    Freeze nilai {rekapWaliData.freeze?.active ? 'AKTIF' : 'TERJADWAL'} •{' '}
+                    {buildFreezeMessage(rekapWaliData.freeze)}
+                  </div>
+                )}
                 {rekapWaliData.audit && (
                   <div className="mt-2 flex flex-wrap gap-2">
                     <span className="px-2.5 py-1 rounded-full text-[11px] bg-emerald-50 text-emerald-700 border border-emerald-200">
@@ -3163,19 +4708,59 @@ export default function LaporanRekap() {
                     </span>
                   </div>
                 )}
+                {rekapWaliData.ringkasanAkademik && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <span className="px-2.5 py-1 rounded-full text-[11px] bg-indigo-50 text-indigo-700 border border-indigo-200">
+                      Rata akhir kelas: {rekapWaliData.ringkasanAkademik.rataNilaiAkhir}
+                    </span>
+                    <span className="px-2.5 py-1 rounded-full text-[11px] bg-cyan-50 text-cyan-700 border border-cyan-200">
+                      Median: {rekapWaliData.ringkasanAkademik.medianNilaiAkhir}
+                    </span>
+                    <span className="px-2.5 py-1 rounded-full text-[11px] bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      Tertinggi: {rekapWaliData.ringkasanAkademik.nilaiTertinggi}
+                    </span>
+                    <span className="px-2.5 py-1 rounded-full text-[11px] bg-slate-50 text-slate-700 border border-slate-200">
+                      Terendah: {rekapWaliData.ringkasanAkademik.nilaiTerendah}
+                    </span>
+                    <span className="px-2.5 py-1 rounded-full text-[11px] bg-green-50 text-green-700 border border-green-200">
+                      Tuntas: {rekapWaliData.ringkasanAkademik.jumlahTuntas} ({rekapWaliData.ringkasanAkademik.persenKetuntasanKelas}%)
+                    </span>
+                    <span className="px-2.5 py-1 rounded-full text-[11px] bg-red-50 text-red-700 border border-red-200">
+                      Remedial: {rekapWaliData.ringkasanAkademik.jumlahRemedial}
+                    </span>
+                    <span className="px-2.5 py-1 rounded-full text-[11px] bg-amber-50 text-amber-700 border border-amber-200">
+                      Pendampingan: {rekapWaliData.ringkasanAkademik.jumlahPerluPendampingan}
+                    </span>
+                    <span className="px-2.5 py-1 rounded-full text-[11px] bg-orange-50 text-orange-700 border border-orange-200">
+                      Intervensi intensif: {rekapWaliData.ringkasanAkademik.jumlahIntervensiIntensif}
+                    </span>
+                  </div>
+                )}
               </div>
               <div className="flex flex-wrap gap-2 print:hidden">
                 <button
                   onClick={exportRekapWaliToExcel}
                   className="text-xs bg-green-600 text-white px-3 py-2 rounded hover:bg-green-700"
                 >
-                  Excel
+                  Excel Akademik
+                </button>
+                <button
+                  onClick={exportRekapEskulToExcel}
+                  className="text-xs bg-emerald-600 text-white px-3 py-2 rounded hover:bg-emerald-700"
+                >
+                  Excel Ekskul
                 </button>
                 <button
                   onClick={() => exportToGoogleSheets('rekap')}
                   className="text-xs bg-blue-600 text-white px-3 py-2 rounded hover:bg-blue-700"
                 >
-                  Google Sheets
+                  Sheets Akademik
+                </button>
+                <button
+                  onClick={() => exportToGoogleSheets('rekap_eskul')}
+                  className="text-xs bg-sky-600 text-white px-3 py-2 rounded hover:bg-sky-700"
+                >
+                  Sheets Ekskul
                 </button>
                 <button
                   onClick={handlePrint}
@@ -3212,6 +4797,18 @@ export default function LaporanRekap() {
                 placeholder="Ketik nama atau NIS..."
                 className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm w-full sm:w-72 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
+              <select
+                value={rekapStatusFilter}
+                onChange={(e) => setRekapStatusFilter(e.target.value)}
+                className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm w-full sm:w-64 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="semua">Semua Status</option>
+                <option value="tuntas">Ketuntasan: Tuntas</option>
+                <option value="remedial">Ketuntasan: Remedial</option>
+                <option value="pendampingan">Tindak lanjut: Pendampingan</option>
+                <option value="intensif">Tindak lanjut: Intervensi Intensif</option>
+                <option value="belum_data">Belum ada data</option>
+              </select>
               {searchRekapWali && !filteredRekapWaliSiswa.length && (
                 <span className="text-xs text-red-500">
                   Tidak ada siswa yang cocok dengan "{searchRekapWali}"
@@ -3220,54 +4817,85 @@ export default function LaporanRekap() {
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full text-sm text-left">
+              <table className="w-full min-w-[2500px] text-sm text-left">
                 <thead className="bg-gray-100 text-gray-700 uppercase font-bold text-xs">
                   <tr>
-                    <th className="px-4 py-3 w-10">Rank</th>
+                    <th className="px-4 py-3 w-12">Rank</th>
                     <th className="px-4 py-3 min-w-[200px]">Nama</th>
-                    <th className="px-4 py-3">NIS</th>
-                    <th className="px-3 py-3 text-center">Total Tugas</th>
-                    <th className="px-3 py-3 text-center">Total Quiz</th>
-                    <th className="px-3 py-3 text-center bg-blue-50">Total Nilai</th>
-                    <th className="px-3 py-3 text-center bg-indigo-50">Rata Akademik</th>
-                    <th className="px-3 py-3 text-center bg-cyan-50">Skor Absensi</th>
-                    <th className="px-3 py-3 text-center bg-purple-50">Rata-rata Akhir</th>
-                    <th className="px-3 py-3 text-center">H</th>
-                    <th className="px-3 py-3 text-center">I</th>
-                    <th className="px-3 py-3 text-center">S</th>
-                    <th className="px-3 py-3 text-center">A</th>
-                    <th className="px-3 py-3 text-center">Aksi</th>
+                    <th className="px-4 py-3 min-w-[120px]">NIS</th>
+                    <th className="px-3 py-3 text-center min-w-[130px]">Total Tugas</th>
+                    <th className="px-3 py-3 text-center min-w-[130px]">Total Quiz</th>
+                    <th className="px-3 py-3 text-center min-w-[110px]">Rata Tugas</th>
+                    <th className="px-3 py-3 text-center min-w-[110px]">Rata Quiz</th>
+                    <th className="px-3 py-3 text-center bg-indigo-50 min-w-[170px]">Rata Akademik (Mapel)</th>
+                    <th className="px-3 py-3 text-center bg-cyan-50 min-w-[150px]">Nilai Mapel Inti</th>
+                    <th className="px-3 py-3 text-center bg-sky-50 min-w-[140px]">Skor Absensi</th>
+                    <th className="px-3 py-3 text-center bg-purple-50 min-w-[180px]">Nilai Akhir Berbobot</th>
+                    <th className="px-3 py-3 text-center min-w-[220px]">Predikat</th>
+                    <th className="px-3 py-3 text-center min-w-[130px]">Ketuntasan</th>
+                    <th className="px-3 py-3 text-center min-w-[210px]">Tindak Lanjut</th>
+                    <th className="px-3 py-3 text-center min-w-[320px]">Catatan Wali</th>
+                    <th className="px-3 py-3 text-center min-w-[50px]">H</th>
+                    <th className="px-3 py-3 text-center min-w-[50px]">I</th>
+                    <th className="px-3 py-3 text-center min-w-[50px]">S</th>
+                    <th className="px-3 py-3 text-center min-w-[50px]">A</th>
+                    <th className="px-3 py-3 text-center min-w-[85px]">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {filteredRekapWaliSiswa.map((s, idx) => {
-                    const bottomRank = rekapWaliData.siswa[rekapWaliData.siswa.length - 1]?.rank
-                    const rata = s.rataRata === '-' ? null : Number(s.rataRata)
-                    const isLow = (rata != null && rata < 70) || s.rank === bottomRank
+                  {filteredRekapWaliSiswa.map((s) => {
+                    const bottomRank = rankedRekapWaliSiswa[rankedRekapWaliSiswa.length - 1]?.rank
+                    const nilaiAkhir = toNumberOrNull(s.nilaiAkhir ?? s.rataRata)
+                    const isLow = (nilaiAkhir != null && nilaiAkhir < 70) || s.rank === bottomRank
+                    const isRowSelected = selectedRekapRowId === s.id
+                    const rekapDefaultClass = `${isLow ? 'bg-red-50/60 ' : ''}hover:bg-gray-50`
                     return (
                       <tr
                         key={s.id}
-                        className={`hover:bg-gray-50 ${isLow ? 'bg-red-50/60' : ''}`}
+                        onClick={() =>
+                          setSelectedRekapRowId((prev) => (prev === s.id ? null : s.id))
+                        }
+                        className={buildSelectableRowClass(isRowSelected, rekapDefaultClass)}
                       >
                         <td className={`px-4 py-2 text-center font-bold ${s.rank === 1 ? 'text-emerald-600' : ''}`}>
                           {s.rank}
                         </td>
                         <td className="px-4 py-2 font-medium">{s.nama}</td>
-                        <td className="px-4 py-2">{s.nis}</td>
-                        <td className="px-3 py-2 text-center">{s.totalTugas}</td>
-                        <td className="px-3 py-2 text-center">{s.totalQuiz}</td>
-                        <td className={`px-3 py-2 text-center font-bold ${isLow ? 'text-red-600' : ''}`}>
-                          {s.totalNilai}
+                        <td className="px-4 py-2 whitespace-nowrap">{s.nis}</td>
+                        <td className="px-3 py-2 text-center whitespace-nowrap">{s.totalTugas}</td>
+                        <td className="px-3 py-2 text-center whitespace-nowrap">{s.totalQuiz}</td>
+                        <td className="px-3 py-2 text-center whitespace-nowrap">{s.rataTugas}</td>
+                        <td className="px-3 py-2 text-center whitespace-nowrap">{s.rataQuiz}</td>
+                        <td className="px-3 py-2 text-center whitespace-nowrap">{s.rataAkademik}</td>
+                        <td className="px-3 py-2 text-center whitespace-nowrap">{s.nilaiMapelInti}</td>
+                        <td className="px-3 py-2 text-center whitespace-nowrap">{s.skorAbsensi}</td>
+                        <td className={`px-3 py-2 text-center font-semibold whitespace-nowrap ${isLow ? 'text-red-600' : ''}`}>
+                          {s.nilaiAkhir ?? s.rataRata}
                         </td>
-                        <td className="px-3 py-2 text-center">{s.rataAkademik}</td>
-                        <td className="px-3 py-2 text-center">{s.skorAbsensi}</td>
-                        <td className={`px-3 py-2 text-center font-semibold ${isLow ? 'text-red-600' : ''}`}>
-                          {s.rataRata}
+                        <td className="px-3 py-2 text-left whitespace-normal">{s.predikatAkhir || getPredikatLabel(s.nilaiAkhir ?? s.rataRata)}</td>
+                        <td className="px-3 py-2 text-center">
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[11px] border ${
+                              s.statusKetuntasan === 'Tuntas'
+                                ? 'bg-green-50 text-green-700 border-green-200'
+                                : s.statusKetuntasan === 'Remedial'
+                                  ? 'bg-red-50 text-red-700 border-red-200'
+                                  : 'bg-slate-50 text-slate-600 border-slate-200'
+                            }`}
+                          >
+                            {s.statusKetuntasan || getKetuntasanStatus(s.nilaiAkhir ?? s.rataRata)}
+                          </span>
                         </td>
-                        <td className="px-3 py-2 text-center">{s.absensi.Hadir}</td>
-                        <td className="px-3 py-2 text-center">{s.absensi.Izin}</td>
-                        <td className="px-3 py-2 text-center">{s.absensi.Sakit}</td>
-                        <td className="px-3 py-2 text-center">{s.absensi.Alpha}</td>
+                        <td className="px-3 py-2 text-left text-xs text-slate-700 whitespace-normal" title={s.catatanWali || '-'}>
+                          {s.statusIntervensi || '-'}
+                        </td>
+                        <td className="px-3 py-2 text-left text-xs text-slate-700 whitespace-normal min-w-[320px]">
+                          {s.catatanWali || '-'}
+                        </td>
+                        <td className="px-3 py-2 text-center whitespace-nowrap">{s.absensi.Hadir}</td>
+                        <td className="px-3 py-2 text-center whitespace-nowrap">{s.absensi.Izin}</td>
+                        <td className="px-3 py-2 text-center whitespace-nowrap">{s.absensi.Sakit}</td>
+                        <td className="px-3 py-2 text-center whitespace-nowrap">{s.absensi.Alpha}</td>
                         <td className="px-3 py-2 text-center">
                           <button
                             type="button"
@@ -3282,8 +4910,8 @@ export default function LaporanRekap() {
                   })}
                   {!filteredRekapWaliSiswa.length && (
                     <tr>
-                      <td colSpan={14} className="px-4 py-6 text-center text-sm text-slate-500">
-                        Tidak ada data siswa pada hasil pencarian.
+                      <td colSpan={20} className="px-4 py-6 text-center text-sm text-slate-500">
+                        Tidak ada data siswa pada hasil pencarian/filter.
                       </td>
                     </tr>
                   )}
@@ -3357,8 +4985,15 @@ export default function LaporanRekap() {
                   <tbody className="divide-y divide-gray-100">
                     {filteredRekapEskulSiswa.map((s, idx) => {
                       const daftarEkskul = (s.eskul?.eskulList || []).join(', ') || '-'
+                      const isRowSelected = selectedEskulRowId === s.id
                       return (
-                        <tr key={`${s.id}-ekskul`} className="hover:bg-slate-50">
+                        <tr
+                          key={`${s.id}-ekskul`}
+                          onClick={() =>
+                            setSelectedEskulRowId((prev) => (prev === s.id ? null : s.id))
+                          }
+                          className={buildSelectableRowClass(isRowSelected, 'hover:bg-slate-50')}
+                        >
                           <td className="px-3 py-2 text-center">{idx + 1}</td>
                           <td className="px-3 py-2 font-medium">{s.nama}</td>
                           <td className="px-3 py-2">{s.nis}</td>
@@ -3438,6 +5073,12 @@ export default function LaporanRekap() {
                         <span className="px-2.5 py-1 rounded-full text-[11px] bg-amber-50 text-amber-700 border border-amber-200">
                           Mapel tanpa nilai: {detailSiswaData.summary.mapelTanpaNilai}
                         </span>
+                        <span className="px-2.5 py-1 rounded-full text-[11px] bg-green-50 text-green-700 border border-green-200">
+                          Mapel tuntas: {detailSiswaData.summary.mapelTuntas}
+                        </span>
+                        <span className="px-2.5 py-1 rounded-full text-[11px] bg-red-50 text-red-700 border border-red-200">
+                          Mapel remedial: {detailSiswaData.summary.mapelRemedial}
+                        </span>
                         <span className="px-2.5 py-1 rounded-full text-[11px] bg-indigo-50 text-indigo-700 border border-indigo-200">
                           Total penilaian: {detailSiswaData.summary.totalPenilaian}
                         </span>
@@ -3462,18 +5103,31 @@ export default function LaporanRekap() {
                             <th className="px-3 py-2 text-center">Jml Penilaian</th>
                             <th className="px-3 py-2 text-center">Rata Akademik</th>
                             <th className="px-3 py-2 text-center">Grade</th>
+                            <th className="px-3 py-2 text-center">Ketuntasan</th>
+                            <th className="px-3 py-2 text-center">Tindak Lanjut</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                           {(detailSiswaData?.rows || []).length === 0 ? (
                             <tr>
-                              <td colSpan={8} className="px-3 py-8 text-center text-slate-500">
+                              <td colSpan={10} className="px-3 py-8 text-center text-slate-500">
                                 Belum ada data nilai per mata pelajaran pada periode ini.
                               </td>
                             </tr>
                           ) : (
-                            detailSiswaData.rows.map((row, idx) => (
-                              <tr key={`${row.mapel}-${idx}`} className="hover:bg-slate-50/80">
+                            detailSiswaData.rows.map((row, idx) => {
+                              const rowKey = `${row.mapel}-${idx}`
+                              const isRowSelected = selectedDetailNilaiRowKey === rowKey
+                              return (
+                              <tr
+                                key={rowKey}
+                                onClick={() =>
+                                  setSelectedDetailNilaiRowKey((prev) =>
+                                    prev === rowKey ? null : rowKey
+                                  )
+                                }
+                                className={buildSelectableRowClass(isRowSelected, 'hover:bg-slate-50/80')}
+                              >
                                 <td className="px-3 py-2 text-center">{idx + 1}</td>
                                 <td className="px-3 py-2 font-medium">{row.mapel}</td>
                                 <td className="px-3 py-2 text-center">{row.nilaiTugas}</td>
@@ -3490,8 +5144,23 @@ export default function LaporanRekap() {
                                     {row.grade}
                                   </span>
                                 </td>
+                                <td className="px-3 py-2 text-center">
+                                  <span
+                                    className={`px-2 py-0.5 rounded-full text-[11px] border ${
+                                      row.statusKetuntasan === 'Tuntas'
+                                        ? 'bg-green-50 text-green-700 border-green-200'
+                                        : row.statusKetuntasan === 'Remedial'
+                                          ? 'bg-red-50 text-red-700 border-red-200'
+                                          : 'bg-slate-50 text-slate-600 border-slate-200'
+                                    }`}
+                                  >
+                                    {row.statusKetuntasan}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2 text-left text-xs text-slate-700">{row.tindakLanjutMapel}</td>
                               </tr>
-                            ))
+                              )
+                            })
                           )}
                         </tbody>
                       </table>

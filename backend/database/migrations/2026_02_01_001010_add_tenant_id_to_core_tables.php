@@ -12,7 +12,7 @@ return new class extends Migration
     {
         $slug = env('TENANT_DEFAULT_SLUG', 'default');
         $tenant = DB::table('tenants')->where('slug', $slug)->first();
-        if (!$tenant) {
+        if (! $tenant) {
             $tenantId = (string) Str::uuid();
             DB::table('tenants')->insert([
                 'id' => $tenantId,
@@ -67,11 +67,11 @@ return new class extends Migration
         ];
 
         foreach ($tables as $tableName) {
-            if (!Schema::hasTable($tableName)) {
+            if (! Schema::hasTable($tableName)) {
                 continue;
             }
 
-            if (!Schema::hasColumn($tableName, 'tenant_id')) {
+            if (! Schema::hasColumn($tableName, 'tenant_id')) {
                 Schema::table($tableName, function (Blueprint $table) {
                     $table->uuid('tenant_id')->nullable();
                     $table->index('tenant_id');
@@ -128,7 +128,7 @@ return new class extends Migration
         ];
 
         foreach ($tables as $tableName) {
-            if (!Schema::hasTable($tableName) || !Schema::hasColumn($tableName, 'tenant_id')) {
+            if (! Schema::hasTable($tableName) || ! Schema::hasColumn($tableName, 'tenant_id')) {
                 continue;
             }
             Schema::table($tableName, function (Blueprint $table) {

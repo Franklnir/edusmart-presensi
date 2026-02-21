@@ -12,12 +12,12 @@ class EnsureTenantMatchesProfile
     public function handle(Request $request, Closure $next)
     {
         $user = $request->user();
-        if (!$user) {
+        if (! $user) {
             return $next($request);
         }
 
         $tenantId = $request->attributes->get('tenant_id');
-        if (!$tenantId) {
+        if (! $tenantId) {
             return response()->json(['error' => 'Tenant tidak valid'], 400);
         }
 
@@ -26,7 +26,7 @@ class EnsureTenantMatchesProfile
         }
 
         $profile = Profile::query()->where('id', $user->id)->first();
-        if (!$profile) {
+        if (! $profile) {
             return response()->json(['error' => 'Profil belum tersedia'], 403);
         }
 
@@ -39,7 +39,7 @@ class EnsureTenantMatchesProfile
 
     private function isSuperAdminIdentity($user): bool
     {
-        if (!$user) {
+        if (! $user) {
             return false;
         }
 

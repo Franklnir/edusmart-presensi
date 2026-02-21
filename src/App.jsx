@@ -31,14 +31,14 @@ const App = () => {
     let id = ''
     try {
       id = localStorage.getItem(key) || ''
-    } catch {}
+    } catch { }
     if (!id) {
       if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
         id = crypto.randomUUID()
       } else {
         id = `dev-${Date.now()}-${Math.random().toString(16).slice(2)}`
       }
-      try { localStorage.setItem(key, id) } catch {}
+      try { localStorage.setItem(key, id) } catch { }
     }
     deviceIdRef.current = id
   }, [])
@@ -76,18 +76,15 @@ const App = () => {
     if (lastPathRef.current === location.pathname) return
     lastPathRef.current = location.pathname
 
-    supabase.presence.ping({ deviceId, activity: true }).catch(() => {})
+    supabase.presence.ping({ deviceId, activity: true }).catch(() => { })
   }, [location.pathname, user?.id])
 
   // Layout untuk halaman auth (login, register, dll)
   if (isAuthPage || !user) {
     return (
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen bg-slate-50">
         <main className="w-full min-h-screen">
-          <div className="w-full h-full">
-            {/* biarkan halaman auth yang atur background/warna sendiri */}
-            <AppRoutes />
-          </div>
+          <AppRoutes />
         </main>
       </div>
     )
@@ -97,9 +94,7 @@ const App = () => {
     return (
       <div className="min-h-screen bg-slate-100">
         <main className="w-full min-h-screen">
-          <div className="w-full h-full">
-            <AppRoutes />
-          </div>
+          <AppRoutes />
         </main>
       </div>
     )
@@ -107,17 +102,12 @@ const App = () => {
 
   // Layout setelah login (ada navbar)
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* HP = kolom (navbar di atas), md+ = baris (navbar di samping) */}
-      <div className="flex min-h-screen flex-col md:flex-row">
+    <div className="h-screen bg-slate-50 overflow-hidden">
+      <div className="flex h-full flex-col md:flex-row overflow-hidden">
         <Navbar />
-
-        <main className="flex-1 w-full overflow-auto py-4">
-          <div className="w-full h-full px-0">
-            <div className="w-full bg-white min-h-full rounded-none shadow-none">
-              <AppRoutes />
-            </div>
-          </div>
+        {/* pb-20 untuk mobile bottom nav, tidak mempengaruhi desktop */}
+        <main className="flex-1 w-full h-full overflow-y-auto pb-20 md:pb-0">
+          <AppRoutes />
         </main>
       </div>
     </div>

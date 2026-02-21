@@ -21,11 +21,31 @@ const MONTH_NAMES_ID = [
 ]
 
 const FILE_SIZE_LIMITS = {
-  IMAGE: 70 * 1024,
+  IMAGE: 100 * 1024,
   PDF: 2 * 1024 * 1024,
   DOCUMENT: 2 * 1024 * 1024,
-  PRESENTATION: 3 * 1024 * 1024,
-  OTHER: 5 * 1024 * 1024
+  PRESENTATION: 3 * 1024 * 1024
+}
+
+const ASSIGNMENT_FILE_ACCEPT = {
+  'image/*': ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'],
+  'application/pdf': ['.pdf'],
+  'application/msword': ['.doc'],
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+  'application/vnd.oasis.opendocument.text': ['.odt'],
+  'application/rtf': ['.rtf'],
+  'application/vnd.ms-powerpoint': ['.ppt'],
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'],
+  'application/vnd.oasis.opendocument.presentation': ['.odp']
+}
+
+const looksLikeDomainUrl = (v = '') => /^[a-z0-9-]+(\.[a-z0-9-]+)+(?::\d+)?(\/|$)/i.test(String(v || '').trim())
+
+const hasUsableValue = (value = '') => {
+  const raw = String(value || '').trim()
+  if (!raw) return false
+  const normalized = raw.toLowerCase()
+  return !['null', 'undefined', '-', 'n/a'].includes(normalized)
 }
 
 const isValidDate = (d) => d instanceof Date && !Number.isNaN(d.getTime())
@@ -119,7 +139,7 @@ const getSubmitLockReason = (tugas, myJawaban, myStatus) => {
 /* =========================
    Compression Helpers
 ========================= */
-const compressImage = async (file, maxSizeKB = 70, initialQuality = 0.9) => {
+const compressImage = async (file, maxSizeKB = 100, initialQuality = 0.9) => {
   return new Promise((resolve, reject) => {
     if (!file?.type?.startsWith('image/')) {
       reject(new Error('File bukan gambar'))
@@ -229,7 +249,9 @@ const compressFileBeforeUpload = async (file) => {
     return enforceMaxBytes(file, FILE_SIZE_LIMITS.DOCUMENT, 'dokumen')
   }
 
-  return enforceMaxBytes(file, FILE_SIZE_LIMITS.OTHER, 'lainnya')
+  throw new Error(
+    'Tipe file tidak didukung. Gunakan gambar (JPG/PNG), PDF/Dokumen, atau PPT.'
+  )
 }
 
 /* =========================
@@ -239,7 +261,12 @@ const extractObjectKeyFromAny = (value) => extractObjectPath(ASSIGNMENT_BUCKET, 
 
 const createSignedUrlForKey = async (keyOrUrl, expiresInSeconds = 60 * 60) => {
   if (!keyOrUrl) return null
-  return getSignedUrlForValue(ASSIGNMENT_BUCKET, keyOrUrl, expiresInSeconds)
+  const key = extractObjectKeyFromAny(keyOrUrl)
+  if (!key) {
+    if (/^https?:\/\//i.test(String(keyOrUrl || ''))) return String(keyOrUrl)
+    throw new Error('Path file tidak valid')
+  }
+  return getSignedUrlForValue(ASSIGNMENT_BUCKET, key, expiresInSeconds)
 }
 
 /**
@@ -717,7 +744,7 @@ export default function TugasSiswa() {
         if (currentLink) {
           const { error } = await supabase
             .from('tugas_jawaban')
-            .update({ file_url: null, updated_at: new Date().toISOString() })
+            .update({ file_url: null })
             .eq('id', existing.id)
             .eq('user_id', user.id)
 
@@ -848,8 +875,24 @@ export default function TugasSiswa() {
      Preview helpers
 ========================= */
   const openPreview = async (keyOrUrl) => {
+    const raw = String(keyOrUrl || '').trim()
+    if (!hasUsableValue(raw)) {
+      pushToast('error', 'File atau link tidak tersedia')
+      return
+    }
+
+    if (/^https?:\/\//i.test(raw)) {
+      setPreviewFile(raw)
+      return
+    }
+
+    if (looksLikeDomainUrl(raw)) {
+      setPreviewFile(`https://${raw}`)
+      return
+    }
+
     try {
-      const signed = await createSignedUrlForKey(keyOrUrl, 60 * 60)
+      const signed = await createSignedUrlForKey(raw, 60 * 60)
       if (!signed) throw new Error('Gagal membuat signed URL')
       setPreviewFile(signed)
     } catch (error) {
@@ -1190,6 +1233,11 @@ export default function TugasSiswa() {
                           🔗 Ada link
                         </span>
                       )}
+                      {t.link && (
+                        <span className="px-3 py-1 rounded-full border bg-indigo-50 text-indigo-700 border-indigo-200 text-xs font-bold">
+                          🔗 Referensi guru
+                        </span>
+                      )}
                     </div>
 
                     {t.keterangan && (
@@ -1274,6 +1322,15 @@ export default function TugasSiswa() {
                           📎 Lampiran Guru
                         </button>
                       )}
+                      {detail?.tugas?.link && (
+                        <button
+                          type="button"
+                          onClick={() => openPreview(detail.tugas.link)}
+                          className="px-4 py-2 rounded-2xl bg-indigo-600 text-white font-semibold hover:bg-indigo-700 transition-colors"
+                        >
+                          🔗 Link Guru
+                        </button>
+                      )}
 
                       <button
                         type="button"
@@ -1303,6 +1360,20 @@ export default function TugasSiswa() {
                             {detail?.tugas?.keterangan || 'Tidak ada instruksi.'}
                           </div>
                         </div>
+
+                        {detail?.tugas?.link && (
+                          <div className="bg-white border border-slate-200 rounded-2xl p-4">
+                            <div className="text-sm font-bold text-slate-800 mb-2">🔗 Link Referensi Guru</div>
+                            <div className="text-xs text-slate-500 break-all mb-3">{detail.tugas.link}</div>
+                            <button
+                              type="button"
+                              onClick={() => openPreview(detail.tugas.link)}
+                              className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 transition-colors"
+                            >
+                              👁️ Preview Link
+                            </button>
+                          </div>
+                        )}
 
                         {/* Jawaban saya */}
                         <div className="bg-white border border-slate-200 rounded-2xl p-4">
@@ -1405,8 +1476,7 @@ export default function TugasSiswa() {
 
                                 <FileDropzone
                                   onFiles={handleUploadJawabanFile}
-                                  accept="*/*"
-                                  maxSize={10 * 1024 * 1024}
+                                  accept={ASSIGNMENT_FILE_ACCEPT}
                                   label="Ganti file"
                                   disabled={isSubmissionLocked}
                                   small
@@ -1415,8 +1485,7 @@ export default function TugasSiswa() {
                             ) : (
                               <FileDropzone
                                 onFiles={handleUploadJawabanFile}
-                                accept="*/*"
-                                maxSize={10 * 1024 * 1024}
+                                accept={ASSIGNMENT_FILE_ACCEPT}
                                 label="Seret file jawaban ke sini atau klik untuk memilih"
                                 disabled={isSubmissionLocked}
                               />
@@ -1425,10 +1494,9 @@ export default function TugasSiswa() {
                             <div className="mt-3 p-3 bg-white rounded-xl border border-slate-200">
                               <p className="text-xs font-semibold text-slate-700 mb-2">📋 Batas Ukuran File:</p>
                               <ul className="text-xs text-slate-600 space-y-1">
-                                <li>🖼️ Gambar: maks 70KB (otomatis dikompresi)</li>
+                                <li>🖼️ Gambar: maks 100KB (otomatis dikompresi)</li>
                                 <li>📄 PDF/Dokumen: maks 2MB</li>
                                 <li>📊 PPT: maks 3MB</li>
-                                <li>📦 Lainnya: maks 5MB</li>
                               </ul>
                             </div>
                           </div>
@@ -1479,16 +1547,6 @@ export default function TugasSiswa() {
                           </div>
                         </div>
 
-                        <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
-                          <div className="text-sm font-bold text-slate-800 mb-2">🛡️ Catatan Anti-IDOR</div>
-                          <ul className="text-xs text-slate-600 space-y-1 list-disc pl-5">
-                            <li>Daftar tugas dibatasi ke <b>kelas Anda</b>.</li>
-                            <li>Jawaban diambil hanya <b>milik user_id Anda</b>.</li>
-                            <li>Upload file jawaban hanya ke folder <b>{selectedTugas.id}/</b> dengan prefix <b>{user.id}-</b>.</li>
-                            <li>Hapus file jawaban hanya file milik Anda sendiri.</li>
-                          </ul>
-                        </div>
-
                         {detail?.tugas?.file_url && (
                           <div className="bg-white border border-slate-200 rounded-2xl p-4">
                             <div className="text-sm font-bold text-slate-800 mb-2">📎 Lampiran Guru</div>
@@ -1502,6 +1560,19 @@ export default function TugasSiswa() {
                             <div className="text-[11px] text-slate-500 mt-2">
                               Jika bucket private, preview akan sukses hanya jika policy storage mengizinkan.
                             </div>
+                          </div>
+                        )}
+
+                        {detail?.tugas?.link && (
+                          <div className="bg-white border border-slate-200 rounded-2xl p-4">
+                            <div className="text-sm font-bold text-slate-800 mb-2">🔗 Link Referensi Guru</div>
+                            <button
+                              type="button"
+                              onClick={() => openPreview(detail.tugas.link)}
+                              className="w-full px-4 py-3 rounded-2xl bg-indigo-600 text-white font-bold hover:bg-indigo-700 transition-colors"
+                            >
+                              👁️ Preview Link
+                            </button>
                           </div>
                         )}
                       </div>

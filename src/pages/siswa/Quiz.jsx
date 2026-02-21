@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
-import { supabase } from '../../lib/supabase'
+import { QUIZ_MEDIA_BUCKET, supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import { formatDateTime } from '../../lib/time'
+import FilePreviewModal from '../../components/FilePreviewModal'
 
 const makeId = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -26,6 +27,10 @@ const getLiveEndAt = (quiz) => {
   return new Date(start.getTime() + Number(quiz.duration_minutes) * 60000)
 }
 
+const getQuizEndAt = (quiz) => (
+  quiz?.is_live ? getLiveEndAt(quiz) : safeDate(quiz?.deadline_at)
+)
+
 const normalizeMode = (quiz) => {
   const raw = (quiz?.mode || '').toString().toLowerCase()
   if (raw === 'regular') return 'regular'
@@ -42,8 +47,17 @@ const getModeLabel = (quiz) => {
   return 'Reguler'
 }
 
+const normalizeQuestionType = (value) => {
+  const type = String(value || '').trim().toLowerCase()
+  if (type === 'essay') return 'essay'
+  return 'mcq'
+}
+
 const FULLSCREEN_REQUIRED_MESSAGE = 'Quiz wajib mode fullscreen. Klik Izinkan Fullscreen di browser untuk mulai.'
 const FULLSCREEN_FAILED_MESSAGE = 'Gagal masuk fullscreen. Aktifkan izin fullscreen pada browser lalu coba lagi.'
+const MONTH_FILTER_ALL = ''
+const MONTH_FILTER_THIS = '__this_month'
+const MONTH_FILTER_LAST_12 = '__last_12_months'
 
 const getQuizStatus = (quiz, submission, now = new Date()) => {
   const startsAt = safeDate(quiz?.starts_at)
@@ -90,6 +104,131 @@ const getQuizStatus = (quiz, submission, now = new Date()) => {
   return { label: 'Sedang berlangsung', tone: 'bg-green-100 text-green-700 border border-green-200', canStart: true, kind: 'active' }
 }
 
+const getQuizCreatedAtMs = (quiz) => {
+  const createdAt = safeDate(quiz?.created_at)
+  return createdAt ? createdAt.getTime() : 0
+}
+
+const compareQuizByDeadlineUrgency = (a, b, now = new Date()) => {
+  const endA = getQuizEndAt(a)
+  const endB = getQuizEndAt(b)
+  const hasEndA = Boolean(endA)
+  const hasEndB = Boolean(endB)
+  const expiredA = hasEndA && endA.getTime() < now.getTime()
+  const expiredB = hasEndB && endB.getTime() < now.getTime()
+
+  if (expiredA !== expiredB) return expiredA ? 1 : -1
+  if (hasEndA !== hasEndB) return hasEndA ? -1 : 1
+  if (hasEndA && hasEndB) {
+    const deadlineDiff = endA.getTime() - endB.getTime()
+    if (deadlineDiff !== 0) return deadlineDiff
+  }
+
+  const createdDiff = getQuizCreatedAtMs(b) - getQuizCreatedAtMs(a)
+  if (createdDiff !== 0) return createdDiff
+  return String(a?.id || '').localeCompare(String(b?.id || ''), 'id')
+}
+
+const sortQuizzesByPriority = (rows, now = new Date()) => {
+  const list = [...(rows || [])]
+  if (list.length <= 1) return list
+
+  const newest = [...list].sort((a, b) => {
+    const createdDiff = getQuizCreatedAtMs(b) - getQuizCreatedAtMs(a)
+    if (createdDiff !== 0) return createdDiff
+    return compareQuizByDeadlineUrgency(a, b, now)
+  })[0]
+
+  const rest = list
+    .filter((row) => row?.id !== newest?.id)
+    .sort((a, b) => compareQuizByDeadlineUrgency(a, b, now))
+
+  return newest ? [newest, ...rest] : rest
+}
+
+const getQuizCountdownMeta = (quiz, status, now = new Date()) => {
+  if (!quiz || !status) return null
+  if (status.kind === 'active') {
+    const endAt = getQuizEndAt(quiz)
+    if (!endAt) return null
+    return {
+      label: 'Sisa waktu',
+      seconds: Math.floor((endAt.getTime() - now.getTime()) / 1000),
+      tone: 'border-emerald-200 bg-emerald-50 text-emerald-800'
+    }
+  }
+  if (status.kind === 'scheduled') {
+    const startsAt = safeDate(quiz?.starts_at)
+    if (!startsAt) return null
+    return {
+      label: 'Mulai dalam',
+      seconds: Math.floor((startsAt.getTime() - now.getTime()) / 1000),
+      tone: 'border-amber-200 bg-amber-50 text-amber-800'
+    }
+  }
+  return null
+}
+
+const getQuizMutationMeta = (quiz) => {
+  const createdAt = safeDate(quiz?.created_at)
+  const updatedAt = safeDate(quiz?.updated_at)
+  if (!createdAt || !updatedAt) {
+    return {
+      label: 'Baru',
+      tone: 'bg-blue-100 text-blue-700 border-blue-200'
+    }
+  }
+
+  const edited = updatedAt.getTime() - createdAt.getTime() > 60 * 1000
+  if (edited) {
+    return {
+      label: 'Diedit',
+      tone: 'bg-amber-100 text-amber-700 border-amber-200'
+    }
+  }
+
+  return {
+    label: 'Baru',
+    tone: 'bg-blue-100 text-blue-700 border-blue-200'
+  }
+}
+
+const getQuizMonthKey = (quiz) => {
+  const baseDate = safeDate(quiz?.starts_at || quiz?.deadline_at || quiz?.created_at)
+  if (!baseDate) return ''
+  const year = baseDate.getFullYear()
+  const month = String(baseDate.getMonth() + 1).padStart(2, '0')
+  return `${year}-${month}`
+}
+
+const getMonthKeyFromDate = (dateValue) => {
+  const date = safeDate(dateValue)
+  if (!date) return ''
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  return `${year}-${month}`
+}
+
+const getLastNMonthKeys = (nowValue = new Date(), count = 12) => {
+  const now = safeDate(nowValue) || new Date()
+  const set = new Set()
+  const base = new Date(now.getFullYear(), now.getMonth(), 1)
+  for (let i = 0; i < count; i += 1) {
+    const d = new Date(base.getFullYear(), base.getMonth() - i, 1)
+    set.add(getMonthKeyFromDate(d))
+  }
+  return set
+}
+
+const formatQuizMonthLabel = (monthKey) => {
+  const [yearText, monthText] = String(monthKey || '').split('-')
+  const year = Number(yearText)
+  const month = Number(monthText)
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return String(monthKey || '')
+  const date = new Date(year, month - 1, 1)
+  return date.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })
+}
+
 const formatRemaining = (seconds) => {
   if (seconds == null) return '-'
   const s = Math.max(0, Math.floor(seconds))
@@ -132,6 +271,7 @@ export default function SiswaQuiz() {
   const [quizLoadDone, setQuizLoadDone] = useState(false)
   const [mapelList, setMapelList] = useState([])
   const [selectedMapel, setSelectedMapel] = useState('')
+  const [selectedMonth, setSelectedMonth] = useState('')
   const [selectedQuizId, setSelectedQuizId] = useState(() => sessionQuizIdParam || '')
   const [questions, setQuestions] = useState([])
   const [optionsByQuestion, setOptionsByQuestion] = useState({})
@@ -139,9 +279,15 @@ export default function SiswaQuiz() {
   const [quizDetailsLoadedForId, setQuizDetailsLoadedForId] = useState('')
   const [quizDetailsError, setQuizDetailsError] = useState('')
   const [quizDetailsRetryTick, setQuizDetailsRetryTick] = useState(0)
+  const [quizRealtimeTick, setQuizRealtimeTick] = useState(0)
+  const [quizDetailRealtimeTick, setQuizDetailRealtimeTick] = useState(0)
   const [answers, setAnswers] = useState({})
   const [answerIds, setAnswerIds] = useState({})
+  const [answerRowsByQuestion, setAnswerRowsByQuestion] = useState({})
+  const [activeQuestionIndex, setActiveQuestionIndex] = useState(0)
   const [submission, setSubmission] = useState(null)
+  const [showResultDetail, setShowResultDetail] = useState(false)
+  const [previewMediaUrl, setPreviewMediaUrl] = useState('')
   const [isTaking, setIsTaking] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [remainingSeconds, setRemainingSeconds] = useState(null)
@@ -168,19 +314,75 @@ export default function SiswaQuiz() {
   const violationLogRef = useRef({ key: '', at: 0 })
   const sessionInitRef = useRef('')
   const sessionBootAttemptRef = useRef('')
+  const selectedQuizIdRef = useRef('')
+  const trackedQuestionIdsRef = useRef(new Set())
+  const essaySaveTimersRef = useRef({})
+  const quizReloadTimerRef = useRef(null)
+  const quizDetailReloadTimerRef = useRef(null)
 
   const kelasId = profile?.kelas || profile?.kelas_id || ''
 
-  const filteredQuizzes = useMemo(() => {
-    if (!selectedMapel) return quizList
-    return quizList.filter((q) => q.mapel === selectedMapel)
-  }, [quizList, selectedMapel])
+  const orderedQuizList = useMemo(() => (
+    sortQuizzesByPriority(quizList, nowTick)
+  ), [quizList, nowTick])
 
-  const selectedQuizPool = isSessionPage ? quizList : filteredQuizzes
+  const mapelFilteredQuizzes = useMemo(() => {
+    if (!selectedMapel) return orderedQuizList
+    return orderedQuizList.filter((q) => q.mapel === selectedMapel)
+  }, [orderedQuizList, selectedMapel])
+
+  const monthOptions = useMemo(() => {
+    const values = new Set()
+    ;(mapelFilteredQuizzes || []).forEach((quiz) => {
+      const monthKey = getQuizMonthKey(quiz)
+      if (monthKey) values.add(monthKey)
+    })
+    return Array.from(values).sort((a, b) => b.localeCompare(a, 'id'))
+  }, [mapelFilteredQuizzes])
+
+  const currentMonthKey = useMemo(() => (
+    getMonthKeyFromDate(nowTick)
+  ), [nowTick])
+
+  const last12MonthKeySet = useMemo(() => (
+    getLastNMonthKeys(nowTick, 12)
+  ), [nowTick])
+
+  const filteredQuizzes = useMemo(() => {
+    if (selectedMonth === MONTH_FILTER_THIS) {
+      return mapelFilteredQuizzes.filter((q) => getQuizMonthKey(q) === currentMonthKey)
+    }
+    if (selectedMonth === MONTH_FILTER_LAST_12) {
+      return mapelFilteredQuizzes.filter((q) => last12MonthKeySet.has(getQuizMonthKey(q)))
+    }
+    if (!selectedMonth) return mapelFilteredQuizzes
+    return mapelFilteredQuizzes.filter((q) => getQuizMonthKey(q) === selectedMonth)
+  }, [mapelFilteredQuizzes, selectedMonth, currentMonthKey, last12MonthKeySet])
+
+  const selectedMonthLabel = useMemo(() => {
+    if (selectedMonth === MONTH_FILTER_THIS) return `Bulan ini (${formatQuizMonthLabel(currentMonthKey)})`
+    if (selectedMonth === MONTH_FILTER_LAST_12) return '12 bulan terakhir'
+    if (!selectedMonth) return 'Semua bulan'
+    return formatQuizMonthLabel(selectedMonth)
+  }, [selectedMonth, currentMonthKey])
+
+  useEffect(() => {
+    if (!selectedMonth) return
+    if (selectedMonth === MONTH_FILTER_THIS || selectedMonth === MONTH_FILTER_LAST_12) return
+    if (!monthOptions.includes(selectedMonth)) {
+      setSelectedMonth('')
+    }
+  }, [selectedMonth, monthOptions])
+
+  const selectedQuizPool = isSessionPage ? orderedQuizList : filteredQuizzes
 
   const selectedQuiz = useMemo(() => (
     selectedQuizPool.find((q) => q.id === selectedQuizId) || null
   ), [selectedQuizPool, selectedQuizId])
+
+  useEffect(() => {
+    selectedQuizIdRef.current = selectedQuizId || ''
+  }, [selectedQuizId])
 
   useEffect(() => {
     if (isSessionPage) return
@@ -207,9 +409,86 @@ export default function SiswaQuiz() {
   }, [selectedQuiz, submission])
   const activeSubmissionId = activeSubmission?.id || ''
 
+  useEffect(() => {
+    trackedQuestionIdsRef.current = new Set((questions || []).map((q) => q.id).filter(Boolean))
+  }, [questions])
+
+  useEffect(() => {
+    Object.values(essaySaveTimersRef.current).forEach((timerId) => clearTimeout(timerId))
+    essaySaveTimersRef.current = {}
+    setActiveQuestionIndex(0)
+    setShowResultDetail(false)
+  }, [selectedQuizId])
+
+  useEffect(() => {
+    setActiveQuestionIndex((prev) => {
+      if (!questions.length) return 0
+      if (prev < 0) return 0
+      if (prev > questions.length - 1) return questions.length - 1
+      return prev
+    })
+  }, [questions.length])
+
+  const queueQuizReload = useCallback((delay = 120) => {
+    if (quizReloadTimerRef.current) {
+      clearTimeout(quizReloadTimerRef.current)
+    }
+    quizReloadTimerRef.current = setTimeout(() => {
+      quizReloadTimerRef.current = null
+      setQuizRealtimeTick((prev) => prev + 1)
+    }, delay)
+  }, [])
+
+  const queueQuizDetailReload = useCallback((delay = 120) => {
+    if (quizDetailReloadTimerRef.current) {
+      clearTimeout(quizDetailReloadTimerRef.current)
+    }
+    quizDetailReloadTimerRef.current = setTimeout(() => {
+      quizDetailReloadTimerRef.current = null
+      setQuizDetailRealtimeTick((prev) => prev + 1)
+    }, delay)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (quizReloadTimerRef.current) clearTimeout(quizReloadTimerRef.current)
+      if (quizDetailReloadTimerRef.current) clearTimeout(quizDetailReloadTimerRef.current)
+      Object.values(essaySaveTimersRef.current).forEach((timerId) => clearTimeout(timerId))
+      essaySaveTimersRef.current = {}
+    }
+  }, [])
+
   const selectedStatus = useMemo(() => (
     selectedQuiz ? getQuizStatus(selectedQuiz, activeSubmission, nowTick) : null
   ), [selectedQuiz, activeSubmission, nowTick])
+
+  const canViewSelectedResult = useMemo(() => (
+    Boolean(
+      selectedQuiz?.result_visible_to_students
+      && (activeSubmission?.status === 'finished')
+    )
+  ), [selectedQuiz?.result_visible_to_students, activeSubmission?.status])
+
+  useEffect(() => {
+    if (!canViewSelectedResult && showResultDetail) {
+      setShowResultDetail(false)
+    }
+  }, [canViewSelectedResult, showResultDetail])
+
+  const quizStatusSummary = useMemo(() => {
+    let active = 0
+    let scheduled = 0
+    let done = 0
+    let expired = 0
+    ;(filteredQuizzes || []).forEach((quiz) => {
+      const kind = getQuizStatus(quiz, quiz?.submission, nowTick).kind
+      if (kind === 'active') active += 1
+      else if (kind === 'scheduled') scheduled += 1
+      else if (kind === 'done') done += 1
+      else if (kind === 'expired') expired += 1
+    })
+    return { active, scheduled, done, expired }
+  }, [filteredQuizzes, nowTick])
 
   const selectedRemainingSeconds = useMemo(() => {
     if (!selectedQuiz || !selectedStatus || selectedStatus.kind !== 'active') return null
@@ -218,10 +497,46 @@ export default function SiswaQuiz() {
     return Math.floor((endAt.getTime() - nowTick.getTime()) / 1000)
   }, [selectedQuiz, selectedStatus, nowTick])
 
+  const selectedStartCountdownSeconds = useMemo(() => {
+    if (!selectedQuiz || !selectedStatus || selectedStatus.kind !== 'scheduled') return null
+    const startsAt = safeDate(selectedQuiz.starts_at)
+    if (!startsAt) return null
+    return Math.floor((startsAt.getTime() - nowTick.getTime()) / 1000)
+  }, [selectedQuiz, selectedStatus, nowTick])
+
+  const selectedCountdownMeta = useMemo(() => {
+    if (selectedStatus?.kind === 'active' && selectedRemainingSeconds != null) {
+      return {
+        label: 'Timer Quiz',
+        seconds: selectedRemainingSeconds,
+        tone: 'border-emerald-200 bg-emerald-50 text-emerald-800'
+      }
+    }
+    if (selectedStatus?.kind === 'scheduled' && selectedStartCountdownSeconds != null) {
+      return {
+        label: 'Mulai dalam',
+        seconds: selectedStartCountdownSeconds,
+        tone: 'border-amber-200 bg-amber-50 text-amber-800'
+      }
+    }
+    return null
+  }, [selectedStatus?.kind, selectedRemainingSeconds, selectedStartCountdownSeconds])
+
   const activeDurationText = useMemo(() => {
     if (!activeSubmission?.started_at) return '-'
     return formatDurationText(activeSubmission.started_at, activeSubmission.finished_at || nowTick)
   }, [activeSubmission?.started_at, activeSubmission?.finished_at, nowTick])
+
+  const fullscreenActive = typeof document !== 'undefined'
+    ? Boolean(document.fullscreenElement)
+    : isFullscreen
+  const answerInteractionLocked = (
+    !isTaking
+    || isSubmitting
+    || violationPrompt.open
+    || !fullscreenActive
+  )
+  const strictAnswerBlock = isTaking && (violationPrompt.open || !fullscreenActive)
 
   const isStartCountdownActive = startCountdown.open && startCountdown.quizId === selectedQuiz?.id
 
@@ -261,10 +576,66 @@ export default function SiswaQuiz() {
   }, [profile?.nama, profile?.kelas, profile?.kelas_id, user?.email, nowTick])
 
   const answeredCount = useMemo(() => (
-    Object.values(answers).filter(Boolean).length
-  ), [answers])
+    (questions || []).reduce((sum, question) => {
+      const value = answers[question.id]
+      if (normalizeQuestionType(question?.question_type) === 'essay') {
+        return sum + (String(value || '').trim() ? 1 : 0)
+      }
+      return sum + (value ? 1 : 0)
+    }, 0)
+  ), [answers, questions])
 
   const totalQuestions = questions.length
+  const activeQuestion = questions[activeQuestionIndex] || null
+
+  const normalizeQuizMediaPath = useCallback((value) => {
+    const rawValue = String(value || '').trim()
+    if (!rawValue) return ''
+
+    let path = rawValue
+    if (/^https?:\/\//i.test(rawValue) || /^\/?api\/storage\/object\?/i.test(rawValue)) {
+      try {
+        const baseOrigin = typeof window !== 'undefined' && window.location?.origin
+          ? window.location.origin
+          : 'http://localhost'
+        const parsed = new URL(rawValue, baseOrigin)
+        const queryPath = parsed.searchParams.get('path')
+        if (queryPath) {
+          path = queryPath
+        }
+      } catch {
+        path = rawValue
+      }
+    }
+
+    path = String(path || '').replace(/\\/g, '/').replace(/^\/+/, '')
+    const prefixes = [
+      'storage/app/private/quiz-media/',
+      'app/private/quiz-media/',
+      'private/quiz-media/'
+    ]
+    for (const prefix of prefixes) {
+      if (path.startsWith(prefix)) {
+        path = path.slice(prefix.length)
+      }
+    }
+    return path
+  }, [])
+
+  const getQuizImageUrl = useCallback((value) => {
+    const objectPath = normalizeQuizMediaPath(value)
+    if (!objectPath) return ''
+    return supabase.storage.from(QUIZ_MEDIA_BUCKET).getPublicUrl(objectPath)?.data?.publicUrl || ''
+  }, [normalizeQuizMediaPath])
+
+  const isQuestionAnswered = useCallback((question) => {
+    if (!question?.id) return false
+    const value = answers[question.id]
+    if (normalizeQuestionType(question?.question_type) === 'essay') {
+      return String(value || '').trim() !== ''
+    }
+    return Boolean(value)
+  }, [answers])
 
   const redirectToSessionPage = useCallback((quizId, { replace = false } = {}) => {
     if (!quizId) return
@@ -411,6 +782,10 @@ export default function SiswaQuiz() {
   }, [violationCount])
 
   useEffect(() => {
+    violationLogRef.current = { key: '', at: 0 }
+  }, [selectedQuiz?.id, activeSubmissionId])
+
+  useEffect(() => {
     if (!celebration.open) return
     const timer = setTimeout(() => setCelebration({ open: false, score: null }), 6000)
     return () => clearTimeout(timer)
@@ -447,8 +822,9 @@ export default function SiswaQuiz() {
       setMapelList(mapels)
 
       setQuizList(merged)
-      if (merged.length && !selectedQuizId) {
-        setSelectedQuizId(merged[0].id)
+      const sortedMerged = sortQuizzesByPriority(merged, new Date())
+      if (sortedMerged.length && !selectedQuizId) {
+        setSelectedQuizId(sortedMerged[0].id)
       }
     } catch (err) {
       pushToast('error', err?.message || 'Gagal memuat quiz')
@@ -461,7 +837,107 @@ export default function SiswaQuiz() {
   useEffect(() => {
     if (user?.id && kelasId) loadQuizzes()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, kelasId])
+  }, [user?.id, kelasId, quizRealtimeTick])
+
+  useEffect(() => {
+    if (!user?.id || !kelasId) return undefined
+
+    const channel = supabase
+      .channel(`siswa-quiz-live-${user.id}-${kelasId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'quizzes',
+          filter: `kelas_id=eq.${kelasId}`
+        },
+        (payload) => {
+          const row = payload.new || payload.old
+          if (!row) return
+          queueQuizReload(80)
+          if (row.id && row.id === selectedQuizIdRef.current) {
+            queueQuizDetailReload(100)
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'quiz_submissions',
+          filter: `siswa_id=eq.${user.id}`
+        },
+        (payload) => {
+          const row = payload.new || payload.old
+          const quizId = row?.quiz_id
+          if (!quizId) return
+          queueQuizReload(90)
+          if (quizId === selectedQuizIdRef.current) {
+            queueQuizDetailReload(80)
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [user?.id, kelasId, queueQuizReload, queueQuizDetailReload])
+
+  useEffect(() => {
+    if (!selectedQuizId || !user?.id) return undefined
+
+    const channel = supabase
+      .channel(`siswa-quiz-detail-live-${user.id}-${selectedQuizId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'quiz_questions',
+          filter: `quiz_id=eq.${selectedQuizId}`
+        },
+        () => {
+          queueQuizDetailReload(70)
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'quiz_options'
+        },
+        (payload) => {
+          const row = payload.new || payload.old
+          const questionId = row?.question_id
+          if (!questionId) return
+          if (!trackedQuestionIdsRef.current.has(questionId)) return
+          queueQuizDetailReload(70)
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'quiz_violation_logs',
+          filter: `quiz_id=eq.${selectedQuizId}`
+        },
+        (payload) => {
+          const row = payload.new || payload.old
+          if (row?.siswa_id && row.siswa_id !== user.id) return
+          queueQuizDetailReload(100)
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [selectedQuizId, user?.id, queueQuizDetailReload])
 
   useEffect(() => {
     if (!isSessionPage || !sessionQuizIdParam || !quizLoadDone) return
@@ -481,6 +957,7 @@ export default function SiswaQuiz() {
       setOptionsByQuestion({})
       setAnswers({})
       setAnswerIds({})
+      setAnswerRowsByQuestion({})
       setSubmission(null)
       return
     }
@@ -516,6 +993,10 @@ export default function SiswaQuiz() {
         if (!grouped[opt.question_id]) grouped[opt.question_id] = []
         grouped[opt.question_id].push(opt)
       })
+      const questionTypeById = {}
+      ;(questionRows || []).forEach((question) => {
+        questionTypeById[question.id] = normalizeQuestionType(question?.question_type)
+      })
 
       let submissionRow = selectedQuiz.submission
       if (!submissionRow) {
@@ -531,6 +1012,7 @@ export default function SiswaQuiz() {
 
       let answerMap = {}
       let answerIdMap = {}
+      let answerRowMap = {}
       if (submissionRow?.id) {
         const { data: answerRows, error: answerError } = await supabase
           .from('quiz_answers')
@@ -539,8 +1021,12 @@ export default function SiswaQuiz() {
         if (answerError) throw answerError
 
         ;(answerRows || []).forEach((row) => {
-          answerMap[row.question_id] = row.option_id
+          const questionType = questionTypeById[row.question_id] || 'mcq'
+          answerMap[row.question_id] = questionType === 'essay'
+            ? String(row.essay_answer || '')
+            : row.option_id
           answerIdMap[row.question_id] = row.id
+          answerRowMap[row.question_id] = row
         })
       }
 
@@ -548,6 +1034,7 @@ export default function SiswaQuiz() {
       setOptionsByQuestion(grouped)
       setAnswers(answerMap)
       setAnswerIds(answerIdMap)
+      setAnswerRowsByQuestion(answerRowMap)
       setSubmission(submissionRow || null)
       setQuizDetailsLoadedForId(targetQuizId)
     } catch (err) {
@@ -568,7 +1055,7 @@ export default function SiswaQuiz() {
   useEffect(() => {
     loadQuizDetails()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedQuizId, selectedQuiz?.id, selectedQuiz?.submission?.id, user?.id, quizDetailsRetryTick])
+  }, [selectedQuizId, selectedQuiz?.id, selectedQuiz?.submission?.id, user?.id, quizDetailsRetryTick, quizDetailRealtimeTick])
 
   useEffect(() => {
     if (!isSessionPage || !selectedQuiz?.id) return
@@ -655,18 +1142,28 @@ export default function SiswaQuiz() {
     })
   }
 
-  const saveAnswer = async (questionId, optionId) => {
+  const saveAnswer = async (questionId, value, questionType = 'mcq', options = {}) => {
     if (!selectedQuiz) return
+    if (answerInteractionLocked) return
     const sub = await ensureSubmission()
     if (!sub?.id) return
 
+    const mode = normalizeQuestionType(questionType)
     const answerId = answerIds[questionId] || makeId()
     const nowIso = new Date().toISOString()
+    const optionId = mode === 'mcq' ? (value || null) : null
+    const essayAnswer = mode === 'essay'
+      ? (() => {
+          const text = String(value || '')
+          return text.trim() ? text : null
+        })()
+      : null
     const payload = {
       id: answerId,
       submission_id: sub.id,
       question_id: questionId,
       option_id: optionId,
+      essay_answer: essayAnswer,
       created_at: nowIso,
       updated_at: nowIso
     }
@@ -676,13 +1173,53 @@ export default function SiswaQuiz() {
       .upsert(payload, { onConflict: 'submission_id,question_id' })
 
     if (error) {
-      pushToast('error', error?.message || 'Gagal menyimpan jawaban')
+      if (!options?.silent) {
+        pushToast('error', error?.message || 'Gagal menyimpan jawaban')
+      }
       return
     }
 
-    setAnswers((prev) => ({ ...prev, [questionId]: optionId }))
+    setAnswers((prev) => ({ ...prev, [questionId]: mode === 'essay' ? String(value || '') : optionId }))
     setAnswerIds((prev) => ({ ...prev, [questionId]: answerId }))
   }
+
+  const handleEssayChange = (questionId, value) => {
+    setAnswers((prev) => ({ ...prev, [questionId]: value }))
+    if (essaySaveTimersRef.current[questionId]) {
+      clearTimeout(essaySaveTimersRef.current[questionId])
+    }
+    essaySaveTimersRef.current[questionId] = setTimeout(() => {
+      delete essaySaveTimersRef.current[questionId]
+      void saveAnswer(questionId, value, 'essay', { silent: true })
+    }, 550)
+  }
+
+  const handleEssayBlur = (questionId, value) => {
+    if (essaySaveTimersRef.current[questionId]) {
+      clearTimeout(essaySaveTimersRef.current[questionId])
+      delete essaySaveTimersRef.current[questionId]
+    }
+    void saveAnswer(questionId, value, 'essay')
+  }
+
+  const buildSubmitAnswersPayload = () => (
+    (questions || []).map((question) => {
+      const questionType = normalizeQuestionType(question?.question_type)
+      const answerValue = answers[question.id]
+      if (questionType === 'essay') {
+        const essayText = String(answerValue || '')
+        return {
+          question_id: question.id,
+          essay_answer: essayText.trim() ? essayText : null,
+          option_id: null
+        }
+      }
+      return {
+        question_id: question.id,
+        option_id: answerValue || null
+      }
+    })
+  )
 
   const handleSubmitQuiz = async (auto = false) => {
     const sub = submission?.quiz_id === selectedQuiz?.id ? submission : activeSubmission
@@ -696,13 +1233,17 @@ export default function SiswaQuiz() {
     try {
       autoSubmitLockRef.current = true
       setIsSubmitting(true)
+      Object.values(essaySaveTimersRef.current).forEach((timerId) => clearTimeout(timerId))
+      essaySaveTimersRef.current = {}
       const { data, error } = await supabase.quiz.submit({
         quiz_id: selectedQuiz.id,
-        submission_id: sub.id
+        submission_id: sub.id,
+        answers: buildSubmitAnswersPayload()
       })
       if (error) throw error
 
       const score = data?.score ?? null
+      const canShowScoreNow = Boolean(selectedQuiz?.result_visible_to_students)
       const updated = {
         ...(sub || {}),
         status: 'finished',
@@ -717,13 +1258,13 @@ export default function SiswaQuiz() {
       setIsTaking(false)
       setViolationMessage('')
       setViolationPrompt({ open: false, message: '', stage: 1 })
-      setCelebration({ open: true, score })
+      setCelebration({ open: true, score: canShowScoreNow ? score : null })
       if (document.fullscreenElement) {
         try {
           await document.exitFullscreen()
         } catch {}
       }
-      pushToast('success', 'Quiz selesai. Nilai sudah tersedia.')
+      pushToast('success', canShowScoreNow ? 'Quiz selesai. Nilai sudah tersedia.' : 'Quiz selesai. Hasil menunggu publikasi dari guru.')
       if (isSessionPage) {
         navigate('/siswa/quiz', { replace: true })
       }
@@ -774,7 +1315,7 @@ export default function SiswaQuiz() {
 
     const markScreenshotViolation = async () => {
       setViolationMessage('Percobaan screenshot terdeteksi saat quiz berjalan.')
-      triggerViolationPrompt('Percobaan screenshot terdeteksi saat quiz berjalan.')
+      triggerViolationPrompt('Percobaan screenshot terdeteksi saat quiz berjalan.', 'screenshot_attempt')
       if (!navigator?.clipboard?.writeText) return
       try {
         await navigator.clipboard.writeText('')
@@ -799,13 +1340,13 @@ export default function SiswaQuiz() {
 
     const handleVisibility = () => {
       if (document.hidden) {
-        triggerViolationPrompt('Anda keluar dari halaman quiz.')
+        triggerViolationPrompt('Anda keluar dari halaman quiz.', 'page_hidden')
       }
     }
 
     const handleBlur = () => {
       if (document.hidden) return
-      triggerViolationPrompt('Anda berpindah aplikasi/tab saat quiz berjalan.')
+      triggerViolationPrompt('Anda berpindah aplikasi/tab saat quiz berjalan.', 'window_blur')
     }
 
     const handleFullscreenChange = () => {
@@ -814,7 +1355,7 @@ export default function SiswaQuiz() {
       if (active) {
         lockKeyboardShortcuts()
       } else {
-        triggerViolationPrompt('Fullscreen ditutup saat quiz berjalan.')
+        triggerViolationPrompt('Fullscreen ditutup saat quiz berjalan.', 'fullscreen_exit')
       }
     }
 
@@ -831,7 +1372,9 @@ export default function SiswaQuiz() {
       if (blockedStrictKeys.has(key)) {
         event.preventDefault()
         event.stopPropagation()
-        setViolationMessage(`Tombol "${event.key}" dinonaktifkan saat quiz berlangsung.`)
+        const message = `Tombol "${event.key}" dinonaktifkan saat quiz berlangsung.`
+        setViolationMessage(message)
+        void logViolationEvent('blocked_key', message, { key: event.key })
         return
       }
 
@@ -842,7 +1385,7 @@ export default function SiswaQuiz() {
       if (isBlockedCombo || isBlockedSingle) {
         event.preventDefault()
         event.stopPropagation()
-        triggerViolationPrompt('Percobaan membuka fitur browser terdeteksi.')
+        triggerViolationPrompt('Percobaan membuka fitur browser terdeteksi.', 'blocked_shortcut')
       }
     }
 
@@ -858,7 +1401,9 @@ export default function SiswaQuiz() {
     const blockClipboardAndContext = (event) => {
       event.preventDefault()
       event.stopPropagation()
-      setViolationMessage('Copy/cut/klik kanan dinonaktifkan saat quiz berlangsung.')
+      const message = 'Copy/cut/klik kanan dinonaktifkan saat quiz berlangsung.'
+      setViolationMessage(message)
+      void logViolationEvent('clipboard_or_context', message, { action: event.type })
     }
 
     const handleBeforeUnload = (event) => {
@@ -868,7 +1413,7 @@ export default function SiswaQuiz() {
 
     const focusGuard = setInterval(() => {
       if (!document.hasFocus()) {
-        triggerViolationPrompt('Fokus browser hilang saat quiz berjalan.')
+        triggerViolationPrompt('Fokus browser hilang saat quiz berjalan.', 'focus_lost')
       }
     }, 800)
 
@@ -898,7 +1443,7 @@ export default function SiswaQuiz() {
       window.removeEventListener('beforeunload', handleBeforeUnload)
       unlockKeyboardShortcuts()
     }
-  }, [isTaking, selectedQuiz?.id, submission?.id, activeSubmission?.id])
+  }, [isTaking, selectedQuiz?.id, submission?.id, activeSubmission?.id, logViolationEvent])
 
   useEffect(() => {
     if (isTaking) {
@@ -1048,66 +1593,96 @@ export default function SiswaQuiz() {
     setCelebration({ open: false, score: null })
   }
 
-  const violationPanel = isTaking && violationPrompt.open && (
+  const warningMessage = violationPrompt.open
+    ? violationPrompt.message
+    : (violationMessage || (
+      answerInteractionLocked
+        ? 'Pilihan jawaban dikunci. Aktifkan fullscreen lalu klik Batal pada peringatan untuk lanjut.'
+        : ''
+    ))
+
+  const sessionWarningPanel = isTaking && warningMessage && (
     <div className="rounded-2xl bg-red-50 border border-red-200 p-4">
-      <div className="text-base font-bold text-red-700">Peringatan Ujian</div>
-      <p className="text-sm text-slate-700 mt-2">{violationPrompt.message}</p>
-      <p className="text-sm text-slate-600 mt-2">
-        {violationPrompt.stage === 1
-          ? 'Klik Oke jika ingin melanjutkan proses keluar quiz, atau Batal untuk kembali mengerjakan.'
-          : 'Konfirmasi terakhir. Jika klik Oke, quiz akan disubmit dan dianggap selesai.'}
-      </p>
-      <div className="mt-4 flex gap-2 justify-end">
-        <button
-          type="button"
-          onClick={handleViolationCancel}
-          className="px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 text-sm font-semibold"
-        >
-          Batal
-        </button>
-        <button
-          type="button"
-          onClick={handleViolationOk}
-          className="px-3 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-sm font-semibold"
-        >
-          Oke
-        </button>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-base font-bold text-red-700">Peringatan Ujian</div>
+          <p className="text-sm text-slate-700 mt-2">{warningMessage}</p>
+          {violationPrompt.open && (
+            <p className="text-sm text-slate-600 mt-2">
+              {violationPrompt.stage === 1
+                ? 'Klik Oke jika ingin melanjutkan proses keluar quiz, atau Batal untuk kembali mengerjakan.'
+                : 'Konfirmasi terakhir. Jika klik Oke, quiz akan disubmit dan dianggap selesai.'}
+            </p>
+          )}
+        </div>
+        <div className="text-xs font-semibold text-red-700 whitespace-nowrap">
+          Peringatan: {violationCount}
+        </div>
       </div>
+      {violationPrompt.open && (
+        <div className="mt-4 flex gap-2 justify-end">
+          <button
+            type="button"
+            onClick={handleViolationCancel}
+            className="px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 text-sm font-semibold"
+          >
+            Batal
+          </button>
+          <button
+            type="button"
+            onClick={handleViolationOk}
+            className="px-3 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-sm font-semibold"
+          >
+            Oke
+          </button>
+        </div>
+      )}
     </div>
   )
 
-  const celebrationPanel = celebration.open && (
-    <div className="relative w-full rounded-2xl bg-emerald-50 border border-emerald-200 p-4 overflow-hidden">
-      <div className="absolute inset-0 pointer-events-none">
-        {sparkleItems.map((item) => (
-          <span
-            key={item.id}
-            className="absolute text-xl animate-pulse"
-            style={{
-              left: `${item.left}%`,
-              top: `${item.top}%`,
-              animationDelay: `${item.delay}s`
-            }}
-          >
-            {item.icon}
-          </span>
-        ))}
-      </div>
-      <div className="relative flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-        <div>
-          <div className="text-lg font-bold text-emerald-700">Quiz berhasil diselesaikan</div>
-          <div className="text-sm text-slate-700 mt-1">
-            Nilai Anda: <span className="font-semibold">{celebration.score ?? '-'}</span>
-          </div>
+  const celebrationOverlay = celebration.open && (
+    <div className="fixed inset-0 z-[1300] bg-slate-900/45 backdrop-blur-[2px] flex items-center justify-center px-4">
+      <div className="relative w-full max-w-2xl rounded-3xl border border-emerald-200 bg-gradient-to-br from-emerald-50 via-white to-teal-50 p-6 sm:p-8 shadow-2xl overflow-hidden">
+        <div className="pointer-events-none absolute inset-0">
+          {sparkleItems.map((item) => (
+            <span
+              key={item.id}
+              className="absolute text-2xl animate-bounce"
+              style={{
+                left: `${item.left}%`,
+                top: `${item.top}%`,
+                animationDelay: `${item.delay}s`,
+                animationDuration: '1.8s'
+              }}
+            >
+              {item.icon}
+            </span>
+          ))}
         </div>
-        <div>
-          <button
-            type="button"
-            onClick={handleCloseCelebration}
-            className="px-4 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold transition-colors"
-          >
-            Tutup
-          </button>
+
+        <div className="relative text-center">
+          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-100 border border-emerald-200 text-emerald-700 text-xs font-bold uppercase tracking-wider">
+            Selamat
+          </div>
+          <h3 className="mt-4 text-3xl sm:text-4xl font-black text-slate-900">
+            Quiz Selesai
+          </h3>
+          <p className="mt-2 text-slate-600">
+            Jawaban Anda sudah dikirim dan dinilai.
+          </p>
+          <div className="mt-5 inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-white border border-emerald-200 shadow-sm">
+            <span className="text-sm text-slate-600">Nilai Anda</span>
+            <span className="text-2xl font-black text-emerald-700">{celebration.score ?? '-'}</span>
+          </div>
+          <div className="mt-6">
+            <button
+              type="button"
+              onClick={handleCloseCelebration}
+              className="px-5 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold transition-colors"
+            >
+              Tutup Notifikasi
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -1137,8 +1712,11 @@ export default function SiswaQuiz() {
                 </div>
                 <div className="flex items-center gap-3 flex-wrap">
                   {(remainingSeconds != null || selectedRemainingSeconds != null) && (
-                    <div className="text-xs px-3 py-1 rounded-full bg-indigo-100 text-indigo-700">
-                      Sisa waktu: {formatRemaining(remainingSeconds ?? selectedRemainingSeconds)}
+                    <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-indigo-800 shadow-sm">
+                      <div className="text-[11px] font-semibold uppercase tracking-wide">Timer Quiz</div>
+                      <div className="text-lg font-black leading-none mt-0.5">
+                        {formatRemaining(remainingSeconds ?? selectedRemainingSeconds)}
+                      </div>
                     </div>
                   )}
                   {!isFullscreen && isTaking && (
@@ -1179,31 +1757,27 @@ export default function SiswaQuiz() {
               </div>
 
               <div className="relative z-10 space-y-5">
-                {celebrationPanel}
-                {violationPanel}
-
-                {violationMessage && (
-                  <div className="px-4 py-3 bg-red-50 border border-red-200 rounded-2xl text-red-700 text-sm flex items-center justify-between">
-                    <div>{violationMessage}</div>
-                    <div className="text-xs">Peringatan: {violationCount}</div>
-                  </div>
-                )}
+                {celebrationOverlay}
+                {sessionWarningPanel}
 
                 {!isTaking && (
-                  <div className="px-4 py-3 bg-indigo-50 border border-indigo-100 rounded-2xl text-sm text-indigo-700">
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                      <span>
-                        {sessionNeedsManualStart
-                          ? 'Izin fullscreen ditolak browser. Klik tombol di samping untuk mulai quiz.'
-                          : 'Klik tombol di samping untuk mulai quiz dalam mode fullscreen.'}
-                      </span>
+                  <div className="px-4 py-4 bg-gradient-to-r from-sky-50 to-cyan-50 border border-sky-200 rounded-2xl text-sm">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold text-sky-900">Sesi siap dimulai</div>
+                        <div className="text-xs text-sky-700 mt-1">
+                          {sessionNeedsManualStart
+                            ? 'Izin fullscreen ditolak browser. Klik tombol mulai agar sistem mencoba lagi.'
+                            : 'Klik mulai untuk masuk fullscreen, lalu kerjakan quiz tanpa pindah tab.'}
+                        </div>
+                      </div>
                       {sessionPrepared && (
                         <button
                           type="button"
                           onClick={handleManualStartSession}
-                          className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold"
+                          className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold"
                         >
-                          Masuk Fullscreen & Mulai Quiz
+                          Mulai Sesi Aman
                         </button>
                       )}
                     </div>
@@ -1242,39 +1816,178 @@ export default function SiswaQuiz() {
                   </div>
                 )}
 
-                {quizDetailsLoadedForId === selectedQuiz.id && !quizDetailsLoading && questions.map((q) => (
-                  <div key={q.id} className="border border-slate-200 rounded-2xl p-4 bg-white shadow-sm">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="font-semibold text-slate-900">Soal {q.nomor}</div>
-                      <div className="text-xs text-slate-500">{q.poin} poin</div>
-                    </div>
-                    <div className="text-sm text-slate-700 mb-4">{q.soal}</div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      {(optionsByQuestion[q.id] || [])
-                        .sort((a, b) => a.label.localeCompare(b.label))
-                        .map((opt) => {
-                          const selected = answers[q.id] === opt.id
-                          const disabled = !isTaking || isSubmitting
-                          return (
+                {quizDetailsLoadedForId === selectedQuiz.id && !quizDetailsLoading && (
+                  <div className="relative">
+                    {strictAnswerBlock && (
+                      <div className="absolute inset-0 z-20 rounded-2xl bg-slate-200/40 backdrop-blur-[1px] cursor-not-allowed" />
+                    )}
+
+                    <div className={`grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_300px] gap-5 ${strictAnswerBlock ? 'pointer-events-none' : ''}`}>
+                      <div className="space-y-5">
+                        {!!activeQuestion && (
+                          <div className="border border-slate-200 rounded-2xl p-4 bg-white shadow-sm">
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="font-semibold text-slate-900">
+                                Soal {activeQuestion.nomor || activeQuestionIndex + 1}
+                                <span className={`ml-2 text-[11px] px-2 py-0.5 rounded-full border align-middle ${
+                                  normalizeQuestionType(activeQuestion.question_type) === 'essay'
+                                    ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                    : 'bg-blue-50 text-blue-700 border-blue-200'
+                                }`}>
+                                  {normalizeQuestionType(activeQuestion.question_type) === 'essay' ? 'Esai' : 'PG'}
+                                </span>
+                              </div>
+                              <div className="text-xs text-slate-500">{activeQuestion.poin} poin</div>
+                            </div>
+                            <div className="text-sm text-slate-700 mb-4">{activeQuestion.soal}</div>
+                            {activeQuestion.image_path && (
+                              <div className="mb-4">
+                                <div className="inline-flex max-w-full flex-col rounded-2xl border border-slate-200 bg-slate-50 p-2.5">
+                                  <img
+                                    src={getQuizImageUrl(activeQuestion.image_path)}
+                                    alt={`Gambar soal ${activeQuestion.nomor || activeQuestionIndex + 1}`}
+                                    className="block max-h-[22rem] w-auto max-w-full object-contain rounded-xl cursor-zoom-in"
+                                    onClick={() => setPreviewMediaUrl(getQuizImageUrl(activeQuestion.image_path))}
+                                  />
+                                  <div className="mt-1 text-[11px] text-slate-500">
+                                    Klik gambar untuk perbesar.
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                            {normalizeQuestionType(activeQuestion.question_type) === 'essay' ? (
+                              <div>
+                                <textarea
+                                  rows="6"
+                                  value={String(answers[activeQuestion.id] || '')}
+                                  onChange={(e) => handleEssayChange(activeQuestion.id, e.target.value)}
+                                  onBlur={(e) => handleEssayBlur(activeQuestion.id, e.target.value)}
+                                  disabled={answerInteractionLocked}
+                                  placeholder="Tulis jawaban esai Anda di sini..."
+                                  className={`w-full border rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                                    answerInteractionLocked
+                                      ? 'border-slate-200 bg-slate-50 opacity-70 cursor-not-allowed'
+                                      : 'border-slate-300 bg-white'
+                                  }`}
+                                />
+                                <div className="text-[11px] text-slate-500 mt-2">
+                                  Jawaban esai dinilai manual oleh guru.
+                                </div>
+                              </div>
+                            ) : (
+                              (() => {
+                                const mcqOptions = (optionsByQuestion[activeQuestion.id] || [])
+                                  .slice()
+                                  .sort((a, b) => String(a?.label || '').localeCompare(String(b?.label || ''), 'id'))
+                                return (
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-start">
+                                    {mcqOptions.map((opt) => {
+                                      const selected = answers[activeQuestion.id] === opt.id
+                                      const disabled = answerInteractionLocked
+                                      return (
+                                        <div key={opt.id} className="space-y-2">
+                                          <button
+                                            type="button"
+                                            onClick={() => saveAnswer(activeQuestion.id, opt.id, 'mcq')}
+                                            disabled={disabled}
+                                            className={`w-full min-h-[52px] text-left px-4 py-3 rounded-2xl border transition ${
+                                              selected
+                                                ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                                                : disabled
+                                                  ? 'border-slate-200 bg-slate-50'
+                                                  : 'border-slate-200 hover:bg-slate-50'
+                                            } ${disabled ? 'opacity-70 cursor-not-allowed' : ''}`}
+                                          >
+                                            <span className="font-semibold mr-2">{opt.label}.</span>
+                                            <span>{opt.text}</span>
+                                          </button>
+                                          {!!opt.image_path && (
+                                            <div className="inline-flex max-w-full flex-col rounded-xl border border-slate-200 bg-slate-50 p-2">
+                                              <img
+                                                src={getQuizImageUrl(opt.image_path)}
+                                                alt={`Gambar opsi ${opt.label}`}
+                                                className="block max-h-56 w-auto max-w-full object-contain rounded-lg cursor-zoom-in"
+                                                onClick={() => setPreviewMediaUrl(getQuizImageUrl(opt.image_path))}
+                                              />
+                                              <div className="mt-1 text-[11px] text-slate-500">Klik gambar untuk perbesar.</div>
+                                            </div>
+                                          )}
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                )
+                              })()
+                            )}
+                          </div>
+                        )}
+
+                        {!!activeQuestion && (
+                          <div className="flex items-center justify-between gap-2">
                             <button
-                              key={opt.id}
                               type="button"
-                              onClick={() => saveAnswer(q.id, opt.id)}
-                              disabled={disabled}
-                              className={`text-left px-4 py-3 rounded-2xl border transition ${
-                                selected
-                                  ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
-                                  : 'border-slate-200 hover:bg-slate-50'
-                              } ${disabled ? 'opacity-70 cursor-not-allowed' : ''}`}
+                              onClick={() => setActiveQuestionIndex((prev) => Math.max(0, prev - 1))}
+                              disabled={activeQuestionIndex <= 0 || strictAnswerBlock || isSubmitting}
+                              className="px-4 py-2 rounded-xl border border-slate-300 text-slate-700 text-sm font-semibold hover:bg-slate-50 disabled:opacity-60"
                             >
-                              <span className="font-semibold mr-2">{opt.label}.</span>
-                              {opt.text}
+                              Soal Sebelumnya
                             </button>
-                          )
-                        })}
+                            <div className="text-xs text-slate-500">
+                              {activeQuestionIndex + 1} / {questions.length}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setActiveQuestionIndex((prev) => Math.min(questions.length - 1, prev + 1))}
+                              disabled={activeQuestionIndex >= questions.length - 1 || strictAnswerBlock || isSubmitting}
+                              className="px-4 py-2 rounded-xl border border-slate-300 text-slate-700 text-sm font-semibold hover:bg-slate-50 disabled:opacity-60"
+                            >
+                              Soal Berikutnya
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {!!questions.length && (
+                        <div className="lg:sticky lg:top-4 h-fit">
+                          <div className="border border-slate-200 rounded-2xl p-4 bg-white shadow-sm">
+                            <div className="flex items-center justify-between gap-2 mb-3">
+                              <div className="text-sm font-semibold text-slate-800">Navigasi Soal</div>
+                              <div className="text-[11px] text-slate-500">Hijau = sudah dijawab</div>
+                            </div>
+                            <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-4 gap-2">
+                              {questions.map((q, index) => {
+                                const isActive = index === activeQuestionIndex
+                                const isAnswered = isQuestionAnswered(q)
+                                const numberLabel = q?.nomor || index + 1
+                                return (
+                                  <button
+                                    key={q.id}
+                                    type="button"
+                                    onClick={() => setActiveQuestionIndex(index)}
+                                    disabled={strictAnswerBlock || isSubmitting}
+                                    className={`h-9 rounded-lg text-sm font-semibold border transition ${
+                                      isActive
+                                        ? 'border-indigo-500 bg-indigo-600 text-white'
+                                        : isAnswered
+                                          ? 'border-emerald-300 bg-emerald-100 text-emerald-700'
+                                          : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                                    } ${
+                                      strictAnswerBlock || isSubmitting
+                                        ? 'opacity-70 cursor-not-allowed'
+                                        : ''
+                                    }`}
+                                  >
+                                    {numberLabel}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
-                ))}
+                )}
 
                 {quizDetailsLoadedForId === selectedQuiz.id && !quizDetailsLoading && !questions.length && (
                   <div className="text-sm text-slate-500">Quiz belum memiliki soal.</div>
@@ -1283,17 +1996,23 @@ export default function SiswaQuiz() {
             </div>
           </div>
         )}
+        {previewMediaUrl && (
+          <FilePreviewModal
+            fileUrl={previewMediaUrl}
+            onClose={() => setPreviewMediaUrl('')}
+          />
+        )}
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-purple-50/30 py-6 px-4 sm:px-6">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-cyan-50/40 to-blue-50/50 py-6 px-4 sm:px-6">
       <div className="max-w-full mx-auto space-y-6">
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 transition-all duration-300 hover:shadow-md">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div className="flex items-center gap-4">
-              <div className="w-3 h-12 bg-gradient-to-b from-indigo-500 to-purple-600 rounded-full"></div>
+              <div className="w-3 h-12 bg-gradient-to-b from-cyan-500 to-blue-600 rounded-full"></div>
               <div>
                 <h1 className="text-2xl lg:text-3xl font-bold text-slate-900">Quiz Siswa</h1>
                 <p className="text-sm text-slate-500">Kerjakan quiz sesuai jadwal yang ditentukan guru.</p>
@@ -1314,6 +2033,20 @@ export default function SiswaQuiz() {
                 {mapelList.map((m) => (
                   <option key={m} value={m}>
                     {m}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="border border-slate-200 rounded-2xl px-4 py-3 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(e.target.value)}
+              >
+                <option value={MONTH_FILTER_ALL}>Semua bulan</option>
+                <option value={MONTH_FILTER_THIS}>Bulan ini</option>
+                <option value={MONTH_FILTER_LAST_12}>12 bulan terakhir</option>
+                {monthOptions.map((monthKey) => (
+                  <option key={monthKey} value={monthKey}>
+                    {formatQuizMonthLabel(monthKey)}
                   </option>
                 ))}
               </select>
@@ -1338,57 +2071,102 @@ export default function SiswaQuiz() {
                   <p className="text-xs text-gray-500 mt-0.5">{filteredQuizzes.length} quiz ditampilkan</p>
                 </div>
               </div>
-              <span className="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-xs font-semibold">
-                {selectedMapel || 'Semua mapel'}
-              </span>
+              <div className="flex flex-wrap justify-end gap-1.5">
+                <span className="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-xs font-semibold">
+                  {selectedMapel || 'Semua mapel'}
+                </span>
+                <span className="px-3 py-1 bg-cyan-100 text-cyan-700 rounded-full text-xs font-semibold">
+                  {selectedMonthLabel}
+                </span>
+              </div>
             </div>
-            <div className="p-5 space-y-3 max-h-[calc(100vh-260px)] overflow-y-auto">
+            <div className="p-5 space-y-3 min-h-[30rem] max-h-[calc(100vh-130px)] overflow-y-auto">
+              <div className="flex flex-wrap gap-2">
+                <span className="text-[11px] px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
+                  Berlangsung: {quizStatusSummary.active}
+                </span>
+                <span className="text-[11px] px-2.5 py-1 rounded-full bg-amber-100 text-amber-700 border border-amber-200">
+                  Akan datang: {quizStatusSummary.scheduled}
+                </span>
+                <span className="text-[11px] px-2.5 py-1 rounded-full bg-blue-100 text-blue-700 border border-blue-200">
+                  Selesai: {quizStatusSummary.done}
+                </span>
+              </div>
               {filteredQuizzes.length === 0 && (
                 <div className="text-sm text-slate-500 bg-slate-50 border border-dashed border-slate-300 rounded-2xl p-4">
                   Belum ada quiz untuk kelas ini.
                 </div>
               )}
-              {filteredQuizzes.map((q) => {
+              {filteredQuizzes.map((q, index) => {
                 const status = getQuizStatus(q, q.submission, nowTick)
+                const mutationMeta = getQuizMutationMeta(q)
+                const canViewResult = Boolean(q.result_visible_to_students)
+                const countdownMeta = getQuizCountdownMeta(q, status, nowTick)
                 const durationText = q.submission?.started_at
                   ? formatDurationText(q.submission.started_at, q.submission.finished_at || nowTick)
                   : null
-                const endAt = q.is_live ? getLiveEndAt(q) : safeDate(q.deadline_at)
-                const remainingOnCard = status.kind === 'active' && endAt
-                  ? Math.floor((endAt.getTime() - nowTick.getTime()) / 1000)
-                  : null
+                const isNewestCard = index === 0
                 return (
                   <button
                     key={q.id}
                     type="button"
                     onClick={() => setSelectedQuizId(q.id)}
                     className={`w-full text-left border-2 rounded-2xl p-4 transition-all duration-300 ${
-                      selectedQuizId === q.id
-                        ? 'border-indigo-400 bg-gradient-to-r from-indigo-50 to-blue-50 shadow-sm shadow-indigo-100/60'
-                        : status.kind === 'expired'
-                          ? 'border-red-200 bg-gradient-to-r from-red-50/90 to-rose-50/40 hover:border-red-300 hover:shadow-sm'
+                      status.kind === 'expired'
+                        ? selectedQuizId === q.id
+                          ? 'border-red-400 bg-gradient-to-r from-red-100 to-rose-100 shadow-sm shadow-red-100/60'
+                          : 'border-red-300 bg-gradient-to-r from-red-100 to-rose-100 hover:border-red-400 hover:shadow-sm'
+                        : selectedQuizId === q.id
+                          ? 'border-indigo-400 bg-gradient-to-r from-indigo-50 to-blue-50 shadow-sm shadow-indigo-100/60'
                           : status.kind === 'active' || status.kind === 'done'
                             ? 'border-emerald-200 bg-gradient-to-r from-emerald-50/90 to-green-50/40 hover:border-emerald-300 hover:shadow-sm'
                             : 'border-amber-200 bg-gradient-to-r from-amber-50/90 to-yellow-50/40 hover:border-amber-300 hover:shadow-sm'
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <div className="font-semibold text-slate-900">{q.nama}</div>
-                      <span className={`text-[11px] px-2 py-0.5 rounded-full ${status.tone}`}>
+                      <div>
+                        <div className="font-semibold text-slate-900">{q.nama}</div>
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                          <span className="text-[11px] px-2 py-0.5 rounded-full bg-white/80 border border-slate-200 text-slate-700">
+                            {q.mapel}
+                          </span>
+                          <span className="text-[11px] px-2 py-0.5 rounded-full bg-white/80 border border-slate-200 text-slate-700">
+                            Mode {getModeLabel(q)}
+                          </span>
+                          {isNewestCard && (
+                            <span className="text-[11px] px-2 py-0.5 rounded-full bg-indigo-100 border border-indigo-200 text-indigo-700 font-semibold">
+                              Terbaru dibuat
+                            </span>
+                          )}
+                          <span className={`text-[11px] px-2 py-0.5 rounded-full border ${mutationMeta.tone}`}>
+                            {mutationMeta.label}
+                          </span>
+                        </div>
+                      </div>
+                      <span className={`text-[11px] px-2 py-0.5 rounded-full border ${status.tone}`}>
                         {status.label}
                       </span>
                     </div>
-                    <div className="text-xs text-slate-500 mt-1">
-                      {q.mapel} | Mode {getModeLabel(q)}
+                    <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div className="text-[11px] rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-sky-800">
+                        <span className="font-semibold">Mulai</span>
+                        <div className="mt-0.5">{q.starts_at ? formatDateTime(q.starts_at) : '-'}</div>
+                      </div>
+                      <div className="text-[11px] rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-rose-800">
+                        <span className="font-semibold">Deadline</span>
+                        <div className="mt-0.5">{q.deadline_at ? formatDateTime(q.deadline_at) : '-'}</div>
+                      </div>
                     </div>
-                    <div className="text-[11px] text-slate-500 mt-1">
-                      Mulai: {q.starts_at ? formatDateTime(q.starts_at) : '-'}
-                    </div>
-                    <div className="text-[11px] text-slate-500">
-                      Selesai: {q.deadline_at ? formatDateTime(q.deadline_at) : '-'}
-                    </div>
+                    {countdownMeta && (
+                      <div className={`mt-2 rounded-xl border px-3 py-2 ${countdownMeta.tone}`}>
+                        <div className="text-[11px] font-semibold uppercase tracking-wide">{countdownMeta.label}</div>
+                        <div className="text-base font-black leading-none mt-1">
+                          {formatRemaining(countdownMeta.seconds)}
+                        </div>
+                      </div>
+                    )}
                     <div className="mt-2 flex items-center gap-2 flex-wrap">
-                      {q.submission?.score != null && (
+                      {canViewResult && q.submission?.score != null && (
                         <span className="text-[11px] px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-200">
                           Nilai: {q.submission.score}
                         </span>
@@ -1398,9 +2176,23 @@ export default function SiswaQuiz() {
                           Durasi: {durationText}
                         </span>
                       )}
-                      {remainingOnCard != null && (
-                        <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
-                          Sisa: {formatRemaining(remainingOnCard)}
+                      <span className={`text-[11px] px-2 py-0.5 rounded-full border ${
+                        canViewResult
+                          ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
+                          : 'bg-slate-100 text-slate-600 border-slate-200'
+                      }`}>
+                        Hasil: {canViewResult ? 'Bisa dilihat' : 'Disembunyikan'}
+                      </span>
+                      {canViewResult && q.submission?.status === 'finished' && (
+                        <span
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setSelectedQuizId(q.id)
+                            setShowResultDetail(true)
+                          }}
+                          className="text-[11px] px-2.5 py-1 rounded-full bg-indigo-100 text-indigo-700 border border-indigo-200 hover:bg-indigo-200 font-semibold cursor-pointer"
+                        >
+                          Detail Hasil
                         </span>
                       )}
                     </div>
@@ -1421,17 +2213,23 @@ export default function SiswaQuiz() {
               <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden transition-all duration-300 hover:shadow-md">
                 <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 p-5 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-white">
                   <div className="flex items-center gap-3">
-                    <div className="w-2 h-8 bg-purple-600 rounded-full"></div>
+                    <div className="w-2 h-8 bg-teal-600 rounded-full"></div>
                     <div>
                       <h3 className="text-xl font-bold text-slate-900">{selectedQuiz.nama}</h3>
-                      <div className="text-sm text-slate-500 mt-1">
-                        {selectedQuiz.mapel} | Mode {getModeLabel(selectedQuiz)}
-                      </div>
-                      <div className="text-xs text-slate-500 mt-1">
-                        Mulai: {selectedQuiz.starts_at ? formatDateTime(selectedQuiz.starts_at) : '-'}
-                      </div>
-                      <div className="text-xs text-slate-500 mt-1">
-                        Selesai: {selectedQuiz.deadline_at ? formatDateTime(selectedQuiz.deadline_at) : 'Tidak ada'}
+                      <div className="text-sm text-slate-500 mt-1 flex flex-wrap items-center gap-1.5">
+                        <span>{selectedQuiz.mapel}</span>
+                        <span>•</span>
+                        <span>Mode {getModeLabel(selectedQuiz)}</span>
+                        <span className={`text-[11px] px-2 py-0.5 rounded-full border ${getQuizMutationMeta(selectedQuiz).tone}`}>
+                          {getQuizMutationMeta(selectedQuiz).label}
+                        </span>
+                        <span className={`text-[11px] px-2 py-0.5 rounded-full border ${
+                          selectedQuiz?.result_visible_to_students
+                            ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
+                            : 'bg-slate-100 text-slate-600 border-slate-200'
+                        }`}>
+                          Hasil: {selectedQuiz?.result_visible_to_students ? 'Bisa dilihat' : 'Disembunyikan'}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -1441,15 +2239,34 @@ export default function SiswaQuiz() {
                         {selectedStatus.label}
                       </span>
                     )}
-                    {selectedStatus?.kind === 'active' && selectedRemainingSeconds != null && (
-                      <span className="text-xs font-semibold text-emerald-700">
-                        Sisa waktu: {formatRemaining(selectedRemainingSeconds)}
-                      </span>
+                    {selectedCountdownMeta && (
+                      <div className={`rounded-xl border px-3 py-2 text-right ${selectedCountdownMeta.tone}`}>
+                        <div className="text-[11px] font-semibold uppercase tracking-wide">
+                          {selectedCountdownMeta.label}
+                        </div>
+                        <div className="text-lg font-black leading-none mt-0.5">
+                          {formatRemaining(selectedCountdownMeta.seconds)}
+                        </div>
+                      </div>
                     )}
                   </div>
                 </div>
 
                 <div className="p-5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                    <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3">
+                      <div className="text-xs text-sky-700 font-semibold">Tanggal Mulai</div>
+                      <div className="text-sm text-slate-800 mt-1 font-semibold">
+                        {selectedQuiz.starts_at ? formatDateTime(selectedQuiz.starts_at) : '-'}
+                      </div>
+                    </div>
+                    <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3">
+                      <div className="text-xs text-rose-700 font-semibold">Deadline</div>
+                      <div className="text-sm text-slate-800 mt-1 font-semibold">
+                        {selectedQuiz.deadline_at ? formatDateTime(selectedQuiz.deadline_at) : 'Tidak ada'}
+                      </div>
+                    </div>
+                  </div>
                   <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                     <div className="border border-blue-200 rounded-2xl p-3 bg-gradient-to-r from-blue-50 to-indigo-50">
                       <div className="text-xs text-slate-500">Jumlah Soal</div>
@@ -1462,7 +2279,7 @@ export default function SiswaQuiz() {
                     <div className="border border-emerald-200 rounded-2xl p-3 bg-gradient-to-r from-emerald-50 to-green-50">
                       <div className="text-xs text-slate-500">Nilai</div>
                       <div className="text-xl font-bold text-slate-900">
-                        {activeSubmission?.score ?? '-'}
+                        {canViewSelectedResult ? (activeSubmission?.score ?? '-') : '-'}
                       </div>
                     </div>
                     <div className="border border-amber-200 rounded-2xl p-3 bg-gradient-to-r from-amber-50 to-yellow-50">
@@ -1471,39 +2288,68 @@ export default function SiswaQuiz() {
                     </div>
                   </div>
 
-                  <div className="mt-4 flex flex-wrap gap-3">
-                    {selectedStatus?.canStart && (
-                      <button
-                        type="button"
-                        onClick={handleStartQuiz}
-                        disabled={isStartCountdownActive}
-                        className={`px-5 py-2.5 rounded-2xl text-white font-semibold transition-colors shadow-sm ${
-                          isStartCountdownActive
-                            ? 'bg-indigo-300 cursor-not-allowed'
-                            : 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700'
-                        }`}
-                      >
-                        {isStartCountdownActive
-                          ? `Mulai dalam ${Math.max(startCountdown.seconds, 0)}`
-                          : activeSubmission?.status === 'ongoing'
-                            ? 'Lanjutkan Quiz'
-                            : 'Mulai Quiz'}
-                      </button>
-                    )}
-                    {!selectedStatus?.canStart && (
-                      <button
-                        type="button"
-                        disabled
-                        className="px-5 py-2.5 rounded-2xl bg-slate-100 text-slate-400 font-semibold cursor-not-allowed"
-                      >
-                        Quiz belum tersedia
-                      </button>
-                    )}
-                    {activeSubmission?.score != null && (
-                      <div className="text-sm text-slate-600 flex items-center">
-                        Nilai sudah keluar.
+                  <div className="mt-4 grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_auto] gap-4">
+                    <div className="rounded-2xl border border-slate-200 bg-gradient-to-r from-white to-cyan-50/50 px-4 py-3">
+                      <div className="text-sm font-semibold text-slate-800">Ruang Persiapan Quiz</div>
+                      <div className="text-xs text-slate-600 mt-1">
+                        Pastikan koneksi stabil, baterai cukup, dan siapkan jawaban sebelum klik mulai.
                       </div>
-                    )}
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <span className="text-[11px] px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
+                          Fullscreen wajib aktif
+                        </span>
+                        <span className="text-[11px] px-2.5 py-1 rounded-full bg-sky-100 text-sky-700 border border-sky-200">
+                          Auto simpan jawaban esai
+                        </span>
+                        <span className="text-[11px] px-2.5 py-1 rounded-full bg-amber-100 text-amber-700 border border-amber-200">
+                          Hindari pindah tab/aplikasi
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row xl:flex-col gap-2 xl:min-w-[220px]">
+                      {selectedStatus?.canStart && (
+                        <button
+                          type="button"
+                          onClick={handleStartQuiz}
+                          disabled={isStartCountdownActive}
+                          className={`px-5 py-2.5 rounded-2xl text-white font-semibold transition-colors shadow-sm ${
+                            isStartCountdownActive
+                              ? 'bg-indigo-300 cursor-not-allowed'
+                              : 'bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-700 hover:to-emerald-700'
+                          }`}
+                        >
+                          {isStartCountdownActive
+                            ? `Mulai dalam ${Math.max(startCountdown.seconds, 0)}`
+                            : activeSubmission?.status === 'ongoing'
+                              ? 'Lanjutkan Quiz'
+                              : 'Mulai Quiz'}
+                        </button>
+                      )}
+                      {!selectedStatus?.canStart && (
+                        <button
+                          type="button"
+                          disabled
+                          className="px-5 py-2.5 rounded-2xl bg-slate-100 text-slate-400 font-semibold cursor-not-allowed"
+                        >
+                          Quiz belum tersedia
+                        </button>
+                      )}
+                      {activeSubmission?.score != null && (
+                        <div className="text-sm text-emerald-700 border border-emerald-200 bg-emerald-50 rounded-2xl px-3 py-2 text-center">
+                          {canViewSelectedResult ? 'Nilai sudah keluar.' : 'Nilai sudah keluar, tapi masih disembunyikan guru.'}
+                        </div>
+                      )}
+                      {canViewSelectedResult && (
+                        <button
+                          type="button"
+                          onClick={() => setShowResultDetail(true)}
+                          className="px-5 py-2.5 rounded-2xl border border-indigo-200 bg-indigo-50 text-indigo-700 font-semibold hover:bg-indigo-100"
+                        >
+                          Detail Hasil
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1511,7 +2357,159 @@ export default function SiswaQuiz() {
           </div>
         </div>
 
-        {celebrationPanel}
+        {showResultDetail && (
+          <div className="fixed inset-0 z-[1100] bg-black/55 backdrop-blur-[1px] flex items-center justify-center p-4">
+            <div className="w-full max-w-5xl max-h-[92vh] overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl flex flex-col">
+              <div className="p-5 border-b border-slate-200 bg-gradient-to-r from-indigo-50 to-white flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-lg font-bold text-slate-900">Detail Hasil Quiz</div>
+                  <div className="text-xs text-slate-500 mt-1">
+                    {selectedQuiz?.nama || '-'} • {selectedQuiz?.mapel || '-'}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowResultDetail(false)}
+                  className="px-4 py-2 rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-50"
+                >
+                  Tutup
+                </button>
+              </div>
+
+              <div className="p-5 overflow-y-auto space-y-4">
+                {!canViewSelectedResult && (
+                  <div className="text-sm text-slate-600 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    Hasil quiz masih disembunyikan oleh guru.
+                  </div>
+                )}
+
+                {canViewSelectedResult && quizDetailsLoadedForId !== selectedQuiz?.id && (
+                  <div className="text-sm text-slate-600 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    Memuat detail hasil...
+                  </div>
+                )}
+
+                {canViewSelectedResult && quizDetailsLoadedForId === selectedQuiz?.id && !questions.length && (
+                  <div className="text-sm text-slate-600 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    Detail soal belum tersedia.
+                  </div>
+                )}
+
+                {canViewSelectedResult && quizDetailsLoadedForId === selectedQuiz?.id && (questions || []).map((question, idx) => {
+                  const questionType = normalizeQuestionType(question?.question_type)
+                  const optionRows = (optionsByQuestion[question.id] || [])
+                    .slice()
+                    .sort((a, b) => String(a?.label || '').localeCompare(String(b?.label || ''), 'id'))
+                  const selectedOptionId = answers[question.id] || null
+                  const selectedOption = optionRows.find((row) => row?.id === selectedOptionId) || null
+                  const correctOption = optionRows.find((row) => Boolean(row?.is_correct)) || null
+                  const answerRow = answerRowsByQuestion[question.id] || null
+                  const essayAnswer = String(answers[question.id] || '').trim()
+                  const essayScore = answerRow?.essay_score
+
+                  return (
+                    <div key={question.id} className="rounded-2xl border border-slate-200 bg-white p-4">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="font-semibold text-slate-900">
+                          Soal {question.nomor || idx + 1}
+                          <span className={`ml-2 text-[11px] px-2 py-0.5 rounded-full border align-middle ${
+                            questionType === 'essay'
+                              ? 'bg-amber-50 text-amber-700 border-amber-200'
+                              : 'bg-blue-50 text-blue-700 border-blue-200'
+                          }`}>
+                            {questionType === 'essay' ? 'Esai' : 'PG'}
+                          </span>
+                        </div>
+                        <div className="text-xs text-slate-500">{question.poin} poin</div>
+                      </div>
+                      <div className="text-sm text-slate-700 mt-2">{question.soal}</div>
+
+                      {!!question.image_path && (
+                        <div className="mt-3">
+                          <div className="inline-flex max-w-full flex-col rounded-xl border border-slate-200 bg-slate-50 p-2">
+                            <img
+                              src={getQuizImageUrl(question.image_path)}
+                              alt={`Gambar soal ${question.nomor || idx + 1}`}
+                              className="block max-h-56 w-auto max-w-full object-contain rounded-lg cursor-zoom-in"
+                              onClick={() => setPreviewMediaUrl(getQuizImageUrl(question.image_path))}
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {questionType === 'essay' ? (
+                        <div className="mt-3 space-y-2">
+                          <div className="text-xs font-semibold text-slate-600">Jawaban Anda</div>
+                          <div className="text-sm text-slate-700 whitespace-pre-wrap border border-slate-200 rounded-xl p-3 bg-slate-50 min-h-16">
+                            {essayAnswer || 'Belum ada jawaban esai.'}
+                          </div>
+                          <div className="text-xs">
+                            Nilai esai:{' '}
+                            <span className={`font-semibold ${
+                              essayScore == null ? 'text-slate-500' : 'text-emerald-700'
+                            }`}>
+                              {essayScore == null ? 'Belum dinilai guru' : `${essayScore}`}
+                            </span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mt-3 space-y-2">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            {optionRows.map((opt) => {
+                              const isSelected = selectedOptionId === opt.id
+                              const isCorrect = Boolean(opt.is_correct)
+                              return (
+                                <div key={opt.id} className="space-y-2">
+                                  <div
+                                    className={`text-sm px-3 py-2 rounded-xl border min-h-[46px] ${
+                                      isCorrect
+                                        ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                                        : isSelected
+                                          ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
+                                          : 'border-slate-200 bg-slate-50'
+                                    }`}
+                                  >
+                                    <span className="font-semibold mr-2">{opt.label}.</span>
+                                    {opt.text}
+                                  </div>
+                                  {!!opt.image_path && (
+                                    <div className="inline-flex max-w-full flex-col rounded-xl border border-slate-200 bg-slate-50 p-2">
+                                      <img
+                                        src={getQuizImageUrl(opt.image_path)}
+                                        alt={`Gambar opsi ${opt.label}`}
+                                        className="block max-h-52 w-auto max-w-full object-contain rounded-lg cursor-zoom-in"
+                                        onClick={() => setPreviewMediaUrl(getQuizImageUrl(opt.image_path))}
+                                      />
+                                    </div>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+
+                          <div className="text-xs text-slate-600">
+                            Jawaban Anda: {selectedOption ? `${selectedOption.label}. ${selectedOption.text}` : '-'}
+                            {' • '}
+                            Kunci: {correctOption ? `${correctOption.label}. ${correctOption.text}` : '-'}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {previewMediaUrl && (
+          <FilePreviewModal
+            fileUrl={previewMediaUrl}
+            onClose={() => setPreviewMediaUrl('')}
+          />
+        )}
+
+        {celebrationOverlay}
 
         {startCountdown.open && (
           <div className="fixed inset-0 z-[1200] bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-6">

@@ -22,10 +22,10 @@ class AuthController extends Controller
         ]);
 
         $settings = Setting::query()->orderBy('id')->first();
-        if ($data['role'] === 'siswa' && $settings && !$settings->registrasi_siswa_aktif) {
+        if ($data['role'] === 'siswa' && $settings && ! $settings->registrasi_siswa_aktif) {
             return response()->json(['message' => 'Registrasi siswa sedang ditutup.'], 403);
         }
-        if ($data['role'] === 'guru' && $settings && !$settings->registrasi_guru_aktif) {
+        if ($data['role'] === 'guru' && $settings && ! $settings->registrasi_guru_aktif) {
             return response()->json(['message' => 'Registrasi guru sedang ditutup.'], 403);
         }
 
@@ -63,7 +63,7 @@ class AuthController extends Controller
         ]);
 
         $user = User::query()->where('email', strtolower($data['email']))->first();
-        if (!$user || !Hash::check($data['password'], $user->password)) {
+        if (! $user || ! Hash::check($data['password'], $user->password)) {
             return response()->json(['message' => 'Email atau password salah.'], 401);
         }
 
@@ -84,12 +84,14 @@ class AuthController extends Controller
     public function logout(Request $request)
     {
         $request->user()?->currentAccessToken()?->delete();
+
         return response()->json(['message' => 'Logout berhasil.']);
     }
 
     public function me(Request $request)
     {
         $user = $request->user();
+
         return response()->json([
             'user' => $user,
             'profile' => $user?->profile,

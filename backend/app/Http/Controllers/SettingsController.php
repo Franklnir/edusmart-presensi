@@ -15,13 +15,14 @@ class SettingsController extends Controller
             $query->where('tenant_id', $tenantId);
         }
         $settings = $query->first();
+
         return response()->json($settings);
     }
 
     public function update(Request $request)
     {
         $user = $request->user();
-        if (!$user || $user->profile?->role !== 'admin') {
+        if (! $user || $user->profile?->role !== 'admin') {
             return response()->json(['message' => 'Forbidden'], 403);
         }
 
@@ -31,8 +32,8 @@ class SettingsController extends Controller
             $query->where('tenant_id', $tenantId);
         }
         $settings = $query->first();
-        if (!$settings) {
-            $settings = new Setting();
+        if (! $settings) {
+            $settings = new Setting;
             if ($tenantId) {
                 $settings->tenant_id = $tenantId;
             }

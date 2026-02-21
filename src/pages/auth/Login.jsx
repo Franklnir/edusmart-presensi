@@ -1,10 +1,11 @@
 // src/pages/auth/Login.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuthStore } from '../../store/useAuthStore';
 import { supabase, PROFILE_BUCKET, getSignedUrlForValue } from '../../lib/supabase';
 import { getRoleHome, isValidRole } from '../../utils/role';
 import { shouldForceAccountSetup } from '../../utils/accountSetup';
+import { sanitizeExternalUrl, sanitizeMediaUrl } from '../../utils/sanitize';
 import '../../styles/Login.css';
 
 const Login = () => {
@@ -18,6 +19,35 @@ const Login = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+
+  // Rate limiting state
+  const [failCount, setFailCount] = useState(0);
+  const [cooldownEnd, setCooldownEnd] = useState(0);
+  const [cooldownLeft, setCooldownLeft] = useState(0);
+  const cooldownTimerRef = useRef(null);
+
+  // Cooldown timer effect
+  useEffect(() => {
+    if (cooldownEnd <= 0) return;
+    const tick = () => {
+      const left = Math.max(0, Math.ceil((cooldownEnd - Date.now()) / 1000));
+      setCooldownLeft(left);
+      if (left <= 0) {
+        clearInterval(cooldownTimerRef.current);
+        setCooldownEnd(0);
+      }
+    };
+    tick();
+    cooldownTimerRef.current = setInterval(tick, 500);
+    return () => clearInterval(cooldownTimerRef.current);
+  }, [cooldownEnd]);
+
+  const startCooldown = useCallback((fails) => {
+    // Exponential backoff: 2s, 4s, 8s, 16s, 30s max
+    const seconds = Math.min(30, Math.pow(2, fails));
+    setCooldownEnd(Date.now() + seconds * 1000);
+    setCooldownLeft(seconds);
+  }, []);
 
   const [settings, setSettings] = useState(null);
   const [settingsId, setSettingsId] = useState(null);
@@ -117,8 +147,9 @@ const Login = () => {
       return () => { active = false; };
     }
 
-    if (/^https?:\/\//i.test(raw)) {
-      setLogoPreview(raw);
+    const safeRawLogoUrl = sanitizeMediaUrl(raw);
+    if (/^https?:\/\//i.test(safeRawLogoUrl)) {
+      setLogoPreview(safeRawLogoUrl);
       return () => { active = false; };
     }
 
@@ -164,6 +195,12 @@ const Login = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
+    // Rate limit check
+    if (cooldownEnd > Date.now()) {
+      setError(`Terlalu banyak percobaan. Tunggu ${cooldownLeft} detik`);
+      return;
+    }
+
     // Validasi input
     if (!form.email.trim() || !form.password.trim()) {
       setError('Email/NIS dan password harus diisi');
@@ -178,19 +215,31 @@ const Login = () => {
 
       if (result?.error) {
         const errorMsg = result.error.toLowerCase();
+        const newFails = failCount + 1;
+        setFailCount(newFails);
+
+        // Start cooldown setelah 2+ kali gagal
+        if (newFails >= 2) {
+          startCooldown(newFails - 1);
+        }
 
         if (
           errorMsg.includes('invalid login credentials') ||
           errorMsg.includes('invalid email or password')
         ) {
-          setError('Email/NIS atau password salah');
+          setError(`Email/NIS atau password salah${newFails >= 2 ? `. Tunggu ${Math.min(30, Math.pow(2, newFails - 1))} detik sebelum coba lagi` : ''}`);
         } else if (errorMsg.includes('email not confirmed')) {
           setError('Email belum dikonfirmasi. Silakan cek email Anda');
         } else if (errorMsg.includes('too many requests')) {
           setError('Terlalu banyak percobaan login. Silakan coba lagi nanti');
+          startCooldown(5); // Force 30s cooldown
         } else {
           setError(result.error);
         }
+      } else {
+        // Login berhasil, reset fail count
+        setFailCount(0);
+        setCooldownEnd(0);
       }
     } catch (_err) {
       setError('Terjadi kesalahan saat login. Silakan coba lagi');
@@ -199,8 +248,10 @@ const Login = () => {
     }
   };
 
+  const isOnCooldown = cooldownEnd > Date.now();
+
   const handleKeyPress = (e) => {
-    if (e.key === 'Enter' && !isSubmitting) {
+    if (e.key === 'Enter' && !isSubmitting && !isOnCooldown) {
       handleSubmit(e);
     }
   };
@@ -248,7 +299,9 @@ const Login = () => {
       icon: 'ri-youtube-fill',
       label: 'YouTube'
     }
-  ].filter((social) => social.href && social.href.trim() !== '');
+  ]
+    .map((social) => ({ ...social, href: sanitizeExternalUrl(social.href) }))
+    .filter((social) => social.href && social.href.trim() !== '');
 
   return (
     <div className="login">
@@ -409,9 +462,8 @@ const Login = () => {
                   />
                   <button
                     type="button"
-                    className={`login__toggle ${
-                      showPassword ? 'active' : ''
-                    }`}
+                    className={`login__toggle ${showPassword ? 'active' : ''
+                      }`}
                     onClick={() => setShowPassword(!showPassword)}
                     tabIndex={0}
                     aria-label={
@@ -421,9 +473,8 @@ const Login = () => {
                     }
                   >
                     <i
-                      className={`ri-eye-${
-                        showPassword ? 'off' : ''
-                      }-fill`}
+                      className={`ri-eye-${showPassword ? 'off' : ''
+                        }-fill`}
                     ></i>
                   </button>
                 </div>

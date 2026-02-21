@@ -1,10 +1,10 @@
 import React, { useEffect, useState, useMemo } from 'react'
-import * as XLSX from 'xlsx'
 import { supabase } from '../../lib/supabase'
 import { formatDate } from '../../lib/time'
 import { useUIStore } from '../../store/useUIStore'
 import ProfileAvatar from '../../components/ProfileAvatar'
 import PasswordInput from '../../components/PasswordInput'
+import { exportRowsToExcel } from '../../utils/spreadsheet'
 import {
   buildAliasMap,
   mapRowByAliases,
@@ -44,7 +44,7 @@ function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Passwor
         <p className="text-gray-600 text-sm mb-4">
           Untuk melanjutkan, masukkan password Anda:
         </p>
-        
+
         <form onSubmit={handleSubmit}>
           <PasswordInput
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 mb-4"
@@ -54,7 +54,7 @@ function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Passwor
             required
             autoFocus
           />
-          
+
           <div className="flex justify-end space-x-3">
             <button
               type="button"
@@ -134,7 +134,7 @@ const formatKelasDisplay = (kelasSlug) => {
     const suffix = parts[1].toUpperCase();
     return `${grade} ${suffix}`;
   }
-  return parts.map(word => 
+  return parts.map(word =>
     word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
   ).join(' ');
 };
@@ -372,7 +372,7 @@ export default function AGuru() {
   // Modal nonaktif
   const [disableUID, setDisableUID] = useState(null)
   const [alasanNonaktif, setAlasanNonaktif] = useState('')
-  
+
   const [detailModalOpen, setDetailModalOpen] = useState(false)
   const [selectedGuru, setSelectedGuru] = useState(null)
 
@@ -413,7 +413,7 @@ export default function AGuru() {
 
   const handlePasswordConfirm = async (password) => {
     setPasswordModal(prev => ({ ...prev, loading: true }))
-    
+
     try {
       await verifyPassword(password)
       await passwordModal.action()
@@ -480,7 +480,7 @@ export default function AGuru() {
       .select('*')
 
     if (error) throw error
-    
+
     const jadwalByKelas = {}
     data?.forEach(j => {
       if (!jadwalByKelas[j.kelas_id]) jadwalByKelas[j.kelas_id] = {}
@@ -495,7 +495,7 @@ export default function AGuru() {
       .select('*')
 
     if (error) throw error
-    
+
     const strukturByKelas = {}
     data?.forEach(s => {
       strukturByKelas[s.kelas_id] = s
@@ -509,7 +509,7 @@ export default function AGuru() {
       .select('*')
 
     if (error) throw error
-    
+
     const strukturById = {}
     data?.forEach(s => {
       strukturById[s.id] = s
@@ -552,9 +552,9 @@ export default function AGuru() {
           if (posisi.jabatan) jabatanSet.add(posisi.jabatan)
         }
       })
-      
+
       const jabatanList = Array.from(jabatanSet).sort()
-      
+
       return {
         ...g,
         uid: g.id,
@@ -572,13 +572,13 @@ export default function AGuru() {
   // Jabatan list untuk filter
   const jabatanList = useMemo(() => {
     const jabatanSet = new Set()
-    
+
     Object.values(strukturSekolah || {}).forEach(posisi => {
       if (posisi?.jabatan) {
         jabatanSet.add(posisi.jabatan)
       }
     })
-    
+
     Object.keys(strukturKelasAll || {}).forEach(kelasId => {
       jabatanSet.add(`Wali Kelas ${formatKelasDisplay(kelasId)}`)
     })
@@ -588,10 +588,10 @@ export default function AGuru() {
         jabatanSet.add(String(g.jabatan).trim())
       }
     })
-    
+
     return Array.from(jabatanSet).sort()
   }, [strukturSekolah, strukturKelasAll, guruRaw])
-  
+
   // Mapel list untuk filter
   const allMapelList = useMemo(() => {
     const mapelSet = new Set()
@@ -893,24 +893,30 @@ export default function AGuru() {
     await loadGuruRaw()
   }
 
-  const exportGuruToExcel = () => {
-    const rows = guru.map((item, idx) => ({
-      No: idx + 1,
-      NIS: item.nis || '',
-      Nama: item.nama || '',
-      Email: item.email || '',
-      Telp: item.telp || '',
-      Jabatan: item.jabatan || item.jabatanUtama || '',
-      Mapel: (item.mapelList || []).join(', '),
-      Kelas: (item.kelasList || []).join(', '),
-      Status: item.status || 'active'
-    }))
+  const exportGuruToExcel = async () => {
+    try {
+      const rows = guru.map((item, idx) => ({
+        No: idx + 1,
+        NIS: item.nis || '',
+        Nama: item.nama || '',
+        Email: item.email || '',
+        Telp: item.telp || '',
+        Jabatan: item.jabatan || item.jabatanUtama || '',
+        Mapel: (item.mapelList || []).join(', '),
+        Kelas: (item.kelasList || []).join(', '),
+        Status: item.status || 'active'
+      }))
 
-    const worksheet = XLSX.utils.json_to_sheet(rows)
-    const workbook = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Guru')
-    const stamp = new Date().toISOString().slice(0, 10)
-    XLSX.writeFile(workbook, `guru_${stamp}.xlsx`)
+      const stamp = new Date().toISOString().slice(0, 10)
+      await exportRowsToExcel({
+        rows,
+        sheetName: 'Guru',
+        fileName: `guru_${stamp}.xlsx`
+      })
+    } catch (error) {
+      console.error('Error exporting guru:', error)
+      pushToast('error', 'Gagal mengekspor data guru')
+    }
   }
 
   // Statistik untuk dashboard
@@ -1016,12 +1022,12 @@ export default function AGuru() {
       if (error) throw error
 
       pushToast('success', 'Guru berhasil didaftarkan')
-      setForm({ 
-        email: '', 
-        nama: '', 
-        telp: '', 
-        password: '', 
-        confirmPassword: '' 
+      setForm({
+        email: '',
+        nama: '',
+        telp: '',
+        password: '',
+        confirmPassword: ''
       })
       setShowAddForm(false)
       loadGuruRaw()
@@ -1208,22 +1214,20 @@ export default function AGuru() {
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
-                    className={`px-4 py-2 rounded-lg text-sm font-medium border ${
-                      importSource === 'file'
-                        ? 'bg-blue-600 text-white border-blue-600'
-                        : 'bg-white text-gray-700 border-gray-200'
-                    }`}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium border ${importSource === 'file'
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white text-gray-700 border-gray-200'
+                      }`}
                     onClick={() => setImportSource('file')}
                   >
                     📁 Upload File
                   </button>
                   <button
                     type="button"
-                    className={`px-4 py-2 rounded-lg text-sm font-medium border ${
-                      importSource === 'sheet'
-                        ? 'bg-blue-600 text-white border-blue-600'
-                        : 'bg-white text-gray-700 border-gray-200'
-                    }`}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium border ${importSource === 'sheet'
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white text-gray-700 border-gray-200'
+                      }`}
                     onClick={() => setImportSource('sheet')}
                   >
                     📊 Google Sheets
@@ -1341,32 +1345,32 @@ export default function AGuru() {
         )}
 
         {/* Header */}
-        <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between">
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-6">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
             <div className="flex items-center gap-4">
-              <div className="p-3 bg-blue-100 rounded-lg">
-                <span className="text-2xl text-blue-600">👨‍🏫</span>
+              <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl flex items-center justify-center shadow-md">
+                <span className="text-2xl">👨‍🏫</span>
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-gray-900 mb-1">Manajemen Guru</h1>
-                <p className="text-gray-600">Kelola data guru, mata pelajaran, dan penugasan</p>
+                <h1 className="text-2xl font-bold text-slate-900">Manajemen Guru</h1>
+                <p className="text-slate-500 text-sm mt-0.5">Kelola data guru, mata pelajaran, dan penugasan</p>
               </div>
             </div>
-            <div className="mt-4 lg:mt-0 flex flex-col sm:flex-row gap-2">
+            <div className="flex flex-wrap gap-2">
               <button
-                className="bg-emerald-50 text-emerald-700 px-4 py-2 rounded-lg border border-emerald-200 hover:bg-emerald-100 focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 transition-all duration-200 font-medium"
+                className="px-4 py-2.5 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-all font-semibold text-sm"
                 onClick={exportGuruToExcel}
               >
                 ⬇️ Export
               </button>
               <button
-                className="bg-amber-50 text-amber-700 px-4 py-2 rounded-lg border border-amber-200 hover:bg-amber-100 focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 transition-all duration-200 font-medium"
+                className="px-4 py-2.5 rounded-xl border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-all font-semibold text-sm"
                 onClick={() => setImportModalOpen(true)}
               >
                 ⬆️ Import
               </button>
               <button
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 font-medium"
+                className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold text-sm shadow-md transition-all"
                 onClick={() => setShowAddForm(!showAddForm)}
               >
                 {showAddForm ? '✕ Tutup Form' : '➕ Tambah Guru'}
@@ -1377,31 +1381,31 @@ export default function AGuru() {
 
         {/* Dashboard Statistics */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <GuruStatCard 
-            label="Total Guru" 
-            value={stats.totalGuru} 
-            icon="👨‍🏫" 
+          <GuruStatCard
+            label="Total Guru"
+            value={stats.totalGuru}
+            icon="👨‍🏫"
             color="blue"
             description="Semua guru terdaftar"
           />
-          <GuruStatCard 
-            label="Guru Aktif" 
-            value={stats.aktifGuru} 
-            icon="✅" 
+          <GuruStatCard
+            label="Guru Aktif"
+            value={stats.aktifGuru}
+            icon="✅"
             color="green"
             description="Sedang aktif mengajar"
           />
-          <GuruStatCard 
-            label="Guru Nonaktif" 
-            value={stats.nonaktifGuru} 
-            icon="⏸️" 
+          <GuruStatCard
+            label="Guru Nonaktif"
+            value={stats.nonaktifGuru}
+            icon="⏸️"
             color="orange"
             description="Tidak aktif sementara"
           />
-          <GuruStatCard 
-            label="Jabatan" 
-            value={stats.totalJabatan} 
-            icon="💼" 
+          <GuruStatCard
+            label="Jabatan"
+            value={stats.totalJabatan}
+            icon="💼"
             color="teal"
             description="Posisi/jabatan"
           />
@@ -1409,286 +1413,150 @@ export default function AGuru() {
 
         {/* Form Tambah Guru */}
         {showAddForm && (
-          <Card className="mb-6">
-            <div className="bg-blue-50 border-b border-blue-200 p-4">
-              <h3 className="text-lg font-semibold text-blue-900 flex items-center gap-2">
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 overflow-hidden">
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-blue-100 px-6 py-4">
+              <h3 className="text-lg font-bold text-blue-900 flex items-center gap-2">
                 <span>➕</span>
                 Tambah Guru Baru
               </h3>
             </div>
-            <div className="p-4">
+            <div className="p-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Input
-                  label="Email *"
-                  name="email"
-                  value={form.email}
-                  onChange={handleChange}
-                  placeholder="Email guru"
-                  type="email"
-                  required
-                />
-                <Input
-                  label="Nama Lengkap *"
-                  name="nama"
-                  value={form.nama}
-                  onChange={handleChange}
-                  placeholder="Nama lengkap"
-                  required
-                />
-                <Input
-                  label="Telepon"
-                  name="telp"
-                  value={form.telp}
-                  onChange={handleChange}
-                  placeholder="Nomor telepon"
-                />
-                <Input
-                  label="Password *"
-                  name="password"
-                  value={form.password}
-                  onChange={handleChange}
-                  placeholder="Password minimal 6 karakter"
-                  type="password"
-                  required
-                />
+                <Input label="Email *" name="email" value={form.email} onChange={handleChange} placeholder="Email guru" type="email" required />
+                <Input label="Nama Lengkap *" name="nama" value={form.nama} onChange={handleChange} placeholder="Nama lengkap" required />
+                <Input label="Telepon" name="telp" value={form.telp} onChange={handleChange} placeholder="Nomor telepon" />
+                <Input label="Password *" name="password" value={form.password} onChange={handleChange} placeholder="Password minimal 6 karakter" type="password" required />
                 <div className="md:col-span-2">
-                  <Input
-                    label="Konfirmasi Password *"
-                    name="confirmPassword"
-                    value={form.confirmPassword}
-                    onChange={handleChange}
-                    placeholder="Ulangi password"
-                    type="password"
-                    required
-                  />
+                  <Input label="Konfirmasi Password *" name="confirmPassword" value={form.confirmPassword} onChange={handleChange} placeholder="Ulangi password" type="password" required />
                 </div>
               </div>
-
-              <div className="flex justify-end space-x-3 mt-4 pt-4 border-t border-gray-200">
-                <Button
-                  variant="secondary"
-                  onClick={() => setShowAddForm(false)}
-                >
-                  ✕ Batal
-                </Button>
-                <Button
-                  onClick={handleAdd}
-                  disabled={
-                    !form.email ||
-                    !form.nama ||
-                    !form.password ||
-                    form.password !== form.confirmPassword
-                  }
-                >
-                  👨‍🏫 Daftarkan
-                </Button>
+              <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-slate-100">
+                <button onClick={() => setShowAddForm(false)} className="px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-700 font-semibold text-sm hover:bg-slate-50 transition-all">✕ Batal</button>
+                <button onClick={handleAdd} disabled={!form.email || !form.nama || !form.password || form.password !== form.confirmPassword} className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold text-sm shadow-md disabled:opacity-50 transition-all">👨‍🏫 Daftarkan</button>
               </div>
             </div>
-          </Card>
+          </div>
         )}
 
         {/* Filter Section */}
-        <Card>
-          <div className="bg-gray-50 border-b border-gray-200 p-4">
-            <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 overflow-hidden">
+          <div className="bg-slate-50 border-b border-slate-100 px-6 py-4">
+            <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
               <span>🔍</span>
               Filter Pencarian
             </h3>
           </div>
-          <div className="p-4">
+          <div className="p-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Input
-                label="Nama / Email"
-                placeholder="Cari nama atau email guru"
-                value={qNama}
-                onChange={e => setQNama(e.target.value)}
-              />
-              <Select
-                label="Mata Pelajaran"
-                value={qMapel}
-                onChange={e => setQMapel(e.target.value)}
-                options={[
-                  { value: '', label: 'Semua Mata Pelajaran' },
-                  ...allMapelList.map(mapel => ({ value: mapel, label: mapel }))
-                ]}
-              />
-              <Select
-                label="Jabatan"
-                value={qJabatan}
-                onChange={e => setQJabatan(e.target.value)}
-                options={[
-                  { value: '', label: 'Semua Jabatan' },
-                  ...jabatanList.map(jab => ({ value: jab, label: jab }))
-                ]}
-              />
+              <Input label="Nama / Email" placeholder="Cari nama atau email guru" value={qNama} onChange={e => setQNama(e.target.value)} />
+              <Select label="Mata Pelajaran" value={qMapel} onChange={e => setQMapel(e.target.value)} options={[{ value: '', label: 'Semua Mata Pelajaran' }, ...allMapelList.map(mapel => ({ value: mapel, label: mapel }))]} />
+              <Select label="Jabatan" value={qJabatan} onChange={e => setQJabatan(e.target.value)} options={[{ value: '', label: 'Semua Jabatan' }, ...jabatanList.map(jab => ({ value: jab, label: jab }))]} />
             </div>
-            <div className="flex justify-end space-x-3 mt-4">
-              <Button
-                onClick={applyFilter}
-                loading={isSearching}
-              >
-                Cari
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={resetFilter}
-              >
-                🔄 Reset
-              </Button>
+            <div className="flex justify-end gap-3 mt-4">
+              <button onClick={resetFilter} className="px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-700 font-semibold text-sm hover:bg-slate-50 transition-all">🔄 Reset</button>
+              <button onClick={applyFilter} disabled={isSearching} className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold text-sm shadow-md transition-all disabled:opacity-70">{isSearching ? 'Mencari...' : '🔎 Cari'}</button>
             </div>
           </div>
-        </Card>
+        </div>
 
         {/* Tabel Guru */}
-        <Card>
-          <div className="bg-gray-50 border-b border-gray-200 p-4">
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 overflow-hidden">
+          <div className="bg-slate-50 border-b border-slate-100 px-6 py-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+              <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
                 <span>📊</span>
                 Daftar Guru
               </h3>
-              <span className="text-sm text-gray-600">
+              <span className="text-sm text-slate-500 bg-white border border-slate-200 px-3 py-1 rounded-full">
                 {guru.length} dari {guruProcessed.length} guru
               </span>
             </div>
           </div>
 
           {loadingInit ? (
-            <div className="p-4">
+            <div className="p-6">
               <LoadingSkeleton />
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full">
-                <thead className="bg-gray-50">
+                <thead className="bg-slate-50 border-b border-slate-100">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b w-12">
-                      No
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
-                      Guru
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
-                      Mapel
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
-                      Kelas
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
-                      Jabatan
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
-                      Status
-                    </th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
-                      Aksi
-                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider w-12">No</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Guru</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Mapel</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Kelas</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Jabatan</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Aksi</th>
                   </tr>
                 </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
+                <tbody className="divide-y divide-slate-100">
                   {guru.map((g, index) => {
                     const foto = g.photo_path || g.photo_url || g.foto_url || g.foto || ''
                     const mapelPreview = listPreview(g.mapelList)
                     const kelasPreview = listPreview(g.kelasList)
-                    
+
                     return (
-                      <tr key={g.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 text-center">
+                      <tr key={g.id} className="hover:bg-slate-50/60 transition-colors">
+                        <td className="px-4 py-4 whitespace-nowrap text-sm text-slate-400 text-center">
                           {index + 1}
                         </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
+                        <td className="px-4 py-4 whitespace-nowrap">
                           <div className="flex items-center">
-                            <div className="flex-shrink-0 h-10 w-10">
+                            <div className="flex-shrink-0">
                               <ProfileAvatar
                                 src={foto}
                                 name={g.nama}
                                 size={40}
-                                className="border-gray-200"
+                                className="border-slate-200"
                                 fallbackClassName="rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center text-sm font-medium text-blue-600"
                               />
                             </div>
                             <div className="ml-3">
-                              <div className="text-sm font-medium text-gray-900">
-                                {g.nama || '—'}
-                              </div>
-                              <div className="text-sm text-gray-500">
-                                {g.email || '—'}
-                              </div>
-                              {g.telp && <div className="text-xs text-gray-500 flex items-center gap-1 mt-1">
-                                <span>📞</span>
-                                <span>{g.telp}</span>
-                              </div>}
+                              <div className="text-sm font-semibold text-slate-900">{g.nama || '—'}</div>
+                              <div className="text-xs text-slate-500">{g.email || '—'}</div>
+                              {g.telp && <div className="text-xs text-slate-400 flex items-center gap-1 mt-0.5"><span>📞</span><span>{g.telp}</span></div>}
                             </div>
                           </div>
                         </td>
-                        <td className="px-4 py-3">
-                          <div className="text-sm text-gray-900" title={mapelPreview.title}>
-                            {mapelPreview.text}
-                          </div>
+                        <td className="px-4 py-4">
+                          <div className="text-sm text-slate-700" title={mapelPreview.title}>{mapelPreview.text}</div>
                         </td>
-                        <td className="px-4 py-3">
-                          <div className="text-sm text-gray-900" title={kelasPreview.title}>
-                            {kelasPreview.text}
-                          </div>
+                        <td className="px-4 py-4">
+                          <div className="text-sm text-slate-700" title={kelasPreview.title}>{kelasPreview.text}</div>
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-4 py-4">
                           <JabatanBadge jabatanList={g.jabatanList} />
                         </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
+                        <td className="px-4 py-4 whitespace-nowrap">
                           {g.status === 'nonaktif' ? (
-                            <Badge variant="danger" className="text-xs">
-                              ⏸️ Nonaktif
-                            </Badge>
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700 border border-red-200">⏸️ Nonaktif</span>
                           ) : (
-                            <Badge variant="success" className="text-xs">
-                              ✅ Aktif
-                            </Badge>
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700 border border-green-200">✅ Aktif</span>
                           )}
                         </td>
-                        <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-medium space-x-1">
-                          <Button
-                            variant="primary"
-                            size="sm"
-                            onClick={() => openDetailModal(g)}
-                          >
-                            Detail
-                          </Button>
-                          <Button
-                            variant="danger"
-                            size="sm"
-                            onClick={() => openDeleteConfirm(g)}
-                            disabled={deletingGuru}
-                          >
-                            Hapus
-                          </Button>
-                          {g.status === 'nonaktif' ? (
-                            <Button
-                              variant="success"
-                              size="sm"
-                              onClick={() => aktif(g)}
-                            >
-                              Aktifkan
-                            </Button>
-                          ) : (
-                            <Button
-                              variant="warning"
-                              size="sm"
-                              onClick={() => openNonaktif(g)}
-                            >
-                              Nonaktif
-                            </Button>
-                          )}
+                        <td className="px-4 py-4 whitespace-nowrap text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <button onClick={() => openDetailModal(g)} className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-all">Detail</button>
+                            <button onClick={() => openDeleteConfirm(g)} disabled={deletingGuru} className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-semibold transition-all disabled:opacity-50">Hapus</button>
+                            {g.status === 'nonaktif' ? (
+                              <button onClick={() => aktif(g)} className="px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-semibold transition-all">Aktifkan</button>
+                            ) : (
+                              <button onClick={() => openNonaktif(g)} className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold transition-all">Nonaktif</button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     )
                   })}
                   {!guru.length && (
                     <tr>
-                      <td colSpan="7" className="px-4 py-8 text-center">
+                      <td colSpan="7" className="px-4 py-14 text-center">
                         <div className="flex flex-col items-center justify-center">
-                          <div className="text-gray-300 text-4xl mb-2">👨‍🏫</div>
-                          <p className="text-gray-500 font-medium mb-1">Tidak ada data guru</p>
-                          <p className="text-gray-400 text-sm">Coba ubah filter pencarian</p>
+                          <div className="text-5xl mb-3 opacity-30">👨‍🏫</div>
+                          <p className="text-slate-600 font-semibold">Tidak ada data guru</p>
+                          <p className="text-slate-400 text-sm mt-1">Coba ubah filter pencarian</p>
                         </div>
                       </td>
                     </tr>
@@ -1697,48 +1565,31 @@ export default function AGuru() {
               </table>
             </div>
           )}
-        </Card>
+        </div>
 
         {/* Modal Nonaktifkan Guru */}
         {disableUID && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-lg p-6 w-full max-w-md">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="p-2 bg-orange-100 text-orange-600 rounded-lg">
-                  <span className="text-xl">⏸️</span>
-                </div>
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md border border-slate-200">
+              <div className="flex items-center gap-3 p-6 border-b border-slate-100">
+                <div className="w-10 h-10 bg-amber-100 rounded-xl flex items-center justify-center"><span className="text-xl">⏸️</span></div>
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900">Nonaktifkan Guru</h3>
-                  <p className="text-gray-600 text-sm">Guru akan diblokir di aplikasi</p>
+                  <h3 className="text-lg font-bold text-slate-900">Nonaktifkan Guru</h3>
+                  <p className="text-slate-500 text-sm">Guru akan diblokir di aplikasi</p>
                 </div>
               </div>
-              
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Alasan Penonaktifan *
-                </label>
+              <div className="p-6">
+                <label className="block text-sm font-semibold text-slate-700 mb-2">Alasan Penonaktifan *</label>
                 <textarea
-                  className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 min-h-[100px]"
+                  className="block w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-amber-400 focus:border-amber-400 min-h-[100px] text-sm"
                   placeholder="Contoh: Cuti panjang..."
                   value={alasanNonaktif}
                   onChange={e => setAlasanNonaktif(e.target.value)}
-                  required
                 />
               </div>
-              
-              <div className="flex justify-end space-x-3">
-                <Button
-                  variant="secondary"
-                  onClick={batalNonaktif}
-                >
-                  ✕ Batal
-                </Button>
-                <Button
-                  onClick={simpanNonaktif}
-                  disabled={!alasanNonaktif.trim()}
-                >
-                  ⏸️ Nonaktifkan
-                </Button>
+              <div className="flex justify-end gap-3 px-6 pb-6">
+                <button onClick={batalNonaktif} className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-semibold text-sm hover:bg-slate-50 transition-all">✕ Batal</button>
+                <button onClick={simpanNonaktif} disabled={!alasanNonaktif.trim()} className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-semibold text-sm disabled:opacity-50 transition-all">⏸️ Nonaktifkan</button>
               </div>
             </div>
           </div>
@@ -1746,48 +1597,29 @@ export default function AGuru() {
 
         {/* Modal Konfirmasi Hapus Akun */}
         {deleteConfirmOpen && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-lg p-6 w-full max-w-md">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="p-2 bg-red-100 text-red-600 rounded-lg">
-                  <span className="text-xl">🗑️</span>
-                </div>
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md border border-slate-200">
+              <div className="flex items-center gap-3 p-6 border-b border-red-100 bg-red-50/50 rounded-t-2xl">
+                <div className="w-10 h-10 bg-red-100 rounded-xl flex items-center justify-center"><span className="text-xl">🗑️</span></div>
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900">Hapus Akun Guru</h3>
-                  <p className="text-gray-600 text-sm">Tindakan ini tidak dapat dibatalkan</p>
+                  <h3 className="text-lg font-bold text-slate-900">Hapus Akun Guru</h3>
+                  <p className="text-slate-500 text-sm">Tindakan ini tidak dapat dibatalkan</p>
                 </div>
               </div>
-              
-              <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
-                <p className="text-red-800 text-sm font-medium mb-2">
-                  Apakah Anda yakin ingin menghapus akun guru ini?
-                </p>
-                <p className="text-red-700 text-sm">
-                  <strong>{guruToDelete?.nama}</strong> ({guruToDelete?.email})
-                </p>
-                <p className="text-red-600 text-xs mt-2">
-                  • Akun akan dihapus dari database dan authentication
-                  <br />
-                  • Semua data terkait (jadwal, struktur) akan dihapus
-                  <br />
-                  • Tindakan ini PERMANEN dan tidak dapat dikembalikan
-                </p>
+              <div className="p-6">
+                <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+                  <p className="text-red-800 text-sm font-semibold mb-2">Apakah Anda yakin ingin menghapus akun guru ini?</p>
+                  <p className="text-red-700 text-sm font-medium">{guruToDelete?.nama} <span className="font-normal text-red-500">({guruToDelete?.email})</span></p>
+                  <div className="mt-3 text-red-600 text-xs space-y-1">
+                    <p>• Akun akan dihapus dari database dan authentication</p>
+                    <p>• Semua data terkait (jadwal, struktur) akan dihapus</p>
+                    <p>• Tindakan ini <strong>PERMANEN</strong> dan tidak dapat dikembalikan</p>
+                  </div>
+                </div>
               </div>
-
-              <div className="flex justify-end space-x-3">
-                <Button
-                  variant="secondary"
-                  onClick={closeDeleteConfirm}
-                >
-                  ✕ Batal
-                </Button>
-                <Button
-                  variant="danger"
-                  onClick={hapusAkunGuru}
-                  loading={deletingGuru}
-                >
-                  🗑️ Ya, Hapus
-                </Button>
+              <div className="flex justify-end gap-3 px-6 pb-6">
+                <button onClick={closeDeleteConfirm} className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-semibold text-sm hover:bg-slate-50 transition-all">✕ Batal</button>
+                <button onClick={hapusAkunGuru} disabled={deletingGuru} className="px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-semibold text-sm disabled:opacity-50 transition-all">{deletingGuru ? 'Menghapus...' : '🗑️ Ya, Hapus'}</button>
               </div>
             </div>
           </div>
@@ -1795,158 +1627,74 @@ export default function AGuru() {
 
         {/* Modal Detail Guru */}
         {detailModalOpen && selectedGuru && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-lg w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col border border-slate-200">
               {/* Header */}
-              <div className="px-6 py-4 border-b bg-gray-50 flex items-start justify-between">
-                <div className="flex items-center space-x-4">
+              <div className="px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-blue-50/30 flex items-start justify-between">
+                <div className="flex items-center gap-4">
                   <ProfileAvatar
                     src={selectedGuru.photo_path || selectedGuru.photo_url}
                     name={selectedGuru.nama}
-                    size={48}
-                    className="border-gray-200"
+                    size={52}
+                    className="border-slate-200"
                     fallbackClassName="rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center text-base font-semibold text-blue-600"
                   />
                   <div>
-                    <h3 className="text-lg font-semibold text-gray-900">{selectedGuru.nama}</h3>
-                    <p className="text-gray-600 text-sm">{selectedGuru.email}</p>
-                    {selectedGuru.telp && <p className="text-gray-500 text-xs flex items-center gap-1 mt-1">
-                      <span>📞</span>
-                      <span>{selectedGuru.telp}</span>
-                    </p>}
-                    <div className="flex items-center space-x-2 mt-1">
-                      <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                        selectedGuru.status === 'active' 
-                          ? 'bg-green-100 text-green-800 border border-green-200' 
-                          : 'bg-red-100 text-red-800 border border-red-200'
-                      }`}>
+                    <h3 className="text-xl font-bold text-slate-900">{selectedGuru.nama}</h3>
+                    <p className="text-slate-500 text-sm">{selectedGuru.email}</p>
+                    {selectedGuru.telp && <p className="text-slate-400 text-xs flex items-center gap-1 mt-0.5"><span>📞</span><span>{selectedGuru.telp}</span></p>}
+                    <div className="mt-2">
+                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${selectedGuru.status === 'active' ? 'bg-green-100 text-green-700 border border-green-200' : 'bg-red-100 text-red-700 border border-red-200'}`}>
                         {selectedGuru.status === 'active' ? '✅ Aktif' : '⏸️ Nonaktif'}
                       </span>
                     </div>
                   </div>
                 </div>
-                <button
-                  className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"
-                  onClick={closeDetailModal}
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
+                <button className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-colors" onClick={closeDetailModal}>
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                 </button>
               </div>
 
               {/* Content */}
-              <div className="p-6 space-y-6 overflow-y-auto flex-1">
-                {/* Informasi Profil */}
-                <div className="bg-white border border-gray-200 rounded-lg p-4">
-                  <h4 className="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                    <span>👤</span>
-                    Informasi Profil
-                  </h4>
+              <div className="p-6 space-y-4 overflow-y-auto flex-1">
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5">
+                  <h4 className="text-sm font-bold text-slate-700 mb-4 flex items-center gap-2"><span>👤</span> Informasi Profil</h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-sm font-medium text-gray-700">Email</p>
-                      <p className="text-sm text-gray-900">{selectedGuru.email}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-gray-700">Telepon</p>
-                      <p className="text-sm text-gray-900">{selectedGuru.telp || '—'}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-gray-700">NIS</p>
-                      <p className="text-sm text-gray-900">{selectedGuru.nis || '—'}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-gray-700">Tanggal Lahir</p>
-                      <p className="text-sm text-gray-900">{formatDate(selectedGuru.tanggal_lahir)}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-gray-700">Jenis Kelamin</p>
-                      <p className="text-sm text-gray-900">{selectedGuru.jk || '—'}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-gray-700">Agama</p>
-                      <p className="text-sm text-gray-900">{selectedGuru.agama || '—'}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-gray-700">Jabatan Profil</p>
-                      <p className="text-sm text-gray-900">{selectedGuru.jabatan || '—'}</p>
-                    </div>
+                    {[['Email', selectedGuru.email], ['Telepon', selectedGuru.telp || '—'], ['NIS', selectedGuru.nis || '—'], ['Tanggal Lahir', formatDate(selectedGuru.tanggal_lahir)], ['Jenis Kelamin', selectedGuru.jk || '—'], ['Agama', selectedGuru.agama || '—'], ['Jabatan', selectedGuru.jabatan || '—']].map(([label, value]) => (
+                      <div key={label}>
+                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{label}</p>
+                        <p className="text-sm text-slate-800 mt-0.5">{value}</p>
+                      </div>
+                    ))}
                   </div>
                 </div>
 
-                {/* Mata Pelajaran Diampu */}
-                <div className="bg-white border border-gray-200 rounded-lg p-4">
-                  <h4 className="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                    <span>📚</span>
-                    Mata Pelajaran Diampu ({selectedGuru.mapelList.length})
-                  </h4>
-                  <div className="space-y-2">
-                    {selectedGuru.mapelList.length > 0 ? (
-                      selectedGuru.mapelList.map((mapel, index) => (
-                        <div key={index} className="flex items-center p-2 bg-gray-50 rounded-lg">
-                          <span className="text-sm text-gray-900">{mapel}</span>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-gray-500 text-sm text-center py-2">Tidak ada mata pelajaran</p>
-                    )}
+                <div className="grid md:grid-cols-3 gap-4">
+                  <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4">
+                    <h4 className="text-sm font-bold text-blue-800 mb-3">📚 Mapel ({selectedGuru.mapelList.length})</h4>
+                    <div className="space-y-1.5">
+                      {selectedGuru.mapelList.length > 0 ? selectedGuru.mapelList.map((m, i) => <div key={i} className="text-sm text-blue-700 bg-white rounded-lg px-3 py-1.5 border border-blue-100">{m}</div>) : <p className="text-blue-500 text-xs">Tidak ada</p>}
+                    </div>
                   </div>
-                </div>
-
-                {/* Kelas Diampu */}
-                <div className="bg-white border border-gray-200 rounded-lg p-4">
-                  <h4 className="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                    <span>🏫</span>
-                    Kelas Diampu ({selectedGuru.kelasList.length})
-                  </h4>
-                  <div className="space-y-2">
-                    {selectedGuru.kelasList.length > 0 ? (
-                      selectedGuru.kelasList.map((kelas, index) => (
-                        <div key={index} className="flex items-center p-2 bg-gray-50 rounded-lg">
-                          <span className="text-sm text-gray-900">{kelas}</span>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-gray-500 text-sm text-center py-2">Tidak ada kelas</p>
-                    )}
+                  <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4">
+                    <h4 className="text-sm font-bold text-indigo-800 mb-3">🏫 Kelas ({selectedGuru.kelasList.length})</h4>
+                    <div className="space-y-1.5">
+                      {selectedGuru.kelasList.length > 0 ? selectedGuru.kelasList.map((k, i) => <div key={i} className="text-sm text-indigo-700 bg-white rounded-lg px-3 py-1.5 border border-indigo-100">{k}</div>) : <p className="text-indigo-500 text-xs">Tidak ada</p>}
+                    </div>
                   </div>
-                </div>
-
-                {/* Semua Jabatan */}
-                <div className="bg-white border border-gray-200 rounded-lg p-4">
-                  <h4 className="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                    <span>💼</span>
-                    Semua Jabatan ({selectedGuru.jabatanList.length})
-                  </h4>
-                  <div className="space-y-2">
-                    {selectedGuru.jabatanList.length > 0 ? (
-                      selectedGuru.jabatanList.map((jabatan, index) => (
-                        <div key={index} className="flex items-center p-2 bg-gray-50 rounded-lg">
-                          <span className="text-sm text-gray-900">{jabatan}</span>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-gray-500 text-sm text-center py-2">Tidak ada jabatan</p>
-                    )}
+                  <div className="bg-purple-50 border border-purple-100 rounded-2xl p-4">
+                    <h4 className="text-sm font-bold text-purple-800 mb-3">💼 Jabatan ({selectedGuru.jabatanList.length})</h4>
+                    <div className="space-y-1.5">
+                      {selectedGuru.jabatanList.length > 0 ? selectedGuru.jabatanList.map((j, i) => <div key={i} className="text-sm text-purple-700 bg-white rounded-lg px-3 py-1.5 border border-purple-100">{j}</div>) : <p className="text-purple-500 text-xs">Tidak ada</p>}
+                    </div>
                   </div>
                 </div>
               </div>
 
               {/* Footer */}
-              <div className="px-6 py-4 border-t bg-gray-50 flex justify-end space-x-3">
-                <Button
-                  variant="secondary"
-                  onClick={closeDetailModal}
-                >
-                  ✕ Tutup
-                </Button>
-                <Button
-                  onClick={() => openDeleteConfirm(selectedGuru)}
-                  variant="danger"
-                >
-                  🗑️ Hapus Akun
-                </Button>
+              <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-3">
+                <button onClick={closeDetailModal} className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-semibold text-sm hover:bg-slate-100 transition-all">✕ Tutup</button>
+                <button onClick={() => openDeleteConfirm(selectedGuru)} className="px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-semibold text-sm transition-all">🗑️ Hapus Akun</button>
               </div>
             </div>
           </div>

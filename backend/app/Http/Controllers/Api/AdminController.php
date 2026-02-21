@@ -9,24 +9,28 @@ class AdminController extends ApiController
 {
     public function monitoring(Request $request)
     {
-        if (!$this->isAdmin($request)) {
+        if (! $this->isAdmin($request)) {
             return $this->deny();
         }
         $tenantId = $this->tenantId($request);
-        if (!$tenantId) {
+        if (! $tenantId) {
             return $this->deny('Tenant tidak valid', 400);
         }
 
         $activeSeconds = (int) $request->query('active_sec', 120);
-        if ($activeSeconds < 30) $activeSeconds = 30;
-        if ($activeSeconds > 900) $activeSeconds = 900;
+        if ($activeSeconds < 30) {
+            $activeSeconds = 30;
+        }
+        if ($activeSeconds > 900) {
+            $activeSeconds = 900;
+        }
 
         $activeCutoff = now()->subSeconds($activeSeconds)->toDateTimeString();
 
         $presenceAgg = DB::table('user_presence')
             ->select(
                 'user_id',
-                DB::raw("max(last_seen_at) as last_seen_at"),
+                DB::raw('max(last_seen_at) as last_seen_at'),
                 DB::raw("sum(case when last_seen_at >= '{$activeCutoff}' then 1 else 0 end) as active_devices"),
                 DB::raw("sum(case when last_seen_at >= '{$activeCutoff}' then activity_count else 0 end) as activity_count")
             )
@@ -76,7 +80,9 @@ class AdminController extends ApiController
         }
 
         $sortWithActivity = function ($a, $b) {
-            if ($a['online'] !== $b['online']) return $a['online'] ? -1 : 1;
+            if ($a['online'] !== $b['online']) {
+                return $a['online'] ? -1 : 1;
+            }
             if ($a['online']) {
                 if ($a['activity_count'] !== $b['activity_count']) {
                     return $b['activity_count'] <=> $a['activity_count'];
@@ -84,13 +90,17 @@ class AdminController extends ApiController
             }
             $aSeen = $a['last_seen_at'] ?? '';
             $bSeen = $b['last_seen_at'] ?? '';
+
             return strcmp($bSeen, $aSeen);
         };
 
         $sortByLastSeen = function ($a, $b) {
-            if ($a['online'] !== $b['online']) return $a['online'] ? -1 : 1;
+            if ($a['online'] !== $b['online']) {
+                return $a['online'] ? -1 : 1;
+            }
             $aSeen = $a['last_seen_at'] ?? '';
             $bSeen = $b['last_seen_at'] ?? '';
+
             return strcmp($bSeen, $aSeen);
         };
 
@@ -103,27 +113,27 @@ class AdminController extends ApiController
                 'teachers' => $teachers,
                 'active_seconds' => $activeSeconds,
                 'generated_at' => now()->toISOString(),
-            ]
+            ],
         ]);
     }
 
     public function deleteUser(Request $request, string $id)
     {
-        if (!$this->isAdmin($request)) {
+        if (! $this->isAdmin($request)) {
             return $this->deny();
         }
         $tenantId = $this->tenantId($request);
-        if (!$tenantId) {
+        if (! $tenantId) {
             return $this->deny('Tenant tidak valid', 400);
         }
 
         $profile = DB::table('profiles')->where('id', $id)->where('tenant_id', $tenantId)->first();
-        if (!$profile) {
+        if (! $profile) {
             return $this->deny('User tidak ditemukan', 404);
         }
 
         $role = strtolower((string) ($profile->role ?? ''));
-        if (!in_array($role, ['guru', 'teacher', 'siswa'], true)) {
+        if (! in_array($role, ['guru', 'teacher', 'siswa'], true)) {
             return $this->deny('Hanya role guru/siswa yang boleh dihapus', 409);
         }
 

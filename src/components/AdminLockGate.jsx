@@ -1,12 +1,13 @@
 // src/components/AdminLockGate.jsx
 import React, { useEffect, useState } from 'react'
-import { Outlet } from 'react-router-dom'
+import { Outlet, useLocation } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/useAuthStore'
 import { useUIStore } from '../store/useUIStore'
 import PasswordInput from './PasswordInput'
 
 const STORAGE_KEY = 'admin_lock_unlocked_v1'
+const LOCK_EXPIRY_MS = 30 * 60 * 1000 // 30 menit
 
 function PasswordModal({ isOpen, onClose, onConfirm, title = 'Konfirmasi Password', loading = false }) {
   const [password, setPassword] = useState('')
@@ -67,11 +68,13 @@ function PasswordModal({ isOpen, onClose, onConfirm, title = 'Konfirmasi Passwor
 export default function AdminLockGate() {
   const { settings } = useAuthStore()
   const { pushToast } = useUIStore()
+  const location = useLocation()
   const [isUnlocked, setIsUnlocked] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
   const [loading, setLoading] = useState(false)
 
   const lockEnabled = Boolean(settings?.admin_lock_enabled)
+  const bypassLock = location.pathname.startsWith('/admin/pengaturan')
 
   useEffect(() => {
     if (!lockEnabled) {
@@ -79,13 +82,23 @@ export default function AdminLockGate() {
       setModalOpen(false)
       try {
         sessionStorage.removeItem(STORAGE_KEY)
-      } catch {}
+      } catch { }
       return
     }
 
     const unlocked = (() => {
       try {
-        return sessionStorage.getItem(STORAGE_KEY) === '1'
+        const raw = sessionStorage.getItem(STORAGE_KEY)
+        if (!raw) return false
+        const parsed = JSON.parse(raw)
+        if (!parsed?.unlockedAt) return false
+        // Cek apakah sudah expired (30 menit)
+        const elapsed = Date.now() - parsed.unlockedAt
+        if (elapsed > LOCK_EXPIRY_MS) {
+          sessionStorage.removeItem(STORAGE_KEY)
+          return false
+        }
+        return true
       } catch {
         return false
       }
@@ -110,8 +123,8 @@ export default function AdminLockGate() {
       if (error) throw new Error('Password salah')
 
       try {
-        sessionStorage.setItem(STORAGE_KEY, '1')
-      } catch {}
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ unlockedAt: Date.now() }))
+      } catch { }
       setIsUnlocked(true)
       setModalOpen(false)
       pushToast('success', 'Akses admin dibuka')
@@ -126,7 +139,7 @@ export default function AdminLockGate() {
     setModalOpen(false)
   }
 
-  if (!lockEnabled || isUnlocked) return <Outlet />
+  if (bypassLock || !lockEnabled || isUnlocked) return <Outlet />
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">

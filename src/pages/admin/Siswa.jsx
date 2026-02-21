@@ -1,12 +1,12 @@
 // src/pages/admin/ASiswa.jsx
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import * as XLSX from 'xlsx'
 import { supabase } from '../../lib/supabase'
 import { formatDate } from '../../lib/time'
 import { useUIStore } from '../../store/useUIStore'
 import { useAuthStore } from '../../store/useAuthStore'
 import ProfileAvatar from '../../components/ProfileAvatar'
 import PasswordInput from '../../components/PasswordInput'
+import { exportRowsToExcel } from '../../utils/spreadsheet'
 import {
   buildAliasMap,
   mapRowByAliases,
@@ -1305,27 +1305,33 @@ export default function ASiswa() {
     }
   }
 
-  const exportSiswaToExcel = () => {
-    const rows = siswa.map((item, idx) => ({
-      No: idx + 1,
-      NIS: item.nis || '',
-      Nama: item.nama || '',
-      Kelas: getNamaKelas(item.kelas),
-      JK: item.jk || '',
-      'Tanggal Lahir': item.tanggal_lahir || '',
-      Agama: item.agama || '',
-      Alamat: item.alamat || '',
-      'HP Siswa': item.no_hp_siswa || item.telp || '',
-      'HP Wali': item.no_hp_wali || '',
-      Email: item.email || '',
-      Status: item.status || 'active'
-    }))
+  const exportSiswaToExcel = async () => {
+    try {
+      const rows = siswa.map((item, idx) => ({
+        No: idx + 1,
+        NIS: item.nis || '',
+        Nama: item.nama || '',
+        Kelas: getNamaKelas(item.kelas),
+        JK: item.jk || '',
+        'Tanggal Lahir': item.tanggal_lahir || '',
+        Agama: item.agama || '',
+        Alamat: item.alamat || '',
+        'HP Siswa': item.no_hp_siswa || item.telp || '',
+        'HP Wali': item.no_hp_wali || '',
+        Email: item.email || '',
+        Status: item.status || 'active'
+      }))
 
-    const worksheet = XLSX.utils.json_to_sheet(rows)
-    const workbook = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Siswa')
-    const stamp = new Date().toISOString().slice(0, 10)
-    XLSX.writeFile(workbook, `siswa_${stamp}.xlsx`)
+      const stamp = new Date().toISOString().slice(0, 10)
+      await exportRowsToExcel({
+        rows,
+        sheetName: 'Siswa',
+        fileName: `siswa_${stamp}.xlsx`
+      })
+    } catch (error) {
+      console.error('Error exporting siswa:', error)
+      pushToast('error', 'Gagal mengekspor data siswa')
+    }
   }
 
   /* ===== Statistik dashboard ===== */

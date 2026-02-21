@@ -10,12 +10,15 @@ class KelasStrukturController extends ApiController
     public function show(Request $request, string $kelasId)
     {
         $row = DB::table('kelas_struktur')->where('kelas_id', $kelasId)->first();
+
         return response()->json(['data' => $row]);
     }
 
     public function upsert(Request $request, string $kelasId)
     {
-        if (!$this->isAdmin($request)) return $this->deny();
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
         $payload = $request->all();
         $payload['kelas_id'] = $kelasId;
         $payload['updated_at'] = now();
@@ -29,6 +32,7 @@ class KelasStrukturController extends ApiController
         }
 
         $row = DB::table('kelas_struktur')->where('kelas_id', $kelasId)->first();
+
         return response()->json(['data' => $row]);
     }
 }

@@ -86,7 +86,7 @@ class AuthSuperAdminHardeningTest extends TestCase
     {
         $user = User::query()->create([
             'id' => (string) Str::uuid(),
-            'name' => $role . ' test',
+            'name' => $role.' test',
             'email' => $email,
             'password' => Hash::make('password123'),
         ]);
@@ -106,4 +106,3 @@ class AuthSuperAdminHardeningTest extends TestCase
         return [$user];
     }
 }
-

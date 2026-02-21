@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useUIStore } from '../../store/useUIStore'
 import PasswordInput from '../../components/PasswordInput'
+import { loadExcelJsBrowser } from '../../utils/excelBrowser'
 
 /* ===== Password Modal Component (Akses Halaman) ===== */
 function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Password", loading = false }) {
@@ -146,6 +147,25 @@ const HARI_OPTS = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu
 const GRADE_OPTS = ['VII', 'VIII', 'IX', 'X', 'XI', 'XII']
 const GRADE_ORDER = Object.fromEntries(GRADE_OPTS.map((g, i) => [g, i]))
 const FORBIDDEN = /[.#$[\]]/
+const DEFAULT_SCHEDULE_DAYS = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']
+
+let jsPdfPromise = null
+const loadJsPdf = async () => {
+  if (!jsPdfPromise) {
+    jsPdfPromise = import('jspdf')
+  }
+  const mod = await jsPdfPromise
+  return mod.jsPDF || mod.default
+}
+
+let autoTablePromise = null
+const loadAutoTable = async () => {
+  if (!autoTablePromise) {
+    autoTablePromise = import('jspdf-autotable')
+  }
+  const mod = await autoTablePromise
+  return mod.default || mod.autoTable || null
+}
 
 const slug = (s = '') => s.toString().trim().toLowerCase()
   .replace(/[^\w\s-]/g, '')
@@ -155,8 +175,163 @@ const slug = (s = '') => s.toString().trim().toLowerCase()
 
 const toMinutes = (hhmm) => {
   if (!hhmm) return NaN
-  const [h, m] = hhmm.split(':').map(Number)
+  const [h, m] = String(hhmm).slice(0, 5).split(':').map(Number)
   return (h * 60) + (m || 0)
+}
+
+const toTimeHHMM = (hhmm) => {
+  const value = String(hhmm || '').trim()
+  if (!value) return ''
+  if (value.length >= 5) return value.slice(0, 5)
+  return value
+}
+
+const toTimeLabel = (hhmm) => toTimeHHMM(hhmm).replace(':', '.')
+
+const toRangeLabel = (start, end) => `${toTimeLabel(start)}-${toTimeLabel(end)}`
+
+const normalizeScheduleDay = (day) => {
+  const raw = String(day || '').trim().toLowerCase()
+  const map = {
+    senin: 'Senin',
+    monday: 'Senin',
+    selasa: 'Selasa',
+    tuesday: 'Selasa',
+    rabu: 'Rabu',
+    wednesday: 'Rabu',
+    kamis: 'Kamis',
+    thursday: 'Kamis',
+    jumat: 'Jumat',
+    friday: 'Jumat',
+    sabtu: 'Sabtu',
+    saturday: 'Sabtu',
+    minggu: 'Minggu',
+    sunday: 'Minggu'
+  }
+
+  return map[raw] || String(day || '').trim()
+}
+
+const classSlug = (value = '') =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'kelas'
+
+const buildSheetName = (source = '', used = new Set()) => {
+  const base = String(source || 'Jadwal')
+    .replace(/[:\\/?*\[\]]/g, ' ')
+    .trim() || 'Jadwal'
+  const candidate = base.slice(0, 31)
+  if (!used.has(candidate)) {
+    used.add(candidate)
+    return candidate
+  }
+
+  let i = 2
+  while (i < 999) {
+    const suffix = ` (${i})`
+    const next = `${base.slice(0, Math.max(0, 31 - suffix.length))}${suffix}`
+    if (!used.has(next)) {
+      used.add(next)
+      return next
+    }
+    i += 1
+  }
+
+  return `Sheet-${Date.now()}`
+}
+
+const normalizeScheduleCellEntries = (entries = []) =>
+  (entries || [])
+    .map((item) => ({
+      mapel: String(item?.mapel || '').trim(),
+      guruNama: String(item?.guruNama || '').trim()
+    }))
+    .filter((item) => item.mapel || item.guruNama)
+
+const buildScheduleCellExportText = (entries = []) =>
+  entries
+    .map((item) => {
+      const mapel = item.mapel || '-'
+      return item.guruNama ? `${mapel}\n${item.guruNama}` : mapel
+    })
+    .join('\n\n')
+
+const buildScheduleCellExcelValue = (entries = []) => {
+  const richText = []
+
+  entries.forEach((item, index) => {
+    if (index > 0) richText.push({ text: '\n\n' })
+    richText.push({
+      text: item.mapel || '-',
+      font: { size: 10, bold: true, color: { argb: 'FF111827' } }
+    })
+    if (item.guruNama) {
+      richText.push({
+        text: `\n${item.guruNama}`,
+        font: { size: 8, italic: true, color: { argb: 'FF4B5563' } }
+      })
+    }
+  })
+
+  return richText.length > 0 ? { richText } : ''
+}
+
+const buildScheduleMatrix = (rows = [], days = DEFAULT_SCHEDULE_DAYS) => {
+  const slotMap = new Map()
+
+  ;(rows || []).forEach((row) => {
+    const start = toTimeHHMM(row.jamMulai)
+    const end = toTimeHHMM(row.jamSelesai)
+    if (!start || !end) return
+    const key = `${start}-${end}`
+
+    if (!slotMap.has(key)) {
+      const cells = {}
+      days.forEach((day) => {
+        cells[day] = []
+      })
+      slotMap.set(key, { key, start, end, cells })
+    }
+
+    const slot = slotMap.get(key)
+    const day = normalizeScheduleDay(row.hari)
+    if (!slot.cells[day]) {
+      slot.cells[day] = []
+    }
+
+    slot.cells[day].push({
+      mapel: String(row.mapel || '').trim(),
+      guruNama: String(row.guruNama || '').trim()
+    })
+  })
+
+  const sortedSlots = Array.from(slotMap.values()).sort((a, b) => toMinutes(a.start) - toMinutes(b.start))
+
+  return sortedSlots.map((slot, index) => {
+    const cellEntries = {}
+    const cellText = {}
+    days.forEach((day) => {
+      const entries = normalizeScheduleCellEntries(slot.cells[day] || [])
+      cellEntries[day] = entries
+      cellText[day] = buildScheduleCellExportText(entries)
+    })
+
+    const isBreakRow = days.some((day) =>
+      (cellEntries[day] || []).some((item) => /istirahat/i.test(item.mapel || ''))
+    )
+    return {
+      ...slot,
+      jamKe: index + 1,
+      rangeLabel: toRangeLabel(slot.start, slot.end),
+      cellEntries,
+      cellText,
+      isBreakRow
+    }
+  })
 }
 
 const timesOverlap = (aStart, aEnd, bStart, bEnd) => {
@@ -245,6 +420,9 @@ export default function AKelas() {
   const [form, setForm] = useState({ hari: '', mapel: '', guruId: '', jamMulai: '', jamSelesai: '' })
   const [editId, setEditId] = useState(null)
   const [editData, setEditData] = useState(null)
+  const [exportClassId, setExportClassId] = useState('')
+  const [exportFormat, setExportFormat] = useState('excel')
+  const [exportingJadwal, setExportingJadwal] = useState(false)
 
   /* ====== EFFECTS ====== */
 
@@ -291,6 +469,18 @@ export default function AKelas() {
 
     loadKelasData()
   }, [isAuthorized, kelasSelected])
+
+  useEffect(() => {
+    if (!exportClassId && kelasSelected) {
+      setExportClassId(kelasSelected)
+    }
+  }, [exportClassId, kelasSelected])
+
+  useEffect(() => {
+    if (exportClassId === '__all__' && exportFormat === 'pdf') {
+      setExportFormat('excel')
+    }
+  }, [exportClassId, exportFormat])
 
   /* ================== LOADERS ================== */
   const loadGuruList = useCallback(async () => {
@@ -470,6 +660,30 @@ export default function AKelas() {
     if (!filterHari) return jadwal
     return jadwal.filter(j => j.hari === filterHari)
   }, [jadwal, filterHari])
+
+  const kelasNameById = React.useMemo(() => {
+    const map = {}
+    kelas.forEach((item) => {
+      map[item.id] = (item.nama || item.id || '').toUpperCase()
+    })
+    return map
+  }, [kelas])
+
+  const exportDays = React.useMemo(() => {
+    const days = [...DEFAULT_SCHEDULE_DAYS]
+    jadwal.forEach((item) => {
+      const day = normalizeScheduleDay(item.hari)
+      if (day && !days.includes(day)) {
+        days.push(day)
+      }
+    })
+    return days
+  }, [jadwal])
+
+  const jadwalMatrix = React.useMemo(
+    () => buildScheduleMatrix(jadwal, exportDays),
+    [jadwal, exportDays]
+  )
 
   function guruNameById(id) {
     return guruList.find(g => g.id === id)?.name || ''
@@ -1033,9 +1247,371 @@ export default function AKelas() {
     }
   }
 
-  // Fungsi untuk mengekspor jadwal ke PDF/Excel (placeholder)
-  const exportJadwal = () => {
-    pushToast('info', 'Fitur ekspor jadwal akan segera tersedia')
+  const downloadBlob = (blob, filename) => {
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = filename
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    URL.revokeObjectURL(url)
+  }
+
+  const sortJadwalRows = (rows) => {
+    return [...(rows || [])].sort((a, b) => {
+      const aiRaw = HARI_OPTS.indexOf(normalizeScheduleDay(a.hari))
+      const biRaw = HARI_OPTS.indexOf(normalizeScheduleDay(b.hari))
+      const ai = aiRaw >= 0 ? aiRaw : 999
+      const bi = biRaw >= 0 ? biRaw : 999
+      if (ai !== bi) return ai - bi
+      return toMinutes(a.jamMulai) - toMinutes(b.jamMulai)
+    })
+  }
+
+  const normalizeScheduleRow = (row) => ({
+    id: row?.id || '',
+    kelasId: row?.kelas_id || '',
+    hari: normalizeScheduleDay(row?.hari),
+    mapel: row?.mapel || '',
+    guruId: row?.guru_id || '',
+    guruNama: row?.guru_nama || '',
+    jamMulai: toTimeHHMM(row?.jam_mulai || row?.jamMulai),
+    jamSelesai: toTimeHHMM(row?.jam_selesai || row?.jamSelesai)
+  })
+
+  const resolveExportClassName = (classId) => {
+    return kelasNameById[classId] || String(classId || '').toUpperCase()
+  }
+
+  const collectExportPayload = async () => {
+    const targetClassId = exportClassId || kelasSelected
+    if (!targetClassId) {
+      throw new Error('Pilih kelas tujuan export terlebih dahulu.')
+    }
+
+    if (targetClassId === '__all__') {
+      const { data, error } = await supabase
+        .from('jadwal')
+        .select('*')
+        .order('kelas_id')
+        .order('hari')
+        .order('jam_mulai')
+
+      if (error) throw error
+
+      const grouped = {}
+      ;(data || []).forEach((raw) => {
+        const row = normalizeScheduleRow(raw)
+        if (!row.kelasId) return
+        if (!grouped[row.kelasId]) grouped[row.kelasId] = []
+        grouped[row.kelasId].push(row)
+      })
+
+      const allClassIds = Array.from(new Set([
+        ...kelas.map((item) => item.id),
+        ...Object.keys(grouped)
+      ]))
+
+      const classPayloads = allClassIds.map((id) => {
+        const rows = sortJadwalRows(grouped[id] || [])
+        const days = [...DEFAULT_SCHEDULE_DAYS]
+        rows.forEach((row) => {
+          const day = normalizeScheduleDay(row.hari)
+          if (day && !days.includes(day)) days.push(day)
+        })
+
+        return {
+          classId: id,
+          className: resolveExportClassName(id),
+          rows,
+          days,
+          matrix: buildScheduleMatrix(rows, days)
+        }
+      })
+
+      return classPayloads.filter((item) => item.rows.length > 0)
+    }
+
+    const selectedId = targetClassId
+    let rows = []
+    if (selectedId === kelasSelected) {
+      rows = sortJadwalRows(jadwal.map((item) => ({
+        ...item,
+        kelasId: selectedId
+      })))
+    } else {
+      const { data, error } = await supabase
+        .from('jadwal')
+        .select('*')
+        .eq('kelas_id', selectedId)
+        .order('hari')
+        .order('jam_mulai')
+      if (error) throw error
+      rows = sortJadwalRows((data || []).map(normalizeScheduleRow))
+    }
+
+    const days = [...DEFAULT_SCHEDULE_DAYS]
+    rows.forEach((row) => {
+      const day = normalizeScheduleDay(row.hari)
+      if (day && !days.includes(day)) days.push(day)
+    })
+
+    return [{
+      classId: selectedId,
+      className: resolveExportClassName(selectedId),
+      rows,
+      days,
+      matrix: buildScheduleMatrix(rows, days)
+    }]
+  }
+
+  const createExcelScheduleBuffer = async (classPayloads) => {
+    const ExcelJS = await loadExcelJsBrowser()
+    const workbook = new ExcelJS.Workbook()
+    workbook.creator = 'EduSmart Admin'
+    workbook.created = new Date()
+
+    const usedSheetNames = new Set()
+    const summarySheet = workbook.addWorksheet(buildSheetName('Ringkasan Export Jadwal', usedSheetNames))
+    summarySheet.columns = [
+      { header: 'No', key: 'no', width: 8 },
+      { header: 'Kelas', key: 'kelas', width: 22 },
+      { header: 'Jumlah Entri Jadwal', key: 'entries', width: 20 },
+      { header: 'Jumlah Slot Waktu', key: 'slots', width: 18 }
+    ]
+    summarySheet.addRows(classPayloads.map((item, idx) => ({
+      no: idx + 1,
+      kelas: item.className,
+      entries: item.rows.length,
+      slots: item.matrix.length
+    })))
+    summarySheet.getRow(1).font = { bold: true }
+    summarySheet.views = [{ state: 'frozen', ySplit: 1 }]
+
+    const border = {
+      top: { style: 'thin', color: { argb: 'FF000000' } },
+      left: { style: 'thin', color: { argb: 'FF000000' } },
+      bottom: { style: 'thin', color: { argb: 'FF000000' } },
+      right: { style: 'thin', color: { argb: 'FF000000' } }
+    }
+
+    classPayloads.forEach((payload) => {
+      const days = payload.days || DEFAULT_SCHEDULE_DAYS
+      const matrix = payload.matrix || []
+      const sheet = workbook.addWorksheet(buildSheetName(`Jadwal ${payload.className}`, usedSheetNames))
+      const lastCol = 2 + days.length
+
+      sheet.mergeCells(1, 1, 2, 1)
+      sheet.mergeCells(1, 2, 2, 2)
+      sheet.mergeCells(1, 3, 1, lastCol)
+      sheet.getCell(1, 1).value = 'JAM KE'
+      sheet.getCell(1, 2).value = 'WAKTU'
+      sheet.getCell(1, 3).value = 'HARI'
+
+      days.forEach((day, idx) => {
+        sheet.getCell(2, 3 + idx).value = day.toUpperCase()
+      })
+
+      for (let col = 1; col <= lastCol; col += 1) {
+        sheet.getCell(1, col).border = border
+        sheet.getCell(2, col).border = border
+        sheet.getCell(1, col).alignment = { vertical: 'middle', horizontal: 'center' }
+        sheet.getCell(2, col).alignment = { vertical: 'middle', horizontal: 'center', wrapText: true }
+      }
+
+      for (let row = 1; row <= 2; row += 1) {
+        for (let col = 1; col <= 2; col += 1) {
+          sheet.getCell(row, col).fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFF4CCCC' }
+          }
+          sheet.getCell(row, col).font = { bold: true, color: { argb: 'FF000000' } }
+        }
+      }
+
+      for (let col = 3; col <= lastCol; col += 1) {
+        sheet.getCell(1, col).fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FF00B0F0' }
+        }
+        sheet.getCell(1, col).font = { bold: true, color: { argb: 'FF000000' } }
+        sheet.getCell(2, col).fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FFFFFF00' }
+        }
+        sheet.getCell(2, col).font = { bold: true, color: { argb: 'FF000000' } }
+      }
+
+      if (!matrix.length) {
+        sheet.mergeCells(3, 1, 3, lastCol)
+        const cell = sheet.getCell(3, 1)
+        cell.value = `Tidak ada jadwal untuk kelas ${payload.className}`
+        cell.alignment = { vertical: 'middle', horizontal: 'center' }
+        cell.border = border
+      } else {
+        matrix.forEach((slot, idx) => {
+          const rowIndex = idx + 3
+          sheet.getCell(rowIndex, 1).value = slot.jamKe
+          sheet.getCell(rowIndex, 2).value = slot.rangeLabel
+
+          days.forEach((day, dayIdx) => {
+            const cell = sheet.getCell(rowIndex, 3 + dayIdx)
+            const entries = slot.cellEntries?.[day] || []
+            cell.value = buildScheduleCellExcelValue(entries)
+          })
+
+          for (let col = 1; col <= lastCol; col += 1) {
+            const cell = sheet.getCell(rowIndex, col)
+            cell.border = border
+            cell.alignment = {
+              vertical: 'middle',
+              horizontal: 'center',
+              wrapText: col >= 3
+            }
+          }
+
+          if (slot.isBreakRow) {
+            for (let col = 1; col <= lastCol; col += 1) {
+              sheet.getCell(rowIndex, col).fill = {
+                type: 'pattern',
+                pattern: 'solid',
+                fgColor: { argb: 'FF92D050' }
+              }
+              sheet.getCell(rowIndex, col).font = { bold: true, italic: true }
+            }
+          }
+        })
+      }
+
+      sheet.getColumn(1).width = 8
+      sheet.getColumn(2).width = 14
+      for (let col = 3; col <= lastCol; col += 1) {
+        sheet.getColumn(col).width = 22
+      }
+
+      sheet.views = [{ state: 'frozen', xSplit: 2, ySplit: 2 }]
+      sheet.pageSetup = {
+        orientation: 'landscape',
+        fitToPage: true,
+        fitToWidth: 1,
+        fitToHeight: 0
+      }
+    })
+
+    return workbook.xlsx.writeBuffer()
+  }
+
+  const exportScheduleToPdf = async (payload) => {
+    const jsPDF = await loadJsPdf()
+    const autoTable = await loadAutoTable()
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' })
+    const days = payload.days || DEFAULT_SCHEDULE_DAYS
+    const matrix = payload.matrix || []
+
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(14)
+    doc.text(`Jadwal Pelajaran - ${payload.className}`, 420, 30, { align: 'center' })
+    doc.setFontSize(9)
+    doc.setFont('helvetica', 'normal')
+    doc.text(`Dicetak: ${new Date().toLocaleString('id-ID')}`, 40, 46)
+
+    const head = [
+      [
+        { content: 'JAM KE', rowSpan: 2, styles: { fillColor: [244, 204, 204], textColor: 0 } },
+        { content: 'WAKTU', rowSpan: 2, styles: { fillColor: [244, 204, 204], textColor: 0 } },
+        { content: 'HARI', colSpan: days.length, styles: { fillColor: [0, 176, 240], textColor: 0 } }
+      ],
+      days.map((day) => ({ content: day.toUpperCase(), styles: { fillColor: [255, 255, 0], textColor: 0 } }))
+    ]
+
+    const body = matrix.map((slot) => ([
+      String(slot.jamKe),
+      slot.rangeLabel,
+      ...days.map((day) => slot.cellText[day] || '')
+    ]))
+
+    if (!autoTable && typeof doc.autoTable !== 'function') {
+      throw new Error('Plugin PDF table tidak tersedia.')
+    }
+
+    const tableConfig = {
+      startY: 58,
+      head,
+      body,
+      styles: {
+        font: 'helvetica',
+        fontSize: 8,
+        halign: 'center',
+        valign: 'middle',
+        lineColor: [0, 0, 0],
+        lineWidth: 0.2,
+        overflow: 'linebreak',
+        cellPadding: 3
+      },
+      didParseCell: (hook) => {
+        if (hook.section === 'body' && matrix[hook.row.index]?.isBreakRow) {
+          hook.cell.styles.fillColor = [146, 208, 80]
+          hook.cell.styles.fontStyle = 'bolditalic'
+        }
+      }
+    }
+
+    if (autoTable) {
+      autoTable(doc, tableConfig)
+    } else {
+      doc.autoTable(tableConfig)
+    }
+
+    doc.save(`jadwal-${classSlug(payload.className)}.pdf`)
+  }
+
+  const exportJadwal = async () => {
+    try {
+      setExportingJadwal(true)
+      const targetClassId = exportClassId || kelasSelected
+      if (!targetClassId) {
+        pushToast('error', 'Pilih kelas terlebih dahulu.')
+        return
+      }
+
+      if (targetClassId === '__all__' && exportFormat !== 'excel') {
+        setExportFormat('excel')
+        pushToast('info', 'Export semua kelas hanya tersedia dalam format Excel.')
+        return
+      }
+
+      const payloads = await collectExportPayload()
+      if (!payloads.length) {
+        pushToast('error', 'Tidak ada data jadwal untuk diexport.')
+        return
+      }
+
+      if (exportFormat === 'pdf') {
+        await exportScheduleToPdf(payloads[0])
+        pushToast('success', `Jadwal ${payloads[0].className} berhasil diexport ke PDF (landscape).`)
+        return
+      }
+
+      const buffer = await createExcelScheduleBuffer(payloads)
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
+      const fileName = targetClassId === '__all__'
+        ? `jadwal-semua-kelas-${stamp}.xlsx`
+        : `jadwal-${classSlug(payloads[0].className)}-${stamp}.xlsx`
+      downloadBlob(
+        new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+        fileName
+      )
+      pushToast('success', `Jadwal berhasil diexport ke Excel (${payloads.length} sheet kelas).`)
+    } catch (error) {
+      console.error('Error exporting jadwal:', error)
+      pushToast('error', error?.message || 'Gagal mengekspor jadwal.')
+    } finally {
+      setExportingJadwal(false)
+    }
   }
 
   // Fungsi untuk mencetak jadwal
@@ -1245,14 +1821,10 @@ export default function AKelas() {
                           ))}
                         </select>
                       </div>
-                      
-                      <button
-                        onClick={exportJadwal}
-                        className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 flex items-center space-x-2"
-                      >
-                        <span>📥</span>
-                        <span>Ekspor</span>
-                      </button>
+
+                      <div className="px-3 py-2 text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-lg">
+                        Export jadwal tersedia di panel "Jadwal Pelajaran".
+                      </div>
                     </div>
                   </div>
 
@@ -1533,21 +2105,54 @@ export default function AKelas() {
                         </p>
                       </div>
                       
-                      <div className="flex items-center space-x-3 mt-4 lg:mt-0">
-                        <button
-                          onClick={printJadwal}
-                          className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 flex items-center space-x-2"
-                        >
-                          <span>🖨️</span>
-                          <span>Cetak</span>
-                        </button>
-                        <button
-                          onClick={exportJadwal}
-                          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center space-x-2"
-                        >
-                          <span>📥</span>
-                          <span>Ekspor</span>
-                        </button>
+                      <div className="mt-4 lg:mt-0 w-full lg:w-auto">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          <select
+                            value={exportClassId || kelasSelected || ''}
+                            onChange={(event) => setExportClassId(event.target.value)}
+                            className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900"
+                          >
+                            {kelas.map((item) => (
+                              <option key={item.id} value={item.id}>
+                                {String(item.nama || item.id).toUpperCase()}
+                              </option>
+                            ))}
+                            <option value="__all__">SEMUA KELAS</option>
+                          </select>
+
+                          <select
+                            value={exportFormat}
+                            onChange={(event) => setExportFormat(event.target.value)}
+                            disabled={(exportClassId || kelasSelected) === '__all__'}
+                            className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 disabled:bg-gray-100 disabled:text-gray-400"
+                          >
+                            <option value="excel">Excel (.xlsx)</option>
+                            <option value="pdf">PDF Landscape (.pdf)</option>
+                          </select>
+
+                          <button
+                            onClick={exportJadwal}
+                            disabled={exportingJadwal}
+                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+                          >
+                            <span>📥</span>
+                            <span>{exportingJadwal ? 'Mengekspor...' : 'Ekspor'}</span>
+                          </button>
+                        </div>
+                        {(exportClassId || kelasSelected) === '__all__' && (
+                          <p className="text-xs text-amber-700 mt-2">
+                            Mode "Semua Kelas" otomatis memakai Excel agar data tidak terpotong.
+                          </p>
+                        )}
+                        <div className="flex justify-end mt-2">
+                          <button
+                            onClick={printJadwal}
+                            className="px-3 py-1.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm flex items-center space-x-2"
+                          >
+                            <span>🖨️</span>
+                            <span>Cetak</span>
+                          </button>
+                        </div>
                       </div>
                     </div>
 
@@ -1579,6 +2184,100 @@ export default function AKelas() {
                           </button>
                         </div>
                       )}
+                    </div>
+
+                    <div className="mb-6 rounded-xl border border-blue-200 overflow-hidden">
+                      <div className="px-4 py-3 bg-blue-50 border-b border-blue-200">
+                        <h4 className="font-semibold text-blue-900">Preview Jadwal Format Cetak / Export</h4>
+                        <p className="text-xs text-blue-700 mt-1">
+                          Tata letak ini mengikuti format tabel untuk PDF landscape dan Excel.
+                        </p>
+                      </div>
+                      <div className="overflow-auto">
+                        <table className="min-w-[920px] w-full border-collapse text-sm">
+                          <thead>
+                            <tr>
+                              <th
+                                rowSpan={2}
+                                className="border border-gray-900 bg-rose-100 px-2 py-2 text-center font-semibold text-gray-900"
+                              >
+                                JAM KE
+                              </th>
+                              <th
+                                rowSpan={2}
+                                className="border border-gray-900 bg-rose-100 px-2 py-2 text-center font-semibold text-gray-900"
+                              >
+                                WAKTU
+                              </th>
+                              <th
+                                colSpan={exportDays.length}
+                                className="border border-gray-900 bg-sky-500 px-2 py-2 text-center font-semibold text-gray-900"
+                              >
+                                HARI
+                              </th>
+                            </tr>
+                            <tr>
+                              {exportDays.map((day) => (
+                                <th
+                                  key={day}
+                                  className="border border-gray-900 bg-yellow-300 px-2 py-2 text-center font-semibold text-gray-900"
+                                >
+                                  {day.toUpperCase()}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {jadwalMatrix.length > 0 ? (
+                              jadwalMatrix.map((slot) => (
+                                <tr key={slot.key} className={slot.isBreakRow ? 'bg-lime-300' : 'bg-white'}>
+                                  <td className="border border-gray-900 px-2 py-2 text-center font-semibold">{slot.jamKe}</td>
+                                  <td className="border border-gray-900 px-2 py-2 text-center font-medium whitespace-nowrap">
+                                    {slot.rangeLabel}
+                                  </td>
+                                  {exportDays.map((day) => (
+                                    <td
+                                      key={`${slot.key}-${day}`}
+                                      className="border border-gray-900 px-2 py-2 text-center align-middle"
+                                    >
+                                      {(slot.cellEntries?.[day] || []).length > 0 ? (
+                                        <div className="space-y-1">
+                                          {(slot.cellEntries[day] || []).map((entry, idx) => (
+                                            <div
+                                              key={`${slot.key}-${day}-${idx}-${entry.mapel || entry.guruNama || 'jadwal'}`}
+                                              className={idx > 0 ? 'border-t border-gray-300 pt-1' : ''}
+                                            >
+                                              <p className="font-medium text-gray-900 leading-tight">
+                                                {entry.mapel || '-'}
+                                              </p>
+                                              {entry.guruNama ? (
+                                                <p className="text-[11px] text-gray-600 leading-tight mt-0.5">
+                                                  {entry.guruNama}
+                                                </p>
+                                              ) : null}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      ) : (
+                                        '-'
+                                      )}
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))
+                            ) : (
+                              <tr>
+                                <td
+                                  colSpan={2 + exportDays.length}
+                                  className="border border-gray-900 px-3 py-6 text-center text-gray-500"
+                                >
+                                  Belum ada jadwal untuk kelas ini.
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
 
                     {/* Form Tambah Jadwal */}

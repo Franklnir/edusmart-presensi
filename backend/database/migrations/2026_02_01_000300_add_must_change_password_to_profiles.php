@@ -9,7 +9,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('profiles', function (Blueprint $table) {
-            if (!Schema::hasColumn('profiles', 'must_change_password')) {
+            if (! Schema::hasColumn('profiles', 'must_change_password')) {
                 $table->boolean('must_change_password')->default(false)->after('status');
             }
         });

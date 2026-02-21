@@ -56,11 +56,11 @@ const ensureProfile = async (user) => {
     const { error: insertError } = await supabase.from('profiles').insert(payload)
     if (insertError) return { error: insertError }
 
-    ;({ data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', user.id)
-      .single())
+      ; ({ data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single())
 
     if (error) return { error }
     return { profile: data }
@@ -490,5 +490,26 @@ export const useAuthStore = create((set, get) => ({
       isActive: profile.status === 'active',
       isNonaktif: profile.status === 'nonaktif'
     }
+  },
+
+  /**
+   * IDOR Guard (defense-in-depth):
+   * Validasi bahwa resourceUserId milik user yang sedang login.
+   * Gunakan sebelum operasi sensitif pada resource milik user.
+   * @param {string} resourceUserId - ID pemilik resource
+   * @param {string} [context] - Konteks untuk logging
+   * @returns {boolean} true jika cocok, false jika mismatch
+   */
+  assertOwner: (resourceUserId, context = '') => {
+    const { user } = get()
+    if (!user?.id) {
+      logError(`[IDOR] assertOwner: No user logged in. Context: ${context}`)
+      return false
+    }
+    if (String(resourceUserId) !== String(user.id)) {
+      logError(`[IDOR] assertOwner MISMATCH: expected=${user.id}, got=${resourceUserId}. Context: ${context}`)
+      return false
+    }
+    return true
   }
 }))

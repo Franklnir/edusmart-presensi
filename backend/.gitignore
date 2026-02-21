@@ -30,11 +30,20 @@ build/
 vendor/
 storage/*.key
 storage/pail
+storage/logs/*
+!storage/logs/.gitignore
+storage/framework/views/*
+!storage/framework/views/.gitignore
 .phpactor.json
 .phpunit.result.cache
 auth.json
 Homestead.json
 Homestead.yaml
+
+# Misplaced artifacts (absolute-path dumps) must never go to web root
+public/D:*
+public/*storage*logs*
+public/*storage*framework*views*
 
 # =========================
 # Environment (SECURE)

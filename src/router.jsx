@@ -1,109 +1,121 @@
-// src/AppRoutes.jsx
-import React from 'react'
-import { Routes, Route, Navigate } from 'react-router-dom'
+import React, { Suspense, lazy } from 'react'
+import { Navigate, Route, Routes } from 'react-router-dom'
+import AdminLockGate from './components/AdminLockGate'
 import ProtectedRoute from './components/ProtectedRoute'
 import RoleGate from './components/RoleGate'
-import AdminLockGate from './components/AdminLockGate'
 
-import Login from './pages/auth/Login'
-import Register from './pages/auth/Register'
-import ForgotPassword from './pages/auth/ForgotPassword'
-import ResetPassword from './pages/auth/ResetPassword'
+const Login = lazy(() => import('./pages/auth/Login'))
+const Register = lazy(() => import('./pages/auth/Register'))
+const ForgotPassword = lazy(() => import('./pages/auth/ForgotPassword'))
+const ResetPassword = lazy(() => import('./pages/auth/ResetPassword'))
 
-// Siswa
-import SHome from './pages/siswa/Home'
-import SAbsensi from './pages/siswa/Absensi'
-import STugas from './pages/siswa/Tugas'
-import SEditProfile from './pages/siswa/EditProfile'
-import SQuiz from './pages/siswa/Quiz'
+const SHome = lazy(() => import('./pages/siswa/Home'))
+const SAbsensi = lazy(() => import('./pages/siswa/Absensi'))
+const STugas = lazy(() => import('./pages/siswa/Tugas'))
+const SEditProfile = lazy(() => import('./pages/siswa/EditProfile'))
+const SQuiz = lazy(() => import('./pages/siswa/Quiz'))
 
-// Guru
-import GJadwal from './pages/guru/JadwalGuru'
-import GAbsensi from './pages/guru/AbsensiGuru'
-import GTugas from './pages/guru/TugasGuru'
-import GLaporan from './pages/guru/Laporan'
-import GProfile from './pages/guru/profile'
-import GQuiz from './pages/guru/Quiz'
+const GJadwal = lazy(() => import('./pages/guru/JadwalGuru'))
+const GAbsensi = lazy(() => import('./pages/guru/AbsensiGuru'))
+const GTugas = lazy(() => import('./pages/guru/TugasGuru'))
+const GLaporan = lazy(() => import('./pages/guru/Laporan'))
+const GProfile = lazy(() => import('./pages/guru/profile'))
+const GQuiz = lazy(() => import('./pages/guru/Quiz'))
 
-// Admin
-import AHome from './pages/admin/Home'
-import AKelas from './pages/admin/Kelas'
-import AGuru from './pages/admin/Guru'
-import ASiswa from './pages/admin/Siswa'
-import AScan from './pages/admin/Scan'
-import Sertifikat from './pages/admin/Sertifikat'
-import APengaturan from './pages/admin/pengaturan'
-import ATenants from './pages/admin/Tenants'
-import ASuperAdmins from './pages/admin/SuperAdmins'
+const AHome = lazy(() => import('./pages/admin/Home'))
+const AKelas = lazy(() => import('./pages/admin/Kelas'))
+const AGuru = lazy(() => import('./pages/admin/Guru'))
+const ASiswa = lazy(() => import('./pages/admin/Siswa'))
+const AScan = lazy(() => import('./pages/admin/Scan'))
+const Sertifikat = lazy(() => import('./pages/admin/Sertifikat'))
+const ABackup = lazy(() => import('./pages/admin/Backup'))
+const APengaturan = lazy(() => import('./pages/admin/pengaturan'))
+const ATenants = lazy(() => import('./pages/admin/Tenants'))
+const ASuperAdmins = lazy(() => import('./pages/admin/SuperAdmins'))
+const AApprovals = lazy(() => import('./pages/admin/Approvals'))
+const AAuditTrail = lazy(() => import('./pages/admin/AuditTrail'))
 
-const AppRoutes = () => {
-  return (
-    <Routes>
-      {/* Auth (tidak butuh login) */}
-      <Route path="/login" element={<Login />} />
-      <Route path="/register" element={<Register />} />
-      <Route path="/forgot-password" element={<ForgotPassword />} />
-      <Route path="/reset-password" element={<ResetPassword />} />
+const RouteFallback = () => (
+  <div className="w-full min-h-[40vh] grid place-items-center">
+    <div className="text-sm text-slate-500">Memuat halaman...</div>
+  </div>
+)
 
-      {/* SISWA */}
-      <Route
-        element={
-          <ProtectedRoute>
-            <RoleGate allow={['siswa']} />
-          </ProtectedRoute>
-        }
-      >
-        <Route path="/siswa/home" element={<SHome />} />
-        <Route path="/siswa/absensi" element={<SAbsensi />} />
-        <Route path="/siswa/quiz" element={<SQuiz />} />
-        <Route path="/siswa/quiz/session/:quizId" element={<SQuiz />} />
-        <Route path="/siswa/tugas" element={<STugas />} />
-        <Route path="/siswa/profile" element={<SEditProfile />} />
+const lazyElement = (Component) => (
+  <Suspense fallback={<RouteFallback />}>
+    <Component />
+  </Suspense>
+)
+
+const AppRoutes = () => (
+  <Routes>
+    {/* Auth (tidak butuh login) */}
+    <Route path="/login" element={lazyElement(Login)} />
+    <Route path="/register" element={lazyElement(Register)} />
+    <Route path="/forgot-password" element={lazyElement(ForgotPassword)} />
+    <Route path="/reset-password" element={lazyElement(ResetPassword)} />
+
+    {/* SISWA */}
+    <Route
+      element={
+        <ProtectedRoute>
+          <RoleGate allow={['siswa']} />
+        </ProtectedRoute>
+      }
+    >
+      <Route path="/siswa/home" element={lazyElement(SHome)} />
+      <Route path="/siswa/absensi" element={lazyElement(SAbsensi)} />
+      <Route path="/siswa/quiz" element={lazyElement(SQuiz)} />
+      <Route path="/siswa/quiz/session/:quizId" element={lazyElement(SQuiz)} />
+      <Route path="/siswa/tugas" element={lazyElement(STugas)} />
+      <Route path="/siswa/profile" element={lazyElement(SEditProfile)} />
+    </Route>
+
+    {/* GURU */}
+    <Route
+      element={
+        <ProtectedRoute>
+          <RoleGate allow={['guru']} />
+        </ProtectedRoute>
+      }
+    >
+      <Route path="/guru/jadwal" element={lazyElement(GJadwal)} />
+      <Route path="/guru/absensi" element={lazyElement(GAbsensi)} />
+      <Route path="/guru/quiz" element={lazyElement(GQuiz)} />
+      <Route path="/guru/tugas" element={lazyElement(GTugas)} />
+      <Route path="/guru/laporan" element={lazyElement(GLaporan)} />
+      <Route path="/guru/siswa" element={lazyElement(ASiswa)} />
+      <Route path="/guru/profile" element={lazyElement(GProfile)} />
+    </Route>
+
+    {/* ADMIN */}
+    <Route
+      element={
+        <ProtectedRoute>
+          <RoleGate allow={['admin']} />
+        </ProtectedRoute>
+      }
+    >
+      <Route path="/admin/pengaturan" element={lazyElement(APengaturan)} />
+      <Route path="/admin/tenants" element={lazyElement(ATenants)} />
+      <Route path="/admin/super-admins" element={lazyElement(ASuperAdmins)} />
+      <Route path="/admin/audit-trail" element={lazyElement(AAuditTrail)} />
+      <Route element={<AdminLockGate />}>
+        <Route path="/admin/home" element={lazyElement(AHome)} />
+        <Route path="/admin/kelas" element={lazyElement(AKelas)} />
+        <Route path="/admin/guru" element={lazyElement(AGuru)} />
+        <Route path="/admin/siswa" element={lazyElement(ASiswa)} />
+        <Route path="/admin/scan" element={lazyElement(AScan)} />
+        <Route path="/admin/backup" element={lazyElement(ABackup)} />
+        <Route path="/admin/approvals" element={lazyElement(AApprovals)} />
+        <Route path="/admin/sertifikat" element={lazyElement(Sertifikat)} />
       </Route>
+    </Route>
 
-      {/* GURU */}
-      <Route
-        element={
-          <ProtectedRoute>
-            <RoleGate allow={['guru']} />
-          </ProtectedRoute>
-        }
-      >
-        <Route path="/guru/jadwal" element={<GJadwal />} />
-        <Route path="/guru/absensi" element={<GAbsensi />} />
-        <Route path="/guru/quiz" element={<GQuiz />} />
-        <Route path="/guru/tugas" element={<GTugas />} />
-        <Route path="/guru/laporan" element={<GLaporan />} />
-        <Route path="/guru/siswa" element={<ASiswa />} />
-        <Route path="/guru/profile" element={<GProfile />} />
-      </Route>
-
-      {/* ADMIN */}
-      <Route
-        element={
-          <ProtectedRoute>
-            <RoleGate allow={['admin']} />
-          </ProtectedRoute>
-        }
-      >
-        <Route path="/admin/pengaturan" element={<APengaturan />} />
-        <Route path="/admin/tenants" element={<ATenants />} />
-        <Route path="/admin/super-admins" element={<ASuperAdmins />} />
-        <Route element={<AdminLockGate />}>
-          <Route path="/admin/home" element={<AHome />} />
-          <Route path="/admin/kelas" element={<AKelas />} />
-          <Route path="/admin/guru" element={<AGuru />} />
-          <Route path="/admin/siswa" element={<ASiswa />} />
-          <Route path="/admin/scan" element={<AScan />} />
-          <Route path="/admin/sertifikat" element={<Sertifikat />} />
-        </Route>
-      </Route>
-
-      {/* Default - Redirect ke login */}
-      <Route path="/" element={<Navigate to="/login" replace />} />
-      <Route path="*" element={<Navigate to="/login" replace />} />
-    </Routes>
-  )
-}
+    {/* Default - Redirect ke login */}
+    <Route path="/" element={<Navigate to="/login" replace />} />
+    <Route path="*" element={<Navigate to="/login" replace />} />
+  </Routes>
+)
 
 export default AppRoutes

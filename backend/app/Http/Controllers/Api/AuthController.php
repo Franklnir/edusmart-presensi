@@ -5,31 +5,32 @@ namespace App\Http\Controllers\Api;
 use App\Models\Profile;
 use App\Models\User;
 use Illuminate\Contracts\Auth\StatefulGuard;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Http\RedirectResponse;
 
 class AuthController extends ApiController
 {
     public function me(Request $request)
     {
         $user = $this->user($request);
-        if (!$user) {
+        if (! $user) {
             return response()->json(['data' => null]);
         }
 
         $profile = $this->profile($request);
+
         return response()->json([
             'data' => [
                 'user' => $user,
                 'profile' => $profile,
-            ]
+            ],
         ]);
     }
 
@@ -47,7 +48,7 @@ class AuthController extends ApiController
         }
 
         $tenantId = $this->tenantId($request);
-        if (!$tenantId) {
+        if (! $tenantId) {
             return response()->json(['error' => 'Tenant tidak valid'], 400);
         }
 
@@ -79,6 +80,7 @@ class AuthController extends ApiController
                 'tenant_id' => $tenantId,
                 'error' => $resolved['error'],
             ]);
+
             return response()->json(['error' => $resolved['error']], $resolved['code']);
         }
         $email = $resolved['email'];
@@ -95,35 +97,38 @@ class AuthController extends ApiController
             $identityUserId ? (string) $identityUserId : null,
             $email
         );
-        if ($isSuperAdminIdentity && !$this->isAdminHost($host)) {
+        if ($isSuperAdminIdentity && ! $this->isAdminHost($host)) {
             $this->registerFailedLoginAttempt($throttleKey);
             $this->logAuthEvent($request, 'login_denied_super_admin_wrong_host', [
                 'email' => $email,
                 'tenant_id' => $tenantId,
                 'host' => $host,
             ]);
+
             return response()->json(['error' => $this->superAdminHostMessage()], 403);
         }
 
-        if (!$isSuperAdminIdentity && $this->isAdminHost($host)) {
+        if (! $isSuperAdminIdentity && $this->isAdminHost($host)) {
             $this->registerFailedLoginAttempt($throttleKey);
             $this->logAuthEvent($request, 'login_denied_non_super_admin_on_admin_host', [
                 'email' => $email,
                 'tenant_id' => $tenantId,
                 'host' => $host,
             ]);
+
             return response()->json([
                 'error' => 'Login admin sekolah/guru/siswa harus lewat subdomain sekolah masing-masing.',
             ], 403);
         }
 
-        if (!Auth::attempt($credentials)) {
+        if (! Auth::attempt($credentials)) {
             $this->registerFailedLoginAttempt($throttleKey);
             $this->logAuthEvent($request, 'login_failed_invalid_credentials', [
                 'email' => $email,
                 'tenant_id' => $tenantId,
                 'host' => $host,
             ]);
+
             return response()->json(['error' => 'Email/NIS atau password salah'], 401);
         }
 
@@ -134,7 +139,7 @@ class AuthController extends ApiController
         $user = $request->user();
         $profile = $this->profile($request);
 
-        if (!$profile || $profile->tenant_id !== $tenantId) {
+        if (! $profile || $profile->tenant_id !== $tenantId) {
             $this->logoutWebSession($request);
             $this->registerFailedLoginAttempt($throttleKey);
             $this->logAuthEvent($request, 'login_failed_tenant_mismatch', [
@@ -142,6 +147,7 @@ class AuthController extends ApiController
                 'tenant_id' => $tenantId,
                 'host' => $host,
             ]);
+
             return response()->json(['error' => 'Akun tidak terdaftar di sekolah ini'], 403);
         }
 
@@ -155,8 +161,9 @@ class AuthController extends ApiController
             ]);
             $message = 'Akun ini dinonaktifkan. Hubungi administrator.';
             if ($profile->alasan_nonaktif) {
-                $message .= ' Alasan: ' . $profile->alasan_nonaktif;
+                $message .= ' Alasan: '.$profile->alasan_nonaktif;
             }
+
             return response()->json(['error' => $message], 403);
         }
 
@@ -174,16 +181,17 @@ class AuthController extends ApiController
             'data' => [
                 'user' => $user,
                 'profile' => $profile,
-            ]
+            ],
         ]);
     }
 
     private function resolveLoginEmail(string $identifier, string $tenantId): array
     {
         if (str_contains($identifier, '@')) {
-            if (!filter_var($identifier, FILTER_VALIDATE_EMAIL)) {
+            if (! filter_var($identifier, FILTER_VALIDATE_EMAIL)) {
                 return ['error' => 'Format email tidak valid', 'code' => 422];
             }
+
             return ['email' => strtolower($identifier)];
         }
 
@@ -193,7 +201,7 @@ class AuthController extends ApiController
             ->where('nis', $identifier)
             ->first();
 
-        if (!$profile) {
+        if (! $profile) {
             return ['error' => 'NIS atau password salah', 'code' => 401];
         }
 
@@ -212,10 +220,11 @@ class AuthController extends ApiController
             return ['error' => 'Akun guru harus login menggunakan email', 'code' => 403];
         }
 
-        if (!$profile->must_change_password) {
+        if (! $profile->must_change_password) {
             if (Str::endsWith($email, '@import.local')) {
                 return ['error' => 'Email akun belum aktif. Hubungi admin.', 'code' => 403];
             }
+
             return ['error' => 'Gunakan email untuk login', 'code' => 403];
         }
 
@@ -225,7 +234,8 @@ class AuthController extends ApiController
     private function loginThrottleKey(Request $request, string $tenantId, string $identifier): string
     {
         $normalized = strtolower(trim($identifier));
-        return 'auth-login|' . $tenantId . '|' . $request->ip() . '|' . sha1($normalized);
+
+        return 'auth-login|'.$tenantId.'|'.$request->ip().'|'.sha1($normalized);
     }
 
     private function maxLoginAttempts(): int
@@ -267,7 +277,7 @@ class AuthController extends ApiController
         $allowRoot = (bool) config('tenancy.allow_root_for_super_admin', false);
 
         if ($root !== '') {
-            $adminHost = $adminSubdomain !== '' ? ($adminSubdomain . '.' . $root) : $root;
+            $adminHost = $adminSubdomain !== '' ? ($adminSubdomain.'.'.$root) : $root;
             if ($host === $adminHost) {
                 return true;
             }
@@ -276,7 +286,7 @@ class AuthController extends ApiController
             }
         }
 
-        if ($host === $adminSubdomain . '.localhost' || $host === $adminSubdomain . '.127.0.0.1') {
+        if ($host === $adminSubdomain.'.localhost' || $host === $adminSubdomain.'.127.0.0.1') {
             return true;
         }
         if ($allowRoot && ($host === 'localhost' || $host === '127.0.0.1')) {
@@ -294,8 +304,9 @@ class AuthController extends ApiController
             return 'Akun super admin hanya bisa login dari domain admin.';
         }
 
-        $adminHost = $adminSubdomain !== '' ? ($adminSubdomain . '.' . $root) : $root;
-        return 'Akun super admin hanya bisa login dari ' . $adminHost;
+        $adminHost = $adminSubdomain !== '' ? ($adminSubdomain.'.'.$root) : $root;
+
+        return 'Akun super admin hanya bisa login dari '.$adminHost;
     }
 
     private function logAuthEvent(
@@ -349,15 +360,16 @@ class AuthController extends ApiController
         }
 
         // Security: Rate Limiting untuk mencegah spam registrasi
-        $throttleKey = 'auth-register|' . $request->ip();
+        $throttleKey = 'auth-register|'.$request->ip();
         if (RateLimiter::tooManyAttempts($throttleKey, 5)) {
             $seconds = RateLimiter::availableIn($throttleKey);
+
             return response()->json(['error' => "Terlalu banyak percobaan registrasi. Coba lagi dalam {$seconds} detik."], 429);
         }
         RateLimiter::hit($throttleKey, 600); // Decay 10 menit
 
         $tenantId = $this->tenantId($request);
-        if (!$tenantId) {
+        if (! $tenantId) {
             return response()->json(['error' => 'Tenant tidak valid'], 400);
         }
 
@@ -369,7 +381,7 @@ class AuthController extends ApiController
         }
 
         $allowAdminCreate = $this->isAdmin($request);
-        if (!$allowAdminCreate) {
+        if (! $allowAdminCreate) {
             $settings = DB::table('settings')->where('tenant_id', $tenantId)->orderBy('id')->first();
             $allow = $role !== 'admin';
             if ($role === 'siswa' && $settings && isset($settings->registrasi_siswa_aktif)) {
@@ -382,7 +394,7 @@ class AuthController extends ApiController
                 $allow = (bool) $settings->registrasi_admin_aktif;
             }
 
-            if (!$allow) {
+            if (! $allow) {
                 return response()->json(['error' => 'Registrasi role ini tidak dibuka'], 403);
             }
         }
@@ -437,9 +449,10 @@ class AuthController extends ApiController
         }
 
         // Security: Rate Limiting untuk mencegah spam email
-        $throttleKey = 'auth-forgot-password|' . $request->ip();
+        $throttleKey = 'auth-forgot-password|'.$request->ip();
         if (RateLimiter::tooManyAttempts($throttleKey, 3)) {
             $seconds = RateLimiter::availableIn($throttleKey);
+
             return response()->json(['error' => "Terlalu banyak permintaan. Coba lagi dalam {$seconds} detik."], 429);
         }
         RateLimiter::hit($throttleKey, 300); // Decay 5 menit
@@ -453,6 +466,7 @@ class AuthController extends ApiController
             $status = Password::sendResetLink(['email' => $email]);
         } catch (\Throwable $e) {
             report($e);
+
             return response()->json([
                 'error' => 'Layanan email sedang bermasalah. Coba lagi beberapa menit.',
             ], 503);
@@ -463,6 +477,7 @@ class AuthController extends ApiController
         }
 
         RateLimiter::clear($throttleKey);
+
         return response()->json(['data' => 'Link reset password dikirim']);
     }
 
@@ -481,9 +496,10 @@ class AuthController extends ApiController
         }
 
         // Security: Rate Limiting untuk mencegah spam email
-        $throttleKey = 'auth-forgot-password|' . $request->ip();
+        $throttleKey = 'auth-forgot-password|'.$request->ip();
         if (RateLimiter::tooManyAttempts($throttleKey, 3)) {
             $seconds = RateLimiter::availableIn($throttleKey);
+
             return response()->json(['error' => "Terlalu banyak permintaan. Coba lagi dalam {$seconds} detik."], 429);
         }
         RateLimiter::hit($throttleKey, 300); // Decay 5 menit
@@ -528,7 +544,9 @@ class AuthController extends ApiController
         }
 
         $user = $request->user();
-        if (!$user) return response()->json(['error' => 'Unauthenticated'], 401);
+        if (! $user) {
+            return response()->json(['error' => 'Unauthenticated'], 401);
+        }
         if ($this->isSuperAdminByIdentity((string) $user->id, (string) ($user->email ?? ''))) {
             return response()->json(['error' => 'Reset password untuk akun super admin dinonaktifkan'], 403);
         }
@@ -556,12 +574,14 @@ class AuthController extends ApiController
         }
 
         $user = $request->user();
-        if (!$user) return response()->json(['error' => 'Unauthenticated'], 401);
+        if (! $user) {
+            return response()->json(['error' => 'Unauthenticated'], 401);
+        }
         if ($this->isSuperAdminByIdentity((string) $user->id, (string) ($user->email ?? ''))) {
             return response()->json(['error' => 'Reset password untuk akun super admin dinonaktifkan'], 403);
         }
         $tenantId = $this->tenantId($request);
-        if (!$tenantId) {
+        if (! $tenantId) {
             return response()->json(['error' => 'Tenant tidak valid'], 400);
         }
 
@@ -599,7 +619,7 @@ class AuthController extends ApiController
     public function resendVerificationEmail(Request $request)
     {
         $user = $request->user();
-        if (!$user) {
+        if (! $user) {
             return response()->json(['error' => 'Unauthenticated'], 401);
         }
 
@@ -608,9 +628,10 @@ class AuthController extends ApiController
         }
 
         // Security: Rate Limiting untuk resend verification
-        $throttleKey = 'auth-resend-verification|' . $user->id;
+        $throttleKey = 'auth-resend-verification|'.$user->id;
         if (RateLimiter::tooManyAttempts($throttleKey, 3)) {
             $seconds = RateLimiter::availableIn($throttleKey);
+
             return response()->json(['error' => "Terlalu banyak permintaan. Coba lagi dalam {$seconds} detik."], 429);
         }
         RateLimiter::hit($throttleKey, 300);
@@ -619,6 +640,7 @@ class AuthController extends ApiController
             $user->sendEmailVerificationNotification();
         } catch (\Throwable $e) {
             report($e);
+
             return response()->json([
                 'error' => 'Layanan email sedang bermasalah. Coba lagi beberapa menit.',
             ], 503);
@@ -629,27 +651,27 @@ class AuthController extends ApiController
 
     public function verifyEmail(Request $request, string $id, string $hash): RedirectResponse
     {
-        if (!$request->hasValidSignature()) {
+        if (! $request->hasValidSignature()) {
             return redirect()->away($this->frontendAuthUrl('/login', [
                 'verified' => 'expired',
             ]));
         }
 
         $user = User::query()->find($id);
-        if (!$user) {
+        if (! $user) {
             return redirect()->away($this->frontendAuthUrl('/login', [
                 'verified' => 'invalid',
             ]));
         }
 
         $expectedHash = sha1((string) $user->getEmailForVerification());
-        if (!hash_equals($expectedHash, (string) $hash)) {
+        if (! hash_equals($expectedHash, (string) $hash)) {
             return redirect()->away($this->frontendAuthUrl('/login', [
                 'verified' => 'invalid',
             ]));
         }
 
-        if (!$user->hasVerifiedEmail()) {
+        if (! $user->hasVerifiedEmail()) {
             $user->markEmailAsVerified();
         }
 
@@ -684,10 +706,48 @@ class AuthController extends ApiController
 
     private function frontendAuthUrl(string $path, array $query = []): string
     {
-        $base = rtrim((string) config('app.frontend_url', config('app.url')), '/');
-        $suffix = '/' . ltrim($path, '/');
+        $base = $this->safeFrontendBaseUrl();
+        $suffix = '/'.ltrim($path, '/');
         $qs = http_build_query($query);
+
         return $qs !== '' ? "{$base}{$suffix}?{$qs}" : "{$base}{$suffix}";
+    }
+
+    private function safeFrontendBaseUrl(): string
+    {
+        $candidates = [
+            (string) config('app.frontend_url', ''),
+            (string) config('app.url', ''),
+        ];
+
+        foreach ($candidates as $candidate) {
+            $candidate = trim($candidate);
+            if ($candidate === '') {
+                continue;
+            }
+
+            $parts = parse_url($candidate);
+            if (! is_array($parts)) {
+                continue;
+            }
+
+            $scheme = strtolower((string) ($parts['scheme'] ?? ''));
+            $host = trim((string) ($parts['host'] ?? ''));
+            if ($host === '' || ! in_array($scheme, ['http', 'https'], true)) {
+                continue;
+            }
+
+            $port = isset($parts['port']) ? ':'.((int) $parts['port']) : '';
+            $safeBase = $scheme.'://'.$host.$port;
+            $basePath = trim((string) ($parts['path'] ?? ''));
+            if ($basePath !== '' && $basePath !== '/') {
+                $safeBase .= '/'.trim($basePath, '/');
+            }
+
+            return rtrim($safeBase, '/');
+        }
+
+        return 'http://localhost:5173';
     }
 
     private function isReservedSuperAdminEmail(string $email): bool

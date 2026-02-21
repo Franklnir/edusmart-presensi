@@ -6,29 +6,29 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check": "npm run build",
+    "security:audit": "npm audit --omit=dev --audit-level=high",
+    "security:audit:full": "npm audit"
+  },
+  "engines": {
+    "node": ">=20.19.0"
   },
   "dependencies": {
-    "appwrite": "^21.4.0",
     "browser-image-compression": "^2.0.2",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
-    "exceljs": "^4.4.0",
-    "jspdf": "^3.0.4",
-    "jspdf-autotable": "^5.0.2",
+    "jspdf": "^4.2.0",
+    "jspdf-autotable": "^5.0.7",
     "lucide-react": "^0.554.0",
     "react": "^18.3.1",
     "react-barcode": "^1.6.1",
     "react-dom": "^18.3.1",
     "react-dropzone": "^14.3.8",
-    "react-qr-reader": "^3.0.0-beta-1",
-    "react-query": "^3.39.3",
-    "react-router-dom": "^6.30.2",
+    "react-router-dom": "^6.30.3",
     "react-to-print": "^3.2.0",
-    "swiper": "^12.0.3",
+    "swiper": "^12.1.2",
     "uuid": "^9.0.1",
-    "xlsx": "^0.18.5",
-    "xlsx-js-style": "^1.2.0",
     "zustand": "^4.5.7"
   },
   "devDependencies": {
@@ -37,11 +37,9 @@
     "@vitejs/plugin-react": "^5.1.0",
     "autoprefixer": "^10.4.20",
     "baseline-browser-mapping": "^2.9.19",
-    "envify": "^4.1.0",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.14",
     "terser": "^5.44.1",
-    "uglifyify": "^5.0.2",
-    "vite": "^5.4.10"
+    "vite": "^6.4.1"
   }
 }

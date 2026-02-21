@@ -70,11 +70,13 @@ const TENANT_SLUG = import.meta.env.VITE_TENANT_SLUG || deriveTenantSlug(RUNTIME
 /* ===================== BUCKETS ===================== */
 export const ASSIGNMENT_BUCKET = 'assignments'
 export const PROFILE_BUCKET = 'profile-photos'
+export const QUIZ_MEDIA_BUCKET = 'quiz-media'
 export const CERT_BUCKET = 'certificates'
 export const CERT_TEMPLATE_BUCKET = 'certificate-templates'
 
 const PROFILE_IMAGE_MAX_BYTES = 50 * 1024
 const ASSIGNMENT_IMAGE_MAX_BYTES = 100 * 1024
+const QUIZ_MEDIA_IMAGE_MAX_BYTES = 70 * 1024
 const KNOWN_IMAGE_EXTENSIONS = [
   'jpg',
   'jpeg',
@@ -178,6 +180,10 @@ const resolveImageUploadLimitBytes = (bucket, path, file) => {
     }
     // fallback aman untuk bucket foto profil
     return PROFILE_IMAGE_MAX_BYTES
+  }
+
+  if (bucket === QUIZ_MEDIA_BUCKET) {
+    return QUIZ_MEDIA_IMAGE_MAX_BYTES
   }
 
   return null
@@ -530,6 +536,19 @@ class QueryBuilder {
 
     let data = res.raw?.data ?? res.data
 
+    if (data && typeof data === 'object' && data.approval_required) {
+      return {
+        data,
+        error: makeError(
+          data?.message ||
+            'Perubahan kritikal menunggu approval. Cek menu Approval.',
+          202,
+          'APPROVAL_REQUIRED'
+        ),
+        count
+      }
+    }
+
     if (this.singleFlag) {
       if (Array.isArray(data)) {
         if (data.length === 1) {
@@ -759,8 +778,56 @@ const auth = {
       const res = await apiFetch(`/api/admin/users/${userId}`, { method: 'DELETE' })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
+    async backup(options = {}) {
+      const params = new URLSearchParams()
+      const mode = String(options?.mode || '').trim()
+      const monthsRaw = options?.months
+
+      if (mode) {
+        params.set('mode', mode)
+      }
+
+      if (Number.isFinite(Number(monthsRaw)) && Number(monthsRaw) > 0) {
+        params.set('months', String(Math.max(1, Math.min(12, Math.trunc(Number(monthsRaw))))))
+      }
+
+      const query = params.toString() ? `?${params.toString()}` : ''
+      const res = await apiFetch(`/api/admin/backup${query}`, { method: 'GET' })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
     async monitoring() {
       const res = await apiFetch('/api/admin/monitoring', { method: 'GET' })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async restoreBackup(payload) {
+      const res = await apiFetch('/api/admin/backup/restore', {
+        method: 'POST',
+        body: payload
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async approvals(params = {}) {
+      const query = new URLSearchParams()
+      Object.entries(params || {}).forEach(([key, value]) => {
+        if (value === undefined || value === null || value === '') return
+        query.set(String(key), String(value))
+      })
+      const suffix = query.toString() ? `?${query.toString()}` : ''
+      const res = await apiFetch(`/api/admin/approvals${suffix}`, { method: 'GET' })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async approveApproval(id, payload = {}) {
+      const res = await apiFetch(`/api/admin/approvals/${id}/approve`, {
+        method: 'POST',
+        body: payload
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async rejectApproval(id, payload = {}) {
+      const res = await apiFetch(`/api/admin/approvals/${id}/reject`, {
+        method: 'POST',
+        body: payload
+      })
       return { data: res.raw?.data ?? res.data, error: res.error }
     }
   },
@@ -789,6 +856,20 @@ const auth = {
       const res = await apiFetch(`/api/super/tenants/${id}/backup${query}`, { method: 'GET' })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
+    async restoreTenant(id, payload = {}) {
+      const res = await apiFetch(`/api/super/tenants/${id}/restore`, {
+        method: 'POST',
+        body: payload
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async updateTenantStatus(id, payload = {}) {
+      const res = await apiFetch(`/api/super/tenants/${id}/status`, {
+        method: 'PATCH',
+        body: payload
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
     async createTenant(payload) {
       const res = await apiFetch('/api/super/tenants', { method: 'POST', body: payload })
       return { data: res.raw?.data ?? res.data, error: res.error }
@@ -811,6 +892,16 @@ const auth = {
     async deleteAdmin(id) {
       const res = await apiFetch(`/api/super/admins/${id}`, { method: 'DELETE' })
       return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async auditTrail(params = {}) {
+      const query = new URLSearchParams()
+      Object.entries(params || {}).forEach(([key, value]) => {
+        if (value === undefined || value === null || value === '') return
+        query.set(String(key), String(value))
+      })
+      const suffix = query.toString() ? `?${query.toString()}` : ''
+      const res = await apiFetch(`/api/super/audit-trail${suffix}`, { method: 'GET' })
+      return { data: res.raw?.data ?? res.data, error: res.error }
     }
   },
   quiz: {
@@ -825,6 +916,18 @@ const auth = {
     async retakeHistory(quizId) {
       const id = encodeURIComponent(String(quizId || ''))
       const res = await apiFetch(`/api/quiz/retake-history?quiz_id=${id}`, { method: 'GET' })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async restoreRetakeScore(payload) {
+      const res = await apiFetch('/api/quiz/restore-retake-score', { method: 'POST', body: payload })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async gradeEssay(payload) {
+      const res = await apiFetch('/api/quiz/grade-essay', { method: 'POST', body: payload })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async completeEssayReview(payload) {
+      const res = await apiFetch('/api/quiz/complete-essay-review', { method: 'POST', body: payload })
       return { data: res.raw?.data ?? res.data, error: res.error }
     }
   }
@@ -862,7 +965,22 @@ export const extractObjectPath = (bucket, urlOrPath) => {
     return raw
   }
 
-  if (!isHttpUrl(urlOrPath)) return normalizePathString(urlOrPath)
+  if (!isHttpUrl(urlOrPath)) {
+    const rawInput = String(urlOrPath || '').trim()
+    if (/^\/?api\/storage\/object\?/i.test(rawInput)) {
+      try {
+        const baseOrigin = typeof window !== 'undefined' && window.location?.origin
+          ? window.location.origin
+          : 'http://localhost'
+        const relativeUrl = new URL(rawInput, baseOrigin)
+        const queryPath = relativeUrl.searchParams.get('path')
+        if (queryPath) return normalizePathString(queryPath)
+      } catch {
+        // fallback to default normalization below
+      }
+    }
+    return normalizePathString(urlOrPath)
+  }
 
   try {
     const u = new URL(urlOrPath)

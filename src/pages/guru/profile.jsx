@@ -445,6 +445,112 @@ export default function ProfileGuru() {
     }
   }
 
+  const securityAccountCard = canManageAccount ? (
+    <div
+      className={`rounded-2xl border p-6 shadow-sm ${
+        needsAccountSetup
+          ? 'border-amber-200/70 bg-amber-50/80'
+          : 'border-blue-200/70 bg-blue-50/70'
+      }`}
+    >
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+        <div>
+          <h2
+            className={`text-xl font-bold mb-2 ${
+              needsAccountSetup ? 'text-amber-900' : 'text-blue-900'
+            }`}
+          >
+            {needsAccountSetup ? 'Lengkapi Akun (Wajib)' : 'Keamanan Akun'}
+          </h2>
+          <p className={`text-sm ${needsAccountSetup ? 'text-amber-800' : 'text-blue-800'}`}>
+            Isi email aktif dulu, lalu ganti password akun Anda.
+          </p>
+        </div>
+        <div
+          className={`text-xs px-4 py-2 rounded-xl ${
+            needsAccountSetup ? 'text-amber-800 bg-amber-100/80' : 'text-blue-800 bg-blue-100/80'
+          }`}
+        >
+          <span className="font-semibold">Login awal:</span> Siswa pakai NIS, guru pakai email.
+        </div>
+      </div>
+
+      <div className="mt-6 grid gap-4 md:grid-cols-3">
+        <div className="space-y-1">
+          <label className="text-sm font-medium text-amber-900">Email Akun</label>
+          <input
+            type="email"
+            value={accountForm.email}
+            onChange={(e) =>
+              setAccountForm((prev) => ({ ...prev, email: e.target.value }))
+            }
+            placeholder="nama@email.com"
+            className="w-full rounded-xl border border-amber-200 bg-white px-4 py-2 text-sm focus:border-amber-400 focus:ring-2 focus:ring-amber-200"
+          />
+          {!isEmailFormat(accountForm.email) && accountForm.email && (
+            <p className="text-xs text-red-600">Format email tidak valid</p>
+          )}
+        </div>
+
+        {showPasswordFields && (
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-amber-900">Password Baru</label>
+            <PasswordInput
+              value={accountForm.password}
+              onChange={(e) =>
+                setAccountForm((prev) => ({ ...prev, password: e.target.value }))
+              }
+              placeholder="Minimal 6 karakter"
+              className="w-full rounded-xl border border-amber-200 bg-white px-4 py-2 text-sm focus:border-amber-400 focus:ring-2 focus:ring-amber-200"
+            />
+          </div>
+        )}
+
+        {showPasswordFields && (
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-amber-900">Ulangi Password</label>
+            <PasswordInput
+              value={accountForm.confirmPassword}
+              onChange={(e) =>
+                setAccountForm((prev) => ({ ...prev, confirmPassword: e.target.value }))
+              }
+              placeholder="Ulangi password"
+              className="w-full rounded-xl border border-amber-200 bg-white px-4 py-2 text-sm focus:border-amber-400 focus:ring-2 focus:ring-amber-200"
+            />
+          </div>
+        )}
+      </div>
+
+      <div className="mt-5 flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={handleTogglePasswordFields}
+          className="inline-flex items-center gap-2 rounded-xl bg-slate-700 px-5 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+        >
+          {showPasswordFields ? 'Batal Ganti Password' : 'Ganti Password'}
+        </button>
+        {showPasswordFields && (
+          <button
+            type="button"
+            onClick={handleCompleteAccount}
+            disabled={accountSaving}
+            className="inline-flex items-center gap-2 rounded-xl bg-amber-600 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-amber-200/70 hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            {accountSaving ? 'Menyimpan...' : 'Simpan Email & Password'}
+          </button>
+        )}
+        <p className="text-xs text-amber-800">
+          Password baru akan aktif untuk login berikutnya.
+        </p>
+      </div>
+      {needsAccountSetup && (
+        <p className="mt-3 text-xs text-amber-700">
+          Anda belum menyelesaikan setup akun. Silakan isi email aktif lalu ganti password.
+        </p>
+      )}
+    </div>
+  ) : null
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50/30 p-4 sm:p-6">
       <div className="max-w-full mx-auto space-y-6">
@@ -467,112 +573,6 @@ export default function ProfileGuru() {
             </div>
           </div>
         </div>
-
-        {canManageAccount && (
-          <div
-            className={`rounded-2xl border p-6 shadow-sm ${
-              needsAccountSetup
-                ? 'border-amber-200/70 bg-amber-50/80'
-                : 'border-blue-200/70 bg-blue-50/70'
-            }`}
-          >
-            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-              <div>
-                <h2
-                  className={`text-xl font-bold mb-2 ${
-                    needsAccountSetup ? 'text-amber-900' : 'text-blue-900'
-                  }`}
-                >
-                  {needsAccountSetup ? 'Lengkapi Akun (Wajib)' : 'Keamanan Akun'}
-                </h2>
-                <p className={`text-sm ${needsAccountSetup ? 'text-amber-800' : 'text-blue-800'}`}>
-                  Isi email aktif dulu, lalu ganti password akun Anda.
-                </p>
-              </div>
-              <div
-                className={`text-xs px-4 py-2 rounded-xl ${
-                  needsAccountSetup ? 'text-amber-800 bg-amber-100/80' : 'text-blue-800 bg-blue-100/80'
-                }`}
-              >
-                <span className="font-semibold">Login awal:</span> Siswa pakai NIS, guru pakai email.
-              </div>
-            </div>
-
-            <div className="mt-6 grid gap-4 md:grid-cols-3">
-              <div className="space-y-1">
-                <label className="text-sm font-medium text-amber-900">Email Akun</label>
-                <input
-                  type="email"
-                  value={accountForm.email}
-                  onChange={(e) =>
-                    setAccountForm((prev) => ({ ...prev, email: e.target.value }))
-                  }
-                  placeholder="nama@email.com"
-                  className="w-full rounded-xl border border-amber-200 bg-white px-4 py-2 text-sm focus:border-amber-400 focus:ring-2 focus:ring-amber-200"
-                />
-                {!isEmailFormat(accountForm.email) && accountForm.email && (
-                  <p className="text-xs text-red-600">Format email tidak valid</p>
-                )}
-              </div>
-
-              {showPasswordFields && (
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-amber-900">Password Baru</label>
-                  <PasswordInput
-                    value={accountForm.password}
-                    onChange={(e) =>
-                      setAccountForm((prev) => ({ ...prev, password: e.target.value }))
-                    }
-                    placeholder="Minimal 6 karakter"
-                    className="w-full rounded-xl border border-amber-200 bg-white px-4 py-2 text-sm focus:border-amber-400 focus:ring-2 focus:ring-amber-200"
-                  />
-                </div>
-              )}
-
-              {showPasswordFields && (
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-amber-900">Ulangi Password</label>
-                  <PasswordInput
-                    value={accountForm.confirmPassword}
-                    onChange={(e) =>
-                      setAccountForm((prev) => ({ ...prev, confirmPassword: e.target.value }))
-                    }
-                    placeholder="Ulangi password"
-                    className="w-full rounded-xl border border-amber-200 bg-white px-4 py-2 text-sm focus:border-amber-400 focus:ring-2 focus:ring-amber-200"
-                  />
-                </div>
-              )}
-            </div>
-
-            <div className="mt-5 flex flex-wrap items-center gap-3">
-              <button
-                type="button"
-                onClick={handleTogglePasswordFields}
-                className="inline-flex items-center gap-2 rounded-xl bg-slate-700 px-5 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-              >
-                {showPasswordFields ? 'Batal Ganti Password' : 'Ganti Password'}
-              </button>
-              {showPasswordFields && (
-                <button
-                  type="button"
-                  onClick={handleCompleteAccount}
-                  disabled={accountSaving}
-                  className="inline-flex items-center gap-2 rounded-xl bg-amber-600 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-amber-200/70 hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-70"
-                >
-                  {accountSaving ? 'Menyimpan...' : 'Simpan Email & Password'}
-                </button>
-              )}
-              <p className="text-xs text-amber-800">
-                Password baru akan aktif untuk login berikutnya.
-              </p>
-            </div>
-            {needsAccountSetup && (
-              <p className="mt-3 text-xs text-amber-700">
-                Anda belum menyelesaikan setup akun. Silakan isi email aktif lalu ganti password.
-              </p>
-            )}
-          </div>
-        )}
 
         <div className="grid lg:grid-cols-4 gap-6">
           {/* ========== SIDEBAR PROFIL ========== */}
@@ -817,6 +817,7 @@ export default function ProfileGuru() {
             </div>
           </div>
         </div>
+        {securityAccountCard}
       </div>
     </div>
   )

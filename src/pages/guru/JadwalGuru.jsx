@@ -8,9 +8,7 @@ import {
   hydrateCertificateFileUrls,
   resolveCertificateFileUrl
 } from '../../utils/certificateFiles'
-// Pakai xlsx-js-style agar bisa kasih warna & style di Excel
-// npm install xlsx-js-style
-import * as XLSX from 'xlsx-js-style'
+import { loadExcelJsBrowser } from '../../utils/excelBrowser'
 
 // --- HELPER FUNCTIONS ---
 
@@ -509,199 +507,140 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
   }
 
   // Fungsi untuk export ke Excel dengan format & warna
-  const exportToExcel = () => {
+  const exportToExcel = async () => {
     try {
-      // Data untuk sheet rekap
+      const periodLabel = `${selectedMonths
+        .map((month) => new Date(selectedYear, month).toLocaleDateString('id-ID', { month: 'long' }))
+        .join(', ')} ${selectedYear}`
+
       const excelDataRekap = [
         ['REKAP ABSENSI EKSKUL', '', '', '', '', '', ''],
         [`Ekskul: ${eskul.nama}`, '', '', '', '', '', ''],
-        [
-          `Periode: ${selectedMonths.map(month =>
-            new Date(selectedYear, month).toLocaleDateString('id-ID', { month: 'long' })
-          ).join(', ')} ${selectedYear}`,
-          '', '', '', '', '', ''
-        ],
+        [`Periode: ${periodLabel}`, '', '', '', '', '', ''],
         [`Total Pertemuan: ${totalPertemuan}`, '', '', '', '', '', ''],
         ['', '', '', '', '', '', ''],
         ['No', 'Name', 'Kelas', 'Total', '', '', 'Masuk'],
         ['', '', '', '', 'H', 'A', 'I'],
         ...anggotaEskul.map((anggota, index) => {
           const stats = calculateStats(anggota.user_id)
-          return [
-            index + 1,
-            anggota.nama,
-            anggota.kelas,
-            totalPertemuan,
-            stats.hadir,
-            stats.alpha,
-            stats.izin
-          ]
+          return [index + 1, anggota.nama, anggota.kelas, totalPertemuan, stats.hadir, stats.alpha, stats.izin]
         })
       ]
 
-      // Data untuk sheet detail (untuk sekarang sama seperti rekap; bisa di-custom kalau mau)
       const excelDataDetail = [
         ['DETAIL ABSENSI PER SISWA', '', '', '', '', '', ''],
         [`Ekskul: ${eskul.nama}`, '', '', '', '', '', ''],
-        [
-          `Periode: ${selectedMonths.map(month =>
-            new Date(selectedYear, month).toLocaleDateString('id-ID', { month: 'long' })
-          ).join(', ')} ${selectedYear}`,
-          '', '', '', '', '', ''
-        ],
+        [`Periode: ${periodLabel}`, '', '', '', '', '', ''],
         ['', '', '', '', '', '', ''],
         ['No', 'Name', 'Kelas', 'Total', '', '', 'Masuk'],
         ['', '', '', '', 'H', 'A', 'I'],
         ...anggotaEskul.map((anggota, index) => {
           const stats = calculateStats(anggota.user_id)
-          return [
-            index + 1,
-            anggota.nama,
-            anggota.kelas,
-            totalPertemuan,
-            stats.hadir,
-            stats.alpha,
-            stats.izin
-          ]
+          return [index + 1, anggota.nama, anggota.kelas, totalPertemuan, stats.hadir, stats.alpha, stats.izin]
         })
       ]
 
-      const wb = XLSX.utils.book_new()
-
-      // Sheet Rekap
-      const wsRekap = XLSX.utils.aoa_to_sheet(excelDataRekap)
-      if (!wsRekap['!merges']) wsRekap['!merges'] = []
-      wsRekap['!merges'].push(
-        { s: { r: 0, c: 0 }, e: { r: 0, c: 6 } },
-        { s: { r: 1, c: 0 }, e: { r: 1, c: 6 } },
-        { s: { r: 2, c: 0 }, e: { r: 2, c: 6 } },
-        { s: { r: 3, c: 0 }, e: { r: 3, c: 6 } },
-        { s: { r: 5, c: 3 }, e: { r: 5, c: 6 } },
-        { s: { r: 5, c: 0 }, e: { r: 6, c: 0 } },
-        { s: { r: 5, c: 1 }, e: { r: 6, c: 1 } },
-        { s: { r: 5, c: 2 }, e: { r: 6, c: 2 } },
-        { s: { r: 5, c: 3 }, e: { r: 6, c: 3 } }
-      )
-      wsRekap['!cols'] = [
-        { wch: 5 },
-        { wch: 25 },
-        { wch: 12 },
-        { wch: 8 },
-        { wch: 8 },
-        { wch: 8 },
-        { wch: 8 },
-      ]
-
-      // Sheet Detail
-      const wsDetail = XLSX.utils.aoa_to_sheet(excelDataDetail)
-      if (!wsDetail['!merges']) wsDetail['!merges'] = []
-      wsDetail['!merges'].push(
-        { s: { r: 0, c: 0 }, e: { r: 0, c: 6 } },
-        { s: { r: 1, c: 0 }, e: { r: 1, c: 6 } },
-        { s: { r: 2, c: 0 }, e: { r: 2, c: 6 } },
-        { s: { r: 4, c: 3 }, e: { r: 4, c: 6 } },
-        { s: { r: 4, c: 0 }, e: { r: 5, c: 0 } },
-        { s: { r: 4, c: 1 }, e: { r: 5, c: 1 } },
-        { s: { r: 4, c: 2 }, e: { r: 5, c: 2 } },
-        { s: { r: 4, c: 3 }, e: { r: 5, c: 3 } }
-      )
-      wsDetail['!cols'] = [
-        { wch: 5 },
-        { wch: 25 },
-        { wch: 12 },
-        { wch: 8 },
-        { wch: 8 },
-        { wch: 8 },
-        { wch: 8 },
-      ]
-
-      // ==== STYLING (judul berwarna, header tabel lembut) ====
+      const ExcelJS = await loadExcelJsBrowser()
+      const workbook = new ExcelJS.Workbook()
+      workbook.creator = 'EduSmart Guru'
+      workbook.created = new Date()
 
       const titleStyle = {
-        font: { bold: true, sz: 14, color: { rgb: 'FFFFFFFF' } },
-        alignment: { horizontal: 'center', vertical: 'center' },
-        fill: { fgColor: { rgb: 'FF2563EB' } } // biru tua
+        font: { bold: true, size: 14, color: { argb: 'FFFFFFFF' } },
+        alignment: { horizontal: 'center', vertical: 'middle' },
+        fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } }
       }
 
       const headerStyle = {
-        font: { bold: true, color: { rgb: 'FF111827' } },
-        alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
-        fill: { fgColor: { rgb: 'FFE0F2FE' } } // biru muda
+        font: { bold: true, color: { argb: 'FF111827' } },
+        alignment: { horizontal: 'center', vertical: 'middle', wrapText: true },
+        fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0F2FE' } }
       }
 
       const subHeaderStyle = {
-        font: { bold: true, color: { rgb: 'FF111827' } },
-        alignment: { horizontal: 'center', vertical: 'center' },
-        fill: { fgColor: { rgb: 'FFF1F5F9' } } // abu soft
+        font: { bold: true, color: { argb: 'FF111827' } },
+        alignment: { horizontal: 'center', vertical: 'middle' },
+        fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } }
       }
 
       const thinBorder = {
-        style: 'thin',
-        color: { rgb: 'FFCBD5E1' }
+        top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+        left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+        bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+        right: { style: 'thin', color: { argb: 'FFCBD5E1' } }
       }
 
-      const applyStyleRange = (ws, startRow, endRow, startCol, endCol, style, withBorder = false) => {
-        for (let r = startRow; r <= endRow; r++) {
-          for (let c = startCol; c <= endCol; c++) {
-            const cellAddress = XLSX.utils.encode_cell({ r, c })
-            const cell = ws[cellAddress]
-            if (!cell) continue
-
-            cell.s = {
-              ...(cell.s || {}),
-              ...style,
-              ...(withBorder
-                ? {
-                    border: {
-                      top: thinBorder,
-                      bottom: thinBorder,
-                      left: thinBorder,
-                      right: thinBorder
-                    }
-                  }
-                : {})
-            }
+      const applyStyleRow = (worksheet, rowNumber, style, withBorder = false) => {
+        const row = worksheet.getRow(rowNumber)
+        row.eachCell({ includeEmpty: true }, (cell) => {
+          cell.font = style.font
+          cell.alignment = style.alignment
+          cell.fill = style.fill
+          if (withBorder) {
+            cell.border = thinBorder
           }
-        }
+        })
       }
 
-      // Judul & info rekap (A1–A4)
-      ;['A1', 'A2', 'A3', 'A4'].forEach((addr) => {
-        const cell = wsRekap[addr]
-        if (cell) {
-          cell.s = { ...(cell.s || {}), ...titleStyle }
-        }
+      const setupSheet = ({ name, data, merges, titleRows, headerRows, subHeaderRows }) => {
+        const worksheet = workbook.addWorksheet(name)
+        worksheet.columns = [
+          { width: 5 },
+          { width: 25 },
+          { width: 12 },
+          { width: 8 },
+          { width: 8 },
+          { width: 8 },
+          { width: 8 }
+        ]
+
+        data.forEach((row) => worksheet.addRow(row))
+        merges.forEach((range) => worksheet.mergeCells(range))
+        titleRows.forEach((rowNumber) => applyStyleRow(worksheet, rowNumber, titleStyle))
+        headerRows.forEach((rowNumber) => applyStyleRow(worksheet, rowNumber, headerStyle, true))
+        subHeaderRows.forEach((rowNumber) => applyStyleRow(worksheet, rowNumber, subHeaderStyle, true))
+        return worksheet
+      }
+
+      setupSheet({
+        name: 'Rekap Siswa',
+        data: excelDataRekap,
+        merges: ['A1:G1', 'A2:G2', 'A3:G3', 'A4:G4', 'D6:G6', 'A6:A7', 'B6:B7', 'C6:C7', 'D6:D7'],
+        titleRows: [1, 2, 3, 4],
+        headerRows: [6],
+        subHeaderRows: [7]
       })
 
-      // Header tabel rekap (baris 6 & 7 → index 5 & 6)
-      applyStyleRange(wsRekap, 5, 5, 0, 6, headerStyle, true)
-      applyStyleRange(wsRekap, 6, 6, 0, 6, subHeaderStyle, true)
-      // Data tidak diberi border, jadi tidak terlalu "kotak-kotak", pakai grid default Excel saja
-
-      // Judul detail (A1–A3)
-      ;['A1', 'A2', 'A3'].forEach((addr) => {
-        const cell = wsDetail[addr]
-        if (cell) {
-          cell.s = { ...(cell.s || {}), ...titleStyle }
-        }
+      setupSheet({
+        name: 'Detail Siswa',
+        data: excelDataDetail,
+        merges: ['A1:G1', 'A2:G2', 'A3:G3', 'D5:G5', 'A5:A6', 'B5:B6', 'C5:C6', 'D5:D6'],
+        titleRows: [1, 2, 3],
+        headerRows: [5],
+        subHeaderRows: [6]
       })
-      // Header tabel detail (baris 5 & 6 → index 4 & 5)
-      applyStyleRange(wsDetail, 4, 4, 0, 6, headerStyle, true)
-      applyStyleRange(wsDetail, 5, 5, 0, 6, subHeaderStyle, true)
 
-      // Tambahkan ke workbook & export
-      XLSX.utils.book_append_sheet(wb, wsRekap, 'Rekap Siswa')
-      XLSX.utils.book_append_sheet(wb, wsDetail, 'Detail Siswa')
-
+      const buffer = await workbook.xlsx.writeBuffer()
       const fileName = `Rekap_Absensi_${eskul.nama.replace(/\s+/g, '_')}_${selectedMonths
-        .map(m => m + 1)
+        .map((month) => month + 1)
         .join('-')}_${selectedYear}.xlsx`
-      XLSX.writeFile(wb, fileName)
 
-      pushToast('success', 'Rekap berhasil diexport ke Excel (2 sheets) dengan judul berwarna & tabel rapi')
+      const blob = new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      })
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = fileName
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      URL.revokeObjectURL(url)
+
+      pushToast('success', 'Rekap berhasil diexport ke Excel (2 sheet) dengan format rapi')
     } catch (error) {
       console.error('Error exporting to Excel:', error)
-      pushToast('error', 'Gagal mengexport rekap')
+      pushToast('error', 'Gagal mengekspor rekap')
     }
   }
 
@@ -1613,6 +1552,235 @@ export default function JadwalGuru() {
 
   const displayedSertifikat = sertifikatList.slice(0, 5)
 
+  const tanggungJawabCard = (
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
+      <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
+        <span>🏆</span> Tanggung Jawab Lain
+      </h3>
+
+      <div className="space-y-4">
+        {/* Ekskul */}
+        <div>
+          <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
+            Ekstrakurikuler ({eskulDiampu.length})
+          </h4>
+          {eskulDiampu.length > 0 ? (
+            <div className="space-y-2">
+              {eskulDiampu.map(e => (
+                <div
+                  key={e.id}
+                  onClick={() => handleEskulClick(e)}
+                  className="p-3 rounded-lg bg-purple-50 border border-purple-100 hover:border-purple-300 hover:shadow-md transition-all cursor-pointer group"
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-semibold text-purple-900 group-hover:text-purple-700">
+                      {e.nama}
+                    </span>
+                    <span className="text-xs text-purple-700 bg-white px-2 py-0.5 rounded border border-purple-100 font-medium">
+                      {e.hari || '-'}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-3 text-xs text-purple-600">
+                    <div className="flex items-center gap-1">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <span>{formatWaktu(e.jam_mulai)} - {formatWaktu(e.jam_selesai)}</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2a4.978 4.978 0 00-.869-2.773M7 20v-2a4.978 4.978 0 01.869-2.773M12 11a3 3 0 100-6 3 3 0 000 6zm5 0a3 3 0 10-6 0 3 3 0 006 0z" />
+                      </svg>
+                      <span>{e.jumlah_anggota} Anggota</span>
+                    </div>
+                  </div>
+
+                  <div className="mt-2 pt-2 border-t border-purple-100">
+                    <button className="text-xs text-purple-600 hover:text-purple-800 font-medium flex items-center gap-1">
+                      <span>📝 Klik untuk Absensi</span>
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : <p className="text-xs text-gray-400 italic">Tidak ada ekskul</p>}
+        </div>
+
+        <hr className="border-gray-100" />
+
+        {/* Organisasi */}
+        <div>
+          <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
+            Organisasi ({organisasiDiampu.length})
+          </h4>
+          {organisasiDiampu.length > 0 ? (
+            <div className="space-y-2">
+              {organisasiDiampu.map(o => (
+                <div
+                  key={o.id}
+                  onClick={() => handleOrganisasiClick(o)}
+                  className="flex items-center justify-between p-3 rounded-lg bg-emerald-50 border border-emerald-100 hover:border-emerald-300 hover:shadow-md transition-all cursor-pointer group"
+                >
+                  <div>
+                    <span className="text-sm font-semibold text-emerald-900 group-hover:text-emerald-700">
+                      {o.nama}
+                    </span>
+                    <div className="mt-1">
+                      <button className="text-xs text-emerald-600 hover:text-emerald-800 font-medium flex items-center gap-1">
+                        <span>👥 Klik untuk lihat detail</span>
+                      </button>
+                    </div>
+                  </div>
+                  <span className="text-xs text-emerald-700 font-medium bg-white px-2 py-1 rounded border border-emerald-100">
+                    {o.jumlah_anggota} Anggota
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : <p className="text-xs text-gray-400 italic">Tidak ada organisasi</p>}
+        </div>
+      </div>
+    </div>
+  )
+
+  const monitoringJamKosongCard = (
+    <div className="bg-white rounded-2xl shadow-md border border-gray-200 flex flex-col max-h-[500px]">
+      <div className="p-6 border-b border-gray-100">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+              <span className="relative flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+              </span>
+              Monitoring Jam Kosong
+            </h2>
+            <p className="text-sm text-gray-500 mt-1">
+              Data real-time pengajuan jam kosong hari ini ({todayName}).
+            </p>
+          </div>
+
+          <div className="flex gap-3">
+            <div className="bg-red-50 border border-red-100 px-4 py-2 rounded-xl text-center">
+              <div className="text-xs text-red-600 font-bold uppercase">Perlu Guru</div>
+              <div className="text-lg font-bold text-red-700 leading-none">
+                {jamKosongHariIni.filter(j => !j.guru_pengganti).length}
+              </div>
+            </div>
+            <div className="bg-green-50 border border-green-100 px-4 py-2 rounded-xl text-center">
+              <div className="text-xs text-green-600 font-bold uppercase">Teratasi</div>
+              <div className="text-lg font-bold text-green-700 leading-none">
+                {jamKosongHariIni.filter(j => j.guru_pengganti).length}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="p-6 bg-gray-50/30 flex-1 overflow-auto">
+        {jamKosongHariIni.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {jamKosongHariIni.map((item) => {
+              const isHandled = !!item.guru_pengganti
+              const isMe = item.guru_pengganti === (profile?.nama || user?.email)
+
+              return (
+                <div
+                  key={item.id}
+                  className={`relative p-5 rounded-xl border-2 transition-all duration-200 flex flex-col justify-between group ${
+                    isHandled
+                      ? 'bg-white border-green-200'
+                      : 'bg-white border-red-200 shadow-lg shadow-red-100 hover:-translate-y-1'
+                  }`}
+                >
+                  <div className={`absolute top-0 right-0 px-3 py-1 rounded-bl-xl rounded-tr-lg text-[10px] font-bold tracking-wide uppercase ${
+                    isHandled ? 'bg-green-100 text-green-700' : 'bg-red-500 text-white'
+                  }`}>
+                    {isHandled ? 'Sudah Ada Guru' : 'Butuh Pengganti'}
+                  </div>
+
+                  <div className="mb-4">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="bg-gray-100 text-gray-700 text-xs font-bold px-2 py-0.5 rounded">
+                        {formatWaktu(item.jam_mulai)} - {formatWaktu(item.jam_selesai)}
+                      </span>
+                      <span className="text-gray-400 text-xs">•</span>
+                      <span className="font-bold text-blue-600 text-sm">
+                        Kelas {getNamaKelasFromList(item.kelas, kelasList)}
+                      </span>
+                    </div>
+                    <h3 className="text-lg font-bold text-gray-800 leading-tight mb-2">
+                      {item.mapel}
+                    </h3>
+
+                    <div className="bg-gray-50 p-3 rounded-lg border border-gray-100 text-sm space-y-1">
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">Pengajar:</span>
+                        <span className="font-medium text-gray-800">{item.guru_pengaju}</span>
+                      </div>
+                      <div className="flex justify-between items-start">
+                        <span className="text-gray-500 shrink-0">Alasan:</span>
+                        <span className="font-medium text-gray-800 text-right line-clamp-2">{item.alasan}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-2 pt-3 border-t border-gray-100">
+                    {isHandled ? (
+                      isMe ? (
+                        <button
+                          onClick={() => handleToggleJamKosong(item.id, item.guru_pengganti)}
+                          className="w-full py-2.5 px-4 bg-orange-100 hover:bg-orange-200 text-orange-700 border border-orange-300 rounded-lg font-bold text-sm transition-colors flex items-center justify-center gap-2"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                          Batalkan (Saya Penggantinya)
+                        </button>
+                      ) : (
+                        <div className="flex items-center gap-2 text-green-700 bg-green-50 p-2 rounded-lg justify-center">
+                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          <span className="text-sm font-semibold">
+                            Digantikan oleh: {item.guru_pengganti}
+                          </span>
+                        </div>
+                      )
+                    ) : (
+                      <button
+                        onClick={() => handleToggleJamKosong(item.id, null)}
+                        className="w-full py-2.5 px-4 bg-red-500 hover:bg-red-600 active:bg-red-700 text-white rounded-lg font-semibold text-sm transition-colors shadow-md shadow-red-200 flex items-center justify-center gap-2"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+                        </svg>
+                        Ambil Jam Ini
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        ) : (
+          <div className="h-full flex flex-col items-center justify-center text-center p-10 bg-white rounded-xl border border-dashed border-gray-300">
+            <div className="w-24 h-24 bg-green-50 rounded-full flex items-center justify-center mb-5 animate-pulse">
+              <svg className="w-12 h-12 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <h3 className="text-xl font-bold text-gray-800">Semua Aman!</h3>
+            <p className="text-gray-500 mt-2 max-w-sm">
+              Belum ada laporan jam kosong untuk hari {todayName} ini. Semua kelas berjalan kondusif.
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+
   // --- RENDER ---
   return (
     <div className="min-h-screen bg-gray-50/50 p-4 md:p-6 pb-20">
@@ -1746,96 +1914,7 @@ export default function JadwalGuru() {
               </div>
             </div>
 
-            {/* Ekskul & Organisasi */}
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
-              <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
-                <span>🏆</span> Tanggung Jawab Lain
-              </h3>
-
-              <div className="space-y-4">
-                {/* Ekskul */}
-                <div>
-                  <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
-                    Ekstrakurikuler ({eskulDiampu.length})
-                  </h4>
-                  {eskulDiampu.length > 0 ? (
-                    <div className="space-y-2">
-                      {eskulDiampu.map(e => (
-                        <div
-                          key={e.id}
-                          onClick={() => handleEskulClick(e)}
-                          className="p-3 rounded-lg bg-purple-50 border border-purple-100 hover:border-purple-300 hover:shadow-md transition-all cursor-pointer group"
-                        >
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-sm font-semibold text-purple-900 group-hover:text-purple-700">
-                              {e.nama}
-                            </span>
-                            <span className="text-xs text-purple-700 bg-white px-2 py-0.5 rounded border border-purple-100 font-medium">
-                              {e.hari || '-'}
-                            </span>
-                          </div>
-
-                          <div className="flex items-center gap-3 text-xs text-purple-600">
-                            <div className="flex items-center gap-1">
-                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                              </svg>
-                              <span>{formatWaktu(e.jam_mulai)} - {formatWaktu(e.jam_selesai)}</span>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2a4.978 4.978 0 00-.869-2.773M7 20v-2a4.978 4.978 0 01.869-2.773M12 11a3 3 0 100-6 3 3 0 000 6zm5 0a3 3 0 10-6 0 3 3 0 006 0z" />
-                              </svg>
-                              <span>{e.jumlah_anggota} Anggota</span>
-                            </div>
-                          </div>
-
-                          <div className="mt-2 pt-2 border-t border-purple-100">
-                            <button className="text-xs text-purple-600 hover:text-purple-800 font-medium flex items-center gap-1">
-                              <span>📝 Klik untuk Absensi</span>
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : <p className="text-xs text-gray-400 italic">Tidak ada ekskul</p>}
-                </div>
-
-                <hr className="border-gray-100" />
-
-                {/* Organisasi */}
-                <div>
-                  <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
-                    Organisasi ({organisasiDiampu.length})
-                  </h4>
-                  {organisasiDiampu.length > 0 ? (
-                    <div className="space-y-2">
-                      {organisasiDiampu.map(o => (
-                        <div
-                          key={o.id}
-                          onClick={() => handleOrganisasiClick(o)}
-                          className="flex items-center justify-between p-3 rounded-lg bg-emerald-50 border border-emerald-100 hover:border-emerald-300 hover:shadow-md transition-all cursor-pointer group"
-                        >
-                          <div>
-                            <span className="text-sm font-semibold text-emerald-900 group-hover:text-emerald-700">
-                              {o.nama}
-                            </span>
-                            <div className="mt-1">
-                              <button className="text-xs text-emerald-600 hover:text-emerald-800 font-medium flex items-center gap-1">
-                                <span>👥 Klik untuk lihat detail</span>
-                              </button>
-                            </div>
-                          </div>
-                          <span className="text-xs text-emerald-700 font-medium bg-white px-2 py-1 rounded border border-emerald-100">
-                            {o.jumlah_anggota} Anggota
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : <p className="text-xs text-gray-400 italic">Tidak ada organisasi</p>}
-                </div>
-              </div>
-            </div>
+            {monitoringJamKosongCard}
 
             {/* Struktur Sekolah */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
@@ -1906,10 +1985,10 @@ export default function JadwalGuru() {
                               {new Date(p.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}
                             </span>
                           </div>
-                          <h3 className="font-bold text-gray-900 mb-2 line-clamp-2 group-hover:text-blue-600 transition-colors">
+                          <h3 className="font-bold text-gray-900 mb-2 break-words group-hover:text-blue-600 transition-colors">
                             {p.judul}
                           </h3>
-                          <p className="text-sm text-gray-600 line-clamp-3 leading-relaxed">
+                          <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-line break-words max-h-60 overflow-y-auto pr-1">
                             {p.keterangan}
                           </p>
                         </div>
@@ -1920,141 +1999,7 @@ export default function JadwalGuru() {
               </div>
             )}
 
-            {/* Monitoring Jam Kosong */}
-            <div className="bg-white rounded-2xl shadow-md border border-gray-200 flex flex-col max-h-[500px]">
-              <div className="p-6 border-b border-gray-100">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                  <div>
-                    <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-                      <span className="relative flex h-3 w-3">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
-                      </span>
-                      Monitoring Jam Kosong
-                    </h2>
-                    <p className="text-sm text-gray-500 mt-1">
-                      Data real-time pengajuan jam kosong hari ini ({todayName}).
-                    </p>
-                  </div>
-
-                  <div className="flex gap-3">
-                    <div className="bg-red-50 border border-red-100 px-4 py-2 rounded-xl text-center">
-                      <div className="text-xs text-red-600 font-bold uppercase">Perlu Guru</div>
-                      <div className="text-lg font-bold text-red-700 leading-none">
-                        {jamKosongHariIni.filter(j => !j.guru_pengganti).length}
-                      </div>
-                    </div>
-                    <div className="bg-green-50 border border-green-100 px-4 py-2 rounded-xl text-center">
-                      <div className="text-xs text-green-600 font-bold uppercase">Teratasi</div>
-                      <div className="text-lg font-bold text-green-700 leading-none">
-                        {jamKosongHariIni.filter(j => j.guru_pengganti).length}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="p-6 bg-gray-50/30 flex-1 overflow-auto">
-                {jamKosongHariIni.length > 0 ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {jamKosongHariIni.map((item) => {
-                      const isHandled = !!item.guru_pengganti
-                      const isMe = item.guru_pengganti === (profile?.nama || user?.email)
-
-                      return (
-                        <div
-                          key={item.id}
-                          className={`relative p-5 rounded-xl border-2 transition-all duration-200 flex flex-col justify-between group ${
-                            isHandled
-                              ? 'bg-white border-green-200'
-                              : 'bg-white border-red-200 shadow-lg shadow-red-100 hover:-translate-y-1'
-                          }`}
-                        >
-                          <div className={`absolute top-0 right-0 px-3 py-1 rounded-bl-xl rounded-tr-lg text-[10px] font-bold tracking-wide uppercase ${
-                            isHandled ? 'bg-green-100 text-green-700' : 'bg-red-500 text-white'
-                          }`}>
-                            {isHandled ? 'Sudah Ada Guru' : 'Butuh Pengganti'}
-                          </div>
-
-                          <div className="mb-4">
-                            <div className="flex items-center gap-2 mb-1">
-                              <span className="bg-gray-100 text-gray-700 text-xs font-bold px-2 py-0.5 rounded">
-                                {formatWaktu(item.jam_mulai)} - {formatWaktu(item.jam_selesai)}
-                              </span>
-                              <span className="text-gray-400 text-xs">•</span>
-                              <span className="font-bold text-blue-600 text-sm">
-                                Kelas {getNamaKelasFromList(item.kelas, kelasList)}
-                              </span>
-                            </div>
-                            <h3 className="text-lg font-bold text-gray-800 leading-tight mb-2">
-                              {item.mapel}
-                            </h3>
-
-                            <div className="bg-gray-50 p-3 rounded-lg border border-gray-100 text-sm space-y-1">
-                              <div className="flex justify-between">
-                                <span className="text-gray-500">Pengajar:</span>
-                                <span className="font-medium text-gray-800">{item.guru_pengaju}</span>
-                              </div>
-                              <div className="flex justify-between items-start">
-                                <span className="text-gray-500 shrink-0">Alasan:</span>
-                                <span className="font-medium text-gray-800 text-right line-clamp-2">{item.alasan}</span>
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="mt-2 pt-3 border-t border-gray-100">
-                            {isHandled ? (
-                              isMe ? (
-                                <button
-                                  onClick={() => handleToggleJamKosong(item.id, item.guru_pengganti)}
-                                  className="w-full py-2.5 px-4 bg-orange-100 hover:bg-orange-200 text-orange-700 border border-orange-300 rounded-lg font-bold text-sm transition-colors flex items-center justify-center gap-2"
-                                >
-                                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                  </svg>
-                                  Batalkan (Saya Penggantinya)
-                                </button>
-                              ) : (
-                                <div className="flex items-center gap-2 text-green-700 bg-green-50 p-2 rounded-lg justify-center">
-                                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                  </svg>
-                                  <span className="text-sm font-semibold">
-                                    Digantikan oleh: {item.guru_pengganti}
-                                  </span>
-                                </div>
-                              )
-                            ) : (
-                              <button
-                                onClick={() => handleToggleJamKosong(item.id, null)}
-                                className="w-full py-2.5 px-4 bg-red-500 hover:bg-red-600 active:bg-red-700 text-white rounded-lg font-semibold text-sm transition-colors shadow-md shadow-red-200 flex items-center justify-center gap-2"
-                              >
-                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
-                                </svg>
-                                Ambil Jam Ini
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                ) : (
-                  <div className="h-full flex flex-col items-center justify-center text-center p-10 bg-white rounded-xl border border-dashed border-gray-300">
-                    <div className="w-24 h-24 bg-green-50 rounded-full flex items-center justify-center mb-5 animate-pulse">
-                      <svg className="w-12 h-12 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                    </div>
-                    <h3 className="text-xl font-bold text-gray-800">Semua Aman!</h3>
-                    <p className="text-gray-500 mt-2 max-w-sm">
-                      Belum ada laporan jam kosong untuk hari {todayName} ini. Semua kelas berjalan kondusif.
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
+            {tanggungJawabCard}
 
             {/* Sertifikat Saya */}
             <div className="bg-white rounded-2xl shadow-md border border-gray-200">

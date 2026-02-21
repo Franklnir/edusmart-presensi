@@ -13,10 +13,16 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        $trustedProxies = (string) env('TRUSTED_PROXIES', '*');
+        if ($trustedProxies !== '*') {
+            $trustedProxies = array_values(array_filter(array_map('trim', explode(',', $trustedProxies))));
+        }
+
         $middleware->redirectGuestsTo(function (Request $request) {
             if ($request->is('api/*') || $request->expectsJson()) {
                 return null;
             }
+
             return '/login';
         });
 
@@ -24,7 +30,13 @@ return Application::configure(basePath: dirname(__DIR__))
             'super.domain' => \App\Http\Middleware\EnsureSuperAdminDomain::class,
         ]);
 
-        $middleware->trustProxies(at: '*');
+        $middleware->trustProxies(
+            at: $trustedProxies,
+            headers: Request::HEADER_X_FORWARDED_FOR
+                | Request::HEADER_X_FORWARDED_HOST
+                | Request::HEADER_X_FORWARDED_PORT
+                | Request::HEADER_X_FORWARDED_PROTO
+        );
         $middleware->append(\Illuminate\Http\Middleware\HandleCors::class);
         $middleware->append(\App\Http\Middleware\SecureHeaders::class);
         $middleware->api(append: [
