@@ -17,6 +17,8 @@ const Login = () => {
     password: ''
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isGoogleSubmitting, setIsGoogleSubmitting] = useState(false);
+  const [info, setInfo] = useState('');
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
@@ -106,6 +108,49 @@ const Login = () => {
       isCancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    try {
+      const url = new URL(window.location.href)
+      const googleStatus = String(url.searchParams.get('google') || '').trim()
+      const googleError = String(url.searchParams.get('google_error') || '').trim()
+      if (!googleStatus) return
+
+      let nextError = ''
+      let nextInfo = ''
+      if (googleStatus === 'failed' && googleError) {
+        nextError = googleError
+      } else if (googleStatus === 'disabled') {
+        nextError = 'Login Google belum diaktifkan oleh administrator.'
+      } else if (googleStatus === 'state_invalid') {
+        nextError = 'Sesi login Google tidak valid atau sudah kedaluwarsa.'
+      } else if (googleStatus === 'tenant_invalid') {
+        nextError = 'Tenant sekolah tidak valid untuk login Google.'
+      } else if (googleStatus === 'unauthenticated') {
+        nextError = 'Silakan login biasa dulu sebelum menautkan Google.'
+      } else if (googleStatus === 'success') {
+        nextInfo = 'Login Google berhasil. Mengarahkan ke dashboard...'
+      } else if (googleStatus === 'linked') {
+        nextInfo = 'Akun Google berhasil ditautkan.'
+      }
+
+      setInfo(nextInfo)
+      if (nextError) {
+        setError(nextError)
+      } else {
+        setError('')
+      }
+
+      url.searchParams.delete('google')
+      url.searchParams.delete('google_error')
+      const cleaned = `${url.pathname}${url.search}${url.hash}`
+      window.history.replaceState({}, '', cleaned)
+    } catch {
+      // ignore malformed URL
+    }
+  }, [])
 
   // Realtime update settings jika ada perubahan
   useEffect(() => {
@@ -209,6 +254,7 @@ const Login = () => {
 
     setIsSubmitting(true);
     setError('');
+    setInfo('');
 
     try {
       const result = await login(form.email, form.password);
@@ -250,6 +296,30 @@ const Login = () => {
 
   const isOnCooldown = cooldownEnd > Date.now();
 
+  const handleGoogleLogin = async () => {
+    setError('')
+    setInfo('')
+    setIsGoogleSubmitting(true)
+
+    try {
+      const redirectTo =
+        typeof window !== 'undefined'
+          ? `${window.location.origin}/login`
+          : '/login'
+
+      const { error: googleError } = await supabase.auth.signInWithGoogle({
+        redirectTo
+      })
+
+      if (googleError) {
+        throw googleError
+      }
+    } catch (err) {
+      setError(err?.message || 'Gagal memulai login Google')
+      setIsGoogleSubmitting(false)
+    }
+  }
+
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !isSubmitting && !isOnCooldown) {
       handleSubmit(e);
@@ -272,7 +342,15 @@ const Login = () => {
   const address = settings?.alamat || '';
   const phone = settings?.telepon || '';
   const emailSekolah = settings?.email || '';
-
+  const isGoogleAuthEnabled = Boolean(supabase.auth.isGoogleEnabled?.());
+  const adminSubdomain = String(import.meta.env.VITE_ADMIN_SUBDOMAIN || 'admin')
+    .trim()
+    .toLowerCase();
+  const runtimeHost = typeof window !== 'undefined' ? String(window.location.hostname || '').toLowerCase() : '';
+  const hostParts = runtimeHost.split('.').filter(Boolean);
+  const isAdminHost =
+    runtimeHost === adminSubdomain ||
+    (hostParts.length >= 2 && hostParts[0] === adminSubdomain);
   // Social media links
   const socials = [
     {
@@ -416,6 +494,12 @@ const Login = () => {
                 <span>{error}</span>
               </div>
             )}
+            {info && (
+              <div className="login__success" role="status">
+                <i className="ri-checkbox-circle-fill"></i>
+                <span>{info}</span>
+              </div>
+            )}
 
             <form
               onSubmit={handleSubmit}
@@ -480,30 +564,79 @@ const Login = () => {
                 </div>
               </div>
 
-              <div className="login__form-options">
-                <Link to="/forgot-password" className="login__forgot-link">
-                  Lupa password?
-                </Link>
+              {!isAdminHost && (
+                <div className="login__form-options">
+                  <Link to="/forgot-password" className="login__forgot-link">
+                    Lupa password?
+                  </Link>
+                </div>
+              )}
+
+              <div className="login__action-row">
+                <button
+                  type="submit"
+                  disabled={isSubmitting || !form.email || !form.password}
+                  className="login__submit-btn"
+                  aria-label="Masuk"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <div className="login__spinner-btn"></div>
+                      <span>Memproses...</span>
+                    </>
+                  ) : (
+                    <>
+                      <i className="ri-login-box-fill"></i>
+                      <span>Masuk</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              <div className="login__divider" role="separator" aria-label="Atau login dengan Google">
+                <span>atau</span>
               </div>
 
               <button
-                type="submit"
-                disabled={isSubmitting || !form.email || !form.password}
-                className="login__submit-btn"
-                aria-label="Masuk"
+                type="button"
+                onClick={handleGoogleLogin}
+                disabled={isGoogleSubmitting || isSubmitting}
+                className="login__google-btn"
+                aria-label="Masuk dengan Google"
+                title="Masuk dengan Google"
               >
-                {isSubmitting ? (
-                  <>
-                    <div className="login__spinner-btn"></div>
-                    <span>Memproses...</span>
-                  </>
-                ) : (
-                  <>
-                    <i className="ri-login-box-fill"></i>
-                    <span>Masuk</span>
-                  </>
-                )}
+                <span className="login__google-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" role="img" focusable="false">
+                    <path
+                      fill="#EA4335"
+                      d="M12 10.2v3.95h5.49c-.24 1.27-.96 2.35-2.03 3.08l3.29 2.55c1.92-1.77 3.02-4.37 3.02-7.45 0-.73-.07-1.44-.19-2.13H12z"
+                    />
+                    <path
+                      fill="#34A853"
+                      d="M12 22c2.73 0 5.03-.9 6.71-2.43l-3.29-2.55c-.91.61-2.08.98-3.42.98-2.64 0-4.88-1.78-5.68-4.18l-3.4 2.62C4.59 19.74 8.03 22 12 22z"
+                    />
+                    <path
+                      fill="#4A90E2"
+                      d="M6.32 13.82A6 6 0 016 12c0-.63.11-1.24.32-1.82L2.92 7.56A9.99 9.99 0 002 12c0 1.62.39 3.14 1.08 4.44l3.24-2.62z"
+                    />
+                    <path
+                      fill="#FBBC05"
+                      d="M12 5.95c1.48 0 2.81.51 3.86 1.51l2.9-2.9C17.03 2.94 14.73 2 12 2 8.03 2 4.59 4.26 2.92 7.56l3.4 2.62C7.12 7.78 9.36 5.95 12 5.95z"
+                    />
+                  </svg>
+                </span>
+                <span>
+                  {isGoogleSubmitting
+                    ? 'Mengalihkan ke Google...'
+                    : 'Masuk dengan Google'}
+                </span>
               </button>
+
+              {!isGoogleAuthEnabled && (
+                <p className="login__google-note">
+                  Hubungi admin untuk mengaktifkan OAuth Google.
+                </p>
+              )}
             </form>
 
             <div className="login__form-footer">

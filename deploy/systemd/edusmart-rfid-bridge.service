@@ -1,0 +1,21 @@
+[Unit]
+Description=EduSmart RFID MQTT Bridge
+After=network-online.target postgresql.service redis-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/edusmart/backend
+EnvironmentFile=/var/www/edusmart/backend/.env
+ExecStart=/usr/bin/php /var/www/edusmart/backend/artisan rfid:mqtt-bridge
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=60
+StandardOutput=append:/var/log/edusmart-rfid-bridge.log
+StandardError=append:/var/log/edusmart-rfid-bridge.log
+
+[Install]
+WantedBy=multi-user.target

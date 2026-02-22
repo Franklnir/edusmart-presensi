@@ -129,15 +129,15 @@ const RingkasanKelasTable = ({
       let siswaData = []
       let siswaError = null
 
-      ;({ data: siswaData, error: siswaError } = await supabase
-        .from('profiles')
-        .select('id, nama, photo_url, photo_path, nis, kelas')
-        .eq('role', 'siswa')
-        .eq('kelas', kelas)
-        .order('nama'))
+        ; ({ data: siswaData, error: siswaError } = await supabase
+          .from('profiles')
+          .select('id, nama, photo_url, photo_path, nis, kelas')
+          .eq('role', 'siswa')
+          .eq('kelas', kelas)
+          .order('nama'))
 
       if (siswaError && /photo_path/i.test(siswaError.message || '')) {
-        ;({ data: siswaData, error: siswaError } = await supabase
+        ; ({ data: siswaData, error: siswaError } = await supabase
           .from('profiles')
           .select('id, nama, photo_url, nis, kelas')
           .eq('role', 'siswa')
@@ -177,21 +177,21 @@ const RingkasanKelasTable = ({
       })
 
       const existingIds = new Set(mapped.map((s) => s.id))
-      ;(absensiData || []).forEach((abs) => {
-        if (!existingIds.has(abs.uid)) {
-          mapped.push({
-            id: abs.uid,
-            nama: abs.nama || 'Tanpa Nama',
-            foto: null,
-            nis: null,
-            kelas,
-            status: abs.status || null,
-            komentar: abs.komentar || '',
-            oleh: abs.oleh || '',
-            waktu: abs.waktu || ''
-          })
-        }
-      })
+        ; (absensiData || []).forEach((abs) => {
+          if (!existingIds.has(abs.uid)) {
+            mapped.push({
+              id: abs.uid,
+              nama: abs.nama || 'Tanpa Nama',
+              foto: null,
+              nis: null,
+              kelas,
+              status: abs.status || null,
+              komentar: abs.komentar || '',
+              oleh: abs.oleh || '',
+              waktu: abs.waktu || ''
+            })
+          }
+        })
 
       mapped.sort((a, b) => (a.nama || '').localeCompare(b.nama || ''))
       setDataSiswa(mapped)
@@ -383,11 +383,10 @@ const RingkasanKelasTable = ({
                             type="button"
                             onClick={onHadir}
                             disabled={!canClickHadir}
-                            className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
-                              !canClickHadir
-                                ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
-                                : 'bg-green-600 hover:bg-green-700 text-white'
-                            }`}
+                            className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${!canClickHadir
+                              ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                              : 'bg-green-600 hover:bg-green-700 text-white'
+                              }`}
                           >
                             Hadir
                           </button>
@@ -400,11 +399,10 @@ const RingkasanKelasTable = ({
                                 ? 'Ajukan izin'
                                 : izinDisabledReason || 'Ajukan izin tidak tersedia'
                             }
-                            className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
-                              !canClickIzin
-                                ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
-                                : 'bg-yellow-500 hover:bg-yellow-600 text-white'
-                            }`}
+                            className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${!canClickIzin
+                              ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                              : 'bg-yellow-500 hover:bg-yellow-600 text-white'
+                              }`}
                           >
                             Ajukan Izin
                           </button>
@@ -486,15 +484,14 @@ const JadwalCard = ({
       <div className="flex items-start justify-between mb-2">
         <div className="flex items-center space-x-2">
           <div
-            className={`w-2 h-2 rounded-full ${
-              isCurrent && isSesiAktifFlag && jadwal.mode === 'otomatis' && !jadwal.status
-                ? 'bg-green-500 animate-pulse'
-                : isCurrent
+            className={`w-2 h-2 rounded-full ${isCurrent && isSesiAktifFlag && jadwal.mode === 'otomatis' && !jadwal.status
+              ? 'bg-green-500 animate-pulse'
+              : isCurrent
                 ? 'bg-blue-500'
                 : jadwal.status
-                ? 'bg-blue-400'
-                : 'bg-slate-400'
-            }`}
+                  ? 'bg-blue-400'
+                  : 'bg-slate-400'
+              }`}
           />
           <div>
             <h3 className="font-semibold text-slate-900 text-sm">{jadwal.mapel}</h3>
@@ -534,10 +531,10 @@ const JadwalCard = ({
               jadwal.status === 'Hadir'
                 ? 'hadir'
                 : jadwal.status === 'Izin'
-                ? 'izin'
-                : jadwal.status === 'Sakit'
-                ? 'sakit'
-                : 'alpha'
+                  ? 'izin'
+                  : jadwal.status === 'Sakit'
+                    ? 'sakit'
+                    : 'alpha'
             }
           >
             {jadwal.status}
@@ -621,9 +618,9 @@ const CalendarOverlay = ({ mapel, jadwalMingguIni, onClose, profile, userId }) =
       if (error) throw error
 
       const absensiMap = {}
-      ;(data || []).forEach((item) => {
-        absensiMap[item.tanggal] = item.status
-      })
+        ; (data || []).forEach((item) => {
+          absensiMap[item.tanggal] = item.status
+        })
 
       setAbsensiData(absensiMap)
     } catch (error) {
@@ -786,9 +783,8 @@ const CalendarOverlay = ({ mapel, jadwalMingguIni, onClose, profile, userId }) =
               {calendar.map((day, index) => (
                 <div
                   key={index}
-                  className={`min-h-[80px] p-2 border-b border-r border-slate-200 last:border-r-0 ${
-                    day ? day.bgColor : 'bg-slate-50'
-                  } ${day?.borderColor || ''}`}
+                  className={`min-h-[80px] p-2 border-b border-r border-slate-200 last:border-r-0 ${day ? day.bgColor : 'bg-slate-50'
+                    } ${day?.borderColor || ''}`}
                 >
                   {day && (
                     <div className="flex flex-col h-full">
@@ -799,17 +795,16 @@ const CalendarOverlay = ({ mapel, jadwalMingguIni, onClose, profile, userId }) =
                         <div className="mt-auto space-y-1">
                           {day.status && (
                             <div
-                              className={`text-xs px-1 py-0.5 rounded ${
-                                day.status === 'Hadir'
-                                  ? 'bg-green-200 text-green-800'
-                                  : day.status === 'Alpha'
+                              className={`text-xs px-1 py-0.5 rounded ${day.status === 'Hadir'
+                                ? 'bg-green-200 text-green-800'
+                                : day.status === 'Alpha'
                                   ? 'bg-red-200 text-red-800'
                                   : day.status === 'Izin'
-                                  ? 'bg-yellow-200 text-yellow-800'
-                                  : day.status === 'Sakit'
-                                  ? 'bg-blue-200 text-blue-800'
-                                  : 'bg-yellow-200 text-yellow-800'
-                              }`}
+                                    ? 'bg-yellow-200 text-yellow-800'
+                                    : day.status === 'Sakit'
+                                      ? 'bg-blue-200 text-blue-800'
+                                      : 'bg-yellow-200 text-yellow-800'
+                                }`}
                             >
                               {day.status || 'Belum Absen'}
                             </div>
@@ -862,9 +857,9 @@ const MapelOptions = ({ kelas, tanggal }) => {
         if (error) throw error
 
         const uniqueMap = new Map()
-        ;(data || []).forEach((d) => {
-          if (!uniqueMap.has(d.mapel)) uniqueMap.set(d.mapel, d)
-        })
+          ; (data || []).forEach((d) => {
+            if (!uniqueMap.has(d.mapel)) uniqueMap.set(d.mapel, d)
+          })
 
         const uniqueList = Array.from(uniqueMap.values()).sort((a, b) =>
           a.mapel.localeCompare(b.mapel)
@@ -1020,9 +1015,13 @@ export default function SAbsensi() {
   }, [rfidSettings, currentDateTime])
 
   const isManualAbsenAllowed = useCallback(() => {
+    // If teacher explicitly opens "otomatis" mode, allow manual attendance as well
+    if (currentJadwal?.mode === 'otomatis') return true
+
+    // Otherwise, if RFID is active and in range, block manual attendance
     if (rfidSettings.rfid_aktif && isInRfidTimeRange()) return false
     return true
-  }, [rfidSettings, isInRfidTimeRange])
+  }, [rfidSettings, isInRfidTimeRange, currentJadwal])
 
   /* ========== Statistik Kehadiran HARI INI ========== */
   const loadStatistikKehadiran = useCallback(async () => {
@@ -1039,12 +1038,12 @@ export default function SAbsensi() {
       if (error) throw error
 
       const statistik = { Hadir: 0, Izin: 0, Sakit: 0, Alpha: 0 }
-      ;(data || []).forEach((item) => {
-        if (item.status === 'Hadir') statistik.Hadir++
-        else if (item.status === 'Izin') statistik.Izin++
-        else if (item.status === 'Sakit') statistik.Sakit++
-        else if (item.status === 'Alpha') statistik.Alpha++
-      })
+        ; (data || []).forEach((item) => {
+          if (item.status === 'Hadir') statistik.Hadir++
+          else if (item.status === 'Izin') statistik.Izin++
+          else if (item.status === 'Sakit') statistik.Sakit++
+          else if (item.status === 'Alpha') statistik.Alpha++
+        })
       setStatistikKehadiran(statistik)
     } catch (error) {
       console.error('Error loading statistik kehadiran:', error)
@@ -1191,11 +1190,11 @@ export default function SAbsensi() {
         jadwalByHari[hari] = []
       })
 
-      ;(jadwalList || []).forEach((jadwal) => {
-        if (jadwalByHari[jadwal.hari]) {
-          jadwalByHari[jadwal.hari].push(jadwal)
-        }
-      })
+        ; (jadwalList || []).forEach((jadwal) => {
+          if (jadwalByHari[jadwal.hari]) {
+            jadwalByHari[jadwal.hari].push(jadwal)
+          }
+        })
 
       Object.keys(jadwalByHari).forEach((hari) => {
         jadwalByHari[hari].sort(
@@ -1228,14 +1227,14 @@ export default function SAbsensi() {
       const agg = { H: 0, I: 0, S: 0, A: 0 }
       let myStatus = null
 
-      ;(data || []).forEach((row) => {
-        if (row.status === 'Hadir') agg.H++
-        else if (row.status === 'Izin') agg.I++
-        else if (row.status === 'Sakit') agg.S++
-        else if (row.status === 'Alpha') agg.A++
+        ; (data || []).forEach((row) => {
+          if (row.status === 'Hadir') agg.H++
+          else if (row.status === 'Izin') agg.I++
+          else if (row.status === 'Sakit') agg.S++
+          else if (row.status === 'Alpha') agg.A++
 
-        if (row.uid === userId) myStatus = row.status
-      })
+          if (row.uid === userId) myStatus = row.status
+        })
 
       setRingkas(agg)
       setStatus(myStatus)
@@ -1461,6 +1460,7 @@ export default function SAbsensi() {
         return
       }
 
+      // Check if mode is 'otomatis'
       if (currentJadwal?.mode !== 'otomatis') {
         pushToast(
           'error',
@@ -1511,7 +1511,6 @@ export default function SAbsensi() {
     setShowCalendarOverlay(true)
   }
 
-  /* ========== Realtime Listener Absensi & Settings ========== */
   useEffect(() => {
     if (!profile?.kelas || !userId) return
 
@@ -1617,16 +1616,16 @@ export default function SAbsensi() {
         'postgres_changes',
         rfidSettingsId
           ? {
-              event: '*',
-              schema: 'public',
-              table: 'absensi_rfid_settings',
-              filter: `id=eq.${rfidSettingsId}`
-            }
+            event: '*',
+            schema: 'public',
+            table: 'absensi_rfid_settings',
+            filter: `id=eq.${rfidSettingsId}`
+          }
           : {
-              event: '*',
-              schema: 'public',
-              table: 'absensi_rfid_settings'
-            },
+            event: '*',
+            schema: 'public',
+            table: 'absensi_rfid_settings'
+          },
         (payload) => {
           if (payload.new) {
             setRfidSettingsId(payload.new.id || '')
@@ -1656,6 +1655,7 @@ export default function SAbsensi() {
 
     const handleRfidEvent = async (payload) => {
       const scan = payload.new
+      if (!scan || (scan.status && String(scan.status).toLowerCase() !== 'raw')) return
       const scanTime = scan.created_at ? new Date(scan.created_at) : new Date()
       const todayKey = getToday()
       const scanDateKey = scanTime.toISOString().slice(0, 10)
@@ -1884,9 +1884,8 @@ export default function SAbsensi() {
                         RFID: {(profile.rfid_uid || '').toUpperCase()}
                       </div>
                       <div
-                        className={`text-[10px] ${
-                          rfidListening ? 'text-green-600' : 'text-red-500'
-                        }`}
+                        className={`text-[10px] ${rfidListening ? 'text-green-600' : 'text-red-500'
+                          }`}
                       >
                         {rfidListening ? 'Siap scan' : 'Tidak terhubung'}
                       </div>
@@ -1915,22 +1914,20 @@ export default function SAbsensi() {
           <div className="border-b border-slate-200">
             <div className="flex gap-2 px-3 pt-2">
               <button
-                className={`px-3 py-2 font-medium border-b-2 rounded-t-2xl transition-all duration-200 flex items-center space-x-1 text-sm ${
-                  tab === 'manual'
-                    ? 'border-blue-600 text-blue-600 bg-blue-50/50'
-                    : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'
-                }`}
+                className={`px-3 py-2 font-medium border-b-2 rounded-t-2xl transition-all duration-200 flex items-center space-x-1 text-sm ${tab === 'manual'
+                  ? 'border-blue-600 text-blue-600 bg-blue-50/50'
+                  : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+                  }`}
                 onClick={() => setTab('manual')}
               >
                 <span>📝</span>
                 <span>Absen Manual</span>
               </button>
               <button
-                className={`px-3 py-2 font-medium border-b-2 rounded-t-2xl transition-all duration-200 flex items-center space-x-1 text-sm ${
-                  tab === 'jadwal'
-                    ? 'border-blue-600 text-blue-600 bg-blue-50/50'
-                    : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'
-                }`}
+                className={`px-3 py-2 font-medium border-b-2 rounded-t-2xl transition-all duration-200 flex items-center space-x-1 text-sm ${tab === 'jadwal'
+                  ? 'border-blue-600 text-blue-600 bg-blue-50/50'
+                  : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+                  }`}
                 onClick={() => setTab('jadwal')}
               >
                 <span>📅</span>
@@ -1999,15 +1996,14 @@ export default function SAbsensi() {
 
                   {/* Status sesi hari ini */}
                   <div
-                    className={`xl:col-span-2 rounded-2xl border p-4 shadow-sm transition-all duration-200 ${
-                      currentJadwal && tgl === getToday()
-                        ? isAbsenOpen && currentJadwal.mode === 'otomatis'
-                          ? 'bg-green-50 border-green-200 text-green-900'
-                          : currentJadwalIndex !== -1
+                    className={`xl:col-span-2 rounded-2xl border p-4 shadow-sm transition-all duration-200 ${currentJadwal && tgl === getToday()
+                      ? isAbsenOpen && currentJadwal.mode === 'otomatis'
+                        ? 'bg-green-50 border-green-200 text-green-900'
+                        : currentJadwalIndex !== -1
                           ? 'bg-blue-50 border-blue-200 text-blue-900'
                           : 'bg-slate-50 border-slate-200 text-slate-800'
-                        : 'bg-slate-50 border-slate-200 text-slate-800'
-                    }`}
+                      : 'bg-slate-50 border-slate-200 text-slate-800'
+                      }`}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div>
@@ -2099,10 +2095,10 @@ export default function SAbsensi() {
                             status === 'Hadir'
                               ? 'hadir'
                               : status === 'Izin'
-                              ? 'izin'
-                              : status === 'Sakit'
-                              ? 'sakit'
-                              : 'alpha'
+                                ? 'izin'
+                                : status === 'Sakit'
+                                  ? 'sakit'
+                                  : 'alpha'
                           }
                         >
                           Status Anda: {status}
@@ -2192,19 +2188,17 @@ export default function SAbsensi() {
                           className="border border-slate-200 rounded-2xl overflow-hidden"
                         >
                           <div
-                            className={`px-4 py-3 border-b ${
-                              isHariIni
-                                ? 'bg-blue-50 border-blue-200'
-                                : 'bg-slate-50 border-slate-200'
-                            }`}
+                            className={`px-4 py-3 border-b ${isHariIni
+                              ? 'bg-blue-50 border-blue-200'
+                              : 'bg-slate-50 border-slate-200'
+                              }`}
                           >
                             <div className="flex items-center justify-between">
                               <h3
-                                className={`font-semibold ${
-                                  isHariIni
-                                    ? 'text-blue-800'
-                                    : 'text-slate-700'
-                                }`}
+                                className={`font-semibold ${isHariIni
+                                  ? 'text-blue-800'
+                                  : 'text-slate-700'
+                                  }`}
                               >
                                 {hari}
                               </h3>
@@ -2223,7 +2217,7 @@ export default function SAbsensi() {
                                   const isCurrent =
                                     isHariIni &&
                                     jadwalHariIni.find((j) => j.id === jadwal.id) ===
-                                      currentJadwal
+                                    currentJadwal
                                   return (
                                     <JadwalCard
                                       key={jadwal.id}
@@ -2312,11 +2306,10 @@ export default function SAbsensi() {
                 Batal
               </button>
               <button
-                className={`px-3 py-2 rounded-2xl font-medium transition-all duration-200 text-xs ${
-                  isSubmitting
-                    ? 'bg-slate-400 cursor-not-allowed text-white'
-                    : 'bg-blue-600 hover:bg-blue-700 text-white'
-                }`}
+                className={`px-3 py-2 rounded-2xl font-medium transition-all duration-200 text-xs ${isSubmitting
+                  ? 'bg-slate-400 cursor-not-allowed text-white'
+                  : 'bg-blue-600 hover:bg-blue-700 text-white'
+                  }`}
                 onClick={ajukanIzin}
                 disabled={isSubmitting}
               >

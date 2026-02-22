@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\DbController;
 use App\Http\Controllers\Api\PresenceController;
 use App\Http\Controllers\Api\QuizController;
+use App\Http\Controllers\Api\RfidController;
 use App\Http\Controllers\Api\StorageController;
 use App\Http\Controllers\Api\SuperAdminController;
 use Illuminate\Support\Facades\Route;
@@ -17,6 +18,18 @@ Route::get('/health', function () {
 
 Route::post('/auth/register', [AuthController::class, 'register'])->middleware('throttle:auth');
 Route::post('/auth/login', [AuthController::class, 'login'])->middleware('throttle:auth');
+Route::get('/auth/google/redirect', [AuthController::class, 'googleRedirect'])
+    ->middleware(['web', 'throttle:auth'])
+    ->withoutMiddleware([\App\Http\Middleware\EnsureTenantMatchesProfile::class]);
+Route::get('/auth/google/callback', [AuthController::class, 'googleCallback'])
+    ->middleware(['web', 'throttle:auth'])
+    ->withoutMiddleware([
+        \App\Http\Middleware\ResolveTenant::class,
+        \App\Http\Middleware\EnsureTenantMatchesProfile::class,
+    ]);
+Route::get('/auth/google/finalize-login', [AuthController::class, 'googleFinalizeLogin'])
+    ->middleware(['web', 'throttle:auth'])
+    ->withoutMiddleware([\App\Http\Middleware\EnsureTenantMatchesProfile::class]);
 Route::post('/auth/forgot-password', [AuthController::class, 'forgotPassword'])->middleware('throttle:auth');
 Route::post('/auth/reset-password', [AuthController::class, 'resetPassword'])->middleware('throttle:auth');
 Route::get('/auth/verify-email/{id}/{hash}', [AuthController::class, 'verifyEmail'])
@@ -26,8 +39,27 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->post('/auth/logout', [AuthC
 Route::middleware(['auth:sanctum', 'throttle:api'])->get('/auth/me', [AuthController::class, 'me']);
 Route::middleware(['auth:sanctum', 'throttle:api'])->post('/auth/update-password', [AuthController::class, 'updatePassword']);
 Route::middleware(['auth:sanctum', 'throttle:api'])->post('/auth/update-account', [AuthController::class, 'updateAccount']);
+Route::middleware(['auth:sanctum', 'throttle:auth'])->post('/auth/password-change/send-code', [AuthController::class, 'sendPasswordChangeCode']);
 Route::middleware(['auth:sanctum', 'throttle:api'])->post('/auth/verify-email/resend', [AuthController::class, 'resendVerificationEmail']);
+Route::middleware(['auth:sanctum', 'throttle:auth'])->post('/auth/email-verification/send-code', [AuthController::class, 'sendEmailVerificationCode']);
+Route::middleware(['auth:sanctum', 'throttle:auth'])->post('/auth/email-verification/verify-code', [AuthController::class, 'verifyEmailCode']);
+Route::middleware(['web', 'auth:sanctum', 'throttle:api'])->get('/auth/google/link', [AuthController::class, 'googleLinkRedirect']);
+Route::middleware(['auth:sanctum', 'throttle:api'])->post('/auth/google/unlink', [AuthController::class, 'googleUnlink']);
 Route::middleware(['auth:sanctum', 'throttle:api'])->post('/presence/ping', [PresenceController::class, 'ping']);
+Route::post('/rfid/scan', [RfidController::class, 'scan'])
+    ->middleware('throttle:api')
+    ->withoutMiddleware([
+        \App\Http\Middleware\ResolveTenant::class,
+        \App\Http\Middleware\EnsureTenantMatchesProfile::class,
+    ]);
+Route::get('/rfid/mode', [RfidController::class, 'mode'])
+    ->middleware('throttle:api')
+    ->withoutMiddleware([
+        \App\Http\Middleware\ResolveTenant::class,
+        \App\Http\Middleware\EnsureTenantMatchesProfile::class,
+    ]);
+Route::post('/rfid/set-mode', [RfidController::class, 'setMode'])
+    ->middleware(['auth:sanctum', 'throttle:api']);
 Route::middleware(['auth:sanctum', 'throttle:api'])->post('/quiz/submit', [QuizController::class, 'submit']);
 Route::middleware(['auth:sanctum', 'throttle:api'])->post('/quiz/retake', [QuizController::class, 'retake']);
 Route::middleware(['auth:sanctum', 'throttle:api'])->get('/quiz/retake-history', [QuizController::class, 'retakeHistory']);
@@ -59,6 +91,7 @@ Route::middleware(['auth:sanctum', 'throttle:super', 'super.domain'])->group(fun
     Route::post('/super/tenants/{id}/restore', [SuperAdminController::class, 'restoreTenant']);
     Route::patch('/super/tenants/{id}/status', [SuperAdminController::class, 'updateTenantStatus']);
     Route::post('/super/tenants/{tenantId}/admins/{userId}/reset-password', [SuperAdminController::class, 'resetTenantAdminPassword']);
+    Route::patch('/super/tenants/{tenantId}/admins/{userId}/primary', [SuperAdminController::class, 'setTenantPrimaryAdmin']);
     Route::get('/super/admins', [SuperAdminController::class, 'admins']);
     Route::post('/super/admins', [SuperAdminController::class, 'storeAdmin']);
     Route::delete('/super/admins/{id}', [SuperAdminController::class, 'deleteAdmin']);

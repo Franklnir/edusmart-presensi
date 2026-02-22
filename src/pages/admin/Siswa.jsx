@@ -1,6 +1,6 @@
 // src/pages/admin/ASiswa.jsx
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { supabase } from '../../lib/supabase'
+import { supabase, apiFetch } from '../../lib/supabase'
 import { formatDate } from '../../lib/time'
 import { useUIStore } from '../../store/useUIStore'
 import { useAuthStore } from '../../store/useAuthStore'
@@ -550,7 +550,7 @@ export default function ASiswa() {
   useEffect(() => {
     return () => {
       if (rfidChannel) {
-        try { supabase.removeChannel(rfidChannel) } catch {}
+        try { supabase.removeChannel(rfidChannel) } catch { }
       }
     }
   }, [rfidChannel])
@@ -1732,7 +1732,7 @@ export default function ASiswa() {
     setRfidLastScan(null)
     setRfidEnrolling(false)
     if (rfidChannel) {
-      try { supabase.removeChannel(rfidChannel) } catch {}
+      try { supabase.removeChannel(rfidChannel) } catch { }
       setRfidChannel(null)
     }
 
@@ -1827,10 +1827,10 @@ export default function ASiswa() {
       setOsisRow(
         osisData
           ? {
-              status: osisData.status || 'aktif',
-              bagian: osisData.bagian || '',
-              jabatan: osisData.jabatan || 'Anggota'
-            }
+            status: osisData.status || 'aktif',
+            bagian: osisData.bagian || '',
+            jabatan: osisData.jabatan || 'Anggota'
+          }
           : null
       )
     } catch (error) {
@@ -1862,7 +1862,7 @@ export default function ASiswa() {
     setEditingPhone(false)
     setPhoneErrors({})
     if (rfidChannel) {
-      try { supabase.removeChannel(rfidChannel) } catch {}
+      try { supabase.removeChannel(rfidChannel) } catch { }
       setRfidChannel(null)
     }
   }
@@ -1889,8 +1889,8 @@ export default function ASiswa() {
       `• Status ketua kelas akan direset jika ada` +
       (isCrossGrade
         ? `\n\n⚠️ PERHATIAN:\n` +
-          `Ini termasuk pindah tingkatan (grade) dari ${originalGrade} ke ${targetGrade}.\n` +
-          `Pastikan ini memang kenaikan kelas / perbaikan salah kelas.`
+        `Ini termasuk pindah tingkatan (grade) dari ${originalGrade} ke ${targetGrade}.\n` +
+        `Pastikan ini memang kenaikan kelas / perbaikan salah kelas.`
         : '')
     )
 
@@ -2127,17 +2127,41 @@ export default function ASiswa() {
   }
 
   /* ===== RFID ===== */
-  function toggleRfidListen() {
+  async function toggleRfidListen() {
     if (!canManageRfid) return
 
     if (rfidEnrolling) {
       if (rfidChannel) {
-        try { supabase.removeChannel(rfidChannel) } catch {}
+        try { supabase.removeChannel(rfidChannel) } catch { }
         setRfidChannel(null)
       }
       setRfidEnrolling(false)
+
+      // Sync hardware back to auto mode
+      try {
+        await apiFetch('/api/rfid/set-mode', {
+          method: 'POST',
+          body: { mode: 'auto' }
+        })
+      } catch (err) {
+        console.error('Failed to reset RFID mode:', err)
+      }
+
       pushToast('info', 'Mode scan RFID dimatikan')
       return
+    }
+
+    // Attempt to set hardware to enroll mode
+    try {
+      const { error: modeErr } = await apiFetch('/api/rfid/set-mode', {
+        method: 'POST',
+        body: { mode: 'enroll' }
+      })
+      if (modeErr) {
+        pushToast('warning', 'Gagal sinkronisasi hardware, tapi mode scan aktif.')
+      }
+    } catch (err) {
+      console.error('Failed to set RFID mode:', err)
     }
 
     const channel = supabase
@@ -2146,6 +2170,7 @@ export default function ASiswa() {
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'rfid_scans' },
         (payload) => {
+          if (!payload?.new || (payload.new.status && String(payload.new.status).toLowerCase() !== 'raw')) return
           const uid = (payload.new.card_uid || '').toUpperCase().replace(/\s+/g, '')
           setRfidInput(uid)
           setRfidLastScan(payload.new)
@@ -2455,33 +2480,30 @@ export default function ASiswa() {
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
-                    className={`px-4 py-2 rounded-lg text-sm font-medium border ${
-                      importSource === 'file'
-                        ? 'bg-blue-600 text-white border-blue-600'
-                        : 'bg-white text-gray-700 border-gray-200'
-                    }`}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium border ${importSource === 'file'
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white text-gray-700 border-gray-200'
+                      }`}
                     onClick={() => switchImportSource('file')}
                   >
                     📁 Upload File
                   </button>
                   <button
                     type="button"
-                    className={`px-4 py-2 rounded-lg text-sm font-medium border ${
-                      importSource === 'sheet'
-                        ? 'bg-blue-600 text-white border-blue-600'
-                        : 'bg-white text-gray-700 border-gray-200'
-                    }`}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium border ${importSource === 'sheet'
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white text-gray-700 border-gray-200'
+                      }`}
                     onClick={() => switchImportSource('sheet')}
                   >
                     📊 Google Sheets
                   </button>
                   <button
                     type="button"
-                    className={`px-4 py-2 rounded-lg text-sm font-medium border ${
-                      importSource === 'history'
-                        ? 'bg-blue-600 text-white border-blue-600'
-                        : 'bg-white text-gray-700 border-gray-200'
-                    }`}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium border ${importSource === 'history'
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white text-gray-700 border-gray-200'
+                      }`}
                     onClick={() => switchImportSource('history')}
                   >
                     🕘 Riwayat Import
@@ -2523,9 +2545,8 @@ export default function ASiswa() {
                                 key={history.id}
                                 type="button"
                                 onClick={() => openImportHistory(history)}
-                                className={`w-full text-left px-4 py-3 transition-colors ${
-                                  isActive ? 'bg-blue-50' : 'hover:bg-gray-50'
-                                }`}
+                                className={`w-full text-left px-4 py-3 transition-colors ${isActive ? 'bg-blue-50' : 'hover:bg-gray-50'
+                                  }`}
                               >
                                 <div className="flex items-start justify-between gap-2">
                                   <div className="min-w-0">

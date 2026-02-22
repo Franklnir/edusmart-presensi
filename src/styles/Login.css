@@ -411,6 +411,10 @@ body {
 }
 
 /* Submit button */
+.login__action-row {
+  margin-bottom: 14px;
+}
+
 .login__submit-btn {
   width: 100%;
   padding: 10px;
@@ -426,7 +430,7 @@ body {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  margin-bottom: 18px;
+  margin-bottom: 0;
   box-shadow: 0 10px 22px rgba(79, 70, 229, 0.35);
 }
 
@@ -449,6 +453,98 @@ body {
   cursor: not-allowed;
   transform: none;
   box-shadow: 0 4px 12px rgba(148, 163, 184, 0.35);
+}
+
+.login__divider {
+  position: relative;
+  text-align: center;
+  margin: 8px 0 12px;
+}
+
+.login__divider::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  border-top: 1px dashed rgba(148, 163, 184, 0.75);
+  transform: translateY(-50%);
+}
+
+.login__divider span {
+  position: relative;
+  display: inline-block;
+  padding: 0 8px;
+  background: #ffffff;
+  color: var(--text-lighter);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.login__google-btn {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1.5px solid var(--border);
+  background: #ffffff;
+  color: #0f172a;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.login__google-btn:hover:not(:disabled) {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px rgba(148, 163, 184, 0.22);
+}
+
+.login__google-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.login__google-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.login__google-icon {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.login__google-icon svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.login__google-note {
+  color: #92400e;
+  font-size: 10px;
+  margin-bottom: 14px;
+  text-align: center;
+}
+
+.login__spinner-btn {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top: 2px solid #ffffff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
 }
 
 .login__spinner {

@@ -174,6 +174,37 @@ export default function Scan() {
     loadSettings()
   }, [pushToast])
 
+  // Auto-switch scan mode based on time
+  useEffect(() => {
+    if (!manualModeEnabled) return
+
+    const updateMode = () => {
+      const now = new Date()
+      const timeStr = now.toTimeString().slice(0, 5)
+      const {
+        jam_masuk_mulai,
+        jam_masuk_selesai,
+        jam_pulang_mulai,
+        jam_pulang_selesai
+      } = sessionSettings
+
+      if (timeStr >= jam_masuk_mulai && timeStr <= jam_masuk_selesai) {
+        setScanMode('masuk')
+      } else if (
+        timeStr >= jam_pulang_mulai &&
+        timeStr <= jam_pulang_selesai
+      ) {
+        setScanMode('pulang')
+      } else {
+        setScanMode(null)
+      }
+    }
+
+    updateMode()
+    const timer = setInterval(updateMode, 60000)
+    return () => clearInterval(timer)
+  }, [manualModeEnabled, sessionSettings])
+
   // fungsi update settings
   const updateSettings = useCallback(
     async (payload) => {
@@ -457,10 +488,90 @@ export default function Scan() {
       if (!code) return
 
       if (!manualModeEnabled) {
-        pushToast(
-          'info',
-          'Mode scan manual belum diaktifkan. Aktifkan toggle "Mode Scan Manual" terlebih dahulu.'
-        )
+        // Mode Langsung: Cari siswa dan absen langsung ke mapel aktif
+        setLoading(true)
+        try {
+          const targetUid = String(code).trim()
+          let cleanedUid = targetUid
+          try {
+            const parsed = JSON.parse(targetUid)
+            if (parsed.uid) cleanedUid = parsed.uid
+          } catch { }
+
+          const { data: student, error: errStudent } = await supabase
+            .from('profiles')
+            .select('id, nama, kelas, status')
+            .eq('role', 'siswa')
+            .eq('rfid_uid', cleanedUid)
+            .single()
+
+          if (errStudent || !student) {
+            pushToast('error', 'Siswa dengan kartu ini tidak ditemukan.')
+            return
+          }
+
+          if (student.status && student.status !== 'active') {
+            pushToast('error', 'Akun siswa tidak aktif.')
+            return
+          }
+
+          const now = new Date()
+          const timeStr = now.toTimeString().slice(0, 5)
+          const dayName = format(now, 'EEEE', { locale: localeId })
+
+          const { data: jadwalAktif, error: errJadwal } = await supabase
+            .from('jadwal')
+            .select('*')
+            .eq('kelas_id', student.kelas)
+            .eq('hari', dayName)
+            .lte('jam_mulai', timeStr)
+            .gte('jam_selesai', timeStr)
+            .maybeSingle()
+
+          if (!jadwalAktif) {
+            pushToast('warning', `Tidak ada jadwal aktif untuk ${student.nama} (${timeStr})`)
+            return
+          }
+
+          const todayIso = now.toISOString().slice(0, 10)
+          const { error: errAbsen } = await supabase.from('absensi').upsert(
+            {
+              kelas: student.kelas,
+              tanggal: todayIso,
+              uid: student.id,
+              mapel: jadwalAktif.mapel,
+              status: 'Hadir',
+              nama: student.nama,
+              oleh: 'ADMIN_SCANNER_LANGSUNG',
+              waktu: now.toISOString()
+            },
+            { onConflict: 'kelas,tanggal,mapel,uid' }
+          )
+
+          if (errAbsen) throw errAbsen
+
+          // Update scan status if applicable
+          if (options.fromRealtime && options.scanRowId) {
+            await supabase
+              .from('rfid_scans')
+              .update({ status: 'processed' })
+              .eq('id', options.scanRowId)
+          }
+
+          pushToast('success', `Absen langsung berhasil: ${student.nama} (${jadwalAktif.mapel})`)
+
+          try {
+            const audio = new Audio('/beep.mp3')
+            audio.play().catch(() => { })
+          } catch { }
+
+          loadKelasData(todayIso)
+        } catch (err) {
+          console.error('Error Scan Langsung:', err)
+          pushToast('error', 'Gagal memproses absen langsung.')
+        } finally {
+          setLoading(false)
+        }
         return
       }
 
@@ -620,7 +731,7 @@ export default function Scan() {
 
         try {
           const audio = new Audio('/beep.mp3')
-          audio.play().catch(() => {})
+          audio.play().catch(() => { })
         } catch {
           // ignore
         }
@@ -984,29 +1095,29 @@ export default function Scan() {
 
         const summaryMap = {}
 
-        ;(scans || []).forEach((s) => {
-          if (!s.card_uid) return
-          const stuFromUid =
-            allStudentsMap[`uid:${s.card_uid}`]
-          if (!stuFromUid) return
-          const sid = stuFromUid.id
+          ; (scans || []).forEach((s) => {
+            if (!s.card_uid) return
+            const stuFromUid =
+              allStudentsMap[`uid:${s.card_uid}`]
+            if (!stuFromUid) return
+            const sid = stuFromUid.id
 
-          if (!summaryMap[sid]) {
-            summaryMap[sid] = {
-              student: stuFromUid,
-              scanCount: 0,
-              firstScan: s.created_at,
-              lastScan: s.created_at
+            if (!summaryMap[sid]) {
+              summaryMap[sid] = {
+                student: stuFromUid,
+                scanCount: 0,
+                firstScan: s.created_at,
+                lastScan: s.created_at
+              }
             }
-          }
-          summaryMap[sid].scanCount += 1
-          if (s.created_at < summaryMap[sid].firstScan) {
-            summaryMap[sid].firstScan = s.created_at
-          }
-          if (s.created_at > summaryMap[sid].lastScan) {
-            summaryMap[sid].lastScan = s.created_at
-          }
-        })
+            summaryMap[sid].scanCount += 1
+            if (s.created_at < summaryMap[sid].firstScan) {
+              summaryMap[sid].firstScan = s.created_at
+            }
+            if (s.created_at > summaryMap[sid].lastScan) {
+              summaryMap[sid].lastScan = s.created_at
+            }
+          })
 
         const result = (allStudents || []).map((stu) => {
           const sum = summaryMap[stu.id] || {
@@ -1082,8 +1193,8 @@ export default function Scan() {
   const attendanceRate =
     totalStudents > 0
       ? Math.round(
-          (totalScannedStudents / totalStudents) * 100
-        )
+        (totalScannedStudents / totalStudents) * 100
+      )
       : 0
 
   /* ========= RENDER ========= */
@@ -1122,11 +1233,10 @@ export default function Scan() {
                   <button
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id)}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                      activeTab === tab.id
-                        ? 'bg-blue-600 text-white shadow-sm'
-                        : 'text-gray-600 hover:bg-gray-50'
-                    }`}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === tab.id
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-gray-600 hover:bg-gray-50'
+                      }`}
                   >
                     <tab.icon size={16} />
                     {tab.label}
@@ -1138,845 +1248,834 @@ export default function Scan() {
         </div>
 
         <div className="space-y-6">
-        {/* --- MODE 1: SCANNING MANUAL --- */}
-        {activeTab === 1 && (
-          <div className="space-y-6">
-            {/* Quick Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div className="bg-white p-4 rounded-xl border border-gray-200">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-blue-50 rounded-lg">
-                    <Users className="w-5 h-5 text-blue-600" />
-                  </div>
-                  <div>
-                    <div className="text-2xl font-bold text-gray-900">
-                      {totalStudents}
+          {/* --- MODE 1: SCANNING MANUAL --- */}
+          {activeTab === 1 && (
+            <div className="space-y-6">
+              {/* Quick Stats */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="bg-white p-4 rounded-xl border border-gray-200">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-blue-50 rounded-lg">
+                      <Users className="w-5 h-5 text-blue-600" />
                     </div>
-                    <div className="text-sm text-gray-600">
-                      Total Siswa
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-white p-4 rounded-xl border border-gray-200">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-green-50 rounded-lg">
-                    <UserCheck className="w-5 h-5 text-green-600" />
-                  </div>
-                  <div>
-                    <div className="text-2xl font-bold text-gray-900">
-                      {scanMasuk.length}
-                    </div>
-                    <div className="text-sm text-gray-600">
-                      Scan Masuk
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-white p-4 rounded-xl border border-gray-200">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-orange-50 rounded-lg">
-                    <UserCheck className="w-5 h-5 text-orange-600" />
-                  </div>
-                  <div>
-                    <div className="text-2xl font-bold text-gray-900">
-                      {scanPulang.length}
-                    </div>
-                    <div className="text-sm text-gray-600">
-                      Scan Pulang
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-white p-4 rounded-xl border border-gray-200">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-purple-50 rounded-lg">
-                    <BarChart3 className="w-5 h-5 text-purple-600" />
-                  </div>
-                  <div>
-                    <div className="text-2xl font-bold text-gray-900">
-                      {kelaslist.length}
-                    </div>
-                    <div className="text-sm text-gray-600">
-                      Total Kelas
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Main Content Grid */}
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-              {/* Settings Panel */}
-              <div className="xl:col-span-2 space-y-6">
-                {/* Settings Card */}
-                <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                  <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
-                    <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                      <Clock className="w-5 h-5 text-gray-600" />
-                      Pengaturan Scan Manual
-                    </h3>
-                  </div>
-
-                  <div className="p-6 space-y-6">
-                    {/* Date and Time Settings */}
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                      <div className="space-y-4">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Tanggal Operasional
-                          </label>
-                          <input
-                            type="date"
-                            value={tanggal}
-                            onChange={(e) =>
-                              setSessionSettings((prev) => ({
-                                ...prev,
-                                tanggal: e.target.value
-                              }))
-                            }
-                            className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                          />
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                              Jam Masuk Mulai
-                            </label>
-                            <input
-                              type="time"
-                              value={
-                                sessionSettings.jam_masuk_mulai
-                              }
-                              onChange={(e) =>
-                                setSessionSettings((prev) => ({
-                                  ...prev,
-                                  jam_masuk_mulai: e.target.value
-                                }))
-                              }
-                              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                              Jam Masuk Selesai
-                            </label>
-                            <input
-                              type="time"
-                              value={
-                                sessionSettings.jam_masuk_selesai
-                              }
-                              onChange={(e) =>
-                                setSessionSettings((prev) => ({
-                                  ...prev,
-                                  jam_masuk_selesai: e.target.value
-                                }))
-                              }
-                              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                            />
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                              Jam Pulang Mulai
-                            </label>
-                            <input
-                              type="time"
-                              value={
-                                sessionSettings.jam_pulang_mulai
-                              }
-                              onChange={(e) =>
-                                setSessionSettings((prev) => ({
-                                  ...prev,
-                                  jam_pulang_mulai: e.target.value
-                                }))
-                              }
-                              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                              Jam Pulang Selesai
-                            </label>
-                            <input
-                              type="time"
-                              value={
-                                sessionSettings.jam_pulang_selesai
-                              }
-                              onChange={(e) =>
-                                setSessionSettings((prev) => ({
-                                  ...prev,
-                                  jam_pulang_selesai: e.target.value
-                                }))
-                              }
-                              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                            />
-                          </div>
-                        </div>
+                    <div>
+                      <div className="text-2xl font-bold text-gray-900">
+                        {totalStudents}
                       </div>
+                      <div className="text-sm text-gray-600">
+                        Total Siswa
+                      </div>
+                    </div>
+                  </div>
+                </div>
 
-                      {/* Mode Controls */}
-                      <div className="space-y-6">
-                        <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200">
+                <div className="bg-white p-4 rounded-xl border border-gray-200">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-green-50 rounded-lg">
+                      <UserCheck className="w-5 h-5 text-green-600" />
+                    </div>
+                    <div>
+                      <div className="text-2xl font-bold text-gray-900">
+                        {scanMasuk.length}
+                      </div>
+                      <div className="text-sm text-gray-600">
+                        Scan Masuk
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white p-4 rounded-xl border border-gray-200">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-orange-50 rounded-lg">
+                      <UserCheck className="w-5 h-5 text-orange-600" />
+                    </div>
+                    <div>
+                      <div className="text-2xl font-bold text-gray-900">
+                        {scanPulang.length}
+                      </div>
+                      <div className="text-sm text-gray-600">
+                        Scan Pulang
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white p-4 rounded-xl border border-gray-200">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-purple-50 rounded-lg">
+                      <BarChart3 className="w-5 h-5 text-purple-600" />
+                    </div>
+                    <div>
+                      <div className="text-2xl font-bold text-gray-900">
+                        {kelaslist.length}
+                      </div>
+                      <div className="text-sm text-gray-600">
+                        Total Kelas
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Main Content Grid */}
+              <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+                {/* Settings Panel */}
+                <div className="xl:col-span-2 space-y-6">
+                  {/* Settings Card */}
+                  <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                    <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
+                      <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                        <Clock className="w-5 h-5 text-gray-600" />
+                        Pengaturan Scan Manual
+                      </h3>
+                    </div>
+
+                    <div className="p-6 space-y-6">
+                      {/* Date and Time Settings */}
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div className="space-y-4">
                           <div>
-                            <div className="font-medium text-gray-900">
-                              Mode Scan Manual
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Tanggal Operasional
+                            </label>
+                            <input
+                              type="date"
+                              value={tanggal}
+                              onChange={(e) =>
+                                setSessionSettings((prev) => ({
+                                  ...prev,
+                                  tanggal: e.target.value
+                                }))
+                              }
+                              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                            />
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-2">
+                                Jam Masuk Mulai
+                              </label>
+                              <input
+                                type="time"
+                                value={
+                                  sessionSettings.jam_masuk_mulai
+                                }
+                                onChange={(e) =>
+                                  setSessionSettings((prev) => ({
+                                    ...prev,
+                                    jam_masuk_mulai: e.target.value
+                                  }))
+                                }
+                                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                              />
                             </div>
-                            <div className="text-sm text-gray-600">
-                              {manualModeEnabled
-                                ? 'Scan RFID aktif sesuai jam yang diatur'
-                                : 'Scan RFID dinonaktifkan'}
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-2">
+                                Jam Masuk Selesai
+                              </label>
+                              <input
+                                type="time"
+                                value={
+                                  sessionSettings.jam_masuk_selesai
+                                }
+                                onChange={(e) =>
+                                  setSessionSettings((prev) => ({
+                                    ...prev,
+                                    jam_masuk_selesai: e.target.value
+                                  }))
+                                }
+                                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                              />
                             </div>
                           </div>
-                          <button
-                            onClick={toggleManualMode}
-                            disabled={settingsLoading}
-                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                              manualModeEnabled
+
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-2">
+                                Jam Pulang Mulai
+                              </label>
+                              <input
+                                type="time"
+                                value={
+                                  sessionSettings.jam_pulang_mulai
+                                }
+                                onChange={(e) =>
+                                  setSessionSettings((prev) => ({
+                                    ...prev,
+                                    jam_pulang_mulai: e.target.value
+                                  }))
+                                }
+                                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-2">
+                                Jam Pulang Selesai
+                              </label>
+                              <input
+                                type="time"
+                                value={
+                                  sessionSettings.jam_pulang_selesai
+                                }
+                                onChange={(e) =>
+                                  setSessionSettings((prev) => ({
+                                    ...prev,
+                                    jam_pulang_selesai: e.target.value
+                                  }))
+                                }
+                                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Mode Controls */}
+                        <div className="space-y-6">
+                          <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200">
+                            <div>
+                              <div className="font-medium text-gray-900">
+                                Mode Scan Manual
+                              </div>
+                              <div className="text-sm text-gray-600">
+                                {manualModeEnabled
+                                  ? 'Scan RFID aktif sesuai jam yang diatur'
+                                  : 'Scan RFID dinonaktifkan'}
+                              </div>
+                            </div>
+                            <button
+                              onClick={toggleManualMode}
+                              disabled={settingsLoading}
+                              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${manualModeEnabled
                                 ? 'bg-blue-600'
                                 : 'bg-gray-300'
-                            } ${
-                              settingsLoading
-                                ? 'opacity-50 cursor-not-allowed'
-                                : ''
-                            }`}
-                          >
-                            <span
-                              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                                manualModeEnabled
+                                } ${settingsLoading
+                                  ? 'opacity-50 cursor-not-allowed'
+                                  : ''
+                                }`}
+                            >
+                              <span
+                                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${manualModeEnabled
                                   ? 'translate-x-6'
                                   : 'translate-x-1'
-                              }`}
-                            />
-                          </button>
-                        </div>
-
-                        <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200">
-                          <div>
-                            <div className="font-medium text-gray-900">
-                              Alpha Otomatis
-                            </div>
-                            <div className="text-sm text-gray-600">
-                              {autoAlphaEnabled
-                                ? 'Siswa tidak scan otomatis diisi Alpha'
-                                : 'Siswa tidak scan tetap kosong'}
-                            </div>
+                                  }`}
+                              />
+                            </button>
                           </div>
-                          <button
-                            onClick={() =>
-                              setAutoAlphaEnabled((prev) => !prev)
-                            }
-                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                              autoAlphaEnabled
+
+                          <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200">
+                            <div>
+                              <div className="font-medium text-gray-900">
+                                Alpha Otomatis
+                              </div>
+                              <div className="text-sm text-gray-600">
+                                {autoAlphaEnabled
+                                  ? 'Siswa tidak scan otomatis diisi Alpha'
+                                  : 'Siswa tidak scan tetap kosong'}
+                              </div>
+                            </div>
+                            <button
+                              onClick={() =>
+                                setAutoAlphaEnabled((prev) => !prev)
+                              }
+                              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${autoAlphaEnabled
                                 ? 'bg-red-600'
                                 : 'bg-gray-300'
-                            }`}
-                          >
-                            <span
-                              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                                autoAlphaEnabled
+                                }`}
+                            >
+                              <span
+                                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${autoAlphaEnabled
                                   ? 'translate-x-6'
                                   : 'translate-x-1'
-                              }`}
-                            />
-                          </button>
-                        </div>
+                                  }`}
+                              />
+                            </button>
+                          </div>
 
-                        <div className="space-y-3">
-                          <button
-                            onClick={handleSaveJamSettings}
-                            className="w-full bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-3 rounded-lg inline-flex items-center justify-center gap-2 font-medium shadow-sm transition-colors"
-                          >
-                            <Save size={18} />
-                            Simpan Pengaturan Jam
-                          </button>
+                          <div className="space-y-3">
+                            <button
+                              onClick={handleSaveJamSettings}
+                              className="w-full bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-3 rounded-lg inline-flex items-center justify-center gap-2 font-medium shadow-sm transition-colors"
+                            >
+                              <Save size={18} />
+                              Simpan Pengaturan Jam
+                            </button>
 
-                          <button
-                            onClick={handleSaveAttendance}
-                            className="w-full bg-green-600 hover:bg-green-700 text-white px-4 py-3 rounded-lg inline-flex items-center justify-center gap-2 font-medium shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                            disabled={scannedStudents.length === 0}
-                          >
-                            <Save size={18} />
-                            Simpan & Proses Absensi
-                          </button>
+                            <button
+                              onClick={handleSaveAttendance}
+                              className="w-full bg-green-600 hover:bg-green-700 text-white px-4 py-3 rounded-lg inline-flex items-center justify-center gap-2 font-medium shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              disabled={scannedStudents.length === 0}
+                            >
+                              <Save size={18} />
+                              Simpan & Proses Absensi
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>
                   </div>
-                </div>
 
-                {/* Scanner Status */}
-                <div className="bg-white rounded-xl border border-gray-200 p-6">
-                  <h4 className="font-medium text-gray-900 mb-4">
-                    Status Scanner
-                  </h4>
+                  {/* Scanner Status */}
+                  <div className="bg-white rounded-xl border border-gray-200 p-6">
+                    <h4 className="font-medium text-gray-900 mb-4">
+                      Status Scanner
+                    </h4>
 
-                  {manualModeEnabled ? (
-                    <div className="mb-4 p-4 text-sm text-green-800 bg-green-50 border border-green-200 rounded-lg flex gap-3">
-                      <CheckCircle className="w-5 h-5 text-green-600 shrink-0 mt-0.5" />
-                      <div>
-                        <div className="font-semibold">
-                          Mode manual aktif
-                        </div>
-                        <div className="mt-1">
-                          Sistem otomatis menentukan{' '}
-                          <b>scan MASUK</b> / <b>PULANG</b> berdasarkan
-                          jam scan. Scanner RFID siap menerima input
-                          dari perangkat USB.
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="mb-4 p-4 text-sm text-yellow-800 bg-yellow-50 border border-yellow-200 rounded-lg flex gap-3">
-                      <AlertCircle className="w-5 h-5 text-yellow-600 shrink-0 mt-0.5" />
-                      <div>
-                        <div className="font-semibold">
-                          Mode scan manual nonaktif
-                        </div>
-                        <div className="mt-1">
-                          Scan dari RFID reader tidak akan diproses.
-                          Aktifkan mode manual terlebih dahulu.
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Current Mode Indicator */}
-                  <div className="grid grid-cols-2 gap-4">
-                    <div
-                      className={`p-4 rounded-lg border-2 text-center ${
-                        scanMode === 'masuk'
-                          ? 'bg-blue-50 border-blue-500 text-blue-700'
-                          : 'bg-gray-50 border-gray-300 text-gray-500'
-                      }`}
-                    >
-                      <div className="font-semibold text-lg">
-                        SCAN MASUK
-                      </div>
-                      <div className="text-sm mt-1">
-                        {sessionSettings.jam_masuk_mulai} -{' '}
-                        {sessionSettings.jam_masuk_selesai}
-                      </div>
-                    </div>
-                    <div
-                      className={`p-4 rounded-lg border-2 text-center ${
-                        scanMode === 'pulang'
-                          ? 'bg-orange-50 border-orange-500 text-orange-700'
-                          : 'bg-gray-50 border-gray-300 text-gray-500'
-                      }`}
-                    >
-                      <div className="font-semibold text-lg">
-                        SCAN PULANG
-                      </div>
-                      <div className="text-sm mt-1">
-                        {sessionSettings.jam_pulang_mulai} -{' '}
-                        {sessionSettings.jam_pulang_selesai}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">
-                    <div className="font-semibold">
-                      Cara Penggunaan:
-                    </div>
-                    <ul className="mt-1 space-y-1 list-disc list-inside">
-                      <li>
-                        Gunakan RFID Reader USB (mode keyboard
-                        emulation)
-                      </li>
-                      <li>
-                        Tempelkan kartu RFID → reader akan mengirimkan
-                        UID
-                      </li>
-                      <li>
-                        Scan otomatis diproses ketika menekan Enter
-                      </li>
-                      <li>
-                        Hanya diterima dalam rentang jam scan yang
-                        ditentukan
-                      </li>
-                    </ul>
-                  </div>
-                </div>
-              </div>
-
-              {/* Classes Panel */}
-              <div className="space-y-6">
-                <div className="bg-white rounded-xl border border-gray-200 p-6">
-                  <h4 className="font-medium text-gray-900 mb-4">
-                    Daftar Kelas
-                  </h4>
-                  <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2">
-                    {kelaslist.map((k) => (
-                      <div
-                        key={k.id}
-                        className="bg-gray-50 p-4 rounded-lg border border-gray-200 hover:border-blue-300 transition-colors"
-                      >
-                        <div className="flex justify-between items-start mb-3">
-                          <h5 className="font-semibold text-gray-900">
-                            {k.nama}
-                          </h5>
-                          <span className="text-xs bg-white px-2 py-0.5 rounded text-gray-600 border">
-                            Kelas {k.grade}
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-3 gap-3 text-sm">
-                          <div className="text-center">
-                            <div className="font-bold text-gray-900 text-lg">
-                              {k.total_siswa}
-                            </div>
-                            <div className="text-xs text-gray-600">
-                              Siswa
-                            </div>
+                    {manualModeEnabled ? (
+                      <div className="mb-4 p-4 text-sm text-green-800 bg-green-50 border border-green-200 rounded-lg flex gap-3">
+                        <CheckCircle className="w-5 h-5 text-green-600 shrink-0 mt-0.5" />
+                        <div>
+                          <div className="font-semibold">
+                            Mode manual aktif
                           </div>
-                          <div className="text-center">
-                            <div className="font-bold text-gray-900 text-lg">
-                              {k.total_mapel}
-                            </div>
-                            <div className="text-xs text-gray-600">
-                              Mapel
-                            </div>
-                          </div>
-                          <div className="text-center">
-                            <div className="font-bold text-green-600 text-lg">
-                              {k.scanned_count}
-                            </div>
-                            <div className="text-xs text-gray-600">
-                              Scan
-                            </div>
+                          <div className="mt-1">
+                            Sistem otomatis menentukan{' '}
+                            <b>scan MASUK</b> / <b>PULANG</b> berdasarkan
+                            jam scan. Scanner RFID siap menerima input
+                            dari perangkat USB.
                           </div>
                         </div>
-                        <div className="mt-3 bg-gray-200 rounded-full h-2">
-                          <div
-                            className="bg-green-500 h-2 rounded-full transition-all duration-500"
-                            style={{
-                              width: `${
-                                k.total_siswa > 0
-                                  ? Math.min(
-                                      100,
-                                      (k.scanned_count /
-                                        k.total_siswa) *
-                                        100
-                                    )
-                                  : 0
-                              }%`
-                            }}
-                          />
-                        </div>
                       </div>
-                    ))}
-                    {kelaslist.length === 0 && !loadingData && (
-                      <div className="text-center text-sm text-gray-500 py-4">
-                        Tidak ada data kelas
+                    ) : (
+                      <div className="mb-4 p-4 text-sm text-blue-800 bg-blue-50 border border-blue-200 rounded-lg flex gap-3">
+                        <CheckCircle className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+                        <div>
+                          <div className="font-semibold">
+                            Mode langsung aktif
+                          </div>
+                          <div className="mt-1">
+                            Scan RFID akan langsung mencatat kehadiran siswa ke mata pelajaran yang sedang berlangsung saat ini.
+                          </div>
+                        </div>
                       </div>
                     )}
-                  </div>
-                </div>
-              </div>
-            </div>
 
-            {/* Live Scan Tables */}
-            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-              <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-semibold text-gray-900">
-                    Live Scan Feed
-                  </h3>
-                  <div className="flex items-center gap-4 text-sm text-gray-600">
-                    <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full">
-                      {scanMasuk.length} Masuk
-                    </span>
-                    <span className="bg-orange-100 text-orange-700 px-3 py-1 rounded-full">
-                      {scanPulang.length} Pulang
-                    </span>
-                    <span className="bg-gray-100 text-gray-700 px-3 py-1 rounded-full">
-                      {scannedStudents.length} Total
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 xl:grid-cols-2 divide-y xl:divide-y-0 xl:divide-x divide-gray-200">
-                {/* Scan Masuk Table */}
-                <div>
-                  <div className="px-6 py-3 bg-blue-50 border-b border-gray-200">
-                    <h4 className="font-semibold text-blue-900 flex items-center gap-2">
-                      <div className="w-2 h-2 bg-blue-500 rounded-full" />
-                      Scan Masuk
-                    </h4>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead className="bg-gray-50 border-b border-gray-200">
-                        <tr>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Siswa
-                          </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Waktu
-                          </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Kelas
-                          </th>
-                          <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Aksi
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-200">
-                        {scanMasuk.map((s, idx) => (
-                          <tr
-                            key={`${s.id}-masuk-${idx}`}
-                            className={
-                              idx === 0
-                                ? 'bg-green-50/50 transition-colors duration-500'
-                                : 'hover:bg-gray-50'
-                            }
-                          >
-                            <td className="px-6 py-4">
-                              <div className="flex items-center gap-3">
-                                <ProfileAvatar
-                                  src={s.photo_url}
-                                  name={s.nama}
-                                  size={32}
-                                  className="border-gray-200"
-                                />
-                                <div>
-                                  <div className="font-medium text-gray-900">
-                                    {s.nama}
-                                  </div>
-                                  <div className="text-sm text-gray-500">
-                                    {s.mapel_count} mapel
-                                  </div>
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4">
-                              <div className="font-mono text-gray-900">
-                                {s.scan_time}
-                              </div>
-                            </td>
-                            <td className="px-6 py-4">
-                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                                {s.kelas}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 text-right">
-                              <button
-                                onClick={() =>
-                                  handleDeleteScan(s)
-                                }
-                                className="text-red-600 hover:text-red-800 text-sm font-medium"
-                              >
-                                Hapus
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                        {scanMasuk.length === 0 && (
-                          <tr>
-                            <td
-                              colSpan={4}
-                              className="px-6 py-8 text-center text-gray-500"
-                            >
-                              Belum ada scan masuk hari ini
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                {/* Scan Pulang Table */}
-                <div>
-                  <div className="px-6 py-3 bg-orange-50 border-b border-gray-200">
-                    <h4 className="font-semibold text-orange-900 flex items-center gap-2">
-                      <div className="w-2 h-2 bg-orange-500 rounded-full" />
-                      Scan Pulang
-                    </h4>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead className="bg-gray-50 border-b border-gray-200">
-                        <tr>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Siswa
-                          </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Waktu
-                          </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Kelas
-                          </th>
-                          <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Aksi
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-200">
-                        {scanPulang.map((s, idx) => (
-                          <tr
-                            key={`${s.id}-pulang-${idx}`}
-                            className={
-                              idx === 0
-                                ? 'bg-green-50/50 transition-colors duration-500'
-                                : 'hover:bg-gray-50'
-                            }
-                          >
-                            <td className="px-6 py-4">
-                              <div className="flex items-center gap-3">
-                                <ProfileAvatar
-                                  src={s.photo_url}
-                                  name={s.nama}
-                                  size={32}
-                                  className="border-gray-200"
-                                />
-                                <div>
-                                  <div className="font-medium text-gray-900">
-                                    {s.nama}
-                                  </div>
-                                  <div className="text-sm text-gray-500">
-                                    {s.mapel_count} mapel
-                                  </div>
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4">
-                              <div className="font-mono text-gray-900">
-                                {s.scan_time}
-                              </div>
-                            </td>
-                            <td className="px-6 py-4">
-                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                                {s.kelas}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 text-right">
-                              <button
-                                onClick={() =>
-                                  handleDeleteScan(s)
-                                }
-                                className="text-red-600 hover:text-red-800 text-sm font-medium"
-                              >
-                                Hapus
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                        {scanPulang.length === 0 && (
-                          <tr>
-                            <td
-                              colSpan={4}
-                              className="px-6 py-8 text-center text-gray-500"
-                            >
-                              Belum ada scan pulang hari ini
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* --- MODE 2: RIWAYAT --- */}
-        {activeTab === 2 && (
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                    <History className="w-5 h-5 text-gray-600" />
-                    Riwayat Kehadiran
-                  </h3>
-                  <p className="text-sm text-gray-600 mt-1">
-                    Pantau riwayat scan siswa berdasarkan jumlah scan
-                    per hari
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-3">
-                  <div className="inline-flex rounded-lg bg-gray-100 p-1">
-                    {HISTORY_OPTIONS.map((opt) => (
-                      <button
-                        key={opt.value}
-                        onClick={() =>
-                          setHistoryDaysAgo(opt.value)
-                        }
-                        className={`px-3 py-1.5 rounded-md text-sm font-medium ${
-                          historyDaysAgo === opt.value
-                            ? 'bg-white shadow-sm text-blue-700'
-                            : 'text-gray-600 hover:text-gray-900'
-                        }`}
+                    {/* Current Mode Indicator */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div
+                        className={`p-4 rounded-lg border-2 text-center ${scanMode === 'masuk'
+                          ? 'bg-blue-50 border-blue-500 text-blue-700'
+                          : 'bg-gray-50 border-gray-300 text-gray-500'
+                          }`}
                       >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                  <button
-                    onClick={() => loadHistory(historyDaysAgo)}
-                    className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-2"
-                  >
-                    <RefreshCcw
-                      size={16}
-                      className={
-                        historyLoading ? 'animate-spin' : ''
-                      }
-                    />
-                    Muat Ulang
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50 border-b border-gray-200">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Siswa
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Kelas
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Jumlah Scan
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Status
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Waktu Scan
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {historyLoading && (
-                    <tr>
-                      <td
-                        colSpan={5}
-                        className="px-6 py-8 text-center text-gray-500"
+                        <div className="font-semibold text-lg">
+                          SCAN MASUK
+                        </div>
+                        <div className="text-sm mt-1">
+                          {sessionSettings.jam_masuk_mulai} -{' '}
+                          {sessionSettings.jam_masuk_selesai}
+                        </div>
+                      </div>
+                      <div
+                        className={`p-4 rounded-lg border-2 text-center ${scanMode === 'pulang'
+                          ? 'bg-orange-50 border-orange-500 text-orange-700'
+                          : 'bg-gray-50 border-gray-300 text-gray-500'
+                          }`}
                       >
-                        Memuat riwayat...
-                      </td>
-                    </tr>
-                  )}
+                        <div className="font-semibold text-lg">
+                          SCAN PULANG
+                        </div>
+                        <div className="text-sm mt-1">
+                          {sessionSettings.jam_pulang_mulai} -{' '}
+                          {sessionSettings.jam_pulang_selesai}
+                        </div>
+                      </div>
+                    </div>
 
-                  {!historyLoading &&
-                    historyData.map((row) => {
-                      const { student } = row
-                      const first =
-                        row.firstScan &&
-                        new Date(row.firstScan)
-                      const last =
-                        row.lastScan &&
-                        new Date(row.lastScan)
+                    <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">
+                      <div className="font-semibold">
+                        Cara Penggunaan:
+                      </div>
+                      <ul className="mt-1 space-y-1 list-disc list-inside">
+                        <li>
+                          Gunakan RFID Reader USB (mode keyboard
+                          emulation)
+                        </li>
+                        <li>
+                          Tempelkan kartu RFID → reader akan mengirimkan
+                          UID
+                        </li>
+                        <li>
+                          Scan otomatis diproses ketika menekan Enter
+                        </li>
+                        <li>
+                          Hanya diterima dalam rentang jam scan yang
+                          ditentukan
+                        </li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
 
-                      let statusColor = 'gray'
-                      if (row.statusType === 'full')
-                        statusColor = 'green'
-                      else if (row.statusType === 'once')
-                        statusColor = 'yellow'
-
-                      return (
-                        <tr
-                          key={student.id}
-                          className="hover:bg-gray-50"
+                {/* Classes Panel */}
+                <div className="space-y-6">
+                  <div className="bg-white rounded-xl border border-gray-200 p-6">
+                    <h4 className="font-medium text-gray-900 mb-4">
+                      Daftar Kelas
+                    </h4>
+                    <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2">
+                      {kelaslist.map((k) => (
+                        <div
+                          key={k.id}
+                          className="bg-gray-50 p-4 rounded-lg border border-gray-200 hover:border-blue-300 transition-colors"
                         >
-                          <td className="px-6 py-4">
-                            <div className="flex items-center gap-3">
-                              <ProfileAvatar
-                                src={student.photo_url}
-                                name={student.nama}
-                                size={32}
-                                className="border-gray-200"
-                              />
-                              <div className="font-medium text-gray-900">
-                                {student.nama}
+                          <div className="flex justify-between items-start mb-3">
+                            <h5 className="font-semibold text-gray-900">
+                              {k.nama}
+                            </h5>
+                            <span className="text-xs bg-white px-2 py-0.5 rounded text-gray-600 border">
+                              Kelas {k.grade}
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-3 gap-3 text-sm">
+                            <div className="text-center">
+                              <div className="font-bold text-gray-900 text-lg">
+                                {k.total_siswa}
+                              </div>
+                              <div className="text-xs text-gray-600">
+                                Siswa
                               </div>
                             </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                              {student.kelas || '—'}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4">
-                            <span className="font-medium text-gray-900">
-                              {row.scanCount}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4">
-                            <span
-                              className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                statusColor === 'green'
-                                  ? 'bg-green-100 text-green-800'
-                                  : statusColor === 'yellow'
-                                  ? 'bg-yellow-100 text-yellow-800'
-                                  : 'bg-gray-100 text-gray-800'
-                              }`}
-                            >
-                              {row.statusLabel}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 text-sm text-gray-900">
-                            {first ? (
-                              <div>
-                                <div className="font-mono">
-                                  {format(
-                                    first,
-                                    'HH:mm:ss'
-                                  )}
-                                </div>
-                                {last &&
-                                  last.getTime() !==
-                                    first.getTime() && (
-                                    <div className="font-mono text-gray-500 text-xs">
-                                      sampai{' '}
-                                      {format(
-                                        last,
-                                        'HH:mm:ss'
-                                      )}
-                                    </div>
-                                  )}
+                            <div className="text-center">
+                              <div className="font-bold text-gray-900 text-lg">
+                                {k.total_mapel}
                               </div>
-                            ) : (
-                              <span className="text-gray-400">
-                                —
-                              </span>
-                            )}
-                          </td>
-                        </tr>
-                      )
-                    })}
+                              <div className="text-xs text-gray-600">
+                                Mapel
+                              </div>
+                            </div>
+                            <div className="text-center">
+                              <div className="font-bold text-green-600 text-lg">
+                                {k.scanned_count}
+                              </div>
+                              <div className="text-xs text-gray-600">
+                                Scan
+                              </div>
+                            </div>
+                          </div>
+                          <div className="mt-3 bg-gray-200 rounded-full h-2">
+                            <div
+                              className="bg-green-500 h-2 rounded-full transition-all duration-500"
+                              style={{
+                                width: `${k.total_siswa > 0
+                                  ? Math.min(
+                                    100,
+                                    (k.scanned_count /
+                                      k.total_siswa) *
+                                    100
+                                  )
+                                  : 0
+                                  }%`
+                              }}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                      {kelaslist.length === 0 && !loadingData && (
+                        <div className="text-center text-sm text-gray-500 py-4">
+                          Tidak ada data kelas
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
 
-                  {!historyLoading &&
-                    historyData.length === 0 && (
+              {/* Live Scan Tables */}
+              <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-semibold text-gray-900">
+                      Live Scan Feed
+                    </h3>
+                    <div className="flex items-center gap-4 text-sm text-gray-600">
+                      <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full">
+                        {scanMasuk.length} Masuk
+                      </span>
+                      <span className="bg-orange-100 text-orange-700 px-3 py-1 rounded-full">
+                        {scanPulang.length} Pulang
+                      </span>
+                      <span className="bg-gray-100 text-gray-700 px-3 py-1 rounded-full">
+                        {scannedStudents.length} Total
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 xl:grid-cols-2 divide-y xl:divide-y-0 xl:divide-x divide-gray-200">
+                  {/* Scan Masuk Table */}
+                  <div>
+                    <div className="px-6 py-3 bg-blue-50 border-b border-gray-200">
+                      <h4 className="font-semibold text-blue-900 flex items-center gap-2">
+                        <div className="w-2 h-2 bg-blue-500 rounded-full" />
+                        Scan Masuk
+                      </h4>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
+                        <thead className="bg-gray-50 border-b border-gray-200">
+                          <tr>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Siswa
+                            </th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Waktu
+                            </th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Kelas
+                            </th>
+                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Aksi
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                          {scanMasuk.map((s, idx) => (
+                            <tr
+                              key={`${s.id}-masuk-${idx}`}
+                              className={
+                                idx === 0
+                                  ? 'bg-green-50/50 transition-colors duration-500'
+                                  : 'hover:bg-gray-50'
+                              }
+                            >
+                              <td className="px-6 py-4">
+                                <div className="flex items-center gap-3">
+                                  <ProfileAvatar
+                                    src={s.photo_url}
+                                    name={s.nama}
+                                    size={32}
+                                    className="border-gray-200"
+                                  />
+                                  <div>
+                                    <div className="font-medium text-gray-900">
+                                      {s.nama}
+                                    </div>
+                                    <div className="text-sm text-gray-500">
+                                      {s.mapel_count} mapel
+                                    </div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-6 py-4">
+                                <div className="font-mono text-gray-900">
+                                  {s.scan_time}
+                                </div>
+                              </td>
+                              <td className="px-6 py-4">
+                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                                  {s.kelas}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 text-right">
+                                <button
+                                  onClick={() =>
+                                    handleDeleteScan(s)
+                                  }
+                                  className="text-red-600 hover:text-red-800 text-sm font-medium"
+                                >
+                                  Hapus
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                          {scanMasuk.length === 0 && (
+                            <tr>
+                              <td
+                                colSpan={4}
+                                className="px-6 py-8 text-center text-gray-500"
+                              >
+                                Belum ada scan masuk hari ini
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Scan Pulang Table */}
+                  <div>
+                    <div className="px-6 py-3 bg-orange-50 border-b border-gray-200">
+                      <h4 className="font-semibold text-orange-900 flex items-center gap-2">
+                        <div className="w-2 h-2 bg-orange-500 rounded-full" />
+                        Scan Pulang
+                      </h4>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
+                        <thead className="bg-gray-50 border-b border-gray-200">
+                          <tr>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Siswa
+                            </th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Waktu
+                            </th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Kelas
+                            </th>
+                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Aksi
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                          {scanPulang.map((s, idx) => (
+                            <tr
+                              key={`${s.id}-pulang-${idx}`}
+                              className={
+                                idx === 0
+                                  ? 'bg-green-50/50 transition-colors duration-500'
+                                  : 'hover:bg-gray-50'
+                              }
+                            >
+                              <td className="px-6 py-4">
+                                <div className="flex items-center gap-3">
+                                  <ProfileAvatar
+                                    src={s.photo_url}
+                                    name={s.nama}
+                                    size={32}
+                                    className="border-gray-200"
+                                  />
+                                  <div>
+                                    <div className="font-medium text-gray-900">
+                                      {s.nama}
+                                    </div>
+                                    <div className="text-sm text-gray-500">
+                                      {s.mapel_count} mapel
+                                    </div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-6 py-4">
+                                <div className="font-mono text-gray-900">
+                                  {s.scan_time}
+                                </div>
+                              </td>
+                              <td className="px-6 py-4">
+                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                                  {s.kelas}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 text-right">
+                                <button
+                                  onClick={() =>
+                                    handleDeleteScan(s)
+                                  }
+                                  className="text-red-600 hover:text-red-800 text-sm font-medium"
+                                >
+                                  Hapus
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                          {scanPulang.length === 0 && (
+                            <tr>
+                              <td
+                                colSpan={4}
+                                className="px-6 py-8 text-center text-gray-500"
+                              >
+                                Belum ada scan pulang hari ini
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* --- MODE 2: RIWAYAT --- */}
+          {activeTab === 2 && (
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                      <History className="w-5 h-5 text-gray-600" />
+                      Riwayat Kehadiran
+                    </h3>
+                    <p className="text-sm text-gray-600 mt-1">
+                      Pantau riwayat scan siswa berdasarkan jumlah scan
+                      per hari
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <div className="inline-flex rounded-lg bg-gray-100 p-1">
+                      {HISTORY_OPTIONS.map((opt) => (
+                        <button
+                          key={opt.value}
+                          onClick={() =>
+                            setHistoryDaysAgo(opt.value)
+                          }
+                          className={`px-3 py-1.5 rounded-md text-sm font-medium ${historyDaysAgo === opt.value
+                            ? 'bg-white shadow-sm text-blue-700'
+                            : 'text-gray-600 hover:text-gray-900'
+                            }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => loadHistory(historyDaysAgo)}
+                      className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                    >
+                      <RefreshCcw
+                        size={16}
+                        className={
+                          historyLoading ? 'animate-spin' : ''
+                        }
+                      />
+                      Muat Ulang
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Siswa
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Kelas
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Jumlah Scan
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Status
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Waktu Scan
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {historyLoading && (
                       <tr>
                         <td
                           colSpan={5}
                           className="px-6 py-8 text-center text-gray-500"
                         >
-                          Tidak ada data untuk hari ini
+                          Memuat riwayat...
                         </td>
                       </tr>
                     )}
-                </tbody>
-              </table>
+
+                    {!historyLoading &&
+                      historyData.map((row) => {
+                        const { student } = row
+                        const first =
+                          row.firstScan &&
+                          new Date(row.firstScan)
+                        const last =
+                          row.lastScan &&
+                          new Date(row.lastScan)
+
+                        let statusColor = 'gray'
+                        if (row.statusType === 'full')
+                          statusColor = 'green'
+                        else if (row.statusType === 'once')
+                          statusColor = 'yellow'
+
+                        return (
+                          <tr
+                            key={student.id}
+                            className="hover:bg-gray-50"
+                          >
+                            <td className="px-6 py-4">
+                              <div className="flex items-center gap-3">
+                                <ProfileAvatar
+                                  src={student.photo_url}
+                                  name={student.nama}
+                                  size={32}
+                                  className="border-gray-200"
+                                />
+                                <div className="font-medium text-gray-900">
+                                  {student.nama}
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                                {student.kelas || '—'}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4">
+                              <span className="font-medium text-gray-900">
+                                {row.scanCount}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4">
+                              <span
+                                className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusColor === 'green'
+                                  ? 'bg-green-100 text-green-800'
+                                  : statusColor === 'yellow'
+                                    ? 'bg-yellow-100 text-yellow-800'
+                                    : 'bg-gray-100 text-gray-800'
+                                  }`}
+                              >
+                                {row.statusLabel}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 text-sm text-gray-900">
+                              {first ? (
+                                <div>
+                                  <div className="font-mono">
+                                    {format(
+                                      first,
+                                      'HH:mm:ss'
+                                    )}
+                                  </div>
+                                  {last &&
+                                    last.getTime() !==
+                                    first.getTime() && (
+                                      <div className="font-mono text-gray-500 text-xs">
+                                        sampai{' '}
+                                        {format(
+                                          last,
+                                          'HH:mm:ss'
+                                        )}
+                                      </div>
+                                    )}
+                                </div>
+                              ) : (
+                                <span className="text-gray-400">
+                                  —
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })}
+
+                    {!historyLoading &&
+                      historyData.length === 0 && (
+                        <tr>
+                          <td
+                            colSpan={5}
+                            className="px-6 py-8 text-center text-gray-500"
+                          >
+                            Tidak ada data untuk hari ini
+                          </td>
+                        </tr>
+                      )}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
       </div>
     </div>
   )

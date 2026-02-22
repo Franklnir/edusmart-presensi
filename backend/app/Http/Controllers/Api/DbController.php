@@ -2284,7 +2284,7 @@ class DbController extends ApiController
             return;
         }
 
-        foreach (['eq', 'is', 'gt', 'gte', 'lt', 'lte'] as $op) {
+        foreach (['eq', 'neq', 'is', 'gt', 'gte', 'lt', 'lte'] as $op) {
             if (! empty($filters[$op]) && is_array($filters[$op])) {
                 foreach ($filters[$op] as $field => $value) {
                     $field = $this->sanitizeIdentifier($field);
@@ -2295,6 +2295,8 @@ class DbController extends ApiController
                     if ($value === null || ($op === 'is' && is_string($value) && strtolower($value) === 'null')) {
                         if ($op === 'eq' || $op === 'is') {
                             $query->whereNull($field);
+                        } elseif ($op === 'neq') {
+                            $query->whereNotNull($field);
                         }
 
                         continue;
@@ -2307,6 +2309,7 @@ class DbController extends ApiController
                     }
 
                     $operator = match ($op) {
+                        'neq' => '!=',
                         'gt' => '>',
                         'gte' => '>=',
                         'lt' => '<',
@@ -2342,7 +2345,7 @@ class DbController extends ApiController
         if (! is_array($filters)) {
             return false;
         }
-        foreach (['eq', 'is', 'gt', 'gte', 'lt', 'lte', 'in'] as $op) {
+        foreach (['eq', 'neq', 'is', 'gt', 'gte', 'lt', 'lte', 'in'] as $op) {
             if (! empty($filters[$op])) {
                 return true;
             }
@@ -2366,7 +2369,7 @@ class DbController extends ApiController
             return 'Format filters tidak valid';
         }
 
-        foreach (['eq', 'is', 'gt', 'gte', 'lt', 'lte', 'in'] as $op) {
+        foreach (['eq', 'neq', 'is', 'gt', 'gte', 'lt', 'lte', 'in'] as $op) {
             if (! isset($filters[$op])) {
                 continue;
             }
@@ -4831,11 +4834,20 @@ class DbController extends ApiController
             return null;
         }
 
-        if (! $this->isAdmin($request) && ! $this->isGuru($request)) {
+        if ($this->isGuru($request)) {
+            return null;
+        }
+
+        if (! $this->isAdmin($request)) {
             return null;
         }
 
         if (! $tenantId) {
+            return null;
+        }
+
+        $userId = (string) ($request->user()?->id ?? '');
+        if ($this->isMakerCheckerBypassUser($tenantId, $userId)) {
             return null;
         }
 
@@ -4952,6 +4964,36 @@ class DbController extends ApiController
         }
     }
 
+    private function isMakerCheckerBypassUser(string $tenantId, string $userId): bool
+    {
+        if ($tenantId === '' || $userId === '') {
+            return false;
+        }
+
+        if (! Schema::hasTable('settings') || ! Schema::hasColumn('settings', 'approval_primary_admin_id')) {
+            return false;
+        }
+
+        try {
+            $row = DB::table('settings')
+                ->where('tenant_id', $tenantId)
+                ->orderBy('id')
+                ->first(['approval_primary_admin_id']);
+            if (! $row) {
+                return false;
+            }
+
+            $primaryAdminId = strtolower(trim((string) ($row->approval_primary_admin_id ?? '')));
+            if ($primaryAdminId === '') {
+                return false;
+            }
+
+            return $primaryAdminId === strtolower(trim($userId));
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
     private function estimateAffectedRowsFromPayload($payload): int
     {
         if (is_array($payload)) {
@@ -5033,6 +5075,11 @@ class DbController extends ApiController
 
             $touchRankingPolicy = false;
             $touchFreezePolicy = false;
+
+            // Admin utama tenant hanya boleh diubah dari panel super admin.
+            if (array_key_exists('approval_primary_admin_id', $row)) {
+                unset($row['approval_primary_admin_id']);
+            }
 
             $weightKeys = [
                 'ranking_weight_tugas',

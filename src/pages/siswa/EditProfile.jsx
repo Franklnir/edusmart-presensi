@@ -4,6 +4,7 @@ import { supabase, PROFILE_BUCKET } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import PasswordInput from '../../components/PasswordInput'
+import EmailVerificationModal from '../../components/EmailVerificationModal'
 import {
   hasRealLoginEmail,
   isEmailFormat,
@@ -200,10 +201,16 @@ export default function EditProfile() {
   const [saving, setSaving] = useState(false)
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
   const [sendingVerify, setSendingVerify] = useState(false)
+  const [verifyModalOpen, setVerifyModalOpen] = useState(false)
   const [progressText, setProgressText] = useState('')
+  const [linkingGoogle, setLinkingGoogle] = useState(false)
+  const [unlinkingGoogle, setUnlinkingGoogle] = useState(false)
 
+  const providerState = supabase.auth.getProviderState?.(user || {}) || { googleLinked: false, emailVerified: false }
+  const googleLinked = Boolean(user?.google_linked || providerState.googleLinked)
+  const isGoogleAuthEnabled = supabase.auth.isGoogleEnabled?.() ?? false
   const email = user?.email || profile?.email || ''
-  const emailVerified = !!(user?.email_confirmed_at || user?.emailVerified)
+  const emailVerified = Boolean(user?.email_confirmed_at || user?.emailVerified || providerState.emailVerified)
 
   const [accountForm, setAccountForm] = useState({
     email: '',
@@ -696,6 +703,55 @@ export default function EditProfile() {
     }
   }
 
+  const handleLinkGoogle = async () => {
+    if (googleLinked) {
+      pushToast('info', 'Akun Google sudah tertaut.')
+      return
+    }
+
+    setLinkingGoogle(true)
+    try {
+      const redirectTo =
+        typeof window !== 'undefined'
+          ? `${window.location.origin}${window.location.pathname}`
+          : '/siswa/profile'
+
+      const { error } = await supabase.auth.linkGoogleAccount({ redirectTo })
+      if (error) throw error
+      pushToast('info', 'Mengalihkan ke Google...')
+    } catch (error) {
+      pushToast('error', error?.message || 'Gagal memulai proses tautkan Google')
+      setLinkingGoogle(false)
+    }
+  }
+
+  const handleUnlinkGoogle = async () => {
+    if (!googleLinked) {
+      pushToast('info', 'Akun Google belum tertaut.')
+      return
+    }
+
+    const confirmed = window.confirm(
+      'Yakin ingin melepas tautan Google? Setelah ini login Google dinonaktifkan untuk akun ini.'
+    )
+    if (!confirmed) return
+
+    setUnlinkingGoogle(true)
+    try {
+      const { data, error } = await supabase.auth.unlinkGoogleAccount()
+      if (error) throw error
+      if (data?.user) {
+        useAuthStore.setState((state) => ({ ...state, user: data.user }))
+      }
+      await refreshProfile()
+      pushToast('success', 'Tautan Google berhasil dilepas.')
+    } catch (error) {
+      pushToast('error', error?.message || 'Gagal melepas tautan Google')
+    } finally {
+      setUnlinkingGoogle(false)
+    }
+  }
+
   // ==================== UI HELPERS ====================
 
   const getDisplayKelas = (kelasSlug) => {
@@ -720,8 +776,8 @@ export default function EditProfile() {
   const securityAccountCard = (
     <div
       className={`rounded-2xl shadow-sm border p-6 ${needsAccountSetup
-          ? 'bg-amber-50/80 border-amber-200/60'
-          : 'bg-purple-50/70 border-purple-200/60'
+        ? 'bg-amber-50/80 border-amber-200/60'
+        : 'bg-purple-50/70 border-purple-200/60'
         }`}
     >
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
@@ -806,6 +862,57 @@ export default function EditProfile() {
 
         <p className="text-xs text-slate-700">Password baru akan aktif untuk login berikutnya.</p>
       </div>
+
+      <div className="mt-6 rounded-xl border border-purple-200/70 bg-white px-4 py-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-900">Tautkan Login Google</h3>
+            <p className="text-xs text-slate-600 mt-1">
+              Setelah ditautkan, Anda bisa login dengan Google dan status email verifikasi ikut sinkron.
+            </p>
+            <p className="text-xs text-slate-600 mt-1">
+              Syarat: email akun harus sama persis dengan email Google.
+            </p>
+            {!isGoogleAuthEnabled && (
+              <p className="text-xs text-amber-700 mt-1">
+                Mode standby: aktifkan `VITE_GOOGLE_AUTH_ENABLED=true` saat siap digunakan.
+              </p>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span
+              className={`px-3 py-1 rounded-full text-xs font-semibold ${googleLinked
+                  ? 'bg-emerald-100 text-emerald-700'
+                  : 'bg-slate-100 text-slate-700'
+                }`}
+            >
+              {googleLinked ? 'Google Tertaut' : 'Belum Tertaut'}
+            </span>
+            <button
+              type="button"
+              onClick={handleLinkGoogle}
+              disabled={linkingGoogle || unlinkingGoogle || googleLinked}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-300 text-[11px] font-bold">
+                G
+              </span>
+              {googleLinked ? 'Sudah Tertaut' : linkingGoogle ? 'Mengalihkan...' : 'Tautkan Google'}
+            </button>
+            {googleLinked && (
+              <button
+                type="button"
+                onClick={handleUnlinkGoogle}
+                disabled={unlinkingGoogle || linkingGoogle}
+                className="inline-flex items-center gap-2 rounded-xl border border-red-300 bg-white px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {unlinkingGoogle ? 'Melepas...' : 'Lepas Tautan'}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   )
 
@@ -884,8 +991,8 @@ export default function EditProfile() {
                     <label
                       htmlFor="photo-input"
                       className={`${uploadingPhoto
-                          ? 'bg-slate-400 cursor-not-allowed'
-                          : 'bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 cursor-pointer shadow-sm'
+                        ? 'bg-slate-400 cursor-not-allowed'
+                        : 'bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 cursor-pointer shadow-sm'
                         } text-white p-3 rounded-2xl transition-all duration-300 transform hover:scale-105`}
                       title="Ubah Foto"
                     >
@@ -944,8 +1051,8 @@ export default function EditProfile() {
               <div className="space-y-4">
                 <div
                   className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium w-full justify-center ${emailVerified
-                      ? 'bg-gradient-to-r from-green-500 to-green-600 text-white shadow-lg shadow-green-500/25'
-                      : 'bg-gradient-to-r from-yellow-500 to-yellow-600 text-white shadow-lg shadow-yellow-500/25'
+                    ? 'bg-gradient-to-r from-green-500 to-green-600 text-white shadow-lg shadow-green-500/25'
+                    : 'bg-gradient-to-r from-yellow-500 to-yellow-600 text-white shadow-lg shadow-yellow-500/25'
                     }`}
                 >
                   {emailVerified ? (
@@ -963,25 +1070,33 @@ export default function EditProfile() {
 
                 {!emailVerified && (
                   <button
-                    onClick={handleSendVerification}
+                    onClick={() => setVerifyModalOpen(true)}
                     disabled={sendingVerify}
                     className="w-full px-4 py-2.5 bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 disabled:from-purple-400 disabled:to-purple-500 text-white font-medium rounded-xl transition-all duration-300 shadow-sm transform hover:scale-105 disabled:transform-none text-sm"
                   >
-                    {sendingVerify ? (
-                      <span className="flex items-center justify-center gap-2">
-                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                        <span>Mengirim...</span>
-                      </span>
-                    ) : (
-                      <span className="flex items-center justify-center gap-1.5">
-                        <span>📧</span>
-                        <span>Kirim Verifikasi</span>
-                      </span>
-                    )}
+                    <span className="flex items-center justify-center gap-1.5">
+                      <span>📧</span>
+                      <span>Kirim Verifikasi</span>
+                    </span>
                   </button>
                 )}
               </div>
             </div>
+
+            {/* Email Verification Modal */}
+            <EmailVerificationModal
+              isOpen={verifyModalOpen}
+              onClose={() => setVerifyModalOpen(false)}
+              email={email}
+              onSendCode={async () => {
+                const { error } = await supabase.auth.resend({ type: 'signup', email: user.email })
+                if (error) throw error
+              }}
+              onSuccess={() => {
+                setVerifyModalOpen(false)
+                pushToast('success', 'Email verifikasi berhasil! Cek inbox untuk konfirmasi.')
+              }}
+            />
 
             {/* SCHOOL INFO */}
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-5">

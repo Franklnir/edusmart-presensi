@@ -117,6 +117,31 @@ services:
       MAIL_PASSWORD: ${MAIL_PASSWORD:-}
       MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS:-no-reply@example.com}
       MAIL_FROM_NAME: ${MAIL_FROM_NAME:-EduSmart}
+      GOOGLE_AUTH_ENABLED: ${GOOGLE_AUTH_ENABLED:-false}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
+      GOOGLE_AUTH_PROMPT: ${GOOGLE_AUTH_PROMPT:-select_account}
+      RFID_SCAN_SHARED_KEY: ${RFID_SCAN_SHARED_KEY:-}
+      RFID_MQTT_BRIDGE_ENABLED: ${RFID_MQTT_BRIDGE_ENABLED:-false}
+      RFID_MQTT_HOST: ${RFID_MQTT_HOST:-}
+      RFID_MQTT_PORT: ${RFID_MQTT_PORT:-8883}
+      RFID_MQTT_USERNAME: ${RFID_MQTT_USERNAME:-}
+      RFID_MQTT_PASSWORD: ${RFID_MQTT_PASSWORD:-}
+      RFID_MQTT_CLIENT_ID_PREFIX: ${RFID_MQTT_CLIENT_ID_PREFIX:-edusmart-rfid-bridge}
+      RFID_MQTT_QOS: ${RFID_MQTT_QOS:-1}
+      RFID_MQTT_USE_TLS: ${RFID_MQTT_USE_TLS:-true}
+      RFID_MQTT_TLS_VERIFY_PEER: ${RFID_MQTT_TLS_VERIFY_PEER:-true}
+      RFID_MQTT_TLS_VERIFY_PEER_NAME: ${RFID_MQTT_TLS_VERIFY_PEER_NAME:-true}
+      RFID_MQTT_TLS_ALLOW_SELF_SIGNED: ${RFID_MQTT_TLS_ALLOW_SELF_SIGNED:-false}
+      RFID_MQTT_SCAN_TOPIC_TEMPLATE: ${RFID_MQTT_SCAN_TOPIC_TEMPLATE:-edusmart/{tenant}/rfid/scan}
+      RFID_MQTT_SCAN_TOPIC_FILTER: ${RFID_MQTT_SCAN_TOPIC_FILTER:-}
+      RFID_MQTT_RESPONSE_TOPIC_TEMPLATE: ${RFID_MQTT_RESPONSE_TOPIC_TEMPLATE:-edusmart/{tenant}/rfid/response}
+      RFID_MQTT_MODE_TOPIC_TEMPLATE: ${RFID_MQTT_MODE_TOPIC_TEMPLATE:-edusmart/{tenant}/rfid/mode}
+      RFID_MQTT_DEFAULT_TENANT_SLUG: ${RFID_MQTT_DEFAULT_TENANT_SLUG:-}
+      RFID_MQTT_DEVICE_TENANT_MAP: ${RFID_MQTT_DEVICE_TENANT_MAP:-{}}
+      RFID_MQTT_MODE_SYNC_INTERVAL: ${RFID_MQTT_MODE_SYNC_INTERVAL:-20}
+      RFID_MQTT_RECONNECT_DELAY: ${RFID_MQTT_RECONNECT_DELAY:-5}
     volumes:
       - backend_storage:/var/www/html/storage
       - backend_bootstrap_cache:/var/www/html/bootstrap/cache
@@ -265,6 +290,87 @@ services:
     networks:
       - internal
 
+  rfid_bridge:
+    build:
+      context: .
+      dockerfile: backend/docker/Dockerfile.prod
+    container_name: edusmart-rfid-bridge
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      APP_ROLE: rfid-bridge
+      APP_ENV: production
+      APP_DEBUG: "false"
+      APP_KEY: ${APP_KEY:?APP_KEY is required}
+      APP_URL: ${APP_URL:?APP_URL is required}
+      FRONTEND_URL: ${FRONTEND_URL:?FRONTEND_URL is required}
+      LOG_CHANNEL: stack
+      LOG_STACK: single
+      LOG_LEVEL: info
+
+      DB_CONNECTION: pgsql
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: ${DB_DATABASE:?DB_DATABASE is required}
+      DB_USERNAME: ${DB_USERNAME:?DB_USERNAME is required}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+
+      CACHE_STORE: redis
+      SESSION_DRIVER: redis
+      SESSION_CONNECTION: default
+      QUEUE_CONNECTION: redis
+
+      REDIS_CLIENT: phpredis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+
+      SANCTUM_STATEFUL_DOMAINS: ${SANCTUM_STATEFUL_DOMAINS:?SANCTUM_STATEFUL_DOMAINS is required}
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-*}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?CORS_ALLOWED_ORIGINS is required}
+      CORS_ALLOWED_ORIGIN_PATTERNS: ${CORS_ALLOWED_ORIGIN_PATTERNS:-}
+
+      TENANT_ROOT_DOMAIN: ${TENANT_ROOT_DOMAIN:?TENANT_ROOT_DOMAIN is required}
+      TENANT_DEFAULT_SLUG: ${TENANT_DEFAULT_SLUG:-default}
+      TENANT_ADMIN_SUBDOMAIN: ${TENANT_ADMIN_SUBDOMAIN:-admin}
+      TENANT_ADMIN_HOSTS: ${TENANT_ADMIN_HOSTS:-}
+      TENANT_ALLOW_ROOT_FOR_SUPER_ADMIN: ${TENANT_ALLOW_ROOT_FOR_SUPER_ADMIN:-false}
+      TENANT_ALLOW_HEADER_OVERRIDE: ${TENANT_ALLOW_HEADER_OVERRIDE:-false}
+      TENANT_RESERVED: ${TENANT_RESERVED:-www,app,api,admin}
+      SUPER_ADMIN_EMAILS: ${SUPER_ADMIN_EMAILS:?SUPER_ADMIN_EMAILS is required}
+      SUPER_ADMIN_IDS: ${SUPER_ADMIN_IDS:-}
+
+      RFID_SCAN_SHARED_KEY: ${RFID_SCAN_SHARED_KEY:-}
+      RFID_MQTT_BRIDGE_ENABLED: ${RFID_MQTT_BRIDGE_ENABLED:-true}
+      RFID_MQTT_HOST: ${RFID_MQTT_HOST:-}
+      RFID_MQTT_PORT: ${RFID_MQTT_PORT:-8883}
+      RFID_MQTT_USERNAME: ${RFID_MQTT_USERNAME:-}
+      RFID_MQTT_PASSWORD: ${RFID_MQTT_PASSWORD:-}
+      RFID_MQTT_CLIENT_ID_PREFIX: ${RFID_MQTT_CLIENT_ID_PREFIX:-edusmart-rfid-bridge}
+      RFID_MQTT_QOS: ${RFID_MQTT_QOS:-1}
+      RFID_MQTT_USE_TLS: ${RFID_MQTT_USE_TLS:-true}
+      RFID_MQTT_TLS_VERIFY_PEER: ${RFID_MQTT_TLS_VERIFY_PEER:-true}
+      RFID_MQTT_TLS_VERIFY_PEER_NAME: ${RFID_MQTT_TLS_VERIFY_PEER_NAME:-true}
+      RFID_MQTT_TLS_ALLOW_SELF_SIGNED: ${RFID_MQTT_TLS_ALLOW_SELF_SIGNED:-false}
+      RFID_MQTT_SCAN_TOPIC_TEMPLATE: ${RFID_MQTT_SCAN_TOPIC_TEMPLATE:-edusmart/{tenant}/rfid/scan}
+      RFID_MQTT_SCAN_TOPIC_FILTER: ${RFID_MQTT_SCAN_TOPIC_FILTER:-}
+      RFID_MQTT_RESPONSE_TOPIC_TEMPLATE: ${RFID_MQTT_RESPONSE_TOPIC_TEMPLATE:-edusmart/{tenant}/rfid/response}
+      RFID_MQTT_MODE_TOPIC_TEMPLATE: ${RFID_MQTT_MODE_TOPIC_TEMPLATE:-edusmart/{tenant}/rfid/mode}
+      RFID_MQTT_DEFAULT_TENANT_SLUG: ${RFID_MQTT_DEFAULT_TENANT_SLUG:-}
+      RFID_MQTT_DEVICE_TENANT_MAP: ${RFID_MQTT_DEVICE_TENANT_MAP:-{}}
+      RFID_MQTT_MODE_SYNC_INTERVAL: ${RFID_MQTT_MODE_SYNC_INTERVAL:-20}
+      RFID_MQTT_RECONNECT_DELAY: ${RFID_MQTT_RECONNECT_DELAY:-5}
+    volumes:
+      - backend_storage:/var/www/html/storage
+      - backend_bootstrap_cache:/var/www/html/bootstrap/cache
+    command: ["php", "artisan", "rfid:mqtt-bridge"]
+    networks:
+      - internal
+
   frontend:
     build:
       context: .
@@ -276,6 +382,9 @@ services:
         VITE_ADMIN_SUBDOMAIN: ${VITE_ADMIN_SUBDOMAIN:-admin}
         VITE_REALTIME_POLL_MS: ${VITE_REALTIME_POLL_MS:-4000}
         VITE_REALTIME_POLL_HIDDEN_MS: ${VITE_REALTIME_POLL_HIDDEN_MS:-12000}
+        VITE_GOOGLE_AUTH_ENABLED: ${VITE_GOOGLE_AUTH_ENABLED:-false}
+        VITE_GOOGLE_AUTH_LOGIN_URL: ${VITE_GOOGLE_AUTH_LOGIN_URL:-/api/auth/google/redirect}
+        VITE_GOOGLE_AUTH_LINK_URL: ${VITE_GOOGLE_AUTH_LINK_URL:-/api/auth/google/link}
     container_name: edusmart-frontend
     restart: unless-stopped
     expose:

@@ -3,6 +3,15 @@ set -eu
 
 cd /var/www/html
 
+if [ "${DB_CONNECTION:-}" = "pgsql" ]; then
+  php -r '
+    if (!extension_loaded("pdo_pgsql")) {
+      fwrite(STDERR, "[entrypoint] ERROR: pdo_pgsql extension belum aktif.\n");
+      exit(1);
+    }
+  '
+fi
+
 if [ "${WAIT_FOR_DB:-false}" = "true" ]; then
   echo "[entrypoint] waiting for database..."
   ATTEMPTS=0

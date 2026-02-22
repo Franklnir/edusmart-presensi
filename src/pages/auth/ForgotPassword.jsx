@@ -4,6 +4,16 @@ import { Link } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 
 const ForgotPassword = () => {
+  const adminSubdomain = String(import.meta.env.VITE_ADMIN_SUBDOMAIN || 'admin')
+    .trim()
+    .toLowerCase()
+  const runtimeHost =
+    typeof window !== 'undefined' ? String(window.location.hostname || '').toLowerCase() : ''
+  const hostParts = runtimeHost.split('.').filter(Boolean)
+  const isAdminHost =
+    runtimeHost === adminSubdomain ||
+    (hostParts.length >= 2 && hostParts[0] === adminSubdomain)
+
   const [email, setEmail] = useState('')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -72,6 +82,27 @@ const ForgotPassword = () => {
     }
   }
 
+  if (isAdminHost) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-sky-50 via-indigo-50 to-slate-100 px-4">
+        <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-xl p-6 w-full max-w-md border border-slate-100">
+          <div className="text-center mb-4">
+            <h1 className="text-2xl font-bold text-slate-800">Lupa Password</h1>
+            <p className="text-sm text-slate-500 mt-2">
+              Fitur ini tidak tersedia untuk admin dan super admin.
+            </p>
+          </div>
+
+          <div className="mt-6 text-center">
+            <Link to="/login" className="text-xs text-indigo-600 hover:text-indigo-700 font-semibold">
+              Kembali ke halaman login
+            </Link>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-sky-50 via-indigo-50 to-slate-100 px-4">
       <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-xl p-6 w-full max-w-md border border-slate-100">
@@ -80,7 +111,7 @@ const ForgotPassword = () => {
             Lupa Password
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Masukkan email yang terdaftar untuk menerima link reset password.
+            Fitur ini khusus guru dan siswa. Masukkan email terdaftar untuk menerima link reset password.
           </p>
         </div>
 

@@ -312,6 +312,7 @@ const Tenants = () => {
   const [detailRefreshing, setDetailRefreshing] = useState(false)
   const [detailError, setDetailError] = useState('')
   const [resetLoadingByUser, setResetLoadingByUser] = useState({})
+  const [primaryAdminSavingByUser, setPrimaryAdminSavingByUser] = useState({})
   const [temporaryPasswords, setTemporaryPasswords] = useState({})
   const [backupLoading, setBackupLoading] = useState(false)
   const [backupMode, setBackupMode] = useState('full')
@@ -472,6 +473,7 @@ const Tenants = () => {
     if (!tenantId) return
     setSelectedTenantId(tenantId)
     setTemporaryPasswords({})
+    setPrimaryAdminSavingByUser({})
     setRestorePreview(null)
     setRestorePayload(null)
     setRestoreFileName('')
@@ -682,6 +684,62 @@ const Tenants = () => {
     }
   }
 
+  const handleSetPrimaryAdmin = async (admin) => {
+    const tenantId = tenantDetail?.tenant?.id || selectedTenantId
+    const userId = admin?.user_id
+    if (!tenantId || !userId) return
+
+    if (admin?.is_primary_admin) {
+      pushToast('info', `${admin?.name || admin?.email || 'Admin'} sudah menjadi admin utama`)
+      return
+    }
+
+    const label = admin?.email || admin?.name || userId
+    const confirmed = window.confirm(
+      `Jadikan ${label} sebagai Admin Utama tenant? Akun ini akan bisa menyimpan perubahan kritikal tanpa approval.`
+    )
+    if (!confirmed) return
+
+    setPrimaryAdminSavingByUser((prev) => ({ ...prev, [userId]: true }))
+    try {
+      const { data, error } = await supabase.super.setTenantPrimaryAdmin(tenantId, userId)
+      if (error) throw error
+
+      const primaryId = data?.primary_admin_user_id || userId
+      setTenantDetail((prev) => {
+        if (!prev) return prev
+        const nextAdmins = Array.isArray(prev.admins)
+          ? prev.admins.map((row) => ({
+              ...row,
+              is_primary_admin: String(row?.user_id || '') === String(primaryId)
+            }))
+          : prev.admins
+
+        return {
+          ...prev,
+          tenant: {
+            ...(prev.tenant || {}),
+            primary_admin_user_id: primaryId,
+            primary_admin_name: data?.primary_admin_name || null,
+            primary_admin_email: data?.primary_admin_email || null
+          },
+          admins: nextAdmins
+        }
+      })
+
+      pushToast('success', `${data?.primary_admin_name || label} ditetapkan sebagai admin utama`)
+      await loadTenantDetail(tenantId, { silent: true, suppressToast: true })
+    } catch (err) {
+      pushToast('error', err?.message || 'Gagal menetapkan admin utama tenant')
+    } finally {
+      setPrimaryAdminSavingByUser((prev) => {
+        const next = { ...prev }
+        delete next[userId]
+        return next
+      })
+    }
+  }
+
   if (!superAdminChecked) {
     return (
       <div className="p-6">
@@ -708,6 +766,10 @@ const Tenants = () => {
   const detailAdmins = Array.isArray(tenantDetail?.admins) ? tenantDetail.admins : []
   const detailStorage = tenantDetail?.storage || {}
   const storageBuckets = Array.isArray(detailStorage?.buckets) ? detailStorage.buckets : []
+  const primaryAdminUserId = String(detailTenant?.primary_admin_user_id || '')
+  const primaryAdminInfo = detailAdmins.find(
+    (admin) => String(admin?.user_id || '') === primaryAdminUserId
+  )
 
   return (
     <div className="p-6 space-y-6">
@@ -891,6 +953,13 @@ const Tenants = () => {
                     Update: {formatDateTime(detailTenant.status_changed_at)}
                   </span>
                 )}
+                <span className="text-xs text-indigo-700 bg-indigo-100 border border-indigo-200 px-2 py-0.5 rounded-full">
+                  Admin Utama:{' '}
+                  {primaryAdminInfo?.name ||
+                    primaryAdminInfo?.email ||
+                    detailTenant?.primary_admin_name ||
+                    'Belum ditetapkan'}
+                </span>
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -996,6 +1065,7 @@ const Tenants = () => {
                   setTenantDetail(null)
                   setDetailError('')
                   setTemporaryPasswords({})
+                  setPrimaryAdminSavingByUser({})
                   setRestorePayload(null)
                   setRestoreFileName('')
                   setRestorePreview(null)
@@ -1244,7 +1314,14 @@ const Tenants = () => {
                     ) : (
                       detailAdmins.map((admin) => (
                         <tr key={admin.user_id} className="border-t border-slate-100">
-                          <td className="py-2 pr-4 font-semibold text-slate-900">{admin.name || '-'}</td>
+                          <td className="py-2 pr-4">
+                            <p className="font-semibold text-slate-900">{admin.name || '-'}</p>
+                            {admin.is_primary_admin ? (
+                              <span className="inline-flex mt-1 text-[11px] px-2 py-0.5 rounded-full border border-indigo-200 bg-indigo-100 text-indigo-700">
+                                Admin Utama (Bypass Approval)
+                              </span>
+                            ) : null}
+                          </td>
                           <td className="py-2 pr-4">{admin.email || '-'}</td>
                           <td className="py-2 pr-4">
                             <span
@@ -1280,14 +1357,31 @@ const Tenants = () => {
                                 Terkunci (Super Admin)
                               </span>
                             ) : (
-                              <button
-                                type="button"
-                                onClick={() => handleResetTenantAdminPassword(admin)}
-                                disabled={Boolean(resetLoadingByUser[admin.user_id])}
-                                className="text-xs px-3 py-1.5 rounded-full border border-indigo-200 text-indigo-700 hover:bg-indigo-50 disabled:opacity-60"
-                              >
-                                {resetLoadingByUser[admin.user_id] ? 'Reset...' : 'Reset Password'}
-                              </button>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => handleResetTenantAdminPassword(admin)}
+                                  disabled={Boolean(resetLoadingByUser[admin.user_id])}
+                                  className="text-xs px-3 py-1.5 rounded-full border border-indigo-200 text-indigo-700 hover:bg-indigo-50 disabled:opacity-60"
+                                >
+                                  {resetLoadingByUser[admin.user_id] ? 'Reset...' : 'Reset Password'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleSetPrimaryAdmin(admin)}
+                                  disabled={
+                                    Boolean(primaryAdminSavingByUser[admin.user_id]) ||
+                                    Boolean(admin.is_primary_admin)
+                                  }
+                                  className="text-xs px-3 py-1.5 rounded-full border border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
+                                >
+                                  {primaryAdminSavingByUser[admin.user_id]
+                                    ? 'Menyimpan...'
+                                    : admin.is_primary_admin
+                                      ? 'Admin Utama'
+                                      : 'Jadikan Utama'}
+                                </button>
+                              </div>
                             )}
                           </td>
                         </tr>

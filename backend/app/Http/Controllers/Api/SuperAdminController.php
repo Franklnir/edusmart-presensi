@@ -161,6 +161,8 @@ class SuperAdminController extends ApiController
             ->where('tenant_id', $tenant->id)
             ->groupBy('user_id');
 
+        $primaryAdminUserId = $this->resolveTenantPrimaryAdminUserId((string) $tenant->id);
+
         $admins = DB::table('profiles as p')
             ->leftJoin('users as u', 'u.id', '=', 'p.id')
             ->leftJoin('super_admins as sa', 'sa.user_id', '=', 'p.id')
@@ -181,7 +183,18 @@ class SuperAdminController extends ApiController
                 DB::raw('case when sa.user_id is not null then true else false end as is_super_admin')
             )
             ->orderBy('p.created_at', 'desc')
-            ->get();
+            ->get()
+            ->map(function ($row) use ($primaryAdminUserId) {
+                $row->is_primary_admin = $primaryAdminUserId !== ''
+                    && (string) ($row->user_id ?? '') === $primaryAdminUserId;
+
+                return $row;
+            })
+            ->values();
+
+        $primaryAdmin = $admins->first(function ($row) use ($primaryAdminUserId) {
+            return $primaryAdminUserId !== '' && (string) ($row->user_id ?? '') === $primaryAdminUserId;
+        });
 
         $storage = $this->buildTenantStorageUsage((string) $tenant->id);
 
@@ -196,6 +209,9 @@ class SuperAdminController extends ApiController
                     'status_changed_at' => $tenant->status_changed_at ?? null,
                     'status_changed_by' => $tenant->status_changed_by ?? null,
                     'archived_at' => $tenant->archived_at ?? null,
+                    'primary_admin_user_id' => $primaryAdminUserId !== '' ? $primaryAdminUserId : null,
+                    'primary_admin_name' => $primaryAdmin?->name ?? null,
+                    'primary_admin_email' => $primaryAdmin?->email ?? null,
                     'created_at' => $tenant->created_at,
                     'updated_at' => $tenant->updated_at,
                 ],
@@ -875,6 +891,96 @@ class SuperAdminController extends ApiController
         $this->logAudit($request, 'super_admins', $row->id, 'DELETE', $oldData, null, $tenantId);
 
         return response()->json(['data' => 'deleted']);
+    }
+
+    public function setTenantPrimaryAdmin(Request $request, string $tenantId, string $userId)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenant = $this->findTenantByIdOrSlug($tenantId);
+        if (! $tenant) {
+            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+        }
+
+        if (! $this->hasTable('settings') || ! $this->tableHasColumn('settings', 'approval_primary_admin_id')) {
+            return response()->json([
+                'error' => 'Kolom admin utama belum tersedia. Jalankan migrasi terbaru terlebih dahulu.',
+            ], 503);
+        }
+
+        $profile = Profile::query()
+            ->where('id', $userId)
+            ->where('tenant_id', $tenant->id)
+            ->where('role', 'admin')
+            ->first();
+        if (! $profile) {
+            return response()->json(['error' => 'Admin tenant tidak ditemukan'], 404);
+        }
+
+        if ($this->isSuperAdminByIdentity((string) $profile->id, (string) ($profile->email ?? ''))) {
+            return response()->json([
+                'error' => 'Akun super admin tidak bisa dijadikan admin utama tenant.',
+            ], 422);
+        }
+
+        $settings = DB::table('settings')
+            ->where('tenant_id', $tenant->id)
+            ->orderBy('id')
+            ->first();
+        if (! $settings) {
+            return response()->json([
+                'error' => 'Pengaturan tenant belum tersedia.',
+            ], 404);
+        }
+
+        $oldData = (array) $settings;
+        $currentPrimary = trim((string) ($settings->approval_primary_admin_id ?? ''));
+        if ($currentPrimary === (string) $profile->id) {
+            return response()->json([
+                'data' => [
+                    'tenant_id' => (string) $tenant->id,
+                    'settings_id' => (string) ($settings->id ?? ''),
+                    'primary_admin_user_id' => (string) $profile->id,
+                    'primary_admin_name' => $profile->nama,
+                    'primary_admin_email' => $profile->email,
+                ],
+            ]);
+        }
+
+        $updates = [
+            'approval_primary_admin_id' => (string) $profile->id,
+        ];
+        if ($this->tableHasColumn('settings', 'updated_at')) {
+            $updates['updated_at'] = now();
+        }
+
+        DB::table('settings')
+            ->where('id', $settings->id)
+            ->update($updates);
+
+        $newData = DB::table('settings')->where('id', $settings->id)->first();
+
+        $this->logAudit(
+            $request,
+            'settings',
+            (string) ($settings->id ?? ''),
+            'UPDATE',
+            $oldData,
+            $newData ? (array) $newData : null,
+            (string) $tenant->id
+        );
+
+        return response()->json([
+            'data' => [
+                'tenant_id' => (string) $tenant->id,
+                'settings_id' => (string) ($settings->id ?? ''),
+                'primary_admin_user_id' => (string) $profile->id,
+                'primary_admin_name' => $profile->nama,
+                'primary_admin_email' => $profile->email,
+            ],
+        ]);
     }
 
     public function resetTenantAdminPassword(Request $request, string $tenantId, string $userId)
@@ -3447,6 +3553,29 @@ class SuperAdminController extends ApiController
         $tenant = $tenantQuery->first();
 
         return $tenant ?: null;
+    }
+
+    private function resolveTenantPrimaryAdminUserId(string $tenantId): string
+    {
+        if ($tenantId === '') {
+            return '';
+        }
+
+        if (! $this->hasTable('settings') || ! $this->tableHasColumn('settings', 'approval_primary_admin_id')) {
+            return '';
+        }
+
+        try {
+            $row = DB::table('settings')
+                ->where('tenant_id', $tenantId)
+                ->orderBy('id')
+                ->first(['approval_primary_admin_id']);
+            $primaryAdminId = trim((string) ($row->approval_primary_admin_id ?? ''));
+
+            return $primaryAdminId;
+        } catch (\Throwable $e) {
+            return '';
+        }
     }
 
     private function backupTablesForTenant(): array

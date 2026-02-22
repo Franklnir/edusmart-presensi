@@ -45,14 +45,14 @@ const Icon = ({ name, className = 'w-5 h-5' }) => {
   )
 }
 
-const NavigationIcon = ({ name }) => {
+const NavigationIcon = ({ name, className = 'w-6 h-6' }) => {
   const map = {
     '🏠': 'home', '📅': 'calendar', '✅': 'check', '🧠': 'brain',
     '📚': 'book', '📝': 'pencil', '📊': 'chart', '👤': 'user',
     '🏫': 'school', '📱': 'scan', '👨‍🏫': 'teacher', '👨‍🎓': 'users',
     '📜': 'certificate', '🗄️': 'backup', '⚙️': 'cog', '🛡️': 'shield',
   }
-  return <Icon name={map[name] || 'home'} className="w-[18px] h-[18px]" />
+  return <Icon name={map[name] || 'home'} className={className} />
 }
 
 const Navbar = () => {
@@ -237,7 +237,7 @@ const Navbar = () => {
         to={link.to}
         title={collapsed ? link.label : undefined}
         className={`
-          group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium
+          group relative flex items-center gap-4 rounded-2xl px-4 py-4 text-[20px] font-semibold
           transition-all duration-200 select-none
           ${isActive
             ? 'bg-brand-600 text-white shadow-brand-sm'
@@ -247,11 +247,11 @@ const Navbar = () => {
         `}
       >
         <span className={`flex-shrink-0 transition-transform duration-200 group-hover:scale-110 ${isActive ? 'text-white' : 'text-slate-500 group-hover:text-brand-600'}`}>
-          <NavigationIcon name={link.icon} />
+          <NavigationIcon name={link.icon} className="w-6 h-6" />
         </span>
         {!collapsed && <span className="truncate">{link.label}</span>}
         {isActive && !collapsed && (
-          <span className="ml-auto w-1.5 h-1.5 rounded-full bg-white/70 flex-shrink-0" />
+          <span className="ml-auto w-2 h-2 rounded-full bg-white/70 flex-shrink-0" />
         )}
         {collapsed && (
           <div className="absolute left-full ml-2 px-2.5 py-1.5 bg-slate-900 text-white text-xs rounded-lg whitespace-nowrap
@@ -331,14 +331,14 @@ const Navbar = () => {
 
       <aside className={`hidden md:flex fixed inset-y-0 left-0 flex-col z-40 bg-white border-r border-slate-100 shadow-sidebar transition-all duration-300 ease-in-out ${isCollapsed ? 'w-[72px]' : 'w-60'}`}>
         {/* Header */}
-        <div className="flex items-center gap-2.5 px-3 pt-4 pb-3 border-b border-slate-100">
-          <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 shadow-brand-sm flex-shrink-0">
-            <span className="font-extrabold text-white text-sm">{schoolName.charAt(0).toUpperCase()}</span>
+        <div className="flex items-center gap-3 px-3 pt-4 pb-3 border-b border-slate-100">
+          <div className="flex items-center justify-center w-11 h-11 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 shadow-brand-sm flex-shrink-0">
+            <span className="font-extrabold text-white text-lg">{schoolName.charAt(0).toUpperCase()}</span>
           </div>
           {!isCollapsed && (
             <div className="flex-1 min-w-0">
-              <p className="text-[10px] font-semibold text-brand-600 uppercase tracking-widest leading-none mb-0.5">{rb.label} Panel</p>
-              <p className="text-sm font-bold text-slate-900 truncate leading-tight">{schoolName}</p>
+              <p className="text-sm font-semibold text-brand-600 uppercase tracking-[0.14em] leading-none mb-0.5">{rb.label} Panel</p>
+              <p className="text-[26px] font-extrabold text-slate-900 truncate leading-[1.05]">{schoolName}</p>
             </div>
           )}
           <button onClick={toggleSidebar}
@@ -436,7 +436,7 @@ const Navbar = () => {
                 className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-all duration-200 min-w-0 flex-1
                   ${isActive ? 'text-brand-600' : 'text-slate-500 hover:text-slate-700'}`}>
                 <span className={`transition-all duration-200 ${isActive ? 'scale-110' : ''}`}>
-                  <NavigationIcon name={link.icon} />
+                  <NavigationIcon name={link.icon} className="w-[18px] h-[18px]" />
                 </span>
                 <span className="text-[10px] font-semibold truncate">{link.label}</span>
                 {isActive && <span className="w-1 h-1 rounded-full bg-brand-600 mt-0.5" />}

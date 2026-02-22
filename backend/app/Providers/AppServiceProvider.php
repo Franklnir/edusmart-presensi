@@ -6,6 +6,7 @@ use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
@@ -30,12 +31,13 @@ class AppServiceProvider extends ServiceProvider
             min($max, (int) env($key, $default))
         );
 
-        $frontendUrl = rtrim((string) config('app.frontend_url', config('app.url')), '/');
+        $frontendUrl = $this->safeFrontendBaseUrl();
 
         ResetPassword::createUrlUsing(function (object $user, string $token) use ($frontendUrl): string {
+            $tenantFrontendUrl = $this->tenantFrontendBaseUrlForUser($user, $frontendUrl);
             $email = urlencode((string) ($user->email ?? ''));
 
-            return "{$frontendUrl}/reset-password?token={$token}&email={$email}";
+            return "{$tenantFrontendUrl}/reset-password?token={$token}&email={$email}";
         });
 
         VerifyEmail::createUrlUsing(function (object $notifiable): string {
@@ -114,5 +116,124 @@ class AppServiceProvider extends ServiceProvider
 
             return Limit::perMinute(30)->by('super|'.$key);
         });
+    }
+
+    private function safeFrontendBaseUrl(): string
+    {
+        $candidates = [
+            (string) config('app.frontend_url', ''),
+            (string) config('app.url', ''),
+        ];
+
+        foreach ($candidates as $candidate) {
+            $candidate = trim($candidate);
+            if ($candidate === '') {
+                continue;
+            }
+
+            $parts = parse_url($candidate);
+            if (! is_array($parts)) {
+                continue;
+            }
+
+            $scheme = strtolower((string) ($parts['scheme'] ?? ''));
+            $host = strtolower(trim((string) ($parts['host'] ?? '')));
+            if ($host === '' || ! in_array($scheme, ['http', 'https'], true)) {
+                continue;
+            }
+
+            $port = isset($parts['port']) ? ':'.((int) $parts['port']) : '';
+            $path = trim((string) ($parts['path'] ?? ''));
+            $path = $path !== '' && $path !== '/' ? '/'.trim($path, '/') : '';
+
+            return rtrim("{$scheme}://{$host}{$port}{$path}", '/');
+        }
+
+        return 'http://localhost:5173';
+    }
+
+    private function tenantFrontendBaseUrlForUser(object $user, string $fallbackBaseUrl): string
+    {
+        $tenantSlug = $this->resolveTenantSlugForUser($user);
+        if ($tenantSlug === '') {
+            return $fallbackBaseUrl;
+        }
+
+        $parts = parse_url($fallbackBaseUrl);
+        if (! is_array($parts)) {
+            return $fallbackBaseUrl;
+        }
+
+        $scheme = strtolower((string) ($parts['scheme'] ?? ''));
+        $host = strtolower(trim((string) ($parts['host'] ?? '')));
+        if (! in_array($scheme, ['http', 'https'], true) || $host === '') {
+            return $fallbackBaseUrl;
+        }
+
+        $resolvedHost = $this->resolveTenantFrontendHost($host, $tenantSlug);
+        if ($resolvedHost === '') {
+            return $fallbackBaseUrl;
+        }
+
+        $port = isset($parts['port']) ? ':'.((int) $parts['port']) : '';
+        $path = trim((string) ($parts['path'] ?? ''));
+        $path = $path !== '' && $path !== '/' ? '/'.trim($path, '/') : '';
+
+        return rtrim("{$scheme}://{$resolvedHost}{$port}{$path}", '/');
+    }
+
+    private function resolveTenantSlugForUser(object $user): string
+    {
+        $userId = trim((string) ($user->id ?? ''));
+        if ($userId === '') {
+            return '';
+        }
+
+        try {
+            $slug = DB::table('profiles as p')
+                ->join('tenants as t', 't.id', '=', 'p.tenant_id')
+                ->where('p.id', $userId)
+                ->value('t.slug');
+        } catch (\Throwable $e) {
+            return '';
+        }
+
+        return strtolower(trim((string) $slug));
+    }
+
+    private function resolveTenantFrontendHost(string $host, string $tenantSlug): string
+    {
+        $slug = strtolower(trim($tenantSlug));
+        if ($slug === '') {
+            return $host;
+        }
+
+        $defaultSlug = strtolower(trim((string) config('tenancy.default_slug', 'default')));
+        if ($this->isLocalSubdomainHost($host)) {
+            return $slug.'.localhost';
+        }
+
+        $rootDomain = strtolower(trim((string) config('tenancy.root_domain', '')));
+        $rootDomain = ltrim($rootDomain, '.');
+        $rootDomain = trim((string) preg_replace('#^https?://#', '', $rootDomain), '/');
+        if (
+            $rootDomain !== ''
+            && ($host === $rootDomain || str_ends_with($host, '.'.$rootDomain))
+        ) {
+            if ($slug === $defaultSlug) {
+                return $rootDomain;
+            }
+
+            return $slug.'.'.$rootDomain;
+        }
+
+        return $host;
+    }
+
+    private function isLocalSubdomainHost(string $host): bool
+    {
+        $normalized = strtolower(trim($host));
+
+        return $normalized === 'localhost' || str_ends_with($normalized, '.localhost');
     }
 }

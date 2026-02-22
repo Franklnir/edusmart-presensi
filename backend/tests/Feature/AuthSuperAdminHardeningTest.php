@@ -71,6 +71,74 @@ class AuthSuperAdminHardeningTest extends TestCase
         $response->assertJsonPath('error', 'Akses tenant ditolak');
     }
 
+    public function test_forgot_password_rejects_super_admin_email(): void
+    {
+        config()->set('superadmin.emails', ['root@example.com']);
+
+        $response = $this
+            ->withServerVariables(['REMOTE_ADDR' => '10.10.10.1'])
+            ->postJson('/api/auth/forgot-password', [
+                'email' => 'root@example.com',
+            ]);
+
+        $response->assertStatus(403);
+        $response->assertJsonPath('error', 'Reset password untuk akun super admin dinonaktifkan');
+    }
+
+    public function test_forgot_password_rejects_admin_role(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        [$adminUser] = $this->createUserWithProfile($tenantId, 'admin', 'x-a', 'admin@example.com');
+
+        $response = $this
+            ->withServerVariables(['REMOTE_ADDR' => '10.10.10.2'])
+            ->postJson('/api/auth/forgot-password', [
+                'email' => $adminUser->email,
+            ]);
+
+        $response->assertStatus(403);
+        $response->assertJsonPath('error', 'Reset password untuk akun admin dinonaktifkan. Hubungi super admin.');
+    }
+
+    public function test_forgot_password_allows_guru_and_siswa_roles(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        [$guruUser] = $this->createUserWithProfile($tenantId, 'guru', 'x-a', 'guru@example.com');
+        [$siswaUser] = $this->createUserWithProfile($tenantId, 'siswa', 'x-a', 'siswa@example.com');
+
+        $guruResponse = $this
+            ->withServerVariables(['REMOTE_ADDR' => '10.10.10.3'])
+            ->postJson('/api/auth/forgot-password', [
+                'email' => $guruUser->email,
+            ]);
+        $guruResponse->assertStatus(200);
+
+        $siswaResponse = $this
+            ->withServerVariables(['REMOTE_ADDR' => '10.10.10.4'])
+            ->postJson('/api/auth/forgot-password', [
+                'email' => $siswaUser->email,
+            ]);
+        $siswaResponse->assertStatus(200);
+    }
+
+    public function test_reset_password_rejects_admin_role(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        [$adminUser] = $this->createUserWithProfile($tenantId, 'admin', 'x-a', 'admin-reset@example.com');
+
+        $response = $this
+            ->withServerVariables(['REMOTE_ADDR' => '10.10.10.5'])
+            ->postJson('/api/auth/reset-password', [
+                'email' => $adminUser->email,
+                'token' => 'dummy-token',
+                'password' => 'newPassword123',
+                'password_confirmation' => 'newPassword123',
+            ]);
+
+        $response->assertStatus(403);
+        $response->assertJsonPath('error', 'Reset password untuk akun admin dinonaktifkan. Hubungi super admin.');
+    }
+
     private function defaultTenantId(): string
     {
         $tenantId = (string) DB::table('tenants')

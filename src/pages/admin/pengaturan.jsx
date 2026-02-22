@@ -2,6 +2,7 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { supabase, PROFILE_BUCKET, getSignedUrlForValue } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
+import EmailVerificationModal from '../../components/EmailVerificationModal'
 import { useUIStore } from '../../store/useUIStore'
 import FileDropzone from '../../components/FileDropzone'
 import { sanitizeText, sanitizeUrl } from '../../utils/sanitize'
@@ -374,6 +375,9 @@ export default function APengaturan() {
   const [saving, setSaving] = useState(false)
   const [uploadingLogo, setUploadingLogo] = useState(false)
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
+  const [linkingGoogle, setLinkingGoogle] = useState(false)
+  const [unlinkingGoogle, setUnlinkingGoogle] = useState(false)
+  const [verifyModalOpen, setVerifyModalOpen] = useState(false)
   const [selectedLogoFile, setSelectedLogoFile] = useState(null)
   const [settingsId, setSettingsId] = useState(null)
   const [mapelOptions, setMapelOptions] = useState([])
@@ -1105,6 +1109,59 @@ export default function APengaturan() {
     setSaving(false)
   }
 
+  async function handleLinkGoogleAccount() {
+    const providerState = supabase.auth.getProviderState?.(user || {}) || { googleLinked: false }
+    const googleLinked = Boolean(user?.google_linked || providerState.googleLinked)
+
+    if (googleLinked) {
+      pushToast('info', 'Akun Google sudah tertaut.')
+      return
+    }
+
+    setLinkingGoogle(true)
+    try {
+      const redirectTo =
+        typeof window !== 'undefined'
+          ? `${window.location.origin}${window.location.pathname}`
+          : '/admin/pengaturan'
+
+      const { error } = await supabase.auth.linkGoogleAccount({ redirectTo })
+      if (error) throw error
+      pushToast('info', 'Mengalihkan ke Google...')
+    } catch (error) {
+      pushToast('error', error?.message || 'Gagal memulai proses tautkan Google')
+      setLinkingGoogle(false)
+    }
+  }
+
+  async function handleUnlinkGoogleAccount() {
+    const providerState = supabase.auth.getProviderState?.(user || {}) || { googleLinked: false }
+    const googleLinked = Boolean(user?.google_linked || providerState.googleLinked)
+    if (!googleLinked) {
+      pushToast('info', 'Akun Google belum tertaut.')
+      return
+    }
+
+    const confirmed = window.confirm(
+      'Yakin ingin melepas tautan Google? Setelah ini login Google dinonaktifkan untuk akun ini.'
+    )
+    if (!confirmed) return
+
+    setUnlinkingGoogle(true)
+    try {
+      const { data, error } = await supabase.auth.unlinkGoogleAccount()
+      if (error) throw error
+      if (data?.user) {
+        useAuthStore.setState((state) => ({ ...state, user: data.user }))
+      }
+      pushToast('success', 'Tautan Google berhasil dilepas.')
+    } catch (error) {
+      pushToast('error', error?.message || 'Gagal melepas tautan Google')
+    } finally {
+      setUnlinkingGoogle(false)
+    }
+  }
+
   // ✅ Fallback PATH: localStorage -> profile -> state
   const localStorageAvatarPath =
     typeof window !== 'undefined' && user?.id
@@ -1137,6 +1194,13 @@ export default function APengaturan() {
   const finalAvatarUrl = avatarSignedUrl || ''
   const displayName = profile?.nama || user?.email || 'Admin'
   const roleLabel = (profile?.role || 'admin').toUpperCase()
+  const providerState = supabase.auth.getProviderState?.(user || {}) || {
+    googleLinked: false,
+    emailVerified: false
+  }
+  const googleLinked = Boolean(user?.google_linked || providerState.googleLinked)
+  const emailVerified = Boolean(user?.email_confirmed_at || user?.emailVerified || providerState.emailVerified)
+  const isGoogleAuthEnabled = supabase.auth.isGoogleEnabled?.() ?? false
   const rankingTieBreakOrder = normalizeTieBreakOrder(form.ranking_tiebreak_order)
   const rankingCoreMapelSelected = normalizeCoreMapelList(form.ranking_core_mapel_text)
   const rankingCoreMapelOptions = Array.from(
@@ -1188,732 +1252,819 @@ export default function APengaturan() {
             </div>
           )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              <div className="lg:col-span-2 space-y-6">
-                {/* ====== Identitas Sekolah ====== */}
-                <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
-                  <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center space-x-2">
-                    <span>🏫</span>
-                    <span>Identitas Sekolah</span>
-                  </h2>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-2 space-y-6">
+              {/* ====== Identitas Sekolah ====== */}
+              <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
+                <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center space-x-2">
+                  <span>🏫</span>
+                  <span>Identitas Sekolah</span>
+                </h2>
 
-                  <div className="space-y-5">
+                <div className="space-y-5">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Nama Sekolah</label>
+                    <input
+                      type="text"
+                      name="nama_sekolah"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                      value={form.nama_sekolah}
+                      onChange={handleChange}
+                      placeholder="Masukkan nama sekolah"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Nama Sekolah</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Email Sekolah</label>
                       <input
-                        type="text"
-                        name="nama_sekolah"
+                        type="email"
+                        name="email"
                         className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
-                        value={form.nama_sekolah}
+                        value={form.email}
                         onChange={handleChange}
-                        placeholder="Masukkan nama sekolah"
+                        placeholder="email@sekolah.example"
                       />
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Email Sekolah</label>
-                        <input
-                          type="email"
-                          name="email"
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
-                          value={form.email}
-                          onChange={handleChange}
-                          placeholder="email@sekolah.example"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Nomor Telepon</label>
-                        <input
-                          type="tel"
-                          name="telepon"
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
-                          value={form.telepon}
-                          onChange={handleChange}
-                          placeholder="+62 ..."
-                        />
-                      </div>
-                    </div>
-
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Alamat Sekolah</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Nomor Telepon</label>
+                      <input
+                        type="tel"
+                        name="telepon"
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                        value={form.telepon}
+                        onChange={handleChange}
+                        placeholder="+62 ..."
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Alamat Sekolah</label>
+                    <textarea
+                      name="alamat"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none transition-all duration-200"
+                      rows="3"
+                      value={form.alamat}
+                      onChange={handleChange}
+                      placeholder="Alamat lengkap sekolah"
+                    ></textarea>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Visi Sekolah</label>
                       <textarea
-                        name="alamat"
+                        name="visi"
                         className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none transition-all duration-200"
-                        rows="3"
-                        value={form.alamat}
+                        rows="4"
+                        value={form.visi}
                         onChange={handleChange}
-                        placeholder="Alamat lengkap sekolah"
+                        placeholder="Visi sekolah yang ingin dicapai"
                       ></textarea>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Visi Sekolah</label>
-                        <textarea
-                          name="visi"
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none transition-all duration-200"
-                          rows="4"
-                          value={form.visi}
-                          onChange={handleChange}
-                          placeholder="Visi sekolah yang ingin dicapai"
-                        ></textarea>
-                        <p className="text-xs text-gray-500 mt-1">Tuliskan visi sekolah yang inspiratif dan jelas</p>
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Misi Sekolah</label>
-                        <textarea
-                          name="misi"
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none transition-all duration-200"
-                          rows="4"
-                          value={form.misi}
-                          onChange={handleChange}
-                          placeholder="Misi sekolah untuk mencapai visi"
-                        ></textarea>
-                        <p className="text-xs text-gray-500 mt-1">Tuliskan misi sekolah secara detail dan terukur</p>
-                      </div>
-                    </div>
-
-                    {/* ===== Media Sosial ===== */}
-                    <div className="border-t pt-6">
-                      <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center space-x-2">
-                        <span>📱</span>
-                        <span>Media Sosial Sekolah</span>
-                      </h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            <div className="flex items-center">
-                              <svg className="w-5 h-5 text-pink-500 mr-2" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M12.017 0C5.396 0 .029 5.367.029 11.987c0 5.079 3.158 9.417 7.618 11.174-.105-.949-.199-2.403.042-3.441.219-.937 1.407-5.965 1.407-5.965s-.359-.719-.359-1.782c0-1.668.967-2.914 2.171-2.914 1.023 0 1.518.769 1.518 1.69 0 1.029-.653 2.567-.992 3.992-.285 1.193.6 2.165 1.775 2.165 2.128 0 3.768-2.245 3.768-5.487 0-2.861-2.063-4.869-5.008-4.869-3.41 0-5.409 2.562-5.409 5.199 0 1.033.394 2.143.889 2.741.099.12.112.225.085.345-.09.375-.293 1.199-.334 1.363-.053.225-.172.271-.402.165-1.495-.69-2.433-2.878-2.433-4.646 0-3.776 2.748-7.252 7.92-7.252 4.158 0 7.392 2.967 7.392 6.923 0 4.135-2.607 7.462-6.233 7.462-1.214 0-2.357-.629-2.75-1.378l-.748 2.853c-.271 1.043-1.002 2.35-1.492 3.146C9.57 23.812 10.763 24.009 12.017 24.009c6.624 0 11.99-5.367 11.99-11.988C24.007 5.367 18.641.001.012.017z" />
-                              </svg>
-                              Instagram
-                            </div>
-                          </label>
-                          <input
-                            type="url"
-                            name="link_instagram"
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
-                            value={form.link_instagram}
-                            onChange={handleChange}
-                            placeholder="https://instagram.com/username"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            <div className="flex items-center">
-                              <svg className="w-5 h-5 text-blue-600 mr-2" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
-                              </svg>
-                              Facebook
-                            </div>
-                          </label>
-                          <input
-                            type="url"
-                            name="link_facebook"
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
-                            value={form.link_facebook}
-                            onChange={handleChange}
-                            placeholder="https://facebook.com/username"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            <div className="flex items-center">
-                              <svg className="w-5 h-5 text-red-600 mr-2" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
-                              </svg>
-                              YouTube
-                            </div>
-                          </label>
-                          <input
-                            type="url"
-                            name="link_youtube"
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
-                            value={form.link_youtube}
-                            onChange={handleChange}
-                            placeholder="https://youtube.com/c/username"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            <div className="flex items-center">
-                              <svg className="w-5 h-5 text-black mr-2" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z" />
-                              </svg>
-                              TikTok
-                            </div>
-                          </label>
-                          <input
-                            type="url"
-                            name="link_tiktok"
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
-                            value={form.link_tiktok}
-                            onChange={handleChange}
-                            placeholder="https://tiktok.com/@username"
-                          />
-                        </div>
-                      </div>
-                      <p className="text-xs text-gray-500 mt-2">
-                        Link media sosial akan ditampilkan di halaman publik sekolah
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* ====== Pengaturan RFID ====== */}
-                <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
-                  <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center space-x-2">
-                    <span>📡</span>
-                    <span>Pengaturan Absensi RFID</span>
-                  </h2>
-
-                  <div className="space-y-4">
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-                      <div className="text-sm text-blue-700">
-                        <strong>Info:</strong>
-                        <ul className="mt-1 space-y-1">
-                          <li>• Jika fitur RFID aktif, siswa hanya bisa absen menggunakan kartu RFID dalam rentang waktu yang ditentukan</li>
-                          <li>• Jika fitur RFID non-aktif, siswa bisa absen mandiri (sesuai mode sistem)</li>
-                          <li>• Di luar rentang waktu, siswa tidak bisa absen mandiri maupun RFID</li>
-                        </ul>
-                      </div>
-                    </div>
-
-                    <label className="flex items-center space-x-3 p-4 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors duration-200">
-                      <input
-                        type="checkbox"
-                        name="rfid_aktif"
-                        checked={rfidSettings.rfid_aktif}
-                        onChange={handleRfidChange}
-                        className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 transition-all duration-200"
-                      />
-                      <div className="flex-1">
-                        <span className="text-gray-900 font-medium">Aktifkan Fitur RFID Saja</span>
-                        <p className="text-sm text-gray-500 mt-1">
-                          Jika aktif, siswa hanya dapat absen dengan RFID dalam rentang waktu yang ditentukan
-                        </p>
-                      </div>
-                      <div
-                        className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${rfidSettings.rfid_aktif ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                          }`}
-                      >
-                        {rfidSettings.rfid_aktif ? 'AKTIF' : 'NON-AKTIF'}
-                      </div>
-                    </label>
-
-                    {rfidSettings.rfid_aktif && (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-gray-50 rounded-lg border border-gray-200 transition-all duration-200">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Mulai Jam</label>
-                          <input
-                            type="time"
-                            name="rfid_mulai"
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
-                            value={normalizeTimeString(rfidSettings.rfid_mulai)}
-                            onChange={handleRfidChange}
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Selesai Jam</label>
-                          <input
-                            type="time"
-                            name="rfid_selesai"
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
-                            value={normalizeTimeString(rfidSettings.rfid_selesai)}
-                            onChange={handleRfidChange}
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* ====== Kebijakan Ranking & Freeze Nilai ====== */}
-                <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
-                  <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center space-x-2">
-                    <span>🏆</span>
-                    <span>Kebijakan Ranking & Freeze Nilai</span>
-                  </h2>
-
-                  <div className="space-y-5">
-                    <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
-                      <p className="text-sm text-indigo-700 font-semibold">
-                        Cara kerja ranking wali kelas:
-                      </p>
-                      <ul className="mt-2 space-y-1 text-sm text-indigo-700">
-                        <li>1. Nilai akhir siswa dihitung per mapel dengan bobot Tugas, Quiz, dan Absensi.</li>
-                        <li>2. Bobot total wajib tepat 100% agar perhitungan valid.</li>
-                        <li>3. Jika nilai akhir sama, sistem pakai tie-break sesuai urutan prioritas resmi.</li>
-                        <li>4. Saat prioritas tie-break memakai mapel inti, sistem melihat daftar mapel inti di bawah.</li>
-                      </ul>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Bobot Tugas (%)</label>
-                        <input
-                          type="number"
-                          min="0"
-                          max="100"
-                          step="0.01"
-                          name="ranking_weight_tugas"
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
-                          value={form.ranking_weight_tugas}
-                          onChange={handleChange}
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Bobot Quiz (%)</label>
-                        <input
-                          type="number"
-                          min="0"
-                          max="100"
-                          step="0.01"
-                          name="ranking_weight_quiz"
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
-                          value={form.ranking_weight_quiz}
-                          onChange={handleChange}
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Bobot Absensi (%)</label>
-                        <input
-                          type="number"
-                          min="0"
-                          max="100"
-                          step="0.01"
-                          name="ranking_weight_absensi"
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
-                          value={form.ranking_weight_absensi}
-                          onChange={handleChange}
-                        />
-                      </div>
-                    </div>
-
-                    <div
-                      className={`text-sm px-3 py-2 rounded-lg border ${
-                        rankingWeightValid
-                          ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
-                          : 'bg-red-50 border-red-200 text-red-700'
-                      }`}
-                    >
-                      Total bobot saat ini: <strong>{rankingWeightTotal}%</strong>
-                      {!rankingWeightValid && ' (harus tepat 100%)'}
-                    </div>
-
-                    <div className="border-t pt-5">
-                      <h3 className="text-base font-semibold text-gray-900 mb-3">Urutan Tie-Break Resmi</h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        {rankingTieBreakOrder.map((item, idx) => (
-                          <div key={`tie-break-${idx}`}>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                              Prioritas {idx + 1}
-                            </label>
-                            <select
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
-                              value={item}
-                              onChange={(e) => handleTieBreakOrderChange(idx, e.target.value)}
-                            >
-                              {RANKING_TIE_BREAK_OPTIONS.map((option) => (
-                                <option key={option.value} value={option.value}>
-                                  {option.label}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        ))}
-                      </div>
+                      <p className="text-xs text-gray-500 mt-1">Tuliskan visi sekolah yang inspiratif dan jelas</p>
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Daftar Mapel Inti (Checklist)
-                      </label>
-                      <p className="text-xs text-gray-500 mb-2">
-                        Centang satu atau lebih mapel inti yang dipakai untuk tie-break.
-                      </p>
-                      <div className="w-full max-h-[220px] overflow-auto px-3 py-2 border border-gray-300 rounded-lg bg-gray-50">
-                        {rankingCoreMapelOptions.map((mapelName) => {
-                          const checked = rankingCoreMapelSelected.includes(mapelName)
-                          return (
-                            <label
-                              key={mapelName}
-                              className="flex items-center gap-3 py-2 px-2 rounded-md hover:bg-white transition-colors duration-200 cursor-pointer"
-                            >
-                              <input
-                                type="checkbox"
-                                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                                checked={checked}
-                                onChange={(e) => handleCoreMapelToggle(mapelName, e.target.checked)}
-                              />
-                              <span className="text-sm text-gray-800">{mapelName}</span>
-                            </label>
-                          )
-                        })}
-                      </div>
-                      {rankingCoreMapelOptions.length === 0 && (
-                        <p className="text-xs text-amber-700 mt-2">
-                          Belum ada data mapel pada master `mata_pelajaran`.
-                        </p>
-                      )}
-                      <p className="text-xs text-gray-600 mt-2">
-                        {rankingCoreMapelSelected.length > 0
-                          ? `Terpilih: ${rankingCoreMapelSelected.join(', ')}`
-                          : 'Belum ada mapel inti dipilih.'}
-                      </p>
-                    </div>
-
-                    <div className="border-t pt-5">
-                      <h3 className="text-base font-semibold text-gray-900 mb-3">Freeze Periode Nilai</h3>
-
-                      <label className="flex items-center space-x-3 p-4 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors duration-200">
-                        <input
-                          type="checkbox"
-                          name="nilai_freeze_enabled"
-                          checked={Boolean(form.nilai_freeze_enabled)}
-                          onChange={handleFormBooleanChange}
-                          className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 transition-all duration-200"
-                        />
-                        <div className="flex-1">
-                          <span className="text-gray-900 font-medium">Aktifkan Freeze Nilai</span>
-                          <p className="text-sm text-gray-500 mt-1">
-                            Jika aktif, guru/admin tidak bisa mengubah nilai pada rentang periode freeze.
-                          </p>
-                        </div>
-                        <div
-                          className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${
-                            form.nilai_freeze_enabled
-                              ? 'bg-red-100 text-red-700'
-                              : 'bg-gray-100 text-gray-700'
-                          }`}
-                        >
-                          {form.nilai_freeze_enabled ? 'FREEZE ON' : 'FREEZE OFF'}
-                        </div>
-                      </label>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Mulai Freeze
-                          </label>
-                          <input
-                            type="datetime-local"
-                            name="nilai_freeze_start"
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 disabled:bg-gray-100 disabled:text-gray-500"
-                            value={form.nilai_freeze_start || ''}
-                            onChange={handleChange}
-                            disabled={!form.nilai_freeze_enabled}
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Selesai Freeze
-                          </label>
-                          <input
-                            type="datetime-local"
-                            name="nilai_freeze_end"
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 disabled:bg-gray-100 disabled:text-gray-500"
-                            value={form.nilai_freeze_end || ''}
-                            onChange={handleChange}
-                            disabled={!form.nilai_freeze_enabled}
-                          />
-                        </div>
-                      </div>
-
-                      {freezeWindowInvalid && (
-                        <p className="text-sm text-red-600 mt-2">
-                          Rentang freeze tidak valid: tanggal akhir harus setelah tanggal mulai.
-                        </p>
-                      )}
-
-                      <div className="mt-4">
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Alasan Freeze (opsional)
-                        </label>
-                        <textarea
-                          name="nilai_freeze_reason"
-                          rows="2"
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y transition-all duration-200 disabled:bg-gray-100 disabled:text-gray-500"
-                          value={form.nilai_freeze_reason}
-                          onChange={handleChange}
-                          placeholder="Contoh: Finalisasi rapor semester ganjil."
-                          disabled={!form.nilai_freeze_enabled}
-                        ></textarea>
-                      </div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Misi Sekolah</label>
+                      <textarea
+                        name="misi"
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none transition-all duration-200"
+                        rows="4"
+                        value={form.misi}
+                        onChange={handleChange}
+                        placeholder="Misi sekolah untuk mencapai visi"
+                      ></textarea>
+                      <p className="text-xs text-gray-500 mt-1">Tuliskan misi sekolah secara detail dan terukur</p>
                     </div>
                   </div>
-                </div>
 
-                {/* ====== Pengaturan Registrasi ====== */}
-                <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
-                  <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center space-x-2">
-                    <span>👥</span>
-                    <span>Pengaturan Registrasi Publik</span>
-                  </h2>
+                  {/* ===== Media Sosial ===== */}
+                  <div className="border-t pt-6">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center space-x-2">
+                      <span>📱</span>
+                      <span>Media Sosial Sekolah</span>
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          <div className="flex items-center">
+                            <svg className="w-5 h-5 text-pink-500 mr-2" fill="currentColor" viewBox="0 0 24 24">
+                              <path d="M12.017 0C5.396 0 .029 5.367.029 11.987c0 5.079 3.158 9.417 7.618 11.174-.105-.949-.199-2.403.042-3.441.219-.937 1.407-5.965 1.407-5.965s-.359-.719-.359-1.782c0-1.668.967-2.914 2.171-2.914 1.023 0 1.518.769 1.518 1.69 0 1.029-.653 2.567-.992 3.992-.285 1.193.6 2.165 1.775 2.165 2.128 0 3.768-2.245 3.768-5.487 0-2.861-2.063-4.869-5.008-4.869-3.41 0-5.409 2.562-5.409 5.199 0 1.033.394 2.143.889 2.741.099.12.112.225.085.345-.09.375-.293 1.199-.334 1.363-.053.225-.172.271-.402.165-1.495-.69-2.433-2.878-2.433-4.646 0-3.776 2.748-7.252 7.92-7.252 4.158 0 7.392 2.967 7.392 6.923 0 4.135-2.607 7.462-6.233 7.462-1.214 0-2.357-.629-2.75-1.378l-.748 2.853c-.271 1.043-1.002 2.35-1.492 3.146C9.57 23.812 10.763 24.009 12.017 24.009c6.624 0 11.99-5.367 11.99-11.988C24.007 5.367 18.641.001.012.017z" />
+                            </svg>
+                            Instagram
+                          </div>
+                        </label>
+                        <input
+                          type="url"
+                          name="link_instagram"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                          value={form.link_instagram}
+                          onChange={handleChange}
+                          placeholder="https://instagram.com/username"
+                        />
+                      </div>
 
-                  <div className="space-y-4">
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-                      <div className="text-sm text-blue-700">
-                        <strong>Info:</strong> Pengaturan ini akan langsung tersimpan otomatis ketika diubah. Role yang tidak aktif akan disembunyikan di halaman registrasi publik.
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          <div className="flex items-center">
+                            <svg className="w-5 h-5 text-blue-600 mr-2" fill="currentColor" viewBox="0 0 24 24">
+                              <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+                            </svg>
+                            Facebook
+                          </div>
+                        </label>
+                        <input
+                          type="url"
+                          name="link_facebook"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                          value={form.link_facebook}
+                          onChange={handleChange}
+                          placeholder="https://facebook.com/username"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          <div className="flex items-center">
+                            <svg className="w-5 h-5 text-red-600 mr-2" fill="currentColor" viewBox="0 0 24 24">
+                              <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
+                            </svg>
+                            YouTube
+                          </div>
+                        </label>
+                        <input
+                          type="url"
+                          name="link_youtube"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                          value={form.link_youtube}
+                          onChange={handleChange}
+                          placeholder="https://youtube.com/c/username"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          <div className="flex items-center">
+                            <svg className="w-5 h-5 text-black mr-2" fill="currentColor" viewBox="0 0 24 24">
+                              <path d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z" />
+                            </svg>
+                            TikTok
+                          </div>
+                        </label>
+                        <input
+                          type="url"
+                          name="link_tiktok"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                          value={form.link_tiktok}
+                          onChange={handleChange}
+                          placeholder="https://tiktok.com/@username"
+                        />
                       </div>
                     </div>
-
-                    <label className="flex items-center space-x-3 p-4 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors duration-200">
-                      <input
-                        type="checkbox"
-                        name="registrasi_siswa_aktif"
-                        checked={form.registrasi_siswa_aktif}
-                        onChange={handleCheckboxChange}
-                        className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 transition-all duration-200"
-                      />
-                      <div className="flex-1">
-                        <span className="text-gray-900 font-medium">Aktifkan Registrasi Siswa</span>
-                        <p className="text-sm text-gray-500 mt-1">Siswa dapat membuat akun sendiri melalui halaman registrasi publik</p>
-                      </div>
-                      <div
-                        className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${form.registrasi_siswa_aktif ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                          }`}
-                      >
-                        {form.registrasi_siswa_aktif ? 'AKTIF' : 'NON-AKTIF'}
-                      </div>
-                    </label>
-
-                    <label className="flex items-center space-x-3 p-4 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors duration-200">
-                      <input
-                        type="checkbox"
-                        name="registrasi_guru_aktif"
-                        checked={form.registrasi_guru_aktif}
-                        onChange={handleCheckboxChange}
-                        className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 transition-all duration-200"
-                      />
-                      <div className="flex-1">
-                        <span className="text-gray-900 font-medium">Aktifkan Registrasi Guru</span>
-                        <p className="text-sm text-gray-500 mt-1">Guru dapat membuat akun sendiri melalui halaman registrasi publik</p>
-                      </div>
-                      <div
-                        className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${form.registrasi_guru_aktif ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                          }`}
-                      >
-                        {form.registrasi_guru_aktif ? 'AKTIF' : 'NON-AKTIF'}
-                      </div>
-                    </label>
-
-                    <label className="flex items-center space-x-3 p-4 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors duration-200">
-                      <input
-                        type="checkbox"
-                        name="registrasi_admin_aktif"
-                        checked={form.registrasi_admin_aktif}
-                        onChange={handleCheckboxChange}
-                        className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 transition-all duration-200"
-                      />
-                      <div className="flex-1">
-                        <span className="text-gray-900 font-medium">Aktifkan Registrasi Admin</span>
-                        <p className="text-sm text-gray-500 mt-1">Admin dapat membuat akun sendiri melalui halaman registrasi publik</p>
-                      </div>
-                      <div
-                        className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${form.registrasi_admin_aktif ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                          }`}
-                      >
-                        {form.registrasi_admin_aktif ? 'AKTIF' : 'NON-AKTIF'}
-                      </div>
-                    </label>
-
-                    {form.registrasi_admin_aktif && (
-                      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 transition-all duration-200">
-                        <p className="text-sm text-yellow-700 font-medium">
-                          ⚠️ PERINGATAN: Membuka pendaftaran admin untuk publik sangat berisiko. Hanya aktifkan jika benar-benar diperlukan dan dalam lingkungan pengembangan.
-                        </p>
-                      </div>
-                    )}
+                    <p className="text-xs text-gray-500 mt-2">
+                      Link media sosial akan ditampilkan di halaman publik sekolah
+                    </p>
                   </div>
                 </div>
               </div>
 
-              {/* ====== Sidebar ====== */}
-              <div className="space-y-6">
-                {/* Profil Admin */}
-                <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
-                  <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center space-x-2">
-                    <span>👨‍💼</span>
-                    <span>Profil Admin</span>
-                  </h2>
+              {/* ====== Pengaturan RFID ====== */}
+              <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
+                <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center space-x-2">
+                  <span>📡</span>
+                  <span>Pengaturan Absensi RFID</span>
+                </h2>
 
-                  <div className="flex items-center space-x-4 mb-4">
-                    {finalAvatarUrl ? (
-                      <div className="relative">
-                        <img
-                          src={finalAvatarUrl}
-                          alt="Foto Profil"
-                          className="w-16 h-16 rounded-full object-cover border-2 border-gray-200 transition-all duration-200 hover:border-blue-500"
-                        />
-                        {uploadingAvatar && (
-                          <div className="absolute inset-0 bg-black bg-opacity-50 rounded-full flex items-center justify-center">
-                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white"></div>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="w-16 h-16 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center text-lg font-bold text-white">
-                        {displayName.charAt(0).toUpperCase()}
-                      </div>
-                    )}
-                    <div>
-                      <h3 className="font-semibold text-gray-900">{displayName}</h3>
-                      <div className="text-sm text-blue-600 font-medium bg-blue-50 px-2 py-1 rounded-full inline-block">
-                        {roleLabel}
-                      </div>
+                <div className="space-y-4">
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                    <div className="text-sm text-blue-700">
+                      <strong>Info:</strong>
+                      <ul className="mt-1 space-y-1">
+                        <li>• Jika fitur RFID aktif, siswa hanya bisa absen menggunakan kartu RFID dalam rentang waktu yang ditentukan</li>
+                        <li>• Jika fitur RFID non-aktif, siswa bisa absen mandiri (sesuai mode sistem)</li>
+                        <li>• Di luar rentang waktu, siswa tidak bisa absen mandiri maupun RFID</li>
+                      </ul>
                     </div>
                   </div>
 
-                  <div className="space-y-3">
-                    <FileDropzone
-                      label={uploadingAvatar ? 'Mengupload...' : 'Ubah Foto Profil'}
-                      onFileSelected={handleAdminPhotoChange}
-                      accept={{ 'image/*': ['.png', '.jpg', '.jpeg'] }}
-                      disabled={uploadingAvatar}
-                      className="text-sm"
+                  <label className="flex items-center space-x-3 p-4 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors duration-200">
+                    <input
+                      type="checkbox"
+                      name="rfid_aktif"
+                      checked={rfidSettings.rfid_aktif}
+                      onChange={handleRfidChange}
+                      className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 transition-all duration-200"
                     />
-
-                    <button
-                      onClick={logout}
-                      className="w-full bg-gray-100 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-200 transition-all duration-200 font-medium text-sm flex items-center justify-center space-x-2"
+                    <div className="flex-1">
+                      <span className="text-gray-900 font-medium">Aktifkan Fitur RFID Saja</span>
+                      <p className="text-sm text-gray-500 mt-1">
+                        Jika aktif, siswa hanya dapat absen dengan RFID dalam rentang waktu yang ditentukan
+                      </p>
+                    </div>
+                    <div
+                      className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${rfidSettings.rfid_aktif ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                        }`}
                     >
-                      <span>🚪</span>
-                      <span>Logout</span>
-                    </button>
+                      {rfidSettings.rfid_aktif ? 'AKTIF' : 'NON-AKTIF'}
+                    </div>
+                  </label>
+
+                  {rfidSettings.rfid_aktif && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-gray-50 rounded-lg border border-gray-200 transition-all duration-200">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Mulai Jam</label>
+                        <input
+                          type="time"
+                          name="rfid_mulai"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                          value={normalizeTimeString(rfidSettings.rfid_mulai)}
+                          onChange={handleRfidChange}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Selesai Jam</label>
+                        <input
+                          type="time"
+                          name="rfid_selesai"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                          value={normalizeTimeString(rfidSettings.rfid_selesai)}
+                          onChange={handleRfidChange}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* ====== Kebijakan Ranking & Freeze Nilai ====== */}
+              <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
+                <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center space-x-2">
+                  <span>🏆</span>
+                  <span>Kebijakan Ranking & Freeze Nilai</span>
+                </h2>
+
+                <div className="space-y-5">
+                  <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
+                    <p className="text-sm text-indigo-700 font-semibold">
+                      Cara kerja ranking wali kelas:
+                    </p>
+                    <ul className="mt-2 space-y-1 text-sm text-indigo-700">
+                      <li>1. Nilai akhir siswa dihitung per mapel dengan bobot Tugas, Quiz, dan Absensi.</li>
+                      <li>2. Bobot total wajib tepat 100% agar perhitungan valid.</li>
+                      <li>3. Jika nilai akhir sama, sistem pakai tie-break sesuai urutan prioritas resmi.</li>
+                      <li>4. Saat prioritas tie-break memakai mapel inti, sistem melihat daftar mapel inti di bawah.</li>
+                    </ul>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Bobot Tugas (%)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        name="ranking_weight_tugas"
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                        value={form.ranking_weight_tugas}
+                        onChange={handleChange}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Bobot Quiz (%)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        name="ranking_weight_quiz"
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                        value={form.ranking_weight_quiz}
+                        onChange={handleChange}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Bobot Absensi (%)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        name="ranking_weight_absensi"
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                        value={form.ranking_weight_absensi}
+                        onChange={handleChange}
+                      />
+                    </div>
+                  </div>
+
+                  <div
+                    className={`text-sm px-3 py-2 rounded-lg border ${rankingWeightValid
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                        : 'bg-red-50 border-red-200 text-red-700'
+                      }`}
+                  >
+                    Total bobot saat ini: <strong>{rankingWeightTotal}%</strong>
+                    {!rankingWeightValid && ' (harus tepat 100%)'}
+                  </div>
+
+                  <div className="border-t pt-5">
+                    <h3 className="text-base font-semibold text-gray-900 mb-3">Urutan Tie-Break Resmi</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {rankingTieBreakOrder.map((item, idx) => (
+                        <div key={`tie-break-${idx}`}>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Prioritas {idx + 1}
+                          </label>
+                          <select
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                            value={item}
+                            onChange={(e) => handleTieBreakOrderChange(idx, e.target.value)}
+                          >
+                            {RANKING_TIE_BREAK_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Daftar Mapel Inti (Checklist)
+                    </label>
+                    <p className="text-xs text-gray-500 mb-2">
+                      Centang satu atau lebih mapel inti yang dipakai untuk tie-break.
+                    </p>
+                    <div className="w-full max-h-[220px] overflow-auto px-3 py-2 border border-gray-300 rounded-lg bg-gray-50">
+                      {rankingCoreMapelOptions.map((mapelName) => {
+                        const checked = rankingCoreMapelSelected.includes(mapelName)
+                        return (
+                          <label
+                            key={mapelName}
+                            className="flex items-center gap-3 py-2 px-2 rounded-md hover:bg-white transition-colors duration-200 cursor-pointer"
+                          >
+                            <input
+                              type="checkbox"
+                              className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                              checked={checked}
+                              onChange={(e) => handleCoreMapelToggle(mapelName, e.target.checked)}
+                            />
+                            <span className="text-sm text-gray-800">{mapelName}</span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                    {rankingCoreMapelOptions.length === 0 && (
+                      <p className="text-xs text-amber-700 mt-2">
+                        Belum ada data mapel pada master `mata_pelajaran`.
+                      </p>
+                    )}
+                    <p className="text-xs text-gray-600 mt-2">
+                      {rankingCoreMapelSelected.length > 0
+                        ? `Terpilih: ${rankingCoreMapelSelected.join(', ')}`
+                        : 'Belum ada mapel inti dipilih.'}
+                    </p>
+                  </div>
+
+                  <div className="border-t pt-5">
+                    <h3 className="text-base font-semibold text-gray-900 mb-3">Freeze Periode Nilai</h3>
+
+                    <label className="flex items-center space-x-3 p-4 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors duration-200">
+                      <input
+                        type="checkbox"
+                        name="nilai_freeze_enabled"
+                        checked={Boolean(form.nilai_freeze_enabled)}
+                        onChange={handleFormBooleanChange}
+                        className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 transition-all duration-200"
+                      />
+                      <div className="flex-1">
+                        <span className="text-gray-900 font-medium">Aktifkan Freeze Nilai</span>
+                        <p className="text-sm text-gray-500 mt-1">
+                          Jika aktif, guru/admin tidak bisa mengubah nilai pada rentang periode freeze.
+                        </p>
+                      </div>
+                      <div
+                        className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${form.nilai_freeze_enabled
+                            ? 'bg-red-100 text-red-700'
+                            : 'bg-gray-100 text-gray-700'
+                          }`}
+                      >
+                        {form.nilai_freeze_enabled ? 'FREEZE ON' : 'FREEZE OFF'}
+                      </div>
+                    </label>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Mulai Freeze
+                        </label>
+                        <input
+                          type="datetime-local"
+                          name="nilai_freeze_start"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 disabled:bg-gray-100 disabled:text-gray-500"
+                          value={form.nilai_freeze_start || ''}
+                          onChange={handleChange}
+                          disabled={!form.nilai_freeze_enabled}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Selesai Freeze
+                        </label>
+                        <input
+                          type="datetime-local"
+                          name="nilai_freeze_end"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 disabled:bg-gray-100 disabled:text-gray-500"
+                          value={form.nilai_freeze_end || ''}
+                          onChange={handleChange}
+                          disabled={!form.nilai_freeze_enabled}
+                        />
+                      </div>
+                    </div>
+
+                    {freezeWindowInvalid && (
+                      <p className="text-sm text-red-600 mt-2">
+                        Rentang freeze tidak valid: tanggal akhir harus setelah tanggal mulai.
+                      </p>
+                    )}
+
+                    <div className="mt-4">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Alasan Freeze (opsional)
+                      </label>
+                      <textarea
+                        name="nilai_freeze_reason"
+                        rows="2"
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y transition-all duration-200 disabled:bg-gray-100 disabled:text-gray-500"
+                        value={form.nilai_freeze_reason}
+                        onChange={handleChange}
+                        placeholder="Contoh: Finalisasi rapor semester ganjil."
+                        disabled={!form.nilai_freeze_enabled}
+                      ></textarea>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* ====== Pengaturan Registrasi ====== */}
+              <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
+                <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center space-x-2">
+                  <span>👥</span>
+                  <span>Pengaturan Registrasi Publik</span>
+                </h2>
+
+                <div className="space-y-4">
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                    <div className="text-sm text-blue-700">
+                      <strong>Info:</strong> Pengaturan ini akan langsung tersimpan otomatis ketika diubah. Role yang tidak aktif akan disembunyikan di halaman registrasi publik.
+                    </div>
+                  </div>
+
+                  <label className="flex items-center space-x-3 p-4 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors duration-200">
+                    <input
+                      type="checkbox"
+                      name="registrasi_siswa_aktif"
+                      checked={form.registrasi_siswa_aktif}
+                      onChange={handleCheckboxChange}
+                      className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 transition-all duration-200"
+                    />
+                    <div className="flex-1">
+                      <span className="text-gray-900 font-medium">Aktifkan Registrasi Siswa</span>
+                      <p className="text-sm text-gray-500 mt-1">Siswa dapat membuat akun sendiri melalui halaman registrasi publik</p>
+                    </div>
+                    <div
+                      className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${form.registrasi_siswa_aktif ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                        }`}
+                    >
+                      {form.registrasi_siswa_aktif ? 'AKTIF' : 'NON-AKTIF'}
+                    </div>
+                  </label>
+
+                  <label className="flex items-center space-x-3 p-4 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors duration-200">
+                    <input
+                      type="checkbox"
+                      name="registrasi_guru_aktif"
+                      checked={form.registrasi_guru_aktif}
+                      onChange={handleCheckboxChange}
+                      className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 transition-all duration-200"
+                    />
+                    <div className="flex-1">
+                      <span className="text-gray-900 font-medium">Aktifkan Registrasi Guru</span>
+                      <p className="text-sm text-gray-500 mt-1">Guru dapat membuat akun sendiri melalui halaman registrasi publik</p>
+                    </div>
+                    <div
+                      className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${form.registrasi_guru_aktif ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                        }`}
+                    >
+                      {form.registrasi_guru_aktif ? 'AKTIF' : 'NON-AKTIF'}
+                    </div>
+                  </label>
+
+                  <label className="flex items-center space-x-3 p-4 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors duration-200">
+                    <input
+                      type="checkbox"
+                      name="registrasi_admin_aktif"
+                      checked={form.registrasi_admin_aktif}
+                      onChange={handleCheckboxChange}
+                      className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 transition-all duration-200"
+                    />
+                    <div className="flex-1">
+                      <span className="text-gray-900 font-medium">Aktifkan Registrasi Admin</span>
+                      <p className="text-sm text-gray-500 mt-1">Admin dapat membuat akun sendiri melalui halaman registrasi publik</p>
+                    </div>
+                    <div
+                      className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${form.registrasi_admin_aktif ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                        }`}
+                    >
+                      {form.registrasi_admin_aktif ? 'AKTIF' : 'NON-AKTIF'}
+                    </div>
+                  </label>
+
+                  {form.registrasi_admin_aktif && (
+                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 transition-all duration-200">
+                      <p className="text-sm text-yellow-700 font-medium">
+                        ⚠️ PERINGATAN: Membuka pendaftaran admin untuk publik sangat berisiko. Hanya aktifkan jika benar-benar diperlukan dan dalam lingkungan pengembangan.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* ====== Sidebar ====== */}
+            <div className="space-y-6">
+              {/* Profil Admin */}
+              <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
+                <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center space-x-2">
+                  <span>👨‍💼</span>
+                  <span>Profil Admin</span>
+                </h2>
+
+                <div className="flex items-center space-x-4 mb-4">
+                  {finalAvatarUrl ? (
+                    <div className="relative">
+                      <img
+                        src={finalAvatarUrl}
+                        alt="Foto Profil"
+                        className="w-16 h-16 rounded-full object-cover border-2 border-gray-200 transition-all duration-200 hover:border-blue-500"
+                      />
+                      {uploadingAvatar && (
+                        <div className="absolute inset-0 bg-black bg-opacity-50 rounded-full flex items-center justify-center">
+                          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white"></div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="w-16 h-16 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center text-lg font-bold text-white">
+                      {displayName.charAt(0).toUpperCase()}
+                    </div>
+                  )}
+                  <div>
+                    <h3 className="font-semibold text-gray-900">{displayName}</h3>
+                    <div className="text-sm text-blue-600 font-medium bg-blue-50 px-2 py-1 rounded-full inline-block">
+                      {roleLabel}
+                    </div>
                   </div>
                 </div>
 
-                {/* Logo Sekolah */}
-                <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
-                  <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center space-x-2">
-                    <span>🏫</span>
-                    <span>Logo Sekolah</span>
-                  </h2>
-
-                  <div className="flex justify-center mb-4">
-                    {logoSignedUrl ? (
-                      <div className="relative">
-                        <img
-                          src={logoSignedUrl}
-                          alt="Logo Sekolah"
-                          className="w-24 h-24 object-contain bg-gray-50 rounded-lg p-2 border border-gray-200 transition-all duration-200 hover:shadow-md"
-                        />
-                        {uploadingLogo && (
-                          <div className="absolute inset-0 bg-black bg-opacity-50 rounded-lg flex items-center justify-center">
-                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white"></div>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="w-24 h-24 flex items-center justify-center bg-gray-50 rounded-lg border-2 border-dashed border-gray-300 text-gray-400 transition-all duration-200 hover:border-gray-400">
-                        <div className="text-center">
-                          <div className="text-lg">🏫</div>
-                          <div className="text-xs mt-1">Belum ada logo</div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
+                <div className="space-y-3">
                   <FileDropzone
-                    label="Pilih file logo"
-                    onFileSelected={setSelectedLogoFile}
+                    label={uploadingAvatar ? 'Mengupload...' : 'Ubah Foto Profil'}
+                    onFileSelected={handleAdminPhotoChange}
                     accept={{ 'image/*': ['.png', '.jpg', '.jpeg'] }}
+                    disabled={uploadingAvatar}
                     className="text-sm"
                   />
 
-                  <button
-                    onClick={handleLogoUpload}
-                    disabled={!selectedLogoFile || uploadingLogo}
-                    className="w-full mt-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white py-2 px-4 rounded-lg hover:from-blue-700 hover:to-blue-800 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm flex items-center justify-center space-x-2"
-                  >
-                    {uploadingLogo ? (
-                      <>
-                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                        <span>Mengupload...</span>
-                      </>
-                    ) : (
-                      <>
-                        <span>📤</span>
-                        <span>Upload Logo</span>
-                      </>
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-xs font-semibold text-slate-700">Login Google</span>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${googleLinked
+                            ? 'bg-emerald-100 text-emerald-700'
+                            : 'bg-slate-200 text-slate-700'
+                          }`}
+                      >
+                        {googleLinked ? 'Tertaut' : 'Belum'}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleLinkGoogleAccount}
+                      disabled={linkingGoogle || unlinkingGoogle || googleLinked}
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-300 text-[10px] font-bold">
+                        G
+                      </span>
+                      {googleLinked ? 'Google Sudah Tertaut' : linkingGoogle ? 'Mengalihkan...' : 'Tautkan Google'}
+                    </button>
+                    {googleLinked && (
+                      <button
+                        type="button"
+                        onClick={handleUnlinkGoogleAccount}
+                        disabled={unlinkingGoogle || linkingGoogle}
+                        className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-red-300 bg-white px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        {unlinkingGoogle ? 'Melepas...' : 'Lepas Tautan Google'}
+                      </button>
                     )}
+                    {!isGoogleAuthEnabled && (
+                      <p className="mt-2 text-[11px] text-amber-700">
+                        Mode standby. Aktifkan `VITE_GOOGLE_AUTH_ENABLED=true`.
+                      </p>
+                    )}
+                    <p className="mt-2 text-[11px] text-slate-500">
+                      Syarat tautkan: email akun harus sama persis dengan email Google.
+                    </p>
+                    <p className="mt-2 text-[11px] text-slate-500">
+                      Email terverifikasi dari Google akan ikut disinkronkan ke status akun.
+                    </p>
+                  </div>
+
+                  {/* Email Verification Section */}
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-xs font-semibold text-slate-700">Verifikasi Email</span>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${emailVerified
+                            ? 'bg-emerald-100 text-emerald-700'
+                            : 'bg-amber-100 text-amber-700'
+                          }`}
+                      >
+                        {emailVerified ? 'Terverifikasi' : 'Belum'}
+                      </span>
+                    </div>
+                    {!emailVerified && (
+                      <button
+                        type="button"
+                        onClick={() => setVerifyModalOpen(true)}
+                        className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-purple-500 to-purple-600 px-3 py-2 text-xs font-semibold text-white hover:from-purple-600 hover:to-purple-700 transition-all duration-200 shadow-sm"
+                      >
+                        <span>📧</span>
+                        <span>Kirim Verifikasi Email</span>
+                      </button>
+                    )}
+                    {emailVerified && (
+                      <p className="text-[11px] text-emerald-600">✅ Email Anda sudah terverifikasi.</p>
+                    )}
+                  </div>
+
+                  {/* Email Verification Modal */}
+                  <EmailVerificationModal
+                    isOpen={verifyModalOpen}
+                    onClose={() => setVerifyModalOpen(false)}
+                    email={user?.email || ''}
+                    onSendCode={async () => {
+                      const { error } = await supabase.auth.resend({ type: 'signup', email: user?.email })
+                      if (error) throw error
+                    }}
+                    onSuccess={() => {
+                      setVerifyModalOpen(false)
+                      pushToast('success', 'Email verifikasi berhasil! Cek inbox untuk konfirmasi.')
+                    }}
+                  />
+
+                  <button
+                    onClick={logout}
+                    className="w-full bg-gray-100 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-200 transition-all duration-200 font-medium text-sm flex items-center justify-center space-x-2"
+                  >
+                    <span>🚪</span>
+                    <span>Logout</span>
                   </button>
-                  <p className="text-xs text-gray-500 text-center mt-2">Gambar akan dikompresi maksimal 300KB</p>
                 </div>
+              </div>
 
-                {/* Preview Visi & Misi */}
-                <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
-                  <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center space-x-2">
-                    <span>📋</span>
-                    <span>Preview Visi &amp; Misi</span>
-                  </h2>
+              {/* Logo Sekolah */}
+              <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
+                <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center space-x-2">
+                  <span>🏫</span>
+                  <span>Logo Sekolah</span>
+                </h2>
 
-                  <div className="space-y-4">
-                    <div>
-                      <h3 className="font-semibold text-gray-700 mb-2">Visi:</h3>
-                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 min-h-[80px] transition-all duration-200 hover:shadow-sm">
-                        {form.visi ? (
-                          <p className="text-sm text-gray-700 whitespace-pre-wrap">{form.visi}</p>
-                        ) : (
-                          <p className="text-sm text-gray-400 italic">Belum ada visi yang ditambahkan</p>
-                        )}
+                <div className="flex justify-center mb-4">
+                  {logoSignedUrl ? (
+                    <div className="relative">
+                      <img
+                        src={logoSignedUrl}
+                        alt="Logo Sekolah"
+                        className="w-24 h-24 object-contain bg-gray-50 rounded-lg p-2 border border-gray-200 transition-all duration-200 hover:shadow-md"
+                      />
+                      {uploadingLogo && (
+                        <div className="absolute inset-0 bg-black bg-opacity-50 rounded-lg flex items-center justify-center">
+                          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white"></div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="w-24 h-24 flex items-center justify-center bg-gray-50 rounded-lg border-2 border-dashed border-gray-300 text-gray-400 transition-all duration-200 hover:border-gray-400">
+                      <div className="text-center">
+                        <div className="text-lg">🏫</div>
+                        <div className="text-xs mt-1">Belum ada logo</div>
                       </div>
                     </div>
+                  )}
+                </div>
 
-                    <div>
-                      <h3 className="font-semibold text-gray-700 mb-2">Misi:</h3>
-                      <div className="bg-green-50 border border-green-200 rounded-lg p-3 min-h-[80px] transition-all duration-200 hover:shadow-sm">
-                        {form.misi ? (
-                          <p className="text-sm text-gray-700 whitespace-pre-wrap">{form.misi}</p>
-                        ) : (
-                          <p className="text-sm text-gray-400 italic">Belum ada misi yang ditambahkan</p>
-                        )}
-                      </div>
+                <FileDropzone
+                  label="Pilih file logo"
+                  onFileSelected={setSelectedLogoFile}
+                  accept={{ 'image/*': ['.png', '.jpg', '.jpeg'] }}
+                  className="text-sm"
+                />
+
+                <button
+                  onClick={handleLogoUpload}
+                  disabled={!selectedLogoFile || uploadingLogo}
+                  className="w-full mt-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white py-2 px-4 rounded-lg hover:from-blue-700 hover:to-blue-800 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm flex items-center justify-center space-x-2"
+                >
+                  {uploadingLogo ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      <span>Mengupload...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>📤</span>
+                      <span>Upload Logo</span>
+                    </>
+                  )}
+                </button>
+                <p className="text-xs text-gray-500 text-center mt-2">Gambar akan dikompresi maksimal 300KB</p>
+              </div>
+
+              {/* Preview Visi & Misi */}
+              <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
+                <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center space-x-2">
+                  <span>📋</span>
+                  <span>Preview Visi &amp; Misi</span>
+                </h2>
+
+                <div className="space-y-4">
+                  <div>
+                    <h3 className="font-semibold text-gray-700 mb-2">Visi:</h3>
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 min-h-[80px] transition-all duration-200 hover:shadow-sm">
+                      {form.visi ? (
+                        <p className="text-sm text-gray-700 whitespace-pre-wrap">{form.visi}</p>
+                      ) : (
+                        <p className="text-sm text-gray-400 italic">Belum ada visi yang ditambahkan</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <h3 className="font-semibold text-gray-700 mb-2">Misi:</h3>
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-3 min-h-[80px] transition-all duration-200 hover:shadow-sm">
+                      {form.misi ? (
+                        <p className="text-sm text-gray-700 whitespace-pre-wrap">{form.misi}</p>
+                      ) : (
+                        <p className="text-sm text-gray-400 italic">Belum ada misi yang ditambahkan</p>
+                      )}
                     </div>
                   </div>
                 </div>
+              </div>
 
-                {/* Save */}
-                <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
-                  <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4 transition-all duration-200">
-                    <p className="text-sm text-green-700 text-center">✅ Semua pengaturan tersimpan otomatis & bisa disinkron realtime</p>
-                  </div>
-
-                  <button
-                    onClick={onSave}
-                    disabled={saving}
-                    className="w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white py-3 px-4 rounded-lg hover:from-blue-700 hover:to-blue-800 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-semibold flex items-center justify-center space-x-2"
-                  >
-                    {saving ? (
-                      <>
-                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                        <span>Menyimpan...</span>
-                      </>
-                    ) : (
-                      <>
-                        <span>💾</span>
-                        <span>Simpan Manual (Backup)</span>
-                      </>
-                    )}
-                  </button>
-
-                  <p className="text-xs text-gray-500 text-center mt-2">Tombol backup untuk memastikan data tersimpan.</p>
+              {/* Save */}
+              <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4 transition-all duration-200">
+                  <p className="text-sm text-green-700 text-center">✅ Semua pengaturan tersimpan otomatis & bisa disinkron realtime</p>
                 </div>
+
+                <button
+                  onClick={onSave}
+                  disabled={saving}
+                  className="w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white py-3 px-4 rounded-lg hover:from-blue-700 hover:to-blue-800 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-semibold flex items-center justify-center space-x-2"
+                >
+                  {saving ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      <span>Menyimpan...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>💾</span>
+                      <span>Simpan Manual (Backup)</span>
+                    </>
+                  )}
+                </button>
+
+                <p className="text-xs text-gray-500 text-center mt-2">Tombol backup untuk memastikan data tersimpan.</p>
               </div>
             </div>
           </div>
         </div>
+      </div>
     </div>
   )
 }

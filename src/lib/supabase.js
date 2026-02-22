@@ -9,6 +9,9 @@ const getRuntimeHostname = () => {
 const ADMIN_SUBDOMAIN = String(import.meta.env.VITE_ADMIN_SUBDOMAIN || 'admin')
   .trim()
   .toLowerCase()
+const ROOT_DOMAIN = String(import.meta.env.VITE_ROOT_DOMAIN || '')
+  .trim()
+  .toLowerCase()
 
 const deriveApiHost = (host) => {
   const normalized = String(host || '').toLowerCase()
@@ -17,7 +20,7 @@ const deriveApiHost = (host) => {
   if (normalized === '127.0.0.1') return '127.0.0.1'
   // Keep tenant subdomain host (e.g. bali.localhost) so CSRF cookie is readable on the same host.
   if (normalized.endsWith('.localhost')) return normalized
-  return host
+  return normalized
 }
 
 const deriveTenantSlug = (host) => {
@@ -34,20 +37,33 @@ const deriveTenantSlug = (host) => {
 
 const RUNTIME_HOST = getRuntimeHostname()
 const DEFAULT_API_HOST = deriveApiHost(RUNTIME_HOST)
+const isWithinRootDomain = (host, rootDomain) => {
+  const normalizedHost = String(host || '').trim().toLowerCase()
+  const normalizedRoot = String(rootDomain || '').trim().toLowerCase()
+  if (!normalizedHost || !normalizedRoot) return false
+  return normalizedHost === normalizedRoot || normalizedHost.endsWith(`.${normalizedRoot}`)
+}
+
 const normalizeApiUrl = (rawApiUrl, runtimeHost) => {
-  const fallback = `http://${DEFAULT_API_HOST}:8000`
+  const runtime = String(runtimeHost || '').toLowerCase()
+  const runtimeIsLocal =
+    runtime === 'localhost' ||
+    runtime === '127.0.0.1' ||
+    runtime.endsWith('.localhost')
+  const runtimeProtocol =
+    typeof window !== 'undefined' && window.location?.protocol
+      ? window.location.protocol
+      : 'http:'
+  const fallback = runtimeIsLocal
+    ? `http://${DEFAULT_API_HOST}:8000`
+    : `${runtimeProtocol}//${DEFAULT_API_HOST}`
   const input = String(rawApiUrl || '').trim()
   if (!input) return fallback
 
   try {
     const url = new URL(input)
-    const runtime = String(runtimeHost || '').toLowerCase()
     const apiHost = String(url.hostname || '').toLowerCase()
 
-    const runtimeIsLocal =
-      runtime === 'localhost' ||
-      runtime === '127.0.0.1' ||
-      runtime.endsWith('.localhost')
     const apiIsLocal =
       apiHost === 'localhost' ||
       apiHost === '127.0.0.1' ||
@@ -55,6 +71,12 @@ const normalizeApiUrl = (rawApiUrl, runtimeHost) => {
 
     // Keep frontend and API on the same local host to avoid CSRF cookie mismatch.
     if (runtimeIsLocal && apiIsLocal && runtime && runtime !== apiHost) {
+      url.hostname = runtime
+    }
+
+    const runtimeInRoot = isWithinRootDomain(runtime, ROOT_DOMAIN)
+    const apiInRoot = isWithinRootDomain(apiHost, ROOT_DOMAIN)
+    if (!runtimeIsLocal && runtimeInRoot && apiInRoot && runtime !== apiHost) {
       url.hostname = runtime
     }
 
@@ -66,6 +88,55 @@ const normalizeApiUrl = (rawApiUrl, runtimeHost) => {
 
 const API_URL = normalizeApiUrl(import.meta.env.VITE_API_URL, RUNTIME_HOST)
 const TENANT_SLUG = import.meta.env.VITE_TENANT_SLUG || deriveTenantSlug(RUNTIME_HOST)
+const GOOGLE_AUTH_ENABLED = String(import.meta.env.VITE_GOOGLE_AUTH_ENABLED || 'false')
+  .trim()
+  .toLowerCase() === 'true'
+const normalizeAuthEndpointUrl = (rawUrl, fallbackPath) => {
+  const input = String(rawUrl || fallbackPath || '').trim()
+  if (!input) return ''
+
+  try {
+    const baseOrigin =
+      typeof window !== 'undefined' && window.location?.origin
+        ? window.location.origin
+        : API_URL
+    const url = new URL(input, baseOrigin)
+    const runtime = String(RUNTIME_HOST || '').toLowerCase()
+    const targetHost = String(url.hostname || '').toLowerCase()
+
+    const runtimeIsLocal =
+      runtime === 'localhost' ||
+      runtime === '127.0.0.1' ||
+      runtime.endsWith('.localhost')
+    const targetIsLocal =
+      targetHost === 'localhost' ||
+      targetHost === '127.0.0.1' ||
+      targetHost.endsWith('.localhost')
+
+    if (runtimeIsLocal && targetIsLocal && runtime && runtime !== targetHost) {
+      url.hostname = runtime
+    }
+
+    const runtimeInRoot = isWithinRootDomain(runtime, ROOT_DOMAIN)
+    const targetInRoot = isWithinRootDomain(targetHost, ROOT_DOMAIN)
+    if (!runtimeIsLocal && runtimeInRoot && targetInRoot && runtime !== targetHost) {
+      url.hostname = runtime
+    }
+
+    return url.toString()
+  } catch {
+    return input
+  }
+}
+
+const GOOGLE_AUTH_LOGIN_URL = normalizeAuthEndpointUrl(
+  import.meta.env.VITE_GOOGLE_AUTH_LOGIN_URL,
+  '/api/auth/google/redirect'
+)
+const GOOGLE_AUTH_LINK_URL = normalizeAuthEndpointUrl(
+  import.meta.env.VITE_GOOGLE_AUTH_LINK_URL,
+  '/api/auth/google/link'
+)
 
 /* ===================== BUCKETS ===================== */
 export const ASSIGNMENT_BUCKET = 'assignments'
@@ -379,7 +450,7 @@ const apiFetch = async (path, options = {}) => {
   let json = null
   try {
     json = await res.json()
-  } catch {}
+  } catch { }
 
   if (!res.ok) {
     return {
@@ -403,7 +474,7 @@ class QueryBuilder {
     this.action = 'select'
     this.columns = '*'
     this.options = {}
-    this.filters = { eq: {}, is: {}, in: {}, gte: {}, lte: {}, gt: {}, lt: {} }
+    this.filters = { eq: {}, neq: {}, is: {}, in: {}, gte: {}, lte: {}, gt: {}, lt: {} }
     this.orderBy = []
     this.limitValue = null
     this.offsetValue = null
@@ -450,6 +521,11 @@ class QueryBuilder {
 
   eq(field, value) {
     this.filters.eq[field] = value
+    return this
+  }
+
+  neq(field, value) {
+    this.filters.neq[field] = value
     return this
   }
 
@@ -541,7 +617,7 @@ class QueryBuilder {
         data,
         error: makeError(
           data?.message ||
-            'Perubahan kritikal menunggu approval. Cek menu Approval.',
+          'Perubahan kritikal menunggu approval. Cek menu Approval.',
           202,
           'APPROVAL_REQUIRED'
         ),
@@ -588,7 +664,7 @@ class StorageBucket {
           data: null,
           error: makeError(
             error?.message ||
-              `Gagal memproses gambar. Maksimal ${Math.floor(maxImageBytes / 1024)}KB.`,
+            `Gagal memproses gambar. Maksimal ${Math.floor(maxImageBytes / 1024)}KB.`,
             422,
             'IMAGE_COMPRESSION_FAILED'
           )
@@ -666,23 +742,165 @@ class StorageBucket {
 }
 
 /* ===================== AUTH ===================== */
+const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
+
+const normalizeProviderList = (value) => {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => String(item || '').trim().toLowerCase())
+      .filter(Boolean)
+  }
+  if (typeof value === 'string') {
+    return value
+      .split(/[,\s]+/g)
+      .map((item) => String(item || '').trim().toLowerCase())
+      .filter(Boolean)
+  }
+  return []
+}
+
+const collectUserProviders = (user = {}) => {
+  const providers = [
+    ...normalizeProviderList(user?.providers),
+    ...normalizeProviderList(user?.app_metadata?.providers),
+    ...normalizeProviderList(user?.user_metadata?.providers)
+  ]
+
+  if (Array.isArray(user?.identities)) {
+    user.identities.forEach((identity) => {
+      const provider = String(identity?.provider || '').trim().toLowerCase()
+      if (provider) providers.push(provider)
+    })
+  }
+
+  return Array.from(new Set(providers))
+}
+
+const isGoogleLinkedUser = (user = {}) => {
+  const providers = collectUserProviders(user)
+  if (providers.includes('google')) return true
+
+  return Boolean(
+    user?.google_linked ||
+    user?.google_linked_at ||
+    user?.google_id ||
+    user?.google_sub ||
+    user?.user_metadata?.google_linked ||
+    user?.user_metadata?.google_linked_at ||
+    user?.app_metadata?.google_linked
+  )
+}
+
+const resolveVerifiedAt = (user = {}) => {
+  const candidates = [
+    user?.email_verified_at,
+    user?.email_confirmed_at,
+    user?.verified_at,
+    user?.google_email_verified_at,
+    user?.user_metadata?.email_verified_at,
+    user?.user_metadata?.email_confirmed_at,
+    user?.app_metadata?.email_verified_at
+  ]
+
+  for (const candidate of candidates) {
+    if (candidate) return candidate
+  }
+  return null
+}
+
+const isEmailVerifiedUser = (user = {}, providers = []) => {
+  const verifiedAt = resolveVerifiedAt(user)
+  if (verifiedAt) return true
+
+  const explicitFlag = Boolean(
+    user?.email_verified ||
+    user?.email_confirmed ||
+    user?.user_metadata?.email_verified ||
+    user?.app_metadata?.email_verified
+  )
+  if (explicitFlag) return true
+
+  // Email Google selalu verified oleh provider.
+  return providers.includes('google')
+}
+
+const buildAuthRedirectUrl = (baseUrl, params = {}) => {
+  const input = String(baseUrl || '').trim()
+  if (!input) return ''
+
+  try {
+    const baseOrigin =
+      typeof window !== 'undefined' && window.location?.origin
+        ? window.location.origin
+        : API_URL
+    const url = new URL(input, baseOrigin)
+    Object.entries(params || {}).forEach(([key, value]) => {
+      if (value === undefined || value === null || value === '') return
+      url.searchParams.set(String(key), String(value))
+    })
+    return url.toString()
+  } catch {
+    return ''
+  }
+}
+
 const normalizeUser = (user, profile) => {
   if (!user) return null
-  const meta = {
-    role: profile?.role,
-    nama: profile?.nama
+  const role =
+    profile?.role ||
+    user?.app_metadata?.role ||
+    user?.user_metadata?.role ||
+    null
+  const nama =
+    profile?.nama ||
+    user?.user_metadata?.nama ||
+    user?.user_metadata?.name ||
+    user?.name ||
+    (user?.email ? user.email.split('@')[0] : null)
+  const providers = collectUserProviders(user)
+  const googleLinked = isGoogleLinkedUser(user)
+  const verifiedAt = resolveVerifiedAt(user)
+  const emailVerified = isEmailVerifiedUser(user, providers)
+
+  const userMeta = isObject(user?.user_metadata) ? { ...user.user_metadata } : {}
+  if (role) userMeta.role = role
+  if (nama) {
+    userMeta.nama = nama
+    if (!userMeta.name) userMeta.name = nama
   }
-  const verifiedAt = user?.email_verified_at || user?.email_confirmed_at || null
+  if (providers.length > 0) userMeta.providers = providers
+  if (googleLinked) userMeta.google_linked = true
+  if (emailVerified) userMeta.email_verified = true
+
+  const appMeta = isObject(user?.app_metadata) ? { ...user.app_metadata } : {}
+  if (role) appMeta.role = role
+  if (providers.length > 0) appMeta.providers = providers
+
   return {
     ...user,
     email_confirmed_at: verifiedAt,
-    emailVerified: Boolean(verifiedAt),
-    user_metadata: meta,
-    app_metadata: { role: profile?.role }
+    emailVerified,
+    providers,
+    google_linked: googleLinked,
+    user_metadata: userMeta,
+    app_metadata: appMeta
   }
 }
 
 const auth = {
+  isGoogleEnabled() {
+    return GOOGLE_AUTH_ENABLED
+  },
+
+  getProviderState(user) {
+    const providers = collectUserProviders(user || {})
+    return {
+      providers,
+      googleLinked: isGoogleLinkedUser(user || {}),
+      emailVerified: isEmailVerifiedUser(user || {}, providers)
+    }
+  },
+
   async signInWithPassword({ email, password }) {
     const res = await apiFetch('/api/auth/login', {
       method: 'POST',
@@ -693,6 +911,80 @@ const auth = {
 
     const user = normalizeUser(res.raw?.data?.user, res.raw?.data?.profile)
     return { data: { user, session: user ? { user } : null }, error: null }
+  },
+
+  async signInWithGoogle(options = {}) {
+    const redirectTo =
+      options?.redirectTo ||
+      (typeof window !== 'undefined'
+        ? `${window.location.origin}/login`
+        : '')
+
+    const redirectUrl = buildAuthRedirectUrl(GOOGLE_AUTH_LOGIN_URL, {
+      redirect: redirectTo,
+      next: redirectTo,
+      tenant: TENANT_SLUG || undefined,
+      mode: 'login'
+    })
+
+    if (!redirectUrl) {
+      return {
+        data: null,
+        error: makeError(
+          'URL login Google belum valid. Cek VITE_GOOGLE_AUTH_LOGIN_URL.',
+          500,
+          'GOOGLE_AUTH_URL_INVALID'
+        )
+      }
+    }
+
+    if (typeof window !== 'undefined' && options?.navigate !== false) {
+      window.location.assign(redirectUrl)
+    }
+
+    return { data: { redirectUrl }, error: null }
+  },
+
+  async linkGoogleAccount(options = {}) {
+    const redirectTo =
+      options?.redirectTo ||
+      (typeof window !== 'undefined'
+        ? `${window.location.origin}${window.location.pathname}`
+        : '')
+
+    const redirectUrl = buildAuthRedirectUrl(GOOGLE_AUTH_LINK_URL, {
+      redirect: redirectTo,
+      next: redirectTo,
+      tenant: TENANT_SLUG || undefined,
+      mode: 'link'
+    })
+
+    if (!redirectUrl) {
+      return {
+        data: null,
+        error: makeError(
+          'URL tautkan Google belum valid. Cek VITE_GOOGLE_AUTH_LINK_URL.',
+          500,
+          'GOOGLE_AUTH_URL_INVALID'
+        )
+      }
+    }
+
+    if (typeof window !== 'undefined' && options?.navigate !== false) {
+      window.location.assign(redirectUrl)
+    }
+
+    return { data: { redirectUrl }, error: null }
+  },
+
+  async unlinkGoogleAccount() {
+    const res = await apiFetch('/api/auth/google/unlink', {
+      method: 'POST'
+    })
+    if (res.error) return { data: null, error: res.error }
+
+    const user = normalizeUser(res.raw?.data?.user, res.raw?.data?.profile)
+    return { data: { user }, error: null }
   },
 
   async signUp({ email, password, options = {} }) {
@@ -769,6 +1061,22 @@ const auth = {
     const res = await apiFetch('/api/auth/verify-email/resend', {
       method: 'POST',
       body: {}
+    })
+    return { data: res.raw?.data ?? res.data, error: res.error }
+  },
+
+  async sendEmailVerificationCode() {
+    const res = await apiFetch('/api/auth/email-verification/send-code', {
+      method: 'POST',
+      body: {}
+    })
+    return { data: res.raw?.data ?? res.data, error: res.error }
+  },
+
+  async verifyEmailCode(code) {
+    const res = await apiFetch('/api/auth/email-verification/verify-code', {
+      method: 'POST',
+      body: { code }
     })
     return { data: res.raw?.data ?? res.data, error: res.error }
   },
@@ -878,6 +1186,13 @@ const auth = {
       const res = await apiFetch(`/api/super/tenants/${tenantId}/admins/${userId}/reset-password`, {
         method: 'POST',
         body: payload
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async setTenantPrimaryAdmin(tenantId, userId) {
+      const res = await apiFetch(`/api/super/tenants/${tenantId}/admins/${userId}/primary`, {
+        method: 'PATCH',
+        body: {}
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },

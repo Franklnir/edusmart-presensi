@@ -1738,7 +1738,7 @@ function AbsensiGuru() {
                           <>
                             <button
                               onClick={() => setStatus(s.id, 'Hadir')}
-                              disabled={loadingActions[s.id]}
+                              disabled={loadingActions[s.id] || (absenMode === 'otomatis' && rfidSettings.rfid_aktif)}
                               className="w-7 h-7 rounded bg-green-500 hover:bg-green-600 text-white flex items-center justify-center text-xs shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                               title="Hadir"
                             >
@@ -1746,7 +1746,7 @@ function AbsensiGuru() {
                             </button>
                             <button
                               onClick={() => openIzinModal(s.id)}
-                              disabled={loadingActions[s.id]}
+                              disabled={loadingActions[s.id] || (absenMode === 'otomatis' && rfidSettings.rfid_aktif)}
                               className="w-7 h-7 rounded bg-yellow-400 hover:bg-yellow-500 text-white flex items-center justify-center text-xs shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                               title="Izin"
                             >
@@ -1754,7 +1754,7 @@ function AbsensiGuru() {
                             </button>
                             <button
                               onClick={() => setStatus(s.id, 'Sakit')}
-                              disabled={loadingActions[s.id]}
+                              disabled={loadingActions[s.id] || (absenMode === 'otomatis' && rfidSettings.rfid_aktif)}
                               className="w-7 h-7 rounded bg-blue-500 hover:bg-blue-600 text-white flex items-center justify-center text-xs shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                               title="Sakit"
                             >
@@ -1762,7 +1762,7 @@ function AbsensiGuru() {
                             </button>
                             <button
                               onClick={() => setStatus(s.id, 'Alpha')}
-                              disabled={loadingActions[s.id]}
+                              disabled={loadingActions[s.id] || (absenMode === 'otomatis' && rfidSettings.rfid_aktif)}
                               className="w-7 h-7 rounded bg-red-500 hover:bg-red-600 text-white flex items-center justify-center text-xs shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                               title="Alpha"
                             >
