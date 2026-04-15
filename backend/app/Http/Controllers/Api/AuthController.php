@@ -42,8 +42,7 @@ class AuthController extends ApiController
 
     public function __construct(
         private readonly TenantDomainService $tenantDomainService
-    ) {
-    }
+    ) {}
 
     public function me(Request $request)
     {

@@ -19,8 +19,7 @@ class WhatsAppIntegrationService
 
     public function __construct(
         private readonly EvolutionApiClient $evolutionApiClient
-    ) {
-    }
+    ) {}
 
     public function providerConfigured(): bool
     {

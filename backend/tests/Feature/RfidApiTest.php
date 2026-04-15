@@ -103,4 +103,3 @@ class RfidApiTest extends TestCase
         ];
     }
 }
-

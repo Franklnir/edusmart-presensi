@@ -32,8 +32,7 @@ class DbController extends ApiController
 
     public function __construct(
         private readonly WhatsAppNotificationService $whatsAppNotificationService
-    ) {
-    }
+    ) {}
 
     private array $allowedTables = [
         'settings',

@@ -2,8 +2,8 @@
 
 namespace App\Http\Controllers\Api;
 
-use App\Services\WhatsApp\WhatsAppNotificationService;
 use App\Services\WhatsApp\WhatsAppIntegrationService;
+use App\Services\WhatsApp\WhatsAppNotificationService;
 use Illuminate\Http\Request;
 
 class WhatsAppController extends ApiController
@@ -11,8 +11,7 @@ class WhatsAppController extends ApiController
     public function __construct(
         private readonly WhatsAppIntegrationService $whatsAppIntegrationService,
         private readonly WhatsAppNotificationService $whatsAppNotificationService
-    ) {
-    }
+    ) {}
 
     public function show(Request $request)
     {

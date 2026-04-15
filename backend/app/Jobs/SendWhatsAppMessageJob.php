@@ -21,8 +21,7 @@ class SendWhatsAppMessageJob implements ShouldQueue
 
     public function __construct(
         public readonly string $logId
-    ) {
-    }
+    ) {}
 
     public function handle(WhatsAppIntegrationService $integrationService): void
     {

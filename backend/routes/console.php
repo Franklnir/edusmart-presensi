@@ -1,7 +1,7 @@
 <?php
 
-use App\Services\Rfid\MqttBridgeService;
 use App\Services\Quiz\QuizScoringService;
+use App\Services\Rfid\MqttBridgeService;
 use App\Services\WhatsApp\WhatsAppIntegrationService;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;

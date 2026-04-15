@@ -11,8 +11,7 @@ class EnsureSuperAdminDomain
 {
     public function __construct(
         private readonly TenantDomainService $tenantDomainService
-    ) {
-    }
+    ) {}
 
     public function handle(Request $request, Closure $next): Response
     {

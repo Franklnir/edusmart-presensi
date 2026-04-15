@@ -26,8 +26,7 @@ class WhatsAppNotificationService
     public function __construct(
         private readonly WhatsAppIntegrationService $integrationService,
         private readonly WhatsAppMessageBuilder $messageBuilder
-    ) {
-    }
+    ) {}
 
     public function handleTableMutation(
         string $tenantId,

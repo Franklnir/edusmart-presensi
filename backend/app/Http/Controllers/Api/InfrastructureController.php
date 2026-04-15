@@ -9,8 +9,7 @@ class InfrastructureController extends ApiController
 {
     public function __construct(
         private readonly TenantDomainService $tenantDomainService
-    ) {
-    }
+    ) {}
 
     public function authorizeTlsDomain(Request $request)
     {

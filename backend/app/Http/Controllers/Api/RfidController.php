@@ -9,8 +9,7 @@ class RfidController extends ApiController
 {
     public function __construct(
         private readonly RfidScanService $rfidScanService
-    ) {
-    }
+    ) {}
 
     public function scan(Request $request)
     {

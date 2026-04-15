@@ -10,8 +10,7 @@ class SuperPluginController extends ApiController
 {
     public function __construct(
         private readonly PluginPackageService $pluginService
-    ) {
-    }
+    ) {}
 
     public function index(Request $request)
     {

@@ -317,7 +317,7 @@ class PluginPackageService
             throw new RuntimeException('Ukuran ZIP plugin melebihi batas 50 MB.');
         }
 
-        $zip = new ZipArchive();
+        $zip = new ZipArchive;
         $openResult = $zip->open($zipPath);
         if ($openResult !== true) {
             throw new RuntimeException('ZIP plugin tidak bisa dibuka.');
@@ -427,7 +427,7 @@ class PluginPackageService
 
     private function extractArchive(string $zipPath, string $destinationPath): void
     {
-        $zip = new ZipArchive();
+        $zip = new ZipArchive;
         $openResult = $zip->open($zipPath);
         if ($openResult !== true) {
             throw new RuntimeException('ZIP plugin tidak bisa diekstrak.');
@@ -459,6 +459,7 @@ class PluginPackageService
                 if (! is_dir($dirPath)) {
                     mkdir($dirPath, 0775, true);
                 }
+
                 continue;
             }
 
@@ -736,6 +737,7 @@ class PluginPackageService
             $target = $path.DIRECTORY_SEPARATOR.$item;
             if (is_dir($target)) {
                 $this->deleteDirectory($target);
+
                 continue;
             }
 

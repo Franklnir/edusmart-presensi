@@ -11,8 +11,7 @@ class MqttBridgeService
 {
     public function __construct(
         private readonly RfidScanService $rfidScanService
-    ) {
-    }
+    ) {}
 
     public function run(callable $log, bool $once = false, array $forcedTenants = []): void
     {
@@ -55,7 +54,7 @@ class MqttBridgeService
                 $client->registerLoopEventHandler(function (MqttClient $mqtt, float $elapsedTime) use ($forcedTenants, $qos, $cfg, $log, $interval, &$lastSyncAt, &$initialSynced) {
                     unset($elapsedTime);
                     $now = microtime(true);
-                    if (!$initialSynced || ($now - $lastSyncAt) >= $interval) {
+                    if (! $initialSynced || ($now - $lastSyncAt) >= $interval) {
                         $this->publishTenantModes($mqtt, $cfg, $forcedTenants, $qos, $log);
                         $initialSynced = true;
                         $lastSyncAt = $now;
@@ -64,7 +63,7 @@ class MqttBridgeService
 
                 $client->loop(true);
             } catch (\Throwable $e) {
-                $log('error', 'MQTT bridge error: ' . $e->getMessage());
+                $log('error', 'MQTT bridge error: '.$e->getMessage());
             } finally {
                 if ($client instanceof MqttClient && $client->isConnected()) {
                     try {
@@ -100,7 +99,7 @@ class MqttBridgeService
             MqttClient::MQTT_3_1_1
         );
 
-        $settings = (new ConnectionSettings())
+        $settings = (new ConnectionSettings)
             ->setUsername($this->nullableString($cfg['username'] ?? null))
             ->setPassword($this->nullableString($cfg['password'] ?? null))
             ->setConnectTimeout(max(3, (int) ($cfg['connect_timeout'] ?? 20)))
@@ -126,8 +125,9 @@ class MqttBridgeService
         callable $log
     ): void {
         $payload = json_decode($message, true);
-        if (!is_array($payload)) {
+        if (! is_array($payload)) {
             $log('warning', sprintf('Payload scan invalid JSON pada topik %s', $topic));
+
             return;
         }
 
@@ -138,6 +138,7 @@ class MqttBridgeService
 
         if ($tenantSlug === '') {
             $log('warning', sprintf('Tenant tidak bisa ditentukan untuk device %s', $deviceId ?: '-'));
+
             return;
         }
 
@@ -197,11 +198,11 @@ class MqttBridgeService
     private function resolveModeTenants(array $forcedTenants): array
     {
         $forced = array_values(array_filter(array_map(
-            fn($value) => trim((string) $value),
+            fn ($value) => trim((string) $value),
             $forcedTenants
         )));
 
-        if (!empty($forced)) {
+        if (! empty($forced)) {
             return array_values(array_unique($forced));
         }
 
@@ -213,11 +214,11 @@ class MqttBridgeService
             ->filter(function ($row) use ($blockedStatuses) {
                 $status = Str::lower(trim((string) ($row->status ?? 'active')));
 
-                return !in_array($status, $blockedStatuses, true);
+                return ! in_array($status, $blockedStatuses, true);
             })
             ->pluck('slug')
-            ->map(fn($slug) => trim((string) $slug))
-            ->filter(fn($slug) => $slug !== '')
+            ->map(fn ($slug) => trim((string) $slug))
+            ->filter(fn ($slug) => $slug !== '')
             ->values()
             ->all();
     }
@@ -253,14 +254,14 @@ class MqttBridgeService
     private function extractTenantSlugFromTopic(array $cfg, string $topic): string
     {
         $template = trim((string) ($cfg['scan_topic_template'] ?? ''));
-        if ($template === '' || !str_contains($template, '{tenant}')) {
+        if ($template === '' || ! str_contains($template, '{tenant}')) {
             return '';
         }
 
         $regex = preg_quote($template, '#');
         $regex = str_replace('\{tenant\}', '([^/]+)', $regex);
 
-        if (!preg_match('#^' . $regex . '$#', $topic, $matches)) {
+        if (! preg_match('#^'.$regex.'$#', $topic, $matches)) {
             return '';
         }
 
@@ -296,12 +297,12 @@ class MqttBridgeService
             return $raw;
         }
 
-        if (!is_string($raw) || trim($raw) === '') {
+        if (! is_string($raw) || trim($raw) === '') {
             return [];
         }
 
         $decoded = json_decode($raw, true);
-        if (!is_array($decoded)) {
+        if (! is_array($decoded)) {
             return [];
         }
 
@@ -324,7 +325,7 @@ class MqttBridgeService
     private function mqttConfig(): array
     {
         $cfg = config('rfid.mqtt', []);
-        if (!is_array($cfg)) {
+        if (! is_array($cfg)) {
             return [];
         }
 

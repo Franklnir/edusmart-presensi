@@ -10,8 +10,7 @@ class WhatsAppWebhookController extends Controller
 {
     public function __construct(
         private readonly WhatsAppIntegrationService $whatsAppIntegrationService
-    ) {
-    }
+    ) {}
 
     public function handle(Request $request, string $secret, ?string $event = null)
     {

@@ -11,8 +11,7 @@ class RfidScanService
 {
     public function __construct(
         private readonly WhatsAppNotificationService $whatsAppNotificationService
-    ) {
-    }
+    ) {}
 
     private function normalizeMode(?string $mode): string
     {
@@ -36,7 +35,7 @@ class RfidScanService
         }
 
         $tenant = $this->resolveTenantBySlug($tenantSlug);
-        if (!$tenant) {
+        if (! $tenant) {
             return $this->result(404, [
                 'success' => false,
                 'reason' => 'tenant_not_found',
@@ -54,7 +53,7 @@ class RfidScanService
         }
 
         $cardUid = $this->normalizeCardUid($cardUid);
-        if ($cardUid === '' || !preg_match('/^[0-9A-F]{8,32}$/', $cardUid)) {
+        if ($cardUid === '' || ! preg_match('/^[0-9A-F]{8,32}$/', $cardUid)) {
             return $this->result(422, [
                 'success' => false,
                 'reason' => 'invalid_card_uid',
@@ -123,7 +122,7 @@ class RfidScanService
         }
 
         $data = $this->decodeFunctionResult($row->result ?? null);
-        if (!is_array($data)) {
+        if (! is_array($data)) {
             return $this->result(500, [
                 'success' => false,
                 'reason' => 'invalid_result',
@@ -157,7 +156,7 @@ class RfidScanService
         }
 
         $tenant = $this->resolveTenantBySlug($tenantSlug);
-        if (!$tenant) {
+        if (! $tenant) {
             return $this->result(404, [
                 'success' => false,
                 'reason' => 'tenant_not_found',
@@ -199,7 +198,7 @@ class RfidScanService
         $manualEnabled = (bool) ($settings->scan_manual_enabled ?? false);
         $dbMode = trim((string) ($settings->rfid_mode ?? ''));
 
-        // Mode logic: 
+        // Mode logic:
         // 1. If 'enroll', it stays 'enroll' regardless of toggle.
         // 2. Otherwise, follow the 'scan_manual_enabled' toggle.
         if ($dbMode === 'enroll') {
@@ -230,7 +229,7 @@ class RfidScanService
         $mode = $this->normalizeMode($mode);
 
         $tenant = $this->resolveTenantBySlug($tenantSlug);
-        if (!$tenant) {
+        if (! $tenant) {
             return $this->result(404, ['success' => false, 'message' => 'Tenant tidak ditemukan']);
         }
 
@@ -277,12 +276,12 @@ class RfidScanService
             return json_decode(json_encode($raw), true);
         }
 
-        if (!is_string($raw) || trim($raw) === '') {
+        if (! is_string($raw) || trim($raw) === '') {
             return null;
         }
 
         $decoded = json_decode($raw, true);
-        if (!is_array($decoded)) {
+        if (! is_array($decoded)) {
             return null;
         }
 

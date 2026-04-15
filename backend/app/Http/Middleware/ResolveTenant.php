@@ -2,17 +2,16 @@
 
 namespace App\Http\Middleware;
 
+use App\Support\Tenancy\TenantDomainService;
 use Closure;
 use Illuminate\Http\Request;
-use App\Support\Tenancy\TenantDomainService;
 use Illuminate\Support\Facades\DB;
 
 class ResolveTenant
 {
     public function __construct(
         private readonly TenantDomainService $tenantDomainService
-    ) {
-    }
+    ) {}
 
     public function handle(Request $request, Closure $next)
     {

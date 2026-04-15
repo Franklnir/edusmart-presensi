@@ -96,11 +96,13 @@ trait HasTenantRestoreLogic
 
                 if ($tableName === '') {
                     $warnings[] = 'Ada entri tabel backup tanpa nama, dilewati.';
+
                     continue;
                 }
 
                 if (! isset($allowedSet[$tableName])) {
                     $warnings[] = "Tabel {$tableName} tidak ada di daftar restore yang diizinkan, dilewati.";
+
                     continue;
                 }
 
@@ -126,6 +128,7 @@ trait HasTenantRestoreLogic
                     $result['messages'][] = 'Tabel tidak ditemukan di database.';
                     $summary['errors'] += 1;
                     $tableResults[] = $result;
+
                     continue;
                 }
 
@@ -134,6 +137,7 @@ trait HasTenantRestoreLogic
                     $result['messages'][] = 'Tabel tidak memiliki kolom tenant_id.';
                     $summary['errors'] += 1;
                     $tableResults[] = $result;
+
                     continue;
                 }
 
@@ -155,6 +159,7 @@ trait HasTenantRestoreLogic
                     if (! is_array($rawRow)) {
                         $result['skipped'] += 1;
                         $summary['skipped'] += 1;
+
                         continue;
                     }
 
@@ -171,6 +176,7 @@ trait HasTenantRestoreLogic
                     if (count($row) <= 1) {
                         $result['skipped'] += 1;
                         $summary['skipped'] += 1;
+
                         continue;
                     }
 

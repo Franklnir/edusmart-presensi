@@ -31,4 +31,3 @@ return [
         'device_tenant_map' => env('RFID_MQTT_DEVICE_TENANT_MAP', '{}'),
     ],
 ];
-

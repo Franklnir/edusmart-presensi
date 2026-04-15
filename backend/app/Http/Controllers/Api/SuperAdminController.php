@@ -3,8 +3,8 @@
 namespace App\Http\Controllers\Api;
 
 use App\Models\Profile;
-use App\Support\Tenancy\TenantDomainService;
 use App\Models\User;
+use App\Support\Tenancy\TenantDomainService;
 use App\Traits\HasTenantRestoreLogic;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -91,8 +91,7 @@ class SuperAdminController extends ApiController
 
     public function __construct(
         private readonly TenantDomainService $tenantDomainService
-    ) {
-    }
+    ) {}
 
     public function me(Request $request)
     {

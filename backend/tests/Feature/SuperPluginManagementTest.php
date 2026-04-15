@@ -182,7 +182,7 @@ class SuperPluginManagementTest extends TestCase
         @unlink($tempBase);
         $zipPath = $tempBase.'.zip';
 
-        $zip = new ZipArchive();
+        $zip = new ZipArchive;
         $result = $zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE);
         if ($result !== true) {
             throw new \RuntimeException('Gagal membuat file ZIP untuk test plugin.');
