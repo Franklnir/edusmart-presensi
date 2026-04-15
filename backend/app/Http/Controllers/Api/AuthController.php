@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Models\Profile;
 use App\Models\User;
+use App\Support\Tenancy\TenantDomainService;
 use Illuminate\Contracts\Auth\StatefulGuard;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -38,6 +39,11 @@ class AuthController extends ApiController
     private const EMAIL_VERIFICATION_CODE_TTL_SECONDS = 600;
 
     private const EMAIL_VERIFICATION_CODE_MAX_ATTEMPTS = 5;
+
+    public function __construct(
+        private readonly TenantDomainService $tenantDomainService
+    ) {
+    }
 
     public function me(Request $request)
     {
@@ -495,50 +501,16 @@ class AuthController extends ApiController
 
     private function isAdminHost(string $host): bool
     {
-        if ($host === '') {
-            return false;
-        }
-
-        $adminHosts = array_map('strtolower', config('tenancy.admin_hosts', []));
-        if (in_array($host, $adminHosts, true)) {
-            return true;
-        }
-
-        $root = strtolower(trim((string) config('tenancy.root_domain', '')));
-        $adminSubdomain = strtolower(trim((string) config('tenancy.admin_subdomain', 'admin')));
-        $allowRoot = (bool) config('tenancy.allow_root_for_super_admin', false);
-
-        if ($root !== '') {
-            $adminHost = $adminSubdomain !== '' ? ($adminSubdomain.'.'.$root) : $root;
-            if ($host === $adminHost) {
-                return true;
-            }
-            if ($allowRoot && $host === $root) {
-                return true;
-            }
-        }
-
-        if ($host === $adminSubdomain.'.localhost' || $host === $adminSubdomain.'.127.0.0.1') {
-            return true;
-        }
-        if ($allowRoot && ($host === 'localhost' || $host === '127.0.0.1')) {
-            return true;
-        }
-
-        return false;
+        return $this->tenantDomainService->isAdminHost($host);
     }
 
     private function superAdminHostMessage(): string
     {
-        $root = strtolower(trim((string) config('tenancy.root_domain', '')));
-        $adminSubdomain = strtolower(trim((string) config('tenancy.admin_subdomain', 'admin')));
-        if ($root === '') {
-            return 'Akun super admin hanya bisa login dari domain admin.';
-        }
-
-        $adminHost = $adminSubdomain !== '' ? ($adminSubdomain.'.'.$root) : $root;
-
-        return 'Akun super admin hanya bisa login dari '.$adminHost;
+        return str_replace(
+            'Panel super admin',
+            'Akun super admin',
+            $this->tenantDomainService->adminHostMessage()
+        );
     }
 
     private function logAuthEvent(

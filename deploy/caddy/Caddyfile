@@ -1,0 +1,45 @@
+{
+	email {$CADDY_ACME_EMAIL}
+	admin off
+	storage file_system /data/caddy
+
+	on_demand_tls {
+		ask http://nginx/api/internal/tls/authorize?secret={$CADDY_ASK_SECRET}
+	}
+}
+
+localhost, admin.localhost, demo.localhost, bali.localhost {
+	tls internal
+
+	encode zstd gzip
+	reverse_proxy nginx:80
+}
+
+wa.localhost {
+	tls internal
+
+	encode zstd gzip
+	reverse_proxy evolution_api:8080
+}
+
+{$CADDY_EVOLUTION_HOST} {
+	tls {
+		on_demand
+	}
+
+	encode zstd gzip
+	reverse_proxy evolution_api:8080
+}
+
+:80 {
+	redir https://{host}{$CADDY_HTTPS_PORT_SUFFIX}{uri} 308
+}
+
+:443 {
+	tls {
+		on_demand
+	}
+
+	encode zstd gzip
+	reverse_proxy nginx:80
+}

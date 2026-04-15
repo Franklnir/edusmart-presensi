@@ -2,6 +2,7 @@
 
 use App\Services\Rfid\MqttBridgeService;
 use App\Services\Quiz\QuizScoringService;
+use App\Services\WhatsApp\WhatsAppIntegrationService;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -14,6 +15,17 @@ Schedule::call(function (QuizScoringService $scoringService) {
     $scoringService->finalizeExpiredSubmissions();
 })
     ->name('quiz:auto-finalize-expired')
+    ->everyMinute()
+    ->withoutOverlapping();
+
+Schedule::call(function (WhatsAppIntegrationService $integrationService) {
+    if (! $integrationService->providerConfigured()) {
+        return;
+    }
+
+    $integrationService->syncAll();
+})
+    ->name('whatsapp:sync-integrations')
     ->everyMinute()
     ->withoutOverlapping();
 

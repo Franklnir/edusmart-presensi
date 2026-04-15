@@ -43,4 +43,21 @@ return [
         'prompt' => env('GOOGLE_AUTH_PROMPT', 'select_account'),
     ],
 
+    'evolution_api' => [
+        'base_url' => env('EVOLUTION_API_BASE_URL'),
+        'api_key' => env('EVOLUTION_API_KEY'),
+        'integration' => env('EVOLUTION_API_INTEGRATION', 'WHATSAPP-BAILEYS'),
+        'instance_prefix' => env('EVOLUTION_API_INSTANCE_PREFIX', 'edusmart'),
+        'public_url' => env('EVOLUTION_PUBLIC_URL'),
+        'webhook_base_url' => env('EVOLUTION_API_WEBHOOK_BASE_URL', env('APP_URL')),
+        'timeout' => (int) env('EVOLUTION_API_TIMEOUT_SECONDS', 20),
+        'verify_ssl' => filter_var(env('EVOLUTION_API_VERIFY_SSL', true), FILTER_VALIDATE_BOOL),
+    ],
+
+    'caddy' => [
+        'ask_secret' => env('CADDY_ASK_SECRET'),
+        'acme_email' => env('CADDY_ACME_EMAIL'),
+        'evolution_host' => env('CADDY_EVOLUTION_HOST'),
+    ],
+
 ];

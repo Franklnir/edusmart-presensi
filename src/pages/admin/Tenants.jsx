@@ -65,6 +65,33 @@ const tenantStatusBadgeClass = (status) => {
   return 'bg-slate-100 text-slate-600'
 }
 
+const domainStatusBadgeClass = (status) => {
+  if (status === 'ready') return 'bg-emerald-100 text-emerald-700'
+  if (status === 'disabled') return 'bg-rose-100 text-rose-700'
+  return 'bg-amber-100 text-amber-700'
+}
+
+const dnsStatusBadgeClass = (status) => {
+  if (status === 'ready') return 'bg-emerald-100 text-emerald-700'
+  if (status === 'missing') return 'bg-amber-100 text-amber-700'
+  if (status === 'mismatch') return 'bg-rose-100 text-rose-700'
+  return 'bg-slate-100 text-slate-600'
+}
+
+const formatDnsRecords = (records = []) => {
+  if (!Array.isArray(records) || records.length === 0) return 'Belum ada record'
+
+  return records
+    .map((record) => {
+      const host = String(record?.host || '').trim()
+      const type = String(record?.type || '').trim()
+      const value = String(record?.value || '').trim()
+      return [host, type, value].filter(Boolean).join(' ')
+    })
+    .filter(Boolean)
+    .join(' · ')
+}
+
 const toNumber = (value) => Number(value || 0)
 
 const formatBytes = (bytes) => {
@@ -324,6 +351,21 @@ const Tenants = () => {
   const [restorePayload, setRestorePayload] = useState(null)
   const [restorePreview, setRestorePreview] = useState(null)
   const [restoreIncludeTables, setRestoreIncludeTables] = useState('')
+  const [platformDomains, setPlatformDomains] = useState(null)
+  const [platformLoading, setPlatformLoading] = useState(false)
+  const [platformSaving, setPlatformSaving] = useState(false)
+  const [tenantDomainSaving, setTenantDomainSaving] = useState(false)
+  const [domainActionLoadingById, setDomainActionLoadingById] = useState({})
+  const [adminDomainForm, setAdminDomainForm] = useState({
+    host: '',
+    isPrimary: false,
+    notes: ''
+  })
+  const [tenantDomainForm, setTenantDomainForm] = useState({
+    host: '',
+    isPrimary: false,
+    notes: ''
+  })
 
   const [form, setForm] = useState({
     name: '',
@@ -346,6 +388,27 @@ const Tenants = () => {
       pushToast('error', err?.message || 'Gagal memuat daftar sekolah')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const loadPlatformDomains = async (options = {}) => {
+    const silent = Boolean(options?.silent)
+    if (!silent) {
+      setPlatformLoading(true)
+    }
+
+    try {
+      const { data, error } = await supabase.super.domains()
+      if (error) throw error
+      setPlatformDomains(data || null)
+    } catch (err) {
+      if (!silent) {
+        pushToast('error', err?.message || 'Gagal memuat konfigurasi domain platform')
+      }
+    } finally {
+      if (!silent) {
+        setPlatformLoading(false)
+      }
     }
   }
 
@@ -388,6 +451,7 @@ const Tenants = () => {
   useEffect(() => {
     if (!superAdminChecked || !isSuperAdmin) return
     loadTenants()
+    loadPlatformDomains()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [superAdminChecked, isSuperAdmin])
 
@@ -425,6 +489,32 @@ const Tenants = () => {
       adminPassword: ''
     })
     setSlugTouched(false)
+  }
+
+  const resetAdminDomainForm = () => {
+    setAdminDomainForm({
+      host: '',
+      isPrimary: false,
+      notes: ''
+    })
+  }
+
+  const resetTenantDomainForm = () => {
+    setTenantDomainForm({
+      host: '',
+      isPrimary: false,
+      notes: ''
+    })
+  }
+
+  const handleAdminDomainField = (field) => (event) => {
+    const value = field === 'isPrimary' ? event.target.checked : event.target.value
+    setAdminDomainForm((prev) => ({ ...prev, [field]: value }))
+  }
+
+  const handleTenantDomainField = (field) => (event) => {
+    const value = field === 'isPrimary' ? event.target.checked : event.target.value
+    setTenantDomainForm((prev) => ({ ...prev, [field]: value }))
   }
 
   const handleSubmit = async (e) => {
@@ -474,6 +564,7 @@ const Tenants = () => {
     setSelectedTenantId(tenantId)
     setTemporaryPasswords({})
     setPrimaryAdminSavingByUser({})
+    resetTenantDomainForm()
     setRestorePreview(null)
     setRestorePayload(null)
     setRestoreFileName('')
@@ -484,6 +575,133 @@ const Tenants = () => {
   const handleRefreshDetail = async () => {
     if (!selectedTenantId) return
     await loadTenantDetail(selectedTenantId, { silent: true })
+  }
+
+  const handleCreateAdminDomain = async (event) => {
+    event.preventDefault()
+    if (platformSaving) return
+
+    const host = adminDomainForm.host.trim()
+    if (!host) {
+      pushToast('error', 'Host domain admin wajib diisi')
+      return
+    }
+
+    setPlatformSaving(true)
+    try {
+      const payload = {
+        host,
+        is_primary: Boolean(adminDomainForm.isPrimary),
+        notes: adminDomainForm.notes.trim() || undefined
+      }
+      const { error } = await supabase.super.createAdminDomain(payload)
+      if (error) throw error
+
+      pushToast('success', 'Domain admin berhasil didaftarkan')
+      resetAdminDomainForm()
+      await loadPlatformDomains({ silent: true })
+    } catch (err) {
+      pushToast('error', err?.message || 'Gagal menambahkan domain admin')
+    } finally {
+      setPlatformSaving(false)
+    }
+  }
+
+  const handleCreateTenantDomain = async (event) => {
+    event.preventDefault()
+    if (tenantDomainSaving) return
+
+    const tenantId = tenantDetail?.tenant?.id || selectedTenantId
+    const host = tenantDomainForm.host.trim()
+
+    if (!tenantId) {
+      pushToast('error', 'Pilih tenant terlebih dahulu')
+      return
+    }
+    if (!host) {
+      pushToast('error', 'Host domain tenant wajib diisi')
+      return
+    }
+
+    setTenantDomainSaving(true)
+    try {
+      const payload = {
+        host,
+        is_primary: Boolean(tenantDomainForm.isPrimary),
+        notes: tenantDomainForm.notes.trim() || undefined
+      }
+      const { error } = await supabase.super.createTenantDomain(tenantId, payload)
+      if (error) throw error
+
+      pushToast('success', 'Domain tenant berhasil didaftarkan')
+      resetTenantDomainForm()
+      await loadTenantDetail(tenantId, { silent: true, suppressToast: true })
+    } catch (err) {
+      pushToast('error', err?.message || 'Gagal menambahkan domain tenant')
+    } finally {
+      setTenantDomainSaving(false)
+    }
+  }
+
+  const setDomainActionLoading = (domainId, value) => {
+    setDomainActionLoadingById((prev) => {
+      const next = { ...prev }
+      if (value) {
+        next[domainId] = true
+      } else {
+        delete next[domainId]
+      }
+      return next
+    })
+  }
+
+  const handleCheckDomain = async (domain) => {
+    const domainId = String(domain?.id || '')
+    if (!domainId || domainActionLoadingById[domainId]) return
+
+    setDomainActionLoading(domainId, true)
+    try {
+      const { error } = await supabase.super.checkDomain(domainId)
+      if (error) throw error
+
+      pushToast('success', `Verifikasi DNS untuk ${domain.host} selesai`)
+      if (domain?.domain_type === 'admin') {
+        await loadPlatformDomains({ silent: true })
+      } else if (domain?.tenant_id) {
+        await loadTenantDetail(domain.tenant_id, { silent: true, suppressToast: true })
+      }
+    } catch (err) {
+      pushToast('error', err?.message || 'Gagal mengecek domain')
+    } finally {
+      setDomainActionLoading(domainId, false)
+    }
+  }
+
+  const handleDeleteDomain = async (domain) => {
+    const domainId = String(domain?.id || '')
+    if (!domainId || domainActionLoadingById[domainId]) return
+
+    const confirmed = window.confirm(
+      `Hapus domain ${domain?.host || domainId}? Host ini akan langsung berhenti dipakai aplikasi.`
+    )
+    if (!confirmed) return
+
+    setDomainActionLoading(domainId, true)
+    try {
+      const { error } = await supabase.super.deleteDomain(domainId)
+      if (error) throw error
+
+      pushToast('success', `Domain ${domain?.host || domainId} dihapus`)
+      if (domain?.domain_type === 'admin') {
+        await loadPlatformDomains({ silent: true })
+      } else if (domain?.tenant_id) {
+        await loadTenantDetail(domain.tenant_id, { silent: true, suppressToast: true })
+      }
+    } catch (err) {
+      pushToast('error', err?.message || 'Gagal menghapus domain')
+    } finally {
+      setDomainActionLoading(domainId, false)
+    }
   }
 
   const handleBackupTenant = async () => {
@@ -762,14 +980,48 @@ const Tenants = () => {
   }
 
   const detailTenant = tenantDetail?.tenant
+  const detailAccess = tenantDetail?.access || {}
   const detailStats = tenantDetail?.stats || {}
   const detailAdmins = Array.isArray(tenantDetail?.admins) ? tenantDetail.admins : []
+  const detailDomains = Array.isArray(tenantDetail?.domains) ? tenantDetail.domains : []
   const detailStorage = tenantDetail?.storage || {}
   const storageBuckets = Array.isArray(detailStorage?.buckets) ? detailStorage.buckets : []
   const primaryAdminUserId = String(detailTenant?.primary_admin_user_id || '')
   const primaryAdminInfo = detailAdmins.find(
     (admin) => String(admin?.user_id || '') === primaryAdminUserId
   )
+  const platformOverview = platformDomains?.platform || {}
+  const platformDnsRecords = Array.isArray(platformOverview?.dns_records)
+    ? platformOverview.dns_records
+    : []
+  const platformNotes = Array.isArray(platformOverview?.notes) ? platformOverview.notes : []
+  const adminDomains = Array.isArray(platformDomains?.admin_domains) ? platformDomains.admin_domains : []
+  const isLocalRootDomain = ['localhost', '127.0.0.1'].includes(String(rootDomain || '').trim().toLowerCase())
+  const sampleTenantSlug = 'smabali'
+  const builtinTenantExample = rootDomain ? `${sampleTenantSlug}.${rootDomain}` : `${sampleTenantSlug}.example.com`
+  const customTenantExample = isLocalRootDomain ? 'smabali.localhost' : 'portal.smabali.sch.id'
+  const adminHostExample =
+    platformOverview.default_admin_host || (rootDomain ? `admin.${rootDomain}` : 'admin.example.com')
+  const onboardingSteps = [
+    'Saat sekolah baru berlangganan, buat tenant dulu dengan nama sekolah, slug unik, dan akun admin sekolah.',
+    `Tenant langsung aktif di subdomain bawaan seperti ${builtinTenantExample}. Ini paling cepat untuk go-live.`,
+    'Kalau sekolah ingin domain sendiri, buka detail tenant lalu tambahkan custom domain tenant di panel yang sama.',
+    'Arahkan DNS domain sekolah ke target default platform, tunggu propagasi, lalu klik Cek DNS sampai status ready.'
+  ]
+  const onboardingModes = [
+    {
+      title: 'Mode Cepat',
+      description: `Pakai subdomain bawaan seperti ${builtinTenantExample}. Cocok untuk onboarding cepat tanpa menunggu setting registrar.`
+    },
+    {
+      title: 'Mode Branding',
+      description: `Pakai domain sekolah sendiri seperti ${customTenantExample}. Dipakai setelah DNS sekolah diarahkan ke platform.`
+    },
+    {
+      title: 'Panel Super Admin',
+      description: `Host admin dipisah di ${adminHostExample} supaya akses tenant dan super admin tidak tercampur.`
+    }
+  ]
 
   return (
     <div className="p-6 space-y-6">
@@ -778,6 +1030,48 @@ const Tenants = () => {
         <p className="text-sm text-slate-600">
           Buat sekolah baru, lihat ringkasan tenant, dan kelola admin sekolah.
         </p>
+      </div>
+
+      <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white rounded-2xl p-6 shadow-sm">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="max-w-3xl">
+            <h2 className="text-lg font-semibold">Alur Tambah Sekolah & Domain</h2>
+            <p className="text-sm text-slate-200 mt-1">
+              Halaman ini sudah disusun untuk alur bisnis langganan sekolah: buat tenant dulu, aktifkan subdomain bawaan, lalu tambah domain sendiri kalau sekolah minta branding khusus.
+            </p>
+          </div>
+          <div className="rounded-xl bg-white/10 border border-white/15 px-4 py-3 text-sm text-slate-100">
+            <p className="font-semibold">Contoh cepat</p>
+            <p className="mt-1">{builtinTenantExample}</p>
+            <p>{customTenantExample}</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-[1.2fr,1fr] gap-4 mt-5">
+          <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
+            <h3 className="text-sm font-semibold text-white">Langkah onboarding tenant</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+              {onboardingSteps.map((step, index) => (
+                <div key={step} className="rounded-xl bg-white/5 border border-white/10 px-4 py-3">
+                  <p className="text-[11px] uppercase tracking-wide text-slate-300">Langkah {index + 1}</p>
+                  <p className="text-sm text-slate-100 mt-1">{step}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
+            <h3 className="text-sm font-semibold text-white">Pilihan setup tenant</h3>
+            <div className="space-y-3 mt-3">
+              {onboardingModes.map((item) => (
+                <div key={item.title} className="rounded-xl bg-white/5 border border-white/10 px-4 py-3">
+                  <p className="text-sm font-semibold text-white">{item.title}</p>
+                  <p className="text-sm text-slate-200 mt-1">{item.description}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
@@ -808,6 +1102,9 @@ const Tenants = () => {
                 URL sekolah: <span className="font-semibold">{previewDomain}</span>
               </p>
             )}
+            <p className="text-xs text-slate-500">
+              Tenant baru langsung aktif di subdomain ini. Domain sekolah sendiri bisa ditambahkan belakangan dari detail tenant.
+            </p>
           </div>
 
           <div className="space-y-2">
@@ -852,6 +1149,261 @@ const Tenants = () => {
             </button>
           </div>
         </form>
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <p className="text-xs font-semibold text-slate-700">Saat tenant dibuat</p>
+            <p className="text-sm text-slate-600 mt-1">
+              Sekolah langsung punya website, akun admin, dan URL tenant bawaan tanpa setup registrar.
+            </p>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <p className="text-xs font-semibold text-slate-700">Kalau sekolah pakai domain sendiri</p>
+            <p className="text-sm text-slate-600 mt-1">
+              Buat tenant dulu, lalu masuk ke detail tenant dan tambahkan custom domain setelah data pelanggan siap.
+            </p>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <p className="text-xs font-semibold text-slate-700">Slug tenant</p>
+            <p className="text-sm text-slate-600 mt-1">
+              Gunakan slug singkat dan unik, misalnya `smabali`, `smkn1jogja`, atau `sekolahalam`.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Domain & DNS Platform</h2>
+            <p className="text-sm text-slate-600 mt-1">
+              Kelola host panel super admin, lihat target DNS utama, dan siapkan onboarding domain tanpa perlu ubah kode lagi.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => loadPlatformDomains()}
+            disabled={platformLoading}
+            className="text-xs px-3 py-1.5 rounded-full border border-slate-200 hover:bg-slate-50 disabled:opacity-60"
+          >
+            {platformLoading ? 'Memuat...' : 'Refresh Domain'}
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+          <div className="rounded-xl border border-slate-200 p-4">
+            <p className="text-xs text-slate-500">Root Domain Tenant</p>
+            <p className="text-sm font-semibold text-slate-900 mt-1">
+              {platformOverview.root_domain || rootDomain || 'Belum diatur'}
+            </p>
+          </div>
+          <div className="rounded-xl border border-slate-200 p-4">
+            <p className="text-xs text-slate-500">Host Admin Default</p>
+            <p className="text-sm font-semibold text-slate-900 mt-1">
+              {platformOverview.default_admin_host || 'Belum diatur'}
+            </p>
+          </div>
+          <div className="rounded-xl border border-slate-200 p-4">
+            <p className="text-xs text-slate-500">Wildcard Tenant</p>
+            <p className="text-sm font-semibold text-slate-900 mt-1">
+              {platformOverview.wildcard_example || 'Belum diatur'}
+            </p>
+          </div>
+          <div className="rounded-xl border border-slate-200 p-4">
+            <p className="text-xs text-slate-500">Skema Publik</p>
+            <p className="text-sm font-semibold text-slate-900 mt-1">
+              {platformOverview.public_scheme || 'https'}
+            </p>
+          </div>
+          <div className="rounded-xl border border-slate-200 p-4 md:col-span-2 xl:col-span-4">
+            <p className="text-xs text-slate-500">Host WhatsApp / Evolution</p>
+            <p className="text-sm font-semibold text-slate-900 mt-1">
+              {platformOverview.evolution_host || 'Belum diatur'}
+            </p>
+            {platformOverview.evolution_url && (
+              <p className="text-xs text-slate-500 mt-1">{platformOverview.evolution_url}</p>
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-slate-900">Target DNS Default</h3>
+            <span className="text-[11px] px-2 py-1 rounded-full bg-indigo-100 text-indigo-700 border border-indigo-200">
+              {platformOverview.manual_dns_mode ? 'Mode verifikasi manual' : 'Mode otomatis'}
+            </span>
+          </div>
+          <div className="space-y-2">
+            {platformDnsRecords.length === 0 ? (
+              <p className="text-sm text-slate-500">
+                Target DNS belum tersedia. Isi `TENANT_DNS_A_RECORD` atau `TENANT_DNS_CNAME_TARGET` di env production.
+              </p>
+            ) : (
+              platformDnsRecords.map((record, index) => (
+                <div
+                  key={`${record.host}-${record.type}-${index}`}
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2"
+                >
+                  <p className="text-xs text-slate-500">{record.label || 'Record'}</p>
+                  <p className="text-sm font-semibold text-slate-900 mt-0.5">
+                    {record.host} {record.type} {record.value}
+                  </p>
+                </div>
+              ))
+            )}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs text-slate-500">
+            {platformNotes.map((note) => (
+              <div key={note} className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                {note}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+          <div className="rounded-xl border border-slate-200 bg-emerald-50/50 px-4 py-3">
+            <p className="text-xs font-semibold text-emerald-700">Contoh tenant cepat</p>
+            <p className="text-sm text-slate-700 mt-1">{builtinTenantExample}</p>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-blue-50/50 px-4 py-3">
+            <p className="text-xs font-semibold text-blue-700">Contoh domain sekolah</p>
+            <p className="text-sm text-slate-700 mt-1">{customTenantExample}</p>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-amber-50/50 px-4 py-3">
+            <p className="text-xs font-semibold text-amber-700">Contoh panel admin</p>
+            <p className="text-sm text-slate-700 mt-1">{adminHostExample}</p>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <p className="text-xs font-semibold text-slate-700">Cara tambah sekolah baru</p>
+            <p className="text-sm text-slate-600 mt-1">
+              Buat tenant dulu, kirim URL bawaan ke sekolah, lalu upgrade ke domain sendiri jika mereka minta.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-[1.4fr,0.9fr] gap-4">
+          <div className="rounded-2xl border border-slate-200 p-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold text-slate-900">Custom Host Super Admin</h3>
+              <span className="text-xs text-slate-500">
+                {adminDomains.length} host tambahan
+              </span>
+            </div>
+
+            {adminDomains.length === 0 ? (
+              <p className="text-sm text-slate-500">
+                Belum ada custom host admin. Host admin default dari env tetap aktif.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {adminDomains.map((domain) => {
+                  const busy = Boolean(domainActionLoadingById[domain.id])
+                  return (
+                    <div key={domain.id} className="rounded-xl border border-slate-200 p-4 space-y-2">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-sm font-semibold text-slate-900">{domain.host}</p>
+                            {domain.is_primary && (
+                              <span className="text-[11px] px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 border border-indigo-200">
+                                Primary
+                              </span>
+                            )}
+                            <span className={`text-[11px] px-2 py-0.5 rounded-full ${domainStatusBadgeClass(domain.status)}`}>
+                              {domain.status || 'pending'}
+                            </span>
+                            <span className={`text-[11px] px-2 py-0.5 rounded-full ${dnsStatusBadgeClass(domain.last_dns_status)}`}>
+                              DNS {domain.last_dns_status || 'belum dicek'}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-500 mt-1">
+                            {domain.url}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleCheckDomain(domain)}
+                            disabled={busy}
+                            className="text-xs px-3 py-1.5 rounded-full border border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
+                          >
+                            {busy ? 'Cek...' : 'Cek DNS'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteDomain(domain)}
+                            disabled={busy}
+                            className="text-xs px-3 py-1.5 rounded-full border border-rose-200 text-rose-700 hover:bg-rose-50 disabled:opacity-60"
+                          >
+                            Hapus
+                          </button>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                        <div className="rounded-lg bg-slate-50 px-3 py-2">
+                          <p className="text-slate-500">Expected DNS</p>
+                          <p className="text-slate-800 mt-1">{formatDnsRecords(domain.expected_records)}</p>
+                        </div>
+                        <div className="rounded-lg bg-slate-50 px-3 py-2">
+                          <p className="text-slate-500">Observed DNS</p>
+                          <p className="text-slate-800 mt-1">{formatDnsRecords(domain.observed_records)}</p>
+                        </div>
+                      </div>
+                      {domain.last_dns_error && (
+                        <p className="text-xs text-rose-600">{domain.last_dns_error}</p>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 p-4">
+            <h3 className="text-sm font-semibold text-slate-900">Tambah Host Admin</h3>
+            <p className="text-xs text-slate-500 mt-1">
+              Cocok untuk domain seperti `panel.sekolahkamu.com` atau `admin.grupkamu.id`.
+            </p>
+            <form onSubmit={handleCreateAdminDomain} className="mt-4 space-y-3">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-600">Host</label>
+                <input
+                  type="text"
+                  value={adminDomainForm.host}
+                  onChange={handleAdminDomainField('host')}
+                  placeholder="panel.sekolahkamu.com"
+                  className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-600">Catatan</label>
+                <textarea
+                  value={adminDomainForm.notes}
+                  onChange={handleAdminDomainField('notes')}
+                  rows={3}
+                  placeholder="Opsional: catatan penggunaan host ini"
+                  className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <label className="flex items-center gap-2 text-xs text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={adminDomainForm.isPrimary}
+                  onChange={handleAdminDomainField('isPrimary')}
+                  className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                />
+                Jadikan host admin utama
+              </label>
+              <button
+                type="submit"
+                disabled={platformSaving}
+                className="w-full px-4 py-2.5 rounded-lg bg-slate-900 text-white font-semibold hover:bg-slate-800 disabled:opacity-60"
+              >
+                {platformSaving ? 'Menyimpan...' : 'Simpan Host Admin'}
+              </button>
+            </form>
+          </div>
+        </div>
       </div>
 
       <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
@@ -1066,6 +1618,7 @@ const Tenants = () => {
                   setDetailError('')
                   setTemporaryPasswords({})
                   setPrimaryAdminSavingByUser({})
+                  resetTenantDomainForm()
                   setRestorePayload(null)
                   setRestoreFileName('')
                   setRestorePreview(null)
@@ -1102,6 +1655,149 @@ const Tenants = () => {
                   <p className="text-sm font-semibold text-slate-900 mt-1">
                     {formatDateTime(detailStats.last_activity_at)}
                   </p>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 p-4 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-900">Domain & DNS Tenant</h3>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Subdomain bawaan tetap aktif, dan tenant bisa ditambah custom domain sendiri dari panel ini.
+                    </p>
+                  </div>
+                  <span className="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                    {detailDomains.length} custom domain
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-[1.25fr,0.95fr] gap-4">
+                  <div className="space-y-3">
+                    <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+                      <p className="text-xs text-slate-500">URL bawaan tenant</p>
+                      <p className="text-sm font-semibold text-slate-900 mt-1">
+                        {detailAccess.default_url || '-'}
+                      </p>
+                      <p className="text-xs text-slate-500 mt-2">
+                        Host default: {detailAccess.default_host || '-'}
+                      </p>
+                    </div>
+
+                    {detailDomains.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-slate-300 p-4 text-sm text-slate-500">
+                        Belum ada custom domain tenant. Tenant tetap bisa diakses dari subdomain bawaan.
+                      </div>
+                    ) : (
+                      detailDomains.map((domain) => {
+                        const busy = Boolean(domainActionLoadingById[domain.id])
+                        return (
+                          <div key={domain.id} className="rounded-xl border border-slate-200 p-4 space-y-2">
+                            <div className="flex flex-wrap items-start justify-between gap-2">
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="text-sm font-semibold text-slate-900">{domain.host}</p>
+                                  {domain.is_primary && (
+                                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 border border-indigo-200">
+                                      Primary
+                                    </span>
+                                  )}
+                                  <span className={`text-[11px] px-2 py-0.5 rounded-full ${domainStatusBadgeClass(domain.status)}`}>
+                                    {domain.status || 'pending'}
+                                  </span>
+                                  <span className={`text-[11px] px-2 py-0.5 rounded-full ${dnsStatusBadgeClass(domain.last_dns_status)}`}>
+                                    DNS {domain.last_dns_status || 'belum dicek'}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-slate-500 mt-1">{domain.url}</p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => handleCheckDomain(domain)}
+                                  disabled={busy}
+                                  className="text-xs px-3 py-1.5 rounded-full border border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
+                                >
+                                  {busy ? 'Cek...' : 'Cek DNS'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteDomain(domain)}
+                                  disabled={busy}
+                                  className="text-xs px-3 py-1.5 rounded-full border border-rose-200 text-rose-700 hover:bg-rose-50 disabled:opacity-60"
+                                >
+                                  Hapus
+                                </button>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                              <div className="rounded-lg bg-slate-50 px-3 py-2">
+                                <p className="text-slate-500">Expected DNS</p>
+                                <p className="text-slate-800 mt-1">{formatDnsRecords(domain.expected_records)}</p>
+                              </div>
+                              <div className="rounded-lg bg-slate-50 px-3 py-2">
+                                <p className="text-slate-500">Observed DNS</p>
+                                <p className="text-slate-800 mt-1">{formatDnsRecords(domain.observed_records)}</p>
+                              </div>
+                            </div>
+                            {domain.notes && (
+                              <p className="text-xs text-slate-500">Catatan: {domain.notes}</p>
+                            )}
+                            {domain.last_dns_error && (
+                              <p className="text-xs text-rose-600">{domain.last_dns_error}</p>
+                            )}
+                          </div>
+                        )
+                      })
+                    )}
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                    <h4 className="text-sm font-semibold text-slate-900">Tambah Custom Domain Tenant</h4>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Gunakan domain luar seperti `smabali.sch.id` atau `portal.sekolah-bali.com`.
+                    </p>
+                    <form onSubmit={handleCreateTenantDomain} className="mt-4 space-y-3">
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-semibold text-slate-600">Host</label>
+                        <input
+                          type="text"
+                          value={tenantDomainForm.host}
+                          onChange={handleTenantDomainField('host')}
+                          placeholder="smabali.sch.id"
+                          className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-semibold text-slate-600">Catatan</label>
+                        <textarea
+                          value={tenantDomainForm.notes}
+                          onChange={handleTenantDomainField('notes')}
+                          rows={3}
+                          placeholder="Opsional: domain utama sekolah, portal publik, dll."
+                          className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                      </div>
+                      <label className="flex items-center gap-2 text-xs text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={tenantDomainForm.isPrimary}
+                          onChange={handleTenantDomainField('isPrimary')}
+                          className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        Jadikan domain utama tenant
+                      </label>
+                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
+                        Setelah disimpan, arahkan DNS domain ke target platform lalu klik <strong>Cek DNS</strong>.
+                      </div>
+                      <button
+                        type="submit"
+                        disabled={tenantDomainSaving}
+                        className="w-full px-4 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700 disabled:opacity-60"
+                      >
+                        {tenantDomainSaving ? 'Menyimpan...' : 'Simpan Custom Domain'}
+                      </button>
+                    </form>
+                  </div>
                 </div>
               </div>
 

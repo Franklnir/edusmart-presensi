@@ -36,6 +36,7 @@ const Icon = ({ name, className = 'w-5 h-5' }) => {
     pencil: <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />,
     users: <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />,
     teacher: <path strokeLinecap="round" strokeLinejoin="round" d="M4.26 10.147a60.438 60.438 0 00-.491 6.347A48.62 48.62 0 0112 20.904a48.62 48.62 0 018.232-4.41 60.46 60.46 0 00-.491-6.347m-15.482 0a50.636 50.636 0 00-2.658-.813A59.906 59.906 0 0112 3.493a59.903 59.903 0 0110.399 5.84c-.896.248-1.783.52-2.658.814m-15.482 0A50.717 50.717 0 0112 13.489a50.702 50.702 0 017.74-3.342M6.75 15a.75.75 0 100-1.5.75.75 0 000 1.5zm0 0v-3.675A55.378 55.378 0 0112 8.443m-7.007 11.55A5.981 5.981 0 006.75 15.75v-1.5" />,
+    chat: <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 9.75h6.75m-6.75 3h4.5m7.875-.75c0 4.971-4.533 9-10.125 9a10.98 10.98 0 01-4.664-1.012L3 21l1.15-3.067A8.76 8.76 0 013 12c0-4.971 4.533-9 10.125-9S23.25 7.029 23.25 12z" />,
   }
   return (
     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
@@ -50,7 +51,7 @@ const NavigationIcon = ({ name, className = 'w-6 h-6' }) => {
     '🏠': 'home', '📅': 'calendar', '✅': 'check', '🧠': 'brain',
     '📚': 'book', '📝': 'pencil', '📊': 'chart', '👤': 'user',
     '🏫': 'school', '📱': 'scan', '👨‍🏫': 'teacher', '👨‍🎓': 'users',
-    '📜': 'certificate', '🗄️': 'backup', '⚙️': 'cog', '🛡️': 'shield',
+    '📜': 'certificate', '🗄️': 'backup', '⚙️': 'cog', '🛡️': 'shield', '💬': 'chat', '🧩': 'cog',
   }
   return <Icon name={map[name] || 'home'} className={className} />
 }
@@ -186,6 +187,7 @@ const Navbar = () => {
       { to: '/admin/scan', label: 'Scan', icon: '📱' },
       { to: '/admin/guru', label: 'Guru', icon: '👨‍🏫' },
       { to: '/admin/siswa', label: 'Siswa', icon: '👨‍🎓' },
+      { to: '/admin/whatsapp', label: 'WhatsApp', icon: '💬' },
       { to: '/admin/sertifikat', label: 'Sertifikat', icon: '📜' },
       { to: '/admin/backup', label: 'Backup', icon: '🗄️' },
       { to: '/admin/approvals', label: 'Approval', icon: '🛡️' },
@@ -205,7 +207,8 @@ const Navbar = () => {
     navLinks = [...navLinks,
     { to: '/admin/tenants', label: 'Sekolah', icon: '🏫' },
     { to: '/admin/super-admins', label: 'Super Admin', icon: '🛡️' },
-    { to: '/admin/audit-trail', label: 'Audit Trail', icon: '📊' }
+    { to: '/admin/audit-trail', label: 'Audit Trail', icon: '📊' },
+    { to: '/admin/plugins', label: 'Plugins', icon: '🧩' }
     ]
   }
 
@@ -329,7 +332,7 @@ const Navbar = () => {
     <>
       <div className={`hidden md:block flex-shrink-0 transition-all duration-300 ease-in-out ${isCollapsed ? 'w-[72px]' : 'w-60'}`} />
 
-      <aside className={`hidden md:flex fixed inset-y-0 left-0 flex-col z-40 bg-white border-r border-slate-100 shadow-sidebar transition-all duration-300 ease-in-out ${isCollapsed ? 'w-[72px]' : 'w-60'}`}>
+      <aside className={`hidden md:flex fixed inset-y-0 left-0 flex-col min-h-0 z-40 bg-white border-r border-slate-100 shadow-sidebar transition-all duration-300 ease-in-out ${isCollapsed ? 'w-[72px]' : 'w-60'}`}>
         {/* Header */}
         <div className="flex items-center gap-3 px-3 pt-4 pb-3 border-b border-slate-100">
           <div className="flex items-center justify-center w-11 h-11 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 shadow-brand-sm flex-shrink-0">
@@ -366,7 +369,7 @@ const Navbar = () => {
         )}
 
         {/* Nav links */}
-        <nav className="flex-1 px-3 py-3 space-y-1 overflow-y-hidden">
+        <nav className="flex-1 min-h-0 px-3 py-3 space-y-1 overflow-y-auto overflow-x-hidden">
           {navLinks.map(link => <NavItem key={link.to} link={link} collapsed={isCollapsed} />)}
         </nav>
 

@@ -9,4 +9,7 @@ return [
     'allow_header_override' => filter_var(env('TENANT_ALLOW_HEADER_OVERRIDE', false), FILTER_VALIDATE_BOOL),
     'reserved_subdomains' => array_filter(array_map('trim', explode(',', env('TENANT_RESERVED', 'www,app,api,admin')))),
     'header' => env('TENANT_HEADER', 'X-Tenant'),
+    'public_scheme' => env('TENANT_PUBLIC_SCHEME', parse_url((string) env('APP_URL', 'https://localhost'), PHP_URL_SCHEME) ?: 'https'),
+    'dns_a_record' => env('TENANT_DNS_A_RECORD', ''),
+    'dns_cname_target' => env('TENANT_DNS_CNAME_TARGET', parse_url((string) env('APP_URL', ''), PHP_URL_HOST) ?: ''),
 ];

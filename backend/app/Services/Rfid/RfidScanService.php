@@ -2,12 +2,18 @@
 
 namespace App\Services\Rfid;
 
+use App\Services\WhatsApp\WhatsAppNotificationService;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 class RfidScanService
 {
+    public function __construct(
+        private readonly WhatsAppNotificationService $whatsAppNotificationService
+    ) {
+    }
+
     private function normalizeMode(?string $mode): string
     {
         $m = Str::lower(trim((string) $mode));
@@ -127,6 +133,14 @@ class RfidScanService
 
         $data['tenant_id'] = (string) $tenant->id;
         $data['tenant_slug'] = (string) $tenant->slug;
+
+        if (($data['success'] ?? false) === true) {
+            try {
+                $this->whatsAppNotificationService->handleRfidAttendanceResult((string) $tenant->id, $data);
+            } catch (\Throwable $e) {
+                // Notifikasi WhatsApp tidak boleh menggagalkan proses absensi RFID.
+            }
+        }
 
         return $this->result(200, $data);
     }
@@ -301,4 +315,3 @@ class RfidScanService
         ];
     }
 }
-

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Models\Profile;
+use App\Support\Tenancy\TenantDomainService;
 use App\Models\User;
 use App\Traits\HasTenantRestoreLogic;
 use Illuminate\Http\Request;
@@ -87,6 +88,11 @@ class SuperAdminController extends ApiController
         'import_siswa_histories',
         'import_siswa_history_items',
     ];
+
+    public function __construct(
+        private readonly TenantDomainService $tenantDomainService
+    ) {
+    }
 
     public function me(Request $request)
     {
@@ -196,6 +202,7 @@ class SuperAdminController extends ApiController
             return $primaryAdminUserId !== '' && (string) ($row->user_id ?? '') === $primaryAdminUserId;
         });
 
+        $domains = $this->tenantDomainService->listTenantDomains((string) $tenant->id);
         $storage = $this->buildTenantStorageUsage((string) $tenant->id);
 
         return response()->json([
@@ -215,6 +222,11 @@ class SuperAdminController extends ApiController
                     'created_at' => $tenant->created_at,
                     'updated_at' => $tenant->updated_at,
                 ],
+                'access' => [
+                    'default_host' => $this->tenantDomainService->defaultTenantHost((string) $tenant->slug),
+                    'default_url' => $this->tenantDomainService->defaultTenantUrl((string) $tenant->slug),
+                    'custom_domain_count' => count($domains),
+                ],
                 'stats' => [
                     'total_users' => (int) ($stats->total_users ?? 0),
                     'total_siswa' => (int) ($stats->total_siswa ?? 0),
@@ -226,6 +238,7 @@ class SuperAdminController extends ApiController
                     'last_activity_at' => $lastActivity,
                 ],
                 'admins' => $admins,
+                'domains' => $domains,
                 'storage' => $storage,
                 'password_security' => [
                     'can_view_existing_password' => false,
@@ -233,6 +246,136 @@ class SuperAdminController extends ApiController
                 ],
             ],
         ]);
+    }
+
+    public function platformDomains(Request $request)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
+        }
+
+        return $this->ok([
+            'platform' => $this->tenantDomainService->platformOverview(),
+            'admin_domains' => $this->tenantDomainService->listAdminDomains(),
+        ]);
+    }
+
+    public function storePlatformDomain(Request $request)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
+        }
+
+        $validator = Validator::make($request->all(), $this->domainRules());
+        if ($validator->fails()) {
+            return response()->json(['error' => $validator->errors()->first()], 422);
+        }
+
+        try {
+            $domain = $this->tenantDomainService->createAdminDomain($validator->validated());
+        } catch (\RuntimeException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+
+        $this->logAudit($request, 'tenant_domains', (string) ($domain['id'] ?? ''), 'INSERT', null, $domain, null);
+
+        return response()->json(['data' => $domain], 201);
+    }
+
+    public function storeTenantDomain(Request $request, string $tenantId)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenant = $this->findTenantByIdOrSlug($tenantId);
+        if (! $tenant) {
+            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+        }
+
+        $validator = Validator::make($request->all(), $this->domainRules());
+        if ($validator->fails()) {
+            return response()->json(['error' => $validator->errors()->first()], 422);
+        }
+
+        try {
+            $domain = $this->tenantDomainService->createTenantDomain((string) $tenant->id, $validator->validated());
+        } catch (\RuntimeException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+
+        $this->logAudit(
+            $request,
+            'tenant_domains',
+            (string) ($domain['id'] ?? ''),
+            'INSERT',
+            null,
+            $domain,
+            (string) $tenant->id
+        );
+
+        return response()->json(['data' => $domain], 201);
+    }
+
+    public function checkDomain(Request $request, string $domainId)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
+        }
+
+        try {
+            $before = $this->tenantDomainRow($domainId);
+            $domain = $this->tenantDomainService->checkDomain($domainId);
+        } catch (\RuntimeException $e) {
+            return response()->json(['error' => $e->getMessage()], 404);
+        }
+
+        $this->logAudit(
+            $request,
+            'tenant_domains',
+            (string) ($domain['id'] ?? $domainId),
+            'UPDATE',
+            $before ? (array) $before : null,
+            $domain,
+            $before?->tenant_id ? (string) $before->tenant_id : null
+        );
+
+        return $this->ok($domain);
+    }
+
+    public function deleteDomain(Request $request, string $domainId)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
+        }
+
+        $row = $this->tenantDomainRow($domainId);
+        if (! $row) {
+            return response()->json(['error' => 'Domain tidak ditemukan'], 404);
+        }
+
+        $before = [
+            'id' => (string) $row->id,
+            'tenant_id' => $row->tenant_id ? (string) $row->tenant_id : null,
+            'host' => (string) $row->host,
+            'domain_type' => (string) $row->domain_type,
+            'status' => (string) ($row->status ?? ''),
+            'is_primary' => (bool) ($row->is_primary ?? false),
+        ];
+
+        $this->tenantDomainService->deleteDomain($domainId);
+
+        $this->logAudit(
+            $request,
+            'tenant_domains',
+            (string) $row->id,
+            'DELETE',
+            $before,
+            null,
+            $row->tenant_id ? (string) $row->tenant_id : null
+        );
+
+        return $this->ok(['deleted' => true]);
     }
 
     public function backupTenant(Request $request, string $id)
@@ -3440,6 +3583,26 @@ class SuperAdminController extends ApiController
         }
 
         return $anomalies;
+    }
+
+    private function domainRules(): array
+    {
+        return [
+            'host' => 'required|string|max:255',
+            'dns_record_type' => 'nullable|string|in:A,CNAME',
+            'dns_record_value' => 'nullable|string|max:255',
+            'is_primary' => 'nullable|boolean',
+            'notes' => 'nullable|string|max:1000',
+        ];
+    }
+
+    private function tenantDomainRow(string $domainId): ?object
+    {
+        if (! $this->hasTable('tenant_domains')) {
+            return null;
+        }
+
+        return DB::table('tenant_domains')->where('id', $domainId)->first();
     }
 
     private function hasTable(string $table): bool

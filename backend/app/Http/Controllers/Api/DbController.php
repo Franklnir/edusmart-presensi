@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Services\WhatsApp\WhatsAppNotificationService;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -28,6 +29,11 @@ class DbController extends ApiController
     private const MAX_DB_PAYLOAD_ROWS = 500;
 
     private const MAX_DB_STRING_VALUE_LENGTH = 20000;
+
+    public function __construct(
+        private readonly WhatsAppNotificationService $whatsAppNotificationService
+    ) {
+    }
 
     private array $allowedTables = [
         'settings',
@@ -321,6 +327,8 @@ class DbController extends ApiController
 
             DB::table($table)->insert($rows);
 
+            $this->notifyWhatsAppMutation($tenantId, $table, 'insert', [], $rows);
+
             if ($shouldAuditNilai) {
                 $afterRows = $this->fetchTugasJawabanRowsForPayload($rows, $tenantId);
                 $this->logAudit(
@@ -342,6 +350,9 @@ class DbController extends ApiController
                 return $this->deny('Payload tidak valid', 422);
             }
 
+            $beforeMutationRows = $this->shouldNotifyWhatsAppForTable($table)
+                ? $this->queryRowsToArray(clone $query)
+                : [];
             $beforeRows = [];
             $shouldAuditNilai = $table === 'tugas_jawaban' && $this->isNilaiAuditActor($request);
             if ($shouldAuditNilai) {
@@ -412,6 +423,13 @@ class DbController extends ApiController
                 throw $e;
             }
 
+            if ($updated > 0) {
+                $afterMutationRows = $this->shouldNotifyWhatsAppForTable($table)
+                    ? $this->queryRowsToArray(clone $query)
+                    : [];
+                $this->notifyWhatsAppMutation($tenantId, $table, 'update', $beforeMutationRows, $afterMutationRows);
+            }
+
             if ($shouldAuditNilai && $updated > 0) {
                 $afterRows = $this->queryRowsToArray(clone $query);
                 $this->logAudit(
@@ -429,6 +447,9 @@ class DbController extends ApiController
         }
 
         if ($action === 'delete') {
+            $beforeMutationRows = $this->shouldNotifyWhatsAppForTable($table)
+                ? $this->queryRowsToArray(clone $query)
+                : [];
             $beforeRows = [];
             $shouldAuditNilai = $table === 'tugas_jawaban' && $this->isNilaiAuditActor($request);
             if ($shouldAuditNilai) {
@@ -456,10 +477,19 @@ class DbController extends ApiController
                     );
                 }
 
+                if ($updated > 0) {
+                    $afterMutationRows = $this->queryRowsToArray(clone $query);
+                    $this->notifyWhatsAppMutation($tenantId, $table, 'delete', $beforeMutationRows, $afterMutationRows);
+                }
+
                 return response()->json(['data' => $updated]);
             }
 
             $deleted = $query->delete();
+
+            if ($deleted > 0) {
+                $this->notifyWhatsAppMutation($tenantId, $table, 'delete', $beforeMutationRows, []);
+            }
 
             if ($shouldAuditNilai && $deleted > 0) {
                 $this->logAudit(
@@ -560,6 +590,8 @@ class DbController extends ApiController
                 } else {
                     DB::table($table)->insert($rows);
 
+                    $this->notifyWhatsAppMutation($tenantId, $table, 'upsert', [], $rows);
+
                     if ($shouldAuditNilai) {
                         $afterRows = $this->fetchTugasJawabanRowsForPayload($rows, $tenantId);
                         $this->logAudit(
@@ -593,10 +625,14 @@ class DbController extends ApiController
                     }
                 }
 
+                $this->notifyWhatsAppMutation($tenantId, $table, 'upsert', [], $resolved);
+
                 return response()->json(['data' => $resolved]);
             }
 
             DB::table($table)->upsert($rows, $uniqueBy, $updateColumns);
+
+            $this->notifyWhatsAppMutation($tenantId, $table, 'upsert', [], $rows);
 
             if ($shouldAuditNilai) {
                 $afterRows = $this->fetchTugasJawabanRowsForPayload($rows, $tenantId);
@@ -4713,6 +4749,47 @@ class DbController extends ApiController
         }
 
         return $out;
+    }
+
+    private function shouldNotifyWhatsAppForTable(string $table): bool
+    {
+        return in_array($table, [
+            'profiles',
+            'absensi',
+            'tugas_jawaban',
+            'quiz_submissions',
+            'absensi_eskul',
+            'ekskul_anggota',
+        ], true);
+    }
+
+    private function notifyWhatsAppMutation(
+        ?string $tenantId,
+        string $table,
+        string $action,
+        array $beforeRows = [],
+        array $afterRows = []
+    ): void {
+        if (! $tenantId || ! $this->shouldNotifyWhatsAppForTable($table)) {
+            return;
+        }
+
+        try {
+            $this->whatsAppNotificationService->handleTableMutation(
+                $tenantId,
+                $table,
+                $action,
+                $this->normalizeNotificationRows($beforeRows),
+                $this->normalizeNotificationRows($afterRows)
+            );
+        } catch (\Throwable $e) {
+            // Notifikasi tidak boleh memblokir mutasi database utama.
+        }
+    }
+
+    private function normalizeNotificationRows(array $rows): array
+    {
+        return array_values(array_map(fn ($row) => (array) $row, $rows));
     }
 
     private function sanitizeRowsByAllowedFields($rows, array $allowed): array

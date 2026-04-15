@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Support\Tenancy\TenantDomainService;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -154,8 +155,8 @@ class AppServiceProvider extends ServiceProvider
 
     private function tenantFrontendBaseUrlForUser(object $user, string $fallbackBaseUrl): string
     {
-        $tenantSlug = $this->resolveTenantSlugForUser($user);
-        if ($tenantSlug === '') {
+        $tenantIdentity = $this->resolveTenantIdentityForUser($user);
+        if ($tenantIdentity['slug'] === '') {
             return $fallbackBaseUrl;
         }
 
@@ -170,7 +171,11 @@ class AppServiceProvider extends ServiceProvider
             return $fallbackBaseUrl;
         }
 
-        $resolvedHost = $this->resolveTenantFrontendHost($host, $tenantSlug);
+        $resolvedHost = app(TenantDomainService::class)->primaryTenantFrontendHost(
+            $tenantIdentity['tenant_id'],
+            $tenantIdentity['slug'],
+            $host
+        );
         if ($resolvedHost === '') {
             return $fallbackBaseUrl;
         }
@@ -182,58 +187,25 @@ class AppServiceProvider extends ServiceProvider
         return rtrim("{$scheme}://{$resolvedHost}{$port}{$path}", '/');
     }
 
-    private function resolveTenantSlugForUser(object $user): string
+    private function resolveTenantIdentityForUser(object $user): array
     {
         $userId = trim((string) ($user->id ?? ''));
         if ($userId === '') {
-            return '';
+            return ['tenant_id' => '', 'slug' => ''];
         }
 
         try {
-            $slug = DB::table('profiles as p')
+            $row = DB::table('profiles as p')
                 ->join('tenants as t', 't.id', '=', 'p.tenant_id')
                 ->where('p.id', $userId)
-                ->value('t.slug');
+                ->first(['p.tenant_id', 't.slug']);
         } catch (\Throwable $e) {
-            return '';
+            return ['tenant_id' => '', 'slug' => ''];
         }
 
-        return strtolower(trim((string) $slug));
-    }
-
-    private function resolveTenantFrontendHost(string $host, string $tenantSlug): string
-    {
-        $slug = strtolower(trim($tenantSlug));
-        if ($slug === '') {
-            return $host;
-        }
-
-        $defaultSlug = strtolower(trim((string) config('tenancy.default_slug', 'default')));
-        if ($this->isLocalSubdomainHost($host)) {
-            return $slug.'.localhost';
-        }
-
-        $rootDomain = strtolower(trim((string) config('tenancy.root_domain', '')));
-        $rootDomain = ltrim($rootDomain, '.');
-        $rootDomain = trim((string) preg_replace('#^https?://#', '', $rootDomain), '/');
-        if (
-            $rootDomain !== ''
-            && ($host === $rootDomain || str_ends_with($host, '.'.$rootDomain))
-        ) {
-            if ($slug === $defaultSlug) {
-                return $rootDomain;
-            }
-
-            return $slug.'.'.$rootDomain;
-        }
-
-        return $host;
-    }
-
-    private function isLocalSubdomainHost(string $host): bool
-    {
-        $normalized = strtolower(trim($host));
-
-        return $normalized === 'localhost' || str_ends_with($normalized, '.localhost');
+        return [
+            'tenant_id' => trim((string) ($row->tenant_id ?? '')),
+            'slug' => strtolower(trim((string) ($row->slug ?? ''))),
+        ];
     }
 }

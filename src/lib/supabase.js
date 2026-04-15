@@ -359,7 +359,7 @@ const compressImageToTarget = async (file, maxBytes) => {
   })
 }
 
-const apiFetch = async (path, options = {}) => {
+export const apiFetch = async (path, options = {}) => {
   const method = (options.method || 'GET').toUpperCase()
   const body = options.body
   const isForm = typeof FormData !== 'undefined' && body instanceof FormData
@@ -465,6 +465,77 @@ const apiFetch = async (path, options = {}) => {
     error: null,
     raw: json
   }
+}
+
+const parseDownloadFilename = (contentDisposition = '', fallback = 'download.bin') => {
+  const header = String(contentDisposition || '')
+  const utfMatch = header.match(/filename\*=UTF-8''([^;]+)/i)
+  if (utfMatch?.[1]) {
+    try {
+      return decodeURIComponent(utfMatch[1])
+    } catch {
+      return utfMatch[1]
+    }
+  }
+
+  const plainMatch = header.match(/filename="?([^";]+)"?/i)
+  if (plainMatch?.[1]) return plainMatch[1]
+
+  return fallback
+}
+
+const downloadAuthenticatedFile = async (path, fallbackName = 'download.bin') => {
+  const headers = {}
+  if (TENANT_SLUG) {
+    headers['X-Tenant'] = TENANT_SLUG
+  }
+
+  let res
+  try {
+    res = await fetch(`${API_URL}${path}`, {
+      method: 'GET',
+      credentials: 'include',
+      headers
+    })
+  } catch {
+    return {
+      data: null,
+      error: makeError(
+        `Tidak bisa terhubung ke server API (${API_URL}).`,
+        0,
+        'NETWORK_ERROR'
+      )
+    }
+  }
+
+  if (!res.ok) {
+    let message = res.statusText || 'Gagal mengunduh file'
+    try {
+      const json = await res.json()
+      message = json?.error || json?.message || message
+    } catch { }
+    return { data: null, error: makeError(message, res.status) }
+  }
+
+  const blob = await res.blob()
+  if (typeof document === 'undefined') {
+    return { data: { downloaded: true }, error: null }
+  }
+
+  const filename = parseDownloadFilename(
+    res.headers.get('content-disposition'),
+    fallbackName
+  )
+  const downloadUrl = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = downloadUrl
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000)
+
+  return { data: { downloaded: true, filename }, error: null }
 }
 
 /* ===================== QUERY BUILDER ===================== */
@@ -1137,11 +1208,67 @@ const auth = {
         body: payload
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async whatsapp() {
+      const res = await apiFetch('/api/admin/whatsapp', { method: 'GET' })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async connectWhatsApp() {
+      const res = await apiFetch('/api/admin/whatsapp/connect', { method: 'POST', body: {} })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async syncWhatsApp() {
+      const res = await apiFetch('/api/admin/whatsapp/sync', { method: 'POST', body: {} })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async logoutWhatsApp() {
+      const res = await apiFetch('/api/admin/whatsapp/logout', { method: 'POST', body: {} })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async updateWhatsAppSettings(payload = {}) {
+      const res = await apiFetch('/api/admin/whatsapp/settings', {
+        method: 'PATCH',
+        body: payload
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async sendWhatsAppTest(payload = {}) {
+      const res = await apiFetch('/api/admin/whatsapp/test', {
+        method: 'POST',
+        body: payload
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
     }
   },
   super: {
     async me() {
       const res = await apiFetch('/api/super/me', { method: 'GET' })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async domains() {
+      const res = await apiFetch('/api/super/domains', { method: 'GET' })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async createAdminDomain(payload = {}) {
+      const res = await apiFetch('/api/super/domains', { method: 'POST', body: payload })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async createTenantDomain(tenantId, payload = {}) {
+      const res = await apiFetch(`/api/super/tenants/${tenantId}/domains`, {
+        method: 'POST',
+        body: payload
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async checkDomain(id) {
+      const res = await apiFetch(`/api/super/domains/${id}/check`, {
+        method: 'POST',
+        body: {}
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async deleteDomain(id) {
+      const res = await apiFetch(`/api/super/domains/${id}`, { method: 'DELETE' })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
     async tenants() {
@@ -1217,6 +1344,41 @@ const auth = {
       const suffix = query.toString() ? `?${query.toString()}` : ''
       const res = await apiFetch(`/api/super/audit-trail${suffix}`, { method: 'GET' })
       return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async plugins() {
+      const res = await apiFetch('/api/super/plugins', { method: 'GET' })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async inspectPlugin(formData) {
+      const res = await apiFetch('/api/super/plugins/inspect', {
+        method: 'POST',
+        body: formData
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async installPlugin(payload = {}) {
+      const res = await apiFetch('/api/super/plugins', {
+        method: 'POST',
+        body: payload
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async updatePluginStatus(id, payload = {}) {
+      const res = await apiFetch(`/api/super/plugins/${id}/status`, {
+        method: 'PATCH',
+        body: payload
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async deletePlugin(id, payload = {}) {
+      const res = await apiFetch(`/api/super/plugins/${id}`, {
+        method: 'DELETE',
+        body: payload
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async downloadPlugin(id, fallbackName = 'plugin.zip') {
+      return downloadAuthenticatedFile(`/api/super/plugins/${id}/download`, fallbackName)
     }
   },
   quiz: {

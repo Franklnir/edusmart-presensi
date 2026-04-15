@@ -34,6 +34,8 @@ const ATenants = lazy(() => import('./pages/admin/Tenants'))
 const ASuperAdmins = lazy(() => import('./pages/admin/SuperAdmins'))
 const AApprovals = lazy(() => import('./pages/admin/Approvals'))
 const AAuditTrail = lazy(() => import('./pages/admin/AuditTrail'))
+const APlugins = lazy(() => import('./pages/admin/Plugins'))
+const AWhatsApp = lazy(() => import('./pages/admin/WhatsApp'))
 
 const RouteFallback = () => (
   <div className="w-full min-h-[40vh] grid place-items-center">
@@ -100,6 +102,7 @@ const AppRoutes = () => (
       <Route path="/admin/tenants" element={lazyElement(ATenants)} />
       <Route path="/admin/super-admins" element={lazyElement(ASuperAdmins)} />
       <Route path="/admin/audit-trail" element={lazyElement(AAuditTrail)} />
+      <Route path="/admin/plugins" element={lazyElement(APlugins)} />
       <Route element={<AdminLockGate />}>
         <Route path="/admin/home" element={lazyElement(AHome)} />
         <Route path="/admin/kelas" element={lazyElement(AKelas)} />
@@ -109,6 +112,7 @@ const AppRoutes = () => (
         <Route path="/admin/backup" element={lazyElement(ABackup)} />
         <Route path="/admin/approvals" element={lazyElement(AApprovals)} />
         <Route path="/admin/sertifikat" element={lazyElement(Sertifikat)} />
+        <Route path="/admin/whatsapp" element={lazyElement(AWhatsApp)} />
       </Route>
     </Route>
 

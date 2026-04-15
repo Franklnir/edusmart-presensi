@@ -2,6 +2,35 @@
 
 Dokumen ini untuk menyiapkan EduSmart ke mode produksi nyata di VPS (`DigitalOcean`, `IDCloudHost`, dll).
 
+## 0. Local Preview yang Mirip Production
+
+Repo ini juga sudah disiapkan agar local preview memakai stack yang hampir sama dengan production:
+
+- `caddy` di depan untuk HTTP/HTTPS
+- `nginx` internal-only
+- `backend`, `worker`, `scheduler`, `redis`, `postgres`
+- `evolution_api` tetap lewat host terpisah bila dipakai
+
+Default local yang sudah disiapkan di `.env.production`:
+
+- `https://localhost:8443`
+- `https://admin.localhost:8443`
+- `https://bali.localhost:8443`
+- `https://wa.localhost:8443`
+
+Jalankan:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+```
+
+Catatan local:
+
+- Browser bisa menampilkan warning sertifikat saat pertama kali membuka `https://*.localhost:8443` karena Caddy memakai local CA/internal certificate untuk host lokal.
+- Setelah warning diterima di browser, alur cookie, session, dan subdomain akan jauh lebih mirip production dibanding mode HTTP biasa.
+- Untuk domain publik asli di VPS, Caddy tetap memakai on-demand TLS, jadi custom domain tenant/admin tetap bisa otomatis mendapatkan sertifikat HTTPS setelah DNS diarahkan dengan benar.
+- Host lokal default seperti `localhost`, `admin.localhost`, `bali.localhost`, `demo.localhost`, dan `wa.localhost` sekarang dibuat eksplisit agar browser dan tool CLI lokal lebih konsisten saat memeriksa nama sertifikat.
+
 ## 1. Prasyarat
 
 - Domain aktif (contoh: `edusmart.example.com`)
@@ -25,17 +54,26 @@ cp .env.production.example .env.production
 - `REDIS_PASSWORD`
 - `APP_URL`
 - `FRONTEND_URL`
-- `NGINX_HTTP_PORT` (default `80`, ganti jika port host sudah dipakai)
-- `VITE_API_URL`
+- `NGINX_HTTP_PORT` (port HTTP publik, sekarang diexpose oleh `caddy`)
+- `CADDY_HTTPS_PORT` (default `443`)
+- `CADDY_HTTPS_PORT_SUFFIX` (kosongkan di production normal; isi misalnya `:8443` jika preview lokal pakai port non-standar)
+- `CADDY_ACME_EMAIL`
+- `CADDY_ASK_SECRET`
+- `CADDY_EVOLUTION_HOST` (opsional, biasanya sama dengan host di `EVOLUTION_PUBLIC_URL`)
+- `VITE_API_URL` (boleh dikosongkan untuk mode same-origin / 1 VPS)
 - `VITE_ADMIN_SUBDOMAIN`
 - `SANCTUM_STATEFUL_DOMAINS`
 - `CORS_ALLOWED_ORIGINS`
 - `CORS_ALLOWED_ORIGIN_PATTERNS` (jika pakai subdomain tenant)
 - `TENANT_ROOT_DOMAIN`
 - `TENANT_ADMIN_SUBDOMAIN` (contoh: `admin`)
+- `TENANT_PUBLIC_SCHEME`
+- `TENANT_DNS_A_RECORD` atau `TENANT_DNS_CNAME_TARGET`
 - `SUPER_ADMIN_EMAILS`
 - `TENANT_RESERVED` (pastikan mengandung `admin`)
 - `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_FROM_ADDRESS`
+- `EVOLUTION_PUBLIC_URL`, `EVOLUTION_API_KEY`
+- `EVOLUTION_DB_PASSWORD`, `EVOLUTION_REDIS_PASSWORD`
 - `RFID_SCAN_SHARED_KEY` (opsional tapi direkomendasikan)
 - `RFID_MQTT_BRIDGE_ENABLED`
 - `RFID_MQTT_HOST`, `RFID_MQTT_PORT`, `RFID_MQTT_USERNAME`, `RFID_MQTT_PASSWORD`
@@ -52,7 +90,12 @@ docker compose --env-file .env.production -f docker-compose.prod.yml run --rm ba
 docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
 ```
 
-Catatan: service `backend_nginx` membaca `./backend/public` dari repo, jadi project harus dideploy dari folder source yang sama di VPS (bukan hanya copy `docker-compose` saja).
+Catatan:
+
+- Stack ini sudah dirapikan untuk VPS kecil: React dibuild sekali saat image `nginx` dibuat, lalu hasil static build diserve langsung oleh Nginx yang sama.
+- Tidak ada container `frontend` runtime terpisah.
+- `caddy` sekarang menjadi edge proxy publik untuk auto HTTPS, sedangkan `nginx` tetap internal-only.
+- Untuk update frontend, cukup `docker compose ... up -d --build nginx`.
 
 Cek status service:
 
@@ -75,7 +118,7 @@ docker compose --env-file .env.production -f docker-compose.prod.yml exec backen
 Jika output kosong, rebuild image tanpa cache:
 
 ```bash
-docker compose --env-file .env.production -f docker-compose.prod.yml build --no-cache backend worker scheduler rfid_bridge
+docker compose --env-file .env.production -f docker-compose.prod.yml build --no-cache backend worker scheduler rfid_bridge nginx
 docker compose --env-file .env.production -f docker-compose.prod.yml up -d
 ```
 
@@ -122,7 +165,7 @@ Agar tombol Google di halaman login bisa dipakai langsung:
 
 ```bash
 docker compose --env-file .env.production -f docker-compose.prod.yml exec backend php artisan config:clear
-docker compose --env-file .env.production -f docker-compose.prod.yml restart backend frontend
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build nginx backend
 ```
 
 Catatan multi-tenant:
@@ -151,17 +194,59 @@ docker compose --env-file .env.production -f docker-compose.prod.yml up -d --bui
 docker compose --env-file .env.production -f docker-compose.prod.yml logs -f rfid_bridge
 ```
 
+## 3.4 Konfigurasi WhatsApp Multi-Tenant (Evolution API)
+
+Stack production ini mendukung pola `1 VPS, banyak container`, jadi EduSmart tetap terpisah dari service WhatsApp:
+
+- `backend`, `worker`, `scheduler`, `nginx`
+- `evolution_api`, `evolution_postgres`, `evolution_redis`
+
+Isi env minimal:
+
+- `EVOLUTION_PUBLIC_URL=https://wa.edusmart.example.com`
+- `CADDY_EVOLUTION_HOST=wa.edusmart.example.com`
+- `EVOLUTION_API_KEY=<apikey server Evolution>`
+- `EVOLUTION_DB_PASSWORD=<password postgres khusus Evolution>`
+- `EVOLUTION_REDIS_PASSWORD=<password redis khusus Evolution>`
+- `EVOLUTION_API_WEBHOOK_BASE_URL=https://edusmart.example.com`
+
+Catatan operasional:
+
+- QR WhatsApp admin sekolah akan ditampilkan di menu `Admin > WhatsApp` pada EduSmart, bukan di dashboard Evolution terpisah.
+- Session WhatsApp disimpan persisten di volume `evolution_instances`.
+- Sinkron status koneksi dijalankan oleh webhook dan scheduler Laravel, jadi state `logout` atau `disconnect` tidak mudah nyangkut.
+- Jika butuh Manager UI Evolution, jalankan terpisah sebagai service tambahan; untuk alur EduSmart saat ini, API saja sudah cukup.
+
+Jalankan atau refresh service WhatsApp:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d evolution_postgres evolution_redis evolution_api backend worker scheduler
+docker compose --env-file .env.production -f docker-compose.prod.yml logs -f evolution_api
+```
+
 ## 4. TLS/HTTPS
 
-File `docker-compose.prod.yml` default expose HTTP (`:80`).
-Untuk HTTPS produksi:
+Stack production sekarang memakai `caddy` langsung di dalam `docker-compose.prod.yml`.
+Jadi alurnya:
 
-- Opsi A: pakai reverse proxy host (Nginx/Caddy/Traefik) di depan container
-- Opsi B: ubah Nginx container untuk terminasi TLS + mount sertifikat
+- `caddy` menerima trafik publik di port `80/443`
+- `caddy` melakukan redirect HTTP ke HTTPS
+- `caddy` menerbitkan sertifikat otomatis untuk host yang disetujui backend
+- `nginx` tetap melayani SPA + Laravel API di jaringan internal Docker
 
-Contoh konfigurasi host-level tersedia di:
+Env minimal untuk mode ini:
 
-- `deploy/nginx/vps.prod.conf.example`
+- `CADDY_ACME_EMAIL=ops@domain-kamu`
+- `CADDY_ASK_SECRET=<secret-acak-panjang>`
+- `CADDY_EVOLUTION_HOST=wa.domain-kamu`
+- `TENANT_PUBLIC_SCHEME=https`
+
+Catatan:
+
+- Endpoint verifikasi TLS internal ada di `api/internal/tls/authorize` dan dilindungi secret.
+- Host yang bisa dapat sertifikat otomatis hanyalah host admin, host tenant bawaan yang valid, dan custom domain tenant/admin yang memang terdaftar.
+- Jika `CADDY_EVOLUTION_HOST` diisi, host itu juga akan diarahkan ke `evolution_api` lewat edge proxy yang sama.
+- Kalau kamu preview lokal dengan port HTTPS non-standar, isi `CADDY_HTTPS_PORT_SUFFIX` agar redirect dari HTTP tidak salah port.
 
 ## 4.1 Domain Policy (Rekomendasi Profesional)
 
@@ -181,15 +266,65 @@ Catatan:
 - Endpoint `api/super/*` hanya bisa diakses dari domain admin.
 - Login akun super admin hanya di domain admin.
 - Login user sekolah (admin/guru/siswa tenant) ditolak jika mencoba login dari domain admin.
-- Wajib pasang wildcard DNS `*.edusmart.myid` + wildcard SSL `*.edusmart.myid`.
+- Wildcard DNS `*.edusmart.myid` tetap sangat disarankan untuk host tenant bawaan.
+- Untuk skala kecil sampai menengah, `caddy` on-demand TLS sudah cukup nyaman.
+- Jika nanti tenant bawaan bertambah sangat cepat dalam domain yang sama, pertimbangkan wildcard SSL via DNS challenge agar tidak mendekati rate limit penerbit sertifikat publik.
+
+## 4.2 Domain Onboarding dari Super Admin
+
+Setelah server dasar jadi, tenant tidak perlu setup kode lagi untuk domain baru.
+
+Alur yang direkomendasikan:
+
+1. Beli domain di registrar mana saja.
+2. Arahkan DNS domain itu ke target yang sama dengan server EduSmart:
+   - isi `TENANT_DNS_A_RECORD=<IP-VPS>` jika pakai A record langsung, atau
+   - isi `TENANT_DNS_CNAME_TARGET=<host-reverse-proxy-kamu>` jika pakai CNAME.
+3. Login ke panel super admin lalu buka `Panel Super Admin > Tenants`.
+4. Tambahkan:
+   - `Custom Host Super Admin` untuk domain panel seperti `panel.grupkamu.id`
+   - `Custom Domain Tenant` untuk sekolah seperti `smabali.sch.id`
+5. Klik `Cek DNS` sampai status menjadi `ready`.
+
+Catatan penting:
+
+- Subdomain tenant bawaan seperti `bali.edusmart.myid` tetap otomatis aktif dari slug tenant dan tidak perlu didaftarkan ulang.
+- Custom domain di aplikasi ini dibuat provider-agnostic, jadi tetap bisa dipakai walau registrar/domain provider kamu berbeda-beda.
+- Setelah DNS diarahkan dan host sudah terdaftar di panel, sertifikat HTTPS akan diterbitkan otomatis oleh `caddy` saat domain pertama kali diakses.
+- Jika nanti kamu pindah ke provider DNS yang punya API publik, otomasi create/update DNS bisa ditambahkan tanpa mengubah alur tenant di panel.
+
+### Contoh domain tenant
+
+- Tenant bawaan cepat: `smabali.edusmart.myid`
+- Domain sekolah sendiri: `portal.smabali.sch.id`
+- Panel super admin: `admin.edusmart.myid`
+- Host WhatsApp/Evolution: `wa.edusmart.myid`
+
+## 4.3 Alur Saat Sekolah Baru Berlangganan
+
+Cara paling aman dan cepat saat ada sekolah baru masuk:
+
+1. Buat tenant baru dari panel super admin dengan `nama sekolah`, `slug`, `admin sekolah`, dan `email admin`.
+2. Tenant langsung aktif di subdomain bawaan, misalnya `smabali.edusmart.myid`.
+3. Kirim URL bawaan itu ke sekolah agar mereka bisa mulai onboarding tanpa menunggu domain mereka sendiri selesai.
+4. Jika sekolah ingin domain khusus, tambahkan dari detail tenant di kartu `Domain & DNS Tenant`.
+5. Minta pihak sekolah mengarahkan DNS domain mereka ke target yang tampil di kartu `Target DNS Default`.
+6. Klik `Cek DNS` sampai status `ready`.
+
+Rekomendasi praktis:
+
+- Pakai subdomain bawaan dulu untuk sekolah baru agar aktivasi cepat.
+- Jadikan custom domain sebagai upgrade branding setelah tenant aktif.
+- Simpan host admin tetap terpisah agar panel super admin tidak tercampur dengan portal tenant.
 
 ## 5. Operasional Harian
 
 Logs:
 
 ```bash
+docker compose --env-file .env.production -f docker-compose.prod.yml logs -f caddy
 docker compose --env-file .env.production -f docker-compose.prod.yml logs -f backend
-docker compose --env-file .env.production -f docker-compose.prod.yml logs -f backend_nginx
+docker compose --env-file .env.production -f docker-compose.prod.yml logs -f nginx
 docker compose --env-file .env.production -f docker-compose.prod.yml logs -f worker
 docker compose --env-file .env.production -f docker-compose.prod.yml logs -f rfid_bridge
 ```
@@ -197,7 +332,7 @@ docker compose --env-file .env.production -f docker-compose.prod.yml logs -f rfi
 Restart service tertentu:
 
 ```bash
-docker compose --env-file .env.production -f docker-compose.prod.yml restart backend backend_nginx worker scheduler rfid_bridge
+docker compose --env-file .env.production -f docker-compose.prod.yml restart caddy backend nginx worker scheduler rfid_bridge
 ```
 
 ## 6. Hardening Minimum
@@ -218,10 +353,14 @@ docker compose --env-file .env.production -f docker-compose.prod.yml restart bac
 - password DB/Redis kuat dan unik
 - hanya expose port yang perlu (`80/443`)
 - backup DB terjadwal
+- password Evolution DB/Redis berbeda dari DB/Redis utama aplikasi
+- `EVOLUTION_API_KEY` hanya disimpan di backend/worker/scheduler, jangan expose ke build frontend
 
 Catatan:
 
+- `deploy/caddy/Caddyfile` sekarang menjadi edge config utama untuk auto HTTPS dan on-demand cert issuance.
 - `deploy/nginx/gateway.prod.conf` sudah diberi rate-limit tambahan untuk `/api/auth/*` dan `/api/*` sebagai lapisan proteksi brute-force di edge.
+- `nginx` sekarang menjadi internal web layer untuk SPA + Laravel API, sementara `caddy` menangani TLS dan host routing di depan.
 - Endpoint file sekarang pakai signed URL dengan masa berlaku + validasi signature untuk akses guest.
 
 ## 7. Deploy Native (Tanpa Docker)

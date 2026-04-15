@@ -5,16 +5,27 @@ use App\Http\Controllers\Api\AdminController;
 use App\Http\Controllers\Api\ApprovalController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\DbController;
+use App\Http\Controllers\Api\InfrastructureController;
 use App\Http\Controllers\Api\PresenceController;
 use App\Http\Controllers\Api\QuizController;
 use App\Http\Controllers\Api\RfidController;
 use App\Http\Controllers\Api\StorageController;
+use App\Http\Controllers\Api\SuperPluginController;
 use App\Http\Controllers\Api\SuperAdminController;
+use App\Http\Controllers\Api\WhatsAppController;
+use App\Http\Controllers\Api\WhatsAppWebhookController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/health', function () {
     return ['status' => 'ok'];
 });
+
+Route::get('/internal/tls/authorize', [InfrastructureController::class, 'authorizeTlsDomain'])
+    ->middleware('throttle:api')
+    ->withoutMiddleware([
+        \App\Http\Middleware\ResolveTenant::class,
+        \App\Http\Middleware\EnsureTenantMatchesProfile::class,
+    ]);
 
 Route::post('/auth/register', [AuthController::class, 'register'])->middleware('throttle:auth');
 Route::post('/auth/login', [AuthController::class, 'login'])->middleware('throttle:auth');
@@ -81,12 +92,29 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->post('/admin/backup/restore
 Route::middleware(['auth:sanctum', 'throttle:api'])->get('/admin/approvals', [ApprovalController::class, 'index']);
 Route::middleware(['auth:sanctum', 'throttle:api'])->post('/admin/approvals/{id}/approve', [ApprovalController::class, 'approve']);
 Route::middleware(['auth:sanctum', 'throttle:api'])->post('/admin/approvals/{id}/reject', [ApprovalController::class, 'reject']);
+Route::middleware(['auth:sanctum', 'throttle:api'])->get('/admin/whatsapp', [WhatsAppController::class, 'show']);
+Route::middleware(['auth:sanctum', 'throttle:api'])->post('/admin/whatsapp/connect', [WhatsAppController::class, 'connect']);
+Route::middleware(['auth:sanctum', 'throttle:api'])->post('/admin/whatsapp/sync', [WhatsAppController::class, 'sync']);
+Route::middleware(['auth:sanctum', 'throttle:api'])->post('/admin/whatsapp/logout', [WhatsAppController::class, 'logout']);
+Route::middleware(['auth:sanctum', 'throttle:api'])->patch('/admin/whatsapp/settings', [WhatsAppController::class, 'updateSettings']);
+Route::middleware(['auth:sanctum', 'throttle:api'])->post('/admin/whatsapp/test', [WhatsAppController::class, 'sendTest']);
+Route::post('/whatsapp/webhook/{secret}/{event?}', [WhatsAppWebhookController::class, 'handle'])
+    ->middleware('throttle:api')
+    ->withoutMiddleware([
+        \App\Http\Middleware\ResolveTenant::class,
+        \App\Http\Middleware\EnsureTenantMatchesProfile::class,
+    ]);
 
 Route::middleware(['auth:sanctum', 'throttle:super', 'super.domain'])->group(function () {
     Route::get('/super/me', [SuperAdminController::class, 'me']);
+    Route::get('/super/domains', [SuperAdminController::class, 'platformDomains']);
+    Route::post('/super/domains', [SuperAdminController::class, 'storePlatformDomain']);
+    Route::post('/super/domains/{domainId}/check', [SuperAdminController::class, 'checkDomain']);
+    Route::delete('/super/domains/{domainId}', [SuperAdminController::class, 'deleteDomain']);
     Route::get('/super/tenants', [SuperAdminController::class, 'index']);
     Route::post('/super/tenants', [SuperAdminController::class, 'store']);
     Route::get('/super/tenants/{id}', [SuperAdminController::class, 'showTenant']);
+    Route::post('/super/tenants/{tenantId}/domains', [SuperAdminController::class, 'storeTenantDomain']);
     Route::get('/super/tenants/{id}/backup', [SuperAdminController::class, 'backupTenant']);
     Route::post('/super/tenants/{id}/restore', [SuperAdminController::class, 'restoreTenant']);
     Route::patch('/super/tenants/{id}/status', [SuperAdminController::class, 'updateTenantStatus']);
@@ -96,4 +124,10 @@ Route::middleware(['auth:sanctum', 'throttle:super', 'super.domain'])->group(fun
     Route::post('/super/admins', [SuperAdminController::class, 'storeAdmin']);
     Route::delete('/super/admins/{id}', [SuperAdminController::class, 'deleteAdmin']);
     Route::get('/super/audit-trail', [SuperAdminController::class, 'auditTrail']);
+    Route::get('/super/plugins', [SuperPluginController::class, 'index']);
+    Route::post('/super/plugins/inspect', [SuperPluginController::class, 'inspect']);
+    Route::post('/super/plugins', [SuperPluginController::class, 'store']);
+    Route::patch('/super/plugins/{id}/status', [SuperPluginController::class, 'updateStatus']);
+    Route::delete('/super/plugins/{id}', [SuperPluginController::class, 'destroy']);
+    Route::get('/super/plugins/{id}/download', [SuperPluginController::class, 'download']);
 });
