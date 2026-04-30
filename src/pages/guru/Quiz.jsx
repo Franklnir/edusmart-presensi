@@ -24,6 +24,10 @@ const makeId = () => {
 
 const normalizeMapel = (v) => (v || '').toString().trim()
 
+const toBoolean = (value) => (
+  value === true || value === 1 || value === '1' || String(value).toLowerCase() === 'true'
+)
+
 const getFileExtension = (name = '') => {
   const normalized = String(name || '').split('?')[0].toLowerCase()
   const parts = normalized.split('.')
@@ -148,6 +152,11 @@ const getRemainingSeconds = (quiz, now) => {
 const getQuizStatus = (quiz, now = new Date()) => {
   const startsAt = safeDate(quiz?.starts_at)
   const endAt = getQuizEndAt(quiz)
+  const closedAt = safeDate(quiz?.closed_at)
+
+  if (closedAt) {
+    return { label: 'Ditutup', tone: 'bg-red-100 text-red-700 border-red-200', kind: 'expired' }
+  }
 
   if (!startsAt) {
     return { label: 'Belum dijadwalkan', tone: 'bg-yellow-100 text-yellow-700 border-yellow-200', kind: 'draft' }
@@ -375,6 +384,15 @@ export default function GuruQuiz() {
   const [detailFinishingReview, setDetailFinishingReview] = useState(false)
   const [retakeRestoreStudentId, setRetakeRestoreStudentId] = useState('')
   const [resultVisibilitySaving, setResultVisibilitySaving] = useState(false)
+  const [securitySaving, setSecuritySaving] = useState(false)
+  const [closingQuiz, setClosingQuiz] = useState(false)
+  const [securityForm, setSecurityForm] = useState({
+    shuffle_questions: false,
+    shuffle_options: false,
+    max_attempts: '',
+    access_code: '',
+    security_mode: 'standard'
+  })
   const [questionImageUploading, setQuestionImageUploading] = useState(false)
   const [optionImageUploading, setOptionImageUploading] = useState({})
   const [imageSizeByPath, setImageSizeByPath] = useState({})
@@ -1349,6 +1367,33 @@ export default function GuruQuiz() {
     })
   }, [selectedQuiz?.id, selectedQuiz?.starts_at, selectedQuiz?.deadline_at, selectedQuiz?.duration_minutes])
 
+  useEffect(() => {
+    if (!selectedQuiz) {
+      setSecurityForm({
+        shuffle_questions: false,
+        shuffle_options: false,
+        max_attempts: '',
+        access_code: '',
+        security_mode: 'standard'
+      })
+      return
+    }
+
+    setSecurityForm({
+      shuffle_questions: toBoolean(selectedQuiz.shuffle_questions),
+      shuffle_options: toBoolean(selectedQuiz.shuffle_options),
+      max_attempts: selectedQuiz.max_attempts ? String(selectedQuiz.max_attempts) : '',
+      access_code: '',
+      security_mode: selectedQuiz.security_mode || 'standard'
+    })
+  }, [
+    selectedQuiz?.id,
+    selectedQuiz?.shuffle_questions,
+    selectedQuiz?.shuffle_options,
+    selectedQuiz?.max_attempts,
+    selectedQuiz?.security_mode
+  ])
+
   const resetQuizForm = () => {
     setQuizForm({
       nama: '',
@@ -1465,6 +1510,16 @@ export default function GuruQuiz() {
       setLoading(true)
       const { error } = await supabase.from('quizzes').update(payload).eq('id', selectedQuiz.id)
       if (error) throw error
+      const { error: publishError } = await supabase.quiz.publish({
+        quiz_id: selectedQuiz.id,
+        activate: true,
+        shuffle_questions: securityForm.shuffle_questions,
+        shuffle_options: securityForm.shuffle_options,
+        max_attempts: securityForm.max_attempts === '' ? null : Number(securityForm.max_attempts),
+        security_mode: securityForm.security_mode || 'standard',
+        timezone: 'Asia/Jakarta'
+      })
+      if (publishError) throw publishError
       pushToast('success', 'Jadwal quiz berhasil disimpan')
       await loadQuizzes()
       await loadQuizDetails()
@@ -1472,6 +1527,66 @@ export default function GuruQuiz() {
       pushToast('error', err?.message || 'Gagal menyimpan jadwal quiz')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleSaveSecuritySettings = async () => {
+    if (!selectedQuiz) return
+    const maxAttemptsRaw = String(securityForm.max_attempts || '').trim()
+    const maxAttempts = maxAttemptsRaw === '' ? null : Number(maxAttemptsRaw)
+    if (maxAttempts !== null && (!Number.isInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 20)) {
+      pushToast('error', 'Batas percobaan harus 1 sampai 20')
+      return
+    }
+
+    const payload = {
+      quiz_id: selectedQuiz.id,
+      activate: toBoolean(selectedQuiz.is_active),
+      shuffle_questions: securityForm.shuffle_questions,
+      shuffle_options: securityForm.shuffle_options,
+      max_attempts: maxAttempts,
+      security_mode: securityForm.security_mode || 'standard',
+      timezone: 'Asia/Jakarta'
+    }
+    const accessCode = String(securityForm.access_code || '').trim()
+    if (accessCode) {
+      payload.access_code = accessCode
+    }
+
+    try {
+      setSecuritySaving(true)
+      const { data, error } = await supabase.quiz.publish(payload)
+      if (error) throw error
+      const freshQuiz = data?.quiz || null
+      if (freshQuiz?.id) {
+        setQuizList((prev) => prev.map((row) => (row.id === freshQuiz.id ? { ...row, ...freshQuiz } : row)))
+      }
+      setSecurityForm((prev) => ({ ...prev, access_code: '' }))
+      pushToast('success', 'Pengaturan keamanan quiz disimpan')
+      await loadQuizzes()
+    } catch (err) {
+      pushToast('error', err?.message || 'Gagal menyimpan keamanan quiz')
+    } finally {
+      setSecuritySaving(false)
+    }
+  }
+
+  const handleCloseQuiz = async () => {
+    if (!selectedQuiz) return
+    const ok = window.confirm('Tutup quiz sekarang? Attempt yang sedang berlangsung akan difinalkan otomatis.')
+    if (!ok) return
+
+    try {
+      setClosingQuiz(true)
+      const { data, error } = await supabase.quiz.close({ quiz_id: selectedQuiz.id })
+      if (error) throw error
+      pushToast('success', `Quiz ditutup. ${data?.finalized_submissions ?? 0} attempt difinalkan.`)
+      await loadQuizzes()
+      await loadQuizDetails()
+    } catch (err) {
+      pushToast('error', err?.message || 'Gagal menutup quiz')
+    } finally {
+      setClosingQuiz(false)
     }
   }
 
@@ -2424,6 +2539,86 @@ export default function GuruQuiz() {
                 <div className="text-xs text-slate-500 mt-3 p-3 rounded-xl border border-emerald-200 bg-emerald-50/70">
                   Alur: buat soal dulu, lalu atur jadwal. Setelah jadwal aktif, siswa bisa mulai quiz otomatis.
                 </div>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden transition-all duration-300 hover:shadow-md">
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 p-4 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-white">
+                  <div className="flex items-center gap-3">
+                    <div className="w-2 h-8 bg-slate-700 rounded-full"></div>
+                    <h3 className="text-lg font-bold text-slate-900">Keamanan Quiz</h3>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={handleSaveSecuritySettings}
+                      disabled={securitySaving}
+                      className="px-4 py-2.5 rounded-xl bg-slate-800 text-white text-sm font-semibold hover:bg-slate-900 transition-colors disabled:opacity-60"
+                    >
+                      {securitySaving ? 'Menyimpan...' : 'Simpan Keamanan'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCloseQuiz}
+                      disabled={closingQuiz}
+                      className="px-4 py-2.5 rounded-xl border border-red-200 bg-red-50 text-red-700 text-sm font-semibold hover:bg-red-100 transition-colors disabled:opacity-60"
+                    >
+                      {closingQuiz ? 'Menutup...' : 'Tutup Quiz'}
+                    </button>
+                  </div>
+                </div>
+                <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <label className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <span className="text-sm font-semibold text-slate-700">Acak urutan soal</span>
+                    <input
+                      type="checkbox"
+                      className="h-5 w-5 rounded border-slate-300 text-slate-800 focus:ring-slate-500"
+                      checked={securityForm.shuffle_questions}
+                      onChange={(e) => setSecurityForm((prev) => ({ ...prev, shuffle_questions: e.target.checked }))}
+                    />
+                  </label>
+                  <label className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <span className="text-sm font-semibold text-slate-700">Acak opsi jawaban</span>
+                    <input
+                      type="checkbox"
+                      className="h-5 w-5 rounded border-slate-300 text-slate-800 focus:ring-slate-500"
+                      checked={securityForm.shuffle_options}
+                      onChange={(e) => setSecurityForm((prev) => ({ ...prev, shuffle_options: e.target.checked }))}
+                    />
+                  </label>
+                  <div>
+                    <label className="text-sm font-semibold text-slate-600">Batas Percobaan</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="20"
+                      className="mt-1 w-full border border-slate-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-slate-500"
+                      value={securityForm.max_attempts}
+                      onChange={(e) => setSecurityForm((prev) => ({ ...prev, max_attempts: e.target.value }))}
+                      placeholder="Default bebas retake guru"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-semibold text-slate-600">Mode Keamanan</label>
+                    <select
+                      className="mt-1 w-full border border-slate-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-slate-500 bg-white"
+                      value={securityForm.security_mode}
+                      onChange={(e) => setSecurityForm((prev) => ({ ...prev, security_mode: e.target.value }))}
+                    >
+                      <option value="standard">Standard</option>
+                      <option value="strict">Strict</option>
+                    </select>
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="text-sm font-semibold text-slate-600">Kode Akses Baru</label>
+                    <input
+                      type="password"
+                      className="mt-1 w-full border border-slate-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-slate-500"
+                      value={securityForm.access_code}
+                      onChange={(e) => setSecurityForm((prev) => ({ ...prev, access_code: e.target.value }))}
+                      placeholder="Kosongkan jika tidak diubah"
+                    />
+                  </div>
                 </div>
               </div>
 

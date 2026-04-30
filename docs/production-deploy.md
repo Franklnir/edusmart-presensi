@@ -175,14 +175,17 @@ Catatan multi-tenant:
 ## 3.3 Konfigurasi RFID MQTT Bridge
 
 Service bridge di `docker-compose.prod.yml` bernama `rfid_bridge` dan akan auto-restart.
+Broker default sekarang memakai Mosquitto open source yang dideploy sebagai service `mosquitto`.
 
 Pastikan env ini terisi:
 
 - `RFID_MQTT_BRIDGE_ENABLED=true`
-- `RFID_MQTT_HOST=<host-hivemq>`
-- `RFID_MQTT_PORT=8883`
-- `RFID_MQTT_USERNAME=<username>`
-- `RFID_MQTT_PASSWORD=<password>`
+- `RFID_MOSQUITTO_PUBLIC_HOST=mqtt.edusmart.example.com`
+- `RFID_MOSQUITTO_BRIDGE_PASSWORD=<password-panjang-random>`
+- `RFID_MQTT_HOST=mosquitto`
+- `RFID_MQTT_PORT=1883`
+- `RFID_MQTT_USERNAME=edusmart_bridge`
+- `RFID_MQTT_PASSWORD=<sama-dengan-RFID_MOSQUITTO_BRIDGE_PASSWORD>`
 - `RFID_MQTT_SCAN_TOPIC_TEMPLATE=edusmart/{tenant}/rfid/scan`
 - `RFID_MQTT_RESPONSE_TOPIC_TEMPLATE=edusmart/{tenant}/rfid/response`
 - `RFID_MQTT_MODE_TOPIC_TEMPLATE=edusmart/{tenant}/rfid/mode`
@@ -190,9 +193,12 @@ Pastikan env ini terisi:
 Jalankan/refresh service bridge:
 
 ```bash
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build rfid_bridge
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build mosquitto_init mosquitto mosquitto_reloader backend rfid_bridge
+docker compose --env-file .env.production -f docker-compose.prod.yml exec backend php artisan rfid:mosquitto-sync
 docker compose --env-file .env.production -f docker-compose.prod.yml logs -f rfid_bridge
 ```
+
+Detail isolasi topic, ACL, dan provision dari Super Admin ada di `docs/mosquitto-rfid-multi-tenant.md`.
 
 ## 3.4 Konfigurasi WhatsApp Multi-Tenant (Evolution API)
 
@@ -340,6 +346,7 @@ docker compose --env-file .env.production -f docker-compose.prod.yml restart cad
 - `APP_ENV=production`
 - `APP_DEBUG=false`
 - `TRUSTED_PROXIES` diisi network proxy/reverse-proxy yang valid (jangan biarkan wildcard di internet publik)
+- password user/admin mengikuti kebijakan kuat minimal 12 karakter dengan huruf besar, huruf kecil, angka, dan simbol
 - `SESSION_SECURE_COOKIE=true`
 - `SESSION_ENCRYPT=true`
 - `AUTH_RATE_LIMIT_PER_MINUTE=12`
@@ -362,6 +369,7 @@ Catatan:
 - `deploy/nginx/gateway.prod.conf` sudah diberi rate-limit tambahan untuk `/api/auth/*` dan `/api/*` sebagai lapisan proteksi brute-force di edge.
 - `nginx` sekarang menjadi internal web layer untuk SPA + Laravel API, sementara `caddy` menangani TLS dan host routing di depan.
 - Endpoint file sekarang pakai signed URL dengan masa berlaku + validasi signature untuk akses guest.
+- Jalankan `deploy/scripts/prod_smoke_check.sh` setiap selesai deploy untuk cek DNS, HTTPS health, dan status container.
 
 ## 7. Deploy Native (Tanpa Docker)
 

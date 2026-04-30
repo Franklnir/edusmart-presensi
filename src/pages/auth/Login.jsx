@@ -1,16 +1,49 @@
 // src/pages/auth/Login.jsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuthStore } from '../../store/useAuthStore';
+import GoogleCredentialButton from '../../components/GoogleCredentialButton';
 import { supabase, PROFILE_BUCKET, getSignedUrlForValue } from '../../lib/supabase';
 import { getRoleHome, isValidRole } from '../../utils/role';
 import { shouldForceAccountSetup } from '../../utils/accountSetup';
 import { sanitizeExternalUrl, sanitizeMediaUrl } from '../../utils/sanitize';
 import '../../styles/Login.css';
 
+const sanitizeNextPath = (value) => {
+  const raw = String(value || '').trim();
+  if (!raw || raw.startsWith('//')) return '';
+
+  try {
+    const baseOrigin =
+      typeof window !== 'undefined' && window.location?.origin
+        ? window.location.origin
+        : 'http://localhost';
+    const url = new URL(raw, baseOrigin);
+
+    if (typeof window !== 'undefined' && url.origin !== window.location.origin) {
+      return '';
+    }
+
+    const nextPath = `${url.pathname}${url.search}${url.hash}`;
+    if (
+      nextPath.startsWith('/login') ||
+      nextPath.startsWith('/register') ||
+      nextPath.startsWith('/forgot-password') ||
+      nextPath.startsWith('/reset-password')
+    ) {
+      return '';
+    }
+
+    return nextPath.startsWith('/') ? nextPath : '';
+  } catch {
+    return '';
+  }
+};
+
 const Login = () => {
   const navigate = useNavigate();
-  const { user, profile, login } = useAuthStore();
+  const location = useLocation();
+  const { user, profile, login, loginWithGoogleCredential } = useAuthStore();
 
   const [form, setForm] = useState({
     email: '',
@@ -55,6 +88,9 @@ const Login = () => {
   const [settingsId, setSettingsId] = useState(null);
   const [isLoadingSettings, setIsLoadingSettings] = useState(true);
   const [logoPreview, setLogoPreview] = useState('');
+  const nextAfterLogin = sanitizeNextPath(
+    new URLSearchParams(location.search).get('next')
+  );
 
   // Load settings sekali di awal
   useEffect(() => {
@@ -116,10 +152,15 @@ const Login = () => {
       const url = new URL(window.location.href)
       const googleStatus = String(url.searchParams.get('google') || '').trim()
       const googleError = String(url.searchParams.get('google_error') || '').trim()
-      if (!googleStatus) return
+      const loginReason = String(url.searchParams.get('reason') || '').trim()
+      if (!googleStatus && !loginReason) return
 
       let nextError = ''
       let nextInfo = ''
+      if (loginReason === 'session-expired') {
+        nextInfo =
+          'Sesi Anda telah berakhir karena tidak ada aktivitas. Silakan login lagi untuk melanjutkan.'
+      }
       if (googleStatus === 'failed' && googleError) {
         nextError = googleError
       } else if (googleStatus === 'disabled') {
@@ -233,9 +274,9 @@ const Login = () => {
       ? profile.role === 'siswa'
         ? '/siswa/profile'
         : '/guru/profile'
-      : getRoleHome(profile.role);
+      : nextAfterLogin || getRoleHome(profile.role);
     navigate(target, { replace: true });
-  }, [user, profile, navigate]);
+  }, [user, profile, navigate, nextAfterLogin]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -296,45 +337,11 @@ const Login = () => {
 
   const isOnCooldown = cooldownEnd > Date.now();
 
-  const handleGoogleLogin = async () => {
-    setError('')
-    setInfo('')
-    setIsGoogleSubmitting(true)
-
-    try {
-      const redirectTo =
-        typeof window !== 'undefined'
-          ? `${window.location.origin}/login`
-          : '/login'
-
-      const { error: googleError } = await supabase.auth.signInWithGoogle({
-        redirectTo
-      })
-
-      if (googleError) {
-        throw googleError
-      }
-    } catch (err) {
-      setError(err?.message || 'Gagal memulai login Google')
-      setIsGoogleSubmitting(false)
-    }
-  }
-
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !isSubmitting && !isOnCooldown) {
       handleSubmit(e);
     }
   };
-
-  // Loading state
-  if (isLoadingSettings) {
-    return (
-      <div className="login-loading">
-        <div className="login-spinner"></div>
-        <p className="login-loading-text">Memuat halaman login...</p>
-      </div>
-    );
-  }
 
   // Data sekolah dengan fallback
   const schoolName = settings?.nama_sekolah || 'Sekolah';
@@ -342,7 +349,7 @@ const Login = () => {
   const address = settings?.alamat || '';
   const phone = settings?.telepon || '';
   const emailSekolah = settings?.email || '';
-  const isGoogleAuthEnabled = Boolean(supabase.auth.isGoogleEnabled?.());
+  const isSessionExpiredNotice = info.toLowerCase().includes('sesi anda telah berakhir');
   const adminSubdomain = String(import.meta.env.VITE_ADMIN_SUBDOMAIN || 'admin')
     .trim()
     .toLowerCase();
@@ -351,7 +358,6 @@ const Login = () => {
   const isAdminHost =
     runtimeHost === adminSubdomain ||
     (hostParts.length >= 2 && hostParts[0] === adminSubdomain);
-  // Social media links
   const socials = [
     {
       key: 'facebook',
@@ -380,6 +386,36 @@ const Login = () => {
   ]
     .map((social) => ({ ...social, href: sanitizeExternalUrl(social.href) }))
     .filter((social) => social.href && social.href.trim() !== '');
+
+  const handleGoogleCredential = useCallback(async (credential) => {
+    setError('')
+    setInfo('')
+    setIsGoogleSubmitting(true)
+
+    try {
+      const result = await loginWithGoogleCredential(credential)
+      if (result?.error) {
+        setError(result.error)
+        return
+      }
+
+      setFailCount(0)
+      setCooldownEnd(0)
+      setInfo('Login Google berhasil. Mengarahkan ke dashboard...')
+    } finally {
+      setIsGoogleSubmitting(false)
+    }
+  }, [loginWithGoogleCredential, setCooldownEnd, setFailCount])
+
+  // Loading state
+  if (isLoadingSettings) {
+    return (
+      <div className="login-loading">
+        <div className="login-spinner"></div>
+        <p className="login-loading-text">Memuat halaman login...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="login">
@@ -495,8 +531,11 @@ const Login = () => {
               </div>
             )}
             {info && (
-              <div className="login__success" role="status">
-                <i className="ri-checkbox-circle-fill"></i>
+              <div
+                className={isSessionExpiredNotice ? 'login__error login__error--warning' : 'login__success'}
+                role="status"
+              >
+                <i className={isSessionExpiredNotice ? 'ri-time-line' : 'ri-checkbox-circle-fill'}></i>
                 <span>{info}</span>
               </div>
             )}
@@ -597,46 +636,18 @@ const Login = () => {
                 <span>atau</span>
               </div>
 
-              <button
-                type="button"
-                onClick={handleGoogleLogin}
-                disabled={isGoogleSubmitting || isSubmitting}
-                className="login__google-btn"
-                aria-label="Masuk dengan Google"
-                title="Masuk dengan Google"
-              >
-                <span className="login__google-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" role="img" focusable="false">
-                    <path
-                      fill="#EA4335"
-                      d="M12 10.2v3.95h5.49c-.24 1.27-.96 2.35-2.03 3.08l3.29 2.55c1.92-1.77 3.02-4.37 3.02-7.45 0-.73-.07-1.44-.19-2.13H12z"
-                    />
-                    <path
-                      fill="#34A853"
-                      d="M12 22c2.73 0 5.03-.9 6.71-2.43l-3.29-2.55c-.91.61-2.08.98-3.42.98-2.64 0-4.88-1.78-5.68-4.18l-3.4 2.62C4.59 19.74 8.03 22 12 22z"
-                    />
-                    <path
-                      fill="#4A90E2"
-                      d="M6.32 13.82A6 6 0 016 12c0-.63.11-1.24.32-1.82L2.92 7.56A9.99 9.99 0 002 12c0 1.62.39 3.14 1.08 4.44l3.24-2.62z"
-                    />
-                    <path
-                      fill="#FBBC05"
-                      d="M12 5.95c1.48 0 2.81.51 3.86 1.51l2.9-2.9C17.03 2.94 14.73 2 12 2 8.03 2 4.59 4.26 2.92 7.56l3.4 2.62C7.12 7.78 9.36 5.95 12 5.95z"
-                    />
-                  </svg>
-                </span>
-                <span>
-                  {isGoogleSubmitting
-                    ? 'Mengalihkan ke Google...'
-                    : 'Masuk dengan Google'}
-                </span>
-              </button>
-
-              {!isGoogleAuthEnabled && (
-                <p className="login__google-note">
-                  Hubungi admin untuk mengaktifkan OAuth Google.
-                </p>
-              )}
+              <div className="login__google-slot">
+                <GoogleCredentialButton
+                  onCredential={handleGoogleCredential}
+                  busy={isGoogleSubmitting}
+                  className="w-full"
+                  buttonClassName="login__google-btn"
+                  noteClassName="login__google-note"
+                  iconClassName="login__google-icon"
+                  label="Masuk dengan Google"
+                  busyLabel="Memproses login Google..."
+                />
+              </div>
             </form>
 
             <div className="login__form-footer">

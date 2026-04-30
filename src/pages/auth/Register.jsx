@@ -119,8 +119,7 @@ export default function Register() {
 
   const allDisabled = useMemo(() => {
     return !settings.registrasi_siswa_aktif &&
-      !settings.registrasi_guru_aktif &&
-      !settings.registrasi_admin_aktif
+      !settings.registrasi_guru_aktif
   }, [settings])
 
   const schoolName = settings.nama_sekolah || 'Sekolah'
@@ -163,8 +162,8 @@ export default function Register() {
     if (!pwdCheck.valid) return pwdCheck.errors[0]
     if (form.password !== form.confirmPassword) return 'Konfirmasi password tidak sama.'
 
-    if (selectedRole === 'admin' && !settings.registrasi_admin_aktif) {
-      return 'Registrasi admin tidak dibuka.'
+    if (selectedRole === 'admin') {
+      return 'Registrasi admin publik tidak diizinkan.'
     }
 
     return null
@@ -357,21 +356,6 @@ export default function Register() {
                     </button>
                   )}
 
-                  {settings.registrasi_admin_aktif && (
-                    <button type="button" onClick={() => handleSelectRole('admin')}
-                      className={`login__role-btn ${selectedRole === 'admin' ? 'login__role-btn--active' : ''}`}>
-                      <div className="login__role-content">
-                        <i className="ri-shield-user-fill"></i>
-                        <div className="login__role-text">
-                          <span className="login__role-name">Admin</span>
-                          <span className="login__role-desc">Kelola sistem & pengguna</span>
-                        </div>
-                      </div>
-                      <span className={'login__role-badge ' + (selectedRole === 'admin' ? 'login__role-badge--selected' : 'login__role-badge--active')}>
-                        {selectedRole === 'admin' ? 'Dipilih' : 'Dibuka'}
-                      </span>
-                    </button>
-                  )}
                 </div>
 
                 {selectedRole && (

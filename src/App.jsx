@@ -1,16 +1,24 @@
 // src/App.jsx
 import React, { useEffect, useRef } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import Navbar from './components/Navbar'
 import AppRoutes from './router'
 import { useAuthStore } from './store/useAuthStore'
-import { supabase } from './lib/supabase'
+import { SESSION_EXPIRED_EVENT, supabase } from './lib/supabase'
 
 const AUTH_PATHS = ['/login', '/register', '/forgot-password', '/reset-password']
+const buildLoginRedirectPath = ({ reason = '', next = '' } = {}) => {
+  const params = new URLSearchParams()
+  if (reason) params.set('reason', reason)
+  if (next) params.set('next', next)
+  const suffix = params.toString()
+  return suffix ? `/login?${suffix}` : '/login'
+}
 
 const App = () => {
   const location = useLocation()
-  const { user, initialized, init } = useAuthStore()
+  const navigate = useNavigate()
+  const { user, initialized, init, expireSession } = useAuthStore()
   const deviceIdRef = useRef('')
   const lastPathRef = useRef('')
 
@@ -22,6 +30,36 @@ const App = () => {
       init()
     }
   }, [initialized, init])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+
+    const handleSessionExpired = (event) => {
+      const nextPath = isAuthPage
+        ? ''
+        : `${location.pathname}${location.search}${location.hash}`
+      const reason = String(event?.detail?.message || '').trim()
+
+      expireSession(reason || 'Sesi login Anda telah berakhir. Silakan masuk lagi.')
+      navigate(
+        buildLoginRedirectPath({
+          reason: 'session-expired',
+          next: nextPath
+        }),
+        { replace: true }
+      )
+    }
+
+    window.addEventListener(SESSION_EXPIRED_EVENT, handleSessionExpired)
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, handleSessionExpired)
+  }, [
+    expireSession,
+    isAuthPage,
+    location.hash,
+    location.pathname,
+    location.search,
+    navigate
+  ])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -78,6 +116,30 @@ const App = () => {
 
     supabase.presence.ping({ deviceId, activity: true }).catch(() => { })
   }, [location.pathname, user?.id])
+
+  useEffect(() => {
+    if (!user?.id) return undefined
+    if (typeof window === 'undefined' || typeof document === 'undefined') return undefined
+
+    const revalidateSession = () => {
+      if (document.visibilityState === 'hidden') return
+      void supabase.auth.getSession()
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        revalidateSession()
+      }
+    }
+
+    window.addEventListener('focus', revalidateSession)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      window.removeEventListener('focus', revalidateSession)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [user?.id])
 
   // Layout untuk halaman auth (login, register, dll)
   if (isAuthPage || !user) {

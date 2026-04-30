@@ -91,6 +91,8 @@ const TENANT_SLUG = import.meta.env.VITE_TENANT_SLUG || deriveTenantSlug(RUNTIME
 const GOOGLE_AUTH_ENABLED = String(import.meta.env.VITE_GOOGLE_AUTH_ENABLED || 'false')
   .trim()
   .toLowerCase() === 'true'
+const GOOGLE_CLIENT_ID = String(import.meta.env.VITE_GOOGLE_CLIENT_ID || '')
+  .trim()
 const normalizeAuthEndpointUrl = (rawUrl, fallbackPath) => {
   const input = String(rawUrl || fallbackPath || '').trim()
   if (!input) return ''
@@ -137,6 +139,110 @@ const GOOGLE_AUTH_LINK_URL = normalizeAuthEndpointUrl(
   import.meta.env.VITE_GOOGLE_AUTH_LINK_URL,
   '/api/auth/google/link'
 )
+export const AUTH_SESSION_HINT_KEY = 'edusmart_auth_session_hint'
+export const SESSION_EXPIRED_EVENT = 'edusmart:session-expired'
+const SESSION_EXPIRED_MESSAGE =
+  'Sesi login Anda telah berakhir. Silakan masuk lagi untuk melanjutkan.'
+let lastSessionExpiredNotifiedAt = 0
+
+const getSessionStorage = () => {
+  if (typeof window === 'undefined') return null
+  try {
+    return window.sessionStorage
+  } catch {
+    return null
+  }
+}
+
+export const setAuthSessionHint = (value = true) => {
+  const storage = getSessionStorage()
+  if (!storage) return
+
+  try {
+    if (value) {
+      storage.setItem(AUTH_SESSION_HINT_KEY, '1')
+    } else {
+      storage.removeItem(AUTH_SESSION_HINT_KEY)
+    }
+  } catch {
+    // ignore storage access errors
+  }
+}
+
+export const clearAuthSessionHint = () => setAuthSessionHint(false)
+
+const hasAuthSessionHint = () => {
+  const storage = getSessionStorage()
+  if (!storage) return false
+
+  try {
+    return storage.getItem(AUTH_SESSION_HINT_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+const normalizeSessionHandlingPath = (input = '') => {
+  const raw = String(input || '').trim()
+  if (!raw) return ''
+
+  try {
+    const baseOrigin =
+      typeof window !== 'undefined' && window.location?.origin
+        ? window.location.origin
+        : API_URL
+    const url = new URL(raw, baseOrigin)
+    return `${url.pathname}${url.search}`
+  } catch {
+    return raw
+  }
+}
+
+const shouldIgnoreSessionExpiredHandling = (input = '') => {
+  const normalized = normalizeSessionHandlingPath(input)
+  if (!normalized) return false
+
+  const ignoredPrefixes = [
+    '/api/auth/login',
+    '/api/auth/register',
+    '/api/auth/logout',
+    '/api/auth/forgot-password',
+    '/api/auth/reset-password',
+    '/api/auth/verify-email/',
+    '/api/auth/google/redirect',
+    '/api/auth/google/popup-context',
+    '/api/auth/google/callback',
+    '/api/auth/google/finalize-login',
+    '/api/auth/google/code-login',
+    '/api/auth/google/credential-login'
+  ]
+
+  return ignoredPrefixes.some(
+    (prefix) => normalized === prefix || normalized.startsWith(prefix)
+  )
+}
+
+const notifySessionExpired = ({ path = '', status = 401, message } = {}) => {
+  if (typeof window === 'undefined') return
+  if (!hasAuthSessionHint()) return
+  if (shouldIgnoreSessionExpiredHandling(path)) return
+
+  const now = Date.now()
+  if (now - lastSessionExpiredNotifiedAt < 1500) return
+  lastSessionExpiredNotifiedAt = now
+
+  clearAuthSessionHint()
+
+  window.dispatchEvent(
+    new CustomEvent(SESSION_EXPIRED_EVENT, {
+      detail: {
+        path: normalizeSessionHandlingPath(path),
+        status,
+        message: message || SESSION_EXPIRED_MESSAGE
+      }
+    })
+  )
+}
 
 /* ===================== BUCKETS ===================== */
 export const ASSIGNMENT_BUCKET = 'assignments'
@@ -204,6 +310,8 @@ const makeError = (message, status, code) => ({
   status,
   code
 })
+
+const isSessionExpiredStatus = (status) => status === 401 || status === 419
 
 const formatBytesLabel = (bytes) => {
   const size = Number(bytes || 0)
@@ -453,6 +561,20 @@ export const apiFetch = async (path, options = {}) => {
   } catch { }
 
   if (!res.ok) {
+    if (isSessionExpiredStatus(res.status) && !shouldIgnoreSessionExpiredHandling(path)) {
+      notifySessionExpired({
+        path,
+        status: res.status,
+        message: SESSION_EXPIRED_MESSAGE
+      })
+
+      return {
+        data: null,
+        error: makeError(SESSION_EXPIRED_MESSAGE, res.status, 'SESSION_EXPIRED'),
+        raw: json
+      }
+    }
+
     return {
       data: null,
       error: makeError(json?.error || json?.message || res.statusText, res.status),
@@ -514,6 +636,19 @@ const downloadAuthenticatedFile = async (path, fallbackName = 'download.bin') =>
       const json = await res.json()
       message = json?.error || json?.message || message
     } catch { }
+
+    if (isSessionExpiredStatus(res.status) && !shouldIgnoreSessionExpiredHandling(path)) {
+      notifySessionExpired({
+        path,
+        status: res.status,
+        message: SESSION_EXPIRED_MESSAGE
+      })
+      return {
+        data: null,
+        error: makeError(SESSION_EXPIRED_MESSAGE, res.status, 'SESSION_EXPIRED')
+      }
+    }
+
     return { data: null, error: makeError(message, res.status) }
   }
 
@@ -802,6 +937,21 @@ class StorageBucket {
     try {
       const response = await fetch(url, { credentials: 'include' })
       if (!response.ok) {
+        if (isSessionExpiredStatus(response.status)) {
+          notifySessionExpired({
+            path: url,
+            status: response.status,
+            message: SESSION_EXPIRED_MESSAGE
+          })
+          return {
+            data: null,
+            error: makeError(
+              SESSION_EXPIRED_MESSAGE,
+              response.status,
+              'SESSION_EXPIRED'
+            )
+          }
+        }
         return { data: null, error: makeError('Gagal mengunduh', response.status) }
       }
       const blob = await response.blob()
@@ -963,6 +1113,10 @@ const auth = {
     return GOOGLE_AUTH_ENABLED
   },
 
+  getGoogleClientId() {
+    return GOOGLE_CLIENT_ID
+  },
+
   getProviderState(user) {
     const providers = collectUserProviders(user || {})
     return {
@@ -1014,6 +1168,65 @@ const auth = {
     }
 
     return { data: { redirectUrl }, error: null }
+  },
+
+  async signInWithGoogleCode({ code }) {
+    const res = await apiFetch('/api/auth/google/code-login', {
+      method: 'POST',
+      body: { code }
+    })
+
+    if (res.error) return { data: null, error: res.error }
+
+    const user = normalizeUser(res.raw?.data?.user, res.raw?.data?.profile)
+
+    return {
+      data: {
+        user,
+        profile: res.raw?.data?.profile || null,
+        session: user ? { user } : null
+      },
+      error: null
+    }
+  },
+
+  async signInWithGoogleCredential({ credential }) {
+    const res = await apiFetch('/api/auth/google/credential-login', {
+      method: 'POST',
+      body: { credential }
+    })
+
+    if (res.error) return { data: null, error: res.error }
+
+    const user = normalizeUser(res.raw?.data?.user, res.raw?.data?.profile)
+
+    return {
+      data: {
+        user,
+        profile: res.raw?.data?.profile || null,
+        session: user ? { user } : null
+      },
+      error: null
+    }
+  },
+
+  async linkGoogleCredential({ credential }) {
+    const res = await apiFetch('/api/auth/google/credential-link', {
+      method: 'POST',
+      body: { credential }
+    })
+
+    if (res.error) return { data: null, error: res.error }
+
+    const user = normalizeUser(res.raw?.data?.user, res.raw?.data?.profile)
+
+    return {
+      data: {
+        user,
+        profile: res.raw?.data?.profile || null
+      },
+      error: null
+    }
   },
 
   async linkGoogleAccount(options = {}) {
@@ -1108,22 +1321,54 @@ const auth = {
     return { data: res.raw?.data ?? res.data, error: res.error }
   },
 
-  async updateUser({ email, password }) {
-    if (email) {
+  async updateUser({ email, password, verificationCode }) {
+    const normalizedEmail = typeof email === 'string' ? email.trim() : ''
+    const normalizedPassword = typeof password === 'string' ? password : ''
+
+    if (normalizedEmail) {
+      const body = {
+        email: normalizedEmail
+      }
+
+      if (normalizedPassword) {
+        body.password = normalizedPassword
+        body.password_confirmation = normalizedPassword
+      }
+      if (verificationCode) {
+        body.verification_code = verificationCode
+      }
+
       const res = await apiFetch('/api/auth/update-account', {
         method: 'POST',
-        body: {
-          email,
-          password,
-          password_confirmation: password
-        }
+        body
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     }
 
+    const body = {
+      password: normalizedPassword,
+      password_confirmation: normalizedPassword
+    }
+    if (verificationCode) {
+      body.verification_code = verificationCode
+    }
+
     const res = await apiFetch('/api/auth/update-password', {
       method: 'POST',
-      body: { password, password_confirmation: password }
+      body
+    })
+    return { data: res.raw?.data ?? res.data, error: res.error }
+  },
+
+  async sendPasswordChangeCode(email = '') {
+    const body = {}
+    if (typeof email === 'string' && email.trim()) {
+      body.email = email.trim()
+    }
+
+    const res = await apiFetch('/api/auth/password-change/send-code', {
+      method: 'POST',
+      body
     })
     return { data: res.raw?.data ?? res.data, error: res.error }
   },
@@ -1153,6 +1398,13 @@ const auth = {
   },
 
   admin: {
+    async provisionUser(payload = {}) {
+      const res = await apiFetch('/api/admin/users/provision', {
+        method: 'POST',
+        body: payload
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
     async deleteUser(userId) {
       const res = await apiFetch(`/api/admin/users/${userId}`, { method: 'DELETE' })
       return { data: res.raw?.data ?? res.data, error: res.error }
@@ -1305,6 +1557,20 @@ const auth = {
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
+    async updateTenantRfidMqtt(id, payload = {}) {
+      const res = await apiFetch(`/api/super/tenants/${id}/rfid-mqtt`, {
+        method: 'PATCH',
+        body: payload
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async provisionTenantRfidMosquitto(id, payload = {}) {
+      const res = await apiFetch(`/api/super/tenants/${id}/rfid-mqtt/mosquitto`, {
+        method: 'POST',
+        body: payload
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
     async createTenant(payload) {
       const res = await apiFetch('/api/super/tenants', { method: 'POST', body: payload })
       return { data: res.raw?.data ?? res.data, error: res.error }
@@ -1382,8 +1648,28 @@ const auth = {
     }
   },
   quiz: {
+    async start(payload) {
+      const res = await apiFetch('/api/quiz/start', { method: 'POST', body: payload })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async saveAnswer(payload) {
+      const res = await apiFetch('/api/quiz/answer', { method: 'POST', body: payload })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
     async submit(payload) {
       const res = await apiFetch('/api/quiz/submit', { method: 'POST', body: payload })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async logViolation(payload) {
+      const res = await apiFetch('/api/quiz/violation', { method: 'POST', body: payload })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async publish(payload) {
+      const res = await apiFetch('/api/quiz/publish', { method: 'POST', body: payload })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async close(payload) {
+      const res = await apiFetch('/api/quiz/close', { method: 'POST', body: payload })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
     async retake(payload) {
@@ -1406,6 +1692,34 @@ const auth = {
     async completeEssayReview(payload) {
       const res = await apiFetch('/api/quiz/complete-essay-review', { method: 'POST', body: payload })
       return { data: res.raw?.data ?? res.data, error: res.error }
+    }
+  }
+}
+
+const attendanceQr = {
+  async session(payload = {}) {
+    const res = await apiFetch('/api/attendance-qr/session', {
+      method: 'POST',
+      body: payload
+    })
+
+    return {
+      data: res.raw?.data ?? res.data,
+      error: res.error,
+      raw: res.raw
+    }
+  },
+
+  async scan(token) {
+    const res = await apiFetch('/api/attendance-qr/scan', {
+      method: 'POST',
+      body: { token }
+    })
+
+    return {
+      data: res.raw?.data ?? res.data,
+      error: res.error,
+      raw: res.raw
     }
   }
 }
@@ -1907,6 +2221,16 @@ export const supabase = {
   admin: auth.admin,
   super: auth.super,
   quiz: auth.quiz,
+  attendanceQr,
+  students: {
+    async updateAdditionalInfo(studentId, payload = {}) {
+      const res = await apiFetch(`/api/students/${studentId}/additional-info`, {
+        method: 'PATCH',
+        body: payload
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    }
+  },
   presence: {
     async ping({ deviceId, activity = false }) {
       const res = await apiFetch('/api/presence/ping', {

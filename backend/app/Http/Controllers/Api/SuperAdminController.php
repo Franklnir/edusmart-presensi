@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Models\Profile;
 use App\Models\User;
+use App\Services\Rfid\RfidDeviceService;
+use App\Services\Rfid\TenantMqttConfigService;
 use App\Support\Tenancy\TenantDomainService;
 use App\Traits\HasTenantRestoreLogic;
 use Illuminate\Http\Request;
@@ -14,6 +16,7 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rules\Password as PasswordRule;
 
 class SuperAdminController extends ApiController
 {
@@ -90,7 +93,9 @@ class SuperAdminController extends ApiController
     ];
 
     public function __construct(
-        private readonly TenantDomainService $tenantDomainService
+        private readonly TenantDomainService $tenantDomainService,
+        private readonly RfidDeviceService $rfidDeviceService,
+        private readonly TenantMqttConfigService $tenantMqttConfigService
     ) {}
 
     public function me(Request $request)
@@ -203,6 +208,12 @@ class SuperAdminController extends ApiController
 
         $domains = $this->tenantDomainService->listTenantDomains((string) $tenant->id);
         $storage = $this->buildTenantStorageUsage((string) $tenant->id);
+        $rfidMqttConfig = $this->tenantMqttConfigService->tenantConfig(
+            (string) $tenant->id,
+            (string) $tenant->slug,
+            false
+        );
+        $rfidTemplate = $this->buildTenantRfidTemplate($tenant);
 
         return response()->json([
             'data' => [
@@ -239,6 +250,8 @@ class SuperAdminController extends ApiController
                 'admins' => $admins,
                 'domains' => $domains,
                 'storage' => $storage,
+                'rfid_mqtt_config' => $this->tenantMqttConfigService->publicConfig($rfidMqttConfig),
+                'rfid_template' => $rfidTemplate,
                 'password_security' => [
                     'can_view_existing_password' => false,
                     'note' => 'Password lama tidak bisa ditampilkan karena disimpan dalam hash.',
@@ -314,6 +327,147 @@ class SuperAdminController extends ApiController
         );
 
         return response()->json(['data' => $domain], 201);
+    }
+
+    public function updateTenantRfidMqtt(Request $request, string $tenantId)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenant = $this->findTenantByIdOrSlug($tenantId);
+        if (! $tenant) {
+            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'enabled' => ['nullable', 'boolean'],
+            'provider' => ['nullable', 'string', 'in:custom,mosquitto'],
+            'managed_by_platform' => ['nullable', 'boolean'],
+            'host' => ['required', 'string', 'max:191'],
+            'port' => ['required', 'integer', 'min:1', 'max:65535'],
+            'runtime_host' => ['nullable', 'string', 'max:191'],
+            'runtime_port' => ['nullable', 'integer', 'min:1', 'max:65535'],
+            'runtime_use_tls' => ['nullable', 'boolean'],
+            'username' => ['nullable', 'string', 'max:191'],
+            'password' => ['nullable', 'string', 'max:512'],
+            'clear_password' => ['nullable', 'boolean'],
+            'use_tls' => ['nullable', 'boolean'],
+            'tls_verify_peer' => ['nullable', 'boolean'],
+            'tls_verify_peer_name' => ['nullable', 'boolean'],
+            'tls_allow_self_signed' => ['nullable', 'boolean'],
+            'qos' => ['nullable', 'integer', 'min:0', 'max:2'],
+            'client_id_prefix' => ['nullable', 'string', 'max:120'],
+            'scan_topic_template' => ['nullable', 'string', 'max:191'],
+            'response_topic_template' => ['nullable', 'string', 'max:191'],
+            'mode_topic_template' => ['nullable', 'string', 'max:191'],
+            'connect_timeout' => ['nullable', 'integer', 'min:3', 'max:120'],
+            'socket_timeout' => ['nullable', 'integer', 'min:1', 'max:60'],
+            'keep_alive' => ['nullable', 'integer', 'min:3', 'max:300'],
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['error' => $validator->errors()->first()], 422);
+        }
+
+        $payload = $validator->validated();
+        $oldConfig = $this->tenantMqttConfigService->publicConfig(
+            $this->tenantMqttConfigService->tenantConfig((string) $tenant->id, (string) $tenant->slug, false)
+        );
+
+        try {
+            $saved = $this->tenantMqttConfigService->saveTenantConfig(
+                (string) $tenant->id,
+                (string) $tenant->slug,
+                $payload,
+                (string) ($request->user()?->id ?? '')
+            );
+        } catch (\RuntimeException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+        $publicSaved = $this->tenantMqttConfigService->publicConfig($saved);
+        $syncResult = null;
+        if (($saved['provider'] ?? '') === 'mosquitto' && (bool) ($saved['managed_by_platform'] ?? false)) {
+            try {
+                $syncResult = $this->tenantMqttConfigService->syncManagedMosquittoFiles();
+            } catch (\RuntimeException $e) {
+                return response()->json(['error' => $e->getMessage()], 422);
+            }
+        }
+
+        $this->logAudit(
+            $request,
+            'tenant_mqtt_configs',
+            (string) $tenant->id,
+            'UPDATE',
+            $oldConfig,
+            $publicSaved,
+            (string) $tenant->id
+        );
+
+        return response()->json([
+            'data' => [
+                'rfid_mqtt_config' => $publicSaved,
+                'rfid_template' => $this->buildTenantRfidTemplate($tenant),
+                'mosquitto_sync' => $syncResult,
+            ],
+        ]);
+    }
+
+    public function provisionTenantRfidMosquitto(Request $request, string $tenantId)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenant = $this->findTenantByIdOrSlug($tenantId);
+        if (! $tenant) {
+            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'rotate_password' => ['nullable', 'boolean'],
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['error' => $validator->errors()->first()], 422);
+        }
+
+        $oldConfig = $this->tenantMqttConfigService->publicConfig(
+            $this->tenantMqttConfigService->tenantConfig((string) $tenant->id, (string) $tenant->slug, false)
+        );
+
+        try {
+            $result = $this->tenantMqttConfigService->provisionMosquittoTenantConfig(
+                (string) $tenant->id,
+                (string) $tenant->slug,
+                (string) ($request->user()?->id ?? ''),
+                (bool) ($validator->validated()['rotate_password'] ?? false)
+            );
+        } catch (\RuntimeException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+
+        $saved = $result['config'] ?? [];
+        $publicSaved = $this->tenantMqttConfigService->publicConfig(is_array($saved) ? $saved : []);
+
+        $this->logAudit(
+            $request,
+            'tenant_mqtt_configs',
+            (string) $tenant->id,
+            'UPDATE',
+            $oldConfig,
+            $publicSaved,
+            (string) $tenant->id
+        );
+
+        return response()->json([
+            'data' => [
+                'rfid_mqtt_config' => $publicSaved,
+                'rfid_template' => $this->buildTenantRfidTemplate($tenant),
+                'mosquitto_sync' => $result['sync'] ?? null,
+            ],
+        ]);
     }
 
     public function checkDomain(Request $request, string $domainId)
@@ -712,7 +866,7 @@ class SuperAdminController extends ApiController
             'slug' => 'required|string|max:63',
             'admin_name' => 'required|string|max:120',
             'admin_email' => 'required|email|max:255',
-            'admin_password' => 'required|string|min:6',
+            'admin_password' => ['required', 'string', PasswordRule::defaults()],
         ]);
 
         if ($validator->fails()) {
@@ -860,7 +1014,7 @@ class SuperAdminController extends ApiController
 
         $validator = Validator::make($payload, [
             'email' => 'required|email|max:255',
-            'password' => 'nullable|string|min:6',
+            'password' => ['nullable', 'string', PasswordRule::defaults()],
             'name' => 'nullable|string|max:120',
             'tenant_slug' => 'nullable|string|max:63',
         ]);
@@ -1145,7 +1299,7 @@ class SuperAdminController extends ApiController
 
         $payload = $request->only(['password']);
         $validator = Validator::make($payload, [
-            'password' => 'nullable|string|min:8|max:100',
+            'password' => ['nullable', 'string', PasswordRule::defaults(), 'max:100'],
         ]);
         if ($validator->fails()) {
             return response()->json(['error' => $validator->errors()->first()], 422);
@@ -3738,6 +3892,67 @@ class SuperAdminController extends ApiController
         } catch (\Throwable $e) {
             return '';
         }
+    }
+
+    private function buildTenantRfidTemplate(object $tenant): array
+    {
+        $tenantId = trim((string) ($tenant->id ?? ''));
+        $tenantSlug = strtolower(trim((string) ($tenant->slug ?? '')));
+
+        if ($tenantId === '' || $tenantSlug === '') {
+            return [
+                'available' => false,
+                'message' => 'Template RFID tenant tidak valid',
+            ];
+        }
+
+        $template = $this->rfidDeviceService->ensureTenantTemplateDevice($tenantId, $tenantSlug);
+        if (! ($template['success'] ?? false)) {
+            return [
+                'available' => false,
+                'message' => (string) ($template['message'] ?? 'Gagal menyiapkan template RFID tenant'),
+            ];
+        }
+
+        $mqttConfig = $this->tenantMqttConfigService->tenantConfig($tenantId, $tenantSlug, true);
+        $scanTopicTemplate = trim((string) ($mqttConfig['scan_topic_template'] ?? 'edusmart/{tenant}/rfid/scan'));
+        $responseTopicTemplate = trim((string) ($mqttConfig['response_topic_template'] ?? 'edusmart/{tenant}/rfid/response'));
+        $modeTopicTemplate = trim((string) ($mqttConfig['mode_topic_template'] ?? 'edusmart/{tenant}/rfid/mode'));
+        $mqttAvailable = (bool) ($mqttConfig['available'] ?? false);
+
+        return [
+            'available' => $mqttAvailable,
+            'message' => $mqttAvailable
+                ? null
+                : 'Konfigurasi MQTT RFID sekolah belum aktif/lengkap',
+            'tenant_id' => $tenantId,
+            'tenant_slug' => $tenantSlug,
+            'device_id' => (string) ($template['device_id'] ?? ''),
+            'device_name' => (string) ($template['device_name'] ?? ''),
+            'device_secret' => (string) ($template['secret'] ?? ''),
+            'firmware_version' => '2.0.0-mqtt-only',
+            'api_base_url' => rtrim((string) config('app.url', ''), '/'),
+            'mqtt' => [
+                'host' => trim((string) ($mqttConfig['host'] ?? '')),
+                'port' => (int) ($mqttConfig['port'] ?? 8883),
+                'username' => trim((string) ($mqttConfig['username'] ?? '')),
+                'password' => trim((string) ($mqttConfig['password'] ?? '')),
+                'use_tls' => (bool) ($mqttConfig['use_tls'] ?? true),
+                'config_source' => (string) ($mqttConfig['source'] ?? 'global'),
+                'provider' => (string) ($mqttConfig['provider'] ?? 'custom'),
+                'managed_by_platform' => (bool) ($mqttConfig['managed_by_platform'] ?? false),
+            ],
+            'topics' => [
+                'scan' => str_replace('{tenant}', $tenantSlug, $scanTopicTemplate),
+                'response' => str_replace('{tenant}', $tenantSlug, $responseTopicTemplate),
+                'mode' => str_replace('{tenant}', $tenantSlug, $modeTopicTemplate),
+            ],
+            'notes' => [
+                'Template MQTT-only: alat hanya publish scan dan menerima response/mode lewat MQTT.',
+                'Backend tetap memutuskan absensi masuk/pulang, jadwal aktif, dan enroll UID.',
+                'Kalau tenant butuh alat kedua, duplikasi template lalu ubah DEVICE_ID dan daftarkan device baru agar tidak konflik.',
+            ],
+        ];
     }
 
     private function backupTablesForTenant(): array

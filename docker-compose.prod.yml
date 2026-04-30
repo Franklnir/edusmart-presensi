@@ -42,6 +42,86 @@ services:
     networks:
       - internal
 
+  mosquitto_init:
+    image: alpine:3.20
+    container_name: edusmart-mosquitto-init
+    restart: "no"
+    environment:
+      RFID_MOSQUITTO_PUBLIC_HOST: ${RFID_MOSQUITTO_PUBLIC_HOST:-edusmart-mqtt.local}
+    volumes:
+      - ./deploy/mosquitto/generated:/generated
+      - mosquitto_data:/mosquitto-data
+      - mosquitto_log:/mosquitto-log
+    command:
+      - sh
+      - -lc
+      - |
+        set -eu
+        mkdir -p /generated/certs
+        mkdir -p /mosquitto-data /mosquitto-log
+        touch /generated/passwords /generated/aclfile
+        chown -R 82:82 /generated /mosquitto-data /mosquitto-log
+        chmod 0770 /generated
+        chmod 0660 /generated/passwords /generated/aclfile
+        if [ ! -s /generated/certs/server.key ] || [ ! -s /generated/certs/server.crt ]; then
+          apk add --no-cache openssl >/dev/null
+          openssl req -x509 -nodes -newkey rsa:2048 -sha256 -days 3650 \
+            -keyout /generated/certs/server.key \
+            -out /generated/certs/server.crt \
+            -subj "/CN=${RFID_MOSQUITTO_PUBLIC_HOST:-edusmart-mqtt.local}"
+        fi
+        chown -R 82:82 /generated/certs
+        chmod 0750 /generated/certs
+        chmod 0640 /generated/certs/server.key /generated/certs/server.crt
+    networks:
+      - internal
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: edusmart-mosquitto
+    restart: unless-stopped
+    user: "82:82"
+    depends_on:
+      mosquitto_init:
+        condition: service_completed_successfully
+    volumes:
+      - ./deploy/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./deploy/mosquitto/generated:/mosquitto/config/generated:ro
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    expose:
+      - "1883"
+    ports:
+      - "${RFID_MOSQUITTO_PUBLIC_PORT:-8883}:8883"
+    networks:
+      - internal
+
+  mosquitto_reloader:
+    image: alpine:3.20
+    container_name: edusmart-mosquitto-reloader
+    restart: unless-stopped
+    depends_on:
+      mosquitto:
+        condition: service_started
+    pid: "service:mosquitto"
+    volumes:
+      - ./deploy/mosquitto/generated:/generated:ro
+    command:
+      - sh
+      - -lc
+      - |
+        last=""
+        while true; do
+          current="$$(sha256sum /generated/passwords /generated/aclfile /generated/certs/server.crt /generated/certs/server.key 2>/dev/null | sha256sum | awk '{print $$1}')"
+          if [ -n "$$last" ] && [ "$$current" != "$$last" ]; then
+            kill -HUP 1 || true
+          fi
+          last="$$current"
+          sleep 10
+        done
+    networks:
+      - internal
+
   evolution_postgres:
     image: postgres:16-alpine
     container_name: edusmart-evolution-postgres
@@ -84,7 +164,7 @@ services:
       - internal
 
   evolution_api:
-    image: ${EVOLUTION_API_IMAGE:-atendai/evolution-api:v2.1.1}
+    image: ${EVOLUTION_API_IMAGE:-evoapicloud/evolution-api:v2.3.7}
     container_name: edusmart-evolution-api
     restart: unless-stopped
     depends_on:
@@ -115,7 +195,7 @@ services:
       CACHE_REDIS_URI: redis://:${EVOLUTION_REDIS_PASSWORD:?EVOLUTION_REDIS_PASSWORD is required}@evolution_redis:6379/0
       WEBSOCKET_ENABLED: "false"
       TELEMETRY: ${EVOLUTION_TELEMETRY:-false}
-      CORS_ORIGIN: ${EVOLUTION_CORS_ORIGIN:-*}
+      CORS_ORIGIN: ${EVOLUTION_CORS_ORIGIN:?EVOLUTION_CORS_ORIGIN is required}
     volumes:
       - evolution_instances:/evolution/instances
     expose:
@@ -143,7 +223,7 @@ services:
       FRONTEND_URL: ${FRONTEND_URL:?FRONTEND_URL is required}
       LOG_CHANNEL: stack
       LOG_STACK: single
-      LOG_LEVEL: info
+      LOG_LEVEL: ${LOG_LEVEL:-info}
 
       DB_CONNECTION: pgsql
       DB_HOST: postgres
@@ -165,12 +245,16 @@ services:
       SESSION_SECURE_COOKIE: ${SESSION_SECURE_COOKIE:-true}
       SESSION_HTTP_ONLY: ${SESSION_HTTP_ONLY:-true}
       SESSION_SAME_SITE: ${SESSION_SAME_SITE:-lax}
+      SESSION_DOMAIN: ${SESSION_DOMAIN:-}
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-*}
       SANCTUM_STATEFUL_DOMAINS: ${SANCTUM_STATEFUL_DOMAINS:?SANCTUM_STATEFUL_DOMAINS is required}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?CORS_ALLOWED_ORIGINS is required}
       CORS_ALLOWED_ORIGIN_PATTERNS: ${CORS_ALLOWED_ORIGIN_PATTERNS:-}
+      API_RATE_LIMIT_PER_MINUTE: ${API_RATE_LIMIT_PER_MINUTE:-300}
       DB_RATE_LIMIT_PER_MINUTE: ${DB_RATE_LIMIT_PER_MINUTE:-300}
       DB_GUEST_RATE_LIMIT_PER_MINUTE: ${DB_GUEST_RATE_LIMIT_PER_MINUTE:-360}
+      RFID_RATE_LIMIT_PER_MINUTE: ${RFID_RATE_LIMIT_PER_MINUTE:-180}
+      WEBHOOK_RATE_LIMIT_PER_MINUTE: ${WEBHOOK_RATE_LIMIT_PER_MINUTE:-60}
       STORAGE_WRITE_RATE_LIMIT_PER_MINUTE: ${STORAGE_WRITE_RATE_LIMIT_PER_MINUTE:-90}
       STORAGE_READ_RATE_LIMIT_PER_MINUTE: ${STORAGE_READ_RATE_LIMIT_PER_MINUTE:-180}
       STORAGE_GUEST_RATE_LIMIT_PER_MINUTE: ${STORAGE_GUEST_RATE_LIMIT_PER_MINUTE:-60}
@@ -181,10 +265,15 @@ services:
       TENANT_ADMIN_HOSTS: ${TENANT_ADMIN_HOSTS:-}
       TENANT_ALLOW_ROOT_FOR_SUPER_ADMIN: ${TENANT_ALLOW_ROOT_FOR_SUPER_ADMIN:-false}
       TENANT_ALLOW_HEADER_OVERRIDE: ${TENANT_ALLOW_HEADER_OVERRIDE:-false}
+      TENANT_PUBLIC_SCHEME: ${TENANT_PUBLIC_SCHEME:-https}
+      TENANT_DNS_A_RECORD: ${TENANT_DNS_A_RECORD:-}
+      TENANT_DNS_CNAME_TARGET: ${TENANT_DNS_CNAME_TARGET:-}
       TENANT_RESERVED: ${TENANT_RESERVED:-www,app,api,admin}
 
       SUPER_ADMIN_EMAILS: ${SUPER_ADMIN_EMAILS:?SUPER_ADMIN_EMAILS is required}
       SUPER_ADMIN_IDS: ${SUPER_ADMIN_IDS:-}
+      SUPER_ADMIN_ALLOW_EMAIL_FALLBACK: ${SUPER_ADMIN_ALLOW_EMAIL_FALLBACK:-false}
+      PASSWORD_MIN_LENGTH: ${PASSWORD_MIN_LENGTH:-12}
 
       FILESYSTEM_DISK: local
       RUN_MIGRATIONS: ${RUN_MIGRATIONS:-true}
@@ -211,7 +300,8 @@ services:
       EVOLUTION_API_INSTANCE_PREFIX: ${EVOLUTION_API_INSTANCE_PREFIX:-edusmart}
       EVOLUTION_API_TIMEOUT_SECONDS: ${EVOLUTION_API_TIMEOUT_SECONDS:-20}
       EVOLUTION_API_VERIFY_SSL: ${EVOLUTION_API_VERIFY_SSL:-true}
-      RFID_SCAN_SHARED_KEY: ${RFID_SCAN_SHARED_KEY:-}
+      RFID_SCAN_SHARED_KEY: ${RFID_SCAN_SHARED_KEY:?RFID_SCAN_SHARED_KEY is required}
+      RFID_ALLOW_OPEN_HTTP: ${RFID_ALLOW_OPEN_HTTP:-false}
       RFID_MQTT_BRIDGE_ENABLED: ${RFID_MQTT_BRIDGE_ENABLED:-false}
       RFID_MQTT_HOST: ${RFID_MQTT_HOST:-}
       RFID_MQTT_PORT: ${RFID_MQTT_PORT:-8883}
@@ -231,11 +321,30 @@ services:
       RFID_MQTT_DEVICE_TENANT_MAP: ${RFID_MQTT_DEVICE_TENANT_MAP:-{}}
       RFID_MQTT_MODE_SYNC_INTERVAL: ${RFID_MQTT_MODE_SYNC_INTERVAL:-20}
       RFID_MQTT_RECONNECT_DELAY: ${RFID_MQTT_RECONNECT_DELAY:-5}
+      RFID_MQTT_CONFIG_RELOAD_INTERVAL: ${RFID_MQTT_CONFIG_RELOAD_INTERVAL:-60}
+      RFID_MOSQUITTO_ENABLED: ${RFID_MOSQUITTO_ENABLED:-true}
+      RFID_MOSQUITTO_PUBLIC_HOST: ${RFID_MOSQUITTO_PUBLIC_HOST:-}
+      RFID_MOSQUITTO_PUBLIC_PORT: ${RFID_MOSQUITTO_PUBLIC_PORT:-8883}
+      RFID_MOSQUITTO_PUBLIC_USE_TLS: ${RFID_MOSQUITTO_PUBLIC_USE_TLS:-true}
+      RFID_MOSQUITTO_INTERNAL_HOST: ${RFID_MOSQUITTO_INTERNAL_HOST:-mosquitto}
+      RFID_MOSQUITTO_INTERNAL_PORT: ${RFID_MOSQUITTO_INTERNAL_PORT:-1883}
+      RFID_MOSQUITTO_INTERNAL_USE_TLS: ${RFID_MOSQUITTO_INTERNAL_USE_TLS:-false}
+      RFID_MOSQUITTO_BRIDGE_USERNAME: ${RFID_MOSQUITTO_BRIDGE_USERNAME:-edusmart_bridge}
+      RFID_MOSQUITTO_BRIDGE_PASSWORD: ${RFID_MOSQUITTO_BRIDGE_PASSWORD:-}
+      RFID_MOSQUITTO_TENANT_USERNAME_PREFIX: ${RFID_MOSQUITTO_TENANT_USERNAME_PREFIX:-edusmart}
+      RFID_MOSQUITTO_TOPIC_PREFIX: ${RFID_MOSQUITTO_TOPIC_PREFIX:-edusmart}
+      RFID_MOSQUITTO_PASSWD_BINARY: ${RFID_MOSQUITTO_PASSWD_BINARY:-mosquitto_passwd}
+      RFID_MOSQUITTO_FILE_UID: ${RFID_MOSQUITTO_FILE_UID:-82}
+      RFID_MOSQUITTO_FILE_GID: ${RFID_MOSQUITTO_FILE_GID:-82}
+      RFID_MOSQUITTO_FILE_MODE: ${RFID_MOSQUITTO_FILE_MODE:-0660}
+      RFID_MOSQUITTO_PASSWORD_FILE: ${RFID_MOSQUITTO_PASSWORD_FILE:-/var/www/html/mosquitto/passwords}
+      RFID_MOSQUITTO_ACL_FILE: ${RFID_MOSQUITTO_ACL_FILE:-/var/www/html/mosquitto/aclfile}
       CADDY_ASK_SECRET: ${CADDY_ASK_SECRET:-}
       CADDY_EVOLUTION_HOST: ${CADDY_EVOLUTION_HOST:-evolution.localhost.invalid}
     volumes:
       - backend_storage:/var/www/html/storage
       - backend_bootstrap_cache:/var/www/html/bootstrap/cache
+      - ./deploy/mosquitto/generated:/var/www/html/mosquitto
     expose:
       - "9000"
     networks:
@@ -276,6 +385,7 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
 
       SANCTUM_STATEFUL_DOMAINS: ${SANCTUM_STATEFUL_DOMAINS:?SANCTUM_STATEFUL_DOMAINS is required}
+      SESSION_DOMAIN: ${SESSION_DOMAIN:-}
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-*}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?CORS_ALLOWED_ORIGINS is required}
       CORS_ALLOWED_ORIGIN_PATTERNS: ${CORS_ALLOWED_ORIGIN_PATTERNS:-}
@@ -284,7 +394,12 @@ services:
       TENANT_ADMIN_HOSTS: ${TENANT_ADMIN_HOSTS:-}
       TENANT_ALLOW_ROOT_FOR_SUPER_ADMIN: ${TENANT_ALLOW_ROOT_FOR_SUPER_ADMIN:-false}
       TENANT_ALLOW_HEADER_OVERRIDE: ${TENANT_ALLOW_HEADER_OVERRIDE:-false}
+      TENANT_PUBLIC_SCHEME: ${TENANT_PUBLIC_SCHEME:-https}
+      TENANT_DNS_A_RECORD: ${TENANT_DNS_A_RECORD:-}
+      TENANT_DNS_CNAME_TARGET: ${TENANT_DNS_CNAME_TARGET:-}
       SUPER_ADMIN_EMAILS: ${SUPER_ADMIN_EMAILS:?SUPER_ADMIN_EMAILS is required}
+      SUPER_ADMIN_ALLOW_EMAIL_FALLBACK: ${SUPER_ADMIN_ALLOW_EMAIL_FALLBACK:-false}
+      PASSWORD_MIN_LENGTH: ${PASSWORD_MIN_LENGTH:-12}
       FRONTEND_URL: ${FRONTEND_URL:?FRONTEND_URL is required}
       MAIL_MAILER: ${MAIL_MAILER:-smtp}
       MAIL_SCHEME: ${MAIL_SCHEME:-smtp}
@@ -342,6 +457,7 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
 
       SANCTUM_STATEFUL_DOMAINS: ${SANCTUM_STATEFUL_DOMAINS:?SANCTUM_STATEFUL_DOMAINS is required}
+      SESSION_DOMAIN: ${SESSION_DOMAIN:-}
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-*}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?CORS_ALLOWED_ORIGINS is required}
       CORS_ALLOWED_ORIGIN_PATTERNS: ${CORS_ALLOWED_ORIGIN_PATTERNS:-}
@@ -350,7 +466,12 @@ services:
       TENANT_ADMIN_HOSTS: ${TENANT_ADMIN_HOSTS:-}
       TENANT_ALLOW_ROOT_FOR_SUPER_ADMIN: ${TENANT_ALLOW_ROOT_FOR_SUPER_ADMIN:-false}
       TENANT_ALLOW_HEADER_OVERRIDE: ${TENANT_ALLOW_HEADER_OVERRIDE:-false}
+      TENANT_PUBLIC_SCHEME: ${TENANT_PUBLIC_SCHEME:-https}
+      TENANT_DNS_A_RECORD: ${TENANT_DNS_A_RECORD:-}
+      TENANT_DNS_CNAME_TARGET: ${TENANT_DNS_CNAME_TARGET:-}
       SUPER_ADMIN_EMAILS: ${SUPER_ADMIN_EMAILS:?SUPER_ADMIN_EMAILS is required}
+      SUPER_ADMIN_ALLOW_EMAIL_FALLBACK: ${SUPER_ADMIN_ALLOW_EMAIL_FALLBACK:-false}
+      PASSWORD_MIN_LENGTH: ${PASSWORD_MIN_LENGTH:-12}
       FRONTEND_URL: ${FRONTEND_URL:?FRONTEND_URL is required}
       MAIL_MAILER: ${MAIL_MAILER:-smtp}
       MAIL_SCHEME: ${MAIL_SCHEME:-smtp}
@@ -384,6 +505,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      mosquitto:
+        condition: service_started
     environment:
       APP_ROLE: rfid-bridge
       APP_ENV: production
@@ -393,7 +516,7 @@ services:
       FRONTEND_URL: ${FRONTEND_URL:?FRONTEND_URL is required}
       LOG_CHANNEL: stack
       LOG_STACK: single
-      LOG_LEVEL: info
+      LOG_LEVEL: ${LOG_LEVEL:-info}
 
       DB_CONNECTION: pgsql
       DB_HOST: postgres
@@ -413,6 +536,7 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
 
       SANCTUM_STATEFUL_DOMAINS: ${SANCTUM_STATEFUL_DOMAINS:?SANCTUM_STATEFUL_DOMAINS is required}
+      SESSION_DOMAIN: ${SESSION_DOMAIN:-}
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-*}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?CORS_ALLOWED_ORIGINS is required}
       CORS_ALLOWED_ORIGIN_PATTERNS: ${CORS_ALLOWED_ORIGIN_PATTERNS:-}
@@ -423,11 +547,17 @@ services:
       TENANT_ADMIN_HOSTS: ${TENANT_ADMIN_HOSTS:-}
       TENANT_ALLOW_ROOT_FOR_SUPER_ADMIN: ${TENANT_ALLOW_ROOT_FOR_SUPER_ADMIN:-false}
       TENANT_ALLOW_HEADER_OVERRIDE: ${TENANT_ALLOW_HEADER_OVERRIDE:-false}
+      TENANT_PUBLIC_SCHEME: ${TENANT_PUBLIC_SCHEME:-https}
+      TENANT_DNS_A_RECORD: ${TENANT_DNS_A_RECORD:-}
+      TENANT_DNS_CNAME_TARGET: ${TENANT_DNS_CNAME_TARGET:-}
       TENANT_RESERVED: ${TENANT_RESERVED:-www,app,api,admin}
       SUPER_ADMIN_EMAILS: ${SUPER_ADMIN_EMAILS:?SUPER_ADMIN_EMAILS is required}
       SUPER_ADMIN_IDS: ${SUPER_ADMIN_IDS:-}
+      SUPER_ADMIN_ALLOW_EMAIL_FALLBACK: ${SUPER_ADMIN_ALLOW_EMAIL_FALLBACK:-false}
+      PASSWORD_MIN_LENGTH: ${PASSWORD_MIN_LENGTH:-12}
 
-      RFID_SCAN_SHARED_KEY: ${RFID_SCAN_SHARED_KEY:-}
+      RFID_SCAN_SHARED_KEY: ${RFID_SCAN_SHARED_KEY:?RFID_SCAN_SHARED_KEY is required}
+      RFID_ALLOW_OPEN_HTTP: ${RFID_ALLOW_OPEN_HTTP:-false}
       RFID_MQTT_BRIDGE_ENABLED: ${RFID_MQTT_BRIDGE_ENABLED:-true}
       RFID_MQTT_HOST: ${RFID_MQTT_HOST:-}
       RFID_MQTT_PORT: ${RFID_MQTT_PORT:-8883}
@@ -447,10 +577,38 @@ services:
       RFID_MQTT_DEVICE_TENANT_MAP: ${RFID_MQTT_DEVICE_TENANT_MAP:-{}}
       RFID_MQTT_MODE_SYNC_INTERVAL: ${RFID_MQTT_MODE_SYNC_INTERVAL:-20}
       RFID_MQTT_RECONNECT_DELAY: ${RFID_MQTT_RECONNECT_DELAY:-5}
+      RFID_MQTT_CONFIG_RELOAD_INTERVAL: ${RFID_MQTT_CONFIG_RELOAD_INTERVAL:-60}
+      RFID_MOSQUITTO_ENABLED: ${RFID_MOSQUITTO_ENABLED:-true}
+      RFID_MOSQUITTO_PUBLIC_HOST: ${RFID_MOSQUITTO_PUBLIC_HOST:-}
+      RFID_MOSQUITTO_PUBLIC_PORT: ${RFID_MOSQUITTO_PUBLIC_PORT:-8883}
+      RFID_MOSQUITTO_PUBLIC_USE_TLS: ${RFID_MOSQUITTO_PUBLIC_USE_TLS:-true}
+      RFID_MOSQUITTO_INTERNAL_HOST: ${RFID_MOSQUITTO_INTERNAL_HOST:-mosquitto}
+      RFID_MOSQUITTO_INTERNAL_PORT: ${RFID_MOSQUITTO_INTERNAL_PORT:-1883}
+      RFID_MOSQUITTO_INTERNAL_USE_TLS: ${RFID_MOSQUITTO_INTERNAL_USE_TLS:-false}
+      RFID_MOSQUITTO_BRIDGE_USERNAME: ${RFID_MOSQUITTO_BRIDGE_USERNAME:-edusmart_bridge}
+      RFID_MOSQUITTO_BRIDGE_PASSWORD: ${RFID_MOSQUITTO_BRIDGE_PASSWORD:-}
+      RFID_MOSQUITTO_TENANT_USERNAME_PREFIX: ${RFID_MOSQUITTO_TENANT_USERNAME_PREFIX:-edusmart}
+      RFID_MOSQUITTO_TOPIC_PREFIX: ${RFID_MOSQUITTO_TOPIC_PREFIX:-edusmart}
+      RFID_MOSQUITTO_PASSWD_BINARY: ${RFID_MOSQUITTO_PASSWD_BINARY:-mosquitto_passwd}
+      RFID_MOSQUITTO_FILE_UID: ${RFID_MOSQUITTO_FILE_UID:-82}
+      RFID_MOSQUITTO_FILE_GID: ${RFID_MOSQUITTO_FILE_GID:-82}
+      RFID_MOSQUITTO_FILE_MODE: ${RFID_MOSQUITTO_FILE_MODE:-0660}
+      RFID_MOSQUITTO_PASSWORD_FILE: ${RFID_MOSQUITTO_PASSWORD_FILE:-/var/www/html/mosquitto/passwords}
+      RFID_MOSQUITTO_ACL_FILE: ${RFID_MOSQUITTO_ACL_FILE:-/var/www/html/mosquitto/aclfile}
     volumes:
       - backend_storage:/var/www/html/storage
       - backend_bootstrap_cache:/var/www/html/bootstrap/cache
-    command: ["php", "artisan", "rfid:mqtt-bridge"]
+      - ./deploy/mosquitto/generated:/var/www/html/mosquitto
+    command:
+      - sh
+      - -lc
+      - |
+        if [ "${RFID_MQTT_BRIDGE_ENABLED:-true}" != "true" ]; then
+          echo "RFID MQTT bridge disabled; container kept idle."
+          trap : TERM INT
+          sleep infinity & wait
+        fi
+        exec php artisan rfid:mqtt-bridge
     networks:
       - internal
 
@@ -466,6 +624,7 @@ services:
         VITE_REALTIME_POLL_MS: ${VITE_REALTIME_POLL_MS:-4000}
         VITE_REALTIME_POLL_HIDDEN_MS: ${VITE_REALTIME_POLL_HIDDEN_MS:-12000}
         VITE_GOOGLE_AUTH_ENABLED: ${VITE_GOOGLE_AUTH_ENABLED:-false}
+        VITE_GOOGLE_CLIENT_ID: ${VITE_GOOGLE_CLIENT_ID:-}
         VITE_GOOGLE_AUTH_LOGIN_URL: ${VITE_GOOGLE_AUTH_LOGIN_URL:-/api/auth/google/redirect}
         VITE_GOOGLE_AUTH_LINK_URL: ${VITE_GOOGLE_AUTH_LINK_URL:-/api/auth/google/link}
     container_name: edusmart-nginx
@@ -513,6 +672,8 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  mosquitto_data:
+  mosquitto_log:
   evolution_postgres_data:
   evolution_redis_data:
   evolution_instances:

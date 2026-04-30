@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Validation\Rules\Password as PasswordRule;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -33,6 +34,13 @@ class AppServiceProvider extends ServiceProvider
         );
 
         $frontendUrl = $this->safeFrontendBaseUrl();
+        $passwordMinLength = max(12, (int) env('PASSWORD_MIN_LENGTH', 12));
+
+        PasswordRule::defaults(static fn () => PasswordRule::min($passwordMinLength)
+            ->letters()
+            ->mixedCase()
+            ->numbers()
+            ->symbols());
 
         ResetPassword::createUrlUsing(function (object $user, string $token) use ($frontendUrl): string {
             $tenantFrontendUrl = $this->tenantFrontendBaseUrlForUser($user, $frontendUrl);
@@ -74,6 +82,28 @@ class AppServiceProvider extends ServiceProvider
             $perMinute = $clampInt('API_RATE_LIMIT_PER_MINUTE', 300, 60, 1200);
 
             return Limit::perMinute($perMinute)->by('api|'.$key);
+        });
+
+        RateLimiter::for('rfid', function (Request $request) use ($clampInt) {
+            $tenant = strtolower(trim((string) (
+                $request->input('tenant_slug')
+                ?? $request->query('tenant_slug')
+                ?? $request->header(config('tenancy.header', 'X-Tenant'), 'global')
+            )));
+            $device = strtolower(trim((string) (
+                $request->header('X-RFID-Device')
+                ?: $request->input('device_id')
+                ?: $request->ip()
+            )));
+            $perMinute = $clampInt('RFID_RATE_LIMIT_PER_MINUTE', 180, 30, 1200);
+
+            return Limit::perMinute($perMinute)->by('rfid|'.$tenant.'|'.$device.'|'.$request->ip());
+        });
+
+        RateLimiter::for('webhook', function (Request $request) use ($clampInt) {
+            $perMinute = $clampInt('WEBHOOK_RATE_LIMIT_PER_MINUTE', 60, 10, 600);
+
+            return Limit::perMinute($perMinute)->by('webhook|'.$request->ip());
         });
 
         RateLimiter::for('db', function (Request $request) use ($clampInt) {

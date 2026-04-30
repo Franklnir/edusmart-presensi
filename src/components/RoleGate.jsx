@@ -11,6 +11,12 @@ const RoleGate = ({ allow = [] }) => {
   const attemptedRef = useRef(false)
   const location = useLocation()
   const role = profile?.role
+  const nextPath = `${location.pathname}${location.search}${location.hash}`
+  const loginParams = new URLSearchParams()
+  if (nextPath && nextPath !== '/login') {
+    loginParams.set('next', nextPath)
+  }
+  const loginTarget = loginParams.toString() ? `/login?${loginParams.toString()}` : '/login'
 
   const canBypassAdmin = allow.includes('admin') && isSuperAdmin
   const needsAccountSetup = shouldForceAccountSetup(profile, user?.email)
@@ -27,11 +33,11 @@ const RoleGate = ({ allow = [] }) => {
     return <LoadingSpinner />
   }
 
-  if (!user) return <Navigate to="/login" replace />
+  if (!user) return <Navigate to={loginTarget} replace />
 
   if (!profile) return <LoadingSpinner />
 
-  if (!isValidRole(role)) return <Navigate to="/login" replace />
+  if (!isValidRole(role)) return <Navigate to={loginTarget} replace />
 
   if (needsAccountSetup && !canBypassAdmin) {
     const target = role === 'siswa' ? '/siswa/profile' : '/guru/profile'

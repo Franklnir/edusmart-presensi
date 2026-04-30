@@ -212,11 +212,29 @@ export const readRowsFromSpreadsheetFile = async (file) => {
     return readRowsFromCsvText(text)
   }
 
+  if (name.endsWith('.xls') && !name.endsWith('.xlsx')) {
+    throw new Error('File Excel .xls lama belum didukung. Simpan ulang sebagai .xlsx atau .csv lalu coba lagi.')
+  }
+
   const buffer = await file.arrayBuffer()
   const ExcelJS = await loadExcelJsBrowser()
   const workbook = new ExcelJS.Workbook()
-  await workbook.xlsx.load(buffer)
-  const worksheet = workbook.worksheets[0]
+
+  try {
+    await workbook.xlsx.load(buffer)
+  } catch (error) {
+    const message = String(error?.message || '')
+    if (message.includes('sheets')) {
+      throw new Error('File Excel tidak valid atau belum didukung. Coba buka lalu simpan ulang sebagai .xlsx atau .csv.')
+    }
+    throw new Error('File Excel tidak bisa dibaca. Pastikan formatnya .xlsx atau .csv yang valid.')
+  }
+
+  const worksheet = workbook?.worksheets?.[0]
+  if (!worksheet) {
+    throw new Error('Sheet pertama tidak ditemukan. Pastikan file berisi minimal 1 sheet yang terisi.')
+  }
+
   return worksheetToRows(worksheet)
 }
 

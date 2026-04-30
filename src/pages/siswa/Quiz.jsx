@@ -6,13 +6,6 @@ import { useUIStore } from '../../store/useUIStore'
 import { formatDateTime } from '../../lib/time'
 import FilePreviewModal from '../../components/FilePreviewModal'
 
-const makeId = () => {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
-  }
-  return `id-${Date.now()}-${Math.random().toString(16).slice(2)}`
-}
-
 const safeDate = (value) => {
   if (!value) return null
   const d = new Date(value)
@@ -53,6 +46,84 @@ const normalizeQuestionType = (value) => {
   return 'mcq'
 }
 
+const normalizeAnswerOrder = (value) => {
+  if (!value) return null
+  let parsed = value
+  if (typeof value === 'string') {
+    try {
+      parsed = JSON.parse(value)
+    } catch {
+      return null
+    }
+  }
+  if (!parsed || typeof parsed !== 'object') return null
+  const questions = Array.isArray(parsed.questions)
+    ? parsed.questions.map((id) => String(id || '')).filter(Boolean)
+    : []
+  const options = {}
+  Object.entries(parsed.options || {}).forEach(([questionId, optionIds]) => {
+    if (!Array.isArray(optionIds)) return
+    options[String(questionId)] = optionIds.map((id) => String(id || '')).filter(Boolean)
+  })
+  return { questions, options }
+}
+
+const getOptionDisplayLabel = (index) => (
+  index >= 0 && index < 26 ? String.fromCharCode(65 + index) : String(index + 1)
+)
+
+const applyQuizOrder = (questionRows = [], groupedOptions = {}, rawOrder = null) => {
+  const order = normalizeAnswerOrder(rawOrder)
+  if (!order) {
+    return {
+      questions: questionRows || [],
+      optionsByQuestion: groupedOptions || {}
+    }
+  }
+
+  const questionMap = new Map((questionRows || []).map((question) => [String(question.id), question]))
+  const seenQuestions = new Set()
+  const orderedQuestions = []
+  ;(order.questions || []).forEach((questionId) => {
+    const question = questionMap.get(String(questionId))
+    if (!question) return
+    seenQuestions.add(String(questionId))
+    orderedQuestions.push(question)
+  })
+  ;(questionRows || []).forEach((question) => {
+    const questionId = String(question.id)
+    if (seenQuestions.has(questionId)) return
+    orderedQuestions.push(question)
+  })
+
+  const orderedGrouped = {}
+  Object.entries(groupedOptions || {}).forEach(([questionId, options]) => {
+    const optionMap = new Map((options || []).map((option) => [String(option.id), option]))
+    const seenOptions = new Set()
+    const orderedOptions = []
+    ;(order.options?.[questionId] || []).forEach((optionId) => {
+      const option = optionMap.get(String(optionId))
+      if (!option) return
+      seenOptions.add(String(optionId))
+      orderedOptions.push(option)
+    })
+    ;(options || []).forEach((option) => {
+      const optionId = String(option.id)
+      if (seenOptions.has(optionId)) return
+      orderedOptions.push(option)
+    })
+    orderedGrouped[questionId] = orderedOptions.map((option, index) => ({
+      ...option,
+      label: getOptionDisplayLabel(index)
+    }))
+  })
+
+  return {
+    questions: orderedQuestions,
+    optionsByQuestion: orderedGrouped
+  }
+}
+
 const FULLSCREEN_REQUIRED_MESSAGE = 'Quiz wajib mode fullscreen. Klik Izinkan Fullscreen di browser untuk mulai.'
 const FULLSCREEN_FAILED_MESSAGE = 'Gagal masuk fullscreen. Aktifkan izin fullscreen pada browser lalu coba lagi.'
 const MONTH_FILTER_ALL = ''
@@ -62,9 +133,14 @@ const MONTH_FILTER_LAST_12 = '__last_12_months'
 const getQuizStatus = (quiz, submission, now = new Date()) => {
   const startsAt = safeDate(quiz?.starts_at)
   const deadline = safeDate(quiz?.deadline_at)
+  const closedAt = safeDate(quiz?.closed_at)
 
   if (submission?.status === 'finished') {
     return { label: 'Selesai', tone: 'bg-green-100 text-green-700 border border-green-200', canStart: false, kind: 'done' }
+  }
+
+  if (closedAt) {
+    return { label: 'Ditutup guru', tone: 'bg-red-100 text-red-600 border border-red-200', canStart: false, kind: 'expired' }
   }
 
   if (!startsAt) {
@@ -299,6 +375,7 @@ export default function SiswaQuiz() {
     seconds: 3,
     quizId: ''
   })
+  const [accessCodeInput, setAccessCodeInput] = useState('')
   const [violationCount, setViolationCount] = useState(0)
   const [violationMessage, setViolationMessage] = useState('')
   const [violationPrompt, setViolationPrompt] = useState({
@@ -383,6 +460,10 @@ export default function SiswaQuiz() {
   useEffect(() => {
     selectedQuizIdRef.current = selectedQuizId || ''
   }, [selectedQuizId])
+
+  useEffect(() => {
+    setAccessCodeInput('')
+  }, [selectedQuiz?.id])
 
   useEffect(() => {
     if (isSessionPage) return
@@ -679,15 +760,12 @@ export default function SiswaQuiz() {
     violationLogRef.current = { key: dedupeKey, at: nowMs }
 
     try {
-      await supabase.from('quiz_violation_logs').insert({
-        id: makeId(),
+      await supabase.quiz.logViolation({
         quiz_id: quizId,
         submission_id: submissionId,
-        siswa_id: siswaId,
         event_type: normalizedType,
         event_message: normalizedMessage || null,
-        event_meta: meta && typeof meta === 'object' ? meta : null,
-        created_at: new Date().toISOString()
+        event_meta: meta && typeof meta === 'object' ? meta : null
       })
     } catch {
       // no-op: logging tidak boleh mengganggu quiz
@@ -1030,8 +1108,9 @@ export default function SiswaQuiz() {
         })
       }
 
-      setQuestions(questionRows || [])
-      setOptionsByQuestion(grouped)
+      const orderedDetail = applyQuizOrder(questionRows || [], grouped, submissionRow?.answer_order)
+      setQuestions(orderedDetail.questions)
+      setOptionsByQuestion(orderedDetail.optionsByQuestion)
       setAnswers(answerMap)
       setAnswerIds(answerIdMap)
       setAnswerRowsByQuestion(answerRowMap)
@@ -1078,41 +1157,27 @@ export default function SiswaQuiz() {
     }
     if (sub?.status === 'finished') return sub
 
-    if (!sub) {
-      const { data: existing } = await supabase
-        .from('quiz_submissions')
-        .select('*')
-        .eq('quiz_id', selectedQuiz.id)
-        .eq('siswa_id', user.id)
-        .maybeSingle()
-      if (existing) sub = existing
+    const { data, error } = await supabase.quiz.start({
+      quiz_id: selectedQuiz.id,
+      access_code: accessCodeInput.trim() || undefined,
+      client_meta: {
+        fullscreen: Boolean(document.fullscreenElement),
+        user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+        viewport: typeof window !== 'undefined'
+          ? { width: window.innerWidth, height: window.innerHeight }
+          : null
+      }
+    })
+    if (error) throw error
+
+    sub = data?.submission || sub
+    if (Array.isArray(data?.questions)) {
+      setQuestions(data.questions)
+      setOptionsByQuestion(data.options_by_question || {})
+      setQuizDetailsLoadedForId(selectedQuiz.id)
     }
 
-    if (!sub) {
-      const newId = makeId()
-      const nowIso = new Date().toISOString()
-      const { error } = await supabase
-        .from('quiz_submissions')
-        .insert({
-          id: newId,
-          quiz_id: selectedQuiz.id,
-          siswa_id: user.id,
-          status: 'ongoing',
-          started_at: nowIso,
-          created_at: nowIso,
-          updated_at: nowIso
-        })
-      if (error) throw error
-      sub = {
-        id: newId,
-        quiz_id: selectedQuiz.id,
-        siswa_id: user.id,
-        status: 'ongoing',
-        started_at: nowIso,
-        created_at: nowIso,
-        updated_at: nowIso
-      }
-    }
+    if (!sub) return null
 
     setSubmission(sub)
     setQuizList((prev) => prev.map((q) => (
@@ -1149,8 +1214,7 @@ export default function SiswaQuiz() {
     if (!sub?.id) return
 
     const mode = normalizeQuestionType(questionType)
-    const answerId = answerIds[questionId] || makeId()
-    const nowIso = new Date().toISOString()
+    const answerId = answerIds[questionId] || ''
     const optionId = mode === 'mcq' ? (value || null) : null
     const essayAnswer = mode === 'essay'
       ? (() => {
@@ -1158,19 +1222,14 @@ export default function SiswaQuiz() {
           return text.trim() ? text : null
         })()
       : null
-    const payload = {
+    const { data, error } = await supabase.quiz.saveAnswer({
       id: answerId,
+      quiz_id: selectedQuiz.id,
       submission_id: sub.id,
       question_id: questionId,
       option_id: optionId,
-      essay_answer: essayAnswer,
-      created_at: nowIso,
-      updated_at: nowIso
-    }
-
-    const { error } = await supabase
-      .from('quiz_answers')
-      .upsert(payload, { onConflict: 'submission_id,question_id' })
+      essay_answer: essayAnswer
+    })
 
     if (error) {
       if (!options?.silent) {
@@ -1180,7 +1239,22 @@ export default function SiswaQuiz() {
     }
 
     setAnswers((prev) => ({ ...prev, [questionId]: mode === 'essay' ? String(value || '') : optionId }))
-    setAnswerIds((prev) => ({ ...prev, [questionId]: answerId }))
+    const savedAnswerId = data?.answer_id || answerId
+    if (savedAnswerId) {
+      setAnswerIds((prev) => ({ ...prev, [questionId]: savedAnswerId }))
+      setAnswerRowsByQuestion((prev) => ({
+        ...prev,
+        [questionId]: {
+          ...(prev[questionId] || {}),
+          id: savedAnswerId,
+          submission_id: sub.id,
+          question_id: questionId,
+          option_id: optionId,
+          essay_answer: essayAnswer,
+          saved_at: data?.saved_at || new Date().toISOString()
+        }
+      }))
+    }
   }
 
   const handleEssayChange = (questionId, value) => {
@@ -1771,6 +1845,16 @@ export default function SiswaQuiz() {
                             : 'Klik mulai untuk masuk fullscreen, lalu kerjakan quiz tanpa pindah tab.'}
                         </div>
                       </div>
+                      <div className="w-full sm:max-w-xs">
+                        <label className="text-xs font-semibold text-sky-800">Kode Akses</label>
+                        <input
+                          type="password"
+                          className="mt-1 w-full rounded-xl border border-sky-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
+                          value={accessCodeInput}
+                          onChange={(e) => setAccessCodeInput(e.target.value)}
+                          placeholder="Isi jika diminta"
+                        />
+                      </div>
                       {sessionPrepared && (
                         <button
                           type="button"
@@ -2304,6 +2388,16 @@ export default function SiswaQuiz() {
                         <span className="text-[11px] px-2.5 py-1 rounded-full bg-amber-100 text-amber-700 border border-amber-200">
                           Hindari pindah tab/aplikasi
                         </span>
+                      </div>
+                      <div className="mt-3 max-w-sm">
+                        <label className="text-xs font-semibold text-slate-600">Kode Akses</label>
+                        <input
+                          type="password"
+                          className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
+                          value={accessCodeInput}
+                          onChange={(e) => setAccessCodeInput(e.target.value)}
+                          placeholder="Isi jika diberikan guru"
+                        />
                       </div>
                     </div>
 

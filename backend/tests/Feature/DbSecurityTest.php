@@ -24,6 +24,7 @@ class DbSecurityTest extends TestCase
             'manual_jam_masuk_mulai' => '07:00:00',
             'manual_jam_masuk_selesai' => '08:00:00',
             'admin_lock_enabled' => true,
+            'registrasi_admin_aktif' => true,
             'created_at' => now(),
             'updated_at' => now(),
         ]);
@@ -42,6 +43,35 @@ class DbSecurityTest extends TestCase
         $this->assertArrayNotHasKey('manual_jam_masuk_mulai', $row);
         $this->assertArrayNotHasKey('manual_jam_masuk_selesai', $row);
         $this->assertArrayNotHasKey('admin_lock_enabled', $row);
+        $this->assertArrayNotHasKey('registrasi_admin_aktif', $row);
+    }
+
+    public function test_db_rejects_unknown_filter_and_order_columns(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        [$user] = $this->createUserWithProfile($tenantId, 'admin', 'X-1');
+
+        $badFilter = $this->actingAs($user)->postJson('/api/db', [
+            'table' => 'profiles',
+            'action' => 'select',
+            'filters' => [
+                'eq' => ['not_a_column' => 'x'],
+            ],
+        ]);
+
+        $badFilter->assertStatus(422);
+        $badFilter->assertJsonPath('error', 'Kolom filter tidak diizinkan');
+
+        $badOrder = $this->actingAs($user)->postJson('/api/db', [
+            'table' => 'profiles',
+            'action' => 'select',
+            'order' => [
+                ['field' => 'not_a_column', 'dir' => 'asc'],
+            ],
+        ]);
+
+        $badOrder->assertStatus(422);
+        $badOrder->assertJsonPath('error', 'Kolom order tidak diizinkan');
     }
 
     public function test_siswa_cannot_insert_tugas_jawaban_for_other_class(): void

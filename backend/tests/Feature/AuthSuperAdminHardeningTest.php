@@ -20,7 +20,7 @@ class AuthSuperAdminHardeningTest extends TestCase
         $response = $this->postJson('/api/auth/register', [
             'nama' => 'User Biasa',
             'email' => 'root@example.com',
-            'password' => 'password123',
+            'password' => 'Str0ng!Passw0rd',
             'role' => 'siswa',
         ]);
 
@@ -37,8 +37,8 @@ class AuthSuperAdminHardeningTest extends TestCase
 
         $response = $this->actingAs($user)->postJson('/api/auth/update-account', [
             'email' => 'root@example.com',
-            'password' => 'newPassword123',
-            'password_confirmation' => 'newPassword123',
+            'password' => 'NewStr0ng!Passw0rd',
+            'password_confirmation' => 'NewStr0ng!Passw0rd',
         ]);
 
         $response->assertStatus(403);
@@ -71,7 +71,7 @@ class AuthSuperAdminHardeningTest extends TestCase
         $response->assertJsonPath('error', 'Akses tenant ditolak');
     }
 
-    public function test_forgot_password_rejects_super_admin_email(): void
+    public function test_forgot_password_returns_generic_response_for_super_admin_email(): void
     {
         config()->set('superadmin.emails', ['root@example.com']);
 
@@ -81,11 +81,11 @@ class AuthSuperAdminHardeningTest extends TestCase
                 'email' => 'root@example.com',
             ]);
 
-        $response->assertStatus(403);
-        $response->assertJsonPath('error', 'Reset password untuk akun super admin dinonaktifkan');
+        $response->assertOk();
+        $response->assertJsonPath('data', 'Jika email terdaftar dan memenuhi syarat, link reset password akan dikirim.');
     }
 
-    public function test_forgot_password_rejects_admin_role(): void
+    public function test_forgot_password_returns_generic_response_for_admin_role(): void
     {
         $tenantId = $this->defaultTenantId();
         [$adminUser] = $this->createUserWithProfile($tenantId, 'admin', 'x-a', 'admin@example.com');
@@ -96,8 +96,8 @@ class AuthSuperAdminHardeningTest extends TestCase
                 'email' => $adminUser->email,
             ]);
 
-        $response->assertStatus(403);
-        $response->assertJsonPath('error', 'Reset password untuk akun admin dinonaktifkan. Hubungi super admin.');
+        $response->assertOk();
+        $response->assertJsonPath('data', 'Jika email terdaftar dan memenuhi syarat, link reset password akan dikirim.');
     }
 
     public function test_forgot_password_allows_guru_and_siswa_roles(): void
@@ -121,6 +121,30 @@ class AuthSuperAdminHardeningTest extends TestCase
         $siswaResponse->assertStatus(200);
     }
 
+    public function test_public_register_rejects_admin_role_even_when_setting_enabled(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        DB::table('settings')->insert([
+            'tenant_id' => $tenantId,
+            'registrasi_admin_aktif' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $response = $this->postJson('/api/auth/register', [
+            'nama' => 'Admin Publik',
+            'email' => 'public-admin@example.com',
+            'password' => 'Str0ng!Passw0rd',
+            'role' => 'admin',
+        ]);
+
+        $response->assertStatus(403);
+        $response->assertJsonPath('error', 'Registrasi admin publik tidak diizinkan. Admin baru harus dibuat dari panel admin.');
+        $this->assertDatabaseMissing('users', [
+            'email' => 'public-admin@example.com',
+        ]);
+    }
+
     public function test_reset_password_rejects_admin_role(): void
     {
         $tenantId = $this->defaultTenantId();
@@ -131,12 +155,12 @@ class AuthSuperAdminHardeningTest extends TestCase
             ->postJson('/api/auth/reset-password', [
                 'email' => $adminUser->email,
                 'token' => 'dummy-token',
-                'password' => 'newPassword123',
-                'password_confirmation' => 'newPassword123',
+                'password' => 'NewStr0ng!Passw0rd',
+                'password_confirmation' => 'NewStr0ng!Passw0rd',
             ]);
 
-        $response->assertStatus(403);
-        $response->assertJsonPath('error', 'Reset password untuk akun admin dinonaktifkan. Hubungi super admin.');
+        $response->assertStatus(400);
+        $response->assertJsonPath('error', 'Token reset tidak valid, sudah kedaluwarsa, atau akun tidak memenuhi syarat untuk reset mandiri.');
     }
 
     private function defaultTenantId(): string

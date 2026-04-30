@@ -34,6 +34,7 @@ class ProfileController extends ApiController
         if ($this->isSiswa($request)) {
             // siswa tidak boleh ganti kelas dan role
             unset($data['kelas']);
+            unset($data['nama']);
         }
 
         $data['updated_at'] = now();

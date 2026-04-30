@@ -1,8 +1,9 @@
 // src/components/Navbar.jsx
-import React, { useState, useEffect } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../store/useAuthStore'
 import { supabase, PROFILE_BUCKET, getSignedUrlForValue } from '../lib/supabase'
+import { prefetchRoute, scheduleRoutePrefetch } from '../lib/routePrefetch'
 import { formatDateTime } from '../lib/time'
 
 const isHttpUrl = (value = '') => /^https?:\/\//i.test(String(value || ''))
@@ -46,7 +47,7 @@ const Icon = ({ name, className = 'w-5 h-5' }) => {
   )
 }
 
-const NavigationIcon = ({ name, className = 'w-6 h-6' }) => {
+const NavigationIcon = ({ name, className = 'w-5 h-5' }) => {
   const map = {
     '🏠': 'home', '📅': 'calendar', '✅': 'check', '🧠': 'brain',
     '📚': 'book', '📝': 'pencil', '📊': 'chart', '👤': 'user',
@@ -165,52 +166,72 @@ const Navbar = () => {
 
   useEffect(() => { if (effectiveRole !== 'admin') setMonitorOpen(false) }, [effectiveRole])
 
-  const navigationConfig = {
-    siswa: [
-      { to: '/siswa/home', label: 'Home', icon: '🏠' },
-      { to: '/siswa/absensi', label: 'Absensi', icon: '📅' },
-      { to: '/siswa/quiz', label: 'Quiz', icon: '🧠' },
-      { to: '/siswa/tugas', label: 'Tugas', icon: '📚' },
-      { to: '/siswa/profile', label: 'Profil', icon: '👤' }
-    ],
-    guru: [
-      { to: '/guru/jadwal', label: 'Jadwal', icon: '📅' },
-      { to: '/guru/absensi', label: 'Absensi', icon: '✅' },
-      { to: '/guru/quiz', label: 'Quiz', icon: '🧠' },
-      { to: '/guru/tugas', label: 'Tugas', icon: '📝' },
-      { to: '/guru/laporan', label: 'Laporan', icon: '📊' },
-      { to: '/guru/profile', label: 'Profil', icon: '👤' }
-    ],
-    admin: [
-      { to: '/admin/home', label: 'Dashboard', icon: '🏠' },
-      { to: '/admin/kelas', label: 'Kelas', icon: '🏫' },
-      { to: '/admin/scan', label: 'Scan', icon: '📱' },
-      { to: '/admin/guru', label: 'Guru', icon: '👨‍🏫' },
-      { to: '/admin/siswa', label: 'Siswa', icon: '👨‍🎓' },
-      { to: '/admin/whatsapp', label: 'WhatsApp', icon: '💬' },
-      { to: '/admin/sertifikat', label: 'Sertifikat', icon: '📜' },
-      { to: '/admin/backup', label: 'Backup', icon: '🗄️' },
-      { to: '/admin/approvals', label: 'Approval', icon: '🛡️' },
-      { to: '/admin/pengaturan', label: 'Pengaturan', icon: '⚙️' }
-    ]
-  }
+  const navigationConfig = useMemo(
+    () => ({
+      siswa: [
+        { to: '/siswa/home', label: 'Home', icon: '🏠' },
+        { to: '/siswa/absensi', label: 'Absensi', icon: '📅' },
+        { to: '/siswa/quiz', label: 'Quiz', icon: '🧠' },
+        { to: '/siswa/tugas', label: 'Tugas', icon: '📚' },
+        { to: '/siswa/profile', label: 'Profil', icon: '👤' }
+      ],
+      guru: [
+        { to: '/guru/jadwal', label: 'Jadwal', icon: '📅' },
+        { to: '/guru/absensi', label: 'Absensi', icon: '✅' },
+        { to: '/guru/quiz', label: 'Quiz', icon: '🧠' },
+        { to: '/guru/tugas', label: 'Tugas', icon: '📝' },
+        { to: '/guru/laporan', label: 'Laporan', icon: '📊' },
+        { to: '/guru/profile', label: 'Profil', icon: '👤' }
+      ],
+      admin: [
+        { to: '/admin/home', label: 'Dashboard', icon: '🏠' },
+        { to: '/admin/kelas', label: 'Kelas', icon: '🏫' },
+        { to: '/admin/scan', label: 'Scan', icon: '📱' },
+        { to: '/admin/guru', label: 'Guru', icon: '👨‍🏫' },
+        { to: '/admin/siswa', label: 'Siswa', icon: '👨‍🎓' },
+        { to: '/admin/whatsapp', label: 'WhatsApp', icon: '💬' },
+        { to: '/admin/sertifikat', label: 'Sertifikat', icon: '📜' },
+        { to: '/admin/backup', label: 'Backup', icon: '🗄️' },
+        { to: '/admin/approvals', label: 'Approval', icon: '🛡️' },
+        { to: '/admin/pengaturan', label: 'Pengaturan', icon: '⚙️' }
+      ]
+    }),
+    []
+  )
 
-  let navLinks = navigationConfig[effectiveRole] || []
-  if (role === 'guru' && isWaliKelas) {
-    const siswaLink = { to: '/guru/siswa', label: 'Siswa', icon: '👨‍🎓' }
-    const profileIndex = navLinks.findIndex(link => link.to === '/guru/profile')
-    navLinks = profileIndex >= 0
-      ? [...navLinks.slice(0, profileIndex), siswaLink, ...navLinks.slice(profileIndex)]
-      : [...navLinks, siswaLink]
-  }
-  if (isSuperAdmin) {
-    navLinks = [...navLinks,
-    { to: '/admin/tenants', label: 'Sekolah', icon: '🏫' },
-    { to: '/admin/super-admins', label: 'Super Admin', icon: '🛡️' },
-    { to: '/admin/audit-trail', label: 'Audit Trail', icon: '📊' },
-    { to: '/admin/plugins', label: 'Plugins', icon: '🧩' }
-    ]
-  }
+  const navLinks = useMemo(() => {
+    let links = navigationConfig[effectiveRole] || []
+
+    if (role === 'guru' && isWaliKelas) {
+      const siswaLink = { to: '/guru/siswa', label: 'Siswa', icon: '👨‍🎓' }
+      const profileIndex = links.findIndex((link) => link.to === '/guru/profile')
+      links = profileIndex >= 0
+        ? [...links.slice(0, profileIndex), siswaLink, ...links.slice(profileIndex)]
+        : [...links, siswaLink]
+    }
+
+    if (isSuperAdmin) {
+      links = [
+        ...links,
+        { to: '/admin/tenants', label: 'Sekolah', icon: '🏫' },
+        { to: '/admin/super-admins', label: 'Super Admin', icon: '🛡️' },
+        { to: '/admin/audit-trail', label: 'Audit Trail', icon: '📊' },
+        { to: '/admin/plugins', label: 'Plugins', icon: '🧩' }
+      ]
+    }
+
+    return links
+  }, [effectiveRole, isSuperAdmin, isWaliKelas, navigationConfig, role])
+
+  useEffect(() => {
+    const nextRoutes = navLinks
+      .map((link) => link.to)
+      .filter((to) => !(location.pathname === to || location.pathname.startsWith(`${to}/`)))
+
+    return scheduleRoutePrefetch(nextRoutes, {
+      max: effectiveRole === 'admin' ? 4 : 3
+    })
+  }, [effectiveRole, location.pathname, navLinks])
 
   /* ---- Role badge color ---- */
   const roleBadge = {
@@ -235,12 +256,19 @@ const Navbar = () => {
   /* ---- NavLink item ---- */
   const NavItem = ({ link, collapsed }) => {
     const isActive = location.pathname === link.to || location.pathname.startsWith(link.to + '/')
+    const handlePrefetch = () => {
+      void prefetchRoute(link.to)
+    }
+
     return (
       <Link
         to={link.to}
         title={collapsed ? link.label : undefined}
+        onMouseEnter={handlePrefetch}
+        onFocus={handlePrefetch}
+        onTouchStart={handlePrefetch}
         className={`
-          group relative flex items-center gap-4 rounded-2xl px-4 py-4 text-[20px] font-semibold
+          group relative flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-[15px] font-semibold
           transition-all duration-200 select-none
           ${isActive
             ? 'bg-brand-600 text-white shadow-brand-sm'
@@ -250,11 +278,11 @@ const Navbar = () => {
         `}
       >
         <span className={`flex-shrink-0 transition-transform duration-200 group-hover:scale-110 ${isActive ? 'text-white' : 'text-slate-500 group-hover:text-brand-600'}`}>
-          <NavigationIcon name={link.icon} className="w-6 h-6" />
+          <NavigationIcon name={link.icon} className="w-4.5 h-4.5" />
         </span>
         {!collapsed && <span className="truncate">{link.label}</span>}
         {isActive && !collapsed && (
-          <span className="ml-auto w-2 h-2 rounded-full bg-white/70 flex-shrink-0" />
+          <span className="ml-auto w-1.5 h-1.5 rounded-full bg-white/70 flex-shrink-0" />
         )}
         {collapsed && (
           <div className="absolute left-full ml-2 px-2.5 py-1.5 bg-slate-900 text-white text-xs rounded-lg whitespace-nowrap
@@ -330,24 +358,24 @@ const Navbar = () => {
   /* ===== Desktop Sidebar ===== */
   const DesktopSidebar = () => (
     <>
-      <div className={`hidden md:block flex-shrink-0 transition-all duration-300 ease-in-out ${isCollapsed ? 'w-[72px]' : 'w-60'}`} />
+      <div className={`hidden md:block flex-shrink-0 transition-all duration-300 ease-in-out ${isCollapsed ? 'w-[64px]' : 'w-52'}`} />
 
-      <aside className={`hidden md:flex fixed inset-y-0 left-0 flex-col min-h-0 z-40 bg-white border-r border-slate-100 shadow-sidebar transition-all duration-300 ease-in-out ${isCollapsed ? 'w-[72px]' : 'w-60'}`}>
+      <aside className={`hidden md:flex fixed inset-y-0 left-0 flex-col min-h-0 z-40 bg-white border-r border-slate-100 shadow-sidebar transition-all duration-300 ease-in-out ${isCollapsed ? 'w-[64px]' : 'w-52'}`}>
         {/* Header */}
-        <div className="flex items-center gap-3 px-3 pt-4 pb-3 border-b border-slate-100">
-          <div className="flex items-center justify-center w-11 h-11 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 shadow-brand-sm flex-shrink-0">
-            <span className="font-extrabold text-white text-lg">{schoolName.charAt(0).toUpperCase()}</span>
+        <div className="flex items-center gap-2 px-3 pt-3 pb-2 border-b border-slate-100">
+          <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 shadow-brand-sm flex-shrink-0">
+            <span className="font-extrabold text-white text-[15px]">{schoolName.charAt(0).toUpperCase()}</span>
           </div>
           {!isCollapsed && (
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-brand-600 uppercase tracking-[0.14em] leading-none mb-0.5">{rb.label} Panel</p>
-              <p className="text-[26px] font-extrabold text-slate-900 truncate leading-[1.05]">{schoolName}</p>
+              <p className="text-[10px] font-semibold text-brand-600 uppercase tracking-[0.16em] leading-none mb-1">{rb.label} Panel</p>
+              <p className="text-[16px] font-extrabold text-slate-900 truncate leading-tight">{schoolName}</p>
             </div>
           )}
           <button onClick={toggleSidebar}
             className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-all duration-200 ml-auto flex-shrink-0"
             title={isCollapsed ? 'Perlebar sidebar' : 'Perkecil sidebar'}>
-            {isCollapsed ? <Icon name="chevronRight" className="w-4 h-4" /> : <Icon name="chevronLeft" className="w-4 h-4" />}
+            {isCollapsed ? <Icon name="chevronRight" className="w-3.5 h-3.5" /> : <Icon name="chevronLeft" className="w-3.5 h-3.5" />}
           </button>
         </div>
 
@@ -355,9 +383,9 @@ const Navbar = () => {
         {effectiveRole === 'admin' && (
           <div className={`px-3 pt-3 ${isCollapsed ? 'flex justify-center' : ''}`}>
             <button onClick={() => setMonitorOpen(true)} title="Monitoring User"
-              className={`flex items-center gap-2 text-xs font-semibold rounded-xl transition-all duration-200
-              ${isCollapsed ? 'p-2 bg-brand-50 text-brand-600 hover:bg-brand-100' : 'w-full px-3 py-2 bg-brand-50 text-brand-700 hover:bg-brand-100'}`}>
-              <Icon name="signal" className="w-4 h-4 flex-shrink-0" />
+              className={`flex items-center gap-2 text-[10px] font-semibold rounded-xl transition-all duration-200
+              ${isCollapsed ? 'p-2 bg-brand-50 text-brand-600 hover:bg-brand-100' : 'w-full px-2.5 py-2 bg-brand-50 text-brand-700 hover:bg-brand-100'}`}>
+              <Icon name="signal" className="w-3 h-3 flex-shrink-0" />
               {!isCollapsed && (
                 <>
                   <span>Monitoring</span>
@@ -377,22 +405,22 @@ const Navbar = () => {
         <div className={`border-t border-slate-100 ${isCollapsed ? 'p-3' : 'p-3'}`}>
           {isCollapsed ? (
             <div className="flex flex-col items-center gap-2">
-              <AvatarImg size={36} />
+              <AvatarImg size={32} />
               <button onClick={handleLogout} title="Keluar"
                 className="p-2 rounded-xl text-slate-400 hover:text-red-500 hover:bg-red-50 transition-all duration-200">
-                <Icon name="logout" className="w-4 h-4" />
+                <Icon name="logout" className="w-3.5 h-3.5" />
               </button>
             </div>
           ) : (
-            <div className="flex items-center gap-2.5">
-              <AvatarImg size={36} className="flex-shrink-0" />
+            <div className="flex items-center gap-2">
+              <AvatarImg size={32} className="flex-shrink-0" />
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-slate-800 truncate leading-tight">{userName}</p>
+                <p className="text-[12px] font-semibold text-slate-800 truncate leading-tight">{userName}</p>
                 <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${rb.bg} ${rb.text}`}>{rb.label}</span>
               </div>
               <button onClick={handleLogout} title="Keluar"
                 className="p-2 rounded-xl text-slate-400 hover:text-red-500 hover:bg-red-50 transition-all duration-200 flex-shrink-0">
-                <Icon name="logout" className="w-4 h-4" />
+                <Icon name="logout" className="w-3.5 h-3.5" />
               </button>
             </div>
           )}
@@ -434,8 +462,14 @@ const Navbar = () => {
         <div className="flex items-center justify-around px-1 py-1.5 safe-area-inset-bottom">
           {navLinks.slice(0, 5).map(link => {
             const isActive = location.pathname === link.to || location.pathname.startsWith(link.to + '/')
+            const handlePrefetch = () => {
+              void prefetchRoute(link.to)
+            }
             return (
               <Link key={link.to} to={link.to}
+                onMouseEnter={handlePrefetch}
+                onFocus={handlePrefetch}
+                onTouchStart={handlePrefetch}
                 className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-all duration-200 min-w-0 flex-1
                   ${isActive ? 'text-brand-600' : 'text-slate-500 hover:text-slate-700'}`}>
                 <span className={`transition-all duration-200 ${isActive ? 'scale-110' : ''}`}>
@@ -453,10 +487,10 @@ const Navbar = () => {
 
   if (isLoading) {
     return (
-      <div className="hidden md:flex flex-col h-screen sticky top-0 w-60 bg-white border-r border-slate-100">
+      <div className="hidden md:flex flex-col h-screen sticky top-0 w-56 bg-white border-r border-slate-100">
         <div className="animate-pulse p-4">
-          <div className="h-9 bg-slate-100 rounded-xl mb-4" />
-          <div className="space-y-2">{[...Array(6)].map((_, i) => <div key={i} className="h-9 bg-slate-100 rounded-xl" />)}</div>
+          <div className="h-8 bg-slate-100 rounded-xl mb-4" />
+          <div className="space-y-2">{[...Array(6)].map((_, i) => <div key={i} className="h-8 bg-slate-100 rounded-xl" />)}</div>
         </div>
       </div>
     )

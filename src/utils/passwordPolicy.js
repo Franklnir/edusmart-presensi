@@ -1,7 +1,7 @@
 // src/utils/passwordPolicy.js
 // Centralized password policy — dipakai di Register, ResetPassword, EditProfile
 
-const MIN_LENGTH = 8
+const MIN_LENGTH = 12
 const MAX_LENGTH = 128
 
 /**
@@ -26,6 +26,9 @@ export const validatePassword = (password) => {
     }
     if (!/[0-9]/.test(pwd)) {
         errors.push('Harus mengandung angka (0-9)')
+    }
+    if (!/[^a-zA-Z0-9]/.test(pwd)) {
+        errors.push('Harus mengandung simbol')
     }
 
     return {
@@ -63,5 +66,6 @@ export const PASSWORD_RULES_TEXT = [
     `Minimal ${MIN_LENGTH} karakter`,
     'Mengandung huruf kecil (a-z)',
     'Mengandung huruf besar (A-Z)',
-    'Mengandung angka (0-9)'
+    'Mengandung angka (0-9)',
+    'Mengandung simbol'
 ]

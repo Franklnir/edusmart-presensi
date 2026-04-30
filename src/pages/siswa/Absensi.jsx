@@ -6,6 +6,8 @@ import React, {
   useRef,
   useMemo
 } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { Camera, CheckCircle2, Loader2, QrCode, ScanLine, XCircle } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
@@ -47,6 +49,307 @@ const getCurrentDateTime = () => {
     minutes: now.getHours() * 60 + now.getMinutes(),
     timestamp: now.getTime()
   }
+}
+
+const extractQrToken = (rawValue = '') => {
+  const value = String(rawValue || '').trim()
+  if (!value) return ''
+
+  try {
+    const url = new URL(value)
+    return (
+      url.searchParams.get('qr') ||
+      url.searchParams.get('token') ||
+      url.searchParams.get('attendance_qr') ||
+      value
+    )
+  } catch {
+    const match = value.match(/(?:^|[?&])(qr|token|attendance_qr)=([^&#]+)/)
+    if (match?.[2]) {
+      try {
+        return decodeURIComponent(match[2])
+      } catch {
+        return match[2]
+      }
+    }
+    return value
+  }
+}
+
+const QrSuccessOverlay = ({ data, onClose }) => {
+  if (!data) return null
+
+  const detailRows = [
+    ['Nama', data.nama],
+    ['Mata Pelajaran', data.mapel],
+    ['Guru', data.guru],
+    ['Jam Absensi', data.jam_absensi],
+    ['Hari', data.hari],
+    ['Tanggal', data.tanggal],
+    ['Bulan', data.bulan],
+    ['Tahun', data.tahun]
+  ]
+
+  return (
+    <div className="fixed inset-0 z-[90] bg-slate-950/55 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="w-full max-w-md rounded-2xl bg-white border border-emerald-100 shadow-2xl overflow-hidden animate-[qr-success-pop_220ms_ease-out]">
+        <div className="px-6 pt-7 pb-5 text-center bg-gradient-to-b from-emerald-50 to-white">
+          <div className="mx-auto h-20 w-20 rounded-full bg-emerald-100 text-emerald-600 grid place-items-center animate-[qr-check-pulse_900ms_ease-out]">
+            <CheckCircle2 className="h-12 w-12" strokeWidth={2.4} />
+          </div>
+          <h2 className="mt-4 text-xl font-bold text-slate-900">Absensi Berhasil</h2>
+          <p className="mt-1 text-sm text-slate-600">Kehadiran kamu sudah tercatat.</p>
+        </div>
+
+        <div className="px-6 pb-5 space-y-2">
+          {detailRows.map(([label, value]) => (
+            <div key={label} className="flex items-start justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</span>
+              <span className="text-sm font-bold text-slate-900 text-right">{value || '-'}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="px-6 pb-6">
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 transition-colors"
+          >
+            Selesai
+          </button>
+        </div>
+      </div>
+      <style>{`
+        @keyframes qr-success-pop {
+          from { opacity: 0; transform: translateY(10px) scale(0.97); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        @keyframes qr-check-pulse {
+          0% { transform: scale(0.72); opacity: 0; }
+          55% { transform: scale(1.08); opacity: 1; }
+          100% { transform: scale(1); opacity: 1; }
+        }
+      `}</style>
+    </div>
+  )
+}
+
+const QrScannerPanel = ({ onSubmitToken, isSubmitting, lastError }) => {
+  const videoRef = useRef(null)
+  const streamRef = useRef(null)
+  const frameRef = useRef(0)
+  const processingRef = useRef(false)
+  const [cameraState, setCameraState] = useState('idle')
+  const [cameraError, setCameraError] = useState('')
+  const [manualToken, setManualToken] = useState('')
+
+  const stopCamera = useCallback((updateState = true) => {
+    try {
+      if (frameRef.current) {
+        window.cancelAnimationFrame(frameRef.current)
+      }
+      streamRef.current?.getTracks?.().forEach((track) => track.stop())
+    } catch {
+      // ignore camera stop errors
+    }
+    frameRef.current = 0
+    streamRef.current = null
+    if (videoRef.current) {
+      videoRef.current.srcObject = null
+    }
+    if (updateState) {
+      setCameraState((prev) => (prev === 'active' || prev === 'starting' ? 'idle' : prev))
+    }
+  }, [])
+
+  const submitDecodedValue = useCallback(
+    async (value) => {
+      if (processingRef.current) return
+      const token = extractQrToken(value)
+      if (!token) {
+        setCameraError('QR tidak berisi token absensi yang valid.')
+        return
+      }
+
+      processingRef.current = true
+      stopCamera()
+      await onSubmitToken(token)
+      window.setTimeout(() => {
+        processingRef.current = false
+      }, 1200)
+    },
+    [onSubmitToken, stopCamera]
+  )
+
+  const scanFrame = useCallback(
+    async (detector) => {
+      if (processingRef.current) return
+      const video = videoRef.current
+      if (!video) return
+
+      try {
+        if (video.readyState >= 2) {
+          const codes = await detector.detect(video)
+          const rawValue = codes?.[0]?.rawValue
+          if (rawValue) {
+            await submitDecodedValue(rawValue)
+            return
+          }
+        }
+      } catch {
+        // frame tertentu bisa gagal diproses; lanjutkan scan frame berikutnya
+      }
+
+      frameRef.current = window.requestAnimationFrame(() => {
+        void scanFrame(detector)
+      })
+    },
+    [submitDecodedValue]
+  )
+
+  const startCamera = useCallback(async () => {
+    if (cameraState === 'starting' || cameraState === 'active') return
+    setCameraError('')
+    setCameraState('starting')
+
+    try {
+      if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+        throw new Error('Browser belum mendukung akses kamera.')
+      }
+      if (typeof window === 'undefined' || typeof window.BarcodeDetector !== 'function') {
+        throw new Error('Browser belum mendukung scanner QR otomatis. Gunakan Chrome/Edge terbaru atau tempel kode QR.')
+      }
+
+      const detector = new window.BarcodeDetector({ formats: ['qr_code'] })
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: 'environment' }
+        },
+        audio: false
+      })
+
+      streamRef.current = stream
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+        await videoRef.current.play()
+      }
+      setCameraState('active')
+      frameRef.current = window.requestAnimationFrame(() => {
+        void scanFrame(detector)
+      })
+    } catch (err) {
+      try {
+        streamRef.current?.getTracks?.().forEach((track) => track.stop())
+      } catch {
+        // ignore cleanup errors
+      }
+      streamRef.current = null
+      if (videoRef.current) videoRef.current.srcObject = null
+      setCameraState('error')
+      setCameraError(err?.message || 'Tidak bisa membuka kamera.')
+    }
+  }, [cameraState, scanFrame])
+
+  useEffect(() => () => stopCamera(false), [stopCamera])
+
+  const handleManualSubmit = async (event) => {
+    event.preventDefault()
+    await submitDecodedValue(manualToken)
+  }
+
+  return (
+    <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.2fr),minmax(320px,0.8fr)] gap-4">
+      <div className="rounded-2xl border border-slate-200 bg-slate-950 overflow-hidden shadow-sm">
+        <div className="relative aspect-[4/3] bg-slate-950">
+          <video ref={videoRef} className="h-full w-full object-cover" muted playsInline />
+          {cameraState !== 'active' && (
+            <div className="absolute inset-0 grid place-items-center bg-slate-950">
+              <div className="text-center px-6">
+                <div className="mx-auto h-16 w-16 rounded-2xl bg-white/10 text-white grid place-items-center mb-4">
+                  <ScanLine className="h-9 w-9" />
+                </div>
+                <div className="text-white font-bold">Kamera scanner QR</div>
+                <div className="text-slate-300 text-sm mt-1">Arahkan kamera ke QR yang tampil di layar guru.</div>
+              </div>
+            </div>
+          )}
+          {cameraState === 'active' && (
+            <div className="absolute inset-0 pointer-events-none grid place-items-center">
+              <div className="h-48 w-48 rounded-2xl border-4 border-emerald-400 shadow-[0_0_0_9999px_rgba(2,6,23,0.38)]" />
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white p-4 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={startCamera}
+            disabled={isSubmitting || cameraState === 'starting' || cameraState === 'active'}
+            className="inline-flex items-center gap-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed px-4 py-2.5 text-sm font-bold text-white"
+          >
+            {cameraState === 'starting' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
+            {cameraState === 'starting' ? 'Membuka kamera' : 'Mulai Scan'}
+          </button>
+          <button
+            type="button"
+            onClick={() => stopCamera()}
+            disabled={cameraState !== 'active'}
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2.5 text-sm font-bold text-slate-700"
+          >
+            <XCircle className="h-4 w-4" />
+            Stop
+          </button>
+          <div className="ml-auto text-xs font-semibold text-slate-500">
+            {cameraState === 'active' ? 'Scanner aktif' : 'Scanner standby'}
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 rounded-xl bg-blue-50 text-blue-600 grid place-items-center">
+            <QrCode className="h-5 w-5" />
+          </div>
+          <div>
+            <h3 className="font-bold text-slate-900">Scan QR dari guru</h3>
+            <p className="text-xs text-slate-500">Sistem akan validasi kelas, sekolah, jadwal, dan jam pelajaran.</p>
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+          QR akan otomatis ditolak jika sudah lewat jam pelajaran, token kedaluwarsa, atau bukan untuk sekolah dan kelas kamu.
+        </div>
+
+        {(cameraError || lastError) && (
+          <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {cameraError || lastError}
+          </div>
+        )}
+
+        <form onSubmit={handleManualSubmit} className="mt-5 space-y-3">
+          <label className="block text-xs font-bold uppercase tracking-wide text-slate-500">
+            Tempel kode QR jika kamera tidak tersedia
+          </label>
+          <textarea
+            value={manualToken}
+            onChange={(event) => setManualToken(event.target.value)}
+            rows={4}
+            className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            placeholder="Tempel hasil scan QR di sini"
+          />
+          <button
+            type="submit"
+            disabled={isSubmitting || !manualToken.trim()}
+            className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 disabled:cursor-not-allowed px-4 py-3 text-sm font-bold text-white"
+          >
+            {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+            Proses Absensi QR
+          </button>
+        </form>
+      </div>
+    </div>
+  )
 }
 
 /* ======================= Jam realtime ======================= */
@@ -889,6 +1192,7 @@ const MapelOptions = ({ kelas, tanggal }) => {
 export default function SAbsensi() {
   const { profile, user } = useAuthStore()
   const { pushToast } = useUIStore()
+  const [searchParams, setSearchParams] = useSearchParams()
   const userId = profile?.id || user?.id
 
   // State utama
@@ -909,6 +1213,9 @@ export default function SAbsensi() {
 
   const [isIzinModalOpen, setIsIzinModalOpen] = useState(false)
   const [izinReason, setIzinReason] = useState('')
+  const [isQrSubmitting, setIsQrSubmitting] = useState(false)
+  const [qrScanError, setQrScanError] = useState('')
+  const [qrSuccessData, setQrSuccessData] = useState(null)
 
   // Statistik kehadiran (HANYA HARI INI)
   const [statistikKehadiran, setStatistikKehadiran] = useState({
@@ -1499,6 +1806,92 @@ export default function SAbsensi() {
     }
   }
 
+  const handleQrScanToken = useCallback(
+    async (rawToken) => {
+      const token = extractQrToken(rawToken)
+      if (!token) {
+        const message = 'QR tidak berisi token absensi yang valid.'
+        setQrScanError(message)
+        pushToast('error', message)
+        return false
+      }
+
+      if (isQrSubmitting) return false
+
+      setIsQrSubmitting(true)
+      setQrScanError('')
+
+      try {
+        const { data, error, raw } = await supabase.attendanceQr.scan(token)
+        if (error) {
+          const message = raw?.error || error?.message || 'Gagal memproses QR absensi'
+          setQrScanError(message)
+          pushToast('error', message, { duration: 5000 })
+          return false
+        }
+
+        const result = data || {}
+        setQrSuccessData(result)
+        setStatus('Hadir')
+        statusRef.current = 'Hadir'
+        if (result.tanggal_iso) setTgl(result.tanggal_iso)
+        if (result.mapel) setMapel(result.mapel)
+
+        const jadwalList = jadwalRef.current || []
+        const matchedIndex = jadwalList.findIndex((j) => j.mapel === result.mapel)
+        if (matchedIndex !== -1) {
+          setCurrentJadwalIndex(matchedIndex)
+          setCurrentJadwal(jadwalList[matchedIndex])
+          currentJadwalRef.current = jadwalList[matchedIndex]
+        }
+
+        pushToast('success', `Absensi QR berhasil untuk ${result.mapel || 'jadwal ini'}`, {
+          duration: 4500
+        })
+
+        const {
+          loadRingkasDanStatus: refreshRingkas,
+          loadJadwalHariIni: refreshJadwal,
+          loadStatistikKehadiran: refreshStatistik
+        } = refreshFnsRef.current
+
+        if (refreshRingkas) refreshRingkas()
+        if (refreshJadwal) refreshJadwal()
+        if (refreshStatistik) refreshStatistik()
+
+        return true
+      } catch (err) {
+        const message = err?.message || 'Terjadi kesalahan saat memproses QR absensi'
+        setQrScanError(message)
+        pushToast('error', message)
+        return false
+      } finally {
+        setIsQrSubmitting(false)
+      }
+    },
+    [isQrSubmitting, pushToast]
+  )
+
+  useEffect(() => {
+    if (!profile || !userId) return
+
+    const tokenFromUrl =
+      searchParams.get('qr') ||
+      searchParams.get('token') ||
+      searchParams.get('attendance_qr')
+
+    if (!tokenFromUrl) return
+
+    setTab('qr')
+    void handleQrScanToken(tokenFromUrl)
+
+    const nextParams = new URLSearchParams(searchParams)
+    nextParams.delete('qr')
+    nextParams.delete('token')
+    nextParams.delete('attendance_qr')
+    setSearchParams(nextParams, { replace: true })
+  }, [profile, userId, searchParams, setSearchParams, handleQrScanToken])
+
   /* ========== Aksi dari Card Jadwal ========== */
   const handleAbsenFromCard = (jadwal) => {
     setMapel(jadwal.mapel)
@@ -1827,6 +2220,7 @@ export default function SAbsensi() {
   /* ======================= RENDER ======================= */
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-purple-50/30 p-4 sm:p-6">
+      <QrSuccessOverlay data={qrSuccessData} onClose={() => setQrSuccessData(null)} />
       <div className="max-w-full mx-auto space-y-6">
         {/* Header */}
         <div className="bg-white rounded-2xl border border-slate-200/60 p-6 shadow-sm transition-all duration-300 hover:shadow-md">
@@ -1922,6 +2316,16 @@ export default function SAbsensi() {
               >
                 <span>📝</span>
                 <span>Absen Manual</span>
+              </button>
+              <button
+                className={`px-3 py-2 font-medium border-b-2 rounded-t-2xl transition-all duration-200 flex items-center gap-1.5 text-sm ${tab === 'qr'
+                  ? 'border-blue-600 text-blue-600 bg-blue-50/50'
+                  : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+                  }`}
+                onClick={() => setTab('qr')}
+              >
+                <QrCode className="h-4 w-4" />
+                <span>Scan QR</span>
               </button>
               <button
                 className={`px-3 py-2 font-medium border-b-2 rounded-t-2xl transition-all duration-200 flex items-center space-x-1 text-sm ${tab === 'jadwal'
@@ -2148,6 +2552,39 @@ export default function SAbsensi() {
                     />
                   </div>
                 </div>
+              </div>
+            )}
+
+            {/* === TAB QR === */}
+            {tab === 'qr' && (
+              <div className="space-y-4">
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="h-10 w-10 rounded-xl bg-blue-50 text-blue-600 grid place-items-center">
+                        <QrCode className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-slate-900">Absensi QR</h3>
+                        <p className="text-xs text-slate-500">
+                          Scan QR dari guru saat jam pelajaran sedang berlangsung.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant={status === 'Hadir' ? 'hadir' : 'warning'}>
+                        Status Anda: {status || 'Belum Absen'}
+                      </Badge>
+                      {mapel && <Badge variant="info">{mapel}</Badge>}
+                    </div>
+                  </div>
+                </div>
+
+                <QrScannerPanel
+                  onSubmitToken={handleQrScanToken}
+                  isSubmitting={isQrSubmitting}
+                  lastError={qrScanError}
+                />
               </div>
             )}
 

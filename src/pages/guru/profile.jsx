@@ -1,14 +1,17 @@
 // src/pages/guru/profile.jsx
-import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase, PROFILE_BUCKET } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
+import GoogleCredentialButton from '../../components/GoogleCredentialButton'
 import PasswordInput from '../../components/PasswordInput'
+import VerificationCodeModal from '../../components/VerificationCodeModal'
 import {
   hasRealLoginEmail,
   isEmailFormat,
   shouldForceAccountSetup
 } from '../../utils/accountSetup'
+import { validatePassword } from '../../utils/passwordPolicy'
 
 /** Signed URL expire (detik) */
 const SIGNED_URL_EXPIRES_IN = 60 * 60 * 24 * 7 // 7 hari
@@ -146,7 +149,7 @@ async function savePhotoPathToProfile(uid, filePath) {
 }
 
 export default function ProfileGuru() {
-  const { user, profile, logout, refreshProfile } = useAuthStore()
+  const { user, profile, logout, refreshProfile, linkGoogleCredential } = useAuthStore()
   const { pushToast } = useUIStore()
 
   const fileInputRef = useRef(null)
@@ -165,17 +168,10 @@ export default function ProfileGuru() {
 
   const [saving, setSaving] = useState(false)
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
-  const [sendingVerify, setSendingVerify] = useState(false)
-  // Inline verification states
-  const [verifyPhase, setVerifyPhase] = useState('idle') // 'idle' | 'sending' | 'input' | 'verifying' | 'success'
-  const [verifyCode, setVerifyCode] = useState(['', '', '', '', '', ''])
-  const [verifyCooldown, setVerifyCooldown] = useState(0)
-  const [verifyError, setVerifyError] = useState('')
-  const [verifySent, setVerifySent] = useState(false)
-  const verifyCooldownRef = useRef(null)
-  const verifyInputsRef = useRef([])
   const [linkingGoogle, setLinkingGoogle] = useState(false)
   const [unlinkingGoogle, setUnlinkingGoogle] = useState(false)
+  const [accountVerifyOpen, setAccountVerifyOpen] = useState(false)
+  const [pendingAccountAction, setPendingAccountAction] = useState(null)
 
   const providerState = useMemo(
     () => supabase.auth.getProviderState?.(user || {}) || { googleLinked: false, emailVerified: false },
@@ -185,12 +181,16 @@ export default function ProfileGuru() {
     () => Boolean(user?.google_linked || providerState.googleLinked),
     [user?.google_linked, providerState.googleLinked]
   )
-  const isGoogleAuthEnabled = supabase.auth.isGoogleEnabled?.() ?? false
   const email = useMemo(() => user?.email || profile?.email || '', [user?.email, profile?.email])
   const emailVerified = useMemo(
     () => Boolean(user?.email_confirmed_at || user?.emailVerified || providerState.emailVerified),
     [user?.email_confirmed_at, user?.emailVerified, providerState.emailVerified]
   )
+  const googleLinkBlockedReason = (profile?.role === 'siswa' && profile?.must_change_password)
+    ? 'Tautkan Google akan tersedia setelah Anda mengganti password awal akun ini.'
+    : !hasRealLoginEmail(email)
+      ? 'Tautkan Google akan tersedia setelah email akun diganti dari email sistem ke email aktif yang sama dengan akun Google Anda.'
+      : ''
 
   const [accountForm, setAccountForm] = useState({
     email: '',
@@ -215,57 +215,143 @@ export default function ProfileGuru() {
     }
   }, [needsAccountSetup])
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const url = new URL(window.location.href)
+    const googleError = String(url.searchParams.get('google_error') || '').trim()
+    if (!googleError) return
+
+    pushToast('error', googleError)
+    url.searchParams.delete('google')
+    url.searchParams.delete('google_error')
+    window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`)
+  }, [pushToast])
+
   const handleTogglePasswordFields = () => {
     if (showPasswordFields) {
       setShowPasswordFields(false)
-      return
-    }
-
-    const nextEmail = (accountForm.email || email || '').trim().toLowerCase()
-    if (!hasRealLoginEmail(nextEmail)) {
-      pushToast('error', 'Email aktif wajib diisi sebelum ganti password')
+      setAccountForm((prev) => ({ ...prev, password: '', confirmPassword: '' }))
       return
     }
     setShowPasswordFields(true)
   }
 
-  const handleCompleteAccount = async () => {
-    if (!user?.id) return
-
+  const buildAccountChangePlan = () => {
+    const currentEmail = (email || '').trim().toLowerCase()
     const nextEmail = (accountForm.email || '').trim().toLowerCase()
-    if (!nextEmail) {
-      pushToast('error', 'Email wajib diisi sebelum mengganti password')
-      return
-    }
-    if (!isEmailFormat(nextEmail) || !hasRealLoginEmail(nextEmail)) {
-      pushToast('error', 'Email tidak valid')
-      return
-    }
-    if (!accountForm.password || accountForm.password.length < 6) {
-      pushToast('error', 'Password minimal 6 karakter')
-      return
-    }
-    if (accountForm.password !== accountForm.confirmPassword) {
-      pushToast('error', 'Password dan konfirmasi tidak sama')
-      return
+    const wantsPasswordChange = showPasswordFields && Boolean(accountForm.password)
+    const emailChanged = nextEmail !== currentEmail
+    const currentEmailIsReal = hasRealLoginEmail(currentEmail)
+    const nextEmailIsReal = hasRealLoginEmail(nextEmail)
+
+    if (emailChanged) {
+      if (!nextEmail) {
+        throw new Error('Email baru wajib diisi sebelum menyimpan perubahan akun')
+      }
+      if (!isEmailFormat(nextEmail) || !nextEmailIsReal) {
+        throw new Error('Email aktif baru tidak valid')
+      }
+      if (googleLinked && currentEmailIsReal) {
+        throw new Error('Lepas tautan Google terlebih dahulu sebelum mengganti email akun.')
+      }
     }
 
+    if (wantsPasswordChange) {
+      const passwordCheck = validatePassword(accountForm.password)
+      if (!passwordCheck.valid) {
+        throw new Error(passwordCheck.errors[0])
+      }
+      if (accountForm.password !== accountForm.confirmPassword) {
+        throw new Error('Password dan konfirmasi tidak sama')
+      }
+    }
+
+    if (!emailChanged && !wantsPasswordChange) {
+      throw new Error('Belum ada perubahan email atau password yang bisa disimpan')
+    }
+
+    const targetEmail = emailChanged ? nextEmail : currentEmail
+    const requiresVerification = emailChanged || !needsAccountSetup
+
+    let verificationTitle = 'Konfirmasi Perubahan Akun'
+    let verificationDescription = 'Kirim kode 6 digit ke email tujuan untuk menyimpan perubahan email atau password akun.'
+    let verificationInputDescription = 'Masukkan kode 6 digit dari email tujuan. Kode ini dipakai untuk memastikan perubahan akun benar-benar Anda lakukan.'
+
+    if (emailChanged && wantsPasswordChange) {
+      verificationTitle = 'Verifikasi Email Baru'
+      verificationDescription = 'Sebelum email akun diganti, sistem akan mengirim kode 6 digit ke email baru ini. Setelah lolos, email dan password baru disimpan sekaligus.'
+      verificationInputDescription = 'Masukkan kode 6 digit dari email baru. Setelah cocok, email baru akan aktif dan password baru ikut disimpan.'
+    } else if (emailChanged) {
+      verificationTitle = 'Verifikasi Email Baru'
+      verificationDescription = 'Sebelum email akun diganti, sistem akan mengirim kode 6 digit ke email baru ini.'
+      verificationInputDescription = 'Masukkan kode 6 digit dari email baru. Setelah cocok, email akun akan diganti ke email aktif tersebut.'
+    } else if (wantsPasswordChange) {
+      verificationTitle = 'Konfirmasi Ganti Password'
+      verificationDescription = 'Sistem akan mengirim kode 6 digit ke email aktif akun ini untuk memastikan perubahan password benar-benar Anda lakukan.'
+      verificationInputDescription = 'Masukkan kode 6 digit dari email aktif akun. Setelah cocok, password baru akan langsung disimpan.'
+    }
+
+    return {
+      nextEmail,
+      password: wantsPasswordChange ? accountForm.password : '',
+      emailChanged,
+      wantsPasswordChange,
+      targetEmail,
+      requiresVerification,
+      verificationTitle,
+      verificationDescription,
+      verificationInputDescription,
+      successMessage: emailChanged && wantsPasswordChange
+        ? 'Email dan password berhasil diperbarui'
+        : emailChanged
+          ? 'Email berhasil diperbarui'
+          : 'Password berhasil diperbarui'
+    }
+  }
+
+  const submitAccountChange = async (plan, verificationCode = '') => {
     setAccountSaving(true)
     try {
       const { error } = await supabase.auth.updateUser({
-        email: nextEmail,
-        password: accountForm.password
+        email: plan.nextEmail,
+        password: plan.password,
+        verificationCode
       })
       if (error) throw error
 
-      setAccountForm((prev) => ({ ...prev, password: '', confirmPassword: '' }))
-      setShowPasswordFields(false)
+      setAccountForm((prev) => ({
+        ...prev,
+        email: plan.nextEmail,
+        password: '',
+        confirmPassword: ''
+      }))
+      if (plan.wantsPasswordChange) {
+        setShowPasswordFields(false)
+      }
       await refreshProfile()
-      pushToast('success', 'Email dan password berhasil diperbarui')
+      pushToast('success', plan.successMessage)
     } catch (err) {
-      pushToast('error', err?.message || 'Gagal memperbarui akun')
+      throw err
     } finally {
       setAccountSaving(false)
+    }
+  }
+
+  const handleCompleteAccount = async () => {
+    if (!user?.id) return
+
+    try {
+      const plan = buildAccountChangePlan()
+      if (plan.requiresVerification) {
+        setPendingAccountAction(plan)
+        setAccountVerifyOpen(true)
+        return
+      }
+
+      await submitAccountChange(plan)
+    } catch (err) {
+      pushToast('error', err?.message || 'Gagal memperbarui akun')
     }
   }
 
@@ -446,108 +532,12 @@ export default function ProfileGuru() {
     }
   }
 
-  /* ========== Kirim Verifikasi Email ========== */
-  const startVerifyCooldown = useCallback(() => {
-    setVerifyCooldown(60)
-    if (verifyCooldownRef.current) clearInterval(verifyCooldownRef.current)
-    verifyCooldownRef.current = setInterval(() => {
-      setVerifyCooldown((prev) => {
-        if (prev <= 1) {
-          clearInterval(verifyCooldownRef.current)
-          verifyCooldownRef.current = null
-          return 0
-        }
-        return prev - 1
-      })
-    }, 1000)
-  }, [])
-
-  // cleanup cooldown on unmount
-  useEffect(() => {
-    return () => {
-      if (verifyCooldownRef.current) clearInterval(verifyCooldownRef.current)
-    }
-  }, [])
-
-  const handleSendVerification = async () => {
-    setSendingVerify(true)
-    setVerifyPhase('sending')
-    setVerifyError('')
-    setVerifySent(false)
-    try {
-      const { error } = await supabase.auth.sendEmailVerificationCode()
-      if (error) throw error
-      startVerifyCooldown()
-      setVerifySent(true)
-    } catch (error) {
-      setVerifyError(error?.message || 'Gagal mengirim kode verifikasi')
-      setVerifySent(false)
-    } finally {
-      setSendingVerify(false)
-      // ALWAYS show input phase even if API failed
-      setVerifyPhase('input')
-      setVerifyCode(['', '', '', '', '', ''])
-      // Auto focus first input after render
-      setTimeout(() => {
-        if (verifyInputsRef.current[0]) verifyInputsRef.current[0].focus()
-      }, 200)
-    }
-  }
-
-  const handleVerifyCodeChange = (idx, e) => {
-    const char = e.target.value.replace(/\D/g, '').slice(-1)
-    const next = [...verifyCode]
-    next[idx] = char
-    setVerifyCode(next)
-    if (char && idx < 5) {
-      verifyInputsRef.current[idx + 1]?.focus()
-    }
-  }
-
-  const handleVerifyCodeKeyDown = (idx, e) => {
-    if (e.key === 'Backspace' && !verifyCode[idx] && idx > 0) {
-      verifyInputsRef.current[idx - 1]?.focus()
-    }
-  }
-
-  const handleVerifyCodePaste = (e) => {
-    e.preventDefault()
-    const pasted = (e.clipboardData?.getData('text') || '').replace(/\D/g, '').slice(0, 6)
-    if (!pasted) return
-    const next = [...verifyCode]
-    for (let i = 0; i < pasted.length; i++) next[i] = pasted[i]
-    setVerifyCode(next)
-    const focusIdx = Math.min(pasted.length, 5)
-    verifyInputsRef.current[focusIdx]?.focus()
-  }
-
-  const handleVerifySubmit = async () => {
-    const code = verifyCode.join('')
-    if (code.length < 6) {
-      setVerifyError('Masukkan kode 6 digit lengkap')
+  const handleLinkGoogle = async (credential) => {
+    if (googleLinkBlockedReason) {
+      pushToast('info', googleLinkBlockedReason)
       return
     }
-    setVerifyPhase('verifying')
-    setVerifyError('')
-    try {
-      const { error } = await supabase.auth.verifyEmailCode(code)
-      if (error) throw error
-      setVerifyPhase('success')
-      pushToast('success', 'Email berhasil diverifikasi!')
-      // Refresh profile to update emailVerified state
-      await refreshProfile()
-    } catch (error) {
-      setVerifyError(error?.message || 'Kode verifikasi tidak valid')
-      setVerifyPhase('input')
-    }
-  }
 
-  const handleVerifyResend = async () => {
-    if (verifyCooldown > 0) return
-    await handleSendVerification()
-  }
-
-  const handleLinkGoogle = async () => {
     if (googleLinked) {
       pushToast('info', 'Akun Google sudah tertaut.')
       return
@@ -555,16 +545,9 @@ export default function ProfileGuru() {
 
     setLinkingGoogle(true)
     try {
-      const redirectTo =
-        typeof window !== 'undefined'
-          ? `${window.location.origin}${window.location.pathname}`
-          : '/guru/profile'
-
-      const { error } = await supabase.auth.linkGoogleAccount({ redirectTo })
-      if (error) throw error
-      pushToast('info', 'Mengalihkan ke Google...')
-    } catch (error) {
-      pushToast('error', error?.message || 'Gagal memulai proses tautkan Google')
+      await linkGoogleCredential(credential)
+      await refreshProfile()
+    } finally {
       setLinkingGoogle(false)
     }
   }
@@ -612,14 +595,16 @@ export default function ProfileGuru() {
             {needsAccountSetup ? 'Lengkapi Akun (Wajib)' : 'Keamanan Akun'}
           </h2>
           <p className={`text-sm ${needsAccountSetup ? 'text-amber-800' : 'text-blue-800'}`}>
-            Isi email aktif dulu, lalu ganti password akun Anda.
+            {needsAccountSetup
+              ? 'Password awal buatan sistem bisa diganti langsung. Jika email sistem ingin diganti ke email aktif, email baru akan diverifikasi dulu dengan kode 6 digit.'
+              : 'Untuk mengganti email atau password, sistem akan mengirim kode verifikasi 6 digit. Jika email masih tertaut ke Google, lepas tautan dulu sebelum mengganti email lagi.'}
           </p>
         </div>
         <div
           className={`text-xs px-4 py-2 rounded-xl ${needsAccountSetup ? 'text-amber-800 bg-amber-100/80' : 'text-blue-800 bg-blue-100/80'
             }`}
         >
-          <span className="font-semibold">Login awal:</span> Siswa pakai NIS, guru pakai email.
+          <span className="font-semibold">Login awal:</span> Siswa pakai NIS + tanggal lahir, guru pakai email + tanggal lahir.
         </div>
       </div>
 
@@ -677,23 +662,32 @@ export default function ProfileGuru() {
         >
           {showPasswordFields ? 'Batal Ganti Password' : 'Ganti Password'}
         </button>
-        {showPasswordFields && (
-          <button
-            type="button"
-            onClick={handleCompleteAccount}
-            disabled={accountSaving}
-            className="inline-flex items-center gap-2 rounded-xl bg-amber-600 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-amber-200/70 hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-70"
-          >
-            {accountSaving ? 'Menyimpan...' : 'Simpan Email & Password'}
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={handleCompleteAccount}
+          disabled={accountSaving}
+          className="inline-flex items-center gap-2 rounded-xl bg-amber-600 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-amber-200/70 hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-70"
+        >
+          {accountSaving
+            ? 'Menyimpan...'
+            : needsAccountSetup
+              ? 'Simpan Setup Akun'
+              : 'Simpan Perubahan Akun'}
+        </button>
         <p className="text-xs text-amber-800">
-          Password baru akan aktif untuk login berikutnya.
+          {needsAccountSetup
+            ? 'Password awal masih bisa diganti langsung. Saat Anda memasukkan email aktif baru, sistem akan mengirim kode 6 digit ke email baru tersebut.'
+            : 'Perubahan email atau password akan meminta kode verifikasi 6 digit. Jika Google masih tertaut, email tidak bisa diganti sebelum tautannya dilepas.'}
         </p>
       </div>
       {needsAccountSetup && (
         <p className="mt-3 text-xs text-amber-700">
-          Anda belum menyelesaikan setup akun. Silakan isi email aktif lalu ganti password.
+          Anda boleh mengganti password dulu, email dulu, atau keduanya sekaligus. Jika email sistem diganti ke email aktif, email baru harus lolos verifikasi 6 digit terlebih dahulu. Akun tetap dianggap tahap awal sampai email aktif dan password awal sudah diganti.
+        </p>
+      )}
+      {googleLinked && hasRealLoginEmail(email) && (
+        <p className="mt-3 text-xs text-red-700">
+          Email akun sedang tertaut dengan Google. Lepas tautan Google terlebih dahulu jika ingin mengganti email akun ini.
         </p>
       )}
 
@@ -707,14 +701,9 @@ export default function ProfileGuru() {
             <p className="text-xs text-slate-600 mt-1">
               Syarat: email akun harus sama persis dengan email Google.
             </p>
-            {!isGoogleAuthEnabled && (
-              <p className="text-xs text-amber-700 mt-1">
-                Mode standby: aktifkan `VITE_GOOGLE_AUTH_ENABLED=true` saat siap produksi.
-              </p>
-            )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col items-stretch gap-2 md:items-end">
             <span
               className={`px-3 py-1 rounded-full text-xs font-semibold ${googleLinked
                 ? 'bg-emerald-100 text-emerald-700'
@@ -723,17 +712,23 @@ export default function ProfileGuru() {
             >
               {googleLinked ? 'Google Tertaut' : 'Belum Tertaut'}
             </span>
-            <button
-              type="button"
-              onClick={handleLinkGoogle}
-              disabled={linkingGoogle || unlinkingGoogle || googleLinked}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-70"
-            >
-              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-300 text-[11px] font-bold">
-                G
-              </span>
-              {googleLinked ? 'Sudah Tertaut' : linkingGoogle ? 'Mengalihkan...' : 'Tautkan Google'}
-            </button>
+            {!googleLinked && !googleLinkBlockedReason && (
+              <GoogleCredentialButton
+                mode="link"
+                onCredential={handleLinkGoogle}
+                busy={linkingGoogle}
+                className="w-full md:w-[260px]"
+                buttonClassName="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-70"
+                noteClassName="text-xs text-slate-600"
+                label="Tautkan Google"
+                busyLabel="Memproses tautan Google..."
+              />
+            )}
+            {!googleLinked && googleLinkBlockedReason && (
+              <div className="w-full md:w-[260px] rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-800">
+                {googleLinkBlockedReason}
+              </div>
+            )}
             {googleLinked && (
               <button
                 type="button"
@@ -853,106 +848,9 @@ export default function ProfileGuru() {
                       </>
                     )}
                   </div>
-
-                  {/* ===== INLINE VERIFICATION FLOW ===== */}
-                  {!emailVerified && verifyPhase === 'idle' && (
-                    <button
-                      onClick={handleSendVerification}
-                      disabled={sendingVerify}
-                      className="w-full mt-3 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white text-sm font-medium rounded-xl transition-all duration-200 shadow-sm"
-                    >
-                      Verifikasi Email
-                    </button>
-                  )}
-
-                  {/* Sending spinner */}
-                  {verifyPhase === 'sending' && (
-                    <div className="mt-3 flex flex-col items-center gap-2 py-3">
-                      <div className="w-8 h-8 border-3 border-slate-200 border-t-blue-600 rounded-full animate-spin" style={{ borderWidth: '3px' }} />
-                      <p className="text-xs text-slate-500 font-medium">Mengirim kode...</p>
-                    </div>
-                  )}
-
-                  {/* Code input */}
-                  {verifyPhase === 'input' && (
-                    <div className="mt-3 space-y-3">
-                      <div
-                        className={`rounded-lg px-3 py-2 text-xs font-medium text-center ${
-                          verifySent
-                            ? 'bg-green-50 border border-green-200 text-green-700'
-                            : 'bg-amber-50 border border-amber-200 text-amber-700'
-                        }`}
-                      >
-                        {verifySent
-                          ? '✅ Kode dikirim ke email Anda'
-                          : '⚠️ Kode belum terkirim. Cek error lalu kirim ulang.'}
-                      </div>
-                      <p className="text-[11px] text-slate-500 text-center">Masukkan kode 6 digit dari email</p>
-                      <div className="flex justify-center gap-1.5">
-                        {[0, 1, 2, 3, 4, 5].map((idx) => (
-                          <input
-                            key={idx}
-                            ref={(el) => { verifyInputsRef.current[idx] = el }}
-                            type="text"
-                            inputMode="numeric"
-                            maxLength={1}
-                            value={verifyCode[idx] || ''}
-                            onChange={(e) => handleVerifyCodeChange(idx, e)}
-                            onKeyDown={(e) => handleVerifyCodeKeyDown(idx, e)}
-                            onPaste={idx === 0 ? handleVerifyCodePaste : undefined}
-                            className="w-9 h-11 text-center text-lg font-bold border-2 border-slate-200 rounded-lg bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all"
-                          />
-                        ))}
-                      </div>
-                      <button
-                        onClick={handleVerifySubmit}
-                        disabled={verifyCode.join('').length < 6}
-                        className="w-full px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-xl transition-all duration-200 shadow-sm"
-                      >
-                        ✅ Verifikasi Kode
-                      </button>
-                      <div className="text-center">
-                        {verifyCooldown > 0 ? (
-                          <span className="text-[11px] text-slate-400">Kirim ulang dalam {verifyCooldown}s</span>
-                        ) : (
-                          <button
-                            onClick={handleVerifyResend}
-                            className="text-[11px] text-blue-600 hover:text-blue-700 underline underline-offset-2 bg-transparent border-none cursor-pointer"
-                          >
-                            📨 Kirim ulang kode
-                          </button>
-                        )}
-                      </div>
-                      {verifyError && (
-                        <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-xs text-red-600">
-                          ⚠️ {verifyError}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Verifying spinner */}
-                  {verifyPhase === 'verifying' && (
-                    <div className="mt-3 flex flex-col items-center gap-2 py-3">
-                      <div className="w-8 h-8 border-3 border-slate-200 border-t-emerald-600 rounded-full animate-spin" style={{ borderWidth: '3px' }} />
-                      <p className="text-xs text-slate-500 font-medium">Memverifikasi kode...</p>
-                    </div>
-                  )}
-
-                  {/* Success animation */}
-                  {verifyPhase === 'success' && (
-                    <div className="mt-3 evmFadeInUp">
-                      <div className="flex flex-col items-center gap-2 py-4">
-                        <div className="evmSuccessCircle" style={{ width: 56, height: 56 }}>
-                          <svg className="evmSuccessCheck" viewBox="0 0 52 52" style={{ width: 28, height: 28 }}>
-                            <path className="evmCheckPath" fill="none" d="M14 27l7.8 7.8L38 17" />
-                          </svg>
-                        </div>
-                        <p className="text-sm font-bold text-emerald-600 mt-1">Verifikasi Berhasil!</p>
-                        <p className="text-[11px] text-slate-500">Email Anda telah terverifikasi</p>
-                      </div>
-                    </div>
-                  )}
+                  <p className="mt-3 text-center text-[11px] leading-5 text-slate-500">
+                    Verifikasi email 6 digit biasa sudah dimatikan. Kode 6 digit sekarang dipakai saat Anda mengganti email atau password akun.
+                  </p>
                 </div>
 
                 <button
@@ -1098,6 +996,35 @@ export default function ProfileGuru() {
           </div>
         </div>
         {securityAccountCard}
+        <VerificationCodeModal
+          isOpen={accountVerifyOpen}
+          onClose={() => {
+            if (accountSaving) return
+            setAccountVerifyOpen(false)
+            setPendingAccountAction(null)
+          }}
+          onSuccess={() => {
+            setAccountVerifyOpen(false)
+            setPendingAccountAction(null)
+          }}
+          email={pendingAccountAction?.targetEmail || ''}
+          title={pendingAccountAction?.verificationTitle || 'Konfirmasi Perubahan Akun'}
+          description={pendingAccountAction?.verificationDescription || 'Kirim kode 6 digit ke email tujuan untuk menyimpan perubahan email atau password akun.'}
+          inputDescription={pendingAccountAction?.verificationInputDescription || 'Masukkan kode 6 digit dari email tujuan. Kode ini dipakai untuk memastikan perubahan akun benar-benar Anda lakukan.'}
+          sendLabel="Kirim Kode 6 Digit"
+          confirmLabel="Simpan Perubahan"
+          successTitle="Perubahan Akun Berhasil!"
+          successSubtitle={pendingAccountAction?.successMessage || 'Perubahan akun berhasil disimpan.'}
+          onSendCode={async () => {
+            const plan = pendingAccountAction || buildAccountChangePlan()
+            const { error } = await supabase.auth.sendPasswordChangeCode(plan.targetEmail)
+            if (error) throw error
+          }}
+          onVerifyCode={async (code) => {
+            const plan = pendingAccountAction || buildAccountChangePlan()
+            await submitAccountChange(plan, code)
+          }}
+        />
       </div>
     </div>
   )

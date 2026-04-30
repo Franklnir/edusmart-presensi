@@ -1,41 +1,43 @@
-import React, { Suspense, lazy } from 'react'
+import React, { Suspense } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import AdminLockGate from './components/AdminLockGate'
 import ProtectedRoute from './components/ProtectedRoute'
 import RoleGate from './components/RoleGate'
+import { lazyRoute } from './lib/routePrefetch'
 
-const Login = lazy(() => import('./pages/auth/Login'))
-const Register = lazy(() => import('./pages/auth/Register'))
-const ForgotPassword = lazy(() => import('./pages/auth/ForgotPassword'))
-const ResetPassword = lazy(() => import('./pages/auth/ResetPassword'))
+const Login = lazyRoute('/login')
+const GoogleAuthPopup = lazyRoute('/auth/google/popup')
+const Register = lazyRoute('/register')
+const ForgotPassword = lazyRoute('/forgot-password')
+const ResetPassword = lazyRoute('/reset-password')
 
-const SHome = lazy(() => import('./pages/siswa/Home'))
-const SAbsensi = lazy(() => import('./pages/siswa/Absensi'))
-const STugas = lazy(() => import('./pages/siswa/Tugas'))
-const SEditProfile = lazy(() => import('./pages/siswa/EditProfile'))
-const SQuiz = lazy(() => import('./pages/siswa/Quiz'))
+const SHome = lazyRoute('/siswa/home')
+const SAbsensi = lazyRoute('/siswa/absensi')
+const STugas = lazyRoute('/siswa/tugas')
+const SEditProfile = lazyRoute('/siswa/profile')
+const SQuiz = lazyRoute('/siswa/quiz')
 
-const GJadwal = lazy(() => import('./pages/guru/JadwalGuru'))
-const GAbsensi = lazy(() => import('./pages/guru/AbsensiGuru'))
-const GTugas = lazy(() => import('./pages/guru/TugasGuru'))
-const GLaporan = lazy(() => import('./pages/guru/Laporan'))
-const GProfile = lazy(() => import('./pages/guru/profile'))
-const GQuiz = lazy(() => import('./pages/guru/Quiz'))
+const GJadwal = lazyRoute('/guru/jadwal')
+const GAbsensi = lazyRoute('/guru/absensi')
+const GTugas = lazyRoute('/guru/tugas')
+const GLaporan = lazyRoute('/guru/laporan')
+const GProfile = lazyRoute('/guru/profile')
+const GQuiz = lazyRoute('/guru/quiz')
 
-const AHome = lazy(() => import('./pages/admin/Home'))
-const AKelas = lazy(() => import('./pages/admin/Kelas'))
-const AGuru = lazy(() => import('./pages/admin/Guru'))
-const ASiswa = lazy(() => import('./pages/admin/Siswa'))
-const AScan = lazy(() => import('./pages/admin/Scan'))
-const Sertifikat = lazy(() => import('./pages/admin/Sertifikat'))
-const ABackup = lazy(() => import('./pages/admin/Backup'))
-const APengaturan = lazy(() => import('./pages/admin/pengaturan'))
-const ATenants = lazy(() => import('./pages/admin/Tenants'))
-const ASuperAdmins = lazy(() => import('./pages/admin/SuperAdmins'))
-const AApprovals = lazy(() => import('./pages/admin/Approvals'))
-const AAuditTrail = lazy(() => import('./pages/admin/AuditTrail'))
-const APlugins = lazy(() => import('./pages/admin/Plugins'))
-const AWhatsApp = lazy(() => import('./pages/admin/WhatsApp'))
+const AHome = lazyRoute('/admin/home')
+const AKelas = lazyRoute('/admin/kelas')
+const AGuru = lazyRoute('/admin/guru')
+const ASiswa = lazyRoute('/admin/siswa')
+const AScan = lazyRoute('/admin/scan')
+const Sertifikat = lazyRoute('/admin/sertifikat')
+const ABackup = lazyRoute('/admin/backup')
+const APengaturan = lazyRoute('/admin/pengaturan')
+const ATenants = lazyRoute('/admin/tenants')
+const ASuperAdmins = lazyRoute('/admin/super-admins')
+const AApprovals = lazyRoute('/admin/approvals')
+const AAuditTrail = lazyRoute('/admin/audit-trail')
+const APlugins = lazyRoute('/admin/plugins')
+const AWhatsApp = lazyRoute('/admin/whatsapp')
 
 const RouteFallback = () => (
   <div className="w-full min-h-[40vh] grid place-items-center">
@@ -53,6 +55,7 @@ const AppRoutes = () => (
   <Routes>
     {/* Auth (tidak butuh login) */}
     <Route path="/login" element={lazyElement(Login)} />
+    <Route path="/auth/google/popup" element={lazyElement(GoogleAuthPopup)} />
     <Route path="/register" element={lazyElement(Register)} />
     <Route path="/forgot-password" element={lazyElement(ForgotPassword)} />
     <Route path="/reset-password" element={lazyElement(ResetPassword)} />

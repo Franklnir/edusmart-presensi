@@ -190,6 +190,14 @@ const toTimeLabel = (hhmm) => toTimeHHMM(hhmm).replace(':', '.')
 
 const toRangeLabel = (start, end) => `${toTimeLabel(start)}-${toTimeLabel(end)}`
 
+const normalizeMapelInput = (value = '') => String(value || '').toUpperCase()
+
+const normalizeMapelName = (value = '') =>
+  String(value || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toUpperCase()
+
 const normalizeScheduleDay = (day) => {
   const raw = String(day || '').trim().toLowerCase()
   const map = {
@@ -581,7 +589,7 @@ export default function AKelas() {
       const rows = data.map(j => ({
         id: j.id,
         hari: j.hari,
-        mapel: j.mapel,
+        mapel: normalizeMapelName(j.mapel),
         guruId: j.guru_id,
         guruNama: j.guru_nama || '',
         jamMulai: j.jam_mulai,
@@ -634,9 +642,9 @@ export default function AKelas() {
       if (error) throw error
 
       const rows = data.map(m => ({
+        ...m,
         id: m.id,
-        nama: m.nama || m.id,
-        ...m
+        nama: normalizeMapelName(m.nama || m.id)
       }))
 
       setMapelList(rows)
@@ -694,7 +702,7 @@ export default function AKelas() {
   }
 
   function buildJadwalKey({ hari, mapel, jamMulai, jamSelesai }) {
-    const cleanMapel = (mapel || '').replace(/\s+/g, '_').replace(/[^\w-]/g, '')
+    const cleanMapel = normalizeMapelName(mapel).replace(/\s+/g, '_').replace(/[^\w-]/g, '')
     const cleanHari = (hari || '').replace(/\s+/g, '_')
     const cleanJamMulai = (jamMulai || '').replace(/:/g, '')
     const cleanJamSelesai = (jamSelesai || '').replace(/:/g, '')
@@ -704,6 +712,7 @@ export default function AKelas() {
 
   async function hasConflict({ hari, jamMulai, jamSelesai, guruId, mapel, kelasId }, ignoreId = null) {
     if (!kelasId) return 'Kelas belum dipilih'
+    const normalizedMapel = normalizeMapelName(mapel)
 
     try {
       // Validasi waktu
@@ -763,7 +772,7 @@ export default function AKelas() {
       let mapelQuery = supabase
         .from('jadwal')
         .select('*')
-        .eq('mapel', mapel)
+        .ilike('mapel', normalizedMapel)
         .eq('hari', hari)
 
       if (ignoreId) {
@@ -775,7 +784,7 @@ export default function AKelas() {
 
       for (const j of sameMapelSchedule) {
         if (timesOverlap(jamMulai, jamSelesai, j.jam_mulai, j.jam_selesai)) {
-          return `Mata pelajaran ${mapel} bentrok di kelas ${j.kelas_id} (${j.jam_mulai}-${j.jam_selesai})`
+          return `Mata pelajaran ${normalizedMapel} bentrok di kelas ${j.kelas_id} (${j.jam_mulai}-${j.jam_selesai})`
         }
       }
 
@@ -963,7 +972,7 @@ export default function AKelas() {
 
   /* ------- MATA PELAJARAN ------- */
   async function tambahMapel() {
-    const nama = (newMapel || '').trim()
+    const nama = normalizeMapelName(newMapel)
     if (!nama) {
       pushToast('error', 'Nama mata pelajaran harus diisi')
       return
@@ -1032,7 +1041,7 @@ export default function AKelas() {
       const { data: usedJadwal, error: checkError } = await supabase
         .from('jadwal')
         .select('kelas_id')
-        .eq('mapel', mapel.nama)
+        .ilike('mapel', normalizeMapelName(mapel.nama))
         .limit(1)
 
       if (checkError) throw checkError
@@ -1069,7 +1078,8 @@ export default function AKelas() {
       return
     }
 
-    const { hari, mapel, guruId, jamMulai, jamSelesai } = form
+    const { hari, guruId, jamMulai, jamSelesai } = form
+    const mapel = normalizeMapelName(form.mapel)
 
     // Validasi
     if (!hari || !mapel || !jamMulai || !jamSelesai) {
@@ -1168,7 +1178,8 @@ export default function AKelas() {
   async function saveEdit() {
     if (!editData) return
 
-    const { hari, mapel, guruId, jamMulai, jamSelesai } = editData
+    const { hari, guruId, jamMulai, jamSelesai } = editData
+    const mapel = normalizeMapelName(editData.mapel)
 
     if (!hari || !mapel || !jamMulai || !jamSelesai) {
       pushToast('error', 'Lengkapi semua field yang wajib.')
@@ -1273,7 +1284,7 @@ export default function AKelas() {
     id: row?.id || '',
     kelasId: row?.kelas_id || '',
     hari: normalizeScheduleDay(row?.hari),
-    mapel: row?.mapel || '',
+    mapel: normalizeMapelName(row?.mapel),
     guruId: row?.guru_id || '',
     guruNama: row?.guru_nama || '',
     jamMulai: toTimeHHMM(row?.jam_mulai || row?.jamMulai),
@@ -1942,7 +1953,7 @@ export default function AKelas() {
                             className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm text-gray-900"
                             placeholder="Contoh: Matematika Wajib"
                             value={newMapel}
-                            onChange={e => setNewMapel(e.target.value)}
+                            onChange={e => setNewMapel(normalizeMapelInput(e.target.value))}
                             onKeyPress={(e) => {
                               if (e.key === 'Enter') {
                                 e.preventDefault()

@@ -16,6 +16,7 @@ return new class extends Migration
             $table->uuid('id')->primary();
             $table->uuid('user_id')->index();
             $table->uuid('tenant_id')->nullable()->index();
+            $table->string('target_email')->nullable();
             $table->string('code_hash');
             $table->timestampTz('expires_at');
             $table->unsignedSmallInteger('attempt_count')->default(0);

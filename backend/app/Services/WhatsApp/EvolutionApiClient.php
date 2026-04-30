@@ -42,11 +42,18 @@ class EvolutionApiClient
             return null;
         }
 
-        $response = $this->send('GET', '/instance/fetchInstances', query: [
+        $response = $this->request()->get('/instance/fetchInstances', [
             'instanceName' => $instanceName,
         ]);
+        if ($response->status() === 404) {
+            return null;
+        }
+        if (! $response->successful()) {
+            throw new RuntimeException($this->buildErrorMessage($response));
+        }
 
-        $items = is_array($response) ? $response : [];
+        $items = $response->json();
+        $items = is_array($items) ? $items : [];
         foreach ($items as $item) {
             $record = $this->normalizeInstanceRecord($item);
             if (! empty($record['instanceName']) && $record['instanceName'] === $instanceName) {
@@ -64,28 +71,38 @@ class EvolutionApiClient
 
     public function connectInstance(string $instanceName, ?string $number = null): array
     {
-        $payload = [];
+        $query = [];
         if ($number !== null && trim($number) !== '') {
-            $payload['number'] = trim($number);
+            $query['number'] = trim($number);
         }
 
-        return $this->send('GET', '/instance/connect/'.rawurlencode($instanceName), payload: $payload);
+        return $this->send('GET', '/instance/connect/'.rawurlencode($instanceName), query: $query);
     }
 
     public function setWebhook(string $instanceName, string $url, array $events): array
     {
         return $this->send('POST', '/webhook/set/'.rawurlencode($instanceName), payload: [
-            'enabled' => true,
-            'url' => $url,
-            'webhookByEvents' => true,
-            'webhookBase64' => true,
-            'events' => array_values($events),
+            // Evolution v2.1.1 runtime expects the webhook config under a nested
+            // "webhook" key, even though parts of the public docs still show a
+            // flat payload for this endpoint.
+            'webhook' => [
+                'enabled' => true,
+                'url' => $url,
+                'webhookByEvents' => true,
+                'webhookBase64' => true,
+                'events' => array_values($events),
+            ],
         ]);
     }
 
     public function logoutInstance(string $instanceName): array
     {
         return $this->send('DELETE', '/instance/logout/'.rawurlencode($instanceName));
+    }
+
+    public function deleteInstance(string $instanceName): array
+    {
+        return $this->send('DELETE', '/instance/delete/'.rawurlencode($instanceName));
     }
 
     public function sendText(string $instanceName, string $number, string $text): array
@@ -158,11 +175,30 @@ class EvolutionApiClient
             return [];
         }
 
+        $record = $item;
         if (isset($item['instance']) && is_array($item['instance'])) {
-            return $item['instance'];
+            $record = array_merge($item, $item['instance']);
         }
 
-        return $item;
+        $instanceName = trim((string) ($record['instanceName'] ?? $record['name'] ?? ''));
+        $status = trim((string) ($record['status'] ?? $record['connectionStatus'] ?? ''));
+        $owner = trim((string) ($record['owner'] ?? $record['ownerJid'] ?? $record['number'] ?? ''));
+        $profileName = trim((string) ($record['profileName'] ?? $record['profile_name'] ?? ''));
+
+        if ($instanceName !== '') {
+            $record['instanceName'] = $instanceName;
+        }
+        if ($status !== '') {
+            $record['status'] = $status;
+        }
+        if ($owner !== '') {
+            $record['owner'] = $owner;
+        }
+        if ($profileName !== '') {
+            $record['profileName'] = $profileName;
+        }
+
+        return $record;
     }
 
     private function baseUrl(): string

@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\AdminBackupController;
 use App\Http\Controllers\Api\AdminController;
+use App\Http\Controllers\Api\AttendanceQrController;
 use App\Http\Controllers\Api\ApprovalController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\DbController;
@@ -32,6 +33,14 @@ Route::post('/auth/login', [AuthController::class, 'login'])->middleware('thrott
 Route::get('/auth/google/redirect', [AuthController::class, 'googleRedirect'])
     ->middleware(['web', 'throttle:auth'])
     ->withoutMiddleware([\App\Http\Middleware\EnsureTenantMatchesProfile::class]);
+Route::get('/auth/google/popup-context', [AuthController::class, 'googlePopupContext'])
+    ->middleware('throttle:auth')
+    ->withoutMiddleware([
+        \App\Http\Middleware\ResolveTenant::class,
+        \App\Http\Middleware\EnsureTenantMatchesProfile::class,
+    ]);
+Route::post('/auth/google/code-login', [AuthController::class, 'googleCodeLogin'])->middleware('throttle:auth');
+Route::post('/auth/google/credential-login', [AuthController::class, 'googleCredentialLogin'])->middleware('throttle:auth');
 Route::get('/auth/google/callback', [AuthController::class, 'googleCallback'])
     ->middleware(['web', 'throttle:auth'])
     ->withoutMiddleware([
@@ -55,16 +64,32 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->post('/auth/verify-email/re
 Route::middleware(['auth:sanctum', 'throttle:auth'])->post('/auth/email-verification/send-code', [AuthController::class, 'sendEmailVerificationCode']);
 Route::middleware(['auth:sanctum', 'throttle:auth'])->post('/auth/email-verification/verify-code', [AuthController::class, 'verifyEmailCode']);
 Route::middleware(['web', 'auth:sanctum', 'throttle:api'])->get('/auth/google/link', [AuthController::class, 'googleLinkRedirect']);
+Route::middleware(['auth:sanctum', 'throttle:api'])->post('/auth/google/credential-link', [AuthController::class, 'googleCredentialLink']);
 Route::middleware(['auth:sanctum', 'throttle:api'])->post('/auth/google/unlink', [AuthController::class, 'googleUnlink']);
 Route::middleware(['auth:sanctum', 'throttle:api'])->post('/presence/ping', [PresenceController::class, 'ping']);
+Route::middleware(['auth:sanctum', 'throttle:api'])->post('/attendance-qr/session', [AttendanceQrController::class, 'session']);
+Route::middleware(['auth:sanctum', 'throttle:api'])->post('/attendance-qr/scan', [AttendanceQrController::class, 'scan']);
+Route::middleware(['auth:sanctum', 'throttle:api'])->patch('/students/{id}/additional-info', [AdminController::class, 'updateStudentAdditionalInfo']);
 Route::post('/rfid/scan', [RfidController::class, 'scan'])
-    ->middleware('throttle:api')
+    ->middleware('throttle:rfid')
     ->withoutMiddleware([
         \App\Http\Middleware\ResolveTenant::class,
         \App\Http\Middleware\EnsureTenantMatchesProfile::class,
     ]);
 Route::get('/rfid/mode', [RfidController::class, 'mode'])
-    ->middleware('throttle:api')
+    ->middleware('throttle:rfid')
+    ->withoutMiddleware([
+        \App\Http\Middleware\ResolveTenant::class,
+        \App\Http\Middleware\EnsureTenantMatchesProfile::class,
+    ]);
+Route::post('/rfid/sync', [RfidController::class, 'sync'])
+    ->middleware('throttle:rfid')
+    ->withoutMiddleware([
+        \App\Http\Middleware\ResolveTenant::class,
+        \App\Http\Middleware\EnsureTenantMatchesProfile::class,
+    ]);
+Route::post('/rfid/heartbeat', [RfidController::class, 'heartbeat'])
+    ->middleware('throttle:rfid')
     ->withoutMiddleware([
         \App\Http\Middleware\ResolveTenant::class,
         \App\Http\Middleware\EnsureTenantMatchesProfile::class,
@@ -72,6 +97,11 @@ Route::get('/rfid/mode', [RfidController::class, 'mode'])
 Route::post('/rfid/set-mode', [RfidController::class, 'setMode'])
     ->middleware(['auth:sanctum', 'throttle:api']);
 Route::middleware(['auth:sanctum', 'throttle:api'])->post('/quiz/submit', [QuizController::class, 'submit']);
+Route::middleware(['auth:sanctum', 'throttle:api'])->post('/quiz/start', [QuizController::class, 'startAttempt']);
+Route::middleware(['auth:sanctum', 'throttle:api'])->post('/quiz/answer', [QuizController::class, 'saveAnswer']);
+Route::middleware(['auth:sanctum', 'throttle:api'])->post('/quiz/violation', [QuizController::class, 'logViolation']);
+Route::middleware(['auth:sanctum', 'throttle:api'])->post('/quiz/publish', [QuizController::class, 'publish']);
+Route::middleware(['auth:sanctum', 'throttle:api'])->post('/quiz/close', [QuizController::class, 'close']);
 Route::middleware(['auth:sanctum', 'throttle:api'])->post('/quiz/retake', [QuizController::class, 'retake']);
 Route::middleware(['auth:sanctum', 'throttle:api'])->get('/quiz/retake-history', [QuizController::class, 'retakeHistory']);
 Route::middleware(['auth:sanctum', 'throttle:api'])->post('/quiz/restore-retake-score', [QuizController::class, 'restoreRetakeScore']);
@@ -86,6 +116,7 @@ Route::get('/storage/signed', [StorageController::class, 'signed'])->middleware(
 Route::get('/storage/object', [StorageController::class, 'object'])->middleware('throttle:storage');
 
 Route::middleware(['auth:sanctum', 'throttle:api'])->delete('/admin/users/{id}', [AdminController::class, 'deleteUser']);
+Route::middleware(['auth:sanctum', 'throttle:api'])->post('/admin/users/provision', [AdminController::class, 'provisionUser']);
 Route::middleware(['auth:sanctum', 'throttle:api'])->get('/admin/monitoring', [AdminController::class, 'monitoring']);
 Route::middleware(['auth:sanctum', 'throttle:api'])->get('/admin/backup', [AdminBackupController::class, 'backup']);
 Route::middleware(['auth:sanctum', 'throttle:api'])->post('/admin/backup/restore', [AdminBackupController::class, 'restore']);
@@ -99,7 +130,7 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->post('/admin/whatsapp/logou
 Route::middleware(['auth:sanctum', 'throttle:api'])->patch('/admin/whatsapp/settings', [WhatsAppController::class, 'updateSettings']);
 Route::middleware(['auth:sanctum', 'throttle:api'])->post('/admin/whatsapp/test', [WhatsAppController::class, 'sendTest']);
 Route::post('/whatsapp/webhook/{secret}/{event?}', [WhatsAppWebhookController::class, 'handle'])
-    ->middleware('throttle:api')
+    ->middleware('throttle:webhook')
     ->withoutMiddleware([
         \App\Http\Middleware\ResolveTenant::class,
         \App\Http\Middleware\EnsureTenantMatchesProfile::class,
@@ -115,6 +146,8 @@ Route::middleware(['auth:sanctum', 'throttle:super', 'super.domain'])->group(fun
     Route::post('/super/tenants', [SuperAdminController::class, 'store']);
     Route::get('/super/tenants/{id}', [SuperAdminController::class, 'showTenant']);
     Route::post('/super/tenants/{tenantId}/domains', [SuperAdminController::class, 'storeTenantDomain']);
+    Route::patch('/super/tenants/{tenantId}/rfid-mqtt', [SuperAdminController::class, 'updateTenantRfidMqtt']);
+    Route::post('/super/tenants/{tenantId}/rfid-mqtt/mosquitto', [SuperAdminController::class, 'provisionTenantRfidMosquitto']);
     Route::get('/super/tenants/{id}/backup', [SuperAdminController::class, 'backupTenant']);
     Route::post('/super/tenants/{id}/restore', [SuperAdminController::class, 'restoreTenant']);
     Route::patch('/super/tenants/{id}/status', [SuperAdminController::class, 'updateTenantStatus']);

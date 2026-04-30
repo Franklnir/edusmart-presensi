@@ -1,13 +1,18 @@
 // src/store/useAuthStore.js
 import { create } from 'zustand'
-import { supabase } from '../lib/supabase'
+import {
+  clearAuthSessionHint,
+  setAuthSessionHint,
+  supabase
+} from '../lib/supabase'
 import { useUIStore } from './useUIStore'
 import { logError } from '../utils/logger'
 import { isValidRole } from '../utils/role'
-import { shouldForceAccountSetup } from '../utils/accountSetup'
+import { hasRealLoginEmail, shouldForceAccountSetup } from '../utils/accountSetup'
 
 // Helper kecil biar konsisten
 const normalizeEmail = (email) => email.trim().toLowerCase()
+let authInitPromise = null
 
 const buildProfilePayload = (user) => {
   const meta = user?.user_metadata || {}
@@ -83,91 +88,124 @@ export const useAuthStore = create((set, get) => ({
      INIT (dipanggil di root App)
      =========================== */
   init: async () => {
-    try {
-      const settings = await get().loadSettings()
+    if (get().initialized) {
+      return {
+        user: get().user,
+        profile: get().profile,
+        settings: get().settings
+      }
+    }
 
-      const {
-        data: { session }
-      } = await supabase.auth.getSession()
+    if (authInitPromise) {
+      return authInitPromise
+    }
 
-      const user = session?.user ?? null
-      let profile = null
+    authInitPromise = (async () => {
+      try {
+        const settings = await get().loadSettings()
 
-      if (user) {
-        const { profile: loadedProfile, error: profileError } = await ensureProfile(user)
-        if (profileError) {
-          logError('Error loading profile on init:', profileError)
-          await supabase.auth.signOut()
-          set({
-            user: null,
-            profile: null,
-            settings,
-            initialized: true,
-            error: profileError?.message || 'Gagal memuat data profil'
-          })
-          return
+        const {
+          data: { session }
+        } = await supabase.auth.getSession()
+
+        const user = session?.user ?? null
+        let profile = null
+
+        if (!user) {
+          clearAuthSessionHint()
         }
 
-        if (!isValidRole(loadedProfile?.role)) {
-          await supabase.auth.signOut()
-          set({
-            user: null,
-            profile: null,
-            settings,
-            initialized: true,
-            error: 'Role pengguna tidak valid. Hubungi administrator.'
-          })
-          return
-        }
-
-        profile = loadedProfile
-
-        // Blokir jika status nonaktif
-        if (profile && profile.status === 'nonaktif') {
-          await supabase.auth.signOut()
-
-          let baseMessage = ''
-          if (profile.role === 'guru') {
-            baseMessage =
-              'Akun guru ini dinonaktifkan. Silakan hubungi administrator.'
-          } else if (profile.role === 'siswa') {
-            baseMessage =
-              'Akun siswa ini dinonaktifkan. Silakan hubungi wali kelas atau admin.'
-          } else {
-            baseMessage =
-              'Akun ini dinonaktifkan. Silakan hubungi administrator.'
+        if (user) {
+          const { profile: loadedProfile, error: profileError } = await ensureProfile(user)
+          if (profileError) {
+            logError('Error loading profile on init:', profileError)
+            await supabase.auth.signOut()
+            clearAuthSessionHint()
+            set({
+              user: null,
+              profile: null,
+              settings,
+              initialized: true,
+              error: profileError?.message || 'Gagal memuat data profil'
+            })
+            return { user: null, profile: null, settings }
           }
 
-          const errorMessage = profile.alasan_nonaktif
-            ? `${baseMessage} Alasan: ${profile.alasan_nonaktif}`
-            : baseMessage
+          if (!isValidRole(loadedProfile?.role)) {
+            await supabase.auth.signOut()
+            clearAuthSessionHint()
+            set({
+              user: null,
+              profile: null,
+              settings,
+              initialized: true,
+              error: 'Role pengguna tidak valid. Hubungi administrator.'
+            })
+            return { user: null, profile: null, settings }
+          }
 
-          set({
-            user: null,
-            profile: null,
-            settings,
-            initialized: true,
-            error: errorMessage
-          })
+          profile = loadedProfile
 
-          return
+          // Blokir jika status nonaktif
+          if (profile && profile.status === 'nonaktif') {
+            await supabase.auth.signOut()
+            clearAuthSessionHint()
+
+            let baseMessage = ''
+            if (profile.role === 'guru') {
+              baseMessage =
+                'Akun guru ini dinonaktifkan. Silakan hubungi administrator.'
+            } else if (profile.role === 'siswa') {
+              baseMessage =
+                'Akun siswa ini dinonaktifkan. Silakan hubungi wali kelas atau admin.'
+            } else {
+              baseMessage =
+                'Akun ini dinonaktifkan. Silakan hubungi administrator.'
+            }
+
+            const errorMessage = profile.alasan_nonaktif
+              ? `${baseMessage} Alasan: ${profile.alasan_nonaktif}`
+              : baseMessage
+
+            set({
+              user: null,
+              profile: null,
+              settings,
+              initialized: true,
+              error: errorMessage
+            })
+
+            return { user: null, profile: null, settings }
+          }
         }
-      }
 
-      set({ user, profile, settings, initialized: true })
-      await get().loadSuperAdmin(profile)
-    } catch (err) {
-      logError('Init error:', err)
-      set({
-        user: null,
-        profile: null,
-        settings: null,
-        isSuperAdmin: false,
-        superAdminChecked: true,
-        initialized: true,
-        error: err?.message || 'Gagal inisialisasi auth'
-      })
-    }
+        if (user) {
+          setAuthSessionHint(true)
+        }
+
+        set({ user, profile, settings, initialized: true })
+        await get().loadSuperAdmin(profile)
+
+        return { user, profile, settings }
+      } catch (err) {
+        logError('Init error:', err)
+        clearAuthSessionHint()
+        set({
+          user: null,
+          profile: null,
+          settings: null,
+          isSuperAdmin: false,
+          superAdminChecked: true,
+          initialized: true,
+          error: err?.message || 'Gagal inisialisasi auth'
+        })
+        return { user: null, profile: null, settings: null }
+      } finally {
+        authInitPromise = null
+      }
+    })()
+
+    return authInitPromise
   },
 
   /* ===========================
@@ -274,6 +312,7 @@ export const useAuthStore = create((set, get) => ({
 
       const accountSetupRequired = shouldForceAccountSetup(profile, user?.email)
 
+      setAuthSessionHint(true)
       set({ user, profile, settings, error: null })
       await get().loadSuperAdmin(profile)
 
@@ -297,6 +336,232 @@ export const useAuthStore = create((set, get) => ({
     } finally {
       set({ isLoading: false })
     }
+  },
+
+  loginWithGoogleCode: async (code) => {
+    const { pushToast } = useUIStore.getState()
+    set({ isLoading: true, error: null })
+
+    try {
+      await supabase.auth.signOut()
+
+      const { data: authData, error: authError } = await supabase.auth.signInWithGoogleCode({
+        code
+      })
+
+      if (authError) {
+        throw new Error(authError.message || 'Login Google gagal')
+      }
+
+      const user = authData?.user
+      const profile = authData?.profile
+      if (!user || !profile) {
+        throw new Error('Data akun Google tidak lengkap')
+      }
+
+      if (!isValidRole(profile?.role)) {
+        await supabase.auth.signOut()
+        throw new Error('Role pengguna tidak valid. Hubungi administrator.')
+      }
+
+      if (profile.status === 'nonaktif') {
+        let baseMessage = ''
+        if (profile.role === 'guru') {
+          baseMessage =
+            'Akun guru dinonaktifkan. Silahkan hubungi administrator.'
+        } else if (profile.role === 'siswa') {
+          baseMessage =
+            'Akun siswa dinonaktifkan. Silahkan hubungi wali kelas atau admin.'
+        } else {
+          baseMessage =
+            'Akun ini dinonaktifkan. Silahkan hubungi administrator.'
+        }
+
+        const errorMessage = profile.alasan_nonaktif
+          ? `${baseMessage} Alasan: ${profile.alasan_nonaktif}`
+          : baseMessage
+
+        await supabase.auth.signOut()
+        throw new Error(errorMessage)
+      }
+
+      const settings = await get().loadSettings()
+      const accountSetupRequired = shouldForceAccountSetup(profile, user?.email)
+
+      setAuthSessionHint(true)
+      set({ user, profile, settings, error: null })
+      await get().loadSuperAdmin(profile)
+
+      if (accountSetupRequired) {
+        pushToast(
+          'warning',
+          'Anda harus mengganti password akun sekarang.',
+          5000
+        )
+      }
+
+      pushToast('success', 'Login Google berhasil')
+
+      return { user, profile }
+    } catch (err) {
+      logError('Login Google catch error:', err)
+      const errorMessage = err?.message || 'Terjadi kesalahan saat login Google'
+      set({ error: errorMessage })
+      pushToast('error', errorMessage)
+      return { error: errorMessage }
+    } finally {
+      set({ isLoading: false })
+    }
+  },
+
+  loginWithGoogleCredential: async (credential) => {
+    const { pushToast } = useUIStore.getState()
+    set({ isLoading: true, error: null })
+
+    try {
+      await supabase.auth.signOut()
+
+      const { data: authData, error: authError } = await supabase.auth.signInWithGoogleCredential({
+        credential
+      })
+
+      if (authError) {
+        throw new Error(authError.message || 'Login Google gagal')
+      }
+
+      const user = authData?.user
+      const profile = authData?.profile
+      if (!user || !profile) {
+        throw new Error('Data akun Google tidak lengkap')
+      }
+
+      if (!isValidRole(profile?.role)) {
+        await supabase.auth.signOut()
+        throw new Error('Role pengguna tidak valid. Hubungi administrator.')
+      }
+
+      if (profile.status === 'nonaktif') {
+        let baseMessage = ''
+        if (profile.role === 'guru') {
+          baseMessage =
+            'Akun guru dinonaktifkan. Silahkan hubungi administrator.'
+        } else if (profile.role === 'siswa') {
+          baseMessage =
+            'Akun siswa dinonaktifkan. Silahkan hubungi wali kelas atau admin.'
+        } else {
+          baseMessage =
+            'Akun ini dinonaktifkan. Silahkan hubungi administrator.'
+        }
+
+        const errorMessage = profile.alasan_nonaktif
+          ? `${baseMessage} Alasan: ${profile.alasan_nonaktif}`
+          : baseMessage
+
+        await supabase.auth.signOut()
+        throw new Error(errorMessage)
+      }
+
+      const settings = await get().loadSettings()
+      const accountSetupRequired = shouldForceAccountSetup(profile, user?.email)
+
+      setAuthSessionHint(true)
+      set({ user, profile, settings, error: null })
+      await get().loadSuperAdmin(profile)
+
+      if (accountSetupRequired) {
+        pushToast(
+          'warning',
+          'Anda harus mengganti password akun sekarang.',
+          5000
+        )
+      }
+
+      pushToast('success', 'Login Google berhasil')
+
+      return { user, profile }
+    } catch (err) {
+      logError('Login Google credential catch error:', err)
+      const errorMessage = err?.message || 'Terjadi kesalahan saat login Google'
+      set({ error: errorMessage })
+      pushToast('error', errorMessage)
+      return { error: errorMessage }
+    } finally {
+      set({ isLoading: false })
+    }
+  },
+
+  linkGoogleCredential: async (credential) => {
+    const { pushToast } = useUIStore.getState()
+    const currentUser = get().user
+    const currentProfile = get().profile
+    const currentEmail = currentUser?.email || currentProfile?.email || ''
+
+    if (currentProfile?.role === 'siswa' && currentProfile?.must_change_password) {
+      const message = 'Ganti password akun terlebih dahulu sebelum menautkan Google.'
+      set({ error: message })
+      pushToast('info', message)
+      return { error: message }
+    }
+
+    if (!hasRealLoginEmail(currentEmail)) {
+      const message =
+        'Email akun ini masih email buatan sistem. Ganti dulu ke email aktif yang sama dengan akun Google Anda sebelum menautkan Google.'
+      set({ error: message })
+      pushToast('info', message)
+      return { error: message }
+    }
+
+    set({ isLoading: true, error: null })
+
+    try {
+      const { data: authData, error: authError } = await supabase.auth.linkGoogleCredential({
+        credential
+      })
+
+      if (authError) {
+        throw new Error(authError.message || 'Tautkan Google gagal')
+      }
+
+      const nextUser = authData?.user || get().user
+      const nextProfile = authData?.profile || get().profile
+
+      set({
+        user: nextUser,
+        profile: nextProfile,
+        error: null
+      })
+
+      pushToast('success', 'Akun Google berhasil ditautkan')
+
+      return {
+        user: nextUser,
+        profile: nextProfile
+      }
+    } catch (err) {
+      logError('Link Google credential catch error:', err)
+      const errorMessage = err?.message || 'Terjadi kesalahan saat menautkan Google'
+      set({ error: errorMessage })
+      pushToast('error', errorMessage)
+      return { error: errorMessage }
+    } finally {
+      set({ isLoading: false })
+    }
+  },
+
+  /* ===========================
+     SESSION EXPIRED
+     =========================== */
+  expireSession: (message = 'Sesi login Anda telah berakhir. Silakan masuk lagi.') => {
+    clearAuthSessionHint()
+    set({
+      user: null,
+      profile: null,
+      isLoading: false,
+      isSuperAdmin: false,
+      superAdminChecked: true,
+      initialized: true,
+      error: message
+    })
   },
 
   /* ===========================
@@ -386,11 +651,19 @@ export const useAuthStore = create((set, get) => ({
      LOGOUT
      =========================== */
   logout: async () => {
+    clearAuthSessionHint()
     try {
       await supabase.auth.signOut()
-      set({ user: null, profile: null, error: null, isSuperAdmin: false, superAdminChecked: false })
     } catch (err) {
       logError('Logout error:', err)
+    } finally {
+      set({
+        user: null,
+        profile: null,
+        error: null,
+        isSuperAdmin: false,
+        superAdminChecked: false
+      })
     }
   },
 
@@ -408,6 +681,7 @@ export const useAuthStore = create((set, get) => ({
         if (!isValidRole(data.role)) {
           const { pushToast } = useUIStore.getState()
           await supabase.auth.signOut()
+          clearAuthSessionHint()
           set({ user: null, profile: null })
           pushToast('error', 'Role pengguna tidak valid. Hubungi administrator.')
           return
@@ -417,6 +691,7 @@ export const useAuthStore = create((set, get) => ({
           const { pushToast } = useUIStore.getState()
 
           await supabase.auth.signOut()
+          clearAuthSessionHint()
           set({ user: null, profile: null })
 
           let msg =
@@ -442,6 +717,7 @@ export const useAuthStore = create((set, get) => ({
         logError('Refresh profile error:', error)
         const { pushToast } = useUIStore.getState()
         await supabase.auth.signOut()
+        clearAuthSessionHint()
         set({ user: null, profile: null })
         pushToast('error', error?.message || 'Gagal memuat data profil')
       }

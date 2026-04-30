@@ -9,6 +9,7 @@ Gunakan checklist ini sebelum dan sesudah deploy supaya hardening IDOR/BOLA dan 
 - `SESSION_SECURE_COOKIE=true`
 - `SESSION_SAME_SITE=lax` (atau `none` jika benar-benar perlu cross-site + HTTPS)
 - `TENANT_ALLOW_HEADER_OVERRIDE=false`
+- `TRUSTED_PROXIES` hanya network proxy private yang valid, jangan wildcard `*`
 - `SUPER_ADMIN_ALLOW_EMAIL_FALLBACK=false`
 - `SUPER_ADMIN_IDS` diisi `user_id` super admin yang valid
 - `SUPER_ADMIN_EMAILS` hanya untuk cadangan bootstrap, jangan jadi sumber utama otorisasi
@@ -44,6 +45,17 @@ php artisan test --filter='DbSecurityTest|AuthSuperAdminHardeningTest'
 
 Jika salah satu gagal, jangan deploy.
 
+Jika image production tidak memuat dependency test, jalankan smoke check host langsung:
+
+```bash
+chmod +x deploy/scripts/prod_smoke_check.sh
+SMOKE_SUPER_ADMIN_EMAIL=admin@example.com \
+SMOKE_SUPER_ADMIN_PASSWORD='ganti-dengan-password-asli' \
+./deploy/scripts/prod_smoke_check.sh
+```
+
+Jika host `admin` atau `wa` masih `NXDOMAIN`, jangan go-live dulu sebelum DNS publik selesai.
+
 ## 5. Infrastruktur & Transport Security
 
 - Pastikan HTTPS aktif end-to-end (reverse proxy + app).
@@ -72,4 +84,3 @@ Jika salah satu gagal, jangan deploy.
 - Rotasi password admin tenant secara berkala.
 - Review akun `super_admins` per bulan (hapus yang tidak dipakai).
 - Jalankan regression test keamanan ini di CI sebelum merge ke branch production.
-

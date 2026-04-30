@@ -1,0 +1,519 @@
+<?php
+
+namespace App\Services\Rfid;
+
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
+
+class RfidDeviceService
+{
+    public function authenticateRequest(Request $request): array
+    {
+        $deviceId = $this->extractDeviceId($request);
+        $providedSecret = trim((string) $request->header('X-RFID-Secret', $request->input('device_secret', '')));
+
+        if ($deviceId !== '' && $providedSecret !== '') {
+            $device = $this->findDeviceContext($deviceId);
+            if (! $device) {
+                return $this->authError(401, 'device_not_registered', 'Device RFID belum terdaftar');
+            }
+
+            if ($this->isDeviceBlocked((string) ($device->status ?? 'active'))) {
+                return $this->authError(423, 'device_blocked', 'Device RFID tidak aktif');
+            }
+
+            $secretHash = trim((string) ($device->secret_hash ?? ''));
+            if ($secretHash === '' || ! Hash::check($providedSecret, $secretHash)) {
+                return $this->authError(401, 'invalid_device_secret', 'Secret device RFID tidak valid');
+            }
+
+            return [
+                'authorized' => true,
+                'auth_mode' => 'device_secret',
+                'device' => $device,
+                'device_id' => (string) $device->device_id,
+                'tenant_slug' => $this->normalizeTenantSlug($device->tenant_slug ?? ''),
+            ];
+        }
+
+        $sharedKeyAuth = $this->validateSharedKey($request);
+        if (! ($sharedKeyAuth['authorized'] ?? false)) {
+            return $sharedKeyAuth;
+        }
+
+        $device = $deviceId !== '' ? $this->findDeviceContext($deviceId) : null;
+        if ($device && $this->isDeviceBlocked((string) ($device->status ?? 'active'))) {
+            return $this->authError(423, 'device_blocked', 'Device RFID tidak aktif');
+        }
+
+        return [
+            'authorized' => true,
+            'auth_mode' => (string) ($sharedKeyAuth['auth_mode'] ?? 'shared_key'),
+            'device' => $device,
+            'device_id' => $device ? (string) $device->device_id : $deviceId,
+            'tenant_slug' => $this->normalizeTenantSlug($device->tenant_slug ?? ''),
+        ];
+    }
+
+    public function registerDevice(
+        string $tenantSlug,
+        string $deviceId,
+        ?string $name = null,
+        ?string $transport = 'mqtt',
+        ?string $plainSecret = null
+    ): array {
+        $tenant = $this->resolveTenantBySlug($tenantSlug);
+        if (! $tenant) {
+            return [
+                'success' => false,
+                'message' => 'Tenant tidak ditemukan',
+            ];
+        }
+
+        if ($this->isDeviceBlocked((string) ($tenant->status ?? 'active'))) {
+            return [
+                'success' => false,
+                'message' => 'Tenant tidak aktif, device tidak bisa didaftarkan',
+            ];
+        }
+
+        $deviceId = trim($deviceId);
+        if ($deviceId === '') {
+            return [
+                'success' => false,
+                'message' => 'device_id wajib diisi',
+            ];
+        }
+
+        if ($this->findDeviceContext($deviceId)) {
+            return [
+                'success' => false,
+                'message' => 'device_id sudah terdaftar',
+            ];
+        }
+
+        $secret = trim((string) $plainSecret);
+        if ($secret === '') {
+            $secret = Str::random(40);
+        }
+
+        $transport = $this->normalizeTransport($transport);
+
+        DB::table('rfid_devices')->insert([
+            'id' => (string) Str::uuid(),
+            'tenant_id' => (string) $tenant->id,
+            'device_id' => $deviceId,
+            'name' => $this->nullableString($name),
+            'secret_hash' => Hash::make($secret),
+            'status' => 'active',
+            'transport' => $transport,
+            'fallback_http_enabled' => $transport !== 'mqtt',
+            'metadata' => json_encode([
+                'created_via' => 'artisan',
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return [
+            'success' => true,
+            'message' => 'Device RFID berhasil didaftarkan',
+            'tenant_slug' => (string) $tenant->slug,
+            'device_id' => $deviceId,
+            'device_name' => $this->nullableString($name),
+            'transport' => $transport,
+            'secret' => $secret,
+        ];
+    }
+
+    public function findDeviceContext(string $deviceId): ?object
+    {
+        $deviceId = trim($deviceId);
+        if ($deviceId === '') {
+            return null;
+        }
+
+        return DB::table('rfid_devices as devices')
+            ->leftJoin('tenants as tenants', 'tenants.id', '=', 'devices.tenant_id')
+            ->whereRaw('lower(devices.device_id) = ?', [Str::lower($deviceId)])
+            ->first([
+                'devices.id',
+                'devices.tenant_id',
+                'devices.device_id',
+                'devices.name',
+                'devices.secret_hash',
+                'devices.status',
+                'devices.transport',
+                'devices.fallback_http_enabled',
+                'devices.metadata',
+                'devices.last_seen_at',
+                'devices.last_transport',
+                'devices.last_ip',
+                'tenants.slug as tenant_slug',
+                'tenants.status as tenant_status',
+            ]);
+    }
+
+    public function resolveRegisteredTenantSlug(string $deviceId): string
+    {
+        $device = $this->findDeviceContext($deviceId);
+
+        return $this->normalizeTenantSlug($device->tenant_slug ?? '');
+    }
+
+    public function listDevices(?string $tenantSlug = null): array
+    {
+        $query = DB::table('rfid_devices as devices')
+            ->leftJoin('tenants as tenants', 'tenants.id', '=', 'devices.tenant_id')
+            ->orderByRaw('coalesce(tenants.slug, \'\') asc')
+            ->orderBy('devices.device_id');
+
+        $tenantSlug = $this->normalizeTenantSlug($tenantSlug);
+        if ($tenantSlug !== '') {
+            $query->whereRaw('lower(tenants.slug) = ?', [$tenantSlug]);
+        }
+
+        return $query->get([
+            'devices.id',
+            'devices.device_id',
+            'devices.name',
+            'devices.status',
+            'devices.transport',
+            'devices.fallback_http_enabled',
+            'devices.last_seen_at',
+            'devices.last_transport',
+            'devices.last_ip',
+            'tenants.slug as tenant_slug',
+        ])->map(function ($row) {
+            return [
+                'tenant_slug' => $this->normalizeTenantSlug($row->tenant_slug ?? ''),
+                'device_id' => trim((string) ($row->device_id ?? '')),
+                'name' => $this->nullableString($row->name ?? null),
+                'status' => Str::lower(trim((string) ($row->status ?? 'active'))),
+                'transport' => Str::lower(trim((string) ($row->transport ?? 'mqtt'))),
+                'fallback_http_enabled' => (bool) ($row->fallback_http_enabled ?? false),
+                'last_seen_at' => $row->last_seen_at ? (string) $row->last_seen_at : null,
+                'last_transport' => $this->nullableString($row->last_transport ?? null),
+                'last_ip' => $this->nullableString($row->last_ip ?? null),
+            ];
+        })->values()->all();
+    }
+
+    public function rotateSecret(string $deviceId, ?string $plainSecret = null): array
+    {
+        $device = $this->findDeviceContext($deviceId);
+        if (! $device) {
+            return [
+                'success' => false,
+                'message' => 'Device RFID tidak ditemukan',
+            ];
+        }
+
+        $secret = trim((string) $plainSecret);
+        if ($secret === '') {
+            $secret = Str::random(40);
+        }
+
+        $metadata = $this->mergeMetadata(
+            $this->decodeMetadata($device->metadata ?? null),
+            ['secret_rotated_at' => now()->toIso8601String()]
+        );
+
+        DB::table('rfid_devices')
+            ->where('id', $device->id)
+            ->update([
+                'secret_hash' => Hash::make($secret),
+                'metadata' => ! empty($metadata)
+                    ? json_encode($metadata, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                    : null,
+                'updated_at' => now(),
+            ]);
+
+        return [
+            'success' => true,
+            'message' => 'Secret device RFID berhasil dirotasi',
+            'tenant_slug' => $this->normalizeTenantSlug($device->tenant_slug ?? ''),
+            'device_id' => (string) $device->device_id,
+            'device_name' => $this->nullableString($device->name ?? null),
+            'secret' => $secret,
+        ];
+    }
+
+    public function ensureTenantTemplateDevice(string $tenantId, string $tenantSlug): array
+    {
+        $tenantId = trim($tenantId);
+        $tenantSlug = $this->normalizeTenantSlug($tenantSlug);
+
+        if ($tenantId === '' || $tenantSlug === '') {
+            return [
+                'success' => false,
+                'message' => 'Tenant RFID template tidak valid',
+            ];
+        }
+
+        $deviceId = $this->templateDeviceId($tenantSlug);
+        $deviceName = 'Template RFID '.Str::upper($tenantSlug);
+        $device = $this->findDeviceContext($deviceId);
+
+        if ($device && (string) ($device->tenant_id ?? '') !== $tenantId) {
+            return [
+                'success' => false,
+                'message' => 'Device template RFID bentrok dengan tenant lain',
+            ];
+        }
+
+        $metadata = $this->decodeMetadata($device->metadata ?? null);
+        $plainSecret = $this->decryptTemplateSecret($metadata);
+
+        if (! $device) {
+            $plainSecret = Str::random(40);
+            $metadata = $this->buildTemplateMetadata($metadata, $tenantSlug, $plainSecret);
+
+            DB::table('rfid_devices')->insert([
+                'id' => (string) Str::uuid(),
+                'tenant_id' => $tenantId,
+                'device_id' => $deviceId,
+                'name' => $deviceName,
+                'secret_hash' => Hash::make($plainSecret),
+                'status' => 'active',
+                'transport' => 'mqtt',
+                'fallback_http_enabled' => false,
+                'metadata' => json_encode($metadata, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        } elseif ($plainSecret === null) {
+            $plainSecret = Str::random(40);
+            $metadata = $this->buildTemplateMetadata($metadata, $tenantSlug, $plainSecret);
+
+            DB::table('rfid_devices')
+                ->where('id', $device->id)
+                ->update([
+                    'name' => $deviceName,
+                    'secret_hash' => Hash::make($plainSecret),
+                    'transport' => 'mqtt',
+                    'fallback_http_enabled' => false,
+                    'metadata' => json_encode($metadata, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                    'updated_at' => now(),
+                ]);
+        } else {
+            $metadata = $this->mergeMetadata($metadata, [
+                'template_transport' => 'mqtt',
+                'template_http_fallback' => false,
+            ]);
+
+            DB::table('rfid_devices')
+                ->where('id', $device->id)
+                ->update([
+                    'name' => $deviceName,
+                    'transport' => 'mqtt',
+                    'fallback_http_enabled' => false,
+                    'metadata' => json_encode($metadata, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                    'updated_at' => now(),
+                ]);
+        }
+
+        return [
+            'success' => true,
+            'tenant_id' => $tenantId,
+            'tenant_slug' => $tenantSlug,
+            'device_id' => $deviceId,
+            'device_name' => $deviceName,
+            'secret' => $plainSecret,
+        ];
+    }
+
+    public function touchDeviceSeen(string $deviceId, string $transport, ?string $ipAddress = null, array $metadata = []): void
+    {
+        $device = $this->findDeviceContext($deviceId);
+        if (! $device) {
+            return;
+        }
+
+        $mergedMetadata = $this->mergeMetadata(
+            $this->decodeMetadata($device->metadata ?? null),
+            $metadata
+        );
+
+        DB::table('rfid_devices')
+            ->where('id', $device->id)
+            ->update([
+                'last_seen_at' => now(),
+                'last_transport' => $this->normalizeTransport($transport),
+                'last_ip' => $this->nullableString($ipAddress),
+                'metadata' => ! empty($mergedMetadata)
+                    ? json_encode($mergedMetadata, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                    : null,
+                'updated_at' => now(),
+            ]);
+    }
+
+    private function validateSharedKey(Request $request): array
+    {
+        $expected = trim((string) config('rfid.shared_key', ''));
+        if ($expected === '') {
+            if (! (bool) config('rfid.allow_open_http', false)) {
+                return $this->authError(401, 'rfid_key_required', 'Kunci device RFID wajib dikonfigurasi');
+            }
+
+            return [
+                'authorized' => true,
+                'auth_mode' => 'open',
+            ];
+        }
+
+        $provided = trim((string) $request->header('X-RFID-Key', $request->input('rfid_key', '')));
+        if ($provided !== '' && hash_equals($expected, $provided)) {
+            return [
+                'authorized' => true,
+                'auth_mode' => 'shared_key',
+            ];
+        }
+
+        return $this->authError(401, 'unauthorized_device', 'Kunci device RFID tidak valid');
+    }
+
+    private function resolveTenantBySlug(string $tenantSlug): ?object
+    {
+        $tenantSlug = trim($tenantSlug);
+        if ($tenantSlug === '') {
+            return null;
+        }
+
+        return DB::table('tenants')
+            ->whereRaw('lower(slug) = ?', [Str::lower($tenantSlug)])
+            ->first(['id', 'slug', 'status']);
+    }
+
+    private function extractDeviceId(Request $request): string
+    {
+        return trim((string) $request->header('X-RFID-Device', $request->input('device_id', '')));
+    }
+
+    private function normalizeTenantSlug(mixed $tenantSlug): string
+    {
+        $tenantSlug = trim((string) $tenantSlug);
+
+        return $tenantSlug !== '' ? Str::lower($tenantSlug) : '';
+    }
+
+    private function decodeMetadata(mixed $metadata): array
+    {
+        if (is_array($metadata)) {
+            return $metadata;
+        }
+
+        if (! is_string($metadata) || trim($metadata) === '') {
+            return [];
+        }
+
+        $decoded = json_decode($metadata, true);
+
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    private function mergeMetadata(array $existing, array $incoming): array
+    {
+        $normalizedIncoming = [];
+        foreach ($incoming as $key => $value) {
+            $normalizedKey = trim((string) $key);
+            if ($normalizedKey === '' || $value === null || $value === '') {
+                continue;
+            }
+
+            $normalizedIncoming[$normalizedKey] = $value;
+        }
+
+        if (empty($normalizedIncoming)) {
+            return $existing;
+        }
+
+        return array_merge($existing, $normalizedIncoming);
+    }
+
+    private function buildTemplateMetadata(array $existing, string $tenantSlug, string $plainSecret): array
+    {
+        $ciphertext = $this->encryptTemplateSecret($plainSecret);
+
+        return $this->mergeMetadata($existing, [
+            'created_via' => $existing['created_via'] ?? 'super_admin_template',
+            'template_managed' => true,
+            'template_scope' => 'tenant_detail',
+            'template_tenant_slug' => $tenantSlug,
+            'template_device_id' => $this->templateDeviceId($tenantSlug),
+            'template_transport' => 'mqtt',
+            'template_http_fallback' => false,
+            'template_generated_at' => now()->toIso8601String(),
+            'template_secret_ciphertext' => $ciphertext,
+        ]);
+    }
+
+    private function decryptTemplateSecret(array $metadata): ?string
+    {
+        $ciphertext = trim((string) ($metadata['template_secret_ciphertext'] ?? ''));
+        if ($ciphertext === '') {
+            return null;
+        }
+
+        try {
+            $plain = Crypt::decryptString($ciphertext);
+
+            return trim((string) $plain) !== '' ? (string) $plain : null;
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    private function encryptTemplateSecret(string $plainSecret): ?string
+    {
+        $plainSecret = trim($plainSecret);
+        if ($plainSecret === '') {
+            return null;
+        }
+
+        try {
+            return Crypt::encryptString($plainSecret);
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    private function templateDeviceId(string $tenantSlug): string
+    {
+        return 'rfid-template-'.$tenantSlug.'-01';
+    }
+
+    private function normalizeTransport(?string $transport): string
+    {
+        $normalized = Str::lower(trim((string) $transport));
+
+        return $normalized !== '' ? $normalized : 'mqtt';
+    }
+
+    private function isDeviceBlocked(string $status): bool
+    {
+        $normalized = Str::lower(trim($status));
+
+        return in_array($normalized, ['inactive', 'disabled', 'suspended', 'archived'], true);
+    }
+
+    private function authError(int $status, string $reason, string $message): array
+    {
+        return [
+            'authorized' => false,
+            'status' => $status,
+            'reason' => $reason,
+            'message' => $message,
+        ];
+    }
+
+    private function nullableString(?string $value): ?string
+    {
+        $value = trim((string) $value);
+
+        return $value !== '' ? $value : null;
+    }
+}

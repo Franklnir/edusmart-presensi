@@ -2,6 +2,7 @@
 
 return [
     'shared_key' => env('RFID_SCAN_SHARED_KEY'),
+    'allow_open_http' => filter_var(env('RFID_ALLOW_OPEN_HTTP', env('APP_ENV') !== 'production'), FILTER_VALIDATE_BOOL),
 
     'mqtt' => [
         'enabled' => filter_var(env('RFID_MQTT_BRIDGE_ENABLED', false), FILTER_VALIDATE_BOOL),
@@ -16,6 +17,7 @@ return [
         'keep_alive' => (int) env('RFID_MQTT_KEEP_ALIVE', 20),
         'reconnect_delay_seconds' => (int) env('RFID_MQTT_RECONNECT_DELAY', 5),
         'mode_sync_interval_seconds' => (int) env('RFID_MQTT_MODE_SYNC_INTERVAL', 20),
+        'config_reload_interval_seconds' => (int) env('RFID_MQTT_CONFIG_RELOAD_INTERVAL', 60),
 
         'use_tls' => filter_var(env('RFID_MQTT_USE_TLS', true), FILTER_VALIDATE_BOOL),
         'tls_verify_peer' => filter_var(env('RFID_MQTT_TLS_VERIFY_PEER', true), FILTER_VALIDATE_BOOL),
@@ -29,5 +31,26 @@ return [
 
         'default_tenant_slug' => env('RFID_MQTT_DEFAULT_TENANT_SLUG', ''),
         'device_tenant_map' => env('RFID_MQTT_DEVICE_TENANT_MAP', '{}'),
+    ],
+
+    'mosquitto' => [
+        'enabled' => filter_var(env('RFID_MOSQUITTO_ENABLED', true), FILTER_VALIDATE_BOOL),
+        'public_host' => env('RFID_MOSQUITTO_PUBLIC_HOST', ''),
+        'public_port' => (int) env('RFID_MOSQUITTO_PUBLIC_PORT', 8883),
+        'public_use_tls' => filter_var(env('RFID_MOSQUITTO_PUBLIC_USE_TLS', true), FILTER_VALIDATE_BOOL),
+        'internal_host' => env('RFID_MOSQUITTO_INTERNAL_HOST', 'mosquitto'),
+        'internal_port' => (int) env('RFID_MOSQUITTO_INTERNAL_PORT', 1883),
+        'internal_use_tls' => filter_var(env('RFID_MOSQUITTO_INTERNAL_USE_TLS', false), FILTER_VALIDATE_BOOL),
+        'bridge_username' => env('RFID_MOSQUITTO_BRIDGE_USERNAME', 'edusmart_bridge'),
+        'bridge_password' => env('RFID_MOSQUITTO_BRIDGE_PASSWORD', ''),
+        'tenant_username_prefix' => env('RFID_MOSQUITTO_TENANT_USERNAME_PREFIX', 'edusmart'),
+        'topic_prefix' => env('RFID_MOSQUITTO_TOPIC_PREFIX', 'edusmart'),
+        'password_length' => (int) env('RFID_MOSQUITTO_TENANT_PASSWORD_LENGTH', 40),
+        'passwd_binary' => env('RFID_MOSQUITTO_PASSWD_BINARY', 'mosquitto_passwd'),
+        'file_uid' => (int) env('RFID_MOSQUITTO_FILE_UID', 82),
+        'file_gid' => (int) env('RFID_MOSQUITTO_FILE_GID', 82),
+        'file_mode' => env('RFID_MOSQUITTO_FILE_MODE', '0660'),
+        'password_file' => env('RFID_MOSQUITTO_PASSWORD_FILE', '/var/www/html/mosquitto/passwords'),
+        'acl_file' => env('RFID_MOSQUITTO_ACL_FILE', '/var/www/html/mosquitto/aclfile'),
     ],
 ];

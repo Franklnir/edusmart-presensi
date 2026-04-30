@@ -71,9 +71,14 @@ export const parseDateValue = (value) => {
 
 export const normalizeGender = (value) => {
   if (!value) return ''
-  const s = String(value).trim().toLowerCase()
-  if (['l', 'laki', 'laki-laki', 'male', 'm', 'pria'].includes(s)) return 'L'
-  if (['p', 'perempuan', 'female', 'f', 'wanita'].includes(s)) return 'P'
+  const s = String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+
+  if (['l', 'laki', 'laki laki', 'male', 'm', 'pria', 'cowok'].includes(s)) return 'L'
+  if (['p', 'perempuan', 'perumpuan', 'female', 'f', 'wanita', 'cewek'].includes(s)) return 'P'
   return String(value).trim()
 }
 
@@ -88,16 +93,21 @@ export const toText = (value) => {
 
 export const buildDefaultPassword = (tanggalLahir, nis) => {
   const iso = parseDateValue(tanggalLahir)
+  const buildStrongPassword = (digitsSource) => {
+    const digits = String(digitsSource || '').replace(/\D+/g, '')
+    const normalized = digits ? digits.padEnd(6, '0') : '123456'
+    return `Aa${normalized}!`
+  }
+
   if (iso) {
     const [y, m, d] = iso.split('-')
     const dd = pad2(d)
     const mm = pad2(m)
-    const pass = `${dd}${mm}${y}`
-    return pass.length >= 6 ? pass : pass.padEnd(6, '0')
+    return buildStrongPassword(`${dd}${mm}${y}`)
   }
   const fallback = toText(nis)
-  if (fallback) return fallback.length >= 6 ? fallback : fallback.padEnd(6, '0')
-  return '123456'
+  if (fallback) return buildStrongPassword(fallback)
+  return buildStrongPassword('123456')
 }
 
 export const readRowsFromFile = async (file) => {

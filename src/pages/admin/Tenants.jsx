@@ -5,6 +5,7 @@ import { useUIStore } from '../../store/useUIStore'
 import { formatDateTime } from '../../lib/time'
 import PasswordInput from '../../components/PasswordInput'
 import { loadExcelJsBrowser } from '../../utils/excelBrowser'
+import rfidArduinoTemplateSource from '../../../docs/esp8266-rfid-hivemq-tenant.ino?raw'
 
 const slugify = (value = '') =>
   value
@@ -52,6 +53,27 @@ const BACKUP_PERIOD_OPTIONS = [
   { value: '24', label: '24 Bulan Terakhir' }
 ]
 
+const RFID_MQTT_FORM_DEFAULTS = {
+  enabled: true,
+  host: '',
+  port: '8883',
+  username: '',
+  password: '',
+  clearPassword: false,
+  useTls: true,
+  tlsVerifyPeer: true,
+  tlsVerifyPeerName: true,
+  tlsAllowSelfSigned: false,
+  qos: '1',
+  clientIdPrefix: 'edusmart-rfid-bridge',
+  scanTopicTemplate: 'edusmart/{tenant}/rfid/scan',
+  responseTopicTemplate: 'edusmart/{tenant}/rfid/response',
+  modeTopicTemplate: 'edusmart/{tenant}/rfid/mode',
+  connectTimeout: '20',
+  socketTimeout: '5',
+  keepAlive: '20'
+}
+
 const TENANT_STATUS_OPTIONS = [
   { value: 'active', label: 'Aktif' },
   { value: 'suspended', label: 'Suspended' },
@@ -93,6 +115,91 @@ const formatDnsRecords = (records = []) => {
 }
 
 const toNumber = (value) => Number(value || 0)
+
+const escapeCppString = (value = '') =>
+  String(value ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+
+const replaceCStringConst = (source, name, value) =>
+  source.replace(
+    new RegExp(`const char\\*\\s+${name}\\s*=\\s*"[^"]*";`),
+    `const char* ${name} = "${escapeCppString(value)}";`
+  )
+
+const replaceNumberConst = (source, name, value) =>
+  source.replace(
+    new RegExp(`const uint16_t\\s+${name}\\s*=\\s*[^;]+;`),
+    `const uint16_t ${name} = ${Number.isFinite(Number(value)) ? Math.trunc(Number(value)) : 0};`
+  )
+
+const replaceBoolConst = (source, name, value) =>
+  source.replace(
+    new RegExp(`const bool\\s+${name}\\s*=\\s*(true|false);`),
+    `const bool ${name} = ${value ? 'true' : 'false'};`
+  )
+
+const buildTenantRfidArduinoCode = (template) => {
+  if (!template?.available) return ''
+
+  let source = rfidArduinoTemplateSource
+  source = replaceCStringConst(source, 'TENANT_SLUG', template?.tenant_slug || '')
+  source = replaceCStringConst(source, 'DEVICE_ID', template?.device_id || '')
+  source = replaceCStringConst(source, 'FIRMWARE_VERSION', template?.firmware_version || '2.0.0-mqtt-only')
+  source = replaceCStringConst(source, 'MQTT_HOST', template?.mqtt?.host || '')
+  source = replaceNumberConst(source, 'MQTT_PORT', template?.mqtt?.port || 8883)
+  source = replaceCStringConst(source, 'MQTT_USER', template?.mqtt?.username || '')
+  source = replaceCStringConst(source, 'MQTT_PASS', template?.mqtt?.password || '')
+  source = replaceBoolConst(source, 'MQTT_USE_TLS', template?.mqtt?.use_tls !== false)
+  source = replaceCStringConst(source, 'MQTT_TOPIC_SCAN', template?.topics?.scan || '')
+  source = replaceCStringConst(source, 'MQTT_TOPIC_RESPONSE', template?.topics?.response || '')
+  source = replaceCStringConst(source, 'MQTT_TOPIC_MODE', template?.topics?.mode || '')
+
+  return source
+}
+
+const mqttFormFromConfig = (config = {}) => ({
+  ...RFID_MQTT_FORM_DEFAULTS,
+  enabled: config?.enabled !== false,
+  host: String(config?.host || ''),
+  port: String(config?.port || RFID_MQTT_FORM_DEFAULTS.port),
+  username: String(config?.username || ''),
+  password: '',
+  clearPassword: false,
+  useTls: config?.use_tls !== false,
+  tlsVerifyPeer: config?.tls_verify_peer !== false,
+  tlsVerifyPeerName: config?.tls_verify_peer_name !== false,
+  tlsAllowSelfSigned: Boolean(config?.tls_allow_self_signed),
+  qos: String(Number.isFinite(Number(config?.qos)) ? Number(config.qos) : RFID_MQTT_FORM_DEFAULTS.qos),
+  clientIdPrefix: String(config?.client_id_prefix || RFID_MQTT_FORM_DEFAULTS.clientIdPrefix),
+  scanTopicTemplate: String(config?.scan_topic_template || RFID_MQTT_FORM_DEFAULTS.scanTopicTemplate),
+  responseTopicTemplate: String(config?.response_topic_template || RFID_MQTT_FORM_DEFAULTS.responseTopicTemplate),
+  modeTopicTemplate: String(config?.mode_topic_template || RFID_MQTT_FORM_DEFAULTS.modeTopicTemplate),
+  connectTimeout: String(config?.connect_timeout || RFID_MQTT_FORM_DEFAULTS.connectTimeout),
+  socketTimeout: String(config?.socket_timeout || RFID_MQTT_FORM_DEFAULTS.socketTimeout),
+  keepAlive: String(config?.keep_alive || RFID_MQTT_FORM_DEFAULTS.keepAlive)
+})
+
+const copyText = async (text) => {
+  const value = String(text || '')
+  if (!value) return false
+
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value)
+    return true
+  }
+
+  const textarea = document.createElement('textarea')
+  textarea.value = value
+  textarea.setAttribute('readonly', 'readonly')
+  textarea.style.position = 'fixed'
+  textarea.style.opacity = '0'
+  document.body.appendChild(textarea)
+  textarea.select()
+  const copied = document.execCommand('copy')
+  textarea.remove()
+  return copied
+}
 
 const formatBytes = (bytes) => {
   const value = Number(bytes || 0)
@@ -345,6 +452,9 @@ const Tenants = () => {
   const [backupMode, setBackupMode] = useState('full')
   const [backupMonths, setBackupMonths] = useState('all')
   const [statusSaving, setStatusSaving] = useState(false)
+  const [mqttForm, setMqttForm] = useState(RFID_MQTT_FORM_DEFAULTS)
+  const [mqttSaving, setMqttSaving] = useState(false)
+  const [mosquittoProvisioning, setMosquittoProvisioning] = useState(false)
   const [restoreLoading, setRestoreLoading] = useState(false)
   const [restoreApplying, setRestoreApplying] = useState(false)
   const [restoreFileName, setRestoreFileName] = useState('')
@@ -430,6 +540,9 @@ const Tenants = () => {
       const { data, error } = await supabase.super.tenantDetail(tenantId)
       if (error) throw error
       setTenantDetail(data || null)
+      if (!silent || options?.syncMqttForm) {
+        setMqttForm(mqttFormFromConfig(data?.rfid_mqtt_config))
+      }
     } catch (err) {
       const message = err?.message || 'Gagal memuat detail sekolah'
       setDetailError(message)
@@ -517,6 +630,19 @@ const Tenants = () => {
     setTenantDomainForm((prev) => ({ ...prev, [field]: value }))
   }
 
+  const handleMqttField = (field) => (event) => {
+    const checkboxFields = [
+      'enabled',
+      'clearPassword',
+      'useTls',
+      'tlsVerifyPeer',
+      'tlsVerifyPeerName',
+      'tlsAllowSelfSigned'
+    ]
+    const value = checkboxFields.includes(field) ? event.target.checked : event.target.value
+    setMqttForm((prev) => ({ ...prev, [field]: value }))
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (saving) return
@@ -565,6 +691,7 @@ const Tenants = () => {
     setTemporaryPasswords({})
     setPrimaryAdminSavingByUser({})
     resetTenantDomainForm()
+    setMqttForm(RFID_MQTT_FORM_DEFAULTS)
     setRestorePreview(null)
     setRestorePayload(null)
     setRestoreFileName('')
@@ -574,7 +701,7 @@ const Tenants = () => {
 
   const handleRefreshDetail = async () => {
     if (!selectedTenantId) return
-    await loadTenantDetail(selectedTenantId, { silent: true })
+    await loadTenantDetail(selectedTenantId, { silent: true, syncMqttForm: true })
   }
 
   const handleCreateAdminDomain = async (event) => {
@@ -640,6 +767,110 @@ const Tenants = () => {
       pushToast('error', err?.message || 'Gagal menambahkan domain tenant')
     } finally {
       setTenantDomainSaving(false)
+    }
+  }
+
+  const handleSaveRfidMqtt = async (event) => {
+    event.preventDefault()
+    if (mqttSaving) return
+
+    const tenantId = tenantDetail?.tenant?.id || selectedTenantId
+    const host = mqttForm.host.trim()
+    if (!tenantId) {
+      pushToast('error', 'Pilih tenant terlebih dahulu')
+      return
+    }
+    if (!host) {
+      pushToast('error', 'Host MQTT wajib diisi')
+      return
+    }
+
+    const password = mqttForm.password.trim()
+    const payload = {
+      enabled: Boolean(mqttForm.enabled),
+      host,
+      port: Number(mqttForm.port || 8883),
+      username: mqttForm.username.trim() || undefined,
+      use_tls: Boolean(mqttForm.useTls),
+      tls_verify_peer: Boolean(mqttForm.tlsVerifyPeer),
+      tls_verify_peer_name: Boolean(mqttForm.tlsVerifyPeerName),
+      tls_allow_self_signed: Boolean(mqttForm.tlsAllowSelfSigned),
+      qos: Number(mqttForm.qos || 1),
+      client_id_prefix: mqttForm.clientIdPrefix.trim() || RFID_MQTT_FORM_DEFAULTS.clientIdPrefix,
+      scan_topic_template: mqttForm.scanTopicTemplate.trim() || RFID_MQTT_FORM_DEFAULTS.scanTopicTemplate,
+      response_topic_template:
+        mqttForm.responseTopicTemplate.trim() || RFID_MQTT_FORM_DEFAULTS.responseTopicTemplate,
+      mode_topic_template: mqttForm.modeTopicTemplate.trim() || RFID_MQTT_FORM_DEFAULTS.modeTopicTemplate,
+      connect_timeout: Number(mqttForm.connectTimeout || 20),
+      socket_timeout: Number(mqttForm.socketTimeout || 5),
+      keep_alive: Number(mqttForm.keepAlive || 20)
+    }
+
+    if (password) {
+      payload.password = password
+    } else if (mqttForm.clearPassword) {
+      payload.clear_password = true
+    }
+
+    setMqttSaving(true)
+    try {
+      const { data, error } = await supabase.super.updateTenantRfidMqtt(tenantId, payload)
+      if (error) throw error
+
+      setTenantDetail((prev) => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          rfid_mqtt_config: data?.rfid_mqtt_config || prev.rfid_mqtt_config,
+          rfid_template: data?.rfid_template || prev.rfid_template
+        }
+      })
+      setMqttForm(mqttFormFromConfig(data?.rfid_mqtt_config))
+      pushToast('success', 'Konfigurasi MQTT RFID sekolah berhasil disimpan')
+    } catch (err) {
+      pushToast('error', err?.message || 'Gagal menyimpan konfigurasi MQTT RFID')
+    } finally {
+      setMqttSaving(false)
+    }
+  }
+
+  const handleProvisionMosquitto = async (rotatePassword = false) => {
+    const tenantId = tenantDetail?.tenant?.id || selectedTenantId
+    if (!tenantId || mosquittoProvisioning) return
+
+    if (rotatePassword) {
+      const confirmed = window.confirm(
+        'Rotasi password MQTT Mosquitto sekolah ini? Device lama harus di-flash ulang dengan template terbaru.'
+      )
+      if (!confirmed) return
+    }
+
+    setMosquittoProvisioning(true)
+    try {
+      const { data, error } = await supabase.super.provisionTenantRfidMosquitto(tenantId, {
+        rotate_password: Boolean(rotatePassword)
+      })
+      if (error) throw error
+
+      setTenantDetail((prev) => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          rfid_mqtt_config: data?.rfid_mqtt_config || prev.rfid_mqtt_config,
+          rfid_template: data?.rfid_template || prev.rfid_template
+        }
+      })
+      setMqttForm(mqttFormFromConfig(data?.rfid_mqtt_config))
+      pushToast(
+        'success',
+        rotatePassword
+          ? 'Credential Mosquitto sekolah berhasil dirotasi'
+          : 'Credential Mosquitto sekolah berhasil dibuat'
+      )
+    } catch (err) {
+      pushToast('error', err?.message || 'Gagal menyiapkan Mosquitto sekolah')
+    } finally {
+      setMosquittoProvisioning(false)
     }
   }
 
@@ -958,6 +1189,44 @@ const Tenants = () => {
     }
   }
 
+  const detailRfidTemplate = tenantDetail?.rfid_template || null
+  const detailRfidMqttConfig = tenantDetail?.rfid_mqtt_config || {}
+  const rfidArduinoCode = useMemo(
+    () => buildTenantRfidArduinoCode(detailRfidTemplate),
+    [detailRfidTemplate]
+  )
+
+  const handleCopyRfidArduinoCode = async () => {
+    if (!rfidArduinoCode) {
+      pushToast('error', 'Template Arduino RFID belum tersedia')
+      return
+    }
+
+    try {
+      const copied = await copyText(rfidArduinoCode)
+      if (!copied) throw new Error('Clipboard tidak tersedia')
+      pushToast('success', 'Template Arduino RFID berhasil dicopy')
+    } catch (err) {
+      pushToast('error', err?.message || 'Gagal menyalin template Arduino RFID')
+    }
+  }
+
+  const handleCopyRfidSecret = async () => {
+    const secret = detailRfidTemplate?.device_secret || ''
+    if (!secret) {
+      pushToast('error', 'Secret RFID belum tersedia')
+      return
+    }
+
+    try {
+      const copied = await copyText(secret)
+      if (!copied) throw new Error('Clipboard tidak tersedia')
+      pushToast('success', 'Secret RFID berhasil dicopy')
+    } catch (err) {
+      pushToast('error', err?.message || 'Gagal menyalin secret RFID')
+    }
+  }
+
   if (!superAdminChecked) {
     return (
       <div className="p-6">
@@ -986,6 +1255,7 @@ const Tenants = () => {
   const detailDomains = Array.isArray(tenantDetail?.domains) ? tenantDetail.domains : []
   const detailStorage = tenantDetail?.storage || {}
   const storageBuckets = Array.isArray(detailStorage?.buckets) ? detailStorage.buckets : []
+  const detailRfidNotes = Array.isArray(detailRfidTemplate?.notes) ? detailRfidTemplate.notes : []
   const primaryAdminUserId = String(detailTenant?.primary_admin_user_id || '')
   const primaryAdminInfo = detailAdmins.find(
     (admin) => String(admin?.user_id || '') === primaryAdminUserId
@@ -1619,6 +1889,7 @@ const Tenants = () => {
                   setTemporaryPasswords({})
                   setPrimaryAdminSavingByUser({})
                   resetTenantDomainForm()
+                  setMqttForm(RFID_MQTT_FORM_DEFAULTS)
                   setRestorePayload(null)
                   setRestoreFileName('')
                   setRestorePreview(null)
@@ -1656,6 +1927,375 @@ const Tenants = () => {
                     {formatDateTime(detailStats.last_activity_at)}
                   </p>
                 </div>
+              </div>
+
+              <form onSubmit={handleSaveRfidMqtt} className="rounded-2xl border border-slate-200 p-4 space-y-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-900">Konfigurasi MQTT RFID Sekolah</h3>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Setting ini dipakai bridge backend dan otomatis masuk ke template ESP sekolah ini.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[11px] px-2 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                      {detailRfidMqttConfig?.managed_by_platform
+                        ? 'Mosquitto platform'
+                        : detailRfidMqttConfig?.source === 'tenant'
+                          ? 'Config tenant'
+                          : 'Fallback global'}
+                    </span>
+                    <span
+                      className={`text-[11px] px-2 py-1 rounded-full border ${
+                        detailRfidMqttConfig?.available
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : 'bg-rose-50 text-rose-700 border-rose-200'
+                      }`}
+                    >
+                      {detailRfidMqttConfig?.available ? 'Aktif' : 'Belum aktif'}
+                    </span>
+                    {detailRfidMqttConfig?.password_set && (
+                      <span className="text-[11px] px-2 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                        Password tersimpan
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleProvisionMosquitto(false)}
+                      disabled={mosquittoProvisioning}
+                      className="text-xs px-3 py-1.5 rounded-full border border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
+                    >
+                      {mosquittoProvisioning ? 'Menyiapkan...' : 'Pakai Mosquitto'}
+                    </button>
+                    {detailRfidMqttConfig?.managed_by_platform && (
+                      <button
+                        type="button"
+                        onClick={() => handleProvisionMosquitto(true)}
+                        disabled={mosquittoProvisioning}
+                        className="text-xs px-3 py-1.5 rounded-full border border-amber-200 text-amber-700 hover:bg-amber-50 disabled:opacity-60"
+                      >
+                        Rotasi Password
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                  <label className="space-y-1">
+                    <span className="text-xs font-semibold text-slate-700">Host MQTT</span>
+                    <input
+                      type="text"
+                      value={mqttForm.host}
+                      onChange={handleMqttField('host')}
+                      placeholder="mqtt.sekolah.sch.id"
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-xs font-semibold text-slate-700">Port</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="65535"
+                      value={mqttForm.port}
+                      onChange={handleMqttField('port')}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-xs font-semibold text-slate-700">Username</span>
+                    <input
+                      type="text"
+                      value={mqttForm.username}
+                      onChange={handleMqttField('username')}
+                      placeholder="username MQTT"
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-xs font-semibold text-slate-700">Password MQTT</span>
+                    <PasswordInput
+                      value={mqttForm.password}
+                      onChange={handleMqttField('password')}
+                      placeholder={detailRfidMqttConfig?.password_set ? 'Kosongkan bila tetap' : 'Password MQTT'}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                  <label className="space-y-1">
+                    <span className="text-xs font-semibold text-slate-700">Topic Scan</span>
+                    <input
+                      type="text"
+                      value={mqttForm.scanTopicTemplate}
+                      onChange={handleMqttField('scanTopicTemplate')}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-xs font-semibold text-slate-700">Topic Response</span>
+                    <input
+                      type="text"
+                      value={mqttForm.responseTopicTemplate}
+                      onChange={handleMqttField('responseTopicTemplate')}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-xs font-semibold text-slate-700">Topic Mode</span>
+                    <input
+                      type="text"
+                      value={mqttForm.modeTopicTemplate}
+                      onChange={handleMqttField('modeTopicTemplate')}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+                  <label className="space-y-1">
+                    <span className="text-xs font-semibold text-slate-700">QoS</span>
+                    <select
+                      value={mqttForm.qos}
+                      onChange={handleMqttField('qos')}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                      <option value="0">0</option>
+                      <option value="1">1</option>
+                      <option value="2">2</option>
+                    </select>
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-xs font-semibold text-slate-700">Client Prefix</span>
+                    <input
+                      type="text"
+                      value={mqttForm.clientIdPrefix}
+                      onChange={handleMqttField('clientIdPrefix')}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-xs font-semibold text-slate-700">Connect Timeout</span>
+                    <input
+                      type="number"
+                      min="3"
+                      max="120"
+                      value={mqttForm.connectTimeout}
+                      onChange={handleMqttField('connectTimeout')}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-xs font-semibold text-slate-700">Socket Timeout</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="60"
+                      value={mqttForm.socketTimeout}
+                      onChange={handleMqttField('socketTimeout')}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-xs font-semibold text-slate-700">Keep Alive</span>
+                    <input
+                      type="number"
+                      min="3"
+                      max="300"
+                      value={mqttForm.keepAlive}
+                      onChange={handleMqttField('keepAlive')}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </label>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3">
+                  <div className="flex flex-wrap items-center gap-4 text-xs text-slate-600">
+                    <label className="inline-flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={mqttForm.enabled}
+                        onChange={handleMqttField('enabled')}
+                        className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                      />
+                      Aktif
+                    </label>
+                    <label className="inline-flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={mqttForm.useTls}
+                        onChange={handleMqttField('useTls')}
+                        className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                      />
+                      TLS
+                    </label>
+                    <label className="inline-flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={mqttForm.tlsVerifyPeer}
+                        onChange={handleMqttField('tlsVerifyPeer')}
+                        className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                      />
+                      Verify peer
+                    </label>
+                    <label className="inline-flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={mqttForm.tlsVerifyPeerName}
+                        onChange={handleMqttField('tlsVerifyPeerName')}
+                        className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                      />
+                      Verify name
+                    </label>
+                    <label className="inline-flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={mqttForm.tlsAllowSelfSigned}
+                        onChange={handleMqttField('tlsAllowSelfSigned')}
+                        className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                      />
+                      Self-signed
+                    </label>
+                    {detailRfidMqttConfig?.password_set && (
+                      <label className="inline-flex items-center gap-2 text-rose-600">
+                        <input
+                          type="checkbox"
+                          checked={mqttForm.clearPassword}
+                          onChange={handleMqttField('clearPassword')}
+                          className="rounded border-rose-300 text-rose-600 focus:ring-rose-500"
+                        />
+                        Hapus password tersimpan
+                      </label>
+                    )}
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={mqttSaving}
+                    className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-60"
+                  >
+                    {mqttSaving ? 'Menyimpan...' : 'Simpan MQTT RFID'}
+                  </button>
+                </div>
+              </form>
+
+              <div className="rounded-2xl border border-slate-200 p-4 space-y-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-900">Template Arduino RFID</h3>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Template ini otomatis diisi khusus untuk sekolah ini. Device cukup kirim scan lewat MQTT,
+                      lalu backend yang menentukan mode masuk/pulang, jadwal aktif, dan enroll UID.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleCopyRfidSecret}
+                      disabled={!detailRfidTemplate?.available}
+                      className="text-xs px-3 py-1.5 rounded-full border border-amber-200 text-amber-700 hover:bg-amber-50 disabled:opacity-60"
+                    >
+                      Copy Secret Opsional
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCopyRfidArduinoCode}
+                      disabled={!rfidArduinoCode}
+                      className="text-xs px-3 py-1.5 rounded-full border border-indigo-200 text-indigo-700 hover:bg-indigo-50 disabled:opacity-60"
+                    >
+                      Copy Code Arduino
+                    </button>
+                  </div>
+                </div>
+
+                {!detailRfidTemplate?.available ? (
+                  <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                    {detailRfidTemplate?.message || 'Template RFID belum tersedia untuk tenant ini.'}
+                  </div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                        <p className="text-xs text-slate-500">Tenant Slug</p>
+                        <p className="text-sm font-semibold text-slate-900 mt-1">
+                          {detailRfidTemplate.tenant_slug || '-'}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                        <p className="text-xs text-slate-500">Device ID Default</p>
+                        <p className="text-sm font-semibold text-slate-900 mt-1 break-all">
+                          {detailRfidTemplate.device_id || '-'}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                        <p className="text-xs text-slate-500">Firmware</p>
+                        <p className="text-sm font-semibold text-slate-900 mt-1 break-all">
+                          {detailRfidTemplate.firmware_version || '-'}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                        <p className="text-xs text-slate-500">MQTT Host</p>
+                        <p className="text-sm font-semibold text-slate-900 mt-1 break-all">
+                          {detailRfidTemplate?.mqtt?.host || '-'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 xl:grid-cols-[0.95fr,1.35fr] gap-4">
+                      <div className="space-y-3">
+                        <div className="rounded-xl border border-slate-200 p-4">
+                          <p className="text-xs font-semibold text-slate-700">Topic MQTT</p>
+                          <div className="mt-3 space-y-2 text-xs">
+                            <div className="rounded-lg bg-slate-50 px-3 py-2">
+                              <div className="text-slate-500">Scan</div>
+                              <div className="font-semibold text-slate-900 break-all">
+                                {detailRfidTemplate?.topics?.scan || '-'}
+                              </div>
+                            </div>
+                            <div className="rounded-lg bg-slate-50 px-3 py-2">
+                              <div className="text-slate-500">Response</div>
+                              <div className="font-semibold text-slate-900 break-all">
+                                {detailRfidTemplate?.topics?.response || '-'}
+                              </div>
+                            </div>
+                            <div className="rounded-lg bg-slate-50 px-3 py-2">
+                              <div className="text-slate-500">Mode</div>
+                              <div className="font-semibold text-slate-900 break-all">
+                                {detailRfidTemplate?.topics?.mode || '-'}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3 space-y-2">
+                          <p className="text-xs font-semibold text-amber-800">Catatan penting</p>
+                          {detailRfidNotes.map((note) => (
+                            <p key={note} className="text-xs text-amber-700">
+                              - {note}
+                            </p>
+                          ))}
+                          <p className="text-xs text-amber-700">
+                            WiFi SSID/password tetap perlu kamu isi manual sesuai lokasi alat.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-slate-200 overflow-hidden">
+                        <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-slate-200 bg-slate-50">
+                          <div>
+                            <p className="text-sm font-semibold text-slate-900">Code Arduino Siap Copy</p>
+                            <p className="text-xs text-slate-500 mt-0.5">
+                              Template ini sudah terisi otomatis untuk sekolah {detailTenant?.name || '-'}.
+                            </p>
+                          </div>
+                        </div>
+                        <pre className="max-h-[34rem] overflow-auto bg-slate-950 text-slate-100 text-[11px] leading-5 p-4 whitespace-pre">
+                          {rfidArduinoCode}
+                        </pre>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
 
               <div className="rounded-2xl border border-slate-200 p-4 space-y-4">

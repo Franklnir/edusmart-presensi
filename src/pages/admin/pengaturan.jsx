@@ -2,9 +2,9 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { supabase, PROFILE_BUCKET, getSignedUrlForValue } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
-import EmailVerificationModal from '../../components/EmailVerificationModal'
 import { useUIStore } from '../../store/useUIStore'
 import FileDropzone from '../../components/FileDropzone'
+import GoogleCredentialButton from '../../components/GoogleCredentialButton'
 import { sanitizeText, sanitizeUrl } from '../../utils/sanitize'
 
 const SUPABASE_BUCKET = 'profile-photos'
@@ -333,7 +333,7 @@ const compressImage = (file, maxSizeKB = 300) => {
 
 export default function APengaturan() {
   const { pushToast } = useUIStore()
-  const { user, profile, logout } = useAuthStore()
+  const { user, profile, logout, linkGoogleCredential } = useAuthStore()
 
   const [isAuthorized, setIsAuthorized] = useState(true)
   const [passwordModalOpen, setPasswordModalOpen] = useState(false)
@@ -377,7 +377,6 @@ export default function APengaturan() {
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
   const [linkingGoogle, setLinkingGoogle] = useState(false)
   const [unlinkingGoogle, setUnlinkingGoogle] = useState(false)
-  const [verifyModalOpen, setVerifyModalOpen] = useState(false)
   const [selectedLogoFile, setSelectedLogoFile] = useState(null)
   const [settingsId, setSettingsId] = useState(null)
   const [mapelOptions, setMapelOptions] = useState([])
@@ -401,6 +400,19 @@ export default function APengaturan() {
   const handlePasswordClose = () => {
     setPasswordModalOpen(false)
   }
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const url = new URL(window.location.href)
+    const googleError = String(url.searchParams.get('google_error') || '').trim()
+    if (!googleError) return
+
+    pushToast('error', googleError)
+    url.searchParams.delete('google')
+    url.searchParams.delete('google_error')
+    window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`)
+  }, [pushToast])
 
   // ✅ Saat authorized: ambil PATH avatar dari profile (support data lama yg masih URL)
   useEffect(() => {
@@ -1109,7 +1121,7 @@ export default function APengaturan() {
     setSaving(false)
   }
 
-  async function handleLinkGoogleAccount() {
+  async function handleLinkGoogleAccount(credential) {
     const providerState = supabase.auth.getProviderState?.(user || {}) || { googleLinked: false }
     const googleLinked = Boolean(user?.google_linked || providerState.googleLinked)
 
@@ -1120,16 +1132,8 @@ export default function APengaturan() {
 
     setLinkingGoogle(true)
     try {
-      const redirectTo =
-        typeof window !== 'undefined'
-          ? `${window.location.origin}${window.location.pathname}`
-          : '/admin/pengaturan'
-
-      const { error } = await supabase.auth.linkGoogleAccount({ redirectTo })
-      if (error) throw error
-      pushToast('info', 'Mengalihkan ke Google...')
-    } catch (error) {
-      pushToast('error', error?.message || 'Gagal memulai proses tautkan Google')
+      await linkGoogleCredential(credential)
+    } finally {
       setLinkingGoogle(false)
     }
   }
@@ -1200,7 +1204,6 @@ export default function APengaturan() {
   }
   const googleLinked = Boolean(user?.google_linked || providerState.googleLinked)
   const emailVerified = Boolean(user?.email_confirmed_at || user?.emailVerified || providerState.emailVerified)
-  const isGoogleAuthEnabled = supabase.auth.isGoogleEnabled?.() ?? false
   const rankingTieBreakOrder = normalizeTieBreakOrder(form.ranking_tiebreak_order)
   const rankingCoreMapelSelected = normalizeCoreMapelList(form.ranking_core_mapel_text)
   const rankingCoreMapelOptions = Array.from(
@@ -1858,17 +1861,21 @@ export default function APengaturan() {
                         {googleLinked ? 'Tertaut' : 'Belum'}
                       </span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={handleLinkGoogleAccount}
-                      disabled={linkingGoogle || unlinkingGoogle || googleLinked}
-                      className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-70"
-                    >
-                      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-300 text-[10px] font-bold">
-                        G
-                      </span>
-                      {googleLinked ? 'Google Sudah Tertaut' : linkingGoogle ? 'Mengalihkan...' : 'Tautkan Google'}
-                    </button>
+                    {!googleLinked && (
+                      <GoogleCredentialButton
+                        mode="link"
+                        onCredential={handleLinkGoogleAccount}
+                        busy={linkingGoogle}
+                        width={260}
+                        className="w-full"
+                        buttonClassName="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-70"
+                        noteClassName="mt-2 text-[11px] text-slate-500"
+                        iconClassName="inline-flex h-4 w-4 items-center justify-center"
+                        label="Tautkan Google"
+                        busyLabel="Memproses tautan Google..."
+                        unavailableLabel="Mode standby. Aktifkan `VITE_GOOGLE_AUTH_ENABLED=true`."
+                      />
+                    )}
                     {googleLinked && (
                       <button
                         type="button"
@@ -1878,11 +1885,6 @@ export default function APengaturan() {
                       >
                         {unlinkingGoogle ? 'Melepas...' : 'Lepas Tautan Google'}
                       </button>
-                    )}
-                    {!isGoogleAuthEnabled && (
-                      <p className="mt-2 text-[11px] text-amber-700">
-                        Mode standby. Aktifkan `VITE_GOOGLE_AUTH_ENABLED=true`.
-                      </p>
                     )}
                     <p className="mt-2 text-[11px] text-slate-500">
                       Syarat tautkan: email akun harus sama persis dengan email Google.
@@ -1905,35 +1907,12 @@ export default function APengaturan() {
                         {emailVerified ? 'Terverifikasi' : 'Belum'}
                       </span>
                     </div>
-                    {!emailVerified && (
-                      <button
-                        type="button"
-                        onClick={() => setVerifyModalOpen(true)}
-                        className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-purple-500 to-purple-600 px-3 py-2 text-xs font-semibold text-white hover:from-purple-600 hover:to-purple-700 transition-all duration-200 shadow-sm"
-                      >
-                        <span>📧</span>
-                        <span>Kirim Verifikasi Email</span>
-                      </button>
-                    )}
-                    {emailVerified && (
-                      <p className="text-[11px] text-emerald-600">✅ Email Anda sudah terverifikasi.</p>
-                    )}
+                    <p className={`text-[11px] leading-5 ${emailVerified ? 'text-emerald-600' : 'text-slate-500'}`}>
+                      {emailVerified
+                        ? '✅ Email akun sudah terverifikasi.'
+                        : 'Verifikasi email 6 digit biasa sudah dimatikan. Kode 6 digit sekarang dipakai saat mengganti email atau password akun.'}
+                    </p>
                   </div>
-
-                  {/* Email Verification Modal */}
-                  <EmailVerificationModal
-                    isOpen={verifyModalOpen}
-                    onClose={() => setVerifyModalOpen(false)}
-                    email={user?.email || ''}
-                    onSendCode={async () => {
-                      const { error } = await supabase.auth.resend({ type: 'signup', email: user?.email })
-                      if (error) throw error
-                    }}
-                    onSuccess={() => {
-                      setVerifyModalOpen(false)
-                      pushToast('success', 'Email verifikasi berhasil! Cek inbox untuk konfirmasi.')
-                    }}
-                  />
 
                   <button
                     onClick={logout}

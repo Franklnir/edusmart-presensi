@@ -44,11 +44,47 @@ if (! $isProduction) {
     ]))));
 }
 
+$expandStatefulEntry = static function (?string $value) use ($normalizeHost): array {
+    $value = trim((string) $value);
+    if ($value === '') {
+        return [];
+    }
+
+    if (str_contains($value, '://')) {
+        $host = $normalizeHost($value);
+
+        return $host ? [$host] : [];
+    }
+
+    if (str_starts_with($value, '.')) {
+        $base = ltrim($value, '.');
+
+        return $base === '' ? [] : [$base, '*.'.$base];
+    }
+
+    if (str_starts_with($value, '*.') && strlen($value) > 2) {
+        $base = substr($value, 2);
+
+        return [$base, $value];
+    }
+
+    return [$value];
+};
+
+$rawStateful = array_map('trim', explode(
+    ',',
+    (string) env('SANCTUM_STATEFUL_DOMAINS', implode(',', $defaultStateful))
+));
+
+$stateful = [];
+foreach ($rawStateful as $entry) {
+    foreach ($expandStatefulEntry($entry) as $expandedEntry) {
+        $stateful[] = $expandedEntry;
+    }
+}
+
 return [
-    'stateful' => array_values(array_unique(array_filter(array_map('trim', explode(
-        ',',
-        (string) env('SANCTUM_STATEFUL_DOMAINS', implode(',', $defaultStateful))
-    ))))),
+    'stateful' => array_values(array_unique(array_filter($stateful))),
 
     'guard' => ['web'],
 

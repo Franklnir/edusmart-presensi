@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import QRCode from 'qrcode'
 import {
   CheckCircle2,
   Loader2,
@@ -86,6 +85,21 @@ const logStatusClass = (status = '') => {
   return 'bg-rose-100 text-rose-700'
 }
 
+const getEvolutionManagerHost = () => {
+  const rootDomain = String(import.meta.env.VITE_ROOT_DOMAIN || '').trim().toLowerCase()
+  if (rootDomain) return `wa.${rootDomain}`
+  return 'wa.xiaozhiscig.biz.id'
+}
+
+let qrCodePromise = null
+const loadQrCodeLibrary = async () => {
+  if (!qrCodePromise) {
+    qrCodePromise = import('qrcode').then((mod) => mod.default || mod)
+  }
+
+  return qrCodePromise
+}
+
 export default function WhatsApp() {
   const { pushToast } = useUIStore()
   const [payload, setPayload] = useState({
@@ -117,6 +131,16 @@ export default function WhatsApp() {
   const providerConfigured = Boolean(payload.provider?.configured)
   const currentStatus = String(integration?.status || 'disconnected').toLowerCase()
   const currentMeta = statusMeta(currentStatus)
+  const canGenerateQr = providerConfigured && !connecting && currentStatus !== 'connected'
+  const connectButtonLabel = currentStatus === 'connected'
+    ? 'Sudah Terhubung'
+    : (integration?.qr_code || integration?.pairing_code || currentStatus === 'awaiting_qr')
+      ? 'Refresh QR'
+      : 'Generate QR'
+  const evolutionManagerHost = getEvolutionManagerHost()
+  const evolutionPublicUrl = integration?.instance_name
+    ? `https://${evolutionManagerHost}/manager/instance/${integration.instance_name}`
+    : `https://${evolutionManagerHost}`
 
   const applyPayload = useCallback((nextData) => {
     const nextPayload = nextData || {
@@ -175,14 +199,17 @@ export default function WhatsApp() {
       return
     }
 
-    QRCode.toDataURL(qrValue, {
-      margin: 1,
-      width: 320,
-      color: {
-        dark: '#0f172a',
-        light: '#ffffff'
-      }
-    })
+    loadQrCodeLibrary()
+      .then((QRCode) =>
+        QRCode.toDataURL(qrValue, {
+          margin: 1,
+          width: 320,
+          color: {
+            dark: '#0f172a',
+            light: '#ffffff'
+          }
+        })
+      )
       .then((url) => {
         if (!cancelled) setQrPreview(url)
       })
@@ -196,15 +223,26 @@ export default function WhatsApp() {
   }, [integration?.qr_code])
 
   useEffect(() => {
-    const shouldPoll = currentStatus === 'awaiting_qr' || currentStatus === 'connected'
+    const shouldPoll = providerConfigured && (currentStatus === 'awaiting_qr' || currentStatus === 'connected')
     if (!shouldPoll) return undefined
 
-    const timer = setInterval(() => {
-      loadData({ silent: true })
-    }, 15000)
+    let cancelled = false
+    const poll = async () => {
+      const { data, error } = await supabase.admin.syncWhatsApp()
+      if (cancelled || error) return
+      applyPayload(data)
+    }
 
-    return () => clearInterval(timer)
-  }, [currentStatus, loadData])
+    const intervalMs = currentStatus === 'awaiting_qr' ? 30000 : 15000
+    const timer = setInterval(() => {
+      poll()
+    }, intervalMs)
+
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [applyPayload, currentStatus, providerConfigured])
 
   const stats = useMemo(() => {
     const logs = Array.isArray(payload.logs) ? payload.logs : []
@@ -233,7 +271,24 @@ export default function WhatsApp() {
     }
 
     applyPayload(data)
-    pushToast('success', 'QR WhatsApp siap dipindai oleh admin sekolah')
+    const nextIntegration = data?.integration
+
+    if (nextIntegration?.last_error) {
+      pushToast('warning', nextIntegration.last_error)
+      return
+    }
+
+    if (nextIntegration?.qr_code || nextIntegration?.pairing_code) {
+      pushToast('success', 'QR WhatsApp siap dipindai oleh admin sekolah')
+      return
+    }
+
+    if (nextIntegration?.status === 'awaiting_qr') {
+      pushToast('info', 'Gateway sedang menyiapkan QR. Sinkronkan lagi jika belum muncul dalam beberapa detik.')
+      return
+    }
+
+    pushToast('success', 'Status koneksi WhatsApp berhasil diperbarui')
   }
 
   const handleSync = async () => {
@@ -247,6 +302,11 @@ export default function WhatsApp() {
     }
 
     applyPayload(data)
+    if (data?.integration?.last_error) {
+      pushToast('warning', data.integration.last_error)
+      return
+    }
+
     pushToast('success', 'Status WhatsApp berhasil disinkronkan')
   }
 
@@ -308,8 +368,7 @@ export default function WhatsApp() {
   }
 
   return (
-    <div className="min-h-full bg-slate-50">
-      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+    <div className="p-6 space-y-6">
         <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
             <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-700">
@@ -355,7 +414,7 @@ export default function WhatsApp() {
         ) : (
           <div className="grid gap-6 xl:grid-cols-[1.25fr_0.95fr]">
             <div className="space-y-6">
-              <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+              <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div>
                     <h2 className="text-xl font-bold text-slate-900">Koneksi WhatsApp</h2>
@@ -368,11 +427,11 @@ export default function WhatsApp() {
                     <button
                       type="button"
                       onClick={handleConnect}
-                      disabled={!providerConfigured || connecting}
+                      disabled={!canGenerateQr}
                       className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {connecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
-                      {integration?.qr_code ? 'Refresh QR' : 'Generate QR'}
+                      {connectButtonLabel}
                     </button>
 
                     <button
@@ -408,6 +467,18 @@ export default function WhatsApp() {
                   />
                 </div>
 
+                <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                  Host manager Evolution:
+                  {' '}
+                  <span className="font-semibold text-slate-900">{evolutionPublicUrl}</span>
+                </div>
+
+                {integration?.last_error && (
+                  <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                    {integration.last_error}
+                  </div>
+                )}
+
                 <div className="mt-6 grid gap-6 lg:grid-cols-[360px_1fr]">
                   <div className="rounded-3xl border border-dashed border-slate-300 bg-slate-50 p-4">
                     <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-700">
@@ -421,7 +492,7 @@ export default function WhatsApp() {
                       </div>
                     ) : (
                       <div className="grid min-h-[320px] place-items-center rounded-2xl bg-white px-6 text-center text-sm text-slate-500 shadow-sm">
-                        QR akan tampil di sini setelah admin menekan tombol generate.
+                        QR akan tampil di sini setelah admin menekan tombol generate. Jika belum muncul dalam 10-20 detik, klik Sinkronkan atau Generate QR ulang untuk membuat sesi scan baru.
                       </div>
                     )}
 
@@ -432,7 +503,7 @@ export default function WhatsApp() {
                     )}
                   </div>
 
-                  <div className="space-y-4 rounded-3xl bg-slate-900 p-5 text-white">
+                  <div className="space-y-4 rounded-3xl bg-slate-900 p-6 text-white">
                     <div>
                       <div className="text-sm uppercase tracking-[0.2em] text-slate-400">Stabilitas</div>
                       <h3 className="mt-2 text-2xl font-bold">State QR dan logout dibuat konsisten</h3>
@@ -453,7 +524,7 @@ export default function WhatsApp() {
                 </div>
               </section>
 
-              <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+              <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <h2 className="text-xl font-bold text-slate-900">Jenis Notifikasi</h2>
@@ -528,7 +599,7 @@ export default function WhatsApp() {
             </div>
 
             <div className="space-y-6">
-              <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+              <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                 <div className="grid gap-4 sm:grid-cols-3">
                   <MiniStat label="Terkirim" value={stats.sent} tone="emerald" />
                   <MiniStat label="Antrean" value={stats.queued} tone="sky" />
@@ -536,7 +607,7 @@ export default function WhatsApp() {
                 </div>
               </section>
 
-              <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+              <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                 <div>
                   <h2 className="text-xl font-bold text-slate-900">Tes Pengiriman</h2>
                   <p className="mt-2 text-sm text-slate-600">
@@ -578,7 +649,7 @@ export default function WhatsApp() {
                 </form>
               </section>
 
-              <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+              <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <h2 className="text-xl font-bold text-slate-900">Log Pengiriman</h2>
@@ -637,7 +708,6 @@ export default function WhatsApp() {
             </div>
           </div>
         )}
-      </div>
     </div>
   )
 }

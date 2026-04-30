@@ -2,11 +2,145 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Models\Profile;
+use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
+use Illuminate\Validation\Rules\Password as PasswordRule;
 
 class AdminController extends ApiController
 {
+    public function provisionUser(Request $request)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        $payload = $request->all();
+        $validator = Validator::make($payload, [
+            'nama' => 'required|string|max:120',
+            'email' => 'nullable|email|max:255',
+            'password' => ['required', 'string', PasswordRule::defaults()],
+            'role' => 'required|in:siswa,guru,admin',
+            'nis' => 'nullable|string|max:64',
+            'kelas' => 'nullable|string|max:120',
+            'jk' => 'nullable|string|max:20',
+            'usia' => 'nullable|integer|min:0|max:150',
+            'telp' => 'nullable|string|max:32',
+            'agama' => 'nullable|string|max:50',
+            'jabatan' => 'nullable|string|max:100',
+            'alamat' => 'nullable|string|max:1000',
+            'status' => 'nullable|string|max:32',
+            'tanggal_lahir' => 'nullable|date',
+            'no_hp_siswa' => 'nullable|string|max:32',
+            'no_hp_wali' => 'nullable|string|max:32',
+            'must_change_password' => 'nullable|boolean',
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['error' => $validator->errors()->first()], 422);
+        }
+
+        $role = strtolower(trim((string) ($payload['role'] ?? '')));
+        $nama = trim((string) ($payload['nama'] ?? ''));
+        $nis = trim((string) ($payload['nis'] ?? ''));
+        $email = strtolower(trim((string) ($payload['email'] ?? '')));
+
+        if ($email === '') {
+            if ($role !== 'siswa') {
+                return response()->json(['error' => 'Email wajib diisi untuk akun guru atau admin'], 422);
+            }
+            if ($nis === '') {
+                return response()->json(['error' => 'NIS wajib diisi jika email siswa kosong'], 422);
+            }
+            $email = $this->buildImportPlaceholderEmail($nis, $tenantId);
+        } elseif (Str::endsWith($email, '@import.local')) {
+            $seed = $nis !== '' ? $nis : strstr($email, '@', true);
+            $email = $this->buildImportPlaceholderEmail((string) $seed, $tenantId);
+        }
+
+        $existingUser = User::query()
+            ->whereRaw('lower(email) = ?', [$email])
+            ->first();
+        if ($existingUser) {
+            return response()->json(['error' => 'Email sudah terdaftar'], 409);
+        }
+
+        if ($nis !== '') {
+            $existingNis = Profile::query()
+                ->where('tenant_id', $tenantId)
+                ->where('nis', $nis)
+                ->first();
+            if ($existingNis) {
+                return response()->json(['error' => 'NIS/NIP sudah terdaftar di sekolah ini'], 409);
+            }
+        }
+
+        $userId = (string) Str::uuid();
+        $status = trim((string) ($payload['status'] ?? 'active')) ?: 'active';
+        $now = now();
+
+        $user = null;
+        $profile = null;
+
+        DB::transaction(function () use ($payload, $tenantId, $userId, $nama, $email, $role, $nis, $status, $now, &$user, &$profile) {
+            $user = User::query()->create([
+                'id' => $userId,
+                'name' => $nama,
+                'email' => $email,
+                'password' => (string) ($payload['password'] ?? ''),
+            ]);
+
+            $profile = Profile::query()->create([
+                'id' => $userId,
+                'tenant_id' => $tenantId,
+                'email' => $email,
+                'nama' => $nama,
+                'role' => $role,
+                'nis' => $nis !== '' ? $nis : null,
+                'kelas' => $this->nullableString($payload['kelas'] ?? null),
+                'jk' => $this->nullableString($payload['jk'] ?? null),
+                'usia' => isset($payload['usia']) ? (int) $payload['usia'] : null,
+                'telp' => $this->nullableString($payload['telp'] ?? null),
+                'agama' => $this->nullableString($payload['agama'] ?? null),
+                'jabatan' => $this->nullableString($payload['jabatan'] ?? null),
+                'alamat' => $this->nullableString($payload['alamat'] ?? null),
+                'status' => $status,
+                'must_change_password' => (bool) ($payload['must_change_password'] ?? false),
+                'tanggal_lahir' => $this->nullableString($payload['tanggal_lahir'] ?? null),
+                'no_hp_siswa' => $this->nullableString($payload['no_hp_siswa'] ?? null),
+                'no_hp_wali' => $this->nullableString($payload['no_hp_wali'] ?? null),
+                'created_at' => $now,
+                'updated_at' => $now,
+            ]);
+        });
+
+        $this->logAudit($request, 'profiles', $userId, 'INSERT', null, [
+            'id' => $userId,
+            'tenant_id' => $tenantId,
+            'email' => $email,
+            'nama' => $nama,
+            'role' => $role,
+            'nis' => $nis !== '' ? $nis : null,
+            'status' => $status,
+            'must_change_password' => (bool) ($payload['must_change_password'] ?? false),
+        ], $tenantId);
+
+        return response()->json([
+            'data' => [
+                'user' => $user,
+                'profile' => $profile,
+            ],
+        ], 201);
+    }
+
     public function monitoring(Request $request)
     {
         if (! $this->isAdmin($request)) {
@@ -30,10 +164,10 @@ class AdminController extends ApiController
         $presenceAgg = DB::table('user_presence')
             ->select(
                 'user_id',
-                DB::raw('max(last_seen_at) as last_seen_at'),
-                DB::raw("sum(case when last_seen_at >= '{$activeCutoff}' then 1 else 0 end) as active_devices"),
-                DB::raw("sum(case when last_seen_at >= '{$activeCutoff}' then activity_count else 0 end) as activity_count")
+                DB::raw('max(last_seen_at) as last_seen_at')
             )
+            ->selectRaw('sum(case when last_seen_at >= ? then 1 else 0 end) as active_devices', [$activeCutoff])
+            ->selectRaw('sum(case when last_seen_at >= ? then activity_count else 0 end) as activity_count', [$activeCutoff])
             ->where('tenant_id', $tenantId)
             ->groupBy('user_id');
 
@@ -162,6 +296,145 @@ class AdminController extends ApiController
         return response()->json(['data' => 'deleted']);
     }
 
+    public function updateStudentAdditionalInfo(Request $request, string $id)
+    {
+        if (! $this->isAdmin($request) && ! $this->isGuru($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        $student = Profile::query()
+            ->where('id', $id)
+            ->where('tenant_id', $tenantId)
+            ->where('role', 'siswa')
+            ->first();
+
+        if (! $student) {
+            return $this->deny('Siswa tidak ditemukan', 404);
+        }
+
+        if (! $this->canEditStudentAdditionalInfo($request, $student, $tenantId)) {
+            return $this->deny('Anda tidak memiliki akses untuk mengubah data siswa ini.', 403);
+        }
+
+        $payload = $request->all();
+        $validator = Validator::make($payload, [
+            'nama' => ['sometimes', 'string', 'max:120'],
+            'jk' => ['sometimes', 'nullable', 'string', 'max:20'],
+            'usia' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:150'],
+            'tanggal_lahir' => ['sometimes', 'nullable', 'date'],
+            'agama' => ['sometimes', 'nullable', 'string', 'max:50'],
+            'alamat' => ['sometimes', 'nullable', 'string', 'max:1000'],
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['error' => $validator->errors()->first()], 422);
+        }
+
+        $allowedKeys = ['nama', 'jk', 'usia', 'tanggal_lahir', 'agama', 'alamat'];
+        $hasAnyField = false;
+        foreach ($allowedKeys as $key) {
+            if (array_key_exists($key, $payload)) {
+                $hasAnyField = true;
+                break;
+            }
+        }
+
+        if (! $hasAnyField) {
+            return $this->deny('Tidak ada data yang dikirim untuk diperbarui.', 422);
+        }
+
+        $data = [];
+
+        if (array_key_exists('nama', $payload)) {
+            $nama = trim((string) ($payload['nama'] ?? ''));
+            if ($nama === '') {
+                return $this->deny('Nama siswa wajib diisi.', 422);
+            }
+            $data['nama'] = $nama;
+        }
+
+        if (array_key_exists('jk', $payload)) {
+            $data['jk'] = $this->normalizeGenderValue($payload['jk']);
+        }
+
+        if (array_key_exists('tanggal_lahir', $payload)) {
+            $tanggalLahir = $this->nullableString($payload['tanggal_lahir'] ?? null);
+            $data['tanggal_lahir'] = $tanggalLahir;
+            $data['usia'] = $tanggalLahir ? $this->calculateAgeFromBirthDate($tanggalLahir) : null;
+        } elseif (array_key_exists('usia', $payload)) {
+            $usia = $payload['usia'];
+            $data['usia'] = ($usia === null || $usia === '') ? null : (int) $usia;
+        }
+
+        if (array_key_exists('agama', $payload)) {
+            $data['agama'] = $this->nullableString($payload['agama'] ?? null);
+        }
+
+        if (array_key_exists('alamat', $payload)) {
+            $data['alamat'] = $this->nullableString($payload['alamat'] ?? null);
+        }
+
+        $oldData = [
+            'nama' => $student->nama,
+            'jk' => $student->jk,
+            'usia' => $student->usia,
+            'tanggal_lahir' => $student->tanggal_lahir,
+            'agama' => $student->agama,
+            'alamat' => $student->alamat,
+        ];
+
+        $now = now();
+        $data['updated_at'] = $now;
+
+        DB::transaction(function () use ($id, $tenantId, $data, $now) {
+            DB::table('profiles')
+                ->where('id', $id)
+                ->where('tenant_id', $tenantId)
+                ->update($data);
+
+            if (array_key_exists('nama', $data)) {
+                DB::table('users')
+                    ->where('id', $id)
+                    ->update([
+                        'name' => $data['nama'],
+                        'updated_at' => $now,
+                    ]);
+            }
+        });
+
+        $fresh = Profile::query()
+            ->where('id', $id)
+            ->where('tenant_id', $tenantId)
+            ->first();
+
+        $this->logAudit(
+            $request,
+            'profiles',
+            $id,
+            'UPDATE',
+            $oldData,
+            [
+                'nama' => $fresh?->nama,
+                'jk' => $fresh?->jk,
+                'usia' => $fresh?->usia,
+                'tanggal_lahir' => $fresh?->tanggal_lahir,
+                'agama' => $fresh?->agama,
+                'alamat' => $fresh?->alamat,
+            ],
+            $tenantId
+        );
+
+        return response()->json([
+            'data' => [
+                'profile' => $fresh,
+            ],
+        ]);
+    }
+
     private function cleanupBeforeHardDelete(string $userId, string $role): void
     {
         $now = now();
@@ -234,5 +507,88 @@ class AdminController extends ApiController
 
             DB::table('quizzes')->where('guru_id', $userId)->delete();
         }
+    }
+
+    private function nullableString(mixed $value): ?string
+    {
+        $normalized = trim((string) ($value ?? ''));
+
+        return $normalized === '' ? null : $normalized;
+    }
+
+    private function canEditStudentAdditionalInfo(Request $request, Profile $student, string $tenantId): bool
+    {
+        if ($this->isAdmin($request)) {
+            return true;
+        }
+
+        if (! $this->isGuru($request)) {
+            return false;
+        }
+
+        $guruId = (string) ($request->user()?->id ?? '');
+        $kelasId = trim((string) ($student->kelas ?? ''));
+        if ($guruId === '' || $kelasId === '') {
+            return false;
+        }
+
+        return DB::table('kelas_struktur')
+            ->where('tenant_id', $tenantId)
+            ->where('kelas_id', $kelasId)
+            ->where('wali_guru_id', $guruId)
+            ->exists();
+    }
+
+    private function normalizeGenderValue(mixed $value): ?string
+    {
+        $normalized = strtolower(trim((string) ($value ?? '')));
+        if ($normalized === '') {
+            return null;
+        }
+
+        if (in_array($normalized, ['l', 'lk', 'laki', 'laki-laki', 'laki laki', 'pria', 'cowok'], true)) {
+            return 'L';
+        }
+
+        if (in_array($normalized, ['p', 'pr', 'perempuan', 'perumpuan', 'wanita', 'cewek'], true)) {
+            return 'P';
+        }
+
+        return strtoupper(substr($normalized, 0, 1));
+    }
+
+    private function calculateAgeFromBirthDate(string $value): ?int
+    {
+        try {
+            $birthDate = Carbon::parse($value);
+        } catch (\Throwable $e) {
+            return null;
+        }
+
+        $now = Carbon::now($birthDate->getTimezone());
+        if ($birthDate->greaterThan($now)) {
+            return null;
+        }
+
+        return $birthDate->age;
+    }
+
+    private function buildImportPlaceholderEmail(string $identifier, string $tenantId): string
+    {
+        $local = strtolower(trim($identifier));
+        $local = preg_replace('/[^a-z0-9]+/i', '.', $local) ?? '';
+        $local = trim($local, '.');
+        if ($local === '') {
+            $local = 'user';
+        }
+
+        $tenantPart = strtolower(trim($tenantId));
+        $tenantPart = preg_replace('/[^a-z0-9]+/i', '.', $tenantPart) ?? '';
+        $tenantPart = trim($tenantPart, '.');
+        if ($tenantPart === '') {
+            $tenantPart = 'tenant';
+        }
+
+        return "{$local}.{$tenantPart}@import.local";
     }
 }

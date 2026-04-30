@@ -6,18 +6,21 @@ use App\Models\Profile;
 use App\Models\User;
 use App\Support\Tenancy\TenantDomainService;
 use Illuminate\Contracts\Auth\StatefulGuard;
+use Illuminate\Http\Client\Response;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rules\Password as PasswordRule;
 use Laravel\Socialite\Facades\Socialite;
 
 class AuthController extends ApiController
@@ -63,86 +66,201 @@ class AuthController extends ApiController
 
     public function googleRedirect(Request $request): RedirectResponse
     {
-        if (! $this->isGoogleAuthEnabled()) {
-            return redirect()->away($this->frontendAuthUrl('/login', [
-                'google' => 'disabled',
-            ], $request));
-        }
-
-        $tenantId = $this->tenantId($request);
-        if (! $tenantId) {
-            return redirect()->away($this->frontendAuthUrl('/login', [
-                'google' => 'tenant_invalid',
-            ], $request));
-        }
-
-        $state = $this->createGoogleState($request, 'login', [
-            'tenant_id' => $tenantId,
-            'host' => $this->currentHost($request),
-            'redirect' => $this->sanitizeFrontendRedirect(
-                $request,
-                (string) $request->query('redirect', $request->query('next', ''))
-            ),
-        ]);
-
-        try {
-            return $this->socialiteGoogleDriver($request)
-                ->with(['state' => $state])
-                ->redirect();
-        } catch (\Throwable $e) {
-            report($e);
-
-            return redirect()->away($this->frontendAuthUrl('/login', [
-                'google' => 'failed',
-                'google_error' => 'Konfigurasi Google OAuth belum lengkap.',
-            ], $request));
-        }
+        return redirect()->away($this->frontendAuthUrl('/login', [
+            'google' => 'failed',
+            'google_error' => 'Flow Google lama dinonaktifkan. Muat ulang halaman lalu gunakan tombol Google terbaru.',
+        ], $request));
     }
 
     public function googleLinkRedirect(Request $request): RedirectResponse
     {
+        $redirectTarget = $this->sanitizeFrontendRedirect(
+            $request,
+            (string) $request->query('redirect', $request->query('next', ''))
+        );
+
+        return redirect()->away($this->appendQueryToUrl($redirectTarget, [
+            'google' => 'failed',
+            'google_error' => 'Flow tautkan Google lama dinonaktifkan. Muat ulang halaman lalu gunakan tombol Google terbaru.',
+        ]));
+    }
+
+    public function googlePopupContext(Request $request)
+    {
         if (! $this->isGoogleAuthEnabled()) {
-            return redirect()->away($this->frontendAuthUrl('/login', [
-                'google' => 'disabled',
-            ], $request));
+            return response()->json(['error' => 'Login Google belum diaktifkan oleh administrator.'], 422);
         }
 
-        $user = $request->user();
-        if (! $user?->id) {
-            return redirect()->away($this->frontendAuthUrl('/login', [
-                'google' => 'unauthenticated',
-            ], $request));
+        if ($this->googleClientId() === '') {
+            return response()->json(['error' => 'Konfigurasi Google OAuth belum lengkap.'], 422);
+        }
+
+        $validated = $request->validate([
+            'origin' => ['required', 'string', 'max:2048'],
+            'mode' => ['nullable', 'string', 'in:login,link'],
+        ]);
+
+        $origin = $this->sanitizeAllowedFrontendOrigin((string) $validated['origin']);
+        if ($origin === null) {
+            return response()->json(['error' => 'Origin login Google tidak diizinkan.'], 422);
+        }
+
+        return response()->json([
+            'data' => [
+                'origin' => $origin,
+                'mode' => (string) ($validated['mode'] ?? 'login'),
+            ],
+        ]);
+    }
+
+    public function googleCodeLogin(Request $request)
+    {
+        if (! $this->isGoogleAuthEnabled()) {
+            return response()->json(['error' => 'Login Google belum diaktifkan oleh administrator.'], 422);
         }
 
         $tenantId = $this->tenantId($request);
         if (! $tenantId) {
-            return redirect()->away($this->frontendAuthUrl('/login', [
-                'google' => 'tenant_invalid',
-            ], $request));
+            return response()->json(['error' => 'Tenant sekolah tidak valid untuk login Google.'], 400);
         }
 
-        $state = $this->createGoogleState($request, 'link', [
-            'tenant_id' => $tenantId,
-            'host' => $this->currentHost($request),
-            'link_user_id' => (string) $user->id,
-            'redirect' => $this->sanitizeFrontendRedirect(
-                $request,
-                (string) $request->query('redirect', $request->query('next', ''))
-            ),
+        $validated = $request->validate([
+            'code' => ['required', 'string', 'max:4096'],
         ]);
 
+        $googleUser = $this->exchangeGooglePopupCodeForUser((string) $validated['code']);
+        if (! ($googleUser['ok'] ?? false)) {
+            return response()->json([
+                'error' => $this->safeGoogleErrorMessage((string) ($googleUser['message'] ?? 'Login Google gagal diproses.')),
+            ], 422);
+        }
+
         try {
-            return $this->socialiteGoogleDriver($request)
-                ->with(['state' => $state])
-                ->redirect();
+            $user = $this->completeGoogleLogin($request, [
+                'tenant_id' => $tenantId,
+                'host' => $this->currentHost($request),
+            ], $googleUser);
         } catch (\Throwable $e) {
             report($e);
 
-            return redirect()->away($this->frontendAuthUrl('/login', [
-                'google' => 'failed',
-                'google_error' => 'Konfigurasi Google OAuth belum lengkap.',
-            ], $request));
+            return response()->json([
+                'error' => $this->safeGoogleErrorMessage($e->getMessage()),
+            ], 422);
         }
+
+        return response()->json([
+            'data' => [
+                'user' => $user->fresh(),
+                'profile' => $this->profile($request),
+            ],
+        ]);
+    }
+
+    public function googleCredentialLogin(Request $request)
+    {
+        if (! $this->isGoogleAuthEnabled()) {
+            return response()->json(['error' => 'Login Google belum diaktifkan oleh administrator.'], 422);
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return response()->json(['error' => 'Tenant sekolah tidak valid untuk login Google.'], 400);
+        }
+
+        $clientId = $this->googleClientId();
+        if ($clientId === '') {
+            return response()->json(['error' => 'Konfigurasi Google OAuth belum lengkap.'], 422);
+        }
+
+        $validated = $request->validate([
+            'credential' => ['required', 'string', 'max:4096'],
+        ]);
+
+        $googleUser = $this->verifyGoogleIdToken(
+            (string) $validated['credential'],
+            $clientId
+        );
+        if (! ($googleUser['ok'] ?? false)) {
+            return response()->json([
+                'error' => $this->safeGoogleErrorMessage((string) ($googleUser['message'] ?? 'Login Google gagal diproses.')),
+            ], 422);
+        }
+
+        try {
+            $user = $this->completeGoogleLogin($request, [
+                'tenant_id' => $tenantId,
+                'host' => $this->currentHost($request),
+            ], $googleUser);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'error' => $this->safeGoogleErrorMessage($e->getMessage()),
+            ], 422);
+        }
+
+        return response()->json([
+            'data' => [
+                'user' => $user->fresh(),
+                'profile' => $this->profile($request),
+            ],
+        ]);
+    }
+
+    public function googleCredentialLink(Request $request)
+    {
+        if (! $this->isGoogleAuthEnabled()) {
+            return response()->json(['error' => 'Login Google belum diaktifkan oleh administrator.'], 422);
+        }
+
+        $user = $request->user();
+        if (! $user?->id) {
+            return response()->json(['error' => 'Unauthenticated'], 401);
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return response()->json(['error' => 'Tenant sekolah tidak valid untuk tautkan Google.'], 400);
+        }
+
+        $clientId = $this->googleClientId();
+        if ($clientId === '') {
+            return response()->json(['error' => 'Konfigurasi Google OAuth belum lengkap.'], 422);
+        }
+
+        $validated = $request->validate([
+            'credential' => ['required', 'string', 'max:4096'],
+        ]);
+
+        $googleUser = $this->verifyGoogleIdToken(
+            (string) $validated['credential'],
+            $clientId
+        );
+        if (! ($googleUser['ok'] ?? false)) {
+            return response()->json([
+                'error' => $this->safeGoogleErrorMessage((string) ($googleUser['message'] ?? 'Tautkan Google gagal diproses.')),
+            ], 422);
+        }
+
+        try {
+            $this->completeGoogleLink($request, [
+                'tenant_id' => $tenantId,
+                'link_user_id' => (string) $user->id,
+            ], $googleUser);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'error' => $this->safeGoogleErrorMessage($e->getMessage()),
+            ], 422);
+        }
+
+        return response()->json([
+            'data' => [
+                'user' => User::query()->find($user->id),
+                'profile' => $this->profile($request),
+            ],
+        ]);
     }
 
     public function googleUnlink(Request $request)
@@ -358,15 +476,31 @@ class AuthController extends ApiController
             ], 403);
         }
 
-        if (! Auth::attempt($credentials)) {
-            $this->registerFailedLoginAttempt($throttleKey);
-            $this->logAuthEvent($request, 'login_failed_invalid_credentials', [
-                'email' => $email,
-                'tenant_id' => $tenantId,
-                'host' => $host,
-            ]);
+        $profileForLogin = $this->resolveProfileForLoginEmail(
+            $tenantId,
+            $email,
+            $identityUserId ? (string) $identityUserId : null
+        );
+        $usedInitialPasswordAlias = false;
 
-            return response()->json(['error' => 'Email/NIS atau password salah'], 401);
+        if (! Auth::attempt($credentials)) {
+            $initialAliasPassword = $this->resolveInitialPasswordAliasForLogin($profileForLogin, $password);
+
+            if ($initialAliasPassword !== null && Auth::attempt([
+                'email' => $email,
+                'password' => $initialAliasPassword,
+            ])) {
+                $usedInitialPasswordAlias = true;
+            } else {
+                $this->registerFailedLoginAttempt($throttleKey);
+                $this->logAuthEvent($request, 'login_failed_invalid_credentials', [
+                    'email' => $email,
+                    'tenant_id' => $tenantId,
+                    'host' => $host,
+                ]);
+
+                return response()->json(['error' => 'Email/NIS atau password salah'], 401);
+            }
         }
 
         if ($request->hasSession()) {
@@ -412,6 +546,7 @@ class AuthController extends ApiController
             'user_id' => (string) ($user->id ?? ''),
             'role' => $profile->role ?? null,
             'is_super_admin' => $isSuperAdminIdentity,
+            'used_initial_password_alias' => $usedInitialPasswordAlias,
         ], $user->id ?? null, $profile->role ?? null);
 
         return response()->json([
@@ -457,7 +592,7 @@ class AuthController extends ApiController
             return ['error' => 'Akun guru harus login menggunakan email', 'code' => 403];
         }
 
-        if (! $profile->must_change_password) {
+        if (! $this->isInitialAccountSetupPending($profile, $email)) {
             if (Str::endsWith($email, '@import.local')) {
                 return ['error' => 'Email akun belum aktif. Hubungi admin.', 'code' => 403];
             }
@@ -761,6 +896,149 @@ class AuthController extends ApiController
         ];
     }
 
+    private function exchangeGooglePopupCodeForUser(string $code): array
+    {
+        if (trim($code) === '') {
+            return [
+                'ok' => false,
+                'message' => 'Kode login Google tidak ditemukan.',
+            ];
+        }
+
+        $clientId = $this->googleClientId();
+        $clientSecret = $this->googleClientSecret();
+        if ($clientId === '' || $clientSecret === '') {
+            return [
+                'ok' => false,
+                'message' => 'Konfigurasi Google OAuth belum lengkap.',
+            ];
+        }
+
+        try {
+            $tokenResponse = Http::asForm()
+                ->acceptJson()
+                ->timeout(20)
+                ->post('https://oauth2.googleapis.com/token', [
+                    'code' => trim($code),
+                    'client_id' => $clientId,
+                    'client_secret' => $clientSecret,
+                    'redirect_uri' => 'postmessage',
+                    'grant_type' => 'authorization_code',
+                ]);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return [
+                'ok' => false,
+                'message' => 'Tidak dapat menghubungi layanan Google OAuth.',
+            ];
+        }
+
+        if (! $tokenResponse->successful()) {
+            return [
+                'ok' => false,
+                'message' => $this->extractGoogleApiErrorMessage(
+                    $tokenResponse,
+                    'Kode login Google tidak valid atau sudah kedaluwarsa.'
+                ),
+            ];
+        }
+
+        $payload = is_array($tokenResponse->json()) ? $tokenResponse->json() : [];
+        $idToken = trim((string) ($payload['id_token'] ?? ''));
+        if ($idToken === '') {
+            return [
+                'ok' => false,
+                'message' => 'Google tidak mengembalikan identitas akun.',
+            ];
+        }
+
+        return $this->verifyGoogleIdToken($idToken, $clientId);
+    }
+
+    private function verifyGoogleIdToken(string $idToken, string $expectedClientId): array
+    {
+        try {
+            $response = Http::acceptJson()
+                ->timeout(20)
+                ->get('https://oauth2.googleapis.com/tokeninfo', [
+                    'id_token' => $idToken,
+                ]);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return [
+                'ok' => false,
+                'message' => 'Tidak dapat memverifikasi identitas Google.',
+            ];
+        }
+
+        if (! $response->successful()) {
+            return [
+                'ok' => false,
+                'message' => $this->extractGoogleApiErrorMessage(
+                    $response,
+                    'Identitas Google tidak valid atau sudah kedaluwarsa.'
+                ),
+            ];
+        }
+
+        $payload = is_array($response->json()) ? $response->json() : [];
+        $audience = trim((string) ($payload['aud'] ?? ''));
+        if ($audience === '' || $audience !== $expectedClientId) {
+            return [
+                'ok' => false,
+                'message' => 'Google mengembalikan client yang tidak cocok.',
+            ];
+        }
+
+        $issuer = trim((string) ($payload['iss'] ?? ''));
+        if (! in_array($issuer, ['accounts.google.com', 'https://accounts.google.com'], true)) {
+            return [
+                'ok' => false,
+                'message' => 'Issuer Google tidak valid.',
+            ];
+        }
+
+        $email = strtolower(trim((string) ($payload['email'] ?? '')));
+        $sub = trim((string) ($payload['sub'] ?? ''));
+        if ($email === '' || $sub === '') {
+            return [
+                'ok' => false,
+                'message' => 'Akun Google tidak mengembalikan identitas email.',
+            ];
+        }
+
+        return [
+            'ok' => true,
+            'sub' => $sub,
+            'email' => $email,
+            'name' => trim((string) ($payload['name'] ?? '')),
+            'avatar' => trim((string) ($payload['picture'] ?? '')),
+            'email_verified' => $this->toBoolean($payload['email_verified'] ?? false),
+        ];
+    }
+
+    private function extractGoogleApiErrorMessage(Response $response, string $fallback): string
+    {
+        $json = $response->json();
+        $message = data_get($json, 'error_description')
+            ?: data_get($json, 'error.message')
+            ?: data_get($json, 'error')
+            ?: data_get($json, 'message');
+
+        $clean = trim((string) $message);
+
+        return $clean !== '' ? $clean : $fallback;
+    }
+
+    private function toBoolean($value): bool
+    {
+        $normalized = filter_var($value, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE);
+
+        return $normalized ?? (bool) $value;
+    }
+
     private function completeGoogleLink(Request $request, array $statePayload, array $googleUser): void
     {
         $linkUserId = trim((string) ($statePayload['link_user_id'] ?? ''));
@@ -782,7 +1060,7 @@ class AuthController extends ApiController
         $googleEmail = strtolower(trim((string) ($googleUser['email'] ?? '')));
         if ($currentEmail === '' || Str::endsWith($currentEmail, '@import.local')) {
             throw new \RuntimeException(
-                'Email akun belum valid. Perbarui email akun terlebih dahulu sebelum menautkan Google.'
+                'Email akun masih email buatan sistem. Ganti dulu ke email aktif yang sama dengan akun Google Anda sebelum menautkan Google.'
             );
         }
         if ($googleEmail === '' || $currentEmail !== $googleEmail) {
@@ -796,6 +1074,12 @@ class AuthController extends ApiController
             if (! $profile || (string) $profile->tenant_id !== $tenantId) {
                 throw new \RuntimeException('Akun tidak memiliki akses tenant ini.');
             }
+        }
+
+        if ($profile && $this->shouldBlockGoogleLinkUntilPasswordChanged($profile)) {
+            throw new \RuntimeException(
+                'Akun siswa hasil import harus mengganti password terlebih dahulu sebelum menautkan Google.'
+            );
         }
 
         $existingByGoogleId = User::query()
@@ -1172,6 +1456,33 @@ class AuthController extends ApiController
         return $safe;
     }
 
+    private function sanitizeAllowedFrontendOrigin(string $raw): ?string
+    {
+        $value = trim($raw);
+        if ($value === '') {
+            return null;
+        }
+
+        $parts = parse_url($value);
+        if (! is_array($parts)) {
+            return null;
+        }
+
+        $host = strtolower(trim((string) ($parts['host'] ?? '')));
+        $scheme = strtolower(trim((string) ($parts['scheme'] ?? '')));
+        if ($host === '' || ! in_array($scheme, ['http', 'https'], true)) {
+            return null;
+        }
+
+        if (! $this->isAllowedFrontendHost($host)) {
+            return null;
+        }
+
+        $port = isset($parts['port']) ? ':'.((int) $parts['port']) : '';
+
+        return $scheme.'://'.$host.$port;
+    }
+
     private function safeGoogleErrorMessage(?string $message): string
     {
         $value = trim(strip_tags((string) $message));
@@ -1184,12 +1495,21 @@ class AuthController extends ApiController
 
     public function register(Request $request)
     {
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return response()->json(['error' => 'Tenant tidak valid'], 400);
+        }
+
         $payload = $request->only(['nama', 'email', 'password', 'role']);
+        $allowAdminCreate = $this->isAdmin($request);
+        if ($allowAdminCreate) {
+            $payload['password'] = $this->normalizeAdminCreatedPassword((string) ($payload['password'] ?? ''));
+        }
 
         $validator = Validator::make($payload, [
             'nama' => 'required|string|max:120',
             'email' => 'required|email|max:255',
-            'password' => 'required|string|min:6',
+            'password' => ['required', 'string', PasswordRule::defaults()],
             'role' => 'required|in:siswa,guru,admin',
         ]);
 
@@ -1197,39 +1517,38 @@ class AuthController extends ApiController
             return response()->json(['error' => $validator->errors()->first()], 422);
         }
 
-        // Security: Rate Limiting untuk mencegah spam registrasi
-        $throttleKey = 'auth-register|'.$request->ip();
-        if (RateLimiter::tooManyAttempts($throttleKey, 5)) {
-            $seconds = RateLimiter::availableIn($throttleKey);
+        if (! $allowAdminCreate) {
+            // Security: Rate Limiting untuk mencegah spam registrasi publik
+            $throttleKey = 'auth-register|'.$request->ip();
+            if (RateLimiter::tooManyAttempts($throttleKey, 5)) {
+                $seconds = RateLimiter::availableIn($throttleKey);
 
-            return response()->json(['error' => "Terlalu banyak percobaan registrasi. Coba lagi dalam {$seconds} detik."], 429);
-        }
-        RateLimiter::hit($throttleKey, 600); // Decay 10 menit
-
-        $tenantId = $this->tenantId($request);
-        if (! $tenantId) {
-            return response()->json(['error' => 'Tenant tidak valid'], 400);
+                return response()->json(['error' => "Terlalu banyak percobaan registrasi. Coba lagi dalam {$seconds} detik."], 429);
+            }
+            RateLimiter::hit($throttleKey, 600); // Decay 10 menit
         }
 
         $email = strtolower(trim($payload['email']));
         $role = $payload['role'];
 
+        if (! $allowAdminCreate && $role === 'admin') {
+            return response()->json([
+                'error' => 'Registrasi admin publik tidak diizinkan. Admin baru harus dibuat dari panel admin.',
+            ], 403);
+        }
+
         if ($this->isReservedSuperAdminEmail($email)) {
             return response()->json(['error' => 'Email ini tidak bisa digunakan untuk registrasi'], 403);
         }
 
-        $allowAdminCreate = $this->isAdmin($request);
         if (! $allowAdminCreate) {
             $settings = DB::table('settings')->where('tenant_id', $tenantId)->orderBy('id')->first();
-            $allow = $role !== 'admin';
+            $allow = true;
             if ($role === 'siswa' && $settings && isset($settings->registrasi_siswa_aktif)) {
                 $allow = (bool) $settings->registrasi_siswa_aktif;
             }
             if ($role === 'guru' && $settings && isset($settings->registrasi_guru_aktif)) {
                 $allow = (bool) $settings->registrasi_guru_aktif;
-            }
-            if ($role === 'admin' && $settings && isset($settings->registrasi_admin_aktif)) {
-                $allow = (bool) $settings->registrasi_admin_aktif;
             }
 
             if (! $allow) {
@@ -1244,7 +1563,7 @@ class AuthController extends ApiController
         $userId = (string) Str::uuid();
 
         $result = null;
-        DB::transaction(function () use ($userId, $email, $payload, $role, $tenantId, &$result) {
+        DB::transaction(function () use ($userId, $email, $payload, $role, $tenantId, $allowAdminCreate, &$result) {
             $user = User::query()->create([
                 'id' => $userId,
                 'name' => $payload['nama'],
@@ -1259,6 +1578,7 @@ class AuthController extends ApiController
                 'nama' => $payload['nama'],
                 'role' => $role,
                 'status' => 'active',
+                'must_change_password' => $allowAdminCreate && in_array($role, ['siswa', 'guru'], true),
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);
@@ -1266,13 +1586,169 @@ class AuthController extends ApiController
             $result = ['user' => $user, 'profile' => $profile];
         });
 
-        try {
-            $result['user']?->sendEmailVerificationNotification();
-        } catch (\Throwable $e) {
-            // jangan gagalkan register jika SMTP bermasalah
+        if (! Str::endsWith($email, '@import.local')) {
+            try {
+                $result['user']?->sendEmailVerificationNotification();
+            } catch (\Throwable $e) {
+                // jangan gagalkan register jika SMTP bermasalah
+            }
         }
 
         return response()->json(['data' => $result], 201);
+    }
+
+    private function normalizeAdminCreatedPassword(string $password): string
+    {
+        $raw = trim($password);
+        if ($this->looksLikeStrongPassword($raw)) {
+            return $raw;
+        }
+
+        $digits = preg_replace('/\D+/', '', $raw) ?? '';
+        $digits = $digits !== '' ? $digits : '123456';
+        if (strlen($digits) < 6) {
+            $digits = str_pad($digits, 6, '0');
+        }
+
+        $generated = 'Aa'.$digits.'!Edu';
+        while (strlen($generated) < $this->passwordMinLength()) {
+            $generated .= '9';
+        }
+
+        return $generated;
+    }
+
+    private function looksLikeStrongPassword(string $password): bool
+    {
+        if (strlen($password) < $this->passwordMinLength()) {
+            return false;
+        }
+
+        return preg_match('/[a-z]/', $password)
+            && preg_match('/[A-Z]/', $password)
+            && preg_match('/\d/', $password)
+            && preg_match('/[^a-zA-Z0-9]/', $password);
+    }
+
+    private function passwordMinLength(): int
+    {
+        return max(12, (int) env('PASSWORD_MIN_LENGTH', 12));
+    }
+
+    private function resolveProfileForLoginEmail(string $tenantId, string $email, ?string $userId = null): ?Profile
+    {
+        $normalizedEmail = strtolower(trim($email));
+        $query = Profile::query()->where('tenant_id', $tenantId);
+
+        if ($userId) {
+            $byId = (clone $query)->where('id', $userId)->first();
+            if ($byId) {
+                return $byId;
+            }
+        }
+
+        if ($normalizedEmail === '') {
+            return null;
+        }
+
+        return (clone $query)
+            ->whereRaw('lower(email) = ?', [$normalizedEmail])
+            ->first();
+    }
+
+    private function resolveInitialPasswordAliasForLogin(?Profile $profile, string $inputPassword): ?string
+    {
+        if (! $profile || ! $profile->must_change_password) {
+            return null;
+        }
+
+        $normalizedInput = $this->normalizeInitialPasswordSeed($inputPassword);
+        if ($normalizedInput === '') {
+            return null;
+        }
+
+        foreach ($this->initialPasswordSeedsForProfile($profile) as $seed) {
+            if ($normalizedInput === $seed) {
+                return $this->normalizeAdminCreatedPassword($seed);
+            }
+        }
+
+        return null;
+    }
+
+    private function initialPasswordSeedsForProfile(Profile $profile): array
+    {
+        $seeds = [];
+        $birthSeed = $this->buildBirthDatePasswordSeed($profile->tanggal_lahir);
+        if ($birthSeed !== '') {
+            $seeds[] = $birthSeed;
+        } elseif (($nis = trim((string) ($profile->nis ?? ''))) !== '') {
+            $digits = preg_replace('/\D+/', '', $nis) ?? '';
+            $seeds[] = $digits !== '' ? $digits : $nis;
+        }
+
+        return array_values(array_unique(array_filter($seeds)));
+    }
+
+    private function buildBirthDatePasswordSeed(mixed $tanggalLahir): string
+    {
+        if (! $tanggalLahir) {
+            return '';
+        }
+
+        try {
+            $date = date_create((string) $tanggalLahir);
+            if (! $date) {
+                return '';
+            }
+
+            return $date->format('dmY');
+        } catch (\Throwable $e) {
+            return '';
+        }
+    }
+
+    private function normalizeInitialPasswordSeed(string $value): string
+    {
+        $trimmed = trim($value);
+        if ($trimmed === '') {
+            return '';
+        }
+
+        if (preg_match('/^[0-9\s\/\-.]+$/', $trimmed)) {
+            return preg_replace('/\D+/', '', $trimmed) ?? '';
+        }
+
+        return $trimmed;
+    }
+
+    private function isInitialAccountSetupPending(Profile $profile, string $email = ''): bool
+    {
+        $role = strtolower(trim((string) ($profile->role ?? '')));
+        if (! in_array($role, ['siswa', 'guru'], true)) {
+            return false;
+        }
+
+        $loginEmail = strtolower(trim($email !== '' ? $email : (string) ($profile->email ?? '')));
+
+        return (bool) ($profile->must_change_password || ! $this->hasRealLoginEmail($loginEmail));
+    }
+
+    private function shouldBlockGoogleLinkUntilPasswordChanged(Profile $profile): bool
+    {
+        $role = strtolower(trim((string) ($profile->role ?? '')));
+
+        return $role === 'siswa' && (bool) $profile->must_change_password;
+    }
+
+    private function hasRealLoginEmail(string $email): bool
+    {
+        $normalized = strtolower(trim($email));
+        if ($normalized === '' || ! filter_var($normalized, FILTER_VALIDATE_EMAIL)) {
+            return false;
+        }
+
+        return ! Str::endsWith($normalized, '@import.local');
     }
 
     public function forgotPassword(Request $request)
@@ -1297,27 +1773,15 @@ class AuthController extends ApiController
 
         $email = strtolower(trim($payload['email']));
         $eligibility = $this->passwordResetEligibility($email);
-        if (! $eligibility['allowed']) {
-            return response()->json(['error' => $eligibility['message']], 403);
+        if ($eligibility['allowed']) {
+            try {
+                Password::sendResetLink(['email' => $email]);
+            } catch (\Throwable $e) {
+                report($e);
+            }
         }
 
-        try {
-            $status = Password::sendResetLink(['email' => $email]);
-        } catch (\Throwable $e) {
-            report($e);
-
-            return response()->json([
-                'error' => 'Layanan email sedang bermasalah. Coba lagi beberapa menit.',
-            ], 503);
-        }
-
-        if ($status !== Password::RESET_LINK_SENT) {
-            return response()->json(['error' => __($status)], 400);
-        }
-
-        RateLimiter::clear($throttleKey);
-
-        return response()->json(['data' => 'Link reset password dikirim']);
+        return response()->json(['data' => $this->passwordResetRequestAcceptedMessage()]);
     }
 
     public function resetPassword(Request $request)
@@ -1327,7 +1791,7 @@ class AuthController extends ApiController
         $validator = Validator::make($payload, [
             'email' => 'required|email',
             'token' => 'required|string',
-            'password' => 'required|string|min:6|confirmed',
+            'password' => ['required', 'string', 'confirmed', PasswordRule::defaults()],
         ]);
 
         if ($validator->fails()) {
@@ -1346,7 +1810,7 @@ class AuthController extends ApiController
         $email = strtolower(trim($payload['email']));
         $eligibility = $this->passwordResetEligibility($email);
         if (! $eligibility['allowed']) {
-            return response()->json(['error' => $eligibility['message']], 403);
+            return response()->json(['error' => $this->passwordResetFailureMessage()], 400);
         }
 
         $status = Password::reset(
@@ -1366,7 +1830,7 @@ class AuthController extends ApiController
         );
 
         if ($status !== Password::PASSWORD_RESET) {
-            return response()->json(['error' => __($status)], 400);
+            return response()->json(['error' => $this->passwordResetFailureMessage()], 400);
         }
 
         return response()->json(['data' => 'Password berhasil diubah']);
@@ -1400,12 +1864,18 @@ class AuthController extends ApiController
         }
 
         $targetEmail = strtolower(trim((string) ($payload['email'] ?? $user->email)));
+        $currentEmail = strtolower(trim((string) ($user->email ?? '')));
         if ($targetEmail === '' || ! filter_var($targetEmail, FILTER_VALIDATE_EMAIL)) {
             return response()->json(['error' => 'Email tujuan verifikasi tidak valid'], 422);
         }
         if (Str::endsWith($targetEmail, '@import.local')) {
             return response()->json([
                 'error' => 'Email akun belum aktif. Isi email aktif dulu, lalu kirim kode verifikasi.',
+            ], 422);
+        }
+        if ($this->shouldRequireGoogleUnlinkBeforeEmailChange($user, $currentEmail, $targetEmail)) {
+            return response()->json([
+                'error' => 'Lepas tautan Google terlebih dahulu sebelum mengganti email akun.',
             ], 422);
         }
 
@@ -1423,8 +1893,9 @@ class AuthController extends ApiController
         $tenantId = $this->tenantId($request);
         $now = now();
         $expiresAt = $now->copy()->addSeconds(self::PASSWORD_CHANGE_CODE_TTL_SECONDS);
+        $supportsTargetEmail = $this->passwordChangeVerificationsSupportsTargetEmail();
 
-        DB::transaction(function () use ($user, $tenantId, $targetEmail, $code, $now, $expiresAt) {
+        DB::transaction(function () use ($user, $tenantId, $targetEmail, $code, $now, $expiresAt, $supportsTargetEmail) {
             DB::table('password_change_verifications')
                 ->where('user_id', $user->id)
                 ->whereNull('used_at')
@@ -1433,18 +1904,23 @@ class AuthController extends ApiController
                     'updated_at' => $now,
                 ]);
 
-            DB::table('password_change_verifications')->insert([
+            $insertPayload = [
                 'id' => (string) Str::uuid(),
                 'user_id' => (string) $user->id,
                 'tenant_id' => $tenantId ?: null,
-                'target_email' => $targetEmail,
                 'code_hash' => Hash::make($code),
                 'expires_at' => $expiresAt,
                 'attempt_count' => 0,
                 'used_at' => null,
                 'created_at' => $now,
                 'updated_at' => $now,
-            ]);
+            ];
+
+            if ($supportsTargetEmail) {
+                $insertPayload['target_email'] = $targetEmail;
+            }
+
+            DB::table('password_change_verifications')->insert($insertPayload);
         });
 
         $schoolName = 'EduSmart';
@@ -1460,18 +1936,18 @@ class AuthController extends ApiController
         }
 
         $mailBody = implode("\n", [
-            "Kode verifikasi ganti sandi Anda: {$code}",
+            "Kode verifikasi perubahan akun Anda: {$code}",
             '',
-            'Kode berlaku selama 10 menit dan hanya bisa digunakan 1 kali.',
+            'Kode berlaku selama 10 menit dan hanya bisa digunakan 1 kali untuk perubahan email atau password.',
             "Sekolah: {$schoolName}",
             '',
-            'Jika Anda tidak meminta perubahan sandi, abaikan email ini.',
+            'Jika Anda tidak meminta perubahan akun ini, abaikan email ini.',
         ]);
 
         try {
             Mail::raw($mailBody, function ($message) use ($targetEmail) {
                 $message->to($targetEmail)
-                    ->subject('Kode Verifikasi Ganti Sandi');
+                    ->subject('Kode Verifikasi Perubahan Akun');
             });
         } catch (\Throwable $e) {
             report($e);
@@ -1491,7 +1967,7 @@ class AuthController extends ApiController
 
         return response()->json([
             'data' => [
-                'message' => 'Kode verifikasi telah dikirim ke email.',
+                'message' => 'Kode verifikasi telah dikirim ke email tujuan.',
                 'target_email' => $this->maskEmail($targetEmail),
                 'expires_in_seconds' => self::PASSWORD_CHANGE_CODE_TTL_SECONDS,
             ],
@@ -1502,7 +1978,7 @@ class AuthController extends ApiController
     {
         $payload = $request->only(['password', 'password_confirmation', 'verification_code']);
         $validator = Validator::make($payload, [
-            'password' => 'required|string|min:6|confirmed',
+            'password' => ['required', 'string', 'confirmed', PasswordRule::defaults()],
             'verification_code' => 'nullable|digits:6',
         ]);
 
@@ -1530,6 +2006,16 @@ class AuthController extends ApiController
 
         $user->forceFill(['password' => Hash::make($payload['password'])])->save();
 
+        $tenantId = $this->tenantId($request);
+        $profileQuery = Profile::query()->where('id', $user->id);
+        if ($tenantId) {
+            $profileQuery->where('tenant_id', $tenantId);
+        }
+        $profileQuery->update([
+            'must_change_password' => false,
+            'updated_at' => now(),
+        ]);
+
         // Security: Logout perangkat lain, tapi biarkan perangkat ini tetap login
         if (method_exists($user, 'tokens')) {
             $user->tokens()->where('id', '!=', $user->currentAccessToken()->id ?? null)->delete();
@@ -1543,7 +2029,7 @@ class AuthController extends ApiController
         $payload = $request->only(['email', 'password', 'password_confirmation', 'verification_code']);
         $validator = Validator::make($payload, [
             'email' => 'required|email',
-            'password' => 'required|string|min:6|confirmed',
+            'password' => ['nullable', 'string', 'confirmed', PasswordRule::defaults()],
             'verification_code' => 'nullable|digits:6',
         ]);
 
@@ -1563,40 +2049,72 @@ class AuthController extends ApiController
             return response()->json(['error' => 'Tenant tidak valid'], 400);
         }
 
+        $profile = $this->profile($request);
+        $currentEmail = strtolower(trim((string) ($user->email ?? '')));
         $email = strtolower(trim($payload['email']));
+        $password = (string) ($payload['password'] ?? '');
+        $hasPasswordChange = trim($password) !== '';
+        $emailChanged = $email !== '' && $email !== $currentEmail;
+
+        if (! $emailChanged && ! $hasPasswordChange) {
+            return response()->json(['error' => 'Tidak ada perubahan akun yang disimpan'], 422);
+        }
 
         if ($this->isReservedSuperAdminEmail($email)) {
             return response()->json(['error' => 'Email ini tidak bisa digunakan'], 403);
+        }
+        if ($this->shouldRequireGoogleUnlinkBeforeEmailChange($user, $currentEmail, $email)) {
+            return response()->json([
+                'error' => 'Lepas tautan Google terlebih dahulu sebelum mengganti email akun ini.',
+            ], 422);
         }
 
         if (User::query()->where('email', $email)->where('id', '!=', $user->id)->exists()) {
             return response()->json(['error' => 'Email sudah terdaftar'], 409);
         }
 
+        $requiresVerification = $this->requiresPasswordChangeVerification($request)
+            && ! $this->shouldBypassSensitiveActionVerification($request, $user, $profile, $emailChanged, $email);
+
         $otpResponse = $this->consumePasswordChangeVerificationCode(
             $request,
             $user,
             (string) ($payload['verification_code'] ?? ''),
-            $email
+            $email,
+            $emailChanged,
+            $profile
         );
         if ($otpResponse) {
             return $otpResponse;
         }
 
-        DB::transaction(function () use ($user, $email, $payload, $tenantId) {
-            $user->forceFill([
-                'email' => $email,
-                'password' => Hash::make($payload['password']),
-            ])->save();
+        DB::transaction(function () use ($user, $email, $password, $tenantId, $emailChanged, $hasPasswordChange, $requiresVerification) {
+            $userPayload = [];
+            if ($emailChanged) {
+                $userPayload['email'] = $email;
+                $userPayload['email_verified_at'] = $requiresVerification ? now() : null;
+            }
+            if ($hasPasswordChange) {
+                $userPayload['password'] = Hash::make($password);
+            }
+            if (! empty($userPayload)) {
+                $user->forceFill($userPayload)->save();
+            }
 
-            Profile::query()->where('id', $user->id)->where('tenant_id', $tenantId)->update([
-                'email' => $email,
-                'must_change_password' => false,
+            $profilePayload = [
                 'updated_at' => now(),
-            ]);
+            ];
+            if ($emailChanged) {
+                $profilePayload['email'] = $email;
+            }
+            if ($hasPasswordChange) {
+                $profilePayload['must_change_password'] = false;
+            }
+
+            Profile::query()->where('id', $user->id)->where('tenant_id', $tenantId)->update($profilePayload);
 
             // Security: Jika password berubah, logout perangkat lain
-            if (method_exists($user, 'tokens')) {
+            if ($hasPasswordChange && method_exists($user, 'tokens')) {
                 $user->tokens()->where('id', '!=', $user->currentAccessToken()->id ?? null)->delete();
             }
         });
@@ -1683,13 +2201,49 @@ class AuthController extends ApiController
         return in_array($role, ['guru', 'siswa'], true);
     }
 
+    private function shouldBypassSensitiveActionVerification(
+        Request $request,
+        User $user,
+        ?Profile $profile = null,
+        bool $emailChanged = false,
+        ?string $targetEmail = null
+    ): bool {
+        if (! $this->requiresPasswordChangeVerification($request)) {
+            return true;
+        }
+
+        $resolvedProfile = $profile ?: $this->profile($request);
+        if (! $resolvedProfile) {
+            return false;
+        }
+
+        $currentEmail = strtolower(trim((string) ($user->email ?? '')));
+        if (! $this->isInitialAccountSetupPending($resolvedProfile, $currentEmail)) {
+            return false;
+        }
+
+        if (! $emailChanged) {
+            return true;
+        }
+
+        $normalizedTargetEmail = strtolower(trim((string) $targetEmail));
+
+        return ! $this->hasRealLoginEmail($normalizedTargetEmail);
+    }
+
     private function consumePasswordChangeVerificationCode(
         Request $request,
         User $user,
         string $code,
-        ?string $expectedEmail = null
+        ?string $expectedEmail = null,
+        bool $emailChanged = false,
+        ?Profile $profile = null
     ) {
         if (! $this->requiresPasswordChangeVerification($request)) {
+            return null;
+        }
+
+        if ($this->shouldBypassSensitiveActionVerification($request, $user, $profile, $emailChanged, $expectedEmail)) {
             return null;
         }
 
@@ -1755,7 +2309,9 @@ class AuthController extends ApiController
                 ];
             }
 
-            $recordEmail = strtolower(trim((string) ($record->target_email ?? '')));
+            $recordEmail = $this->passwordChangeVerificationsSupportsTargetEmail()
+                ? strtolower(trim((string) ($record->target_email ?? '')))
+                : '';
             $expected = strtolower(trim((string) $expectedEmail));
             if ($expected !== '' && $recordEmail !== '' && $recordEmail !== $expected) {
                 return [
@@ -1803,6 +2359,42 @@ class AuthController extends ApiController
         }
 
         return null;
+    }
+
+    private function hasGoogleLinkedAccount(User $user): bool
+    {
+        return trim((string) ($user->google_id ?? '')) !== ''
+            || trim((string) ($user->google_email ?? '')) !== ''
+            || $user->google_linked_at !== null;
+    }
+
+    private function shouldRequireGoogleUnlinkBeforeEmailChange(
+        User $user,
+        string $currentEmail,
+        string $targetEmail
+    ): bool {
+        $normalizedCurrentEmail = strtolower(trim($currentEmail));
+        $normalizedTargetEmail = strtolower(trim($targetEmail));
+
+        if (
+            $normalizedCurrentEmail === ''
+            || $normalizedTargetEmail === ''
+            || $normalizedCurrentEmail === $normalizedTargetEmail
+        ) {
+            return false;
+        }
+
+        if (! $this->hasGoogleLinkedAccount($user)) {
+            return false;
+        }
+
+        return $this->hasRealLoginEmail($normalizedCurrentEmail);
+    }
+
+    private function passwordChangeVerificationsSupportsTargetEmail(): bool
+    {
+        return Schema::hasTable('password_change_verifications')
+            && Schema::hasColumn('password_change_verifications', 'target_email');
     }
 
     private function maskEmail(string $email): string
@@ -1913,6 +2505,14 @@ class AuthController extends ApiController
 
         $root = strtolower(trim((string) config('tenancy.root_domain', '')));
         if ($root !== '' && ($normalizedHost === $root || str_ends_with($normalizedHost, '.'.$root))) {
+            return true;
+        }
+
+        if ($this->tenantDomainService->isAdminHost($normalizedHost)) {
+            return true;
+        }
+
+        if ($this->tenantDomainService->resolveTenantForHost($normalizedHost)) {
             return true;
         }
 
@@ -2033,6 +2633,16 @@ class AuthController extends ApiController
         return ['allowed' => true];
     }
 
+    private function passwordResetRequestAcceptedMessage(): string
+    {
+        return 'Jika email terdaftar dan memenuhi syarat, link reset password akan dikirim.';
+    }
+
+    private function passwordResetFailureMessage(): string
+    {
+        return 'Token reset tidak valid, sudah kedaluwarsa, atau akun tidak memenuhi syarat untuk reset mandiri.';
+    }
+
     private function isReservedSuperAdminEmail(string $email): bool
     {
         $normalizedEmail = strtolower(trim($email));
@@ -2065,244 +2675,15 @@ class AuthController extends ApiController
 
     public function sendEmailVerificationCode(Request $request)
     {
-        $user = $request->user();
-        if (! $user) {
-            return response()->json(['error' => 'Unauthenticated'], 401);
-        }
-
-        if ($user->hasVerifiedEmail()) {
-            return response()->json(['data' => ['message' => 'Email sudah terverifikasi']]);
-        }
-
-        if (! Schema::hasTable('email_verifications')) {
-            return response()->json([
-                'error' => 'Fitur verifikasi email belum aktif. Jalankan migrasi terbaru terlebih dahulu.',
-            ], 503);
-        }
-
-        $targetEmail = strtolower(trim((string) ($user->email ?? '')));
-        if ($targetEmail === '' || ! filter_var($targetEmail, FILTER_VALIDATE_EMAIL)) {
-            return response()->json(['error' => 'Email akun tidak valid'], 422);
-        }
-        if (Str::endsWith($targetEmail, '@import.local')) {
-            return response()->json([
-                'error' => 'Email akun belum aktif. Isi email aktif dulu sebelum verifikasi.',
-            ], 422);
-        }
-
-        $throttleKey = 'auth-email-verify-code|'.$user->id;
-        if (RateLimiter::tooManyAttempts($throttleKey, 5)) {
-            $seconds = max(1, RateLimiter::availableIn($throttleKey));
-
-            return response()->json([
-                'error' => "Terlalu banyak permintaan kode. Coba lagi dalam {$seconds} detik.",
-            ], 429);
-        }
-        RateLimiter::hit($throttleKey, 600);
-
-        $code = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
-        $tenantId = $this->tenantId($request);
-        $now = now();
-        $expiresAt = $now->copy()->addSeconds(self::EMAIL_VERIFICATION_CODE_TTL_SECONDS);
-
-        DB::transaction(function () use ($user, $tenantId, $targetEmail, $code, $now, $expiresAt) {
-            DB::table('email_verifications')
-                ->where('user_id', $user->id)
-                ->whereNull('used_at')
-                ->update([
-                    'used_at' => $now,
-                    'updated_at' => $now,
-                ]);
-
-            DB::table('email_verifications')->insert([
-                'id' => (string) Str::uuid(),
-                'user_id' => (string) $user->id,
-                'tenant_id' => $tenantId ?: null,
-                'email' => $targetEmail,
-                'code_hash' => Hash::make($code),
-                'expires_at' => $expiresAt,
-                'attempt_count' => 0,
-                'used_at' => null,
-                'created_at' => $now,
-                'updated_at' => $now,
-            ]);
-        });
-
-        $schoolName = 'EduSmart';
-        if ($tenantId) {
-            try {
-                $schoolName = (string) (DB::table('settings')
-                    ->where('tenant_id', $tenantId)
-                    ->orderBy('id')
-                    ->value('nama_sekolah') ?: $schoolName);
-            } catch (\Throwable $e) {
-                // ignore
-            }
-        }
-
-        $mailBody = implode("\n", [
-            "Kode verifikasi email Anda: {$code}",
-            '',
-            'Kode berlaku selama 10 menit dan hanya bisa digunakan 1 kali.',
-            "Sekolah: {$schoolName}",
-            '',
-            'Jika Anda tidak meminta verifikasi ini, abaikan email ini.',
-        ]);
-
-        try {
-            Mail::raw($mailBody, function ($message) use ($targetEmail) {
-                $message->to($targetEmail)
-                    ->subject('Kode Verifikasi Email');
-            });
-        } catch (\Throwable $e) {
-            report($e);
-
-            DB::table('email_verifications')
-                ->where('user_id', $user->id)
-                ->whereNull('used_at')
-                ->update([
-                    'used_at' => now(),
-                    'updated_at' => now(),
-                ]);
-
-            return response()->json([
-                'error' => 'Gagal mengirim email verifikasi. Cek konfigurasi SMTP lalu coba lagi.',
-            ], 503);
-        }
-
         return response()->json([
-            'data' => [
-                'message' => 'Kode verifikasi telah dikirim ke email.',
-                'target_email' => $this->maskEmail($targetEmail),
-                'expires_in_seconds' => self::EMAIL_VERIFICATION_CODE_TTL_SECONDS,
-            ],
-        ]);
+            'error' => 'Verifikasi email 6 digit sudah dinonaktifkan. Kode 6 digit sekarang dipakai saat mengganti email atau password akun.',
+        ], 410);
     }
 
     public function verifyEmailCode(Request $request)
     {
-        $user = $request->user();
-        if (! $user) {
-            return response()->json(['error' => 'Unauthenticated'], 401);
-        }
-
-        if ($user->hasVerifiedEmail()) {
-            return response()->json(['data' => ['message' => 'Email sudah terverifikasi']]);
-        }
-
-        $payload = $request->only(['code']);
-        $validator = Validator::make($payload, [
-            'code' => 'required|string|size:6',
-        ]);
-        if ($validator->fails()) {
-            return response()->json(['error' => 'Kode verifikasi 6 digit wajib diisi.'], 422);
-        }
-
-        if (! Schema::hasTable('email_verifications')) {
-            return response()->json([
-                'error' => 'Fitur verifikasi email belum aktif.',
-            ], 503);
-        }
-
-        $normalizedCode = trim($payload['code']);
-
-        $result = DB::transaction(function () use ($user, $normalizedCode) {
-            $record = DB::table('email_verifications')
-                ->where('user_id', (string) $user->id)
-                ->whereNull('used_at')
-                ->orderByDesc('created_at')
-                ->lockForUpdate()
-                ->first();
-
-            if (! $record) {
-                return [
-                    'ok' => false,
-                    'status' => 422,
-                    'message' => 'Kode verifikasi belum dibuat. Klik "Kirim Kode" terlebih dahulu.',
-                ];
-            }
-
-            $now = now();
-            $expiresAt = $record->expires_at ? now()->parse($record->expires_at) : null;
-            if (! $expiresAt || $now->greaterThan($expiresAt)) {
-                DB::table('email_verifications')
-                    ->where('id', $record->id)
-                    ->update([
-                        'used_at' => $now,
-                        'updated_at' => $now,
-                    ]);
-
-                return [
-                    'ok' => false,
-                    'status' => 422,
-                    'message' => 'Kode verifikasi sudah kedaluwarsa. Silakan kirim ulang.',
-                ];
-            }
-
-            $attemptCount = (int) ($record->attempt_count ?? 0);
-            if ($attemptCount >= self::EMAIL_VERIFICATION_CODE_MAX_ATTEMPTS) {
-                DB::table('email_verifications')
-                    ->where('id', $record->id)
-                    ->update([
-                        'used_at' => $now,
-                        'updated_at' => $now,
-                    ]);
-
-                return [
-                    'ok' => false,
-                    'status' => 429,
-                    'message' => 'Kode verifikasi sudah terlalu sering salah. Kirim ulang kode baru.',
-                ];
-            }
-
-            if (! Hash::check($normalizedCode, (string) ($record->code_hash ?? ''))) {
-                $nextAttempt = $attemptCount + 1;
-                $updatePayload = [
-                    'attempt_count' => $nextAttempt,
-                    'updated_at' => $now,
-                ];
-                if ($nextAttempt >= self::EMAIL_VERIFICATION_CODE_MAX_ATTEMPTS) {
-                    $updatePayload['used_at'] = $now;
-                }
-
-                DB::table('email_verifications')
-                    ->where('id', $record->id)
-                    ->update($updatePayload);
-
-                return [
-                    'ok' => false,
-                    'status' => 422,
-                    'message' => 'Kode verifikasi tidak valid.',
-                ];
-            }
-
-            // Code is correct — mark as used
-            DB::table('email_verifications')
-                ->where('id', $record->id)
-                ->update([
-                    'used_at' => $now,
-                    'updated_at' => $now,
-                ]);
-
-            return ['ok' => true];
-        });
-
-        if (! ($result['ok'] ?? false)) {
-            return response()->json([
-                'error' => (string) ($result['message'] ?? 'Verifikasi kode gagal.'),
-            ], (int) ($result['status'] ?? 422));
-        }
-
-        // Mark email as verified
-        $user->forceFill([
-            'email_verified_at' => now(),
-        ])->save();
-
         return response()->json([
-            'data' => [
-                'message' => 'Email berhasil diverifikasi!',
-                'verified' => true,
-            ],
-        ]);
+            'error' => 'Verifikasi email 6 digit sudah dinonaktifkan. Kode 6 digit sekarang dipakai saat mengganti email atau password akun.',
+        ], 410);
     }
 }

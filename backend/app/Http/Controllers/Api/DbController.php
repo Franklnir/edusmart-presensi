@@ -283,6 +283,10 @@ class DbController extends ApiController
                 );
             }
 
+            if (! $head && $table === 'quizzes') {
+                $data = $this->sanitizeQuizRows($data);
+            }
+
             return response()->json(['data' => $data, 'count' => $count]);
         }
 
@@ -782,6 +786,7 @@ class DbController extends ApiController
 
                     if ($this->isSiswa($request)) {
                         unset($payload['kelas']);
+                        unset($payload['nama']);
                     }
                 }
 
@@ -1475,31 +1480,7 @@ class DbController extends ApiController
                     return $this->deny('Nilai quiz dihitung otomatis oleh sistem');
                 }
                 if ($this->isSiswa($request)) {
-                    $kelasQuizIds = $this->kelasQuizIds($profile?->kelas);
-                    $this->mapPayload($payload, function ($row) use ($userId) {
-                        $row = $this->filterPayload($row, [
-                            'id', 'quiz_id', 'siswa_id', 'started_at', 'status', 'created_at', 'updated_at',
-                        ]);
-                        $row['siswa_id'] = $userId;
-                        if (! isset($row['started_at'])) {
-                            $row['started_at'] = now();
-                        }
-                        $row['status'] = 'ongoing';
-                        if (! isset($row['created_at'])) {
-                            $row['created_at'] = now();
-                        }
-                        $row['updated_at'] = now();
-
-                        return $row;
-                    });
-                    if ($this->payloadHasInvalidQuiz($payload, $kelasQuizIds)) {
-                        return $this->deny('Quiz tidak diizinkan');
-                    }
-                    if ($this->payloadHasUnavailableQuizForSiswa($payload, $profile?->kelas)) {
-                        return $this->deny('Quiz belum tersedia atau sudah berakhir');
-                    }
-
-                    return true;
+                    return $this->deny('Mulai quiz wajib melalui endpoint start attempt');
                 }
 
                 return $this->deny();
@@ -1523,13 +1504,7 @@ class DbController extends ApiController
                     return true;
                 }
                 if ($this->isSiswa($request)) {
-                    $query->where('siswa_id', $userId);
-                    if ($action === 'update' && is_array($payload)) {
-                        $payload = $this->filterPayload($payload, ['updated_at']);
-                        $payload['updated_at'] = now();
-                    }
-
-                    return true;
+                    return $this->deny('Perubahan attempt quiz wajib melalui endpoint quiz');
                 }
 
                 return $this->deny();
@@ -1570,26 +1545,7 @@ class DbController extends ApiController
                     return true;
                 }
                 if ($this->isSiswa($request)) {
-                    $submissionIds = $this->submissionIdsByUser($userId);
-                    $this->mapPayload($payload, function ($row) {
-                        $row = $this->filterPayload($row, [
-                            'id', 'submission_id', 'question_id', 'option_id', 'essay_answer', 'created_at', 'updated_at',
-                        ]);
-                        if (! isset($row['created_at'])) {
-                            $row['created_at'] = now();
-                        }
-                        $row['updated_at'] = now();
-
-                        return $row;
-                    });
-                    if ($this->payloadHasInvalidSubmission($payload, $submissionIds)) {
-                        return $this->deny('Submission tidak diizinkan');
-                    }
-                    if ($this->payloadHasInvalidQuizAnswerForSiswa($payload, $userId)) {
-                        return $this->deny('Jawaban tidak valid atau quiz sudah berakhir');
-                    }
-
-                    return true;
+                    return $this->deny('Jawaban quiz wajib disimpan melalui endpoint khusus');
                 }
 
                 return $this->deny();
@@ -1616,17 +1572,7 @@ class DbController extends ApiController
                     return true;
                 }
                 if ($this->isSiswa($request)) {
-                    $submissionIds = $this->submissionIdsByUser($userId);
-                    if (empty($submissionIds)) {
-                        return $this->deny();
-                    }
-                    $query->whereIn('submission_id', $submissionIds);
-                    if ($action === 'update' && is_array($payload)) {
-                        $payload = $this->filterPayload($payload, ['updated_at']);
-                        $payload['updated_at'] = now();
-                    }
-
-                    return true;
+                    return $this->deny('Jawaban quiz wajib disimpan melalui endpoint khusus');
                 }
 
                 return $this->deny();
@@ -1662,31 +1608,7 @@ class DbController extends ApiController
                     return true;
                 }
                 if ($this->isSiswa($request)) {
-                    $kelasQuizIds = $this->kelasQuizIds($profile?->kelas);
-                    $submissionIds = $this->submissionIdsByUser($userId);
-                    $this->mapPayload($payload, function ($row) use ($userId) {
-                        $row = $this->filterPayload($row, [
-                            'id', 'quiz_id', 'submission_id', 'siswa_id', 'event_type', 'event_message',
-                            'event_meta', 'created_at',
-                        ]);
-                        $row['siswa_id'] = $userId;
-                        if (! isset($row['event_type']) || trim((string) $row['event_type']) === '') {
-                            $row['event_type'] = 'warning';
-                        }
-                        if (! isset($row['created_at'])) {
-                            $row['created_at'] = now();
-                        }
-
-                        return $row;
-                    });
-                    if ($this->payloadHasInvalidQuiz($payload, $kelasQuizIds)) {
-                        return $this->deny('Quiz tidak diizinkan');
-                    }
-                    if ($this->payloadHasInvalidSubmission($payload, $submissionIds)) {
-                        return $this->deny('Submission tidak diizinkan');
-                    }
-
-                    return true;
+                    return $this->deny('Log pelanggaran quiz wajib melalui endpoint khusus');
                 }
 
                 return $this->deny();
@@ -2391,6 +2313,7 @@ class DbController extends ApiController
 
     private function validateDbRequestShape(Request $request): ?string
     {
+        $table = (string) $request->input('table', '');
         $columns = $request->input('columns');
         if ($columns !== null && ! is_string($columns)) {
             return 'Format columns tidak valid';
@@ -2416,8 +2339,12 @@ class DbController extends ApiController
             }
 
             foreach ($filters[$op] as $field => $value) {
-                if (! is_string($field) || $this->sanitizeIdentifier($field) === null) {
+                $column = is_string($field) ? $this->sanitizeIdentifier($field) : null;
+                if ($column === null) {
                     return 'Nama kolom filter tidak valid';
+                }
+                if (! $this->isSelectableColumn($table, $column)) {
+                    return 'Kolom filter tidak diizinkan';
                 }
                 if (! $this->isReasonableDbValue($value, 0)) {
                     return 'Nilai filter tidak valid';
@@ -2439,8 +2366,12 @@ class DbController extends ApiController
                 return 'Format item order tidak valid';
             }
             $field = (string) ($item['field'] ?? '');
-            if ($field === '' || $this->sanitizeIdentifier($field) === null) {
+            $column = $this->sanitizeIdentifier($field);
+            if ($field === '' || $column === null) {
                 return 'Kolom order tidak valid';
+            }
+            if (! $this->isSelectableColumn($table, $column)) {
+                return 'Kolom order tidak diizinkan';
             }
         }
 
@@ -4666,10 +4597,21 @@ class DbController extends ApiController
             'link_tiktok',
             'registrasi_siswa_aktif',
             'registrasi_guru_aktif',
-            'registrasi_admin_aktif',
         ];
 
         return $this->sanitizeRowsByAllowedFields($rows, $allowed);
+    }
+
+    private function sanitizeQuizRows($rows): array
+    {
+        $out = [];
+        foreach ($rows as $row) {
+            $item = (array) $row;
+            unset($item['access_code_hash']);
+            $out[] = $item;
+        }
+
+        return $out;
     }
 
     private function sanitizeProfilesForNonAdmin(

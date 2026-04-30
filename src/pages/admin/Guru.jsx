@@ -139,6 +139,11 @@ const formatKelasDisplay = (kelasSlug) => {
   ).join(' ');
 };
 
+const getKelasDisplayName = (kelasObj) => {
+  if (!kelasObj) return ''
+  return kelasObj.nama || formatKelasDisplay(kelasObj.id) || ''
+}
+
 const normalizePhoneSimple = (input) => {
   if (!input) return ''
   return String(input).replace(/\D/g, '')
@@ -170,6 +175,21 @@ const GURU_ALIAS_MAP = buildAliasMap({
   email: ['email', 'email guru'],
   status: ['status']
 })
+
+const GURU_IMPORT_EXAMPLE_COLUMNS = [
+  { key: 'nama', label: 'Nama', cellClassName: 'min-w-[180px] font-medium text-gray-800 whitespace-normal leading-5' },
+  { key: 'nis', label: 'NIP/NUPTK', cellClassName: 'min-w-[120px] whitespace-nowrap' },
+  { key: 'kelas', label: 'Kelas', cellClassName: 'min-w-[112px] whitespace-normal leading-5' },
+  { key: 'jk', label: 'JK', cellClassName: 'min-w-[56px] whitespace-nowrap' },
+  { key: 'tanggal_lahir', label: 'Tanggal Lahir', cellClassName: 'min-w-[120px] whitespace-nowrap' },
+  { key: 'agama', label: 'Agama', cellClassName: 'min-w-[92px] whitespace-nowrap' },
+  { key: 'alamat', label: 'Alamat', cellClassName: 'min-w-[220px] whitespace-normal leading-5' },
+  { key: 'telp', label: 'No HP', cellClassName: 'min-w-[136px] whitespace-nowrap' },
+  { key: 'jabatan', label: 'Jabatan', cellClassName: 'min-w-[156px] whitespace-normal leading-5' },
+  { key: 'email', label: 'Email', cellClassName: 'min-w-[220px] whitespace-nowrap' }
+]
+
+const GURU_IMPORT_EXAMPLE_HEADERS = GURU_IMPORT_EXAMPLE_COLUMNS.map((column) => column.label)
 
 const normalizeStatusValue = (value) => {
   if (!value) return ''
@@ -400,6 +420,136 @@ export default function AGuru() {
   const [importErrors, setImportErrors] = useState([])
   const [importLoading, setImportLoading] = useState(false)
   const [importSummary, setImportSummary] = useState(null)
+
+  const availableKelasNames = useMemo(
+    () => kelasList.map((kelas) => getKelasDisplayName(kelas)).filter(Boolean),
+    [kelasList]
+  )
+
+  const importExampleRows = useMemo(() => {
+    const fallbackKelas = ['X A MIPA', 'X B MIPA']
+    const classNames = availableKelasNames.length ? availableKelasNames : fallbackKelas
+    const sampleNames = [
+      'Dewi Kartika Sari',
+      'Ahmad Fauzan Pratama',
+      'Rina Oktaviani',
+      'Bagus Ramadhan',
+      'Siska Rahmawati',
+      'Rizal Hidayat',
+      'Lina Marlina',
+      'Andika Saputra'
+    ]
+    const sampleJabatan = [
+      'Guru Matematika',
+      'Guru Bahasa Indonesia',
+      'Guru IPA',
+      'Guru IPS',
+      'Guru Bahasa Inggris',
+      'Guru BK',
+      'Guru PPKn',
+      'Guru Informatika'
+    ]
+    const sampleAgama = [
+      'Islam',
+      'Islam',
+      'Islam',
+      'Islam',
+      'Islam',
+      'Islam',
+      'Kristen',
+      'Islam'
+    ]
+    const sampleAddresses = [
+      'Jl. Anggrek 10, Bandung',
+      'Jl. Melati 21, Bandung',
+      'Jl. Mawar 8, Bandung',
+      'Jl. Cempaka 5, Bandung',
+      'Jl. Dahlia 14, Bandung',
+      'Jl. Kenanga 2, Bandung',
+      'Jl. Flamboyan 12, Bandung',
+      'Jl. Teratai 6, Bandung'
+    ]
+
+    return classNames.map((kelasName, index) => {
+      const sampleName = sampleNames[index] || `Contoh Guru ${index + 1}`
+      const emailSlug = sampleName
+        .toLowerCase()
+        .replace(/[^a-z\s]/g, '')
+        .trim()
+        .replace(/\s+/g, '.')
+      const month = String((index % 12) + 1).padStart(2, '0')
+      const day = String(((index * 4) % 28) + 1).padStart(2, '0')
+      const nip = `1987${month}${day}${String(index + 1).padStart(4, '0')}`
+
+      return {
+        nama: sampleName,
+        nis: nip,
+        kelas: kelasName,
+        jk: index % 2 === 0 ? 'P' : 'L',
+        tanggal_lahir: `1987-${month}-${day}`,
+        agama: sampleAgama[index] || 'Islam',
+        alamat: sampleAddresses[index] || `Jl. Contoh ${index + 1}, Bandung`,
+        telp: `08131${String(2345678 + index).padStart(7, '0')}`,
+        jabatan: sampleJabatan[index] || 'Guru Mata Pelajaran',
+        email: `${emailSlug || `contoh.guru.${index + 1}`}@example.com`
+      }
+    })
+  }, [availableKelasNames])
+
+  const getImportExampleValues = (row) => (
+    GURU_IMPORT_EXAMPLE_COLUMNS.map(({ key }) => row[key] ?? '')
+  )
+
+  const importExampleCopyText = useMemo(() => {
+    const headerLine = GURU_IMPORT_EXAMPLE_HEADERS.join('\t')
+    const bodyLines = importExampleRows.map((row) => getImportExampleValues(row).join('\t'))
+
+    return [headerLine, ...bodyLines].join('\n')
+  }, [importExampleRows])
+
+  const importExampleExcelRows = useMemo(() => {
+    return importExampleRows.map((row) => {
+      const item = {}
+      GURU_IMPORT_EXAMPLE_COLUMNS.forEach(({ key, label }) => {
+        item[label] = row[key] ?? ''
+      })
+      return item
+    })
+  }, [importExampleRows])
+
+  const importMissingKelasErrors = useMemo(
+    () => importErrors.filter((item) => item.type === 'kelas_missing'),
+    [importErrors]
+  )
+
+  const importBlockingErrorMessage = useMemo(() => {
+    if (!importErrors.length) return ''
+
+    if (importMissingKelasErrors.length) {
+      const missingNames = [
+        ...new Set(importMissingKelasErrors.map((item) => item.className).filter(Boolean))
+      ]
+      const suffix = missingNames.length ? ` Kelas yang belum tersedia: ${missingNames.join(', ')}.` : ''
+      return `Maaf, kelas data guru yang ada di file Excel, CSV, atau Google Sheets belum tersedia di website ini. Silakan buat terlebih dahulu.${suffix}`
+    }
+
+    return 'Masih ada data import guru yang belum valid. Perbaiki dulu semua error sebelum memulai import.'
+  }, [importErrors, importMissingKelasErrors])
+
+  const importedKelasNames = useMemo(
+    () =>
+      [
+        ...new Set(
+          importRows
+            .map((row) => {
+              const kelas = kelasList.find((item) => item.id === row.kelas)
+              return getKelasDisplayName(kelas) || row.kelas_raw || row.kelas
+            })
+            .filter(Boolean)
+        )
+      ],
+    [importRows, kelasList]
+  )
 
   /* ===== Password Modal Functions ===== */
   const openPasswordModal = (title, action) => {
@@ -640,6 +790,46 @@ export default function AGuru() {
     return kelasLookup.get(slugKey) || ''
   }
 
+  const ensureKelasReadyForImport = () => {
+    if (kelasList.length) return true
+    pushToast('error', 'Anda belum membuat kelas. Buat kelas terlebih dahulu sebelum import data guru.')
+    return false
+  }
+
+  const copyImportExampleToClipboard = async () => {
+    if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+      pushToast('error', 'Browser ini belum mendukung fitur salin otomatis.')
+      return
+    }
+
+    try {
+      await navigator.clipboard.writeText(importExampleCopyText)
+      pushToast('success', 'Contoh format import guru berhasil disalin untuk Excel atau Google Sheets.')
+    } catch (error) {
+      pushToast('error', error?.message || 'Gagal menyalin contoh format import guru.')
+    }
+  }
+
+  const downloadImportTemplateExcel = async () => {
+    try {
+      const stamp = new Date().toISOString().slice(0, 10)
+      const suffix = availableKelasNames.length
+        ? `${availableKelasNames.length}-kelas`
+        : 'template-default'
+      const fileName = `template_import_guru_${suffix}_${stamp}.xlsx`
+
+      await exportRowsToExcel({
+        rows: importExampleExcelRows,
+        fileName,
+        sheetName: 'Template Import Guru'
+      })
+
+      pushToast('success', `Template Excel guru berhasil diunduh: ${fileName}`)
+    } catch (error) {
+      pushToast('error', error?.message || 'Gagal mengunduh template Excel guru.')
+    }
+  }
+
   const normalizeImportRow = (row, index) => {
     const mapped = mapRowByAliases(row, GURU_ALIAS_MAP)
     const hasAny = Object.values(mapped).some((v) => String(v || '').trim() !== '')
@@ -693,7 +883,9 @@ export default function AGuru() {
       if (!normalized.kelas) {
         errors.push({
           row: normalized.__rowNum,
-          reason: `Kelas tidak ditemukan: ${normalized.kelas_raw}`
+          reason: `Maaf, kelas "${normalized.kelas_raw}" belum tersedia di website ini. Silakan buat terlebih dahulu.`,
+          type: 'kelas_missing',
+          className: normalized.kelas_raw
         })
         return
       }
@@ -716,6 +908,7 @@ export default function AGuru() {
 
   const handleImportFileChange = async (file) => {
     if (!file) return
+    if (!ensureKelasReadyForImport()) return
     setImportFile(file)
     setImportLoading(true)
     try {
@@ -729,6 +922,7 @@ export default function AGuru() {
   }
 
   const handleLoadSheet = async () => {
+    if (!ensureKelasReadyForImport()) return
     const csvUrl = buildGoogleSheetCsvUrl(sheetUrl)
     if (!csvUrl) {
       pushToast('error', 'Link Google Sheets tidak valid')
@@ -820,35 +1014,26 @@ export default function AGuru() {
       return 'updated'
     }
 
-    const { data: authData, error: authError } = await supabase.auth.signUp({
+    const { data: provisionData, error: provisionError } = await supabase.admin.provisionUser({
+      nama,
       email: emailForAuth,
       password,
-      options: {
-        data: {
-          nama,
-          role: 'guru'
-        }
-      }
-    })
-
-    if (authError) throw authError
-    const userId = authData?.user?.id
-    if (!userId) throw new Error('User gagal dibuat')
-
-    const createPayload = {
-      ...payload,
       role: 'guru',
-      email: emailForAuth,
+      nis: row.nis || '',
+      kelas: row.kelas || '',
+      jk: row.jk || '',
+      tanggal_lahir: row.tanggal_lahir || '',
+      agama: row.agama || '',
+      alamat: row.alamat || '',
+      telp: row.telp || '',
+      jabatan: row.jabatan || '',
       status: payload.status || 'active',
       must_change_password: true
-    }
+    })
 
-    const { error: updateError } = await supabase
-      .from('profiles')
-      .update(createPayload)
-      .eq('id', userId)
-
-    if (updateError) throw updateError
+    if (provisionError) throw provisionError
+    const userId = provisionData?.user?.id || provisionData?.profile?.id
+    if (!userId) throw new Error('User gagal dibuat')
 
     return 'created'
   }
@@ -859,8 +1044,24 @@ export default function AGuru() {
       return
     }
 
-    if (!kelasList.length) {
-      pushToast('error', 'Belum ada data kelas. Buat kelas terlebih dahulu sebelum import guru.')
+    if (!ensureKelasReadyForImport()) {
+      return
+    }
+
+    if (importErrors.length) {
+      pushToast('error', importBlockingErrorMessage)
+      return
+    }
+
+    const kelasTersedia = importedKelasNames.length
+      ? importedKelasNames.join(', ')
+      : availableKelasNames.join(', ')
+
+    const confirmed = window.confirm(
+      `Apakah Anda yakin ingin masukin data guru dengan kelas ${kelasTersedia}?`
+    )
+
+    if (!confirmed) {
       return
     }
 
@@ -1189,8 +1390,8 @@ export default function AGuru() {
         />
 
         {importModalOpen && (
-          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl overflow-hidden">
+          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-start justify-center overflow-y-auto p-4 sm:items-center">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[calc(100vh-2rem)] overflow-hidden flex flex-col">
               <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
                 <div>
                   <h3 className="text-lg font-bold text-gray-900">Import Data Guru</h3>
@@ -1210,7 +1411,7 @@ export default function AGuru() {
                 </button>
               </div>
 
-              <div className="p-6 space-y-5">
+              <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-5">
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
@@ -1234,14 +1435,122 @@ export default function AGuru() {
                   </button>
                 </div>
 
+                <div className={`rounded-xl border p-4 text-sm ${kelasList.length
+                  ? 'bg-indigo-50 border-indigo-200 text-indigo-900'
+                  : 'bg-red-50 border-red-200 text-red-800'
+                  }`}>
+                  <p className="font-semibold mb-1">
+                    {kelasList.length ? 'Konfirmasi kelas yang sudah dibuat' : 'Import ditolak sementara'}
+                  </p>
+                  {kelasList.length ? (
+                    <>
+                      <p className="mb-3">
+                        Apakah Anda yakin ingin masukin data guru dengan kelas yang sudah kita buat?
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {availableKelasNames.map((kelasName) => (
+                          <span
+                            key={kelasName}
+                            className="inline-flex items-center rounded-full bg-white/80 px-3 py-1 text-xs font-semibold border border-indigo-200"
+                          >
+                            {kelasName}
+                          </span>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <p>
+                      Anda belom membuat kelas, jadi upload Excel, CSV, atau Google Sheets belum bisa diproses.
+                    </p>
+                  )}
+                </div>
+
+                <div className="border border-gray-200 rounded-xl overflow-hidden">
+                  <div className="px-4 py-3 border-b border-gray-200 bg-gray-50 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900">
+                        Contoh format {importExampleRows.length} baris
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        Satu baris contoh untuk tiap kelas yang sudah dibuat. Bisa dipakai untuk Excel, CSV, atau langsung dipaste ke Google Sheets.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={copyImportExampleToClipboard}
+                        className="px-3 py-2 rounded-lg border border-gray-300 text-xs font-semibold text-gray-700 hover:bg-gray-100"
+                      >
+                        Copy Contoh
+                      </button>
+                      <button
+                        type="button"
+                        onClick={downloadImportTemplateExcel}
+                        className="px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700"
+                      >
+                        Download Template Excel
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="max-h-64 overflow-auto">
+                    <table className="w-full min-w-[1160px] text-sm">
+                      <thead className="bg-slate-50">
+                        <tr>
+                          {GURU_IMPORT_EXAMPLE_COLUMNS.map((column) => (
+                            <th
+                              key={column.key}
+                              className="px-4 py-3 text-left font-semibold text-slate-600 border-b border-gray-200 sticky top-0 bg-slate-50"
+                            >
+                              {column.label}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {importExampleRows.map((row, idx) => (
+                          <tr
+                            key={`${row.nis}-${idx}`}
+                            className={idx % 2 === 0 ? 'border-b border-gray-100 bg-white' : 'border-b border-gray-100 bg-slate-50/50'}
+                          >
+                            {GURU_IMPORT_EXAMPLE_COLUMNS.map((column) => (
+                              <td
+                                key={`${row.nis}-${column.key}`}
+                                className={`px-4 py-3 align-top text-gray-700 ${column.cellClassName}`}
+                              >
+                                {row[column.key] || '—'}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="border-t border-gray-200 bg-gray-50 p-4">
+                    <p className="text-xs font-semibold text-gray-700 mb-2">
+                      Format yang bisa dicopy ke Excel / Google Sheets:
+                    </p>
+                    <textarea
+                      readOnly
+                      value={importExampleCopyText}
+                      className="w-full min-h-[130px] rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 font-mono"
+                      spellCheck={false}
+                    />
+                    <p className="mt-2 text-[11px] text-gray-500">
+                      Template download memakai format Excel (`.xlsx`) supaya header dan kolom terlihat lebih rapi saat dibuka.
+                    </p>
+                  </div>
+                </div>
+
                 {importSource === 'file' && (
                   <div className="space-y-3">
                     <input
                       type="file"
-                      accept=".xlsx,.xls,.csv"
+                      accept=".xlsx,.csv"
                       onChange={(e) => handleImportFileChange(e.target.files?.[0])}
                       className="block w-full text-sm text-gray-700 file:mr-4 file:rounded-lg file:border-0 file:bg-blue-50 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-blue-700 hover:file:bg-blue-100"
-                      disabled={importLoading}
+                      disabled={importLoading || !kelasList.length}
                     />
                     {importFile && (
                       <p className="text-xs text-gray-500">File terpilih: {importFile.name}</p>
@@ -1257,13 +1566,13 @@ export default function AGuru() {
                       value={sheetUrl}
                       onChange={(e) => setSheetUrl(e.target.value)}
                       className="w-full rounded-lg border border-gray-200 px-4 py-2 text-sm"
-                      disabled={importLoading}
+                      disabled={importLoading || !kelasList.length}
                     />
                     <button
                       type="button"
                       onClick={handleLoadSheet}
                       className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-60"
-                      disabled={importLoading || !sheetUrl.trim()}
+                      disabled={importLoading || !sheetUrl.trim() || !kelasList.length}
                     >
                       Ambil Data
                     </button>
@@ -1273,10 +1582,16 @@ export default function AGuru() {
                 <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-800">
                   <p className="font-semibold mb-1">Catatan penting</p>
                   <ul className="list-disc list-inside space-y-1">
-                    <li>Kolom wajib: <b>Nama</b>, <b>NIS/NIP</b>, <b>Email</b>, dan <b>Kelas</b>.</li>
-                    <li>Password awal otomatis dari <b>tanggal lahir</b> (contoh 05/08/2010 → 05082010).</li>
-                    <li>Login awal guru: pakai <b>Email</b> dan password tanggal lahir.</li>
-                    <li>Nama kelas dari Excel harus sama dengan kelas yang sudah dibuat (otomatis dicocokkan uppercase).</li>
+                    <li>Kolom wajib: <b>Nama</b>, <b>NIP/NUPTK</b>, <b>Email</b>, dan <b>Kelas</b>.</li>
+                    <li>Kolom <b>JK</b> bisa diisi <b>L</b>/<b>P</b>, <b>Laki-laki</b>, <b>Laki laki</b>, <b>Perempuan</b>, atau <b>Perumpuan</b>.</li>
+                    <li>Password awal sistem akan diamankan otomatis oleh server.</li>
+                    <li>Untuk <b>login pertama</b>, guru cukup pakai <b>tanggal lahir polos</b> (contoh 05/08/2010 → <b>05082010</b>).</li>
+                    <li>Kalau <b>tanggal lahir</b> kosong, login pertama memakai <b>NIP/NUPTK</b> sebagai password sementara.</li>
+                    <li>Login awal guru: pakai <b>Email</b> dan password sementara di atas.</li>
+                    <li>NIP/NUPTK dipakai sebagai nomor induk guru, bukan username login awal di sistem ini.</li>
+                    <li>Nama kelas harus mengarah ke kelas yang sudah dibuat di website ini.</li>
+                    <li>Huruf besar dan kecil tidak ngaruh, jadi <b>x a mipa</b> dan <b>X A MIPA</b> akan dianggap sama.</li>
+                    <li>Upload file Excel yang didukung adalah <b>.xlsx</b>. Kalau file masih <b>.xls</b>, simpan ulang dulu sebagai <b>.xlsx</b> atau <b>.csv</b>.</li>
                     <li>Setelah login, guru wajib mengganti password.</li>
                   </ul>
                 </div>
@@ -1293,6 +1608,9 @@ export default function AGuru() {
                 {importErrors.length > 0 && (
                   <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
                     <p className="font-semibold mb-2">Contoh error</p>
+                    {importBlockingErrorMessage ? (
+                      <p className="mb-2">{importBlockingErrorMessage}</p>
+                    ) : null}
                     <ul className="list-disc list-inside space-y-1 max-h-28 overflow-auto">
                       {importErrors.slice(0, 5).map((err, idx) => (
                         <li key={`${err.row}-${idx}`}>
@@ -1334,7 +1652,7 @@ export default function AGuru() {
                 <button
                   type="button"
                   onClick={handleRunImport}
-                  disabled={importLoading || !importRows.length}
+                  disabled={importLoading || !importRows.length || !kelasList.length || importErrors.length > 0}
                   className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-60"
                 >
                   {importLoading ? 'Memproses...' : 'Mulai Import'}

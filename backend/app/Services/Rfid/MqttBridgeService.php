@@ -10,110 +10,238 @@ use PhpMqtt\Client\MqttClient;
 class MqttBridgeService
 {
     public function __construct(
-        private readonly RfidScanService $rfidScanService
+        private readonly RfidScanService $rfidScanService,
+        private readonly RfidIngressService $rfidIngressService,
+        private readonly RfidDeviceService $rfidDeviceService,
+        private readonly TenantMqttConfigService $tenantMqttConfigService,
     ) {}
 
     public function run(callable $log, bool $once = false, array $forcedTenants = []): void
     {
-        $cfg = $this->mqttConfig();
-        $host = trim((string) ($cfg['host'] ?? ''));
-        $port = (int) ($cfg['port'] ?? 0);
-
-        if ($host === '' || $port <= 0) {
-            throw new \RuntimeException('Konfigurasi MQTT belum lengkap (RFID_MQTT_HOST / RFID_MQTT_PORT).');
-        }
-
         do {
-            $client = null;
+            $contexts = [];
             try {
-                $client = $this->connectClient($cfg, $log);
-                $scanFilter = $this->scanTopicFilter($cfg);
-                $qos = $this->normalizeQos((int) ($cfg['qos'] ?? 1));
+                $configs = $this->tenantMqttConfigService->runtimeConfigs($forcedTenants);
+                if (empty($configs)) {
+                    throw new \RuntimeException('Belum ada konfigurasi MQTT RFID yang aktif.');
+                }
 
-                $log('info', sprintf('MQTT subscribe: %s', $scanFilter));
-
-                $client->subscribe(
-                    $scanFilter,
-                    function (string $topic, string $message, bool $retained, array $matchedWildcards) use ($client, $cfg, $qos, $log) {
-                        $this->handleIncomingScan($client, $cfg, $topic, $message, $qos, $log);
-                    },
-                    $qos
-                );
+                $contexts = $this->connectContexts($configs, $log);
+                if (empty($contexts)) {
+                    throw new \RuntimeException('Tidak ada koneksi MQTT RFID yang berhasil dibuat.');
+                }
 
                 if ($once) {
-                    $this->publishTenantModes($client, $cfg, $forcedTenants, $qos, $log);
+                    foreach ($contexts as $context) {
+                        $this->publishScopedTenantModes(
+                            $context['client'],
+                            $context['cfg'],
+                            $forcedTenants,
+                            $this->normalizeQos((int) ($context['cfg']['qos'] ?? 1)),
+                            $log
+                        );
+                    }
                     $log('info', 'Bridge selesai dijalankan sekali (--once).');
 
                     return;
                 }
 
-                $interval = max(5, (int) ($cfg['mode_sync_interval_seconds'] ?? 20));
-                $lastSyncAt = 0.0;
-                $initialSynced = false;
-
-                $client->registerLoopEventHandler(function (MqttClient $mqtt, float $elapsedTime) use ($forcedTenants, $qos, $cfg, $log, $interval, &$lastSyncAt, &$initialSynced) {
-                    unset($elapsedTime);
-                    $now = microtime(true);
-                    if (! $initialSynced || ($now - $lastSyncAt) >= $interval) {
-                        $this->publishTenantModes($mqtt, $cfg, $forcedTenants, $qos, $log);
-                        $initialSynced = true;
-                        $lastSyncAt = $now;
-                    }
-                });
-
-                $client->loop(true);
+                $this->runContextsLoop($contexts, $forcedTenants, $log);
             } catch (\Throwable $e) {
                 $log('error', 'MQTT bridge error: '.$e->getMessage());
             } finally {
-                if ($client instanceof MqttClient && $client->isConnected()) {
-                    try {
-                        $client->disconnect();
-                    } catch (\Throwable $e) {
-                        // ignore disconnect errors
-                    }
-                }
+                $this->disconnectContexts($contexts);
             }
 
             if ($once) {
                 break;
             }
 
-            $delay = max(1, (int) ($cfg['reconnect_delay_seconds'] ?? 5));
+            $delay = max(1, (int) (config('rfid.mqtt.reconnect_delay_seconds', 5)));
             $log('warning', sprintf('MQTT reconnect dalam %d detik...', $delay));
             sleep($delay);
         } while (true);
     }
 
+    private function connectContexts(array $configs, callable $log): array
+    {
+        $contexts = [];
+
+        foreach ($configs as $cfg) {
+            $host = trim((string) ($cfg['connect_host'] ?? $cfg['host'] ?? ''));
+            $port = (int) ($cfg['connect_port'] ?? $cfg['port'] ?? 0);
+            $tenantSlug = $this->nullableString($cfg['tenant_slug'] ?? null) ?: '*';
+
+            if ($host === '' || $port <= 0) {
+                $log('warning', sprintf('MQTT config [%s] dilewati: host/port kosong.', $tenantSlug));
+
+                continue;
+            }
+
+            try {
+                $client = $this->connectClient($cfg, $log);
+                $scanFilter = $this->scanTopicFilter($cfg);
+                $qos = $this->normalizeQos((int) ($cfg['qos'] ?? 1));
+
+                $log('info', sprintf('MQTT subscribe [%s]: %s', $tenantSlug, $scanFilter));
+
+                $client->subscribe(
+                    $scanFilter,
+                    function (string $topic, string $message, bool $retained, array $matchedWildcards) use ($client, $cfg, $qos, $log) {
+                        unset($retained, $matchedWildcards);
+                        $this->handleIncomingScan($client, $cfg, $topic, $message, $qos, $log);
+                    },
+                    $qos
+                );
+
+                $contexts[$this->contextKey($cfg)] = [
+                    'client' => $client,
+                    'cfg' => $cfg,
+                    'started_at' => microtime(true),
+                    'last_mode_sync_at' => 0.0,
+                    'mode_synced' => false,
+                ];
+            } catch (\Throwable $e) {
+                $log('error', sprintf('Gagal konek MQTT [%s]: %s', $tenantSlug, $e->getMessage()));
+            }
+        }
+
+        return $contexts;
+    }
+
+    private function runContextsLoop(array &$contexts, array $forcedTenants, callable $log): void
+    {
+        $reloadInterval = max(30, (int) config('rfid.mqtt.config_reload_interval_seconds', 60));
+        $lastReloadAt = microtime(true);
+
+        while (true) {
+            foreach ($contexts as $key => &$context) {
+                $client = $context['client'] ?? null;
+                if (! $client instanceof MqttClient || ! $client->isConnected()) {
+                    unset($contexts[$key]);
+
+                    continue;
+                }
+
+                $cfg = (array) ($context['cfg'] ?? []);
+                $qos = $this->normalizeQos((int) ($cfg['qos'] ?? 1));
+
+                try {
+                    $client->loopOnce((float) ($context['started_at'] ?? microtime(true)), false);
+
+                    $interval = max(5, (int) ($cfg['mode_sync_interval_seconds'] ?? config('rfid.mqtt.mode_sync_interval_seconds', 20)));
+                    $now = microtime(true);
+                    if (! ($context['mode_synced'] ?? false) || ($now - (float) ($context['last_mode_sync_at'] ?? 0)) >= $interval) {
+                        $this->publishScopedTenantModes($client, $cfg, $forcedTenants, $qos, $log);
+                        $context['mode_synced'] = true;
+                        $context['last_mode_sync_at'] = $now;
+                    }
+                } catch (\Throwable $e) {
+                    $tenantSlug = $this->nullableString($cfg['tenant_slug'] ?? null) ?: '*';
+                    $log('error', sprintf('MQTT loop error [%s]: %s', $tenantSlug, $e->getMessage()));
+                    $this->disconnectClient($client);
+                    unset($contexts[$key]);
+                }
+            }
+            unset($context);
+
+            if (empty($contexts)) {
+                $log('warning', 'Semua koneksi MQTT RFID terputus.');
+
+                return;
+            }
+
+            if ((microtime(true) - $lastReloadAt) >= $reloadInterval) {
+                $log('info', 'Reload konfigurasi MQTT RFID tenant...');
+
+                return;
+            }
+
+            usleep(100000);
+        }
+    }
+
+    private function disconnectContexts(array $contexts): void
+    {
+        foreach ($contexts as $context) {
+            $client = $context['client'] ?? null;
+            if ($client instanceof MqttClient) {
+                $this->disconnectClient($client);
+            }
+        }
+    }
+
+    private function disconnectClient(MqttClient $client): void
+    {
+        if (! $client->isConnected()) {
+            return;
+        }
+
+        try {
+            $client->disconnect();
+        } catch (\Throwable $e) {
+            // ignore disconnect errors
+        }
+    }
+
     private function connectClient(array $cfg, callable $log): MqttClient
     {
+        $tenantPart = $this->nullableString($cfg['tenant_slug'] ?? null);
         $clientId = sprintf(
-            '%s-%s',
+            '%s-%s-%s',
             trim((string) ($cfg['client_id_prefix'] ?? 'edusmart-rfid-bridge')),
+            $tenantPart ? Str::slug($tenantPart) : 'global',
             Str::lower(Str::random(8))
         );
 
         $client = new MqttClient(
-            (string) $cfg['host'],
-            (int) $cfg['port'],
+            (string) ($cfg['connect_host'] ?? $cfg['host']),
+            (int) ($cfg['connect_port'] ?? $cfg['port']),
             $clientId,
             MqttClient::MQTT_3_1_1
         );
+        $username = $this->nullableString($cfg['bridge_username'] ?? null)
+            ?? $this->nullableString($cfg['username'] ?? null);
+        $password = $this->nullableString($cfg['bridge_password'] ?? null)
+            ?? $this->nullableString($cfg['password'] ?? null);
 
         $settings = (new ConnectionSettings)
-            ->setUsername($this->nullableString($cfg['username'] ?? null))
-            ->setPassword($this->nullableString($cfg['password'] ?? null))
+            ->setUsername($username)
+            ->setPassword($password)
             ->setConnectTimeout(max(3, (int) ($cfg['connect_timeout'] ?? 20)))
             ->setSocketTimeout(max(1, (int) ($cfg['socket_timeout'] ?? 5)))
             ->setKeepAliveInterval(max(3, (int) ($cfg['keep_alive'] ?? 20)))
-            ->setUseTls((bool) ($cfg['use_tls'] ?? true))
+            ->setUseTls((bool) ($cfg['connect_use_tls'] ?? $cfg['use_tls'] ?? true))
             ->setTlsVerifyPeer((bool) ($cfg['tls_verify_peer'] ?? true))
             ->setTlsVerifyPeerName((bool) ($cfg['tls_verify_peer_name'] ?? true))
             ->setTlsSelfSignedAllowed((bool) ($cfg['tls_allow_self_signed'] ?? false));
 
         $client->connect($settings, true);
-        $log('info', sprintf('MQTT connected: %s:%d (%s)', $cfg['host'], $cfg['port'], $clientId));
+        $log('info', sprintf(
+            'MQTT connected: %s:%d (%s)',
+            (string) ($cfg['connect_host'] ?? $cfg['host']),
+            (int) ($cfg['connect_port'] ?? $cfg['port']),
+            $clientId
+        ));
 
         return $client;
+    }
+
+    private function publishScopedTenantModes(
+        MqttClient $client,
+        array $cfg,
+        array $forcedTenants,
+        int $qos,
+        callable $log
+    ): void {
+        $tenantSlug = $this->nullableString($cfg['tenant_slug'] ?? null);
+        if ($tenantSlug) {
+            $this->publishTenantModes($client, $cfg, [$tenantSlug], $qos, $log);
+
+            return;
+        }
+
+        $this->publishTenantModes($client, $cfg, $forcedTenants, $qos, $log);
     }
 
     private function handleIncomingScan(
@@ -134,6 +262,8 @@ class MqttBridgeService
         $deviceId = trim((string) ($payload['device_id'] ?? ''));
         $cardUid = trim((string) ($payload['card_uid'] ?? ''));
         $mode = trim((string) ($payload['mode'] ?? ''));
+        $eventId = trim((string) ($payload['event_id'] ?? $payload['scan_id'] ?? ''));
+        $scannedAt = trim((string) ($payload['scanned_at'] ?? $payload['timestamp'] ?? ''));
         $tenantSlug = $this->resolveTenantSlugFromMessage($cfg, $topic, $payload, $deviceId);
 
         if ($tenantSlug === '') {
@@ -142,13 +272,40 @@ class MqttBridgeService
             return;
         }
 
-        $result = $this->rfidScanService->processScanByTenantSlug($tenantSlug, $cardUid, $deviceId, $mode);
+        if ($deviceId !== '') {
+            $this->rfidDeviceService->touchDeviceSeen($deviceId, 'mqtt', null, [
+                'last_mqtt_topic' => $topic,
+            ]);
+        }
+
+        $result = $this->rfidIngressService->processScanByTenantSlug(
+            tenantSlug: $tenantSlug,
+            cardUid: $cardUid,
+            deviceId: $deviceId,
+            mode: $mode,
+            source: 'mqtt',
+            eventId: $eventId,
+            scannedAt: $scannedAt,
+            payload: $payload,
+        );
         $responseTopic = $this->renderTopicTemplate(
             (string) ($cfg['response_topic_template'] ?? 'edusmart/{tenant}/rfid/response'),
             $tenantSlug
         );
 
         $responsePayload = $result['data'] ?? [];
+        if (! array_key_exists('event_id', $responsePayload) && $eventId !== '') {
+            $responsePayload['event_id'] = $eventId;
+        }
+        if (! array_key_exists('device_id', $responsePayload) && $deviceId !== '') {
+            $responsePayload['device_id'] = $deviceId;
+        }
+        if (! array_key_exists('card_uid', $responsePayload) && $cardUid !== '') {
+            $responsePayload['card_uid'] = $cardUid;
+        }
+        if (! array_key_exists('tenant_slug', $responsePayload) && $tenantSlug !== '') {
+            $responsePayload['tenant_slug'] = $tenantSlug;
+        }
         $responsePayload['source'] = 'rfid-mqtt-bridge';
         $responsePayload['received_topic'] = $topic;
         $responsePayload['http_status'] = (int) ($result['status'] ?? 500);
@@ -225,6 +382,24 @@ class MqttBridgeService
 
     private function resolveTenantSlugFromMessage(array $cfg, string $topic, array $payload, string $deviceId): string
     {
+        $configTenant = $this->nullableString($cfg['tenant_slug'] ?? null);
+        if ($deviceId !== '') {
+            $registered = $this->rfidDeviceService->resolveRegisteredTenantSlug($deviceId);
+            if ($configTenant !== null) {
+                return $registered === '' || $registered === Str::lower($configTenant)
+                    ? Str::lower($configTenant)
+                    : '';
+            }
+
+            if ($registered !== '') {
+                return $registered;
+            }
+        }
+
+        if ($configTenant !== null) {
+            return Str::lower($configTenant);
+        }
+
         $fromTopic = $this->extractTenantSlugFromTopic($cfg, $topic);
         if ($fromTopic !== '') {
             return $fromTopic;
@@ -270,14 +445,15 @@ class MqttBridgeService
 
     private function scanTopicFilter(array $cfg): string
     {
+        $tenantSlug = $this->nullableString($cfg['tenant_slug'] ?? null);
         $filter = trim((string) ($cfg['scan_topic_filter'] ?? ''));
         if ($filter !== '') {
-            return $filter;
+            return $tenantSlug ? $this->renderTopicTemplate($filter, $tenantSlug) : $filter;
         }
 
         $template = trim((string) ($cfg['scan_topic_template'] ?? 'edusmart/{tenant}/rfid/scan'));
         if (str_contains($template, '{tenant}')) {
-            return str_replace('{tenant}', '+', $template);
+            return $tenantSlug ? $this->renderTopicTemplate($template, $tenantSlug) : str_replace('{tenant}', '+', $template);
         }
 
         return $template;
@@ -322,14 +498,16 @@ class MqttBridgeService
         return $qos;
     }
 
-    private function mqttConfig(): array
+    private function contextKey(array $cfg): string
     {
-        $cfg = config('rfid.mqtt', []);
-        if (! is_array($cfg)) {
-            return [];
-        }
-
-        return $cfg;
+        return implode('|', [
+            $this->nullableString($cfg['tenant_slug'] ?? null) ?: 'global',
+            trim((string) ($cfg['connect_host'] ?? $cfg['host'] ?? '')),
+            (string) ((int) ($cfg['connect_port'] ?? $cfg['port'] ?? 0)),
+            trim((string) (($this->nullableString($cfg['bridge_username'] ?? null) ?? $this->nullableString($cfg['username'] ?? null)) ?? '')),
+            trim((string) ($cfg['scan_topic_template'] ?? '')),
+            trim((string) ($cfg['scan_topic_filter'] ?? '')),
+        ]);
     }
 
     private function nullableString(mixed $value): ?string

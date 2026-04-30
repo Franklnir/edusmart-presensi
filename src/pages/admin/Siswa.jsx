@@ -111,9 +111,9 @@ function initials(name = '?') {
 
 const JK_LABEL = (jk) => {
   if (!jk) return '—'
-  const s = String(jk).toLowerCase()
-  if (['l', 'laki', 'laki-laki', 'male'].includes(s)) return 'Laki-laki'
-  if (['p', 'perempuan', 'female'].includes(s)) return 'Perempuan'
+  const normalized = normalizeGender(jk)
+  if (normalized === 'L') return 'Laki-laki'
+  if (normalized === 'P') return 'Perempuan'
   return jk
 }
 
@@ -196,6 +196,28 @@ const formatPhoneDisplay = (phone) => {
   return phone
 }
 
+const formatDateInputValue = (value) => {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw
+
+  const parsed = new Date(raw)
+  if (Number.isNaN(parsed.getTime())) {
+    return raw.slice(0, 10)
+  }
+
+  return parsed.toISOString().slice(0, 10)
+}
+
+const buildAdditionalInfoForm = (item = null) => ({
+  nama: String(item?.nama || ''),
+  jk: normalizeGender(item?.jk) || '',
+  usia: item?.usia ?? '',
+  tanggal_lahir: formatDateInputValue(item?.tanggal_lahir),
+  agama: String(item?.agama || ''),
+  alamat: String(item?.alamat || '')
+})
+
 const SISWA_ALIAS_MAP = buildAliasMap({
   nama: ['nama', 'name', 'nama siswa', 'nama lengkap', 'full name'],
   nis: ['nis', 'nisn', 'nik', 'nip', 'noinduk', 'no induk', 'nomor induk', 'studentid'],
@@ -277,6 +299,20 @@ const IMPORT_SOURCE_LABEL = {
   file: 'Upload File',
   sheet: 'Google Sheets'
 }
+
+const SISWA_IMPORT_EXAMPLE_COLUMNS = [
+  { key: 'nama', label: 'Nama', cellClassName: 'min-w-[180px] font-medium text-gray-800 whitespace-normal leading-5' },
+  { key: 'nis', label: 'NIS', cellClassName: 'min-w-[92px] whitespace-nowrap' },
+  { key: 'kelas', label: 'Kelas', cellClassName: 'min-w-[112px] whitespace-normal leading-5' },
+  { key: 'jk', label: 'JK', cellClassName: 'min-w-[56px] whitespace-nowrap' },
+  { key: 'tanggal_lahir', label: 'Tanggal Lahir', cellClassName: 'min-w-[120px] whitespace-nowrap' },
+  { key: 'agama', label: 'Agama', cellClassName: 'min-w-[92px] whitespace-nowrap' },
+  { key: 'alamat', label: 'Alamat', cellClassName: 'min-w-[220px] whitespace-normal leading-5' },
+  { key: 'no_hp_siswa', label: 'No HP Siswa', cellClassName: 'min-w-[136px] whitespace-nowrap' },
+  { key: 'no_hp_wali', label: 'No HP Wali', cellClassName: 'min-w-[136px] whitespace-nowrap' }
+]
+
+const SISWA_IMPORT_EXAMPLE_HEADERS = SISWA_IMPORT_EXAMPLE_COLUMNS.map((column) => column.label)
 
 /* ===========================
    UI Components
@@ -529,6 +565,10 @@ export default function ASiswa() {
     no_hp_wali: ''
   })
   const [phoneErrors, setPhoneErrors] = useState({})
+  const [editingAdditionalInfo, setEditingAdditionalInfo] = useState(false)
+  const [savingAdditionalInfo, setSavingAdditionalInfo] = useState(false)
+  const [editAdditionalInfoForm, setEditAdditionalInfoForm] = useState(() => buildAdditionalInfoForm())
+  const [additionalInfoErrors, setAdditionalInfoErrors] = useState({})
 
   // Import / Export
   const [importModalOpen, setImportModalOpen] = useState(false)
@@ -545,6 +585,126 @@ export default function ASiswa() {
   const [importHistoryLoading, setImportHistoryLoading] = useState(false)
   const [importHistoryDetailLoading, setImportHistoryDetailLoading] = useState(false)
   const [importHistoryActionLoading, setImportHistoryActionLoading] = useState(false)
+
+  const availableKelasNames = useMemo(
+    () => kelasList.map((kelas) => getKelasDisplayName(kelas)).filter(Boolean),
+    [kelasList]
+  )
+
+  const importExampleRows = useMemo(() => {
+    const fallbackKelas = ['X IPA 1', 'X IPA 2']
+    const classNames = availableKelasNames.length ? availableKelasNames : fallbackKelas
+    const sampleNames = [
+      'Alya Putri Ramadhani',
+      'Raka Pratama Saputra',
+      'Nabila Azzahra Putri',
+      'Fahri Maulana Akbar',
+      'Siti Nurhaliza',
+      'Dimas Aditya Pratama',
+      'Citra Lestari',
+      'Bagas Permana',
+      'Keysa Maharani',
+      'Rizky Kurniawan'
+    ]
+    const sampleReligions = [
+      'Islam',
+      'Islam',
+      'Islam',
+      'Islam',
+      'Islam',
+      'Islam',
+      'Kristen',
+      'Islam',
+      'Islam',
+      'Katolik'
+    ]
+    const sampleAddresses = [
+      'Jl. Melati 12, Bandung',
+      'Jl. Kenanga 8, Bandung',
+      'Jl. Anggrek 5, Bandung',
+      'Jl. Cempaka 17, Bandung',
+      'Jl. Mawar 10, Bandung',
+      'Jl. Flamboyan 2, Bandung',
+      'Jl. Teratai 9, Bandung',
+      'Jl. Wijaya Kusuma 4, Bandung',
+      'Jl. Dahlia 7, Bandung',
+      'Jl. Bougenville 14, Bandung'
+    ]
+
+    return classNames.map((kelasName, index) => {
+      const sampleName = sampleNames[index] || `Contoh Siswa ${index + 1}`
+      const month = String((index % 12) + 1).padStart(2, '0')
+      const day = String(((index * 3) % 28) + 1).padStart(2, '0')
+      const nis = `2401${String(index + 1).padStart(3, '0')}`
+
+      return {
+        nama: sampleName,
+        nis,
+        kelas: kelasName,
+        jk: index % 2 === 0 ? 'P' : 'L',
+        tanggal_lahir: `2010-${month}-${day}`,
+        agama: sampleReligions[index] || 'Islam',
+        alamat: sampleAddresses[index] || `Jl. Contoh ${index + 1}, Bandung`,
+        no_hp_siswa: `08123${String(4567890 + index).padStart(7, '0')}`,
+        no_hp_wali: `08129${String(8765432 + index).padStart(7, '0')}`
+      }
+    })
+  }, [availableKelasNames])
+
+  const getImportExampleValues = (row) => (
+    SISWA_IMPORT_EXAMPLE_COLUMNS.map(({ key }) => row[key] ?? '')
+  )
+
+  const importExampleCopyText = useMemo(() => {
+    const headerLine = SISWA_IMPORT_EXAMPLE_HEADERS.join('\t')
+    const bodyLines = importExampleRows.map((row) => getImportExampleValues(row).join('\t'))
+
+    return [headerLine, ...bodyLines].join('\n')
+  }, [importExampleRows])
+
+  const importExampleExcelRows = useMemo(() => {
+    return importExampleRows.map((row) => {
+      const item = {}
+      SISWA_IMPORT_EXAMPLE_COLUMNS.forEach(({ key, label }) => {
+        item[label] = row[key] ?? ''
+      })
+      return item
+    })
+  }, [importExampleRows])
+
+  const importMissingKelasErrors = useMemo(
+    () => importErrors.filter((item) => item.type === 'kelas_missing'),
+    [importErrors]
+  )
+
+  const importBlockingErrorMessage = useMemo(() => {
+    if (!importErrors.length) return ''
+
+    if (importMissingKelasErrors.length) {
+      const missingNames = [
+        ...new Set(importMissingKelasErrors.map((item) => item.className).filter(Boolean))
+      ]
+      const suffix = missingNames.length ? ` Kelas yang belum tersedia: ${missingNames.join(', ')}.` : ''
+      return `Maaf, kelas data siswa yang ada di file Excel, CSV, atau Google Sheets belum tersedia di website ini. Silakan buat terlebih dahulu.${suffix}`
+    }
+
+    return 'Masih ada data import yang belum valid. Perbaiki dulu semua error sebelum memulai import.'
+  }, [importErrors, importMissingKelasErrors])
+
+  const importedKelasNames = useMemo(
+    () =>
+      [
+        ...new Set(
+          importRows
+            .map((row) => {
+              const kelas = kelasList.find((item) => item.id === row.kelas)
+              return getKelasDisplayName(kelas) || row.kelas_raw || row.kelas
+            })
+            .filter(Boolean)
+        )
+      ],
+    [importRows, kelasList]
+  )
 
   /* ===== Cleanup channel ===== */
   useEffect(() => {
@@ -757,6 +917,13 @@ export default function ASiswa() {
     return getKelasDisplayName(kelas) || kelasId || '—'
   }
 
+  const canEditAdditionalInfo = Boolean(
+    detailUser?.id && (
+      isAdmin ||
+      (isGuru && detailUser?.kelas && waliKelasIds.includes(detailUser.kelas))
+    )
+  )
+
   // Cek ketua kelas
   const isKetuaKelas = (siswaId) => {
     return Object.values(strukturKelas).some(
@@ -786,6 +953,46 @@ export default function ASiswa() {
       setQKelas(onlyKelas)
     }
   }, [isGuru, kelasOptions, kelasFilterValueSet, qKelas])
+
+  const ensureKelasReadyForImport = () => {
+    if (kelasList.length) return true
+    pushToast('error', 'Anda belum membuat kelas. Buat kelas terlebih dahulu sebelum import data siswa.')
+    return false
+  }
+
+  const copyImportExampleToClipboard = async () => {
+    if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+      pushToast('error', 'Browser ini belum mendukung fitur salin otomatis.')
+      return
+    }
+
+    try {
+      await navigator.clipboard.writeText(importExampleCopyText)
+      pushToast('success', 'Contoh format import berhasil disalin untuk Excel atau Google Sheets.')
+    } catch (error) {
+      pushToast('error', error?.message || 'Gagal menyalin contoh format import.')
+    }
+  }
+
+  const downloadImportTemplateExcel = async () => {
+    try {
+      const stamp = new Date().toISOString().slice(0, 10)
+      const suffix = availableKelasNames.length
+        ? `${availableKelasNames.length}-kelas`
+        : 'template-default'
+      const fileName = `template_import_siswa_${suffix}_${stamp}.xlsx`
+
+      await exportRowsToExcel({
+        rows: importExampleExcelRows,
+        fileName,
+        sheetName: 'Template Import Siswa'
+      })
+
+      pushToast('success', `Template Excel berhasil diunduh: ${fileName}`)
+    } catch (error) {
+      pushToast('error', error?.message || 'Gagal mengunduh template Excel.')
+    }
+  }
 
   const normalizeImportRow = (row, index) => {
     const mapped = mapRowByAliases(row, SISWA_ALIAS_MAP)
@@ -846,7 +1053,9 @@ export default function ASiswa() {
       if (!normalized.kelas) {
         errors.push({
           row: normalized.__rowNum,
-          reason: `Kelas tidak ditemukan: ${normalized.kelas_raw}`
+          reason: `Maaf, kelas "${normalized.kelas_raw}" belum tersedia di website ini. Silakan buat terlebih dahulu.`,
+          type: 'kelas_missing',
+          className: normalized.kelas_raw
         })
         return
       }
@@ -861,6 +1070,7 @@ export default function ASiswa() {
 
   const handleImportFileChange = async (file) => {
     if (!file) return
+    if (!ensureKelasReadyForImport()) return
     setImportFile(file)
     setImportLoading(true)
     try {
@@ -874,6 +1084,7 @@ export default function ASiswa() {
   }
 
   const handleLoadSheet = async () => {
+    if (!ensureKelasReadyForImport()) return
     const csvUrl = buildGoogleSheetCsvUrl(sheetUrl)
     if (!csvUrl) {
       pushToast('error', 'Link Google Sheets tidak valid')
@@ -1120,8 +1331,6 @@ export default function ASiswa() {
     const nama = row.nama
     const emailLower = row.email ? row.email.toLowerCase() : ''
     const hasEmail = isEmailFormat(emailLower)
-    const emailForAuth = hasEmail ? emailLower : `${nis}@import.local`
-    const isPlaceholderEmail = (value) => /@import\.local$/i.test(String(value || '').trim())
     const password = buildDefaultPassword(row.tanggal_lahir, nis)
 
     let { data: existing, error: exError } = await supabase
@@ -1163,11 +1372,8 @@ export default function ASiswa() {
         throw new Error('NIS sudah digunakan untuk role lain')
       }
 
-      const existingEmail = String(existing.email || '').trim().toLowerCase()
       if (hasEmail) {
         payload.email = emailLower
-      } else if (!existingEmail || isPlaceholderEmail(existingEmail)) {
-        payload.email = emailForAuth
       }
 
       const updateKeys = Object.keys(payload).filter((k) => k !== 'updated_at')
@@ -1190,35 +1396,28 @@ export default function ASiswa() {
       }
     }
 
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email: emailForAuth,
+    const { data: provisionData, error: provisionError } = await supabase.admin.provisionUser({
+      nama,
+      email: hasEmail ? emailLower : '',
       password,
-      options: {
-        data: {
-          nama,
-          role: 'siswa'
-        }
-      }
-    })
-
-    if (authError) throw authError
-    const userId = authData?.user?.id
-    if (!userId) throw new Error('User gagal dibuat')
-
-    const createPayload = {
-      ...payload,
       role: 'siswa',
-      email: emailForAuth,
+      nis: row.nis || '',
+      kelas: row.kelas || '',
+      jk: row.jk || '',
+      tanggal_lahir: row.tanggal_lahir || '',
+      usia: Number.isInteger(row.usia) && row.usia >= 0 ? row.usia : null,
+      agama: row.agama || '',
+      alamat: row.alamat || '',
+      telp: row.telp || '',
+      no_hp_siswa: row.no_hp_siswa || '',
+      no_hp_wali: row.no_hp_wali || '',
       status: payload.status || 'active',
       must_change_password: true
-    }
+    })
 
-    const { error: updateError } = await supabase
-      .from('profiles')
-      .update(createPayload)
-      .eq('id', userId)
-
-    if (updateError) throw updateError
+    if (provisionError) throw provisionError
+    const userId = provisionData?.user?.id || provisionData?.profile?.id
+    if (!userId) throw new Error('User gagal dibuat')
 
     return {
       status: 'created',
@@ -1232,8 +1431,24 @@ export default function ASiswa() {
       return
     }
 
-    if (!kelasList.length) {
-      pushToast('error', 'Belum ada data kelas. Buat kelas terlebih dahulu sebelum import siswa.')
+    if (!ensureKelasReadyForImport()) {
+      return
+    }
+
+    if (importErrors.length) {
+      pushToast('error', importBlockingErrorMessage)
+      return
+    }
+
+    const kelasTersedia = importedKelasNames.length
+      ? importedKelasNames.join(', ')
+      : availableKelasNames.join(', ')
+
+    const confirmed = window.confirm(
+      `Apakah Anda yakin ingin masukin data siswa dengan kelas ${kelasTersedia}?`
+    )
+
+    if (!confirmed) {
       return
     }
 
@@ -1745,6 +1960,9 @@ export default function ASiswa() {
       no_hp_wali: u.no_hp_wali || ''
     })
     setEditingPhone(false)
+    setEditAdditionalInfoForm(buildAdditionalInfoForm(u))
+    setEditingAdditionalInfo(false)
+    setAdditionalInfoErrors({})
 
     // Untuk guru/wali: tampilkan detail segera dari data list, tanpa nunggu fetch tambahan.
     setDetailLoading(canManage)
@@ -1770,6 +1988,7 @@ export default function ASiswa() {
           no_hp_siswa: detailProfile.no_hp_siswa || '',
           no_hp_wali: detailProfile.no_hp_wali || ''
         })
+        setEditAdditionalInfoForm(buildAdditionalInfoForm(detailProfile))
         setRfidInput((detailProfile.rfid_uid || '').toUpperCase())
       }
 
@@ -1861,6 +2080,10 @@ export default function ASiswa() {
     setRfidEnrolling(false)
     setEditingPhone(false)
     setPhoneErrors({})
+    setEditingAdditionalInfo(false)
+    setSavingAdditionalInfo(false)
+    setAdditionalInfoErrors({})
+    setEditAdditionalInfoForm(buildAdditionalInfoForm())
     if (rfidChannel) {
       try { supabase.removeChannel(rfidChannel) } catch { }
       setRfidChannel(null)
@@ -2018,6 +2241,90 @@ export default function ASiswa() {
     } catch (error) {
       console.error('Error saving phone numbers:', error)
       pushToast('error', 'Gagal menyimpan nomor HP')
+    }
+  }
+
+  /* ===== Edit Informasi Tambahan ===== */
+  const handleEditAdditionalInfo = () => {
+    setEditAdditionalInfoForm(buildAdditionalInfoForm(detailUser))
+    setAdditionalInfoErrors({})
+    setEditingAdditionalInfo(true)
+  }
+
+  const handleCancelEditAdditionalInfo = () => {
+    setEditAdditionalInfoForm(buildAdditionalInfoForm(detailUser))
+    setAdditionalInfoErrors({})
+    setEditingAdditionalInfo(false)
+  }
+
+  const handleAdditionalInfoChange = (e) => {
+    const { name, value } = e.target
+
+    setEditAdditionalInfoForm((prev) => ({
+      ...prev,
+      [name]: name === 'usia' ? value.replace(/[^\d]/g, '').slice(0, 3) : value
+    }))
+
+    if (additionalInfoErrors[name]) {
+      setAdditionalInfoErrors((prev) => ({ ...prev, [name]: '' }))
+    }
+  }
+
+  const handleSaveAdditionalInfo = async () => {
+    if (!detailUser?.id || !canEditAdditionalInfo) return
+
+    const errors = {}
+    const nextName = String(editAdditionalInfoForm.nama || '').trim()
+    const nextGender = normalizeGender(editAdditionalInfoForm.jk) || ''
+    const nextAgeRaw = String(editAdditionalInfoForm.usia ?? '').trim()
+
+    if (!nextName) {
+      errors.nama = 'Nama siswa wajib diisi'
+    }
+
+    if (nextAgeRaw) {
+      const ageValue = Number(nextAgeRaw)
+      if (!Number.isFinite(ageValue) || ageValue < 10 || ageValue > 30) {
+        errors.usia = 'Usia harus antara 10 sampai 30 tahun'
+      }
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setAdditionalInfoErrors(errors)
+      return
+    }
+
+    setSavingAdditionalInfo(true)
+    try {
+      const payload = {
+        nama: nextName,
+        jk: nextGender || null,
+        usia: nextAgeRaw ? Number(nextAgeRaw) : null,
+        tanggal_lahir: editAdditionalInfoForm.tanggal_lahir || null,
+        agama: String(editAdditionalInfoForm.agama || '').trim() || null,
+        alamat: String(editAdditionalInfoForm.alamat || '').trim() || null
+      }
+
+      const { data, error } = await supabase.students.updateAdditionalInfo(detailUser.id, payload)
+      if (error) throw error
+
+      const updatedProfile = data?.profile || null
+      if (!updatedProfile) {
+        throw new Error('Data siswa terbaru tidak ditemukan.')
+      }
+
+      setDetailUser((prev) => prev ? ({ ...prev, ...updatedProfile }) : updatedProfile)
+      setEditAdditionalInfoForm(buildAdditionalInfoForm(updatedProfile))
+      setEditingAdditionalInfo(false)
+      setAdditionalInfoErrors({})
+
+      await loadSiswaRaw()
+      pushToast('success', 'Informasi tambahan siswa berhasil diperbarui')
+    } catch (error) {
+      console.error('Error saving additional info:', error)
+      pushToast('error', error.message || 'Gagal menyimpan informasi tambahan siswa')
+    } finally {
+      setSavingAdditionalInfo(false)
     }
   }
 
@@ -2455,8 +2762,8 @@ export default function ASiswa() {
         />
 
         {importModalOpen && (
-          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl overflow-hidden">
+          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-start justify-center overflow-y-auto p-4 sm:items-center">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[calc(100vh-2rem)] overflow-hidden flex flex-col">
               <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
                 <div>
                   <h3 className="text-lg font-bold text-gray-900">Import Data Siswa</h3>
@@ -2476,7 +2783,7 @@ export default function ASiswa() {
                 </button>
               </div>
 
-              <div className="p-6 space-y-5">
+              <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-5">
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
@@ -2509,6 +2816,38 @@ export default function ASiswa() {
                     🕘 Riwayat Import
                   </button>
                 </div>
+
+                {importSource !== 'history' && (
+                  <div className={`rounded-xl border p-4 text-sm ${kelasList.length
+                    ? 'bg-indigo-50 border-indigo-200 text-indigo-900'
+                    : 'bg-red-50 border-red-200 text-red-800'
+                    }`}>
+                    <p className="font-semibold mb-1">
+                      {kelasList.length ? 'Konfirmasi kelas yang sudah dibuat' : 'Import ditolak sementara'}
+                    </p>
+                    {kelasList.length ? (
+                      <>
+                        <p className="mb-3">
+                          Apakah Anda yakin ingin masukin data siswa dengan kelas yang sudah kita buat?
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {availableKelasNames.map((kelasName) => (
+                            <span
+                              key={kelasName}
+                              className="inline-flex items-center rounded-full bg-white/80 px-3 py-1 text-xs font-semibold border border-indigo-200"
+                            >
+                              {kelasName}
+                            </span>
+                          ))}
+                        </div>
+                      </>
+                    ) : (
+                      <p>
+                        Anda belom membuat kelas, jadi upload Excel, CSV, atau Google Sheets belum bisa diproses.
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 {importSource === 'history' ? (
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -2663,14 +3002,92 @@ export default function ASiswa() {
                   </div>
                 ) : (
                   <>
+                    <div className="border border-gray-200 rounded-xl overflow-hidden">
+                      <div className="px-4 py-3 border-b border-gray-200 bg-gray-50 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="text-sm font-semibold text-gray-900">
+                            Contoh format {importExampleRows.length} baris
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            Satu baris contoh untuk tiap kelas yang sudah dibuat. Bisa dipakai untuk Excel, CSV, atau langsung dipaste ke Google Sheets.
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={copyImportExampleToClipboard}
+                            className="px-3 py-2 rounded-lg border border-gray-300 text-xs font-semibold text-gray-700 hover:bg-gray-100"
+                          >
+                            Copy Contoh
+                          </button>
+                          <button
+                            type="button"
+                            onClick={downloadImportTemplateExcel}
+                            className="px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700"
+                          >
+                            Download Template Excel
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="max-h-64 overflow-auto">
+                        <table className="w-full min-w-[1080px] text-sm">
+                          <thead className="bg-slate-50">
+                            <tr>
+                              {SISWA_IMPORT_EXAMPLE_COLUMNS.map((column) => (
+                                <th
+                                  key={column.key}
+                                  className="px-4 py-3 text-left font-semibold text-slate-600 border-b border-gray-200 sticky top-0 bg-slate-50"
+                                >
+                                  {column.label}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {importExampleRows.map((row, idx) => (
+                              <tr
+                                key={`${row.nis}-${idx}`}
+                                className={idx % 2 === 0 ? 'border-b border-gray-100 bg-white' : 'border-b border-gray-100 bg-slate-50/50'}
+                              >
+                                {SISWA_IMPORT_EXAMPLE_COLUMNS.map((column) => (
+                                  <td
+                                    key={`${row.nis}-${column.key}`}
+                                    className={`px-4 py-3 align-top text-gray-700 ${column.cellClassName}`}
+                                  >
+                                    {row[column.key] || '—'}
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div className="border-t border-gray-200 bg-gray-50 p-4">
+                        <p className="text-xs font-semibold text-gray-700 mb-2">
+                          Format yang bisa dicopy ke Excel / Google Sheets:
+                        </p>
+                        <textarea
+                          readOnly
+                          value={importExampleCopyText}
+                          className="w-full min-h-[130px] rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 font-mono"
+                          spellCheck={false}
+                        />
+                        <p className="mt-2 text-[11px] text-gray-500">
+                          Template download memakai format Excel (`.xlsx`) supaya header dan kolom terlihat lebih rapi saat dibuka.
+                        </p>
+                      </div>
+                    </div>
+
                     {importSource === 'file' && (
                       <div className="space-y-3">
                         <input
                           type="file"
-                          accept=".xlsx,.xls,.csv"
+                          accept=".xlsx,.csv"
                           onChange={(e) => handleImportFileChange(e.target.files?.[0])}
                           className="block w-full text-sm text-gray-700 file:mr-4 file:rounded-lg file:border-0 file:bg-blue-50 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-blue-700 hover:file:bg-blue-100"
-                          disabled={importLoading}
+                          disabled={importLoading || !kelasList.length}
                         />
                         {importFile && (
                           <p className="text-xs text-gray-500">File terpilih: {importFile.name}</p>
@@ -2686,13 +3103,13 @@ export default function ASiswa() {
                           value={sheetUrl}
                           onChange={(e) => setSheetUrl(e.target.value)}
                           className="w-full rounded-lg border border-gray-200 px-4 py-2 text-sm"
-                          disabled={importLoading}
+                          disabled={importLoading || !kelasList.length}
                         />
                         <button
                           type="button"
                           onClick={handleLoadSheet}
                           className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-60"
-                          disabled={importLoading || !sheetUrl.trim()}
+                          disabled={importLoading || !sheetUrl.trim() || !kelasList.length}
                         >
                           Ambil Data
                         </button>
@@ -2703,11 +3120,17 @@ export default function ASiswa() {
                       <p className="font-semibold mb-1">Catatan penting</p>
                       <ul className="list-disc list-inside space-y-1">
                         <li>Kolom wajib: <b>Nama</b>, <b>NIS</b>, dan <b>Kelas</b>.</li>
-                        <li>Password awal otomatis dari <b>tanggal lahir</b> (contoh 05/08/2010 → 05082010).</li>
+                        <li>Kolom <b>Email</b> opsional, jadi boleh dikosongkan dulu.</li>
+                        <li>Kolom <b>JK</b> bisa diisi <b>L</b>/<b>P</b>, <b>Laki-laki</b>, <b>Laki laki</b>, <b>Perempuan</b>, atau <b>Perumpuan</b>.</li>
+                        <li>Password awal sistem akan diamankan otomatis oleh server.</li>
+                        <li>Untuk <b>login pertama</b>, siswa cukup pakai <b>tanggal lahir polos</b> (contoh 05/08/2010 → <b>05082010</b>).</li>
+                        <li>Kalau <b>tanggal lahir</b> kosong, login pertama memakai <b>NIS</b> sebagai password sementara.</li>
                         <li>Usia akan dihitung otomatis dari tanggal lahir yang valid.</li>
-                        <li>Login awal siswa: pakai <b>NIS</b> dan password tanggal lahir.</li>
-                        <li>Nama kelas dari Excel harus sama dengan kelas yang sudah dibuat (otomatis dicocokkan uppercase).</li>
-                        <li>Setelah login, siswa wajib ganti password. Jika email belum ada, isi email dulu.</li>
+                        <li>Login awal siswa: pakai <b>NIS</b> dan password sementara di atas.</li>
+                        <li>Nama kelas harus mengarah ke kelas yang sudah dibuat di website ini.</li>
+                        <li>Huruf besar dan kecil tidak ngaruh, jadi <b>x ipa 1</b> dan <b>X IPA 1</b> akan dianggap sama.</li>
+                        <li>Upload file Excel yang didukung adalah <b>.xlsx</b>. Kalau file masih <b>.xls</b>, simpan ulang dulu sebagai <b>.xlsx</b> atau <b>.csv</b>.</li>
+                        <li>Setelah login, siswa wajib ganti password. Email bisa dilengkapi nanti kalau memang belum ada.</li>
                       </ul>
                     </div>
 
@@ -2723,6 +3146,9 @@ export default function ASiswa() {
                     {importErrors.length > 0 && (
                       <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
                         <p className="font-semibold mb-2">Contoh error</p>
+                        {importBlockingErrorMessage ? (
+                          <p className="mb-2">{importBlockingErrorMessage}</p>
+                        ) : null}
                         <ul className="list-disc list-inside space-y-1 max-h-28 overflow-auto">
                           {importErrors.slice(0, 5).map((err, idx) => (
                             <li key={`${err.row}-${idx}`}>
@@ -2770,7 +3196,7 @@ export default function ASiswa() {
                   <button
                     type="button"
                     onClick={handleRunImport}
-                    disabled={importLoading || !importRows.length}
+                    disabled={importLoading || !importRows.length || !kelasList.length || importErrors.length > 0}
                     className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-60"
                   >
                     {importLoading ? 'Memproses...' : 'Mulai Import'}
@@ -3599,7 +4025,7 @@ export default function ASiswa() {
                         </h4>
                         {!canManage && (
                           <div className="mb-3 text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
-                            Mode baca saja untuk wali kelas. Perubahan data siswa dinonaktifkan.
+                            Wali kelas hanya bisa mengubah informasi tambahan siswa. Perubahan kelas dan status tetap dinonaktifkan.
                           </div>
                         )}
                         <div className="space-y-3">
@@ -3894,32 +4320,158 @@ export default function ASiswa() {
 
                     {/* Informasi Tambahan */}
                     <div className="bg-white border border-gray-200 rounded-lg p-4">
-                      <h4 className="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                        <span>📋</span>
-                        Informasi Tambahan
-                      </h4>
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                        <div>
-                          <p className="text-sm font-medium text-gray-700">Jenis Kelamin</p>
-                          <p className="text-sm text-gray-900">{JK_LABEL(detailUser?.jk)}</p>
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium text-gray-700">Usia</p>
-                          <p className="text-sm text-gray-900">{detailUser?.usia ? `${detailUser.usia} tahun` : '—'}</p>
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium text-gray-700">Tanggal Lahir</p>
-                          <p className="text-sm text-gray-900">{formatDate(detailUser?.tanggal_lahir)}</p>
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium text-gray-700">Agama</p>
-                          <p className="text-sm text-gray-900">{detailUser?.agama || '—'}</p>
-                        </div>
-                        <div className="md:col-span-2 lg:col-span-1">
-                          <p className="text-sm font-medium text-gray-700">Alamat</p>
-                          <p className="text-sm text-gray-900">{detailUser?.alamat || '—'}</p>
-                        </div>
+                      <div className="flex items-center justify-between gap-3 mb-4">
+                        <h4 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+                          <span>📋</span>
+                          Informasi Tambahan
+                        </h4>
+                        {canEditAdditionalInfo && !editingAdditionalInfo && (
+                          <Button variant="primary" size="sm" onClick={handleEditAdditionalInfo}>
+                            ✏️ Edit
+                          </Button>
+                        )}
                       </div>
+
+                      {editingAdditionalInfo ? (
+                        <div className="space-y-4">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="md:col-span-2">
+                              <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Nama Siswa
+                              </label>
+                              <input
+                                type="text"
+                                name="nama"
+                                value={editAdditionalInfoForm.nama}
+                                onChange={handleAdditionalInfoChange}
+                                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 ${additionalInfoErrors.nama ? 'border-red-300 bg-red-50' : 'border-gray-300'}`}
+                                placeholder="Masukkan nama siswa"
+                                maxLength={120}
+                              />
+                              {additionalInfoErrors.nama && (
+                                <p className="mt-1 text-xs text-red-600">{additionalInfoErrors.nama}</p>
+                              )}
+                            </div>
+
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Jenis Kelamin
+                              </label>
+                              <select
+                                name="jk"
+                                value={editAdditionalInfoForm.jk}
+                                onChange={handleAdditionalInfoChange}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-white"
+                              >
+                                <option value="">Pilih jenis kelamin</option>
+                                <option value="L">Laki-laki</option>
+                                <option value="P">Perempuan</option>
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Usia
+                              </label>
+                              <input
+                                type="number"
+                                min="10"
+                                max="30"
+                                name="usia"
+                                value={editAdditionalInfoForm.usia}
+                                onChange={handleAdditionalInfoChange}
+                                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 ${additionalInfoErrors.usia ? 'border-red-300 bg-red-50' : 'border-gray-300'}`}
+                                placeholder="Contoh: 16"
+                              />
+                              {additionalInfoErrors.usia ? (
+                                <p className="mt-1 text-xs text-red-600">{additionalInfoErrors.usia}</p>
+                              ) : (
+                                <p className="mt-1 text-xs text-gray-500">
+                                  Jika tanggal lahir diisi, usia akan disesuaikan otomatis.
+                                </p>
+                              )}
+                            </div>
+
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Tanggal Lahir
+                              </label>
+                              <input
+                                type="date"
+                                name="tanggal_lahir"
+                                value={editAdditionalInfoForm.tanggal_lahir}
+                                onChange={handleAdditionalInfoChange}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Agama
+                              </label>
+                              <input
+                                type="text"
+                                name="agama"
+                                value={editAdditionalInfoForm.agama}
+                                onChange={handleAdditionalInfoChange}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                                placeholder="Contoh: Islam"
+                                maxLength={50}
+                              />
+                            </div>
+
+                            <div className="md:col-span-2">
+                              <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Alamat
+                              </label>
+                              <textarea
+                                name="alamat"
+                                value={editAdditionalInfoForm.alamat}
+                                onChange={handleAdditionalInfoChange}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 min-h-[96px] resize-y"
+                                placeholder="Masukkan alamat siswa"
+                                maxLength={1000}
+                              />
+                            </div>
+                          </div>
+
+                          <div className="flex justify-end space-x-3">
+                            <Button variant="secondary" size="sm" onClick={handleCancelEditAdditionalInfo}>
+                              ✕ Batal
+                            </Button>
+                            <Button variant="success" size="sm" onClick={handleSaveAdditionalInfo} loading={savingAdditionalInfo}>
+                              💾 Simpan
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                          <div>
+                            <p className="text-sm font-medium text-gray-700">Nama Siswa</p>
+                            <p className="text-sm text-gray-900">{detailUser?.nama || '—'}</p>
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium text-gray-700">Jenis Kelamin</p>
+                            <p className="text-sm text-gray-900">{JK_LABEL(detailUser?.jk)}</p>
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium text-gray-700">Usia</p>
+                            <p className="text-sm text-gray-900">{detailUser?.usia ? `${detailUser.usia} tahun` : '—'}</p>
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium text-gray-700">Tanggal Lahir</p>
+                            <p className="text-sm text-gray-900">{formatDate(detailUser?.tanggal_lahir)}</p>
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium text-gray-700">Agama</p>
+                            <p className="text-sm text-gray-900">{detailUser?.agama || '—'}</p>
+                          </div>
+                          <div className="md:col-span-2 lg:col-span-3">
+                            <p className="text-sm font-medium text-gray-700">Alamat</p>
+                            <p className="text-sm text-gray-900">{detailUser?.alamat || '—'}</p>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </>
                 )}

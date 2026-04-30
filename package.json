@@ -29,7 +29,6 @@
     "react-router-dom": "^6.30.3",
     "react-to-print": "^3.2.0",
     "swiper": "^12.1.2",
-    "uuid": "^9.0.1",
     "zustand": "^4.5.7"
   },
   "devDependencies": {

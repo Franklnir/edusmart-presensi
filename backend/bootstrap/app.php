@@ -13,9 +13,19 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        $trustedProxies = (string) env('TRUSTED_PROXIES', '*');
-        if ($trustedProxies !== '*') {
+        $trustedProxies = trim((string) env('TRUSTED_PROXIES', ''));
+        $isProduction = strtolower(trim((string) env('APP_ENV', 'production'))) === 'production';
+        if (($trustedProxies === '' || $trustedProxies === '*') && $isProduction) {
+            $trustedProxies = [
+                '127.0.0.1/32',
+                '10.0.0.0/8',
+                '172.16.0.0/12',
+                '192.168.0.0/16',
+            ];
+        } elseif ($trustedProxies !== '*' && $trustedProxies !== '') {
             $trustedProxies = array_values(array_filter(array_map('trim', explode(',', $trustedProxies))));
+        } else {
+            $trustedProxies = '*';
         }
 
         $middleware->redirectGuestsTo(function (Request $request) {

@@ -7,7 +7,9 @@ use App\Models\User;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rules\Password as PasswordRule;
 
 require __DIR__.'/../vendor/autoload.php';
 
@@ -35,7 +37,17 @@ if ($email === '') {
 }
 
 if ($password === '') {
-    $password = 'Admin@12345';
+    fail('Password wajib diisi dan harus memenuhi kebijakan password production.');
+}
+
+$validator = Validator::make([
+    'password' => $password,
+], [
+    'password' => ['required', 'string', PasswordRule::defaults()],
+]);
+
+if ($validator->fails()) {
+    fail($validator->errors()->first());
 }
 
 $tenant = DB::table('tenants')
