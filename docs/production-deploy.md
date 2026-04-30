@@ -182,13 +182,13 @@ Pastikan env ini terisi:
 - `RFID_MQTT_BRIDGE_ENABLED=true`
 - `RFID_MOSQUITTO_PUBLIC_HOST=mqtt.edusmart.example.com`
 - `RFID_MOSQUITTO_BRIDGE_PASSWORD=<password-panjang-random>`
-- `RFID_MQTT_HOST=mosquitto`
-- `RFID_MQTT_PORT=1883`
-- `RFID_MQTT_USERNAME=edusmart_bridge`
-- `RFID_MQTT_PASSWORD=<sama-dengan-RFID_MOSQUITTO_BRIDGE_PASSWORD>`
+- `RFID_MQTT_HOST=` dikosongkan agar global fallback tidak dipakai lintas sekolah.
 - `RFID_MQTT_SCAN_TOPIC_TEMPLATE=edusmart/{tenant}/rfid/scan`
 - `RFID_MQTT_RESPONSE_TOPIC_TEMPLATE=edusmart/{tenant}/rfid/response`
 - `RFID_MQTT_MODE_TOPIC_TEMPLATE=edusmart/{tenant}/rfid/mode`
+
+Setelah service aktif, buka Super Admin > Detail Sekolah > `Pakai Mosquitto`
+untuk membuat username/password dan ACL topic khusus sekolah tersebut.
 
 Jalankan/refresh service bridge:
 

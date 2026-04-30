@@ -3918,13 +3918,28 @@ class SuperAdminController extends ApiController
         $scanTopicTemplate = trim((string) ($mqttConfig['scan_topic_template'] ?? 'edusmart/{tenant}/rfid/scan'));
         $responseTopicTemplate = trim((string) ($mqttConfig['response_topic_template'] ?? 'edusmart/{tenant}/rfid/response'));
         $modeTopicTemplate = trim((string) ($mqttConfig['mode_topic_template'] ?? 'edusmart/{tenant}/rfid/mode'));
-        $mqttAvailable = (bool) ($mqttConfig['available'] ?? false);
+        $mqttHost = trim((string) ($mqttConfig['host'] ?? ''));
+        $mqttUsername = trim((string) ($mqttConfig['username'] ?? ''));
+        $mqttPassword = trim((string) ($mqttConfig['password'] ?? ''));
+        $isTenantScopedMqtt = (string) ($mqttConfig['source'] ?? '') === 'tenant';
+        $mqttAvailable = (bool) ($mqttConfig['available'] ?? false)
+            && $isTenantScopedMqtt
+            && $mqttHost !== ''
+            && $mqttUsername !== ''
+            && $mqttPassword !== '';
+
+        $unavailableMessage = 'Konfigurasi MQTT RFID sekolah belum aktif/lengkap';
+        if (! $isTenantScopedMqtt) {
+            $unavailableMessage = 'Klik Pakai Mosquitto agar sekolah ini punya credential dan topic MQTT sendiri.';
+        } elseif ($mqttUsername === '' || $mqttPassword === '') {
+            $unavailableMessage = 'Credential MQTT sekolah belum lengkap. Jalankan Pakai Mosquitto atau rotasi password.';
+        }
 
         return [
             'available' => $mqttAvailable,
             'message' => $mqttAvailable
                 ? null
-                : 'Konfigurasi MQTT RFID sekolah belum aktif/lengkap',
+                : $unavailableMessage,
             'tenant_id' => $tenantId,
             'tenant_slug' => $tenantSlug,
             'device_id' => (string) ($template['device_id'] ?? ''),
@@ -3933,11 +3948,14 @@ class SuperAdminController extends ApiController
             'firmware_version' => '2.0.0-mqtt-only',
             'api_base_url' => rtrim((string) config('app.url', ''), '/'),
             'mqtt' => [
-                'host' => trim((string) ($mqttConfig['host'] ?? '')),
+                'host' => $mqttHost,
                 'port' => (int) ($mqttConfig['port'] ?? 8883),
-                'username' => trim((string) ($mqttConfig['username'] ?? '')),
-                'password' => trim((string) ($mqttConfig['password'] ?? '')),
+                'username' => $mqttUsername,
+                'password' => $mqttPassword,
                 'use_tls' => (bool) ($mqttConfig['use_tls'] ?? true),
+                'tls_verify_peer' => (bool) ($mqttConfig['tls_verify_peer'] ?? true),
+                'tls_verify_peer_name' => (bool) ($mqttConfig['tls_verify_peer_name'] ?? true),
+                'tls_allow_self_signed' => (bool) ($mqttConfig['tls_allow_self_signed'] ?? false),
                 'config_source' => (string) ($mqttConfig['source'] ?? 'global'),
                 'provider' => (string) ($mqttConfig['provider'] ?? 'custom'),
                 'managed_by_platform' => (bool) ($mqttConfig['managed_by_platform'] ?? false),

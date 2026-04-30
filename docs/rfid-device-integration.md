@@ -371,4 +371,4 @@ Sketch ESP8266/Arduino yang siap dipakai sebagai baseline sudah disediakan. Yang
 - baca mode dari topic retained
 
 File sketch MQTT-only yang siap dipakai ada di:
-- `docs/esp8266-rfid-hivemq-tenant.ino`
+- `docs/esp8266-rfid-mosquitto-tenant.ino`

@@ -121,9 +121,15 @@ class TenantMqttConfigService
         $tenantSlug = $this->normalizeTenantSlug($tenantSlug);
         $existing = $this->findRowByTenantId($tenantId);
         $existingPasswordSet = trim((string) ($existing->password_ciphertext ?? '')) !== '';
+        $existingProvider = $this->normalizeProvider($existing->provider ?? 'custom');
+        $existingManagedByPlatform = (bool) ($existing->managed_by_platform ?? false);
+        $reuseExistingPlatformCredential = $existing
+            && $existingProvider === 'mosquitto'
+            && $existingManagedByPlatform
+            && ! $rotatePassword;
         $topicPrefix = $this->normalizeTopicPrefix((string) ($mosquitto['topic_prefix'] ?? 'edusmart'));
-        $username = trim((string) ($existing->username ?? ''));
-        if ($username === '' || $rotatePassword) {
+        $username = $reuseExistingPlatformCredential ? trim((string) ($existing->username ?? '')) : '';
+        if ($username === '') {
             $username = $this->buildMosquittoTenantUsername($tenantSlug);
         }
 
@@ -151,7 +157,7 @@ class TenantMqttConfigService
             'keep_alive' => 20,
         ];
 
-        if ($rotatePassword || ! $existingPasswordSet) {
+        if ($rotatePassword || ! $existingPasswordSet || ! $reuseExistingPlatformCredential) {
             $payload['password'] = $this->generateMosquittoPassword();
         }
 

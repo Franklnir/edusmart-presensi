@@ -1,5 +1,5 @@
 /*
-  ESP8266 + PN532 + MQTT-only RFID
+  ESP8266 + PN532 + Mosquitto MQTT-only RFID
 
   Device dibuat ringan:
   - ESP8266 hanya membaca kartu dan publish event scan ke MQTT.
@@ -37,14 +37,15 @@ const char* TENANT_SLUG = "sman1jombang";
 const char* DEVICE_ID = "gerbang-utara-01";
 const char* FIRMWARE_VERSION = "2.0.0-mqtt-only";
 
-/* ================== KONFIGURASI MQTT ================== */
+/* ================== KONFIGURASI MOSQUITTO MQTT ================== */
 const char* MQTT_HOST = "mqtt.edusmart.example.com";
 const uint16_t MQTT_PORT = 8883;
 const char* MQTT_USER = "edusmart_sman1jombang_rfid";
 const char* MQTT_PASS = "YOUR_MOSQUITTO_PASSWORD";
 const bool MQTT_USE_TLS = true;
 
-// Untuk produksi yang lebih ketat, ganti setInsecure() dengan CA certificate broker Mosquitto.
+// Default platform memakai Mosquitto. Jika broker sudah memakai certificate public CA,
+// ubah nilai ini ke false lewat generator agar ESP8266 memverifikasi TLS.
 const bool MQTT_TLS_INSECURE = true;
 
 const char* MQTT_TOPIC_SCAN = "edusmart/sman1jombang/rfid/scan";

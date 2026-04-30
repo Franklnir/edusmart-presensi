@@ -5,7 +5,7 @@ import { useUIStore } from '../../store/useUIStore'
 import { formatDateTime } from '../../lib/time'
 import PasswordInput from '../../components/PasswordInput'
 import { loadExcelJsBrowser } from '../../utils/excelBrowser'
-import rfidArduinoTemplateSource from '../../../docs/esp8266-rfid-hivemq-tenant.ino?raw'
+import rfidArduinoTemplateSource from '../../../docs/esp8266-rfid-mosquitto-tenant.ino?raw'
 
 const slugify = (value = '') =>
   value
@@ -141,6 +141,7 @@ const replaceBoolConst = (source, name, value) =>
 
 const buildTenantRfidArduinoCode = (template) => {
   if (!template?.available) return ''
+  if (!template?.mqtt?.host || !template?.mqtt?.username || !template?.mqtt?.password) return ''
 
   let source = rfidArduinoTemplateSource
   source = replaceCStringConst(source, 'TENANT_SLUG', template?.tenant_slug || '')
@@ -151,6 +152,7 @@ const buildTenantRfidArduinoCode = (template) => {
   source = replaceCStringConst(source, 'MQTT_USER', template?.mqtt?.username || '')
   source = replaceCStringConst(source, 'MQTT_PASS', template?.mqtt?.password || '')
   source = replaceBoolConst(source, 'MQTT_USE_TLS', template?.mqtt?.use_tls !== false)
+  source = replaceBoolConst(source, 'MQTT_TLS_INSECURE', Boolean(template?.mqtt?.tls_allow_self_signed))
   source = replaceCStringConst(source, 'MQTT_TOPIC_SCAN', template?.topics?.scan || '')
   source = replaceCStringConst(source, 'MQTT_TOPIC_RESPONSE', template?.topics?.response || '')
   source = replaceCStringConst(source, 'MQTT_TOPIC_MODE', template?.topics?.mode || '')
