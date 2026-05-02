@@ -100,6 +100,12 @@ const dnsStatusBadgeClass = (status) => {
   return 'bg-slate-100 text-slate-600'
 }
 
+const driveStatusBadgeClass = (drive = {}) => {
+  if (drive?.ready) return 'bg-emerald-100 text-emerald-700'
+  if (drive?.status === 'needs_attention') return 'bg-amber-100 text-amber-700'
+  return 'bg-slate-100 text-slate-600'
+}
+
 const formatDnsRecords = (records = []) => {
   if (!Array.isArray(records) || records.length === 0) return 'Belum ada record'
 
@@ -1256,6 +1262,7 @@ const Tenants = () => {
   const detailAdmins = Array.isArray(tenantDetail?.admins) ? tenantDetail.admins : []
   const detailDomains = Array.isArray(tenantDetail?.domains) ? tenantDetail.domains : []
   const detailStorage = tenantDetail?.storage || {}
+  const detailGoogleDrive = tenantDetail?.google_drive || {}
   const storageBuckets = Array.isArray(detailStorage?.buckets) ? detailStorage.buckets : []
   const detailRfidNotes = Array.isArray(detailRfidTemplate?.notes) ? detailRfidTemplate.notes : []
   const primaryAdminUserId = String(detailTenant?.primary_admin_user_id || '')
@@ -1702,6 +1709,7 @@ const Tenants = () => {
                   <th className="py-2 pr-4">Sekolah</th>
                   <th className="py-2 pr-4">Subdomain</th>
                   <th className="py-2 pr-4">Status</th>
+                  <th className="py-2 pr-4">Google Drive</th>
                   <th className="py-2 pr-4">Dibuat</th>
                   <th className="py-2 pr-4">Aksi</th>
                 </tr>
@@ -1727,6 +1735,16 @@ const Tenants = () => {
                       >
                         {tenant.status || 'unknown'}
                       </span>
+                    </td>
+                    <td className="py-2 pr-4">
+                      <div className="flex flex-col gap-1">
+                        <span className={`w-fit text-xs px-2 py-0.5 rounded-full ${driveStatusBadgeClass(tenant.google_drive)}`}>
+                          {tenant.google_drive?.ready ? 'Siap' : tenant.google_drive?.status_label || 'Belum'}
+                        </span>
+                        <span className="text-[11px] text-slate-500">
+                          {tenant.google_drive?.quota?.used_label || '0 B'}
+                        </span>
+                      </div>
                     </td>
                     <td className="py-2 pr-4 text-slate-500">{formatDateTime(tenant.created_at)}</td>
                     <td className="py-2 pr-4">
@@ -2441,6 +2459,63 @@ const Tenants = () => {
                     </form>
                   </div>
                 </div>
+              </div>
+
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50/40 p-4 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-semibold text-slate-900">Google Drive Sekolah</h3>
+                  <span className={`text-xs px-2 py-1 rounded-full ${driveStatusBadgeClass(detailGoogleDrive)}`}>
+                    {detailGoogleDrive?.status_label || 'Belum tersambung'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div className="rounded-xl border border-emerald-200 bg-white p-3">
+                    <p className="text-xs text-slate-500">Status</p>
+                    <p className="text-sm font-bold text-slate-900 mt-1">
+                      {detailGoogleDrive?.ready ? 'Siap dipakai' : detailGoogleDrive?.status_label || '-'}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-emerald-200 bg-white p-3">
+                    <p className="text-xs text-slate-500">Storage Saat Ini</p>
+                    <p className="text-lg font-bold text-slate-900 mt-1">
+                      {detailGoogleDrive?.quota?.used_label || '0 B'}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-emerald-200 bg-white p-3">
+                    <p className="text-xs text-slate-500">Upload Hari Ini</p>
+                    <p className="text-lg font-bold text-slate-900 mt-1">
+                      {detailGoogleDrive?.today?.uploaded_label || '0 B'}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-emerald-200 bg-white p-3">
+                    <p className="text-xs text-slate-500">File EduSmart</p>
+                    <p className="text-lg font-bold text-slate-900 mt-1">
+                      {numberFormatter.format(toNumber(detailGoogleDrive?.app_storage?.files))}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 text-xs">
+                  <div className="rounded-xl border border-emerald-200 bg-white p-3 lg:col-span-2">
+                    <p className="font-semibold text-slate-500">Akun</p>
+                    <p className="mt-1 break-all text-sm font-semibold text-slate-900">
+                      {detailGoogleDrive?.account_email || '-'}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-emerald-200 bg-white p-3">
+                    <p className="font-semibold text-slate-500">Limit</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-900">
+                      {detailGoogleDrive?.quota?.limit_label || 'Tidak terbatas'}
+                    </p>
+                  </div>
+                </div>
+
+                {detailGoogleDrive?.last_error && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                    {detailGoogleDrive.last_error}
+                  </div>
+                )}
               </div>
 
               <div className="rounded-2xl border border-cyan-200 bg-cyan-50/50 p-4 space-y-4">

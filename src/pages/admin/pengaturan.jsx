@@ -15,6 +15,31 @@ const LOGO_FILE_PATH = 'logo_sekolah.png'
 // Kalau banyak halaman publik menampilkan logo, pertimbangkan expiry lebih panjang (mis. 1-7 hari).
 const SIGNED_URL_EXPIRES_IN = 60 * 60 * 24 * 7 // 7 hari
 
+const formatBytesLabel = (bytes) => {
+  const value = Number(bytes || 0)
+  if (!Number.isFinite(value) || value <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let size = value
+  let idx = 0
+  while (size >= 1024 && idx < units.length - 1) {
+    size /= 1024
+    idx += 1
+  }
+  const precision = idx === 0 ? 0 : 2
+  return `${Number(size.toFixed(precision)).toLocaleString('id-ID')} ${units[idx]}`
+}
+
+const DRIVE_STATUS_DEFAULT = {
+  provider_configured: false,
+  configured: false,
+  ready: false,
+  status: 'disconnected',
+  status_label: 'Belum tersambung',
+  quota: { used_label: '0 B', limit_label: 'Tidak terbatas', percent: null },
+  today: { uploaded_label: '0 B', files: 0 },
+  app_storage: { uploaded_label: '0 B', files: 0 }
+}
+
 const RANKING_TIE_BREAK_KEYS = ['nilai_akhir', 'mapel_inti', 'absensi', 'nama']
 const RANKING_TIE_BREAK_OPTIONS = [
   { value: 'nilai_akhir', label: 'Nilai Akhir Berbobot' },
@@ -377,6 +402,11 @@ export default function APengaturan() {
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
   const [linkingGoogle, setLinkingGoogle] = useState(false)
   const [unlinkingGoogle, setUnlinkingGoogle] = useState(false)
+  const [driveStatus, setDriveStatus] = useState(DRIVE_STATUS_DEFAULT)
+  const [driveLoading, setDriveLoading] = useState(false)
+  const [driveConnecting, setDriveConnecting] = useState(false)
+  const [driveSyncing, setDriveSyncing] = useState(false)
+  const [driveDisconnecting, setDriveDisconnecting] = useState(false)
   const [selectedLogoFile, setSelectedLogoFile] = useState(null)
   const [settingsId, setSettingsId] = useState(null)
   const [mapelOptions, setMapelOptions] = useState([])
@@ -406,11 +436,17 @@ export default function APengaturan() {
 
     const url = new URL(window.location.href)
     const googleError = String(url.searchParams.get('google_error') || '').trim()
-    if (!googleError) return
+    const driveState = String(url.searchParams.get('drive') || '').trim()
+    const driveError = String(url.searchParams.get('drive_error') || '').trim()
+    if (!googleError && !driveState && !driveError) return
 
-    pushToast('error', googleError)
+    if (googleError) pushToast('error', googleError)
+    if (driveState === 'connected') pushToast('success', 'Google Drive sekolah berhasil tersambung.')
+    if (driveState === 'failed') pushToast('error', driveError || 'Gagal menyambungkan Google Drive sekolah.')
     url.searchParams.delete('google')
     url.searchParams.delete('google_error')
+    url.searchParams.delete('drive')
+    url.searchParams.delete('drive_error')
     window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`)
   }, [pushToast])
 
@@ -649,6 +685,36 @@ export default function APengaturan() {
       isCancelled = true
     }
   }, [isAuthorized])
+
+  useEffect(() => {
+    if (!isAuthorized) return
+
+    let isCancelled = false
+
+    async function loadDriveStatus() {
+      setDriveLoading(true)
+      try {
+        const { data, error } = await supabase.admin.googleDrive()
+        if (error) throw error
+        if (!isCancelled) {
+          setDriveStatus(data || DRIVE_STATUS_DEFAULT)
+        }
+      } catch (error) {
+        if (!isCancelled) {
+          setDriveStatus(DRIVE_STATUS_DEFAULT)
+          pushToast('error', error?.message || 'Gagal memuat status Google Drive sekolah')
+        }
+      } finally {
+        if (!isCancelled) setDriveLoading(false)
+      }
+    }
+
+    loadDriveStatus()
+
+    return () => {
+      isCancelled = true
+    }
+  }, [isAuthorized, pushToast])
 
   useEffect(() => {
     if (!settingsId || !isAuthorized) return
@@ -1166,6 +1232,58 @@ export default function APengaturan() {
     }
   }
 
+  async function handleConnectGoogleDrive() {
+    setDriveConnecting(true)
+    try {
+      const returnUrl =
+        typeof window !== 'undefined'
+          ? `${window.location.origin}${window.location.pathname}`
+          : '/admin/pengaturan'
+      const { data, error } = await supabase.admin.googleDriveConnectUrl({ return_url: returnUrl })
+      if (error) throw error
+      if (!data?.authorization_url) throw new Error('URL otorisasi Google Drive tidak tersedia')
+      if (typeof window !== 'undefined') {
+        window.location.assign(data.authorization_url)
+      }
+    } catch (error) {
+      pushToast('error', error?.message || 'Gagal menyiapkan sambungan Google Drive')
+      setDriveConnecting(false)
+    }
+  }
+
+  async function handleSyncGoogleDrive() {
+    setDriveSyncing(true)
+    try {
+      const { data, error } = await supabase.admin.syncGoogleDrive()
+      if (error) throw error
+      setDriveStatus(data || DRIVE_STATUS_DEFAULT)
+      pushToast('success', 'Status Google Drive sekolah berhasil dicek.')
+    } catch (error) {
+      pushToast('error', error?.message || 'Gagal mengecek Google Drive sekolah')
+    } finally {
+      setDriveSyncing(false)
+    }
+  }
+
+  async function handleDisconnectGoogleDrive() {
+    const confirmed = window.confirm(
+      'Putuskan Google Drive sekolah? Upload dokumen berikutnya akan kembali ke storage lokal sampai disambungkan lagi.'
+    )
+    if (!confirmed) return
+
+    setDriveDisconnecting(true)
+    try {
+      const { data, error } = await supabase.admin.disconnectGoogleDrive()
+      if (error) throw error
+      setDriveStatus(data || DRIVE_STATUS_DEFAULT)
+      pushToast('success', 'Google Drive sekolah berhasil diputuskan.')
+    } catch (error) {
+      pushToast('error', error?.message || 'Gagal memutuskan Google Drive sekolah')
+    } finally {
+      setDriveDisconnecting(false)
+    }
+  }
+
   // ✅ Fallback PATH: localStorage -> profile -> state
   const localStorageAvatarPath =
     typeof window !== 'undefined' && user?.id
@@ -1222,15 +1340,26 @@ export default function APengaturan() {
     !Number.isNaN(freezeStartDate.getTime()) &&
     !Number.isNaN(freezeEndDate.getTime()) &&
     freezeStartDate > freezeEndDate
+  const driveReady = Boolean(driveStatus?.ready)
+  const driveProviderConfigured = driveStatus?.provider_configured !== false
+  const driveQuotaPercent = Number(driveStatus?.quota?.percent)
+  const driveQuotaPercentLabel = Number.isFinite(driveQuotaPercent)
+    ? `${driveQuotaPercent.toLocaleString('id-ID')}%`
+    : '-'
+  const driveStatusBadgeClass = driveReady
+    ? 'bg-emerald-100 text-emerald-700'
+    : driveStatus?.status === 'needs_attention'
+      ? 'bg-amber-100 text-amber-700'
+      : 'bg-slate-200 text-slate-700'
 
   return (
-    <div className="min-h-screen bg-gray-50 p-0">
-      <div className="w-full mx-auto">
-        <div className="sticky top-14 md:top-0 z-30 bg-white/95 backdrop-blur shadow-lg p-6 border-b border-gray-200">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+    <div className="min-h-screen bg-gray-50">
+      <div className="w-full space-y-8 px-4 sm:px-6 lg:px-8 pt-2 pb-8">
+        <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
+          <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
             <div className="flex items-center space-x-4">
-              <div className="p-3 bg-blue-600 rounded-xl">
-                <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className="p-3 bg-blue-100 rounded-2xl">
+                <svg className="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                 </svg>
@@ -1245,7 +1374,7 @@ export default function APengaturan() {
           </div>
         </div>
 
-        <div className="p-4 md:p-6">
+        <div className="space-y-6">
           {loading && (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 backdrop-blur-sm">
               <div className="bg-white rounded-2xl p-6 flex items-center space-x-3 shadow-2xl">
@@ -1255,7 +1384,49 @@ export default function APengaturan() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div id="google-drive-sekolah" className="rounded-2xl border border-blue-200 bg-white p-6 shadow-lg">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">Storage Sekolah</p>
+                <h2 className="mt-1 text-xl font-bold text-gray-900">Google Drive Sekolah</h2>
+                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-600">
+                  <span>Storage: <strong className="text-slate-900">{driveStatus?.quota?.used_label || formatBytesLabel(driveStatus?.quota?.used_bytes)}</strong></span>
+                  <span>Upload hari ini: <strong className="text-slate-900">{driveStatus?.today?.uploaded_label || '0 B'}</strong></span>
+                  <span>File hari ini: <strong className="text-slate-900">{Number(driveStatus?.today?.files || 0).toLocaleString('id-ID')}</strong></span>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <span className={`inline-flex w-fit rounded-full px-3 py-1 text-xs font-semibold ${driveStatusBadgeClass}`}>
+                  {driveLoading ? 'Memuat...' : driveStatus?.status_label || 'Belum tersambung'}
+                </span>
+                <button
+                  type="button"
+                  onClick={handleConnectGoogleDrive}
+                  disabled={!driveProviderConfigured || driveConnecting || driveSyncing}
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {driveConnecting ? 'Menyambungkan...' : driveReady ? 'Sambungkan Ulang' : 'Sambungkan Google Drive'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSyncGoogleDrive}
+                  disabled={!driveProviderConfigured || driveSyncing || driveConnecting}
+                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {driveSyncing ? 'Mengecek...' : 'Cek Kesiapan'}
+                </button>
+              </div>
+            </div>
+
+            {!driveProviderConfigured && (
+              <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                Google Drive belum aktif di server. Lengkapi GOOGLE_DRIVE_CLIENT_ID, GOOGLE_DRIVE_CLIENT_SECRET, dan GOOGLE_DRIVE_REDIRECT_URI.
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 space-y-6">
               {/* ====== Identitas Sekolah ====== */}
               <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
@@ -1499,6 +1670,118 @@ export default function APengaturan() {
                       </div>
                     </div>
                   )}
+                </div>
+              </div>
+
+              {/* ====== Google Drive Sekolah ====== */}
+              <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
+                <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <h2 className="text-xl font-bold text-gray-900 flex items-center space-x-2">
+                    <span>☁️</span>
+                    <span>Google Drive Sekolah</span>
+                  </h2>
+                  <span className={`inline-flex w-fit rounded-full px-3 py-1 text-xs font-semibold ${driveStatusBadgeClass}`}>
+                    {driveLoading ? 'Memuat...' : driveStatus?.status_label || 'Belum tersambung'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-xs font-semibold text-slate-500">Storage Saat Ini</p>
+                    <p className="mt-1 text-xl font-bold text-slate-900">
+                      {driveStatus?.quota?.used_label || formatBytesLabel(driveStatus?.quota?.used_bytes)}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Limit: {driveStatus?.quota?.limit_label || 'Tidak terbatas'}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-xs font-semibold text-slate-500">Upload Hari Ini</p>
+                    <p className="mt-1 text-xl font-bold text-slate-900">
+                      {driveStatus?.today?.uploaded_label || '0 B'}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {Number(driveStatus?.today?.files || 0).toLocaleString('id-ID')} file
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-xs font-semibold text-slate-500">Pemakaian Quota</p>
+                    <p className="mt-1 text-xl font-bold text-slate-900">{driveQuotaPercentLabel}</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Total EduSmart: {driveStatus?.app_storage?.uploaded_label || '0 B'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <p className="text-xs font-semibold text-slate-500">Akun Drive</p>
+                      <p className="mt-1 font-semibold text-slate-900 break-all">
+                        {driveStatus?.account_email || '-'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-slate-500">Folder Sekolah</p>
+                      {driveStatus?.folder_url ? (
+                        <a
+                          href={driveStatus.folder_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mt-1 inline-flex font-semibold text-blue-700 hover:text-blue-800"
+                        >
+                          {driveStatus?.folder_name || 'Buka folder'}
+                        </a>
+                      ) : (
+                        <p className="mt-1 font-semibold text-slate-900">-</p>
+                      )}
+                    </div>
+                  </div>
+
+                  {driveStatus?.last_error && (
+                    <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                      {driveStatus.last_error}
+                    </div>
+                  )}
+
+                  {!driveProviderConfigured && (
+                    <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                      Google Drive belum aktif di server. Lengkapi GOOGLE_DRIVE_CLIENT_ID, GOOGLE_DRIVE_CLIENT_SECRET, dan GOOGLE_DRIVE_REDIRECT_URI.
+                    </div>
+                  )}
+
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    <button
+                      type="button"
+                      onClick={handleConnectGoogleDrive}
+                      disabled={!driveProviderConfigured || driveConnecting || driveSyncing}
+                      className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {driveConnecting ? 'Menyambungkan...' : driveReady ? 'Sambungkan Ulang' : 'Sambungkan Google Drive'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSyncGoogleDrive}
+                      disabled={!driveProviderConfigured || driveSyncing || driveConnecting}
+                      className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {driveSyncing ? 'Mengecek...' : 'Cek Kesiapan'}
+                    </button>
+                    {driveStatus?.configured && (
+                      <button
+                        type="button"
+                        onClick={handleDisconnectGoogleDrive}
+                        disabled={driveDisconnecting || driveConnecting}
+                        className="rounded-lg border border-red-300 bg-white px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {driveDisconnecting ? 'Memutuskan...' : 'Putuskan'}
+                      </button>
+                    )}
+                  </div>
+
+                  <p className="mt-3 text-xs text-slate-500">
+                    Dokumen tugas PDF, DOC, XLS, PPT, TXT, ODT, RTF, dan ODP akan dikirim ke Drive saat status siap. Gambar dan link tetap memakai alur biasa.
+                  </p>
                 </div>
               </div>
 

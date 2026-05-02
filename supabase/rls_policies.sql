@@ -1159,4 +1159,54 @@ create policy storage_settings_admin
     and public.is_admin()
   );
 
+-- Google Drive tenant storage metadata
+
+alter table public.tenant_google_drive_configs enable row level security;
+alter table public.tenant_google_drive_configs force row level security;
+
+drop policy if exists tenant_google_drive_configs_admin_all on public.tenant_google_drive_configs;
+create policy tenant_google_drive_configs_admin_all
+  on public.tenant_google_drive_configs
+  for all
+  using (public.is_admin())
+  with check (public.is_admin());
+
+alter table public.tenant_google_drive_files enable row level security;
+alter table public.tenant_google_drive_files force row level security;
+
+drop policy if exists tenant_google_drive_files_select on public.tenant_google_drive_files;
+create policy tenant_google_drive_files_select
+  on public.tenant_google_drive_files
+  for select
+  using (
+    public.is_admin()
+    or uploaded_by_user_id = auth.uid()
+    or exists (
+      select 1
+      from public.tugas t
+      where t.file_url = tenant_google_drive_files.storage_value
+        and (
+          t.created_by = auth.uid()
+          or t.kelas = public.current_kelas()
+        )
+    )
+    or exists (
+      select 1
+      from public.tugas_jawaban j
+      join public.tugas t on t.id = j.tugas_id
+      where j.file_url = tenant_google_drive_files.storage_value
+        and (
+          j.user_id = auth.uid()
+          or t.created_by = auth.uid()
+        )
+    )
+  );
+
+drop policy if exists tenant_google_drive_files_admin_all on public.tenant_google_drive_files;
+create policy tenant_google_drive_files_admin_all
+  on public.tenant_google_drive_files
+  for all
+  using (public.is_admin())
+  with check (public.is_admin());
+
 commit;

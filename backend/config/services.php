@@ -41,6 +41,15 @@ return [
         'client_secret' => env('GOOGLE_CLIENT_SECRET'),
         'redirect_uri' => env('GOOGLE_REDIRECT_URI'),
         'prompt' => env('GOOGLE_AUTH_PROMPT', 'select_account'),
+        'drive' => [
+            'enabled' => filter_var(env('GOOGLE_DRIVE_ENABLED', env('GOOGLE_AUTH_ENABLED', false)), FILTER_VALIDATE_BOOL),
+            'client_id' => env('GOOGLE_DRIVE_CLIENT_ID', env('GOOGLE_CLIENT_ID')),
+            'client_secret' => env('GOOGLE_DRIVE_CLIENT_SECRET', env('GOOGLE_CLIENT_SECRET')),
+            'redirect_uri' => env('GOOGLE_DRIVE_REDIRECT_URI'),
+            'folder_name' => env('GOOGLE_DRIVE_FOLDER_NAME', 'EduSmart Presensi'),
+            'share_uploaded_files' => filter_var(env('GOOGLE_DRIVE_SHARE_UPLOADED_FILES', true), FILTER_VALIDATE_BOOL),
+            'usage_timezone' => env('GOOGLE_DRIVE_USAGE_TIMEZONE', 'Asia/Jakarta'),
+        ],
     ],
 
     'evolution_api' => [

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Models\Profile;
 use App\Models\User;
+use App\Services\GoogleDrive\GoogleDriveService;
 use App\Services\Rfid\RfidDeviceService;
 use App\Services\Rfid\TenantMqttConfigService;
 use App\Support\Tenancy\TenantDomainService;
@@ -95,7 +96,8 @@ class SuperAdminController extends ApiController
     public function __construct(
         private readonly TenantDomainService $tenantDomainService,
         private readonly RfidDeviceService $rfidDeviceService,
-        private readonly TenantMqttConfigService $tenantMqttConfigService
+        private readonly TenantMqttConfigService $tenantMqttConfigService,
+        private readonly GoogleDriveService $googleDriveService
     ) {}
 
     public function me(Request $request)
@@ -127,7 +129,11 @@ class SuperAdminController extends ApiController
 
         $this->applyPagination($query, $request);
 
-        $tenants = $query->get();
+        $tenants = $query->get()->map(function ($tenant) {
+            $tenant->google_drive = $this->googleDriveService->summaryForTenant((string) $tenant->id);
+
+            return $tenant;
+        });
 
         return $this->ok($tenants);
     }
@@ -208,6 +214,7 @@ class SuperAdminController extends ApiController
 
         $domains = $this->tenantDomainService->listTenantDomains((string) $tenant->id);
         $storage = $this->buildTenantStorageUsage((string) $tenant->id);
+        $googleDrive = $this->googleDriveService->summaryForTenant((string) $tenant->id);
         $rfidMqttConfig = $this->tenantMqttConfigService->tenantConfig(
             (string) $tenant->id,
             (string) $tenant->slug,
@@ -250,6 +257,7 @@ class SuperAdminController extends ApiController
                 'admins' => $admins,
                 'domains' => $domains,
                 'storage' => $storage,
+                'google_drive' => $googleDrive,
                 'rfid_mqtt_config' => $this->tenantMqttConfigService->publicConfig($rfidMqttConfig),
                 'rfid_template' => $rfidTemplate,
                 'password_security' => [
@@ -1601,6 +1609,9 @@ class SuperAdminController extends ApiController
 
             $raw = trim((string) $value);
             if ($raw === '') {
+                continue;
+            }
+            if ($this->googleDriveService->isGoogleDriveUrl($raw)) {
                 continue;
             }
 

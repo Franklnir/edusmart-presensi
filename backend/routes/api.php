@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\AttendanceQrController;
 use App\Http\Controllers\Api\ApprovalController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\DbController;
+use App\Http\Controllers\Api\GoogleDriveController;
 use App\Http\Controllers\Api\InfrastructureController;
 use App\Http\Controllers\Api\PresenceController;
 use App\Http\Controllers\Api\QuizController;
@@ -129,6 +130,16 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->post('/admin/whatsapp/sync'
 Route::middleware(['auth:sanctum', 'throttle:api'])->post('/admin/whatsapp/logout', [WhatsAppController::class, 'logout']);
 Route::middleware(['auth:sanctum', 'throttle:api'])->patch('/admin/whatsapp/settings', [WhatsAppController::class, 'updateSettings']);
 Route::middleware(['auth:sanctum', 'throttle:api'])->post('/admin/whatsapp/test', [WhatsAppController::class, 'sendTest']);
+Route::middleware(['auth:sanctum', 'throttle:api'])->get('/admin/google-drive', [GoogleDriveController::class, 'show']);
+Route::middleware(['auth:sanctum', 'throttle:api'])->post('/admin/google-drive/connect-url', [GoogleDriveController::class, 'connectUrl']);
+Route::middleware(['auth:sanctum', 'throttle:api'])->post('/admin/google-drive/sync', [GoogleDriveController::class, 'sync']);
+Route::middleware(['auth:sanctum', 'throttle:api'])->post('/admin/google-drive/disconnect', [GoogleDriveController::class, 'disconnect']);
+Route::get('/admin/google-drive/callback', [GoogleDriveController::class, 'callback'])
+    ->middleware(['web', 'throttle:auth'])
+    ->withoutMiddleware([
+        \App\Http\Middleware\ResolveTenant::class,
+        \App\Http\Middleware\EnsureTenantMatchesProfile::class,
+    ]);
 Route::post('/whatsapp/webhook/{secret}/{event?}', [WhatsAppWebhookController::class, 'handle'])
     ->middleware('throttle:webhook')
     ->withoutMiddleware([

@@ -26,6 +26,7 @@ const FILE_SIZE_LIMITS = {
   IMAGE: 100 * 1024,
   PDF: 2 * 1024 * 1024,
   DOCUMENT: 2 * 1024 * 1024,
+  SPREADSHEET: 2 * 1024 * 1024,
   PRESENTATION: 3 * 1024 * 1024
 }
 
@@ -58,6 +59,8 @@ const ASSIGNMENT_FILE_ACCEPT = {
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
   'application/vnd.oasis.opendocument.text': ['.odt'],
   'application/rtf': ['.rtf'],
+  'application/vnd.ms-excel': ['.xls'],
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
   'application/vnd.ms-powerpoint': ['.ppt'],
   'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'],
   'application/vnd.oasis.opendocument.presentation': ['.odp']
@@ -278,6 +281,9 @@ const compressFileBeforeUpload = async (file) => {
     return await compressImage(file, FILE_SIZE_LIMITS.IMAGE / 1024)
   }
   if (fileType === 'application/pdf' || fileName.endsWith('.pdf')) return ensureMax(FILE_SIZE_LIMITS.PDF, 'PDF')
+  if (fileType.includes('spreadsheet') || fileName.endsWith('.xls') || fileName.endsWith('.xlsx')) {
+    return ensureMax(FILE_SIZE_LIMITS.SPREADSHEET, 'spreadsheet')
+  }
   if (fileType.includes('presentation') || fileName.endsWith('.ppt') || fileName.endsWith('.pptx')) {
     return ensureMax(FILE_SIZE_LIMITS.PRESENTATION, 'presentasi')
   }
@@ -292,7 +298,7 @@ const compressFileBeforeUpload = async (file) => {
   }
 
   throw new Error(
-    'Tipe file tidak didukung. Gunakan gambar (JPG/PNG), PDF/Dokumen, atau PPT.'
+    'Tipe file tidak didukung. Gunakan gambar (JPG/PNG), PDF/Dokumen, Spreadsheet, atau PPT.'
   )
 }
 
@@ -302,6 +308,7 @@ const compressFileBeforeUpload = async (file) => {
    - Support input path maupun URL (public/signed lama)
 ========================= */
 const normalizeAssignmentKey = (urlOrPath) => extractObjectPath(ASSIGNMENT_BUCKET, urlOrPath || '')
+const isGoogleDriveUrl = (value = '') => /^https?:\/\/(?:drive|docs)\.google\.com\//i.test(String(value || '').trim())
 
 const createSignedUrlForAssignment = async (urlOrPath, expiresInSec = 60 * 15) => {
   const key = normalizeAssignmentKey(urlOrPath)
@@ -316,6 +323,13 @@ const createSignedUrlForAssignment = async (urlOrPath, expiresInSec = 60 * 15) =
 
 // ANTI-IDOR: penghapusan file hanya untuk folder milik guru (tugas_lampiran/<guruId>/...)
 const deleteTeacherAttachment = async (urlOrPath, teacherId) => {
+  const raw = String(urlOrPath || '').trim()
+  if (isGoogleDriveUrl(raw)) {
+    const { error } = await supabase.storage.from(ASSIGNMENT_BUCKET).remove([raw])
+    if (error) throw error
+    return
+  }
+
   const key = normalizeAssignmentKey(urlOrPath)
   if (!key) return
   if (!String(key).startsWith(`tugas_lampiran/${teacherId}/`)) {
@@ -987,7 +1001,7 @@ export default function TugasGuru() {
 
       setCompressionProgress('Mengupload file...')
 
-      const { error: uploadError } = await supabase.storage
+      const { data: uploadData, error: uploadError } = await supabase.storage
         .from(ASSIGNMENT_BUCKET)
         .upload(filePath, compressed, { upsert: false, cacheControl: '3600' })
 
@@ -1006,15 +1020,16 @@ export default function TugasGuru() {
         }
       }
 
-      const sizeLabel = formatFileSize(compressed.size)
+      const storedFileValue = uploadData?.path || uploadData?.fullPath || filePath
+      const sizeLabel = uploadData?.uploadedSizeLabel || formatFileSize(uploadData?.uploadedSizeBytes || compressed.size)
       setCompressionProgress(null)
 
       if (mode === 'edit') {
-        setEditForm((prev) => ({ ...prev, file_url: filePath }))
+        setEditForm((prev) => ({ ...prev, file_url: storedFileValue }))
         setUploadedFileSizeEdit(sizeLabel)
         setEditExistingFileSize(sizeLabel)
       } else {
-        setForm((prev) => ({ ...prev, file_url: filePath }))
+        setForm((prev) => ({ ...prev, file_url: storedFileValue }))
         setUploadedFileSizeCreate(sizeLabel)
       }
 

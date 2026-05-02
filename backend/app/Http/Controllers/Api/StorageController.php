@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Services\GoogleDrive\GoogleDriveService;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -11,6 +12,10 @@ use Illuminate\Support\Str;
 
 class StorageController extends ApiController
 {
+    public function __construct(
+        private readonly GoogleDriveService $googleDriveService
+    ) {}
+
     private array $tenantColumnCache = [];
 
     private const PROFILE_IMAGE_MAX_BYTES = 50 * 1024;
@@ -39,15 +44,19 @@ class StorageController extends ApiController
         ],
         'assignments' => [
             'max_bytes' => 15 * 1024 * 1024,
-            'extensions' => ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'jpg', 'jpeg', 'png', 'webp'],
+            'extensions' => ['pdf', 'doc', 'docx', 'odt', 'rtf', 'xls', 'xlsx', 'ppt', 'pptx', 'odp', 'txt', 'jpg', 'jpeg', 'png', 'webp'],
             'mimes' => [
                 'application/pdf',
                 'application/msword',
                 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'application/vnd.oasis.opendocument.text',
+                'application/rtf',
+                'text/rtf',
                 'application/vnd.ms-excel',
                 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                 'application/vnd.ms-powerpoint',
                 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                'application/vnd.oasis.opendocument.presentation',
                 'text/plain',
                 'image/jpeg',
                 'image/png',
@@ -134,6 +143,22 @@ class StorageController extends ApiController
             return $imageRuleError;
         }
 
+        try {
+            $driveUpload = $this->googleDriveService->uploadAssignmentDocumentIfAvailable(
+                $request,
+                $bucket,
+                $path,
+                $file
+            );
+            if (is_array($driveUpload)) {
+                return response()->json(['data' => $driveUpload]);
+            }
+        } catch (\Throwable $e) {
+            return response()->json([
+                'error' => 'Google Drive sekolah belum siap: '.$e->getMessage(),
+            ], 422);
+        }
+
         $storage = Storage::disk('local');
         $fullPath = $this->buildStoragePath($bucket, $path);
 
@@ -184,7 +209,27 @@ class StorageController extends ApiController
 
         $storage = Storage::disk('local');
         foreach ($paths as $path) {
-            $path = $this->sanitizePath($path);
+            $rawPath = trim((string) $path);
+            if ($bucket === 'assignments' && $this->googleDriveService->isGoogleDriveUrl($rawPath)) {
+                if (! $this->canWriteGoogleDriveUrl($request, $rawPath)) {
+                    return $this->deny('Akses hapus Google Drive ditolak');
+                }
+
+                try {
+                    $this->googleDriveService->deleteStoredFile(
+                        (string) ($this->tenantId($request) ?? ''),
+                        $rawPath
+                    );
+                } catch (\Throwable $e) {
+                    return response()->json([
+                        'error' => 'Gagal menghapus file Google Drive: '.$e->getMessage(),
+                    ], 422);
+                }
+
+                continue;
+            }
+
+            $path = $this->sanitizePath($rawPath);
             if (! $path) {
                 continue;
             }
@@ -419,6 +464,59 @@ class StorageController extends ApiController
             $this->applyTenantScope($certQuery, 'certificates', $tenantId);
 
             return $this->queryHasMatchingPath($certQuery, 'file_url', $path);
+        }
+
+        return false;
+    }
+
+    private function canWriteGoogleDriveUrl(Request $request, string $url): bool
+    {
+        $user = $request->user();
+        $userId = $user?->id;
+        $tenantId = $this->tenantId($request);
+
+        if (! $user || ! $userId || ! $tenantId) {
+            return false;
+        }
+
+        if ($this->isAdmin($request)) {
+            return true;
+        }
+
+        $fileId = $this->googleDriveService->fileIdFromUrl($url);
+        if ($fileId === '') {
+            return false;
+        }
+
+        if (Schema::hasTable('tenant_google_drive_files')) {
+            $record = DB::table('tenant_google_drive_files')
+                ->where('tenant_id', $tenantId)
+                ->where('drive_file_id', $fileId)
+                ->first(['uploaded_by_user_id', 'storage_value']);
+
+            if ($record && (string) ($record->uploaded_by_user_id ?? '') === (string) $userId) {
+                return true;
+            }
+        }
+
+        if ($this->isGuru($request)) {
+            $ownAttachmentQuery = DB::table('tugas')
+                ->where('created_by', $userId)
+                ->where('file_url', $url);
+            $this->applyTenantScope($ownAttachmentQuery, 'tugas', $tenantId);
+            if ($ownAttachmentQuery->exists()) {
+                return true;
+            }
+        }
+
+        if ($this->isSiswa($request)) {
+            $ownAnswerQuery = DB::table('tugas_jawaban')
+                ->where('user_id', $userId)
+                ->where('file_url', $url);
+            $this->applyTenantScope($ownAnswerQuery, 'tugas_jawaban', $tenantId);
+            if ($ownAnswerQuery->exists()) {
+                return true;
+            }
         }
 
         return false;

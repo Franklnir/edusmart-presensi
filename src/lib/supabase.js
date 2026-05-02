@@ -1490,6 +1490,31 @@ const auth = {
         body: payload
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async googleDrive() {
+      const res = await apiFetch('/api/admin/google-drive', { method: 'GET' })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async googleDriveConnectUrl(payload = {}) {
+      const res = await apiFetch('/api/admin/google-drive/connect-url', {
+        method: 'POST',
+        body: payload
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async syncGoogleDrive() {
+      const res = await apiFetch('/api/admin/google-drive/sync', {
+        method: 'POST',
+        body: {}
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async disconnectGoogleDrive() {
+      const res = await apiFetch('/api/admin/google-drive/disconnect', {
+        method: 'POST',
+        body: {}
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
     }
   },
   super: {

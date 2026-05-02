@@ -24,6 +24,7 @@ const FILE_SIZE_LIMITS = {
   IMAGE: 100 * 1024,
   PDF: 2 * 1024 * 1024,
   DOCUMENT: 2 * 1024 * 1024,
+  SPREADSHEET: 2 * 1024 * 1024,
   PRESENTATION: 3 * 1024 * 1024
 }
 
@@ -34,6 +35,8 @@ const ASSIGNMENT_FILE_ACCEPT = {
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
   'application/vnd.oasis.opendocument.text': ['.odt'],
   'application/rtf': ['.rtf'],
+  'application/vnd.ms-excel': ['.xls'],
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
   'application/vnd.ms-powerpoint': ['.ppt'],
   'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'],
   'application/vnd.oasis.opendocument.presentation': ['.odp']
@@ -235,6 +238,10 @@ const compressFileBeforeUpload = async (file) => {
     return enforceMaxBytes(file, FILE_SIZE_LIMITS.PDF, 'PDF')
   }
 
+  if (fileType.includes('spreadsheet') || fileName.endsWith('.xls') || fileName.endsWith('.xlsx')) {
+    return enforceMaxBytes(file, FILE_SIZE_LIMITS.SPREADSHEET, 'spreadsheet')
+  }
+
   if (fileType.includes('presentation') || fileName.endsWith('.ppt') || fileName.endsWith('.pptx')) {
     return enforceMaxBytes(file, FILE_SIZE_LIMITS.PRESENTATION, 'presentasi')
   }
@@ -250,7 +257,7 @@ const compressFileBeforeUpload = async (file) => {
   }
 
   throw new Error(
-    'Tipe file tidak didukung. Gunakan gambar (JPG/PNG), PDF/Dokumen, atau PPT.'
+    'Tipe file tidak didukung. Gunakan gambar (JPG/PNG), PDF/Dokumen, Spreadsheet, atau PPT.'
   )
 }
 
@@ -258,6 +265,7 @@ const compressFileBeforeUpload = async (file) => {
    Storage Helpers
 ========================= */
 const extractObjectKeyFromAny = (value) => extractObjectPath(ASSIGNMENT_BUCKET, value || '')
+const isGoogleDriveUrl = (value = '') => /^https?:\/\/(?:drive|docs)\.google\.com\//i.test(String(value || '').trim())
 
 const createSignedUrlForKey = async (keyOrUrl, expiresInSeconds = 60 * 60) => {
   if (!keyOrUrl) return null
@@ -275,6 +283,13 @@ const createSignedUrlForKey = async (keyOrUrl, expiresInSeconds = 60 * 60) => {
  * - siswa boleh delete hanya jawaban miliknya sendiri (folder tugas yang sama, dan prefix siswa_id-)
  */
 const deleteJawabanFileFromStorage = async (fileKeyOrUrl, tugasId, userId) => {
+  const raw = String(fileKeyOrUrl || '').trim()
+  if (isGoogleDriveUrl(raw)) {
+    const { error } = await supabase.storage.from(ASSIGNMENT_BUCKET).remove([raw])
+    if (error) throw error
+    return
+  }
+
   const key = extractObjectKeyFromAny(fileKeyOrUrl)
   if (!key) return
 
@@ -682,7 +697,7 @@ export default function TugasSiswa() {
 
       setUploadProgress('Mengupload file...')
 
-      const { error: uploadError } = await supabase.storage
+      const { data: uploadData, error: uploadError } = await supabase.storage
         .from(ASSIGNMENT_BUCKET)
         .upload(filePath, compressed, { upsert: false, cacheControl: '3600' })
 
@@ -697,11 +712,14 @@ export default function TugasSiswa() {
         }
       }
 
-      setJawabanFileKey(filePath)
-      setJawabanFileSize(formatFileSize(compressed.size))
+      const storedFileValue = uploadData?.path || uploadData?.fullPath || filePath
+      const sizeLabel = uploadData?.uploadedSizeLabel || formatFileSize(uploadData?.uploadedSizeBytes || compressed.size)
+
+      setJawabanFileKey(storedFileValue)
+      setJawabanFileSize(sizeLabel)
       setUploadProgress(null)
 
-      pushToast('success', `File jawaban berhasil diupload (${formatFileSize(compressed.size)})`)
+      pushToast('success', `File jawaban berhasil diupload (${sizeLabel})`)
     } catch (error) {
       console.error('Upload jawaban error:', error)
       setUploadProgress(null)
