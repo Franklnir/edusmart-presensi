@@ -19,3 +19,5 @@ build/
 
 # Editor
 .vscode/
+core
+backups/

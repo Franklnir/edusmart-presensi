@@ -680,7 +680,7 @@ class QueryBuilder {
     this.action = 'select'
     this.columns = '*'
     this.options = {}
-    this.filters = { eq: {}, neq: {}, is: {}, in: {}, gte: {}, lte: {}, gt: {}, lt: {} }
+    this.filters = { eq: {}, neq: {}, is: {}, in: {}, gte: {}, lte: {}, gt: {}, lt: {}, ilike: {} }
     this.orderBy = []
     this.limitValue = null
     this.offsetValue = null
@@ -762,6 +762,11 @@ class QueryBuilder {
 
   lt(field, value) {
     this.filters.lt[field] = value
+    return this
+  }
+
+  ilike(field, value) {
+    this.filters.ilike[field] = value
     return this
   }
 
@@ -1295,14 +1300,21 @@ const auth = {
     const res = await apiFetch('/api/auth/me', { method: 'GET' })
     if (res.error) return { data: { session: null }, error: res.error }
     const user = normalizeUser(res.raw?.data?.user, res.raw?.data?.profile)
-    return { data: { session: user ? { user } : null }, error: null }
+    const profile = res.raw?.data?.profile || null
+    return {
+      data: {
+        profile,
+        session: user ? { user, profile } : null
+      },
+      error: null
+    }
   },
 
   async getUser() {
     const res = await apiFetch('/api/auth/me', { method: 'GET' })
     if (res.error) return { data: { user: null }, error: res.error }
     const user = normalizeUser(res.raw?.data?.user, res.raw?.data?.profile)
-    return { data: { user }, error: null }
+    return { data: { user, profile: res.raw?.data?.profile || null }, error: null }
   },
 
   async resetPasswordForEmail(email) {
@@ -1407,6 +1419,13 @@ const auth = {
     },
     async deleteUser(userId) {
       const res = await apiFetch(`/api/admin/users/${userId}`, { method: 'DELETE' })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async updateTeacherName(userId, nama) {
+      const res = await apiFetch(`/api/admin/teachers/${userId}/name`, {
+        method: 'PATCH',
+        body: { nama }
+      })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
     async backup(options = {}) {

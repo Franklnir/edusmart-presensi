@@ -5,6 +5,7 @@ namespace App\Services\WhatsApp;
 use App\Jobs\SendWhatsAppMessageJob;
 use App\Models\WhatsAppMessageLog;
 use App\Models\WhatsAppNotificationSetting;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -124,18 +125,22 @@ class WhatsAppNotificationService
                 continue;
             }
 
-            $message = $this->messageBuilder->buildAttendanceMessage(
+            $problem = $this->attendanceProblemForRow($tenantId, $attendance);
+            if (! $problem) {
+                continue;
+            }
+
+            $message = $this->messageBuilder->buildAttendanceProblemMessage(
                 $context['school'],
                 $student,
-                $attendance
+                $problem
             );
 
             $eventKey = implode(':', [
-                'attendance',
+                'attendance-problem',
+                $problem['type'],
                 $studentId,
                 (string) ($attendance['tanggal'] ?? ''),
-                (string) ($attendance['mapel'] ?? ''),
-                (string) ($attendance['status'] ?? ''),
             ]);
 
             $this->queueForRecipients(
@@ -143,13 +148,102 @@ class WhatsAppNotificationService
                 $context['integration']->id,
                 $context['settings'],
                 $student,
-                'attendance',
+                'attendance_problem',
                 $eventKey,
                 $message,
                 'absensi',
                 (string) ($attendance['id'] ?? $eventKey)
             );
         }
+    }
+
+    private function attendanceProblemForRow(string $tenantId, array $attendance): ?array
+    {
+        $studentId = trim((string) ($attendance['uid'] ?? ''));
+        $date = trim((string) ($attendance['tanggal'] ?? ''));
+        if ($studentId === '' || $date === '') {
+            return null;
+        }
+
+        $status = Str::lower(trim((string) ($attendance['status'] ?? '')));
+        if (! in_array($status, ['hadir', 'alpha'], true)) {
+            return null;
+        }
+
+        $scans = $this->scanSummaryForAttendance($tenantId, $studentId, $date);
+        $hasMasuk = ! empty($scans['masuk_at']);
+        $hasPulang = ! empty($scans['pulang_at']);
+
+        $type = null;
+        $title = null;
+
+        if (! $hasMasuk && $hasPulang) {
+            $type = 'no_checkin';
+            $title = 'Scan pulang tanpa scan masuk';
+        } elseif ($status === 'alpha') {
+            if (! $hasMasuk) {
+                $type = 'no_checkin';
+                $title = 'Tidak scan masuk / Alpha';
+            } elseif (! $hasPulang) {
+                $type = 'missing_checkout';
+                $title = 'Scan masuk, tetapi belum scan pulang';
+            } else {
+                $type = 'alpha';
+                $title = 'Alpha';
+            }
+        } elseif ($status === 'hadir' && $hasMasuk && ! $hasPulang) {
+            $type = 'missing_checkout';
+            $title = 'Scan masuk, tetapi belum scan pulang';
+        }
+
+        if (! $type) {
+            return null;
+        }
+
+        return [
+            'type' => $type,
+            'title' => $title,
+            'tanggal' => $date,
+            'status' => $attendance['status'] ?? null,
+            'mapel' => $attendance['mapel'] ?? null,
+            'detected_at' => $attendance['waktu'] ?? Carbon::parse($date)->endOfDay()->toIso8601String(),
+            'scan_masuk_at' => $scans['masuk_at'] ?? null,
+            'scan_pulang_at' => $scans['pulang_at'] ?? null,
+        ];
+    }
+
+    private function scanSummaryForAttendance(string $tenantId, string $studentId, string $date): array
+    {
+        try {
+            $rows = DB::table('absensi_scan_temp')
+                ->where('tenant_id', $tenantId)
+                ->where('siswa_id', $studentId)
+                ->where('tanggal', $date)
+                ->orderBy('scan_at')
+                ->get(['sesi', 'scan_at']);
+        } catch (\Throwable $e) {
+            return [
+                'masuk_at' => null,
+                'pulang_at' => null,
+            ];
+        }
+
+        $summary = [
+            'masuk_at' => null,
+            'pulang_at' => null,
+        ];
+
+        foreach ($rows as $row) {
+            $session = Str::lower(trim((string) ($row->sesi ?? '')));
+            if ($session === 'masuk' && ! $summary['masuk_at']) {
+                $summary['masuk_at'] = $row->scan_at ?? null;
+            }
+            if ($session === 'pulang') {
+                $summary['pulang_at'] = $row->scan_at ?? null;
+            }
+        }
+
+        return $summary;
     }
 
     private function handleProfileMutation(string $tenantId, string $action, array $beforeRows, array $afterRows): void

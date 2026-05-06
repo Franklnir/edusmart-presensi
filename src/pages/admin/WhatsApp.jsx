@@ -33,8 +33,8 @@ const STATUS_META = {
 const CATEGORY_OPTIONS = [
   {
     key: 'send_attendance',
-    title: 'Absensi',
-    description: 'Kirim status hadir, izin, sakit, alpha, mapel, dan jam scan.'
+    title: 'Peringatan Presensi',
+    description: 'Kirim hanya kasus bermasalah: tidak scan masuk, scan pulang tanpa masuk, masuk tanpa pulang, dan Alpha.'
   },
   {
     key: 'send_profile_updates',
@@ -68,6 +68,7 @@ const statusMeta = (status) => STATUS_META[status] || STATUS_META.disconnected
 
 const categoryLabel = (value = '') => {
   const normalized = String(value || '').trim().toLowerCase()
+  if (normalized === 'attendance_problem') return 'Peringatan Presensi'
   if (normalized === 'attendance') return 'Absensi'
   if (normalized === 'profile_update') return 'Perubahan Data'
   if (normalized === 'assignment') return 'Upload Tugas'
@@ -369,14 +370,14 @@ export default function WhatsApp() {
 
   return (
     <div className="p-6 space-y-6">
-        <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="page-title-card whatsapp-page-header flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
-            <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-700">
+            <div className="whatsapp-page-eyebrow inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-700">
               <ShieldCheck className="h-4 w-4" />
               Notifikasi Tenant
             </div>
-            <h1 className="mt-3 text-3xl font-bold text-slate-900">WhatsApp Sekolah</h1>
-            <p className="mt-2 max-w-3xl text-sm text-slate-600">
+            <h1 className="whatsapp-page-title page-title-heading mt-3">WhatsApp Sekolah</h1>
+            <p className="whatsapp-page-description page-title-description max-w-3xl">
               Hubungkan WhatsApp per sekolah via QR, atur jenis notifikasi yang dikirim,
               dan pantau log pengiriman agar operasional admin tetap stabil.
             </p>
@@ -517,7 +518,7 @@ export default function WhatsApp() {
                         Status koneksi disinkronkan dari webhook dan scheduler supaya tidak nyangkut di UI.
                       </li>
                       <li className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                        Pengiriman notifikasi masuk antrean queue, jadi transaksi data sekolah tetap cepat.
+                        Pengiriman masuk antrean queue dan presensi normal tidak dikirim WA, jadi scan serentak tetap ringan.
                       </li>
                     </ul>
                   </div>
@@ -529,7 +530,7 @@ export default function WhatsApp() {
                   <div>
                     <h2 className="text-xl font-bold text-slate-900">Jenis Notifikasi</h2>
                     <p className="mt-2 text-sm text-slate-600">
-                      Admin sekolah tinggal checklist apa saja yang ingin dikirim ke wali murid atau siswa.
+                      Pilih notifikasi penting yang boleh dikirim ke wali murid atau siswa.
                     </p>
                   </div>
 

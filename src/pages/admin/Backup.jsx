@@ -630,15 +630,15 @@ export default function BackupAdmin() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 py-6">
       <div className="w-full space-y-8 px-4 sm:px-6 lg:px-8">
-        <section className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
+        <section className="page-title-card">
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
             <div className="flex items-center gap-4">
               <div className="p-3 bg-blue-100 rounded-lg">
                 <span className="text-2xl text-blue-600">🗄️</span>
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-gray-900 mb-1">Backup Data Sekolah</h1>
-                <p className="text-gray-600">
+                <h1 className="page-title-heading">Backup Data Sekolah</h1>
+                <p className="page-title-description">
                   Pilih jenis data yang ingin dibackup, tentukan periode bulan, lalu unduh dalam format yang dibutuhkan.
                 </p>
               </div>

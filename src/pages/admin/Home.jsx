@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useUIStore } from '../../store/useUIStore'
 import { useAuthStore } from '../../store/useAuthStore'
+import { resolveAcademicPeriod } from '../../utils/academicPeriod'
 
 /* ===== Utils ===== */
 const slug = (s = '') =>
@@ -147,16 +148,18 @@ export default function AHome() {
   const loadAllData = useCallback(async () => {
     setIsLoading(true)
     try {
-      await Promise.all([
+      await Promise.allSettled([loadPengumuman()])
+
+      setIsLoading(false)
+
+      void Promise.allSettled([
+        loadEskulList(),
         loadStatistics(),
         loadGuruDanSiswa(),
-        loadPengumuman(),
-        loadEskulList(),
         loadAdminList()
       ])
     } catch (error) {
       pushToast('error', 'Gagal memuat data awal')
-    } finally {
       setIsLoading(false)
     }
   }, [pushToast])
@@ -167,6 +170,7 @@ export default function AHome() {
 
   const loadStatistics = useCallback(async () => {
     try {
+      const period = resolveAcademicPeriod()
       const [
         { count: siswa },
         { count: guru },
@@ -189,7 +193,11 @@ export default function AHome() {
           .select('*', { count: 'exact', head: true })
           .eq('role', 'admin'),
         supabase.from('kelas').select('*', { count: 'exact', head: true }),
-        supabase.from('absensi').select('*', { count: 'exact', head: true }),
+        supabase
+          .from('absensi')
+          .select('*', { count: 'exact', head: true })
+          .eq('tahun_ajaran', period.tahunAjaran)
+          .eq('semester', period.semester),
         supabase.from('pengumuman').select('*', { count: 'exact', head: true }),
         supabase.from('ekskul').select('*', { count: 'exact', head: true })
       ])
@@ -298,7 +306,7 @@ export default function AHome() {
     try {
       const { data, error } = await supabase
         .from('pengumuman')
-        .select('*')
+        .select('id,judul,keterangan,target,created_at,updated_at')
         .order('created_at', { ascending: false })
 
       if (error) throw error
@@ -418,7 +426,10 @@ export default function AHome() {
 
   const loadEskulList = useCallback(async () => {
     try {
-      const { data, error } = await supabase.from('ekskul').select('*').order('nama')
+      const { data, error } = await supabase
+        .from('ekskul')
+        .select('id,nama,keterangan,hari,jam_mulai,jam_selesai,pembina_guru_id,registration_deadline_at,created_at,updated_at')
+        .order('nama')
 
       if (error) throw error
       setEskulList(data || [])
@@ -773,9 +784,16 @@ export default function AHome() {
     <div className="page-wrapper">
       <div className="w-full space-y-6">
         {/* ── Header ── */}
-        <div>
-          <h1 className="text-2xl font-extrabold text-slate-900">Dashboard Admin</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Kelola data sekolah, pengumuman, dan ekstrakurikuler</p>
+        <div className="page-title-card">
+          <div className="flex items-center gap-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-100 text-2xl text-blue-600">
+              📊
+            </div>
+            <div>
+              <h1 className="page-title-heading">Dashboard Admin</h1>
+              <p className="page-title-description">Kelola data sekolah, pengumuman, dan ekstrakurikuler</p>
+            </div>
+          </div>
         </div>
 
         {/* --- STATISTICS --- */}

@@ -3208,15 +3208,15 @@ export default function ASiswa() {
         )}
 
         {/* Header */}
-        <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
+        <div className="page-title-card">
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-center gap-4">
               <div className="p-3 bg-blue-100 rounded-lg">
                 <span className="text-2xl text-blue-600">👨‍🎓</span>
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-gray-900 mb-1">Manajemen Siswa</h1>
-                <p className="text-gray-600">
+                <h1 className="page-title-heading">Manajemen Siswa</h1>
+                <p className="page-title-description">
                   Kelola data siswa, kelas, organisasi, OSIS, dan kartu RFID
                 </p>
                 {isGuru && (
@@ -3240,12 +3240,6 @@ export default function ASiswa() {
                   onClick={() => setImportModalOpen(true)}
                 >
                   ⬆️ Import
-                </button>
-                <button
-                  className="bg-indigo-50 text-indigo-700 px-4 py-2 rounded-lg border border-indigo-200 hover:bg-indigo-100 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-all duration-200 font-medium"
-                  onClick={openPromotionModal}
-                >
-                  ⬆️ Kenaikan Kelas
                 </button>
                 <button
                   className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 font-medium"

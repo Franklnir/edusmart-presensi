@@ -51,6 +51,54 @@ const getTodayLocal = () => {
   return `${year}-${month}-${day}`
 }
 
+const toTimeValue = (value) => String(value || '').slice(0, 5)
+
+const scanDateToTimeValue = (value) => {
+  if (!value) return ''
+
+  const parsed = new Date(value)
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toTimeString().slice(0, 5)
+  }
+
+  const fallback = String(value)
+  const timeMatch = fallback.match(/(\d{2}:\d{2})/)
+  return timeMatch?.[1] || ''
+}
+
+const findRelevantMapelForSingleScan = (jadwalSiswa, scanRecord, session) => {
+  if (!Array.isArray(jadwalSiswa) || jadwalSiswa.length === 0 || !scanRecord) {
+    return null
+  }
+
+  const scanTime = scanDateToTimeValue(scanRecord.scan_date)
+  if (!scanTime) return null
+
+  const sorted = [...jadwalSiswa].sort((a, b) =>
+    toTimeValue(a.jam_mulai).localeCompare(toTimeValue(b.jam_mulai))
+  )
+
+  const active = sorted.find((jadwal) => {
+    const start = toTimeValue(jadwal.jam_mulai)
+    const end = toTimeValue(jadwal.jam_selesai)
+    return start && end && scanTime >= start && scanTime <= end
+  })
+  if (active) return active
+
+  const first = sorted[0]
+  const last = sorted[sorted.length - 1]
+
+  if (session === 'masuk' && scanTime <= toTimeValue(first?.jam_mulai)) {
+    return first
+  }
+
+  if (session === 'pulang' && scanTime >= toTimeValue(last?.jam_selesai)) {
+    return last
+  }
+
+  return null
+}
+
 /* ========= MAIN COMPONENT ========= */
 
 export default function Scan() {
@@ -675,7 +723,40 @@ export default function Scan() {
           mapel_count: mapelCount
         }
 
-        setScannedStudents((prev) => [scanRecord, ...prev])
+        const { error: tempErr } = await supabase
+          .from('absensi_scan_temp')
+          .upsert(
+            {
+              tanggal,
+              siswa_id: student.id,
+              kelas: student.kelas,
+              sesi: currentSession,
+              scan_at: now.toISOString(),
+              mapel_count: mapelCount,
+              source: fromRealtime ? 'device' : 'web_admin',
+              card_uid: cleanedUid
+            },
+            {
+              onConflict: 'tanggal,siswa_id,sesi'
+            }
+          )
+
+        if (tempErr) {
+          console.error('Gagal menyimpan ke absensi_scan_temp:', tempErr)
+          if (fromRealtime && scanRowId) {
+            const { error: errUpdate } = await supabase
+              .from('rfid_scans')
+              .update({ status: 'error' })
+              .eq('id', scanRowId)
+
+            if (errUpdate) console.error(errUpdate)
+          }
+          pushToast(
+            'error',
+            'Scan belum tersimpan ke server. Data tidak ditampilkan agar tidak hilang saat refresh.'
+          )
+          return
+        }
 
         if (fromRealtime && scanRowId) {
           const { error: errUpdate } = await supabase
@@ -695,37 +776,7 @@ export default function Scan() {
           if (errInsert) console.error(errInsert)
         }
 
-        try {
-          const { error: tempErr } = await supabase
-            .from('absensi_scan_temp')
-            .upsert(
-              {
-                tanggal,
-                siswa_id: student.id,
-                kelas: student.kelas,
-                sesi: currentSession,
-                scan_at: now.toISOString(),
-                mapel_count: mapelCount,
-                source: fromRealtime ? 'device' : 'web_admin',
-                card_uid: cleanedUid
-              },
-              {
-                onConflict: 'tanggal,siswa_id,sesi'
-              }
-            )
-
-          if (tempErr) {
-            console.error(
-              'Gagal menyimpan ke absensi_scan_temp:',
-              tempErr
-            )
-          }
-        } catch (err) {
-          console.error(
-            'Exception saat upsert absensi_scan_temp:',
-            err
-          )
-        }
+        setScannedStudents((prev) => [scanRecord, ...prev])
 
         pushToast('success', `Scan berhasil: ${student.nama}`)
 
@@ -915,7 +966,11 @@ export default function Scan() {
 
       if (errJadwal) throw errJadwal
       if (!jadwalHariIni?.length) {
-        throw new Error('Tidak ada jadwal pelajaran untuk hari ini.')
+        pushToast(
+          'info',
+          'Scan masuk/pulang tetap tercatat, tetapi tidak ada jadwal pelajaran hari ini sehingga absensi mapel tidak dibuat.'
+        )
+        return
       }
 
       const { data: allStudents, error: errStudents } = await supabase
@@ -952,15 +1007,36 @@ export default function Scan() {
       scannedStudents.forEach((s) => {
         if (!scanMap[s.id]) {
           scanMap[s.id] = {
-            masuk: false,
-            pulang: false
+            masuk: null,
+            pulang: null
           }
         }
-        if (s.session === 'masuk') scanMap[s.id].masuk = true
-        if (s.session === 'pulang') scanMap[s.id].pulang = true
+        if (s.session === 'masuk') scanMap[s.id].masuk = s
+        if (s.session === 'pulang') scanMap[s.id].pulang = s
       })
 
       const absensiInserts = []
+      let skippedNoSchedule = 0
+      let skippedSingleScanNoMapel = 0
+
+      const addHadirIfMissing = (student, mapel) => {
+        if (!mapel?.mapel) return false
+
+        const key = `${student.id}|${mapel.mapel}`
+        if (existingKey.has(key)) return false
+
+        absensiInserts.push({
+          kelas: student.kelas,
+          tanggal,
+          uid: student.id,
+          mapel: mapel.mapel,
+          status: 'Hadir',
+          nama: student.nama,
+          oleh: 'SYSTEM_RFID'
+        })
+        existingKey.add(key)
+        return true
+      }
 
       for (const student of allStudents || []) {
         const scanData = scanMap[student.id]
@@ -972,39 +1048,28 @@ export default function Scan() {
           a.jam_mulai.localeCompare(b.jam_mulai)
         )
 
-        if (!jadwalSiswa.length) continue
+        if (!jadwalSiswa.length) {
+          if (scanData) skippedNoSchedule += 1
+          continue
+        }
 
         if (scanData) {
           if (scanData.masuk && scanData.pulang) {
             jadwalSiswa.forEach((mapel) => {
-              const key = `${student.id}|${mapel.mapel}`
-              if (!existingKey.has(key)) {
-                absensiInserts.push({
-                  kelas: student.kelas,
-                  tanggal,
-                  uid: student.id,
-                  mapel: mapel.mapel,
-                  status: 'Hadir',
-                  nama: student.nama,
-                  oleh: 'SYSTEM_RFID'
-                })
-              }
+              addHadirIfMissing(student, mapel)
             })
-          } else if (scanData.masuk && !scanData.pulang) {
-            const first = jadwalSiswa[0]
-            if (first) {
-              const key = `${student.id}|${first.mapel}`
-              if (!existingKey.has(key)) {
-                absensiInserts.push({
-                  kelas: student.kelas,
-                  tanggal,
-                  uid: student.id,
-                  mapel: first.mapel,
-                  status: 'Hadir',
-                  nama: student.nama,
-                  oleh: 'SYSTEM_RFID'
-                })
-              }
+          } else {
+            const session = scanData.masuk ? 'masuk' : 'pulang'
+            const relevantMapel = findRelevantMapelForSingleScan(
+              jadwalSiswa,
+              scanData[session],
+              session
+            )
+
+            if (relevantMapel) {
+              addHadirIfMissing(student, relevantMapel)
+            } else {
+              skippedSingleScanNoMapel += 1
             }
           }
         } else if (autoAlphaEnabled) {
@@ -1020,6 +1085,7 @@ export default function Scan() {
                 nama: student.nama,
                 oleh: 'SYSTEM_RFID'
               })
+              existingKey.add(key)
             }
           })
         }
@@ -1034,13 +1100,29 @@ export default function Scan() {
 
         pushToast(
           'success',
-          `${absensiInserts.length} data absensi berhasil disimpan!`
+          [
+            `${absensiInserts.length} data absensi berhasil disimpan!`,
+            skippedSingleScanNoMapel > 0
+              ? `${skippedSingleScanNoMapel} scan satu sisi tidak punya mapel aktif/terdekat.`
+              : '',
+            skippedNoSchedule > 0
+              ? `${skippedNoSchedule} siswa scan di kelas yang tidak punya jadwal hari ini.`
+              : ''
+          ].filter(Boolean).join(' ')
         )
         loadKelasData(tanggal)
       } else {
         pushToast(
           'info',
-          'Tidak ada data absensi baru untuk disimpan.'
+          [
+            'Tidak ada data absensi baru untuk disimpan.',
+            skippedSingleScanNoMapel > 0
+              ? `${skippedSingleScanNoMapel} scan satu sisi tidak punya mapel aktif/terdekat.`
+              : '',
+            skippedNoSchedule > 0
+              ? `${skippedNoSchedule} siswa scan di kelas yang tidak punya jadwal hari ini.`
+              : ''
+          ].filter(Boolean).join(' ')
         )
       }
     } catch (error) {
@@ -1203,13 +1285,13 @@ export default function Scan() {
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 py-6">
       <div className="w-full space-y-8 px-4 sm:px-6 lg:px-8">
         {/* Header */}
-        <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
+        <div className="page-title-card">
           <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">
+              <h1 className="page-title-heading">
                 Scan & Absensi RFID
               </h1>
-              <p className="text-gray-600 mt-1">
+              <p className="page-title-description">
                 Kelola kehadiran siswa melalui scan kartu RFID dan
                 pantau riwayat kehadiran
               </p>

@@ -100,11 +100,18 @@ const AuditTrail = () => {
 
   return (
     <div className="p-6 space-y-6">
-      <div className="space-y-1">
-        <h1 className="text-2xl font-bold text-slate-900">Audit Trail Super Admin</h1>
-        <p className="text-sm text-slate-600">
-          Pantau perubahan data lintas tenant beserta deteksi anomali.
-        </p>
+      <div className="page-title-card">
+        <div className="flex items-center gap-4">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-100 text-sm font-bold text-blue-700">
+            AT
+          </div>
+          <div>
+            <h1 className="page-title-heading">Audit Trail Super Admin</h1>
+            <p className="page-title-description">
+              Pantau perubahan data lintas tenant beserta deteksi anomali.
+            </p>
+          </div>
+        </div>
       </div>
 
       <form onSubmit={handleApplyFilter} className="rounded-2xl border border-slate-200 bg-white p-4 grid grid-cols-1 md:grid-cols-4 gap-3">

@@ -41,6 +41,14 @@ const routeEntries = Object.entries(routeLoaders).sort(
 const prefetchedModules = new Map()
 const LOW_BANDWIDTH_TYPES = new Set(['slow-2g', '2g'])
 
+const getConnection = () => (
+  typeof navigator === 'undefined'
+    ? null
+    : navigator.connection ||
+      navigator.mozConnection ||
+      navigator.webkitConnection
+)
+
 const normalizeRoutePath = (path = '') => {
   const normalized = String(path || '').trim()
   if (!normalized) return ''
@@ -63,15 +71,25 @@ const canPrefetchRoutes = () => {
     return false
   }
 
-  const connection =
-    navigator.connection ||
-    navigator.mozConnection ||
-    navigator.webkitConnection
+  const connection = getConnection()
 
   if (connection?.saveData) return false
   if (LOW_BANDWIDTH_TYPES.has(connection?.effectiveType)) return false
 
   return true
+}
+
+const resolveAutoPrefetchMax = (requestedMax) => {
+  const safeRequestedMax = Math.max(1, Number(requestedMax) || 1)
+  const connection = getConnection()
+  const deviceMemory = typeof navigator === 'undefined'
+    ? 0
+    : Number(navigator.deviceMemory || 0)
+  const constrainedDevice = deviceMemory > 0 && deviceMemory <= 4
+  const constrainedConnection = connection?.effectiveType === '3g'
+  const ceiling = constrainedDevice || constrainedConnection ? 1 : 2
+
+  return Math.min(safeRequestedMax, ceiling)
 }
 
 export const lazyRoute = (path) => {
@@ -115,32 +133,56 @@ export const scheduleRoutePrefetch = (paths, options = {}) => {
     return () => {}
   }
 
-  const max = Math.max(1, Number(options.max) || uniquePaths.length)
+  const max = resolveAutoPrefetchMax(options.max || uniquePaths.length)
+  const queue = uniquePaths.slice(0, max)
+  const delay = Math.max(300, Number(options.delay) || 1200)
+  const gap = Math.max(400, Number(options.gap) || 900)
+  const timeout = Math.max(1000, Number(options.timeout) || 2500)
   let cancelled = false
+  let cursor = 0
+  let timer = null
+  let idleHandle = null
 
-  const run = () => {
-    if (cancelled) return
-    uniquePaths.slice(0, max).forEach((path) => {
-      void prefetchRoute(path)
-    })
-  }
-
-  if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
-    const handle = window.requestIdleCallback(run, {
-      timeout: Number(options.timeout) || 1500
-    })
-
-    return () => {
-      cancelled = true
-      if (typeof window.cancelIdleCallback === 'function') {
-        window.cancelIdleCallback(handle)
-      }
+  const clearScheduled = () => {
+    if (timer !== null) {
+      window.clearTimeout(timer)
+      timer = null
+    }
+    if (idleHandle !== null && typeof window.cancelIdleCallback === 'function') {
+      window.cancelIdleCallback(idleHandle)
+      idleHandle = null
     }
   }
 
-  const timer = window.setTimeout(run, Number(options.delay) || 250)
+  const scheduleIdle = (callback) => {
+    clearScheduled()
+    if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+      idleHandle = window.requestIdleCallback(callback, { timeout })
+      return
+    }
+    timer = window.setTimeout(callback, 0)
+  }
+
+  const runNext = () => {
+    idleHandle = null
+    if (cancelled) return
+
+    const path = queue[cursor]
+    if (!path) return
+
+    void prefetchRoute(path)
+      .catch(() => {})
+      .finally(() => {
+        cursor += 1
+        if (cancelled || cursor >= queue.length) return
+        timer = window.setTimeout(() => scheduleIdle(runNext), gap)
+      })
+  }
+
+  timer = window.setTimeout(() => scheduleIdle(runNext), delay)
+
   return () => {
     cancelled = true
-    window.clearTimeout(timer)
+    clearScheduled()
   }
 }

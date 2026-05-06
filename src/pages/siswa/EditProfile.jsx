@@ -998,17 +998,17 @@ export default function EditProfile() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-purple-50/30 p-4 sm:p-6">
       <div className="max-w-full mx-auto space-y-6">
         {/* HEADER */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-6">
+        <div className="page-title-card">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
             <div className="flex items-center gap-5">
               <div className="w-16 h-16 bg-gradient-to-br from-purple-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg">
                 <span className="text-2xl text-white">👤</span>
               </div>
               <div>
-                <h1 className="text-3xl font-bold text-slate-800 mb-2">
+                <h1 className="page-title-heading">
                   Profil Siswa
                 </h1>
-                <p className="text-slate-600 text-base">Kelola informasi profil dan foto Anda dengan aman</p>
+                <p className="page-title-description">Kelola informasi profil dan foto Anda dengan aman</p>
               </div>
             </div>
 

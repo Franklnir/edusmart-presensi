@@ -96,6 +96,38 @@ class GoogleDriveService
         ];
     }
 
+    public function canUploadAssignmentDocument(Request $request, string $bucket, UploadedFile $file): bool
+    {
+        $fileName = (string) ($file->getClientOriginalName() ?: '');
+        $mime = (string) ($file->getMimeType() ?: $file->getClientMimeType() ?: '');
+
+        return $this->canUploadAssignmentDocumentMetadata($request, $bucket, $fileName, $mime);
+    }
+
+    public function canUploadAssignmentDocumentMetadata(Request $request, string $bucket, string $fileName, string $mime = ''): bool
+    {
+        if ($bucket !== 'assignments' || ! $this->shouldSendFileMetadataToDrive($fileName, $mime)) {
+            return false;
+        }
+        if (! $this->providerConfigured() || ! $this->tablesReady()) {
+            return false;
+        }
+
+        $tenantId = trim((string) $request->attributes->get('tenant_id', ''));
+        if ($tenantId === '') {
+            return false;
+        }
+
+        $config = TenantGoogleDriveConfig::query()
+            ->where('tenant_id', $tenantId)
+            ->where('is_enabled', true)
+            ->first();
+
+        return $config
+            && $config->status === self::STATUS_CONNECTED
+            && trim((string) ($config->refresh_token ?? '')) !== '';
+    }
+
     public function consumeOAuthCallback(Request $request): array
     {
         $state = trim((string) $request->query('state', ''));
@@ -275,10 +307,13 @@ class GoogleDriveService
 
         $config = $this->ensureSchoolFolder($config);
         $accessToken = $this->validAccessToken($config);
-        $folderId = trim((string) ($config->drive_folder_id ?? ''));
-        if ($folderId === '') {
+        $schoolFolderId = trim((string) ($config->drive_folder_id ?? ''));
+        if ($schoolFolderId === '') {
             throw new RuntimeException('Folder Google Drive sekolah belum siap.');
         }
+        $targetFolder = $this->ensureAssignmentUploadFolder($accessToken, $schoolFolderId, $sourcePath);
+        $folderId = (string) ($targetFolder['id'] ?? $schoolFolderId);
+        $folderPath = (string) ($targetFolder['path'] ?? '');
 
         $safeName = $this->safeFilename($file->getClientOriginalName() ?: basename($sourcePath));
         $mime = (string) ($file->getMimeType() ?: $file->getClientMimeType() ?: 'application/octet-stream');
@@ -292,6 +327,7 @@ class GoogleDriveService
                 'tenant_id' => $tenantId,
                 'source_path' => $sourcePath,
                 'bucket' => $bucket,
+                'folder_path' => $folderPath,
             ],
         ];
 
@@ -357,9 +393,12 @@ class GoogleDriveService
             'fullPath' => $webViewLink,
             'bucket' => $bucket,
             'provider' => 'google_drive',
+            'providerLabel' => 'Google Drive',
             'driveFileId' => $fileId,
             'driveFileName' => $record->drive_file_name,
             'driveWebViewLink' => $webViewLink,
+            'driveFolderId' => $folderId,
+            'driveFolderPath' => $folderPath,
             'uploadedSizeBytes' => $sizeBytes,
             'uploadedSizeLabel' => $this->formatBytes($sizeBytes),
         ];
@@ -538,12 +577,29 @@ class GoogleDriveService
             throw new RuntimeException('Google Drive belum dikonfigurasi di server.');
         }
 
+        $token = $this->validAccessToken($config);
         $folderId = trim((string) ($config->drive_folder_id ?? ''));
         if ($folderId !== '') {
-            return $config;
+            $folder = $this->fetchExistingFolder($token, $folderId);
+            if ($folder) {
+                $config->fill([
+                    'drive_folder_name' => (string) ($folder['name'] ?? $config->drive_folder_name),
+                    'drive_folder_web_url' => (string) ($folder['webViewLink'] ?? $config->drive_folder_web_url),
+                    'status' => self::STATUS_CONNECTED,
+                    'last_error' => null,
+                ]);
+                $config->save();
+
+                return $config->fresh();
+            }
+
+            $config->fill([
+                'drive_folder_id' => null,
+                'drive_folder_web_url' => null,
+            ]);
+            $config->save();
         }
 
-        $token = $this->validAccessToken($config);
         $folderName = trim((string) ($config->drive_folder_name ?? '')) ?: $this->defaultFolderName('Sekolah');
         $response = Http::withToken($token)
             ->acceptJson()
@@ -569,6 +625,148 @@ class GoogleDriveService
         $config->save();
 
         return $config->fresh();
+    }
+
+    private function fetchExistingFolder(string $accessToken, string $folderId): ?array
+    {
+        $response = Http::withToken($accessToken)
+            ->acceptJson()
+            ->timeout(20)
+            ->get('https://www.googleapis.com/drive/v3/files/'.rawurlencode($folderId), [
+                'fields' => 'id,name,mimeType,webViewLink,trashed',
+            ]);
+
+        if ($response->successful()) {
+            $data = (array) $response->json();
+            $isFolder = (string) ($data['mimeType'] ?? '') === self::DRIVE_FOLDER_MIME;
+            $isTrashed = (bool) ($data['trashed'] ?? false);
+
+            return $isFolder && ! $isTrashed ? $data : null;
+        }
+
+        if (in_array($response->status(), [403, 404], true)) {
+            return null;
+        }
+
+        throw new RuntimeException($this->googleErrorMessage($response->json(), 'Gagal memeriksa folder Google Drive sekolah.'));
+    }
+
+    private function ensureAssignmentUploadFolder(string $accessToken, string $schoolFolderId, string $sourcePath): array
+    {
+        $segments = $this->assignmentFolderSegments($sourcePath);
+        $parentId = $schoolFolderId;
+        $path = [];
+
+        foreach ($segments as $segment) {
+            $folderName = $this->safeDriveFolderName($segment);
+            if ($folderName === '') {
+                continue;
+            }
+
+            $folder = $this->findChildFolder($accessToken, $parentId, $folderName)
+                ?: $this->createChildFolder($accessToken, $parentId, $folderName, $sourcePath);
+
+            $parentId = (string) ($folder['id'] ?? $parentId);
+            $path[] = (string) ($folder['name'] ?? $folderName);
+        }
+
+        return [
+            'id' => $parentId,
+            'path' => implode('/', $path),
+        ];
+    }
+
+    private function assignmentFolderSegments(string $sourcePath): array
+    {
+        $parts = array_values(array_filter(explode('/', trim($sourcePath, '/')), static fn ($part) => trim($part) !== ''));
+        $first = (string) ($parts[0] ?? '');
+
+        if ($first === 'tugas_lampiran') {
+            $teacherId = $this->folderLabel('Guru', (string) ($parts[1] ?? 'tanpa-user'));
+
+            return ['Tugas', 'Lampiran Guru', $teacherId];
+        }
+
+        $taskId = $this->folderLabel('Tugas', $first !== '' ? $first : 'tanpa-id');
+        $filename = (string) ($parts[1] ?? '');
+        $studentId = 'tanpa-user';
+        if (preg_match('/^([0-9a-fA-F-]{32,36})-/', $filename, $matches)) {
+            $studentId = (string) $matches[1];
+        }
+
+        return ['Tugas', 'Jawaban Siswa', $taskId, $this->folderLabel('Siswa', $studentId)];
+    }
+
+    private function folderLabel(string $prefix, string $value): string
+    {
+        $cleanValue = trim($value);
+        if ($cleanValue === '') {
+            $cleanValue = 'tanpa-id';
+        }
+
+        return $prefix.' '.$cleanValue;
+    }
+
+    private function findChildFolder(string $accessToken, string $parentId, string $folderName): ?array
+    {
+        $query = sprintf(
+            "'%s' in parents and mimeType = '%s' and name = '%s' and trashed = false",
+            $this->driveQueryLiteral($parentId),
+            self::DRIVE_FOLDER_MIME,
+            $this->driveQueryLiteral($folderName)
+        );
+
+        $response = Http::withToken($accessToken)
+            ->acceptJson()
+            ->timeout(20)
+            ->get('https://www.googleapis.com/drive/v3/files', [
+                'q' => $query,
+                'spaces' => 'drive',
+                'pageSize' => 1,
+                'fields' => 'files(id,name,webViewLink)',
+            ]);
+
+        if (! $response->successful()) {
+            throw new RuntimeException($this->googleErrorMessage($response->json(), 'Gagal memeriksa struktur folder Google Drive.'));
+        }
+
+        $files = (array) ($response->json('files') ?? []);
+        $folder = $files[0] ?? null;
+
+        return is_array($folder) ? $folder : null;
+    }
+
+    private function createChildFolder(string $accessToken, string $parentId, string $folderName, string $sourcePath): array
+    {
+        $response = Http::withToken($accessToken)
+            ->acceptJson()
+            ->timeout(20)
+            ->post('https://www.googleapis.com/drive/v3/files?fields=id,name,webViewLink', [
+                'name' => $folderName,
+                'mimeType' => self::DRIVE_FOLDER_MIME,
+                'parents' => [$parentId],
+                'description' => 'Folder EduSmart Presensi untuk '.$sourcePath,
+            ]);
+
+        if (! $response->successful()) {
+            throw new RuntimeException($this->googleErrorMessage($response->json(), 'Gagal membuat struktur folder Google Drive.'));
+        }
+
+        return (array) $response->json();
+    }
+
+    private function driveQueryLiteral(string $value): string
+    {
+        return str_replace(["\\", "'"], ["\\\\", "\\'"], $value);
+    }
+
+    private function safeDriveFolderName(string $value): string
+    {
+        $name = preg_replace('/[<>:"\/\\\\|?*\x00-\x1F]+/', '-', trim($value)) ?: '';
+        $name = preg_replace('/\s+/', ' ', $name) ?: '';
+        $name = trim($name, " .-\t\n\r\0\x0B");
+
+        return Str::limit($name, 100, '');
     }
 
     private function syncQuota(TenantGoogleDriveConfig $config): TenantGoogleDriveConfig
@@ -719,8 +917,16 @@ class GoogleDriveService
 
     private function shouldSendFileToDrive(UploadedFile $file): bool
     {
-        $extension = $this->fileExtension($file->getClientOriginalName());
-        $mime = strtolower(trim((string) ($file->getMimeType() ?: $file->getClientMimeType() ?: '')));
+        return $this->shouldSendFileMetadataToDrive(
+            (string) $file->getClientOriginalName(),
+            (string) ($file->getMimeType() ?: $file->getClientMimeType() ?: '')
+        );
+    }
+
+    private function shouldSendFileMetadataToDrive(string $fileName, string $mime = ''): bool
+    {
+        $extension = $this->fileExtension($fileName);
+        $mime = strtolower(trim($mime));
 
         if ($mime !== '' && str_starts_with($mime, 'image/')) {
             return false;

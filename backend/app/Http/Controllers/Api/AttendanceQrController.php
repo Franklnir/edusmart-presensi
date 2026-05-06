@@ -2,10 +2,12 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Support\AcademicPeriod;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use RuntimeException;
 
@@ -216,7 +218,7 @@ class AttendanceQrController extends ApiController
                     return ['existing' => $existing];
                 }
 
-                $id = DB::table('absensi')->insertGetId([
+                $insert = [
                     'tenant_id' => $tenantId,
                     'kelas' => $profile->kelas,
                     'tanggal' => $now->toDateString(),
@@ -227,7 +229,17 @@ class AttendanceQrController extends ApiController
                     'waktu' => $now,
                     'komentar' => 'Hadir via QR absensi',
                     'oleh' => 'qr:'.((string) ($jadwal->guru_id ?? '')),
-                ]);
+                ];
+
+                $period = $this->currentAcademicPeriodForTenant($tenantId);
+                if (Schema::hasColumn('absensi', 'tahun_ajaran')) {
+                    $insert['tahun_ajaran'] = $period['tahun_ajaran'];
+                }
+                if (Schema::hasColumn('absensi', 'semester')) {
+                    $insert['semester'] = $period['semester'];
+                }
+
+                $id = DB::table('absensi')->insertGetId($insert);
 
                 $row = DB::table('absensi')
                     ->where('tenant_id', $tenantId)
@@ -272,6 +284,20 @@ class AttendanceQrController extends ApiController
             ->where('id', $scheduleId)
             ->where('kelas_id', $classId)
             ->first();
+    }
+
+    private function currentAcademicPeriodForTenant(?string $tenantId): array
+    {
+        $settings = null;
+        if (Schema::hasTable('settings')) {
+            $query = DB::table('settings')->orderBy('id');
+            if ($tenantId && Schema::hasColumn('settings', 'tenant_id')) {
+                $query->where('tenant_id', $tenantId);
+            }
+            $settings = $query->first(['tahun_ajaran', 'semester_aktif']);
+        }
+
+        return AcademicPeriod::fromSettings($settings);
     }
 
     private function activeClassWindow(object $jadwal, Carbon $now): array

@@ -7,6 +7,7 @@ use App\Models\Profile;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class ApiController extends Controller
 {
@@ -181,6 +182,141 @@ class ApiController extends Controller
         } catch (\Throwable $e) {
             // jangan block proses utama jika audit gagal
         }
+    }
+
+    protected function syncTeacherDisplayNameSnapshots(
+        string $tenantId,
+        string $teacherId,
+        string $displayName,
+        Carbon $now
+    ): array {
+        $teacherName = preg_replace('/\s+/', ' ', trim($displayName)) ?? '';
+        if ($tenantId === '' || $teacherId === '' || $teacherName === '') {
+            return [
+                'jadwal' => 0,
+                'kelas_struktur' => 0,
+                'struktur_sekolah' => 0,
+                'organisasi' => 0,
+                'absensi_ajuan' => 0,
+            ];
+        }
+
+        return [
+            'jadwal' => $this->updateTenantSnapshotTable(
+                'jadwal',
+                ['guru_id' => $teacherId],
+                ['guru_nama' => $teacherName, 'updated_at' => $now],
+                $tenantId
+            ),
+            'kelas_struktur' => $this->updateTenantSnapshotTable(
+                'kelas_struktur',
+                ['wali_guru_id' => $teacherId],
+                ['wali_guru_nama' => $teacherName, 'updated_at' => $now],
+                $tenantId
+            ),
+            'struktur_sekolah' => $this->updateTenantSnapshotTable(
+                'struktur_sekolah',
+                ['guru_id' => $teacherId],
+                ['guru_nama' => $teacherName, 'updated_at' => $now],
+                $tenantId
+            ),
+            'organisasi' => $this->updateTenantSnapshotTable(
+                'organisasi',
+                ['pembina_guru_id' => $teacherId],
+                ['pembina_guru_nama' => $teacherName, 'updated_at' => $now],
+                $tenantId
+            ),
+            'absensi_ajuan' => $this->updateTenantSnapshotTable(
+                'absensi_ajuan',
+                ['guru_id' => $teacherId],
+                ['guru_nama' => $teacherName],
+                $tenantId
+            ),
+        ];
+    }
+
+    protected function updateTenantSnapshotTable(
+        string $table,
+        array $matches,
+        array $values,
+        string $tenantId
+    ): int {
+        try {
+            if (! Schema::hasTable($table)) {
+                return 0;
+            }
+
+            $query = DB::table($table);
+            if (Schema::hasColumn($table, 'tenant_id')) {
+                $query->where('tenant_id', $tenantId);
+            }
+
+            foreach ($matches as $column => $value) {
+                if (! Schema::hasColumn($table, $column)) {
+                    return 0;
+                }
+                $query->where($column, $value);
+            }
+
+            $payload = [];
+            foreach ($values as $column => $value) {
+                if (Schema::hasColumn($table, $column)) {
+                    $payload[$column] = $value;
+                }
+            }
+
+            if (empty($payload)) {
+                return 0;
+            }
+
+            return $query->update($payload);
+        } catch (\Throwable $e) {
+            return 0;
+        }
+    }
+
+    protected function syncStudentDisplayNameSnapshots(
+        string $tenantId,
+        string $studentId,
+        string $displayName,
+        Carbon $now
+    ): array {
+        $studentName = preg_replace('/\s+/', ' ', trim($displayName)) ?? '';
+        if ($tenantId === '' || $studentId === '' || $studentName === '') {
+            return [
+                'kelas_struktur' => 0,
+                'organisasi_anggota' => 0,
+                'absensi' => 0,
+                'absensi_ajuan' => 0,
+            ];
+        }
+
+        return [
+            'kelas_struktur' => $this->updateTenantSnapshotTable(
+                'kelas_struktur',
+                ['ketua_siswa_id' => $studentId],
+                ['ketua_siswa_nama' => $studentName, 'updated_at' => $now],
+                $tenantId
+            ),
+            'organisasi_anggota' => $this->updateTenantSnapshotTable(
+                'organisasi_anggota',
+                ['siswa_id' => $studentId],
+                ['nama' => $studentName, 'updated_at' => $now],
+                $tenantId
+            ),
+            'absensi' => $this->updateTenantSnapshotTable(
+                'absensi',
+                ['uid' => $studentId],
+                ['nama' => $studentName],
+                $tenantId
+            ),
+            'absensi_ajuan' => $this->updateTenantSnapshotTable(
+                'absensi_ajuan',
+                ['uid' => $studentId],
+                ['nama' => $studentName],
+                $tenantId
+            ),
+        ];
     }
 
     protected function getNilaiFreezeState(Request $request): ?array

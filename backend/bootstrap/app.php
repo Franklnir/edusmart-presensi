@@ -49,6 +49,7 @@ return Application::configure(basePath: dirname(__DIR__))
         );
         $middleware->append(\Illuminate\Http\Middleware\HandleCors::class);
         $middleware->append(\App\Http\Middleware\SecureHeaders::class);
+        $middleware->append(\App\Http\Middleware\BlockSuspiciousRequests::class);
         $middleware->api(append: [
             \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
             \App\Http\Middleware\ResolveTenant::class,

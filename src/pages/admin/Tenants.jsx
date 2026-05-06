@@ -53,6 +53,49 @@ const BACKUP_PERIOD_OPTIONS = [
   { value: '24', label: '24 Bulan Terakhir' }
 ]
 
+const STANDARD_RFID_MQTT_TOPICS = {
+  scan: 'edusmart/{tenant}/rfid/scan',
+  response: 'edusmart/{tenant}/rfid/response',
+  mode: 'edusmart/{tenant}/rfid/mode'
+}
+
+const MQTT_BROKER_PRESETS = [
+  {
+    key: 'hivemq',
+    label: 'HiveMQ Cloud',
+    helper: 'TLS verified, port 8883',
+    values: {
+      port: '8883',
+      useTls: true,
+      tlsVerifyPeer: true,
+      tlsVerifyPeerName: true,
+      tlsAllowSelfSigned: false,
+      qos: '1',
+      clientIdPrefix: 'edusmart-rfid-bridge',
+      connectTimeout: '20',
+      socketTimeout: '5',
+      keepAlive: '20'
+    }
+  },
+  {
+    key: 'self-signed',
+    label: 'Self-signed TLS',
+    helper: 'TLS aktif, verifikasi sertifikat nonaktif',
+    values: {
+      port: '8883',
+      useTls: true,
+      tlsVerifyPeer: false,
+      tlsVerifyPeerName: false,
+      tlsAllowSelfSigned: true,
+      qos: '1',
+      clientIdPrefix: 'edusmart-rfid-bridge',
+      connectTimeout: '20',
+      socketTimeout: '5',
+      keepAlive: '20'
+    }
+  }
+]
+
 const RFID_MQTT_FORM_DEFAULTS = {
   enabled: true,
   host: '',
@@ -66,12 +109,24 @@ const RFID_MQTT_FORM_DEFAULTS = {
   tlsAllowSelfSigned: false,
   qos: '1',
   clientIdPrefix: 'edusmart-rfid-bridge',
-  scanTopicTemplate: 'edusmart/{tenant}/rfid/scan',
-  responseTopicTemplate: 'edusmart/{tenant}/rfid/response',
-  modeTopicTemplate: 'edusmart/{tenant}/rfid/mode',
+  scanTopicTemplate: STANDARD_RFID_MQTT_TOPICS.scan,
+  responseTopicTemplate: STANDARD_RFID_MQTT_TOPICS.response,
+  modeTopicTemplate: STANDARD_RFID_MQTT_TOPICS.mode,
   connectTimeout: '20',
   socketTimeout: '5',
   keepAlive: '20'
+}
+
+const withStandardMqttTopics = (form = {}) => ({
+  ...form,
+  scanTopicTemplate: STANDARD_RFID_MQTT_TOPICS.scan,
+  responseTopicTemplate: STANDARD_RFID_MQTT_TOPICS.response,
+  modeTopicTemplate: STANDARD_RFID_MQTT_TOPICS.mode
+})
+
+const renderMqttTopicTemplate = (template, tenantSlug = '') => {
+  const slug = String(tenantSlug || '').trim() || '{tenant}'
+  return String(template || '').replace('{tenant}', slug)
 }
 
 const TENANT_STATUS_OPTIONS = [
@@ -145,11 +200,13 @@ const replaceBoolConst = (source, name, value) =>
     `const bool ${name} = ${value ? 'true' : 'false'};`
   )
 
-const buildTenantRfidArduinoCode = (template) => {
+const buildTenantRfidArduinoCode = (template, wifi = {}) => {
   if (!template?.available) return ''
   if (!template?.mqtt?.host || !template?.mqtt?.username || !template?.mqtt?.password) return ''
 
   let source = rfidArduinoTemplateSource
+  source = replaceCStringConst(source, 'WIFI_SSID', wifi?.ssid || 'YOUR_WIFI_SSID')
+  source = replaceCStringConst(source, 'WIFI_PASS', wifi?.password || 'YOUR_WIFI_PASSWORD')
   source = replaceCStringConst(source, 'TENANT_SLUG', template?.tenant_slug || '')
   source = replaceCStringConst(source, 'DEVICE_ID', template?.device_id || '')
   source = replaceCStringConst(source, 'FIRMWARE_VERSION', template?.firmware_version || '2.0.0-mqtt-only')
@@ -166,27 +223,25 @@ const buildTenantRfidArduinoCode = (template) => {
   return source
 }
 
-const mqttFormFromConfig = (config = {}) => ({
-  ...RFID_MQTT_FORM_DEFAULTS,
-  enabled: config?.enabled !== false,
-  host: String(config?.host || ''),
-  port: String(config?.port || RFID_MQTT_FORM_DEFAULTS.port),
-  username: String(config?.username || ''),
-  password: '',
-  clearPassword: false,
-  useTls: config?.use_tls !== false,
-  tlsVerifyPeer: config?.tls_verify_peer !== false,
-  tlsVerifyPeerName: config?.tls_verify_peer_name !== false,
-  tlsAllowSelfSigned: Boolean(config?.tls_allow_self_signed),
-  qos: String(Number.isFinite(Number(config?.qos)) ? Number(config.qos) : RFID_MQTT_FORM_DEFAULTS.qos),
-  clientIdPrefix: String(config?.client_id_prefix || RFID_MQTT_FORM_DEFAULTS.clientIdPrefix),
-  scanTopicTemplate: String(config?.scan_topic_template || RFID_MQTT_FORM_DEFAULTS.scanTopicTemplate),
-  responseTopicTemplate: String(config?.response_topic_template || RFID_MQTT_FORM_DEFAULTS.responseTopicTemplate),
-  modeTopicTemplate: String(config?.mode_topic_template || RFID_MQTT_FORM_DEFAULTS.modeTopicTemplate),
-  connectTimeout: String(config?.connect_timeout || RFID_MQTT_FORM_DEFAULTS.connectTimeout),
-  socketTimeout: String(config?.socket_timeout || RFID_MQTT_FORM_DEFAULTS.socketTimeout),
-  keepAlive: String(config?.keep_alive || RFID_MQTT_FORM_DEFAULTS.keepAlive)
-})
+const mqttFormFromConfig = (config = {}) =>
+  withStandardMqttTopics({
+    ...RFID_MQTT_FORM_DEFAULTS,
+    enabled: config?.enabled !== false,
+    host: String(config?.host || ''),
+    port: String(config?.port || RFID_MQTT_FORM_DEFAULTS.port),
+    username: String(config?.username || ''),
+    password: '',
+    clearPassword: false,
+    useTls: config?.use_tls !== false,
+    tlsVerifyPeer: config?.tls_verify_peer !== false,
+    tlsVerifyPeerName: config?.tls_verify_peer_name !== false,
+    tlsAllowSelfSigned: Boolean(config?.tls_allow_self_signed),
+    qos: String(Number.isFinite(Number(config?.qos)) ? Number(config.qos) : RFID_MQTT_FORM_DEFAULTS.qos),
+    clientIdPrefix: String(config?.client_id_prefix || RFID_MQTT_FORM_DEFAULTS.clientIdPrefix),
+    connectTimeout: String(config?.connect_timeout || RFID_MQTT_FORM_DEFAULTS.connectTimeout),
+    socketTimeout: String(config?.socket_timeout || RFID_MQTT_FORM_DEFAULTS.socketTimeout),
+    keepAlive: String(config?.keep_alive || RFID_MQTT_FORM_DEFAULTS.keepAlive)
+  })
 
 const copyText = async (text) => {
   const value = String(text || '')
@@ -463,6 +518,10 @@ const Tenants = () => {
   const [mqttForm, setMqttForm] = useState(RFID_MQTT_FORM_DEFAULTS)
   const [mqttSaving, setMqttSaving] = useState(false)
   const [mosquittoProvisioning, setMosquittoProvisioning] = useState(false)
+  const [rfidWifiForm, setRfidWifiForm] = useState({
+    ssid: '',
+    password: ''
+  })
   const [restoreLoading, setRestoreLoading] = useState(false)
   const [restoreApplying, setRestoreApplying] = useState(false)
   const [restoreFileName, setRestoreFileName] = useState('')
@@ -651,6 +710,23 @@ const Tenants = () => {
     setMqttForm((prev) => ({ ...prev, [field]: value }))
   }
 
+  const handleMqttPreset = (preset) => {
+    if (!preset?.values) return
+    setMqttForm((prev) =>
+      withStandardMqttTopics({
+        ...prev,
+        ...preset.values,
+        clearPassword: false
+      })
+    )
+    pushToast('success', `Preset ${preset.label} diterapkan`)
+  }
+
+  const handleRfidWifiField = (field) => (event) => {
+    const value = event.target.value
+    setRfidWifiForm((prev) => ({ ...prev, [field]: value }))
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (saving) return
@@ -700,6 +776,7 @@ const Tenants = () => {
     setPrimaryAdminSavingByUser({})
     resetTenantDomainForm()
     setMqttForm(RFID_MQTT_FORM_DEFAULTS)
+    setRfidWifiForm({ ssid: '', password: '' })
     setRestorePreview(null)
     setRestorePayload(null)
     setRestoreFileName('')
@@ -805,10 +882,9 @@ const Tenants = () => {
       tls_allow_self_signed: Boolean(mqttForm.tlsAllowSelfSigned),
       qos: Number(mqttForm.qos || 1),
       client_id_prefix: mqttForm.clientIdPrefix.trim() || RFID_MQTT_FORM_DEFAULTS.clientIdPrefix,
-      scan_topic_template: mqttForm.scanTopicTemplate.trim() || RFID_MQTT_FORM_DEFAULTS.scanTopicTemplate,
-      response_topic_template:
-        mqttForm.responseTopicTemplate.trim() || RFID_MQTT_FORM_DEFAULTS.responseTopicTemplate,
-      mode_topic_template: mqttForm.modeTopicTemplate.trim() || RFID_MQTT_FORM_DEFAULTS.modeTopicTemplate,
+      scan_topic_template: STANDARD_RFID_MQTT_TOPICS.scan,
+      response_topic_template: STANDARD_RFID_MQTT_TOPICS.response,
+      mode_topic_template: STANDARD_RFID_MQTT_TOPICS.mode,
       connect_timeout: Number(mqttForm.connectTimeout || 20),
       socket_timeout: Number(mqttForm.socketTimeout || 5),
       keep_alive: Number(mqttForm.keepAlive || 20)
@@ -1199,10 +1275,35 @@ const Tenants = () => {
 
   const detailRfidTemplate = tenantDetail?.rfid_template || null
   const detailRfidMqttConfig = tenantDetail?.rfid_mqtt_config || {}
-  const rfidArduinoCode = useMemo(
-    () => buildTenantRfidArduinoCode(detailRfidTemplate),
-    [detailRfidTemplate]
+  const detailTenantSlug = tenantDetail?.tenant?.slug || detailRfidTemplate?.tenant_slug || ''
+  const mqttTopicPreview = useMemo(
+    () => [
+      {
+        key: 'scan',
+        label: 'Scan',
+        template: STANDARD_RFID_MQTT_TOPICS.scan,
+        preview: renderMqttTopicTemplate(STANDARD_RFID_MQTT_TOPICS.scan, detailTenantSlug)
+      },
+      {
+        key: 'response',
+        label: 'Response',
+        template: STANDARD_RFID_MQTT_TOPICS.response,
+        preview: renderMqttTopicTemplate(STANDARD_RFID_MQTT_TOPICS.response, detailTenantSlug)
+      },
+      {
+        key: 'mode',
+        label: 'Mode',
+        template: STANDARD_RFID_MQTT_TOPICS.mode,
+        preview: renderMqttTopicTemplate(STANDARD_RFID_MQTT_TOPICS.mode, detailTenantSlug)
+      }
+    ],
+    [detailTenantSlug]
   )
+  const rfidArduinoCode = useMemo(
+    () => buildTenantRfidArduinoCode(detailRfidTemplate, rfidWifiForm),
+    [detailRfidTemplate, rfidWifiForm]
+  )
+  const rfidWifiReady = rfidWifiForm.ssid.trim() !== '' && rfidWifiForm.password.trim() !== ''
 
   const handleCopyRfidArduinoCode = async () => {
     if (!rfidArduinoCode) {
@@ -1213,9 +1314,9 @@ const Tenants = () => {
     try {
       const copied = await copyText(rfidArduinoCode)
       if (!copied) throw new Error('Clipboard tidak tersedia')
-      pushToast('success', 'Template Arduino RFID berhasil dicopy')
+      pushToast('success', 'Kode Arduino RFID siap flash berhasil dicopy')
     } catch (err) {
-      pushToast('error', err?.message || 'Gagal menyalin template Arduino RFID')
+      pushToast('error', err?.message || 'Gagal menyalin kode Arduino RFID')
     }
   }
 
@@ -1301,471 +1402,484 @@ const Tenants = () => {
       description: `Host admin dipisah di ${adminHostExample} supaya akses tenant dan super admin tidak tercampur.`
     }
   ]
+  const tenantSummary = tenants.reduce(
+    (summary, tenant) => {
+      const status = String(tenant?.status || '').toLowerCase()
+      return {
+        total: summary.total + 1,
+        active: summary.active + (status === 'active' ? 1 : 0),
+        suspended: summary.suspended + (status === 'suspended' ? 1 : 0),
+        archived: summary.archived + (status === 'archived' ? 1 : 0),
+        driveReady: summary.driveReady + (tenant?.google_drive?.ready ? 1 : 0)
+      }
+    },
+    { total: 0, active: 0, suspended: 0, archived: 0, driveReady: 0 }
+  )
+  const selectedTenantRow = tenants.find((tenant) => tenant.id === selectedTenantId)
+  const readyAdminDomains = adminDomains.filter((domain) => domain?.status === 'ready').length
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex flex-col gap-2">
-        <h1 className="text-2xl font-bold text-slate-900">Panel Super Admin</h1>
-        <p className="text-sm text-slate-600">
-          Buat sekolah baru, lihat ringkasan tenant, dan kelola admin sekolah.
-        </p>
-      </div>
-
-      <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white rounded-2xl p-6 shadow-sm">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div className="max-w-3xl">
-            <h2 className="text-lg font-semibold">Alur Tambah Sekolah & Domain</h2>
-            <p className="text-sm text-slate-200 mt-1">
-              Halaman ini sudah disusun untuk alur bisnis langganan sekolah: buat tenant dulu, aktifkan subdomain bawaan, lalu tambah domain sendiri kalau sekolah minta branding khusus.
+      <div className="page-title-card">
+        <div className="flex items-center gap-4">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-100 text-sm font-bold text-blue-700">
+            TN
+          </div>
+          <div>
+            <h1 className="page-title-heading">Panel Super Admin</h1>
+            <p className="page-title-description">
+              Buat sekolah baru, lihat ringkasan tenant, dan kelola admin sekolah.
             </p>
           </div>
-          <div className="rounded-xl bg-white/10 border border-white/15 px-4 py-3 text-sm text-slate-100">
-            <p className="font-semibold">Contoh cepat</p>
-            <p className="mt-1">{builtinTenantExample}</p>
-            <p>{customTenantExample}</p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-[1.2fr,1fr] gap-4 mt-5">
-          <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
-            <h3 className="text-sm font-semibold text-white">Langkah onboarding tenant</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
-              {onboardingSteps.map((step, index) => (
-                <div key={step} className="rounded-xl bg-white/5 border border-white/10 px-4 py-3">
-                  <p className="text-[11px] uppercase tracking-wide text-slate-300">Langkah {index + 1}</p>
-                  <p className="text-sm text-slate-100 mt-1">{step}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
-            <h3 className="text-sm font-semibold text-white">Pilihan setup tenant</h3>
-            <div className="space-y-3 mt-3">
-              {onboardingModes.map((item) => (
-                <div key={item.title} className="rounded-xl bg-white/5 border border-white/10 px-4 py-3">
-                  <p className="text-sm font-semibold text-white">{item.title}</p>
-                  <p className="text-sm text-slate-200 mt-1">{item.description}</p>
-                </div>
-              ))}
-            </div>
-          </div>
         </div>
       </div>
 
-      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-slate-900 mb-4">Buat Sekolah</h2>
-        <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <label className="text-sm font-semibold text-slate-700">Nama Sekolah</label>
-            <input
-              type="text"
-              value={form.name}
-              onChange={handleChange('name')}
-              placeholder="Contoh: SMA Negeri 1"
-              className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-          </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <p className="text-xs font-semibold text-slate-500">Total Sekolah</p>
+          <p className="mt-2 text-2xl font-bold text-slate-900">{numberFormatter.format(tenantSummary.total)}</p>
+        </div>
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 shadow-sm">
+          <p className="text-xs font-semibold text-emerald-700">Aktif</p>
+          <p className="mt-2 text-2xl font-bold text-emerald-800">{numberFormatter.format(tenantSummary.active)}</p>
+        </div>
+        <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 shadow-sm">
+          <p className="text-xs font-semibold text-amber-700">Suspended</p>
+          <p className="mt-2 text-2xl font-bold text-amber-800">{numberFormatter.format(tenantSummary.suspended)}</p>
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <p className="text-xs font-semibold text-slate-500">Drive Siap</p>
+          <p className="mt-2 text-2xl font-bold text-slate-900">{numberFormatter.format(tenantSummary.driveReady)}</p>
+        </div>
+        <div className="rounded-2xl border border-indigo-200 bg-indigo-50/70 p-4 shadow-sm">
+          <p className="text-xs font-semibold text-indigo-700">Host Admin Ready</p>
+          <p className="mt-2 text-2xl font-bold text-indigo-800">{numberFormatter.format(readyAdminDomains)}</p>
+        </div>
+      </div>
 
-          <div className="space-y-2">
-            <label className="text-sm font-semibold text-slate-700">Subdomain Sekolah</label>
-            <input
-              type="text"
-              value={form.slug}
-              onChange={handleChange('slug')}
-              placeholder="contoh: sma1"
-              className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-            {previewDomain && (
-              <p className="text-xs text-slate-500">
-                URL sekolah: <span className="font-semibold">{previewDomain}</span>
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_390px]">
+        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-col gap-3 border-b border-slate-100 p-5 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">Daftar Sekolah</h2>
+              <p className="mt-1 text-sm text-slate-600">
+                Pilih sekolah untuk melihat admin, domain, storage, backup, dan konfigurasi perangkat.
               </p>
-            )}
-            <p className="text-xs text-slate-500">
-              Tenant baru langsung aktif di subdomain ini. Domain sekolah sendiri bisa ditambahkan belakangan dari detail tenant.
-            </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {selectedTenantId && (
+                <span className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700">
+                  Dipilih: {selectedTenantRow?.name || detailTenant?.name || 'Sekolah'}
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={loadTenants}
+                className="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Refresh
+              </button>
+            </div>
           </div>
 
-          <div className="space-y-2">
-            <label className="text-sm font-semibold text-slate-700">Nama Admin Sekolah</label>
-            <input
-              type="text"
-              value={form.adminName}
-              onChange={handleChange('adminName')}
-              placeholder="Nama admin"
-              className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-          </div>
+          {loading ? (
+            <div className="p-5 text-sm text-slate-500">Memuat data sekolah...</div>
+          ) : tenants.length === 0 ? (
+            <div className="p-5 text-sm text-slate-500">Belum ada sekolah.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-100 bg-slate-50/70 text-left text-xs uppercase tracking-wide text-slate-500">
+                    <th className="px-5 py-3">Sekolah</th>
+                    <th className="px-5 py-3">Subdomain</th>
+                    <th className="px-5 py-3">Status</th>
+                    <th className="px-5 py-3">Google Drive</th>
+                    <th className="px-5 py-3">Dibuat</th>
+                    <th className="px-5 py-3 text-right">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-slate-700">
+                  {tenants.map((tenant) => (
+                    <tr
+                      key={tenant.id}
+                      className={`cursor-pointer transition hover:bg-slate-50 ${
+                        selectedTenantId === tenant.id ? 'bg-indigo-50/80' : 'bg-white'
+                      }`}
+                      onClick={() => handleSelectTenant(tenant.id)}
+                    >
+                      <td className="px-5 py-4">
+                        <p className="font-semibold text-slate-900">{tenant.name || '-'}</p>
+                        <p className="mt-1 text-xs text-slate-500">{tenant.id}</p>
+                      </td>
+                      <td className="px-5 py-4">
+                        <p className="font-medium text-slate-900">
+                          {tenant.slug ? `${tenant.slug}.${rootDomain}` : '-'}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">Slug: {tenant.slug || '-'}</p>
+                      </td>
+                      <td className="px-5 py-4">
+                        <span
+                          className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${tenantStatusBadgeClass(
+                            tenant.status
+                          )}`}
+                        >
+                          {tenant.status || 'unknown'}
+                        </span>
+                      </td>
+                      <td className="px-5 py-4">
+                        <div className="flex flex-col gap-1">
+                          <span className={`w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${driveStatusBadgeClass(tenant.google_drive)}`}>
+                            {tenant.google_drive?.ready ? 'Siap' : tenant.google_drive?.status_label || 'Belum'}
+                          </span>
+                          <span className="text-[11px] text-slate-500">
+                            {tenant.google_drive?.quota?.used_label || '0 B'}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-5 py-4 text-slate-500">{formatDateTime(tenant.created_at)}</td>
+                      <td className="px-5 py-4 text-right">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleSelectTenant(tenant.id)
+                          }}
+                          className="rounded-full border border-indigo-200 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50"
+                        >
+                          Kelola
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
 
-          <div className="space-y-2">
-            <label className="text-sm font-semibold text-slate-700">Email Admin</label>
-            <input
-              type="email"
-              value={form.adminEmail}
-              onChange={handleChange('adminEmail')}
-              placeholder="admin@sekolah.com"
-              className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-          </div>
+        <aside className="space-y-6">
+          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">Buat Sekolah</h2>
+              <p className="mt-1 text-sm text-slate-600">
+                Buat tenant, subdomain bawaan, dan akun admin sekolah dalam satu langkah.
+              </p>
+            </div>
 
-          <div className="space-y-2">
-            <label className="text-sm font-semibold text-slate-700">Password Admin</label>
-            <PasswordInput
-              value={form.adminPassword}
-              onChange={handleChange('adminPassword')}
-              placeholder="Minimal 6 karakter"
-              className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-          </div>
+            <form onSubmit={handleSubmit} className="mt-5 space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-sm font-semibold text-slate-700">Nama Sekolah</label>
+                <input
+                  type="text"
+                  value={form.name}
+                  onChange={handleChange('name')}
+                  placeholder="Contoh: SMA Negeri 1"
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-semibold text-slate-700">Subdomain Sekolah</label>
+                <input
+                  type="text"
+                  value={form.slug}
+                  onChange={handleChange('slug')}
+                  placeholder="contoh: sma1"
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                <p className="text-xs text-slate-500">
+                  URL: <span className="font-semibold">{previewDomain || builtinTenantExample}</span>
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-semibold text-slate-700">Nama Admin</label>
+                <input
+                  type="text"
+                  value={form.adminName}
+                  onChange={handleChange('adminName')}
+                  placeholder="Nama admin"
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-semibold text-slate-700">Email Admin</label>
+                <input
+                  type="email"
+                  value={form.adminEmail}
+                  onChange={handleChange('adminEmail')}
+                  placeholder="admin@sekolah.com"
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-semibold text-slate-700">Password Admin</label>
+                <PasswordInput
+                  value={form.adminPassword}
+                  onChange={handleChange('adminPassword')}
+                  placeholder="Minimal 6 karakter"
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={saving}
+                className="w-full rounded-lg bg-indigo-600 px-5 py-2.5 font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
+              >
+                {saving ? 'Menyimpan...' : 'Buat Sekolah'}
+              </button>
+            </form>
+          </section>
 
-          <div className="flex items-end">
-            <button
-              type="submit"
-              disabled={saving}
-              className="w-full md:w-auto px-5 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700 disabled:opacity-60"
-            >
-              {saving ? 'Menyimpan...' : 'Buat Sekolah'}
-            </button>
-          </div>
-        </form>
-        <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-            <p className="text-xs font-semibold text-slate-700">Saat tenant dibuat</p>
-            <p className="text-sm text-slate-600 mt-1">
-              Sekolah langsung punya website, akun admin, dan URL tenant bawaan tanpa setup registrar.
-            </p>
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-            <p className="text-xs font-semibold text-slate-700">Kalau sekolah pakai domain sendiri</p>
-            <p className="text-sm text-slate-600 mt-1">
-              Buat tenant dulu, lalu masuk ke detail tenant dan tambahkan custom domain setelah data pelanggan siap.
-            </p>
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-            <p className="text-xs font-semibold text-slate-700">Slug tenant</p>
-            <p className="text-sm text-slate-600 mt-1">
-              Gunakan slug singkat dan unik, misalnya `smabali`, `smkn1jogja`, atau `sekolahalam`.
-            </p>
-          </div>
-        </div>
+          <section className="rounded-2xl border border-slate-200 bg-slate-900 p-5 text-white shadow-sm">
+            <h2 className="text-base font-semibold">Panduan Onboarding</h2>
+            <div className="mt-4 space-y-3">
+              {onboardingSteps.map((step, index) => (
+                <div key={step} className="flex gap-3 rounded-xl border border-white/10 bg-white/5 p-3">
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white text-xs font-bold text-slate-900">
+                    {index + 1}
+                  </span>
+                  <p className="text-sm leading-6 text-slate-100">{step}</p>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 grid gap-2">
+              {onboardingModes.map((item) => (
+                <div key={item.title} className="rounded-xl bg-white/5 px-3 py-2">
+                  <p className="text-sm font-semibold text-white">{item.title}</p>
+                  <p className="mt-1 text-xs leading-5 text-slate-300">{item.description}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+        </aside>
       </div>
 
-      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-5">
+      <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-slate-900">Domain & DNS Platform</h2>
-            <p className="text-sm text-slate-600 mt-1">
-              Kelola host panel super admin, lihat target DNS utama, dan siapkan onboarding domain tanpa perlu ubah kode lagi.
+            <h2 className="text-lg font-semibold text-slate-900">Konfigurasi Platform & DNS</h2>
+            <p className="mt-1 text-sm text-slate-600">
+              Pantau host admin, target DNS, dan domain platform dari satu area operasional.
             </p>
           </div>
           <button
             type="button"
             onClick={() => loadPlatformDomains()}
             disabled={platformLoading}
-            className="text-xs px-3 py-1.5 rounded-full border border-slate-200 hover:bg-slate-50 disabled:opacity-60"
+            className="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
           >
             {platformLoading ? 'Memuat...' : 'Refresh Domain'}
           </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-          <div className="rounded-xl border border-slate-200 p-4">
-            <p className="text-xs text-slate-500">Root Domain Tenant</p>
-            <p className="text-sm font-semibold text-slate-900 mt-1">
-              {platformOverview.root_domain || rootDomain || 'Belum diatur'}
-            </p>
-          </div>
-          <div className="rounded-xl border border-slate-200 p-4">
-            <p className="text-xs text-slate-500">Host Admin Default</p>
-            <p className="text-sm font-semibold text-slate-900 mt-1">
-              {platformOverview.default_admin_host || 'Belum diatur'}
-            </p>
-          </div>
-          <div className="rounded-xl border border-slate-200 p-4">
-            <p className="text-xs text-slate-500">Wildcard Tenant</p>
-            <p className="text-sm font-semibold text-slate-900 mt-1">
-              {platformOverview.wildcard_example || 'Belum diatur'}
-            </p>
-          </div>
-          <div className="rounded-xl border border-slate-200 p-4">
-            <p className="text-xs text-slate-500">Skema Publik</p>
-            <p className="text-sm font-semibold text-slate-900 mt-1">
-              {platformOverview.public_scheme || 'https'}
-            </p>
-          </div>
-          <div className="rounded-xl border border-slate-200 p-4 md:col-span-2 xl:col-span-4">
-            <p className="text-xs text-slate-500">Host WhatsApp / Evolution</p>
-            <p className="text-sm font-semibold text-slate-900 mt-1">
-              {platformOverview.evolution_host || 'Belum diatur'}
-            </p>
-            {platformOverview.evolution_url && (
-              <p className="text-xs text-slate-500 mt-1">{platformOverview.evolution_url}</p>
-            )}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold text-slate-900">Target DNS Default</h3>
-            <span className="text-[11px] px-2 py-1 rounded-full bg-indigo-100 text-indigo-700 border border-indigo-200">
-              {platformOverview.manual_dns_mode ? 'Mode verifikasi manual' : 'Mode otomatis'}
-            </span>
-          </div>
-          <div className="space-y-2">
-            {platformDnsRecords.length === 0 ? (
-              <p className="text-sm text-slate-500">
-                Target DNS belum tersedia. Isi `TENANT_DNS_A_RECORD` atau `TENANT_DNS_CNAME_TARGET` di env production.
-              </p>
-            ) : (
-              platformDnsRecords.map((record, index) => (
-                <div
-                  key={`${record.host}-${record.type}-${index}`}
-                  className="rounded-xl border border-slate-200 bg-white px-3 py-2"
-                >
-                  <p className="text-xs text-slate-500">{record.label || 'Record'}</p>
-                  <p className="text-sm font-semibold text-slate-900 mt-0.5">
-                    {record.host} {record.type} {record.value}
-                  </p>
-                </div>
-              ))
-            )}
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs text-slate-500">
-            {platformNotes.map((note) => (
-              <div key={note} className="rounded-xl border border-slate-200 bg-white px-3 py-2">
-                {note}
+        <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+                <p className="text-xs text-slate-500">Root Domain Tenant</p>
+                <p className="mt-1 text-sm font-semibold text-slate-900">
+                  {platformOverview.root_domain || rootDomain || 'Belum diatur'}
+                </p>
               </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-          <div className="rounded-xl border border-slate-200 bg-emerald-50/50 px-4 py-3">
-            <p className="text-xs font-semibold text-emerald-700">Contoh tenant cepat</p>
-            <p className="text-sm text-slate-700 mt-1">{builtinTenantExample}</p>
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-blue-50/50 px-4 py-3">
-            <p className="text-xs font-semibold text-blue-700">Contoh domain sekolah</p>
-            <p className="text-sm text-slate-700 mt-1">{customTenantExample}</p>
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-amber-50/50 px-4 py-3">
-            <p className="text-xs font-semibold text-amber-700">Contoh panel admin</p>
-            <p className="text-sm text-slate-700 mt-1">{adminHostExample}</p>
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-            <p className="text-xs font-semibold text-slate-700">Cara tambah sekolah baru</p>
-            <p className="text-sm text-slate-600 mt-1">
-              Buat tenant dulu, kirim URL bawaan ke sekolah, lalu upgrade ke domain sendiri jika mereka minta.
-            </p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 xl:grid-cols-[1.4fr,0.9fr] gap-4">
-          <div className="rounded-2xl border border-slate-200 p-4 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold text-slate-900">Custom Host Super Admin</h3>
-              <span className="text-xs text-slate-500">
-                {adminDomains.length} host tambahan
-              </span>
+              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+                <p className="text-xs text-slate-500">Host Admin Default</p>
+                <p className="mt-1 text-sm font-semibold text-slate-900">
+                  {platformOverview.default_admin_host || 'Belum diatur'}
+                </p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+                <p className="text-xs text-slate-500">Wildcard Tenant</p>
+                <p className="mt-1 text-sm font-semibold text-slate-900">
+                  {platformOverview.wildcard_example || 'Belum diatur'}
+                </p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+                <p className="text-xs text-slate-500">WhatsApp / Evolution</p>
+                <p className="mt-1 text-sm font-semibold text-slate-900">
+                  {platformOverview.evolution_host || 'Belum diatur'}
+                </p>
+              </div>
             </div>
 
-            {adminDomains.length === 0 ? (
-              <p className="text-sm text-slate-500">
-                Belum ada custom host admin. Host admin default dari env tetap aktif.
-              </p>
-            ) : (
-              <div className="space-y-3">
-                {adminDomains.map((domain) => {
-                  const busy = Boolean(domainActionLoadingById[domain.id])
-                  return (
-                    <div key={domain.id} className="rounded-xl border border-slate-200 p-4 space-y-2">
-                      <div className="flex flex-wrap items-start justify-between gap-2">
-                        <div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="text-sm font-semibold text-slate-900">{domain.host}</p>
-                            {domain.is_primary && (
-                              <span className="text-[11px] px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 border border-indigo-200">
-                                Primary
-                              </span>
-                            )}
-                            <span className={`text-[11px] px-2 py-0.5 rounded-full ${domainStatusBadgeClass(domain.status)}`}>
-                              {domain.status || 'pending'}
-                            </span>
-                            <span className={`text-[11px] px-2 py-0.5 rounded-full ${dnsStatusBadgeClass(domain.last_dns_status)}`}>
-                              DNS {domain.last_dns_status || 'belum dicek'}
-                            </span>
+            <div className="grid gap-4 lg:grid-cols-[0.95fr,1.05fr]">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-semibold text-slate-900">Target DNS Default</h3>
+                  <span className="rounded-full border border-indigo-200 bg-indigo-100 px-2 py-1 text-[11px] text-indigo-700">
+                    {platformOverview.manual_dns_mode ? 'Verifikasi manual' : 'Otomatis'}
+                  </span>
+                </div>
+                <div className="mt-3 space-y-2">
+                  {platformDnsRecords.length === 0 ? (
+                    <p className="text-sm text-slate-500">
+                      Target DNS belum tersedia. Isi `TENANT_DNS_A_RECORD` atau `TENANT_DNS_CNAME_TARGET` di env production.
+                    </p>
+                  ) : (
+                    platformDnsRecords.map((record, index) => (
+                      <div
+                        key={`${record.host}-${record.type}-${index}`}
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-2"
+                      >
+                        <p className="text-xs text-slate-500">{record.label || 'Record'}</p>
+                        <p className="mt-0.5 text-sm font-semibold text-slate-900">
+                          {record.host} {record.type} {record.value}
+                        </p>
+                      </div>
+                    ))
+                  )}
+                </div>
+                {platformNotes.length > 0 && (
+                  <div className="mt-3 grid gap-2 text-xs text-slate-500">
+                    {platformNotes.map((note) => (
+                      <div key={note} className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                        {note}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-semibold text-slate-900">Custom Host Super Admin</h3>
+                  <span className="text-xs text-slate-500">{adminDomains.length} host tambahan</span>
+                </div>
+
+                {adminDomains.length === 0 ? (
+                  <p className="mt-3 text-sm text-slate-500">
+                    Belum ada custom host admin. Host admin default dari env tetap aktif.
+                  </p>
+                ) : (
+                  <div className="mt-3 space-y-3">
+                    {adminDomains.map((domain) => {
+                      const busy = Boolean(domainActionLoadingById[domain.id])
+                      return (
+                        <div key={domain.id} className="rounded-xl border border-slate-200 p-3">
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="text-sm font-semibold text-slate-900">{domain.host}</p>
+                                {domain.is_primary && (
+                                  <span className="rounded-full border border-indigo-200 bg-indigo-100 px-2 py-0.5 text-[11px] text-indigo-700">
+                                    Primary
+                                  </span>
+                                )}
+                                <span className={`rounded-full px-2 py-0.5 text-[11px] ${domainStatusBadgeClass(domain.status)}`}>
+                                  {domain.status || 'pending'}
+                                </span>
+                                <span className={`rounded-full px-2 py-0.5 text-[11px] ${dnsStatusBadgeClass(domain.last_dns_status)}`}>
+                                  DNS {domain.last_dns_status || 'belum dicek'}
+                                </span>
+                              </div>
+                              <p className="mt-1 text-xs text-slate-500">{domain.url}</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleCheckDomain(domain)}
+                                disabled={busy}
+                                className="rounded-full border border-emerald-200 px-3 py-1.5 text-xs text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
+                              >
+                                {busy ? 'Cek...' : 'Cek DNS'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteDomain(domain)}
+                                disabled={busy}
+                                className="rounded-full border border-rose-200 px-3 py-1.5 text-xs text-rose-700 hover:bg-rose-50 disabled:opacity-60"
+                              >
+                                Hapus
+                              </button>
+                            </div>
                           </div>
-                          <p className="text-xs text-slate-500 mt-1">
-                            {domain.url}
-                          </p>
+                          <div className="mt-3 grid gap-2 text-xs md:grid-cols-2">
+                            <div className="rounded-lg bg-slate-50 px-3 py-2">
+                              <p className="text-slate-500">Expected DNS</p>
+                              <p className="mt-1 text-slate-800">{formatDnsRecords(domain.expected_records)}</p>
+                            </div>
+                            <div className="rounded-lg bg-slate-50 px-3 py-2">
+                              <p className="text-slate-500">Observed DNS</p>
+                              <p className="mt-1 text-slate-800">{formatDnsRecords(domain.observed_records)}</p>
+                            </div>
+                          </div>
+                          {domain.last_dns_error && (
+                            <p className="mt-2 text-xs text-rose-600">{domain.last_dns_error}</p>
+                          )}
                         </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleCheckDomain(domain)}
-                            disabled={busy}
-                            className="text-xs px-3 py-1.5 rounded-full border border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
-                          >
-                            {busy ? 'Cek...' : 'Cek DNS'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteDomain(domain)}
-                            disabled={busy}
-                            className="text-xs px-3 py-1.5 rounded-full border border-rose-200 text-rose-700 hover:bg-rose-50 disabled:opacity-60"
-                          >
-                            Hapus
-                          </button>
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-                        <div className="rounded-lg bg-slate-50 px-3 py-2">
-                          <p className="text-slate-500">Expected DNS</p>
-                          <p className="text-slate-800 mt-1">{formatDnsRecords(domain.expected_records)}</p>
-                        </div>
-                        <div className="rounded-lg bg-slate-50 px-3 py-2">
-                          <p className="text-slate-500">Observed DNS</p>
-                          <p className="text-slate-800 mt-1">{formatDnsRecords(domain.observed_records)}</p>
-                        </div>
-                      </div>
-                      {domain.last_dns_error && (
-                        <p className="text-xs text-rose-600">{domain.last_dns_error}</p>
-                      )}
-                    </div>
-                  )
-                })}
+                      )
+                    })}
+                  </div>
+                )}
               </div>
-            )}
+            </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-200 p-4">
-            <h3 className="text-sm font-semibold text-slate-900">Tambah Host Admin</h3>
-            <p className="text-xs text-slate-500 mt-1">
-              Cocok untuk domain seperti `panel.sekolahkamu.com` atau `admin.grupkamu.id`.
-            </p>
-            <form onSubmit={handleCreateAdminDomain} className="mt-4 space-y-3">
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-600">Host</label>
-                <input
-                  type="text"
-                  value={adminDomainForm.host}
-                  onChange={handleAdminDomainField('host')}
-                  placeholder="panel.sekolahkamu.com"
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
+          <aside className="space-y-4">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+              <h3 className="text-sm font-semibold text-slate-900">Referensi Cepat</h3>
+              <div className="mt-3 space-y-2 text-sm">
+                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                  <p className="text-xs font-semibold text-emerald-700">Tenant cepat</p>
+                  <p className="mt-1 text-slate-700">{builtinTenantExample}</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                  <p className="text-xs font-semibold text-blue-700">Domain sekolah</p>
+                  <p className="mt-1 text-slate-700">{customTenantExample}</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                  <p className="text-xs font-semibold text-amber-700">Panel admin</p>
+                  <p className="mt-1 text-slate-700">{adminHostExample}</p>
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-600">Catatan</label>
-                <textarea
-                  value={adminDomainForm.notes}
-                  onChange={handleAdminDomainField('notes')}
-                  rows={3}
-                  placeholder="Opsional: catatan penggunaan host ini"
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-              <label className="flex items-center gap-2 text-xs text-slate-600">
-                <input
-                  type="checkbox"
-                  checked={adminDomainForm.isPrimary}
-                  onChange={handleAdminDomainField('isPrimary')}
-                  className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                />
-                Jadikan host admin utama
-              </label>
-              <button
-                type="submit"
-                disabled={platformSaving}
-                className="w-full px-4 py-2.5 rounded-lg bg-slate-900 text-white font-semibold hover:bg-slate-800 disabled:opacity-60"
-              >
-                {platformSaving ? 'Menyimpan...' : 'Simpan Host Admin'}
-              </button>
-            </form>
-          </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 p-4">
+              <h3 className="text-sm font-semibold text-slate-900">Tambah Host Admin</h3>
+              <p className="mt-1 text-xs text-slate-500">
+                Cocok untuk domain seperti `panel.sekolahkamu.com` atau `admin.grupkamu.id`.
+              </p>
+              <form onSubmit={handleCreateAdminDomain} className="mt-4 space-y-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-600">Host</label>
+                  <input
+                    type="text"
+                    value={adminDomainForm.host}
+                    onChange={handleAdminDomainField('host')}
+                    placeholder="panel.sekolahkamu.com"
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-600">Catatan</label>
+                  <textarea
+                    value={adminDomainForm.notes}
+                    onChange={handleAdminDomainField('notes')}
+                    rows={3}
+                    placeholder="Opsional: catatan penggunaan host ini"
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <label className="flex items-center gap-2 text-xs text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={adminDomainForm.isPrimary}
+                    onChange={handleAdminDomainField('isPrimary')}
+                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  Jadikan host admin utama
+                </label>
+                <button
+                  type="submit"
+                  disabled={platformSaving}
+                  className="w-full rounded-lg bg-slate-900 px-4 py-2.5 font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+                >
+                  {platformSaving ? 'Menyimpan...' : 'Simpan Host Admin'}
+                </button>
+              </form>
+            </div>
+          </aside>
         </div>
-      </div>
-
-      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-slate-900">Daftar Sekolah</h2>
-          <button
-            type="button"
-            onClick={loadTenants}
-            className="text-xs px-3 py-1.5 rounded-full border border-slate-200 hover:bg-slate-50"
-          >
-            Refresh
-          </button>
-        </div>
-
-        {loading ? (
-          <div className="text-sm text-slate-500">Memuat data sekolah...</div>
-        ) : tenants.length === 0 ? (
-          <div className="text-sm text-slate-500">Belum ada sekolah.</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead>
-                <tr className="text-left text-slate-500">
-                  <th className="py-2 pr-4">Sekolah</th>
-                  <th className="py-2 pr-4">Subdomain</th>
-                  <th className="py-2 pr-4">Status</th>
-                  <th className="py-2 pr-4">Google Drive</th>
-                  <th className="py-2 pr-4">Dibuat</th>
-                  <th className="py-2 pr-4">Aksi</th>
-                </tr>
-              </thead>
-              <tbody className="text-slate-700">
-                {tenants.map((tenant) => (
-                  <tr
-                    key={tenant.id}
-                    className={`border-t border-slate-100 cursor-pointer hover:bg-slate-50 ${
-                      selectedTenantId === tenant.id ? 'bg-indigo-50/70' : ''
-                    }`}
-                    onClick={() => handleSelectTenant(tenant.id)}
-                  >
-                    <td className="py-2 pr-4 font-semibold text-slate-900">{tenant.name || '-'}</td>
-                    <td className="py-2 pr-4">
-                      {tenant.slug ? `${tenant.slug}.${rootDomain}` : '-'}
-                    </td>
-                    <td className="py-2 pr-4">
-                      <span
-                        className={`text-xs px-2 py-0.5 rounded-full ${tenantStatusBadgeClass(
-                          tenant.status
-                        )}`}
-                      >
-                        {tenant.status || 'unknown'}
-                      </span>
-                    </td>
-                    <td className="py-2 pr-4">
-                      <div className="flex flex-col gap-1">
-                        <span className={`w-fit text-xs px-2 py-0.5 rounded-full ${driveStatusBadgeClass(tenant.google_drive)}`}>
-                          {tenant.google_drive?.ready ? 'Siap' : tenant.google_drive?.status_label || 'Belum'}
-                        </span>
-                        <span className="text-[11px] text-slate-500">
-                          {tenant.google_drive?.quota?.used_label || '0 B'}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="py-2 pr-4 text-slate-500">{formatDateTime(tenant.created_at)}</td>
-                    <td className="py-2 pr-4">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleSelectTenant(tenant.id)
-                        }}
-                        className="text-xs px-3 py-1.5 rounded-full border border-indigo-200 text-indigo-700 hover:bg-indigo-50"
-                      >
-                        Detail
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      </section>
 
       {selectedTenantId && (
         <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
@@ -1910,6 +2024,7 @@ const Tenants = () => {
                   setPrimaryAdminSavingByUser({})
                   resetTenantDomainForm()
                   setMqttForm(RFID_MQTT_FORM_DEFAULTS)
+                  setRfidWifiForm({ ssid: '', password: '' })
                   setRestorePayload(null)
                   setRestoreFileName('')
                   setRestorePreview(null)
@@ -2000,6 +2115,30 @@ const Tenants = () => {
                   </div>
                 </div>
 
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                      <p className="text-xs font-semibold text-slate-700">Preset Broker</p>
+                      <p className="text-xs text-slate-500 mt-1">
+                        Pilih preset, lalu isi host, username, dan password broker.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {MQTT_BROKER_PRESETS.map((preset) => (
+                        <button
+                          key={preset.key}
+                          type="button"
+                          onClick={() => handleMqttPreset(preset)}
+                          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-xs hover:border-indigo-200 hover:bg-indigo-50"
+                        >
+                          <span className="block font-semibold text-slate-900">{preset.label}</span>
+                          <span className="block text-slate-500 mt-0.5">{preset.helper}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
                   <label className="space-y-1">
                     <span className="text-xs font-semibold text-slate-700">Host MQTT</span>
@@ -2043,34 +2182,25 @@ const Tenants = () => {
                   </label>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-                  <label className="space-y-1">
-                    <span className="text-xs font-semibold text-slate-700">Topic Scan</span>
-                    <input
-                      type="text"
-                      value={mqttForm.scanTopicTemplate}
-                      onChange={handleMqttField('scanTopicTemplate')}
-                      className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                  </label>
-                  <label className="space-y-1">
-                    <span className="text-xs font-semibold text-slate-700">Topic Response</span>
-                    <input
-                      type="text"
-                      value={mqttForm.responseTopicTemplate}
-                      onChange={handleMqttField('responseTopicTemplate')}
-                      className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                  </label>
-                  <label className="space-y-1">
-                    <span className="text-xs font-semibold text-slate-700">Topic Mode</span>
-                    <input
-                      type="text"
-                      value={mqttForm.modeTopicTemplate}
-                      onChange={handleMqttField('modeTopicTemplate')}
-                      className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                  </label>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-xs font-semibold text-slate-700">Topic RFID Standar</p>
+                      <p className="text-xs text-slate-500 mt-1">Dipakai otomatis oleh backend dan kode Arduino.</p>
+                    </div>
+                    <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600">
+                      Template terkunci
+                    </span>
+                  </div>
+                  <div className="mt-3 grid grid-cols-1 lg:grid-cols-3 gap-3">
+                    {mqttTopicPreview.map((topic) => (
+                      <div key={topic.key} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                        <div className="text-[11px] font-semibold uppercase text-slate-500">{topic.label}</div>
+                        <div className="mt-1 break-all text-sm font-semibold text-slate-900">{topic.preview}</div>
+                        <div className="mt-1 break-all text-[11px] text-slate-500">{topic.template}</div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
@@ -2215,15 +2345,15 @@ const Tenants = () => {
                       disabled={!detailRfidTemplate?.available}
                       className="text-xs px-3 py-1.5 rounded-full border border-amber-200 text-amber-700 hover:bg-amber-50 disabled:opacity-60"
                     >
-                      Copy Secret Opsional
+                      Salin Secret
                     </button>
                     <button
                       type="button"
                       onClick={handleCopyRfidArduinoCode}
                       disabled={!rfidArduinoCode}
-                      className="text-xs px-3 py-1.5 rounded-full border border-indigo-200 text-indigo-700 hover:bg-indigo-50 disabled:opacity-60"
+                      className="text-xs px-3 py-1.5 rounded-full bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60"
                     >
-                      Copy Code Arduino
+                      Salin Code Siap Flash
                     </button>
                   </div>
                 </div>
@@ -2261,6 +2391,45 @@ const Tenants = () => {
                       </div>
                     </div>
 
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <p className="text-xs font-semibold text-slate-700">WiFi Alat</p>
+                          <p className="text-xs text-slate-500 mt-1">Lokal di browser, tidak disimpan ke server.</p>
+                        </div>
+                        <span
+                          className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
+                            rfidWifiReady
+                              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                              : 'border-amber-200 bg-amber-50 text-amber-700'
+                          }`}
+                        >
+                          {rfidWifiReady ? 'WiFi terisi' : 'WiFi placeholder'}
+                        </span>
+                      </div>
+                      <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <label className="space-y-1">
+                          <span className="text-xs font-semibold text-slate-700">WiFi SSID</span>
+                          <input
+                            type="text"
+                            value={rfidWifiForm.ssid}
+                            onChange={handleRfidWifiField('ssid')}
+                            placeholder="Nama WiFi lokasi alat"
+                            className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          />
+                        </label>
+                        <label className="space-y-1">
+                          <span className="text-xs font-semibold text-slate-700">Password WiFi</span>
+                          <PasswordInput
+                            value={rfidWifiForm.password}
+                            onChange={handleRfidWifiField('password')}
+                            placeholder="Password WiFi lokasi alat"
+                            className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          />
+                        </label>
+                      </div>
+                    </div>
+
                     <div className="grid grid-cols-1 xl:grid-cols-[0.95fr,1.35fr] gap-4">
                       <div className="space-y-3">
                         <div className="rounded-xl border border-slate-200 p-4">
@@ -2295,7 +2464,9 @@ const Tenants = () => {
                             </p>
                           ))}
                           <p className="text-xs text-amber-700">
-                            WiFi SSID/password tetap perlu kamu isi manual sesuai lokasi alat.
+                            {rfidWifiReady
+                              ? 'WiFi sudah masuk ke kode Arduino yang akan disalin.'
+                              : 'Kolom WiFi kosong akan memakai placeholder di kode Arduino.'}
                           </p>
                         </div>
                       </div>
@@ -2305,9 +2476,19 @@ const Tenants = () => {
                           <div>
                             <p className="text-sm font-semibold text-slate-900">Code Arduino Siap Copy</p>
                             <p className="text-xs text-slate-500 mt-0.5">
-                              Template ini sudah terisi otomatis untuk sekolah {detailTenant?.name || '-'}.
+                              {rfidWifiReady
+                                ? `Template sudah terisi untuk sekolah ${detailTenant?.name || '-'}.`
+                                : 'WiFi masih memakai placeholder.'}
                             </p>
                           </div>
+                          <button
+                            type="button"
+                            onClick={handleCopyRfidArduinoCode}
+                            disabled={!rfidArduinoCode}
+                            className="shrink-0 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
+                          >
+                            Salin
+                          </button>
                         </div>
                         <pre className="max-h-[34rem] overflow-auto bg-slate-950 text-slate-100 text-[11px] leading-5 p-4 whitespace-pre">
                           {rfidArduinoCode}

@@ -4,6 +4,7 @@ import {
   supabase,
   ASSIGNMENT_BUCKET,
   PROFILE_BUCKET,
+  apiFetch,
   extractObjectPath,
   getSignedUrlForValue,
   removeStorageObject
@@ -12,6 +13,7 @@ import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import FileDropzone from '../../components/FileDropzone'
 import FilePreviewModal from '../../components/FilePreviewModal'
+import UploadProgressTrain from '../../components/UploadProgressTrain'
 import { parseSupabaseError } from '../../utils/supabaseError'
 
 /* =========================
@@ -24,10 +26,10 @@ const MONTH_NAMES_ID = [
 
 const FILE_SIZE_LIMITS = {
   IMAGE: 100 * 1024,
-  PDF: 2 * 1024 * 1024,
-  DOCUMENT: 2 * 1024 * 1024,
-  SPREADSHEET: 2 * 1024 * 1024,
-  PRESENTATION: 3 * 1024 * 1024
+  PDF: 3 * 1024 * 1024,
+  DOCUMENT: 3 * 1024 * 1024,
+  SPREADSHEET: 3 * 1024 * 1024,
+  PRESENTATION: 5 * 1024 * 1024
 }
 
 const isHttpUrl = (v = '') => /^https?:\/\//i.test(String(v || ''))
@@ -64,6 +66,40 @@ const ASSIGNMENT_FILE_ACCEPT = {
   'application/vnd.ms-powerpoint': ['.ppt'],
   'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'],
   'application/vnd.oasis.opendocument.presentation': ['.odp']
+}
+
+const uploadToneForProvider = (provider) => {
+  if (provider === 'google_drive') return 'emerald'
+  if (provider === 'local') return 'red'
+  return 'blue'
+}
+
+const uploadDetailForProvider = (provider, fallback) => {
+  if (provider === 'google_drive') return 'File sedang dikirim ke Google Drive sekolah.'
+  if (provider === 'local') return 'File sedang dikirim ke VPS.'
+  return fallback
+}
+
+const MIN_UPLOAD_ANIMATION_MS = 1400
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+const holdUploadAnimation = async (startedAt) => {
+  const remaining = MIN_UPLOAD_ANIMATION_MS - (Date.now() - startedAt)
+  if (remaining > 0) await wait(remaining)
+}
+
+const resolveAssignmentUploadProvider = async (file) => {
+  const res = await apiFetch('/api/storage/upload-destination', {
+    method: 'POST',
+    body: {
+      bucket: ASSIGNMENT_BUCKET,
+      filename: file?.name || '',
+      mime_type: file?.type || '',
+      size_bytes: file?.size || 0
+    }
+  })
+
+  if (res.error) return 'local'
+  return res.data?.provider === 'google_drive' ? 'google_drive' : 'local'
 }
 
 const addCacheBuster = (url) => {
@@ -426,6 +462,7 @@ export default function TugasGuru() {
   const [isUploadingFile, setIsUploadingFile] = useState(false)
   const [uploadedFileSizeCreate, setUploadedFileSizeCreate] = useState('')
   const [compressionProgress, setCompressionProgress] = useState(null)
+  const [uploadProvider, setUploadProvider] = useState(null)
 
   // History filter
   const [listTugas, setListTugas] = useState([])
@@ -448,6 +485,8 @@ export default function TugasGuru() {
   const [editForm, setEditForm] = useState(null)
   const [uploadedFileSizeEdit, setUploadedFileSizeEdit] = useState('')
   const [editExistingFileSize, setEditExistingFileSize] = useState('')
+  const [editOriginalFile, setEditOriginalFile] = useState('')
+  const [pendingEditFile, setPendingEditFile] = useState(null)
 
   // Sidebar: tasks needing grading
   const [tugasPerluDinilai, setTugasPerluDinilai] = useState([])
@@ -989,9 +1028,15 @@ export default function TugasGuru() {
   const handleFileUpload = async (files, mode = 'create') => {
     if (!files?.length || !user?.id) return
     const file = files[0]
+    const animationStartedAt = Date.now()
 
     try {
       setIsUploadingFile(true)
+      setUploadProvider(null)
+      setCompressionProgress('Mengecek tujuan upload...')
+
+      const plannedProvider = await resolveAssignmentUploadProvider(file)
+      setUploadProvider(plannedProvider)
       setCompressionProgress('Mengkompresi file...')
 
       const compressed = await compressFileBeforeUpload(file)
@@ -1010,28 +1055,39 @@ export default function TugasGuru() {
         throw new Error(uploadError.message || 'Upload ditolak oleh policy storage')
       }
 
-      // Hapus file lama jika ada (hanya file milik guru sendiri)
-      const currentFile = mode === 'edit' ? editForm?.file_url : form.file_url
-      if (currentFile) {
-        try {
-          await deleteTeacherAttachment(currentFile, user.id)
-        } catch (e) {
-          console.warn('Gagal menghapus file lama:', e)
-        }
-      }
-
       const storedFileValue = uploadData?.path || uploadData?.fullPath || filePath
       const sizeLabel = uploadData?.uploadedSizeLabel || formatFileSize(uploadData?.uploadedSizeBytes || compressed.size)
-      setCompressionProgress(null)
+      const storedProvider = uploadData?.provider === 'google_drive' ? 'google_drive' : 'local'
 
       if (mode === 'edit') {
+        const oldPendingFile = pendingEditFile?.value
+        if (oldPendingFile && oldPendingFile !== storedFileValue) {
+          try {
+            await deleteTeacherAttachment(oldPendingFile, user.id)
+          } catch (e) {
+            console.warn('Gagal menghapus file edit sementara:', e)
+          }
+        }
+
         setEditForm((prev) => ({ ...prev, file_url: storedFileValue }))
+        setPendingEditFile({ value: storedFileValue, sizeLabel, provider: storedProvider })
         setUploadedFileSizeEdit(sizeLabel)
         setEditExistingFileSize(sizeLabel)
       } else {
+        const currentFile = form.file_url
+        if (currentFile) {
+          try {
+            await deleteTeacherAttachment(currentFile, user.id)
+          } catch (e) {
+            console.warn('Gagal menghapus file lama:', e)
+          }
+        }
+
         setForm((prev) => ({ ...prev, file_url: storedFileValue }))
         setUploadedFileSizeCreate(sizeLabel)
       }
+
+      setCompressionProgress(null)
 
       pushToast('success', `File berhasil diupload (${sizeLabel})`)
     } catch (error) {
@@ -1045,11 +1101,62 @@ export default function TugasGuru() {
         pushToast('error', `Gagal mengupload file: ${parsed.message}`)
       }
     } finally {
+      await holdUploadAnimation(animationStartedAt)
       setIsUploadingFile(false)
+      setUploadProvider(null)
     }
   }
 
   const handleEditFileUpload = async (files) => handleFileUpload(files, 'edit')
+
+  const discardPendingEditFile = useCallback(async () => {
+    const pendingValue = pendingEditFile?.value
+    if (!pendingValue || !user?.id) return
+
+    try {
+      await deleteTeacherAttachment(pendingValue, user.id)
+    } catch (error) {
+      console.warn('Gagal menghapus file edit sementara:', error)
+    } finally {
+      setPendingEditFile(null)
+    }
+  }, [pendingEditFile?.value, user?.id])
+
+  const resetEditState = useCallback(() => {
+    setIsEditingTugas(false)
+    setEditForm(null)
+    setUploadedFileSizeEdit('')
+    setEditExistingFileSize('')
+    setEditOriginalFile('')
+    setPendingEditFile(null)
+  }, [])
+
+  const cancelEditTugas = useCallback(async () => {
+    await discardPendingEditFile()
+    resetEditState()
+  }, [discardPendingEditFile, resetEditState])
+
+  const closeSelectedTugas = useCallback(async () => {
+    await discardPendingEditFile()
+    setSelectedTugas(null)
+    resetEditState()
+  }, [discardPendingEditFile, resetEditState])
+
+  const removeEditAttachment = useCallback(async () => {
+    const pendingValue = pendingEditFile?.value
+    if (pendingValue && editForm?.file_url === pendingValue && user?.id) {
+      try {
+        await deleteTeacherAttachment(pendingValue, user.id)
+      } catch (e) {
+        console.warn('Gagal menghapus file edit sementara:', e)
+      }
+      setPendingEditFile(null)
+    }
+
+    setEditForm((prev) => ({ ...prev, file_url: '' }))
+    setUploadedFileSizeEdit('')
+    setEditExistingFileSize('')
+  }, [editForm?.file_url, pendingEditFile?.value, user?.id])
 
   /* =========================
      11) Get old file size (edit)
@@ -1152,6 +1259,7 @@ export default function TugasGuru() {
       return
     }
 
+    const originalFile = selectedTugas.file_url || ''
     setEditForm({
       id: selectedTugas.id,
       kelas: selectedTugas.kelas,
@@ -1161,13 +1269,15 @@ export default function TugasGuru() {
       link: selectedTugas.link || '',
       mulai: toDatetimeLocalValue(selectedTugas.mulai || selectedTugas.created_at),
       deadline: toDatetimeLocalValue(selectedTugas.deadline),
-      file_url: selectedTugas.file_url || '',
+      file_url: originalFile,
       created_by: selectedTugas.created_by,
       hasGradedSubmissions: Boolean(selectedTugas.hasGradedSubmissions || (selectedTugas.stats?.sudah || 0) > 0)
     })
     setIsEditingTugas(true)
     setUploadedFileSizeEdit('')
     setEditExistingFileSize('')
+    setEditOriginalFile(originalFile)
+    setPendingEditFile(null)
   }
 
   const simpanEditTugas = async () => {
@@ -1175,8 +1285,7 @@ export default function TugasGuru() {
 
     if (editForm.created_by !== user.id) {
       pushToast('error', 'Anda tidak memiliki akses untuk mengedit tugas ini')
-      setIsEditingTugas(false)
-      setEditForm(null)
+      await cancelEditTugas()
       return
     }
 
@@ -1218,6 +1327,14 @@ export default function TugasGuru() {
 
       if (error) throw error
 
+      if (editOriginalFile && editOriginalFile !== editForm.file_url) {
+        try {
+          await deleteTeacherAttachment(editOriginalFile, user.id)
+        } catch (deleteError) {
+          console.warn('Gagal menghapus file lampiran lama:', deleteError)
+        }
+      }
+
       pushToast('success', 'Tugas berhasil diperbarui')
       setSelectedTugas((prev) => {
         if (!prev) return prev
@@ -1229,6 +1346,8 @@ export default function TugasGuru() {
       setEditForm(null)
       setUploadedFileSizeEdit('')
       setEditExistingFileSize('')
+      setEditOriginalFile('')
+      setPendingEditFile(null)
 
       await loadTugas()
     } catch (error) {
@@ -1281,6 +1400,8 @@ export default function TugasGuru() {
       setEditForm(null)
       setUploadedFileSizeEdit('')
       setEditExistingFileSize('')
+      setEditOriginalFile('')
+      setPendingEditFile(null)
 
       await loadTugas()
       await loadTugasPerluDinilai()
@@ -1625,15 +1746,15 @@ export default function TugasGuru() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50/30 p-4 sm:p-6">
       <div className="max-w-full mx-auto space-y-6">
         {/* HEADER */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-6">
+        <div className="page-title-card">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
             <div className="flex items-center gap-4">
               <div className="w-14 h-14 bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl flex items-center justify-center shadow-lg">
                 <span className="text-2xl text-white">📚</span>
               </div>
               <div>
-                <h1 className="text-2xl lg:text-3xl font-bold text-slate-800 mb-2">Kelola Tugas</h1>
-                <p className="text-slate-600 text-base">Buat, atur, dan nilai tugas untuk siswa Anda</p>
+                <h1 className="page-title-heading">Kelola Tugas</h1>
+                <p className="page-title-description">Buat, atur, dan nilai tugas untuk siswa Anda</p>
               </div>
             </div>
 
@@ -1781,7 +1902,7 @@ export default function TugasGuru() {
                   placeholder="contoh: drive.google.com/... / youtube.com/... / website"
                 />
                 <p className="text-[11px] text-slate-500 mt-1">
-                  Link akan bisa dipreview overlay (Google Drive / YouTube / Website).
+                  Link manual disimpan di database/VPS dan bisa dipreview overlay (Google Drive / YouTube / Website).
                 </p>
               </div>
             </div>
@@ -1789,22 +1910,12 @@ export default function TugasGuru() {
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-2">File Lampiran (opsional)</label>
 
-              {compressionProgress && (
-                <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-xl">
-                  <div className="flex items-center gap-2 text-blue-700 text-sm">
-                    <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                    {compressionProgress}
-                  </div>
-                </div>
-              )}
-
               {isUploadingFile ? (
-                <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl text-slate-600 text-center">
-                  <div className="flex items-center justify-center gap-2">
-                    <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                    <span>Mengupload file...</span>
-                  </div>
-                </div>
+                <UploadProgressTrain
+                  label={compressionProgress || 'Mengupload file...'}
+                  detail={uploadDetailForProvider(uploadProvider, 'Lampiran tugas sedang diproses dan dikirim.')}
+                  tone={uploadToneForProvider(uploadProvider)}
+                />
               ) : form.file_url ? (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded-xl">
@@ -1851,8 +1962,8 @@ export default function TugasGuru() {
                 <p className="text-xs font-semibold text-slate-700 mb-2">📋 Batas Ukuran File:</p>
                 <ul className="text-xs text-slate-600 space-y-1">
                   <li>🖼️ Gambar: maks 100KB (otomatis dikompresi)</li>
-                  <li>📄 PDF/Dokumen: maks 2MB</li>
-                  <li>📊 PPT: maks 3MB</li>
+                  <li>📄 PDF/Dokumen: Drive siap maks 3MB, VPS maks 2MB</li>
+                  <li>📊 PPT: Drive siap maks 5MB, VPS maks 2MB</li>
                 </ul>
               </div>
             </div>
@@ -2183,18 +2294,12 @@ export default function TugasGuru() {
           <div className="fixed inset-0 z-50">
             <div
               className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-              onClick={() => {
-                setSelectedTugas(null)
-                setIsEditingTugas(false)
-                setEditForm(null)
-              }}
+              onClick={() => { void closeSelectedTugas() }}
               role="button"
               tabIndex={0}
               onKeyDown={(e) => {
                 if (e.key === 'Escape') {
-                  setSelectedTugas(null)
-                  setIsEditingTugas(false)
-                  setEditForm(null)
+                  void closeSelectedTugas()
                 }
               }}
             />
@@ -2303,10 +2408,7 @@ export default function TugasGuru() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => {
-                              setIsEditingTugas(false)
-                              setEditForm(null)
-                            }}
+                            onClick={() => { void cancelEditTugas() }}
                             className="px-4 py-2 rounded-2xl bg-white border border-slate-200 text-slate-700 font-semibold hover:bg-slate-50 transition-colors"
                           >
                             ✖️ Batal
@@ -2316,11 +2418,7 @@ export default function TugasGuru() {
 
                       <button
                         type="button"
-                        onClick={() => {
-                          setSelectedTugas(null)
-                          setIsEditingTugas(false)
-                          setEditForm(null)
-                        }}
+                        onClick={() => { void closeSelectedTugas() }}
                         className="px-4 py-2 rounded-2xl bg-white border border-slate-200 text-slate-700 font-semibold hover:bg-slate-50 transition-colors"
                       >
                         ❌ Tutup
@@ -2386,6 +2484,9 @@ export default function TugasGuru() {
                             onChange={(e) => setEditForm((p) => ({ ...p, link: e.target.value }))}
                             placeholder="contoh: drive.google.com/... / youtube.com/... / website"
                           />
+                          <p className="text-[11px] text-slate-500 mt-1">
+                            Link manual disimpan di database/VPS, bukan di Google Drive sekolah.
+                          </p>
                         </div>
                       </div>
 
@@ -2400,17 +2501,7 @@ export default function TugasGuru() {
                               {renderFileButton(editForm.file_url, 'Preview', editExistingFileSize || uploadedFileSizeEdit)}
                               <button
                                 type="button"
-                                onClick={async () => {
-                                  try {
-                                    await deleteTeacherAttachment(editForm.file_url, user.id)
-                                    setEditForm((p) => ({ ...p, file_url: '' }))
-                                    setUploadedFileSizeEdit('')
-                                    setEditExistingFileSize('')
-                                    pushToast('success', 'File berhasil dihapus')
-                                  } catch (e) {
-                                    pushToast('error', `Gagal menghapus file: ${e?.message || 'Unknown error'}`)
-                                  }
-                                }}
+                                onClick={() => { void removeEditAttachment() }}
                                 className="px-4 py-2 rounded-2xl bg-red-600 text-white font-semibold hover:bg-red-700 transition-colors"
                               >
                                 Hapus
@@ -2419,20 +2510,19 @@ export default function TugasGuru() {
                           )}
                         </div>
 
-                        {compressionProgress && (
-                          <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-xl">
-                            <div className="flex items-center gap-2 text-blue-700 text-sm">
-                              <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                              {compressionProgress}
-                            </div>
-                          </div>
+                        {isUploadingFile ? (
+                          <UploadProgressTrain
+                            label={compressionProgress || 'Mengupload file...'}
+                            detail={uploadDetailForProvider(uploadProvider, 'Lampiran tugas sedang diproses dan dikirim.')}
+                            tone={uploadToneForProvider(uploadProvider)}
+                          />
+                        ) : (
+                          <FileDropzone
+                            onFiles={handleEditFileUpload}
+                            accept={ASSIGNMENT_FILE_ACCEPT}
+                            label={editForm.file_url ? 'Ganti file lampiran (opsional)' : 'Seret file lampiran baru ke sini atau klik untuk memilih'}
+                          />
                         )}
-
-                        <FileDropzone
-                          onFiles={handleEditFileUpload}
-                          accept={ASSIGNMENT_FILE_ACCEPT}
-                          label={editForm.file_url ? 'Ganti file lampiran (opsional)' : 'Seret file lampiran baru ke sini atau klik untuk memilih'}
-                        />
                       </div>
                     </div>
                   ) : (

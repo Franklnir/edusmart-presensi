@@ -327,13 +327,13 @@ const AdminSertifikat = () => {
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 text-gray-800 font-sans py-6">
       <div className="w-full space-y-8 px-4 sm:px-6 lg:px-8">
         {/* Navbar */}
-        <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
+        <div className="page-title-card">
           <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
             <div className="flex items-center gap-4">
               <div className="p-3 bg-blue-600 rounded-xl shadow-sm text-white text-2xl">🎓</div>
               <div>
-                <h1 className="text-2xl font-bold text-gray-900 leading-tight">Certificate Pro</h1>
-                <p className="text-gray-600 mt-1">Admin Dashboard Sertifikat</p>
+                <h1 className="page-title-heading">Certificate Pro</h1>
+                <p className="page-title-description">Admin Dashboard Sertifikat</p>
               </div>
             </div>
 

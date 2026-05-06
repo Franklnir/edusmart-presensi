@@ -204,6 +204,7 @@ services:
       - internal
 
   backend:
+    image: edusmart-prod-backend:latest
     build:
       context: .
       dockerfile: backend/docker/Dockerfile.prod
@@ -281,6 +282,10 @@ services:
       AUTH_RATE_LIMIT_PER_MINUTE: ${AUTH_RATE_LIMIT_PER_MINUTE:-12}
       AUTH_IP_RATE_LIMIT_PER_MINUTE: ${AUTH_IP_RATE_LIMIT_PER_MINUTE:-90}
       AUTH_LOGIN_MAX_ATTEMPTS: ${AUTH_LOGIN_MAX_ATTEMPTS:-5}
+      SECURITY_SCANNER_BLOCK_ENABLED: ${SECURITY_SCANNER_BLOCK_ENABLED:-true}
+      SECURITY_SCANNER_BLOCK_AUDIT: ${SECURITY_SCANNER_BLOCK_AUDIT:-true}
+      SECURITY_BLOCKED_IPS: ${SECURITY_BLOCKED_IPS:-}
+      SECURITY_BLOCKED_USER_AGENTS: ${SECURITY_BLOCKED_USER_AGENTS:-sqlmap,nikto,acunetix,nessus,nuclei,zgrab,masscan,dirbuster,gobuster,ffuf,wpscan}
       MAIL_MAILER: ${MAIL_MAILER:-smtp}
       MAIL_SCHEME: ${MAIL_SCHEME:-smtp}
       MAIL_HOST: ${MAIL_HOST:-smtp-relay.brevo.com}
@@ -355,9 +360,7 @@ services:
       - internal
 
   worker:
-    build:
-      context: .
-      dockerfile: backend/docker/Dockerfile.prod
+    image: edusmart-prod-backend:latest
     container_name: edusmart-worker
     restart: unless-stopped
     depends_on:
@@ -427,9 +430,7 @@ services:
       - internal
 
   scheduler:
-    build:
-      context: .
-      dockerfile: backend/docker/Dockerfile.prod
+    image: edusmart-prod-backend:latest
     container_name: edusmart-scheduler
     restart: unless-stopped
     depends_on:
@@ -499,9 +500,7 @@ services:
       - internal
 
   rfid_bridge:
-    build:
-      context: .
-      dockerfile: backend/docker/Dockerfile.prod
+    image: edusmart-prod-backend:latest
     container_name: edusmart-rfid-bridge
     restart: unless-stopped
     depends_on:

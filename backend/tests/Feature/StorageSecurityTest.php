@@ -43,6 +43,42 @@ class StorageSecurityTest extends TestCase
         $response->assertJsonPath('error', 'Ekstensi file tidak diizinkan');
     }
 
+    public function test_assignment_pdf_upload_is_limited_to_two_mb_when_drive_is_not_ready(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        [$user] = $this->createUserWithProfile($tenantId, 'siswa', 'X-1');
+        Sanctum::actingAs($user);
+
+        $response = $this->post('/api/storage/upload', [
+            'bucket' => 'assignments',
+            'path' => 'X-1/'.$user->id.'-large.pdf',
+            'file' => UploadedFile::fake()->create('large.pdf', 4096, 'application/pdf'),
+        ]);
+
+        $response->assertStatus(422);
+        $this->assertStringContainsString('maksimal 2 MB', (string) $response->json('error'));
+    }
+
+    public function test_assignment_presentation_upload_is_limited_to_two_mb_when_drive_is_not_ready(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        [$user] = $this->createUserWithProfile($tenantId, 'siswa', 'X-1');
+        Sanctum::actingAs($user);
+
+        $response = $this->post('/api/storage/upload', [
+            'bucket' => 'assignments',
+            'path' => 'X-1/'.$user->id.'-large.pptx',
+            'file' => UploadedFile::fake()->create(
+                'large.pptx',
+                6144,
+                'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+            ),
+        ]);
+
+        $response->assertStatus(422);
+        $this->assertStringContainsString('maksimal 2 MB', (string) $response->json('error'));
+    }
+
     public function test_guest_object_access_requires_valid_signature(): void
     {
         Storage::fake('local');

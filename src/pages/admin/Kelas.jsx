@@ -3,6 +3,14 @@ import { supabase } from '../../lib/supabase'
 import { useUIStore } from '../../store/useUIStore'
 import PasswordInput from '../../components/PasswordInput'
 import { loadExcelJsBrowser } from '../../utils/excelBrowser'
+import {
+  getCurrentAcademicPeriod,
+  getNextAcademicPeriod,
+  inferCohortYear,
+  normalizeAcademicYear,
+  normalizeSemester,
+  resolveAcademicPeriod
+} from '../../utils/academicPeriod'
 
 /* ===== Password Modal Component (Akses Halaman) ===== */
 function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Password", loading = false }) {
@@ -174,16 +182,22 @@ const slug = (s = '') => s.toString().trim().toLowerCase()
   .slice(0, 80)
 
 const toMinutes = (hhmm) => {
-  if (!hhmm) return NaN
-  const [h, m] = String(hhmm).slice(0, 5).split(':').map(Number)
-  return (h * 60) + (m || 0)
+  const value = toTimeHHMM(hhmm)
+  if (!value) return NaN
+  const [h, m] = value.split(':').map(Number)
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return NaN
+  return (h * 60) + m
 }
 
 const toTimeHHMM = (hhmm) => {
   const value = String(hhmm || '').trim()
   if (!value) return ''
-  if (value.length >= 5) return value.slice(0, 5)
-  return value
+  const normalized = value.replace('.', ':')
+  const match = normalized.match(/^(\d{1,2}):(\d{1,2})/)
+  if (!match) return normalized.length >= 5 ? normalized.slice(0, 5) : normalized
+  const hour = Math.max(0, Math.min(23, Number(match[1])))
+  const minute = Math.max(0, Math.min(59, Number(match[2])))
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
 }
 
 const toTimeLabel = (hhmm) => toTimeHHMM(hhmm).replace(':', '.')
@@ -366,6 +380,46 @@ const makeClassName = (grade, suffix) => (grade + (suffix ? ' ' + suffix.trim() 
 /* quick helpers */
 const confirmDelete = (msg = 'Yakin mau dihapus?') => window.confirm(msg)
 
+let strukturSekolahTabPromise = null
+const loadStrukturSekolahTab = () => {
+  if (!strukturSekolahTabPromise) {
+    strukturSekolahTabPromise = import('./kelas/StrukturSekolahTab')
+  }
+  return strukturSekolahTabPromise
+}
+
+let organisasiTabPromise = null
+const loadOrganisasiTab = () => {
+  if (!organisasiTabPromise) {
+    organisasiTabPromise = import('./kelas/OrganisasiTab')
+  }
+  return organisasiTabPromise
+}
+
+const StrukturSekolahTab = React.lazy(loadStrukturSekolahTab)
+const OrganisasiTab = React.lazy(loadOrganisasiTab)
+
+const lazyTabLoaders = {
+  struktur: loadStrukturSekolahTab,
+  org: loadOrganisasiTab
+}
+
+const prefetchLazyTab = (key) => {
+  const loader = lazyTabLoaders[key]
+  if (loader) void loader()
+}
+
+function TabContentFallback({ label = 'Memuat tab...' }) {
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-8 shadow-sm">
+      <div className="flex items-center justify-center gap-3 text-sm font-medium text-gray-500">
+        <span className="h-5 w-5 animate-spin rounded-full border-2 border-gray-200 border-t-blue-600" />
+        <span>{label}</span>
+      </div>
+    </div>
+  )
+}
+
 /* ===== Component Utama: AKelas (Terkunci Password) ===== */
 export default function AKelas() {
   const { pushToast } = useUIStore()
@@ -410,10 +464,18 @@ export default function AKelas() {
   const [kelasSelected, setKelasSelected] = useState('')
   const [jadwal, setJadwal] = useState([])
   const [filterHari, setFilterHari] = useState('')
+  const [settingsRow, setSettingsRow] = useState(null)
+  const [academicPeriod, setAcademicPeriod] = useState(() => resolveAcademicPeriod())
+  const [periodForm, setPeriodForm] = useState(() => {
+    const current = getCurrentAcademicPeriod()
+    return { tahunAjaran: current.tahunAjaran, semester: current.semester }
+  })
+  const [savingPeriod, setSavingPeriod] = useState(false)
 
   // Form buat kelas
   const [newGrade, setNewGrade] = useState('')
   const [newSuffix, setNewSuffix] = useState('')
+  const [newAngkatan, setNewAngkatan] = useState('')
   const selObj = React.useMemo(() => kelas.find(k => k.id === kelasSelected) || null, [kelas, kelasSelected])
 
   // Struktur kelas
@@ -432,6 +494,20 @@ export default function AKelas() {
   const [exportFormat, setExportFormat] = useState('excel')
   const [exportingJadwal, setExportingJadwal] = useState(false)
 
+  const PROMO_ALUMNI = '__ALUMNI__'
+  const PROMO_MUTASI = '__MUTASI__'
+  const [promotionModalOpen, setPromotionModalOpen] = useState(false)
+  const [promotionMode, setPromotionMode] = useState('kelas')
+  const [promotionFromKelas, setPromotionFromKelas] = useState('')
+  const [promotionToKelas, setPromotionToKelas] = useState('')
+  const [promotionFilterGrade, setPromotionFilterGrade] = useState('')
+  const [promotionFilterKelas, setPromotionFilterKelas] = useState('')
+  const [promotionSelectedIds, setPromotionSelectedIds] = useState([])
+  const [promotionAlumniYear, setPromotionAlumniYear] = useState(String(new Date().getFullYear()))
+  const [promotionExitReason, setPromotionExitReason] = useState('')
+  const [promotionAdvancePeriod, setPromotionAdvancePeriod] = useState(false)
+  const [promotionLoading, setPromotionLoading] = useState(false)
+
   /* ====== EFFECTS ====== */
 
   // Load guru & siswa setelah password benar
@@ -442,11 +518,13 @@ export default function AKelas() {
       setLoading(true)
       try {
         await Promise.all([
+          loadSettings(),
           loadGuruList(),
-          loadSiswaList(),
           loadKelas(),
           loadMapelList()
         ])
+
+        void loadSiswaList().catch(() => {})
       } catch (error) {
         console.error('Error loading initial data:', error)
       } finally {
@@ -476,7 +554,7 @@ export default function AKelas() {
     }
 
     loadKelasData()
-  }, [isAuthorized, kelasSelected])
+  }, [isAuthorized, kelasSelected, academicPeriod.tahunAjaran, academicPeriod.semester])
 
   useEffect(() => {
     if (!exportClassId && kelasSelected) {
@@ -490,7 +568,37 @@ export default function AKelas() {
     }
   }, [exportClassId, exportFormat])
 
+  useEffect(() => {
+    if (!newGrade) return
+    setNewAngkatan(inferCohortYear(newGrade, academicPeriod.startYear))
+  }, [newGrade, academicPeriod.startYear])
+
   /* ================== LOADERS ================== */
+  const loadSettings = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('settings')
+        .select('id, tahun_ajaran, semester_aktif')
+        .order('id')
+        .limit(1)
+        .maybeSingle()
+
+      if (error && error.code !== 'PGRST116') throw error
+
+      const resolved = resolveAcademicPeriod(data || {})
+      setSettingsRow(data || null)
+      setAcademicPeriod(resolved)
+      setPeriodForm({
+        tahunAjaran: resolved.tahunAjaran,
+        semester: resolved.semester
+      })
+    } catch (error) {
+      console.error('Error loading settings:', error)
+      pushToast('error', 'Gagal memuat tahun ajaran aktif')
+      throw error
+    }
+  }, [pushToast])
+
   const loadGuruList = useCallback(async () => {
     try {
       const { data, error } = await supabase
@@ -501,10 +609,14 @@ export default function AKelas() {
 
       if (error) throw error
 
-      const guru = data.map(u => ({
-        id: u.id,
-        name: (u.nama || u.email || u.id) + (u.email ? ` (${u.email})` : '')
-      }))
+      const guru = data.map(u => {
+        const name = u.nama || u.email || u.id
+        return {
+          id: u.id,
+          name,
+          label: name + (u.email ? ` (${u.email})` : '')
+        }
+      })
       setGuruList(guru)
     } catch (error) {
       console.error('Error loading guru:', error)
@@ -517,7 +629,7 @@ export default function AKelas() {
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('id, nama, email, kelas, role')
+        .select('id, nama, email, kelas, role, status, angkatan')
         .eq('role', 'siswa')
         .order('kelas')
         .order('nama')
@@ -527,7 +639,10 @@ export default function AKelas() {
       const siswa = data.map(u => ({
         uid: u.id,
         nama: u.nama || u.email || u.id,
-        kelas: u.kelas || ''
+        email: u.email || '',
+        kelas: u.kelas || '',
+        status: u.status || 'active',
+        angkatan: u.angkatan || ''
       }))
       setSiswaList(siswa)
     } catch (error) {
@@ -552,6 +667,10 @@ export default function AKelas() {
         nama: k.nama || k.id,
         grade: k.grade || parseGrade(k.id),
         suffix: k.suffix || stripGradePrefix(k.nama || k.id),
+        angkatan: k.angkatan || '',
+        tahunAjaran: k.tahun_ajaran || '',
+        semester: k.semester || '',
+        isActive: k.is_active !== false,
         ...k
       }))
 
@@ -581,6 +700,8 @@ export default function AKelas() {
         .from('jadwal')
         .select('*')
         .eq('kelas_id', kelasSelected)
+        .eq('tahun_ajaran', academicPeriod.tahunAjaran)
+        .eq('semester', academicPeriod.semester)
         .order('hari')
         .order('jam_mulai')
 
@@ -592,8 +713,10 @@ export default function AKelas() {
         mapel: normalizeMapelName(j.mapel),
         guruId: j.guru_id,
         guruNama: j.guru_nama || '',
-        jamMulai: j.jam_mulai,
-        jamSelesai: j.jam_selesai
+        jamMulai: toTimeHHMM(j.jam_mulai),
+        jamSelesai: toTimeHHMM(j.jam_selesai),
+        tahunAjaran: j.tahun_ajaran || academicPeriod.tahunAjaran,
+        semester: j.semester || academicPeriod.semester
       }))
 
       rows.sort((a, b) => {
@@ -609,7 +732,7 @@ export default function AKelas() {
       pushToast('error', 'Gagal memuat jadwal')
       throw error
     }
-  }, [kelasSelected, pushToast])
+  }, [academicPeriod.semester, academicPeriod.tahunAjaran, kelasSelected, pushToast])
 
   const loadStrukturKelas = useCallback(async () => {
     if (!kelasSelected) return
@@ -693,6 +816,54 @@ export default function AKelas() {
     [jadwal, exportDays]
   )
 
+  const kelasOptions = React.useMemo(() => (
+    kelas.map((item) => ({
+      value: item.id,
+      label: (item.nama || item.id || '').toUpperCase(),
+      grade: item.grade || parseGrade(item.id)
+    }))
+  ), [kelas])
+
+  const gradeLabelsForPromotion = React.useMemo(() => {
+    const set = new Set(GRADE_OPTS)
+    kelas.forEach((item) => {
+      const grade = item.grade || parseGrade(item.id)
+      if (grade) set.add(grade)
+    })
+    return Array.from(set).sort((a, b) => (GRADE_ORDER[a] ?? 999) - (GRADE_ORDER[b] ?? 999))
+  }, [kelas])
+
+  const activeSiswaList = React.useMemo(() => (
+    siswaList.filter((siswa) => {
+      const status = String(siswa.status || 'active').toLowerCase()
+      return status === 'active' || status === ''
+    })
+  ), [siswaList])
+
+  const promotionCandidateSiswa = React.useMemo(() => {
+    let rows = activeSiswaList
+    if (promotionFilterGrade) {
+      rows = rows.filter((siswa) => parseGrade(siswa.kelas || '') === promotionFilterGrade)
+    }
+    if (promotionFilterKelas) {
+      rows = rows.filter((siswa) => siswa.kelas === promotionFilterKelas)
+    }
+
+    return [...rows].sort((a, b) => {
+      const classCompare = getKelasName(a.kelas).localeCompare(getKelasName(b.kelas), 'id')
+      if (classCompare !== 0) return classCompare
+      return (a.nama || '').localeCompare(b.nama || '', 'id')
+    })
+  }, [activeSiswaList, promotionFilterGrade, promotionFilterKelas, kelas])
+
+  const nextAcademicPeriod = React.useMemo(
+    () => getNextAcademicPeriod({
+      tahunAjaran: academicPeriod.tahunAjaran,
+      semester: academicPeriod.semester
+    }),
+    [academicPeriod.semester, academicPeriod.tahunAjaran]
+  )
+
   function guruNameById(id) {
     return guruList.find(g => g.id === id)?.name || ''
   }
@@ -701,18 +872,66 @@ export default function AKelas() {
     return siswaList.find(s => s.uid === uid)?.nama || ''
   }
 
+  function getKelasName(kelasId) {
+    return kelas.find((item) => item.id === kelasId)?.nama || kelasId || '-'
+  }
+
   function buildJadwalKey({ hari, mapel, jamMulai, jamSelesai }) {
     const cleanMapel = normalizeMapelName(mapel).replace(/\s+/g, '_').replace(/[^\w-]/g, '')
     const cleanHari = (hari || '').replace(/\s+/g, '_')
     const cleanJamMulai = (jamMulai || '').replace(/:/g, '')
     const cleanJamSelesai = (jamSelesai || '').replace(/:/g, '')
+    const cleanYear = (academicPeriod.tahunAjaran || '').replace(/[^\w]/g, '')
+    const cleanSemester = (academicPeriod.semester || '').replace(/[^\w]/g, '')
 
-    return `${kelasSelected}-${cleanHari}-${cleanMapel}-${cleanJamMulai}-${cleanJamSelesai}`
+    return `${kelasSelected}-${cleanYear}-${cleanSemester}-${cleanHari}-${cleanMapel}-${cleanJamMulai}-${cleanJamSelesai}`
+  }
+
+  async function persistAcademicPeriod(nextPeriod, { silent = false } = {}) {
+    const tahunAjaran = normalizeAcademicYear(nextPeriod?.tahunAjaran)
+    const semester = normalizeSemester(nextPeriod?.semester)
+
+    if (!tahunAjaran || !semester) {
+      throw new Error('Tahun ajaran atau semester tidak valid')
+    }
+
+    const payload = {
+      tahun_ajaran: tahunAjaran,
+      semester_aktif: semester,
+      updated_at: new Date().toISOString()
+    }
+
+    const { data, error } = await supabase
+      .from('settings')
+      .upsert(payload)
+
+    if (error) throw error
+
+    const resolved = resolveAcademicPeriod(payload)
+    setSettingsRow(Array.isArray(data) ? data[0] : data || settingsRow)
+    setAcademicPeriod(resolved)
+    setPeriodForm({ tahunAjaran: resolved.tahunAjaran, semester: resolved.semester })
+    if (!silent) pushToast('success', `Periode aktif disimpan: ${resolved.tahunAjaran} - ${resolved.semester}`)
+
+    return resolved
+  }
+
+  async function simpanPeriodeAktif() {
+    try {
+      setSavingPeriod(true)
+      await persistAcademicPeriod(periodForm)
+      setJadwal([])
+      await loadKelas()
+    } catch (error) {
+      console.error('Error saving academic period:', error)
+      pushToast('error', error.message || 'Gagal menyimpan tahun ajaran aktif')
+    } finally {
+      setSavingPeriod(false)
+    }
   }
 
   async function hasConflict({ hari, jamMulai, jamSelesai, guruId, mapel, kelasId }, ignoreId = null) {
     if (!kelasId) return 'Kelas belum dipilih'
-    const normalizedMapel = normalizeMapelName(mapel)
 
     try {
       // Validasi waktu
@@ -732,6 +951,8 @@ export default function AKelas() {
         .select('*')
         .eq('kelas_id', kelasId)
         .eq('hari', hari)
+        .eq('tahun_ajaran', academicPeriod.tahunAjaran)
+        .eq('semester', academicPeriod.semester)
 
       if (ignoreId) {
         classQuery = classQuery.neq('id', ignoreId)
@@ -740,7 +961,7 @@ export default function AKelas() {
       const { data: sameClassSchedule, error: classError } = await classQuery
       if (classError) throw classError
 
-      for (const j of sameClassSchedule) {
+      for (const j of sameClassSchedule || []) {
         if (timesOverlap(jamMulai, jamSelesai, j.jam_mulai, j.jam_selesai)) {
           return `Konflik dengan ${j.mapel} di kelas ini (${j.jam_mulai}-${j.jam_selesai})`
         }
@@ -753,6 +974,8 @@ export default function AKelas() {
           .select('*')
           .eq('guru_id', guruId)
           .eq('hari', hari)
+          .eq('tahun_ajaran', academicPeriod.tahunAjaran)
+          .eq('semester', academicPeriod.semester)
 
         if (ignoreId) {
           teacherQuery = teacherQuery.neq('id', ignoreId)
@@ -761,37 +984,231 @@ export default function AKelas() {
         const { data: teacherSchedule, error: teacherError } = await teacherQuery
         if (teacherError) throw teacherError
 
-        for (const j of teacherSchedule) {
+        for (const j of teacherSchedule || []) {
           if (timesOverlap(jamMulai, jamSelesai, j.jam_mulai, j.jam_selesai)) {
             return `Guru bentrok di kelas ${j.kelas_id} (${j.mapel} ${j.jam_mulai}-${j.jam_selesai})`
           }
         }
       }
 
-      // Bentrok mapel (opsional)
-      let mapelQuery = supabase
-        .from('jadwal')
-        .select('*')
-        .ilike('mapel', normalizedMapel)
-        .eq('hari', hari)
-
-      if (ignoreId) {
-        mapelQuery = mapelQuery.neq('id', ignoreId)
-      }
-
-      const { data: sameMapelSchedule, error: mapelError } = await mapelQuery
-      if (mapelError) throw mapelError
-
-      for (const j of sameMapelSchedule) {
-        if (timesOverlap(jamMulai, jamSelesai, j.jam_mulai, j.jam_selesai)) {
-          return `Mata pelajaran ${normalizedMapel} bentrok di kelas ${j.kelas_id} (${j.jam_mulai}-${j.jam_selesai})`
-        }
-      }
-
       return null
     } catch (error) {
       console.error('Error checking conflict:', error)
-      return 'Error memeriksa konflik jadwal'
+      return error?.message
+        ? `Error memeriksa konflik jadwal: ${error.message}`
+        : 'Error memeriksa konflik jadwal'
+    }
+  }
+
+  function openPromotionModal() {
+    setPromotionMode('kelas')
+    setPromotionFromKelas(kelasSelected || '')
+    setPromotionToKelas('')
+    setPromotionFilterGrade('')
+    setPromotionFilterKelas(kelasSelected || '')
+    setPromotionSelectedIds([])
+    setPromotionAlumniYear(String(new Date().getFullYear()))
+    setPromotionExitReason('')
+    setPromotionAdvancePeriod(false)
+    setPromotionModalOpen(true)
+  }
+
+  function closePromotionModal() {
+    setPromotionModalOpen(false)
+    setPromotionLoading(false)
+    setPromotionSelectedIds([])
+    setPromotionExitReason('')
+  }
+
+  function togglePromotionSelect(uid) {
+    setPromotionSelectedIds((prev) => (
+      prev.includes(uid) ? prev.filter((item) => item !== uid) : [...prev, uid]
+    ))
+  }
+
+  function togglePromotionSelectAllVisible() {
+    const visibleIds = promotionCandidateSiswa.map((siswa) => siswa.uid)
+    if (!visibleIds.length) return
+
+    const allSelected = visibleIds.every((uid) => promotionSelectedIds.includes(uid))
+    setPromotionSelectedIds((prev) => (
+      allSelected
+        ? prev.filter((uid) => !visibleIds.includes(uid))
+        : Array.from(new Set([...prev, ...visibleIds]))
+    ))
+  }
+
+  async function handlePromotion() {
+    try {
+      if (!promotionToKelas) {
+        pushToast('error', 'Pilih tujuan kenaikan/pindah kelas terlebih dahulu')
+        return
+      }
+
+      let selectedSiswa = []
+      if (promotionMode === 'kelas') {
+        if (!promotionFromKelas) {
+          pushToast('error', 'Pilih kelas asal terlebih dahulu')
+          return
+        }
+        selectedSiswa = activeSiswaList.filter((siswa) => siswa.kelas === promotionFromKelas)
+      } else {
+        if (!promotionSelectedIds.length) {
+          pushToast('error', 'Pilih minimal 1 siswa')
+          return
+        }
+        selectedSiswa = activeSiswaList.filter((siswa) => promotionSelectedIds.includes(siswa.uid))
+      }
+
+      const selectedIds = selectedSiswa.map((siswa) => siswa.uid)
+      if (!selectedIds.length) {
+        pushToast('error', 'Tidak ada siswa aktif yang bisa diproses')
+        return
+      }
+
+      const isAlumniMode = promotionToKelas === PROMO_ALUMNI
+      const isMutasiMode = promotionToKelas === PROMO_MUTASI
+      const isExitMode = isAlumniMode || isMutasiMode
+      const fromLabel = promotionMode === 'kelas'
+        ? getKelasName(promotionFromKelas)
+        : 'Siswa terpilih'
+      const toLabel = isExitMode
+        ? (isAlumniMode ? 'Alumni / Lulus' : 'Mutasi / Pindah Sekolah')
+        : getKelasName(promotionToKelas)
+
+      if (!isExitMode && promotionMode === 'kelas' && promotionFromKelas === promotionToKelas) {
+        pushToast('error', 'Kelas asal dan kelas tujuan tidak boleh sama')
+        return
+      }
+
+      if (isExitMode && !promotionExitReason.trim()) {
+        pushToast('error', 'Alasan/catatan wajib diisi untuk Alumni atau Mutasi')
+        return
+      }
+
+      const fromGrades = Array.from(new Set(selectedSiswa.map((siswa) => parseGrade(siswa.kelas)).filter(Boolean)))
+      const toGrade = !isExitMode ? parseGrade(promotionToKelas) : ''
+      const lines = [
+        `Periode aktif: ${academicPeriod.tahunAjaran} - ${academicPeriod.semester}`,
+        `Sumber: ${fromLabel}`,
+        `Tujuan: ${toLabel}`,
+        `Total siswa: ${selectedIds.length}`
+      ]
+
+      if (isAlumniMode) {
+        const eligible = selectedSiswa.filter((siswa) => parseGrade(siswa.kelas) === 'XII')
+        lines.push('', `Alumni hanya memproses kelas XII. Eligible: ${eligible.length}, dilewati: ${selectedIds.length - eligible.length}.`)
+        lines.push(`Tahun lulus: ${promotionAlumniYear || new Date().getFullYear()}`)
+      }
+
+      if (!isExitMode && fromGrades.length === 1 && toGrade && fromGrades[0] !== toGrade) {
+        lines.push('', `Perubahan tingkatan: ${fromGrades[0]} ke ${toGrade}.`)
+      }
+
+      if (promotionAdvancePeriod) {
+        lines.push('', `Setelah proses, periode aktif akan diganti ke ${nextAcademicPeriod.tahunAjaran} - ${nextAcademicPeriod.semester}.`)
+      }
+
+      lines.push('', 'Lanjutkan?')
+      if (!window.confirm(lines.join('\n'))) return
+
+      setPromotionLoading(true)
+      const now = new Date().toISOString()
+
+      if (isExitMode) {
+        let eligibleSiswa = selectedSiswa
+        if (isAlumniMode) {
+          eligibleSiswa = selectedSiswa.filter((siswa) => parseGrade(siswa.kelas) === 'XII')
+        }
+
+        if (!eligibleSiswa.length) {
+          pushToast('error', 'Tidak ada siswa eligible untuk diproses')
+          return
+        }
+
+        const eligibleIds = eligibleSiswa.map((siswa) => siswa.uid)
+        const affectedClasses = Array.from(new Set(eligibleSiswa.map((siswa) => siswa.kelas).filter(Boolean)))
+
+        await supabase
+          .from('kelas_struktur')
+          .update({ ketua_siswa_id: null, ketua_siswa_nama: null, updated_at: now })
+          .in('ketua_siswa_id', eligibleIds)
+
+        const payload = {
+          status: isAlumniMode ? 'alumni' : 'mutasi',
+          disabled_at: now,
+          alasan_nonaktif: `${toLabel}. Kelas terakhir: ${fromLabel}. ${promotionExitReason.trim()}`.trim(),
+          rfid_uid: null,
+          kelas: '',
+          updated_at: now
+        }
+
+        if (isAlumniMode) {
+          payload.tahun_lulus = Number(promotionAlumniYear) || new Date().getFullYear()
+        }
+
+        const { error } = await supabase
+          .from('profiles')
+          .update(payload)
+          .in('id', eligibleIds)
+
+        if (error) throw error
+
+        if (affectedClasses.length) {
+          await supabase
+            .from('kelas_struktur')
+            .update({ ketua_siswa_id: null, ketua_siswa_nama: null, updated_at: now })
+            .in('kelas_id', affectedClasses)
+        }
+
+        pushToast('success', `${toLabel} berhasil diproses untuk ${eligibleIds.length} siswa`)
+      } else {
+        const targetClass = kelas.find((item) => item.id === promotionToKelas)
+        const targetGrade = targetClass?.grade || parseGrade(promotionToKelas)
+        const targetCohort = targetClass?.angkatan || inferCohortYear(targetGrade, academicPeriod.startYear)
+
+        const { error } = await supabase
+          .from('profiles')
+          .update({ kelas: promotionToKelas, updated_at: now })
+          .in('id', selectedIds)
+
+        if (error) throw error
+
+        const missingCohortIds = selectedSiswa
+          .filter((siswa) => !String(siswa.angkatan || '').trim())
+          .map((siswa) => siswa.uid)
+
+        if (missingCohortIds.length) {
+          await supabase
+            .from('profiles')
+            .update({ angkatan: targetCohort, updated_at: now })
+            .in('id', missingCohortIds)
+        }
+
+        const affectedClasses = Array.from(new Set([
+          ...selectedSiswa.map((siswa) => siswa.kelas).filter(Boolean),
+          promotionToKelas
+        ]))
+        await supabase
+          .from('kelas_struktur')
+          .update({ ketua_siswa_id: null, ketua_siswa_nama: null, updated_at: now })
+          .in('kelas_id', affectedClasses)
+
+        pushToast('success', `Berhasil memindahkan ${selectedIds.length} siswa ke ${targetClass?.nama || promotionToKelas}`)
+      }
+
+      if (promotionAdvancePeriod) {
+        await persistAcademicPeriod(nextAcademicPeriod, { silent: true })
+        pushToast('success', `Periode aktif diperbarui ke ${nextAcademicPeriod.tahunAjaran} - ${nextAcademicPeriod.semester}`)
+      }
+
+      closePromotionModal()
+      await Promise.all([loadSiswaList(), loadStrukturKelas(), loadKelas()])
+    } catch (error) {
+      console.error('Error running promotion:', error)
+      pushToast('error', error.message || 'Gagal memproses kenaikan kelas')
+    } finally {
+      setPromotionLoading(false)
     }
   }
 
@@ -817,6 +1234,7 @@ export default function AKelas() {
 
     const nama = makeClassName(grade, suffix).toUpperCase()
     const id = slug(nama)
+    const angkatan = String(newAngkatan || inferCohortYear(grade, academicPeriod.startYear)).trim()
 
     try {
       setLoading(true)
@@ -840,6 +1258,10 @@ export default function AKelas() {
           nama,
           grade,
           suffix,
+          angkatan,
+          tahun_ajaran: academicPeriod.tahunAjaran,
+          semester: academicPeriod.semester,
+          is_active: true,
           created_at: new Date().toISOString()
         })
 
@@ -848,6 +1270,7 @@ export default function AKelas() {
       pushToast('success', `Kelas ${nama} berhasil ditambahkan`)
       setNewGrade('')
       setNewSuffix('')
+      setNewAngkatan('')
       setKelasSelected(id)
       await loadKelas()
     } catch (error) {
@@ -1040,13 +1463,15 @@ export default function AKelas() {
       // Cek apakah masih digunakan di jadwal
       const { data: usedJadwal, error: checkError } = await supabase
         .from('jadwal')
-        .select('kelas_id')
-        .ilike('mapel', normalizeMapelName(mapel.nama))
-        .limit(1)
+        .select('kelas_id, mapel')
 
       if (checkError) throw checkError
 
-      if (usedJadwal.length > 0) {
+      const usedByMapel = (usedJadwal || []).find(
+        (row) => normalizeMapelName(row.mapel) === normalizeMapelName(mapel.nama)
+      )
+
+      if (usedByMapel) {
         pushToast('error', 
           `Tidak bisa hapus: Mata pelajaran "${mapel.nama}" masih dipakai di jadwal. 
           Hapus semua jadwal dengan mapel ini terlebih dahulu.`)
@@ -1078,7 +1503,9 @@ export default function AKelas() {
       return
     }
 
-    const { hari, guruId, jamMulai, jamSelesai } = form
+    const { hari, guruId } = form
+    const jamMulai = toTimeHHMM(form.jamMulai)
+    const jamSelesai = toTimeHHMM(form.jamSelesai)
     const mapel = normalizeMapelName(form.mapel)
 
     // Validasi
@@ -1118,6 +1545,8 @@ export default function AKelas() {
           guru_nama: guruNama,
           jam_mulai: jamMulai,
           jam_selesai: jamSelesai,
+          tahun_ajaran: academicPeriod.tahunAjaran,
+          semester: academicPeriod.semester,
           created_at: new Date().toISOString()
         })
 
@@ -1148,6 +1577,7 @@ export default function AKelas() {
         .from('jadwal')
         .delete()
         .eq('id', id)
+        .eq('kelas_id', kelasSelected)
 
       if (error) throw error
 
@@ -1178,7 +1608,9 @@ export default function AKelas() {
   async function saveEdit() {
     if (!editData) return
 
-    const { hari, guruId, jamMulai, jamSelesai } = editData
+    const { hari, guruId } = editData
+    const jamMulai = toTimeHHMM(editData.jamMulai)
+    const jamSelesai = toTimeHHMM(editData.jamSelesai)
     const mapel = normalizeMapelName(editData.mapel)
 
     if (!hari || !mapel || !jamMulai || !jamSelesai) {
@@ -1212,6 +1644,7 @@ export default function AKelas() {
           .from('jadwal')
           .delete()
           .eq('id', editId)
+          .eq('kelas_id', kelasSelected)
 
         const { error } = await supabase
           .from('jadwal')
@@ -1224,6 +1657,9 @@ export default function AKelas() {
             guru_nama: guruNama,
             jam_mulai: jamMulai,
             jam_selesai: jamSelesai,
+            tahun_ajaran: academicPeriod.tahunAjaran,
+            semester: academicPeriod.semester,
+            created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
           })
 
@@ -1239,9 +1675,12 @@ export default function AKelas() {
             guru_nama: guruNama,
             jam_mulai: jamMulai,
             jam_selesai: jamSelesai,
+            tahun_ajaran: academicPeriod.tahunAjaran,
+            semester: academicPeriod.semester,
             updated_at: new Date().toISOString()
           })
           .eq('id', editId)
+          .eq('kelas_id', kelasSelected)
 
         if (error) throw error
       }
@@ -1305,6 +1744,8 @@ export default function AKelas() {
       const { data, error } = await supabase
         .from('jadwal')
         .select('*')
+        .eq('tahun_ajaran', academicPeriod.tahunAjaran)
+        .eq('semester', academicPeriod.semester)
         .order('kelas_id')
         .order('hari')
         .order('jam_mulai')
@@ -1356,6 +1797,8 @@ export default function AKelas() {
         .from('jadwal')
         .select('*')
         .eq('kelas_id', selectedId)
+        .eq('tahun_ajaran', academicPeriod.tahunAjaran)
+        .eq('semester', academicPeriod.semester)
         .order('hari')
         .order('jam_mulai')
       if (error) throw error
@@ -1677,20 +2120,20 @@ export default function AKelas() {
         /* ================== KONTEN ASLI HALAMAN ================== */
         <div className="w-full space-y-8 px-4 sm:px-6 lg:px-8 pt-2">
           {/* Header */}
-          <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
+          <div className="page-title-card">
             <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
               <div className="flex items-center space-x-4">
                 <div className="p-3 bg-blue-100 rounded-2xl">
                   <span className="text-2xl text-blue-600">🏫</span>
                 </div>
                 <div>
-                  <h1 className="text-2xl font-bold text-gray-900">Manajemen Kelas & Jadwal</h1>
-                  <p className="text-gray-600 mt-1">
+                  <h1 className="page-title-heading">Manajemen Kelas & Jadwal</h1>
+                  <p className="page-title-description">
                     Kelola data kelas, jadwal pelajaran, dan struktur organisasi sekolah
                   </p>
                 </div>
               </div>
-              
+
               {/* Tab Navigation */}
               <div className="flex flex-wrap gap-2">
                 {[
@@ -1723,13 +2166,26 @@ export default function AKelas() {
                       className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 flex items-center space-x-2 ${
                         active ? activeClass : idleClass
                       }`}
-                      onClick={() => setTab(key)}
+                      onPointerEnter={() => prefetchLazyTab(key)}
+                      onFocus={() => prefetchLazyTab(key)}
+                      onClick={() => {
+                        prefetchLazyTab(key)
+                        setTab(key)
+                      }}
                     >
                       <span>{icon}</span>
                       <span>{label}</span>
                     </button>
                   )
                 })}
+                <button
+                  type="button"
+                  className="px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 flex items-center space-x-2 bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100"
+                  onClick={openPromotionModal}
+                >
+                  <span>⬆️</span>
+                  <span>Kenaikan Kelas</span>
+                </button>
               </div>
             </div>
           </div>
@@ -1752,8 +2208,56 @@ export default function AKelas() {
             {/* ===================== TAB: KELAS & JADWAL ===================== */}
             {tab === 'kelas' && (
               <div className="space-y-6">
+                <div className="bg-white rounded-2xl shadow-lg p-5 border border-blue-200">
+                  <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                    <div>
+                      <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                        <span className="p-2 bg-blue-100 rounded-lg">🎓</span>
+                        <span>Periode Akademik Aktif</span>
+                      </h2>
+                      <p className="text-sm text-gray-600 mt-1">
+                        Jadwal baru dan pengecekan konflik memakai periode ini agar data semester lain tetap tersimpan.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-[160px_140px_auto] gap-3 w-full lg:w-auto">
+                      <input
+                        className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        value={periodForm.tahunAjaran}
+                        onChange={(event) => setPeriodForm((prev) => ({ ...prev, tahunAjaran: event.target.value }))}
+                        placeholder="2025/2026"
+                      />
+                      <select
+                        className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        value={periodForm.semester}
+                        onChange={(event) => setPeriodForm((prev) => ({ ...prev, semester: event.target.value }))}
+                      >
+                        <option value="Ganjil">Ganjil</option>
+                        <option value="Genap">Genap</option>
+                      </select>
+                      <button
+                        type="button"
+                        onClick={simpanPeriodeAktif}
+                        disabled={savingPeriod}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60 text-sm font-medium"
+                      >
+                        {savingPeriod ? 'Menyimpan...' : 'Simpan Periode'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap gap-2 text-xs">
+                    <span className="px-3 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+                      Saat ini: {academicPeriod.tahunAjaran} - {academicPeriod.semester}
+                    </span>
+                    <span className="px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
+                      Periode berikutnya: {nextAcademicPeriod.tahunAjaran} - {nextAcademicPeriod.semester}
+                    </span>
+                  </div>
+                </div>
+
                 {/* Statistik Ringkas */}
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                   <div className="bg-white rounded-xl p-4 shadow border border-gray-200">
                     <div className="flex items-center justify-between">
                       <div>
@@ -1795,6 +2299,18 @@ export default function AKelas() {
                       </div>
                       <div className="p-3 bg-orange-100 rounded-lg">
                         <span className="text-xl">📅</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="bg-white rounded-xl p-4 shadow border border-gray-200">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-gray-500">Semester</p>
+                        <p className="text-lg font-bold text-gray-900">{academicPeriod.semester}</p>
+                        <p className="text-xs text-gray-500">{academicPeriod.tahunAjaran}</p>
+                      </div>
+                      <div className="p-3 bg-indigo-100 rounded-lg">
+                        <span className="text-xl">🗓️</span>
                       </div>
                     </div>
                   </div>
@@ -1853,6 +2369,7 @@ export default function AKelas() {
                         >
                           <span className="block text-lg font-bold">{(k.nama || k.id).toUpperCase()}</span>
                           <span className="text-xs opacity-75 mt-1">Grade {k.grade}</span>
+                          <span className="text-[11px] opacity-75">Angkatan {k.angkatan || '-'}</span>
                         </button>
                         
                         {/* Delete button (only visible on hover) */}
@@ -1922,6 +2439,20 @@ export default function AKelas() {
                         />
                         <p className="text-xs text-gray-500 mt-1">
                           Contoh hasil: VII A, X IPA 1, dll.
+                        </p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Angkatan
+                        </label>
+                        <input
+                          className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm text-gray-900"
+                          placeholder={newGrade ? inferCohortYear(newGrade, academicPeriod.startYear) : 'Contoh: 2026'}
+                          value={newAngkatan}
+                          onChange={e => setNewAngkatan(String(e.target.value || '').replace(/[^\d]/g, '').slice(0, 4))}
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                          Digunakan untuk menandai cohort/angkatan siswa dan kelas.
                         </p>
                       </div>
                       <button
@@ -2034,7 +2565,7 @@ export default function AKelas() {
                           >
                             <option value="">Pilih wali kelas</option>
                             {guruList.map(g => (
-                              <option key={g.id} value={g.id}>{g.name}</option>
+                              <option key={g.id} value={g.id}>{g.label || g.name}</option>
                             ))}
                           </select>
                           {waliGuruId && (
@@ -2113,6 +2644,9 @@ export default function AKelas() {
                         </h3>
                         <p className="text-gray-600 text-sm mt-1">
                           Kelola jadwal pelajaran untuk kelas ini
+                        </p>
+                        <p className="text-xs text-blue-700 mt-1">
+                          Periode: {academicPeriod.tahunAjaran} - Semester {academicPeriod.semester}
                         </p>
                       </div>
                       
@@ -2344,7 +2878,7 @@ export default function AKelas() {
                           >
                             <option value="">Pilih guru (opsional)</option>
                             {guruList.map(g => (
-                              <option key={g.id} value={g.id}>{g.name}</option>
+                              <option key={g.id} value={g.id}>{g.label || g.name}</option>
                             ))}
                           </select>
                         </div>
@@ -2471,7 +3005,7 @@ export default function AKelas() {
                                     >
                                       <option value="">Pilih guru</option>
                                       {guruList.map(g => (
-                                        <option key={g.id} value={g.id}>{g.name}</option>
+                                        <option key={g.id} value={g.id}>{g.label || g.name}</option>
                                       ))}
                                     </select>
                                   </td>
@@ -2599,1361 +3133,260 @@ export default function AKelas() {
 
             {/* ===================== TAB: STRUKTUR SEKOLAH ===================== */}
             {tab === 'struktur' && (
-              <StrukturSekolah guruList={guruList} pushToast={pushToast} />
+              <React.Suspense fallback={<TabContentFallback label="Memuat struktur sekolah..." />}>
+                <StrukturSekolahTab guruList={guruList} pushToast={pushToast} />
+              </React.Suspense>
             )}
 
             {/* ===================== TAB: ORGANISASI ===================== */}
             {tab === 'org' && (
-              <Organisasi guruList={guruList} siswaList={siswaList} pushToast={pushToast} />
+              <React.Suspense fallback={<TabContentFallback label="Memuat organisasi..." />}>
+                <OrganisasiTab guruList={guruList} siswaList={siswaList} pushToast={pushToast} />
+              </React.Suspense>
             )}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
 
-/* === STRUKTUR SEKOLAH === */
-function StrukturSekolah({ guruList, pushToast }) {
-  const DEFAULT_POS = ['Kepala Sekolah', 'Wakil Kepala Sekolah', 'Kurikulum', 'Kesiswaan', 'Sarpras', 'Humas', 'Bendahara', 'Tata Usaha']
-  const [struktur, setStruktur] = useState([])
-  const [waliKelas, setWaliKelas] = useState([])
-  const [posBaru, setPosBaru] = useState('')
-  const [posGuru, setPosGuru] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [editMode, setEditMode] = useState(null)
-
-  const FORBIDDEN = /[.#$[\]]/
-  const slug = (s = '') => s.toString().trim().toLowerCase()
-    .replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-').slice(0, 80)
-
-  useEffect(() => {
-    loadStruktur()
-    loadWaliKelas()
-  }, [])
-
-  const loadStruktur = async () => {
-    try {
-      setLoading(true)
-      const { data, error } = await supabase
-        .from('struktur_sekolah')
-        .select('*')
-        .order('jabatan')
-
-      if (error) throw error
-      setStruktur(data || [])
-    } catch (error) {
-      console.error('Error loading struktur:', error)
-      pushToast('error', 'Gagal memuat struktur sekolah')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const loadWaliKelas = async () => {
-    try {
-      setLoading(true)
-      
-      // Ambil data kelas dengan struktur
-      const { data: kelasData, error: kelasError } = await supabase
-        .from('kelas')
-        .select('*')
-        .order('grade')
-        .order('suffix')
-
-      if (kelasError) throw kelasError
-
-      const { data: strukturData, error: strukturError } = await supabase
-        .from('kelas_struktur')
-        .select('*')
-
-      if (strukturError) throw strukturError
-
-      // Gabungkan data
-      const waliKelasData = kelasData.map(kelas => {
-        const struktur = strukturData?.find(s => s.kelas_id === kelas.id)
-        return {
-          id: kelas.id,
-          nama_kelas: kelas.nama || kelas.id,
-          grade: kelas.grade || parseGrade(kelas.id),
-          suffix: kelas.suffix || stripGradePrefix(kelas.nama || kelas.id),
-          wali_guru_id: struktur?.wali_guru_id || '',
-          wali_guru_nama: struktur?.wali_guru_nama || ''
-        }
-      })
-
-      // Urutkan berdasarkan grade
-      waliKelasData.sort((a, b) => {
-        const ag = GRADE_ORDER[a.grade] ?? 999
-        const bg = GRADE_ORDER[b.grade] ?? 999
-        if (ag !== bg) return ag - bg
-        return (a.suffix || '').localeCompare(b.suffix || '', 'id')
-      })
-
-      setWaliKelas(waliKelasData)
-    } catch (error) {
-      console.error('Error loading wali kelas:', error)
-      pushToast('error', 'Gagal memuat data wali kelas')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  function formatNamaKelas(kelas) {
-    if (kelas.nama_kelas) return kelas.nama_kelas
-    return `${kelas.grade || parseGrade(kelas.id)} ${kelas.suffix || ''}`.trim()
-  }
-
-  async function addPosisi() {
-    const jab = (posBaru || '').trim()
-    if (!jab) {
-      pushToast('error', 'Nama jabatan harus diisi')
-      return
-    }
-    
-    if (FORBIDDEN.test(jab)) {
-      pushToast('error', 'Nama posisi tidak boleh mengandung . # $ [ ]')
-      return
-    }
-
-    const id = slug(jab)
-
-    try {
-      setLoading(true)
-
-      // Cek apakah sudah ada
-      const { data: existing } = await supabase
-        .from('struktur_sekolah')
-        .select('id')
-        .eq('id', id)
-        .single()
-
-      if (existing) {
-        pushToast('error', 'Posisi sudah ada.')
-        return
-      }
-
-      const guruId = posGuru || ''
-      const guruNama = guruId ? (guruList.find(g => g.id === guruId)?.name || '') : ''
-
-      const { error } = await supabase
-        .from('struktur_sekolah')
-        .insert({
-          id,
-          jabatan: jab,
-          guru_id: guruId || null,
-          guru_nama: guruNama,
-          created_at: new Date().toISOString()
-        })
-
-      if (error) throw error
-
-      pushToast('success', `Posisi "${jab}" berhasil ditambahkan`)
-      setPosBaru('')
-      setPosGuru('')
-      await loadStruktur()
-    } catch (error) {
-      console.error('Error adding posisi:', error)
-      pushToast('error', error.message || 'Gagal menambah posisi')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function updatePosisi(posisiId, newGuruId) {
-    try {
-      setLoading(true)
-      const guruNama = newGuruId ? (guruList.find(g => g.id === newGuruId)?.name || '') : ''
-
-      const { error } = await supabase
-        .from('struktur_sekolah')
-        .update({
-          guru_id: newGuruId || null,
-          guru_nama: guruNama,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', posisiId)
-
-      if (error) throw error
-
-      pushToast('success', 'Posisi berhasil diupdate')
-      await loadStruktur()
-    } catch (error) {
-      console.error('Error updating posisi:', error)
-      pushToast('error', error.message || 'Gagal mengupdate posisi')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function updateWaliKelas(kelasId, newGuruId) {
-    try {
-      setLoading(true)
-      const guruNama = newGuruId ? (guruList.find(g => g.id === newGuruId)?.name || '') : ''
-
-      const { error } = await supabase
-        .from('kelas_struktur')
-        .upsert({
-          kelas_id: kelasId,
-          wali_guru_id: newGuruId || null,
-          wali_guru_nama: guruNama,
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'kelas_id' })
-
-      if (error) throw error
-
-      pushToast('success', 'Wali kelas berhasil diupdate')
-      await loadWaliKelas()
-    } catch (error) {
-      console.error('Error updating wali kelas:', error)
-      pushToast('error', error.message || 'Gagal mengupdate wali kelas')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function hapusPosisi(p) {
-    if (!confirmDelete(`Hapus posisi "${p.jabatan}"?`)) return
-
-    try {
-      setLoading(true)
-      const { error } = await supabase
-        .from('struktur_sekolah')
-        .delete()
-        .eq('id', p.id)
-
-      if (error) throw error
-
-      pushToast('success', 'Posisi berhasil dihapus')
-      await loadStruktur()
-    } catch (error) {
-      console.error('Error deleting posisi:', error)
-      pushToast('error', error.message || 'Gagal menghapus posisi')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-200">
-        <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
-          <div>
-            <h2 className="text-2xl font-bold text-gray-900 flex items-center space-x-2">
-              <span className="p-2 bg-purple-100 rounded-lg">🏢</span>
-              <span>Struktur Sekolah</span>
-            </h2>
-            <p className="text-gray-600 text-sm mt-1">
-              Kelola jabatan dan penanggung jawab di sekolah
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* Statistik */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-white rounded-xl p-4 shadow border border-purple-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-500">Total Posisi</p>
-              <p className="text-2xl font-bold text-gray-900">{struktur.length}</p>
-            </div>
-            <div className="p-3 bg-purple-100 rounded-lg">
-              <span className="text-xl">👔</span>
-            </div>
-          </div>
-        </div>
-        <div className="bg-white rounded-xl p-4 shadow border border-green-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-500">Total Wali Kelas</p>
-              <p className="text-2xl font-bold text-gray-900">{waliKelas.filter(wk => wk.wali_guru_id).length}</p>
-            </div>
-            <div className="p-3 bg-green-100 rounded-lg">
-              <span className="text-xl">👨‍🏫</span>
-            </div>
-          </div>
-        </div>
-        <div className="bg-white rounded-xl p-4 shadow border border-blue-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-500">Total Kelas</p>
-              <p className="text-2xl font-bold text-gray-900">{waliKelas.length}</p>
-            </div>
-            <div className="p-3 bg-blue-100 rounded-lg">
-              <span className="text-xl">🏫</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Form Tambah Posisi */}
-      <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-200">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center space-x-2">
-          <span className="p-2 bg-blue-100 rounded-lg">➕</span>
-          <span>Tambah Posisi Baru</span>
-        </h3>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="md:col-span-2">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Jabatan <span className="text-red-500">*</span>
-            </label>
-            <input
-              className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm text-gray-900"
-              list="list-posisi"
-              placeholder="cth: Kepala Sekolah"
-              value={posBaru}
-              onChange={e => setPosBaru(e.target.value)}
-            />
-            <datalist id="list-posisi">
-              {DEFAULT_POS.map(p => (
-                <option key={p} value={p} />
-              ))}
-            </datalist>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Penanggung Jawab</label>
-            <select
-              className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm text-gray-900"
-              value={posGuru}
-              onChange={e => setPosGuru(e.target.value)}
-            >
-              <option value="">Pilih guru</option>
-              {guruList.map(g => (
-                <option key={g.id} value={g.id}>{g.name}</option>
-              ))}
-            </select>
-          </div>
-          <div className="flex items-end">
-            <button
-              className="w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white py-2.5 px-4 rounded-lg hover:from-blue-700 hover:to-blue-800 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 text-sm font-medium shadow-md flex items-center justify-center space-x-2 disabled:opacity-50"
-              onClick={addPosisi}
-              disabled={loading || !posBaru.trim()}
-            >
-              {loading ? (
-                <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                  <span>Menambah...</span>
-                </>
-              ) : (
-                <>
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                  </svg>
-                  <span>Tambah Posisi</span>
-                </>
-              )}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Struktur Sekolah */}
-      <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-200">
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="text-lg font-semibold text-gray-900 flex items-center space-x-2">
-            <span className="p-2 bg-purple-100 rounded-lg">📊</span>
-            <span>Struktur Sekolah</span>
-          </h3>
-          <span className="text-sm text-gray-500">
-            {struktur.length} posisi
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {struktur.map((p, index) => (
-            <div
-              key={p.id}
-              className="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all duration-300 p-4 hover:border-purple-300"
-            >
-              <div className="flex justify-between items-start">
-                <div className="flex-1">
-                  <div className="flex items-center space-x-2 mb-2">
-                    <div className="w-8 h-8 bg-gradient-to-r from-purple-500 to-purple-600 rounded-full flex items-center justify-center">
-                      <span className="text-xs font-bold text-white">{index + 1}</span>
-                    </div>
-                    <h4 className="font-bold text-gray-900 text-lg">{p.jabatan}</h4>
-                  </div>
-
-                  {editMode === p.id ? (
-                    <div className="space-y-2">
-                      <select
-                        className="block w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
-                        value={p.guru_id || ''}
-                        onChange={e => updatePosisi(p.id, e.target.value)}
-                        onBlur={() => setEditMode(null)}
-                        autoFocus
-                      >
-                        <option value="">Pilih penanggung jawab</option>
-                        {guruList.map(g => (
-                          <option key={g.id} value={g.id}>{g.name}</option>
-                        ))}
-                      </select>
-                      <p className="text-xs text-gray-500">
-                        Klik di luar untuk menyimpan
-                      </p>
-                    </div>
-                  ) : (
-                    <div
-                      className="cursor-pointer group"
-                      onClick={() => setEditMode(p.id)}
-                    >
-                      <p className="text-gray-700 text-sm">
-                        {p.guru_nama || 'Belum ada penanggung jawab'}
-                      </p>
-                      <p className="text-gray-500 text-xs mt-1 group-hover:text-gray-700 transition-colors">
-                        <span className="inline-flex items-center">
-                          <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                          </svg>
-                          Klik untuk mengubah
-                        </span>
-                      </p>
-                    </div>
-                  )}
-                </div>
-                <button
-                  className="text-red-500 hover:text-red-700 p-2 rounded-lg transition-all duration-200 hover:bg-red-50 ml-2"
-                  onClick={() => hapusPosisi(p)}
-                  disabled={loading}
-                  title="Hapus posisi"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-          ))}
-          {!struktur.length && (
-            <div className="col-span-full text-center py-12 text-gray-500">
-              <div className="w-20 h-20 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
-                <svg className="w-10 h-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                </svg>
-              </div>
-              <p className="text-lg font-medium">Belum ada data struktur</p>
-              <p className="text-sm mt-1">Tambahkan posisi baru untuk memulai</p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Wali Kelas */}
-      <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-200">
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="text-lg font-semibold text-gray-900 flex items-center space-x-2">
-            <span className="p-2 bg-green-100 rounded-lg">👨‍🏫</span>
-            <span>Wali Kelas</span>
-          </h3>
-          <span className="text-sm text-gray-500">
-            {waliKelas.filter(wk => wk.wali_guru_id).length} dari {waliKelas.length} kelas
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {waliKelas.map((wk, index) => (
-            <div
-              key={wk.id}
-              className={`bg-white rounded-xl border shadow-sm hover:shadow-md transition-all duration-300 p-4 ${
-                wk.wali_guru_id 
-                  ? 'border-green-200 hover:border-green-300' 
-                  : 'border-gray-200 hover:border-gray-300'
-              }`}
-            >
-              <div className="flex justify-between items-start">
-                <div className="flex-1">
-                  <div className="flex items-center space-x-2 mb-2">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                      wk.wali_guru_id ? 'bg-green-100' : 'bg-gray-100'
-                    }`}>
-                      <span className={`text-xs font-bold ${
-                        wk.wali_guru_id ? 'text-green-600' : 'text-gray-400'
-                      }`}>
-                        {wk.grade?.charAt(0) || '?'}
-                      </span>
-                    </div>
+            {promotionModalOpen && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+                  <div className="px-6 py-4 border-b border-gray-200 flex items-start justify-between gap-4">
                     <div>
-                      <h4 className="font-bold text-gray-900 text-lg">{formatNamaKelas(wk)}</h4>
-                      <p className="text-xs text-gray-500">
-                        {wk.grade} • {wk.suffix || '-'}
+                      <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                        <span className="p-2 bg-indigo-100 text-indigo-700 rounded-lg">⬆️</span>
+                        <span>Kenaikan Kelas</span>
+                      </h3>
+                      <p className="text-sm text-gray-600 mt-1">
+                        Periode aktif {academicPeriod.tahunAjaran} - {academicPeriod.semester}. Data tugas, quiz, nilai, dan absensi lama tidak dihapus.
                       </p>
                     </div>
+                    <button
+                      type="button"
+                      className="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                      onClick={closePromotionModal}
+                      disabled={promotionLoading}
+                    >
+                      Tutup
+                    </button>
                   </div>
 
-                  {editMode === `wali_${wk.id}` ? (
-                    <div className="space-y-2">
-                      <select
-                        className="block w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
-                        value={wk.wali_guru_id || ''}
-                        onChange={e => updateWaliKelas(wk.id, e.target.value)}
-                        onBlur={() => setEditMode(null)}
-                        autoFocus
+                  <div className="p-6 space-y-5">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        className={`px-4 py-3 rounded-lg border text-sm font-medium ${promotionMode === 'kelas' ? 'bg-indigo-50 border-indigo-400 text-indigo-700' : 'bg-white border-gray-300 text-gray-700'}`}
+                        onClick={() => setPromotionMode('kelas')}
                       >
-                        <option value="">Pilih wali kelas</option>
-                        {guruList.map(g => (
-                          <option key={g.id} value={g.id}>{g.name}</option>
-                        ))}
-                      </select>
-                      <p className="text-xs text-gray-500">
-                        Klik di luar untuk menyimpan
-                      </p>
+                        Berdasarkan Kelas
+                      </button>
+                      <button
+                        type="button"
+                        className={`px-4 py-3 rounded-lg border text-sm font-medium ${promotionMode === 'selected' ? 'bg-indigo-50 border-indigo-400 text-indigo-700' : 'bg-white border-gray-300 text-gray-700'}`}
+                        onClick={() => setPromotionMode('selected')}
+                      >
+                        Pilih Siswa Manual ({promotionSelectedIds.length})
+                      </button>
                     </div>
-                  ) : (
-                    <div
-                      className="cursor-pointer group"
-                      onClick={() => setEditMode(`wali_${wk.id}`)}
-                    >
-                      <p className={`text-sm ${
-                        wk.wali_guru_nama ? 'text-gray-700' : 'text-gray-500 italic'
-                      }`}>
-                        {wk.wali_guru_nama || 'Belum ada wali kelas'}
-                      </p>
-                      <p className="text-gray-500 text-xs mt-1 group-hover:text-gray-700 transition-colors">
-                        <span className="inline-flex items-center">
-                          <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                          </svg>
-                          Klik untuk mengubah
-                        </span>
-                      </p>
-                    </div>
-                  )}
-                </div>
-                
-                {wk.wali_guru_id && (
-                  <div className="ml-2">
-                    <span className="text-xs px-2 py-1 bg-green-100 text-green-800 rounded-full">
-                      ✅
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
-          {!waliKelas.length && (
-            <div className="col-span-full text-center py-12 text-gray-500">
-              <div className="w-20 h-20 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
-                <svg className="w-10 h-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                </svg>
-              </div>
-              <p className="text-lg font-medium">Belum ada data wali kelas</p>
-              <p className="text-sm mt-1">Atur wali kelas di tab Kelas & Jadwal</p>
-            </div>
-          )}
-        </div>
-      </div>
 
-      {loading && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl p-6 flex items-center space-x-3 shadow-2xl">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-            <span className="text-gray-700 font-medium">Memproses...</span>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-/* === ORGANISASI === */
-function Organisasi({ guruList, siswaList, pushToast }) {
-  const [orgList, setOrgList] = useState([])
-  const [orgSel, setOrgSel] = useState('')
-  const [orgForm, setOrgForm] = useState({ nama: '', visi: '', misi: '', pembinaGuruId: '' })
-  const [orgAnggota, setOrgAnggota] = useState([])
-  const [addMemberUid, setAddMemberUid] = useState('')
-  const [addMemberJabatan, setAddMemberJabatan] = useState('')
-  const [editAnggotaId, setEditAnggotaId] = useState(null)
-  const [editAnggotaData, setEditAnggotaData] = useState({})
-  const [loading, setLoading] = useState(false)
-
-  const JABATAN_OPTS = ['Ketua', 'Wakil Ketua', 'Sekretaris', 'Bendahara', 'Koordinator', 'Anggota']
-  const FORBIDDEN = /[.#$[\]]/
-  const slug = (s = '') => s.toString().trim().toLowerCase()
-    .replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-').slice(0, 80)
-
-  useEffect(() => {
-    loadOrgList()
-  }, [])
-
-  useEffect(() => {
-    if (orgSel) {
-      loadOrgDetail()
-      loadOrgAnggota()
-    } else {
-      setOrgForm({ nama: '', visi: '', misi: '', pembinaGuruId: '' })
-      setOrgAnggota([])
-    }
-  }, [orgSel])
-
-  const loadOrgList = async () => {
-    try {
-      setLoading(true)
-      const { data, error } = await supabase
-        .from('organisasi')
-        .select('*')
-        .order('nama')
-
-      if (error) throw error
-      setOrgList(data || [])
-    } catch (error) {
-      console.error('Error loading organisasi:', error)
-      pushToast('error', 'Gagal memuat data organisasi')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const loadOrgDetail = async () => {
-    try {
-      setLoading(true)
-      const { data, error } = await supabase
-        .from('organisasi')
-        .select('*')
-        .eq('id', orgSel)
-        .single()
-
-      if (error) throw error
-
-      setOrgForm({
-        nama: data.nama || '',
-        visi: data.visi || '',
-        misi: data.misi || '',
-        pembinaGuruId: data.pembina_guru_id || ''
-      })
-    } catch (error) {
-      console.error('Error loading org detail:', error)
-      pushToast('error', 'Gagal memuat detail organisasi')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const loadOrgAnggota = async () => {
-    try {
-      setLoading(true)
-
-      const { data, error } = await supabase
-        .from('organisasi_anggota')
-        .select('*')
-        .eq('organisasi_id', orgSel)
-        .order('jabatan', { ascending: false })
-        .order('nama')
-
-      if (error) throw error
-
-      setOrgAnggota(data || [])
-    } catch (error) {
-      console.error('Error loading anggota:', error)
-      pushToast('error', 'Gagal memuat anggota organisasi')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function tambahOrganisasi() {
-    const nama = (orgForm.nama || '').trim()
-    if (!nama) {
-      pushToast('error', 'Nama organisasi harus diisi')
-      return
-    }
-    
-    if (nama.length < 3) {
-      pushToast('error', 'Nama organisasi minimal 3 karakter')
-      return
-    }
-    
-    if (FORBIDDEN.test(nama)) {
-      pushToast('error', 'Nama organisasi tidak boleh mengandung . # $ [ ]')
-      return
-    }
-
-    const id = slug(nama)
-
-    try {
-      setLoading(true)
-
-      // Cek apakah sudah ada
-      const { data: existing } = await supabase
-        .from('organisasi')
-        .select('id')
-        .eq('id', id)
-        .single()
-
-      if (existing) {
-        pushToast('error', 'Nama organisasi sudah ada.')
-        return
-      }
-
-      const pembinaId = orgForm.pembinaGuruId || ''
-      const pembinaNama = pembinaId ? (guruList.find(g => g.id === pembinaId)?.name || '') : ''
-
-      const { error } = await supabase
-        .from('organisasi')
-        .insert({
-          id,
-          nama,
-          visi: orgForm.visi || '',
-          misi: orgForm.misi || '',
-          pembina_guru_id: pembinaId || null,
-          pembina_guru_nama: pembinaNama,
-          created_at: new Date().toISOString()
-        })
-
-      if (error) throw error
-
-      pushToast('success', `Organisasi "${nama}" berhasil ditambahkan`)
-      setOrgSel(id)
-      await loadOrgList()
-    } catch (error) {
-      console.error('Error adding organisasi:', error)
-      pushToast('error', error.message || 'Gagal menambah organisasi')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function simpanOrganisasi() {
-    if (!orgSel) {
-      pushToast('error', 'Pilih organisasi terlebih dahulu')
-      return
-    }
-
-    try {
-      setLoading(true)
-      const pembinaId = orgForm.pembinaGuruId || ''
-      const pembinaNama = pembinaId ? (guruList.find(g => g.id === pembinaId)?.name || '') : ''
-
-      const { error } = await supabase
-        .from('organisasi')
-        .update({
-          nama: orgForm.nama || '',
-          visi: orgForm.visi || '',
-          misi: orgForm.misi || '',
-          pembina_guru_id: pembinaId || null,
-          pembina_guru_nama: pembinaNama,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', orgSel)
-
-      if (error) throw error
-
-      pushToast('success', 'Organisasi berhasil disimpan')
-      await loadOrgList()
-    } catch (error) {
-      console.error('Error saving organisasi:', error)
-      pushToast('error', error.message || 'Gagal menyimpan organisasi')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function hapusOrganisasi() {
-    if (!orgSel) return
-    if (!confirmDelete('Yakin mau hapus organisasi ini? Semua data anggota juga akan dihapus.')) return
-
-    try {
-      setLoading(true)
-
-      // Hapus anggota terlebih dahulu
-      const { error: deleteAnggotaError } = await supabase
-        .from('organisasi_anggota')
-        .delete()
-        .eq('organisasi_id', orgSel)
-
-      if (deleteAnggotaError) throw deleteAnggotaError
-
-      // Hapus organisasi
-      const { error } = await supabase
-        .from('organisasi')
-        .delete()
-        .eq('id', orgSel)
-
-      if (error) throw error
-
-      pushToast('success', 'Organisasi berhasil dihapus')
-      setOrgSel('')
-      setOrgForm({ nama: '', visi: '', misi: '', pembinaGuruId: '' })
-      setOrgAnggota([])
-      setAddMemberUid('')
-      setAddMemberJabatan('')
-      setEditAnggotaId(null)
-      setEditAnggotaData({})
-      await loadOrgList()
-    } catch (error) {
-      console.error('Error deleting organisasi:', error)
-      pushToast('error', error.message || 'Gagal menghapus organisasi')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function tambahAnggota() {
-    if (!orgSel) {
-      pushToast('error', 'Pilih organisasi terlebih dahulu')
-      return
-    }
-    
-    if (!addMemberUid) {
-      pushToast('error', 'Pilih siswa yang akan ditambahkan')
-      return
-    }
-
-    const jabatan = (addMemberJabatan || 'Anggota').trim()
-
-    try {
-      setLoading(true)
-      const siswa = siswaList.find(s => s.uid === addMemberUid)
-      const namaSiswa = siswa?.nama || ''
-
-      const { error } = await supabase
-        .from('organisasi_anggota')
-        .insert({
-          organisasi_id: orgSel,
-          siswa_id: addMemberUid,
-          nama: namaSiswa,
-          kelas: siswa?.kelas || '',
-          jabatan,
-          created_at: new Date().toISOString()
-        })
-
-      if (error) throw error
-
-      pushToast('success', 'Anggota berhasil ditambahkan')
-      setAddMemberUid('')
-      setAddMemberJabatan('')
-      await loadOrgAnggota()
-    } catch (error) {
-      console.error('Error adding anggota:', error)
-      pushToast('error', error.message || 'Gagal menambah anggota')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function hapusAnggota(anggota) {
-    if (!confirmDelete(`Hapus ${anggota.nama} dari organisasi?`)) return
-
-    try {
-      setLoading(true)
-      const { error } = await supabase
-        .from('organisasi_anggota')
-        .delete()
-        .eq('id', anggota.id)
-
-      if (error) throw error
-
-      pushToast('success', 'Anggota berhasil dihapus')
-      await loadOrgAnggota()
-    } catch (error) {
-      console.error('Error deleting anggota:', error)
-      pushToast('error', error.message || 'Gagal menghapus anggota')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  function startEditAnggota(anggota) {
-    setEditAnggotaId(anggota.id)
-    setEditAnggotaData({ ...anggota })
-  }
-
-  function batalEditAnggota() {
-    setEditAnggotaId(null)
-    setEditAnggotaData({})
-  }
-
-  async function saveEditAnggota() {
-    if (!editAnggotaId) return
-
-    const jabatan = (editAnggotaData.jabatan || '').trim()
-    if (!jabatan) {
-      pushToast('error', 'Jabatan tidak boleh kosong')
-      return
-    }
-
-    try {
-      setLoading(true)
-      const { error } = await supabase
-        .from('organisasi_anggota')
-        .update({
-          jabatan,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', editAnggotaId)
-
-      if (error) throw error
-
-      pushToast('success', 'Data anggota berhasil diupdate')
-      setEditAnggotaId(null)
-      setEditAnggotaData({})
-      await loadOrgAnggota()
-    } catch (error) {
-      console.error('Error updating anggota:', error)
-      pushToast('error', error.message || 'Gagal mengupdate anggota')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const isEditingOrg = Boolean(orgSel)
-
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-200">
-        <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
-          <div>
-            <h2 className="text-2xl font-bold text-gray-900 flex items-center space-x-2">
-              <span className="p-2 bg-green-100 rounded-lg">👥</span>
-              <span>Organisasi Sekolah</span>
-            </h2>
-            <p className="text-gray-600 text-sm mt-1">
-              Kelola organisasi, pembina, serta anggota siswa
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* Statistik */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl p-4 shadow border border-green-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-500">Total Organisasi</p>
-              <p className="text-2xl font-bold text-gray-900">{orgList.length}</p>
-            </div>
-            <div className="p-3 bg-green-100 rounded-lg">
-              <span className="text-xl">👥</span>
-            </div>
-          </div>
-        </div>
-        <div className="bg-white rounded-xl p-4 shadow border border-blue-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-500">Total Anggota</p>
-              <p className="text-2xl font-bold text-gray-900">{orgAnggota.length}</p>
-            </div>
-            <div className="p-3 bg-blue-100 rounded-lg">
-              <span className="text-xl">👨‍🎓</span>
-            </div>
-          </div>
-        </div>
-        <div className="bg-white rounded-xl p-4 shadow border border-purple-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-500">Total Pembina</p>
-              <p className="text-2xl font-bold text-gray-900">
-                {orgList.filter(o => o.pembina_guru_id).length}
-              </p>
-            </div>
-            <div className="p-3 bg-purple-100 rounded-lg">
-              <span className="text-xl">👨‍🏫</span>
-            </div>
-          </div>
-        </div>
-        <div className="bg-white rounded-xl p-4 shadow border border-yellow-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-500">Siswa Tersedia</p>
-              <p className="text-2xl font-bold text-gray-900">{siswaList.length}</p>
-            </div>
-            <div className="p-3 bg-yellow-100 rounded-lg">
-              <span className="text-xl">📋</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Organisasi + Detail */}
-      <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-200">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* List Organisasi */}
-          <div className="lg:border-r lg:pr-6">
-            <div className="flex justify-between items-center mb-3">
-              <h3 className="text-base font-semibold text-gray-900 flex items-center space-x-2">
-                <span className="p-1.5 bg-blue-100 rounded-lg">📂</span>
-                <span>Daftar Organisasi</span>
-              </h3>
-              <span className="text-xs text-gray-500">{orgList.length}</span>
-            </div>
-            <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-              {orgList.map(o => (
-                <button
-                  key={o.id}
-                  className={`w-full text-left p-3 rounded-xl border text-sm transition-all duration-200 flex justify-between items-start ${
-                    orgSel === o.id
-                      ? 'bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-500 text-blue-700'
-                      : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
-                  }`}
-                  onClick={() => setOrgSel(o.id)}
-                >
-                  <div className="flex-1">
-                    <div className="font-medium">{o.nama}</div>
-                    {o.pembina_guru_nama && (
-                      <div className="text-xs text-gray-500 mt-0.5 truncate">
-                        Pembina: {o.pembina_guru_nama}
-                      </div>
-                    )}
-                  </div>
-                  {orgSel === o.id && (
-                    <span className="text-blue-500 ml-2">→</span>
-                  )}
-                </button>
-              ))}
-              {!orgList.length && (
-                <div className="text-center py-8 text-gray-500">
-                  <div className="w-12 h-12 mx-auto mb-3 bg-gray-100 rounded-full flex items-center justify-center">
-                    <span>📂</span>
-                  </div>
-                  <p className="text-sm">Belum ada organisasi</p>
-                </div>
-              )}
-            </div>
-
-            <button
-              className="mt-4 w-full py-2.5 text-sm bg-gradient-to-r from-green-50 to-emerald-50 text-green-700 border border-green-200 rounded-lg hover:from-green-100 hover:to-emerald-100 hover:border-green-300 transition-all duration-200 font-medium flex items-center justify-center space-x-2"
-              type="button"
-              onClick={() => {
-                setOrgSel('')
-                setOrgForm({ nama: '', visi: '', misi: '', pembinaGuruId: '' })
-                setOrgAnggota([])
-              }}
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-              </svg>
-              <span>Buat Organisasi Baru</span>
-            </button>
-          </div>
-
-          {/* Detail Organisasi */}
-          <div className="lg:col-span-2">
-            <div className="flex justify-between items-center mb-3">
-              <h3 className="text-base font-semibold text-gray-900 flex items-center space-x-2">
-                <span className="p-1.5 bg-green-100 rounded-lg">📝</span>
-                <span>{isEditingOrg ? 'Detail Organisasi' : 'Organisasi Baru'}</span>
-              </h3>
-              {isEditingOrg && (
-                <span className="text-xs px-2 py-1 bg-green-100 text-green-800 rounded-full">
-                  Sedang diedit
-                </span>
-              )}
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Nama Organisasi <span className="text-red-500">*</span>
-                </label>
-                <input
-                  className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm text-gray-900"
-                  value={orgForm.nama}
-                  onChange={e => setOrgForm(f => ({ ...f, nama: e.target.value }))}
-                  placeholder="cth: OSIS, Pramuka, PMR"
-                />
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Visi
-                  </label>
-                  <textarea
-                    className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm text-gray-900 min-h-[100px]"
-                    value={orgForm.visi}
-                    onChange={e => setOrgForm(f => ({ ...f, visi: e.target.value }))}
-                    placeholder="Tuliskan visi organisasi..."
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Misi
-                  </label>
-                  <textarea
-                    className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm text-gray-900 min-h-[100px]"
-                    value={orgForm.misi}
-                    onChange={e => setOrgForm(f => ({ ...f, misi: e.target.value }))}
-                    placeholder="Tuliskan misi organisasi..."
-                  />
-                </div>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Pembina Guru
-                </label>
-                <select
-                  className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm text-gray-900"
-                  value={orgForm.pembinaGuruId}
-                  onChange={e => setOrgForm(f => ({ ...f, pembinaGuruId: e.target.value }))}
-                >
-                  <option value="">Pilih guru pembina</option>
-                  {guruList.map(g => (
-                    <option key={g.id} value={g.id}>{g.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="flex justify-end space-x-3 pt-2">
-                {isEditingOrg ? (
-                  <>
-                    <button
-                      type="button"
-                      className="px-4 py-2.5 text-sm border border-red-300 text-red-700 rounded-lg hover:bg-red-50 font-medium flex items-center space-x-2 transition-all duration-200"
-                      onClick={hapusOrganisasi}
-                      disabled={loading}
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                      </svg>
-                      <span>Hapus</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="px-4 py-2.5 text-sm bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg hover:from-blue-700 hover:to-blue-800 font-medium flex items-center space-x-2 transition-all duration-200 shadow-md"
-                      onClick={simpanOrganisasi}
-                      disabled={loading}
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                      <span>Simpan Perubahan</span>
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    type="button"
-                    className="w-full md:w-auto px-4 py-2.5 text-sm bg-gradient-to-r from-green-600 to-green-700 text-white rounded-lg hover:from-green-700 hover:to-green-800 font-medium flex items-center justify-center space-x-2 transition-all duration-200 shadow-md"
-                    onClick={tambahOrganisasi}
-                    disabled={loading || !orgForm.nama.trim()}
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                    </svg>
-                    <span>Tambah Organisasi</span>
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Anggota Organisasi */}
-      {orgSel && (
-        <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-200">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-semibold text-gray-900 flex items-center space-x-2">
-              <span className="p-2 bg-blue-100 rounded-lg">👨‍🎓</span>
-              <span>Anggota Organisasi</span>
-            </h3>
-            <span className="text-sm text-gray-500">
-              {orgAnggota.length} anggota
-            </span>
-          </div>
-
-          {/* Form tambah anggota */}
-          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 mb-6">
-            <h4 className="text-sm font-semibold text-blue-900 mb-3 flex items-center space-x-2">
-              <span className="p-1.5 bg-blue-200 rounded-lg">➕</span>
-              <span>Tambah Anggota Baru</span>
-            </h4>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-blue-800 mb-1">
-                  Siswa <span className="text-red-500">*</span>
-                </label>
-                <select
-                  className="block w-full px-3 py-2 text-sm border border-blue-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
-                  value={addMemberUid}
-                  onChange={e => setAddMemberUid(e.target.value)}
-                >
-                  <option value="">Pilih siswa</option>
-                  {siswaList.map(s => (
-                    <option key={s.uid} value={s.uid}>
-                      {s.nama} {s.kelas ? `(${s.kelas})` : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-blue-800 mb-1">Jabatan</label>
-                <select
-                  className="block w-full px-3 py-2 text-sm border border-blue-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
-                  value={addMemberJabatan}
-                  onChange={e => setAddMemberJabatan(e.target.value)}
-                >
-                  <option value="">Anggota</option>
-                  {JABATAN_OPTS.map(j => (
-                    <option key={j} value={j}>{j}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex items-end">
-                <button
-                  type="button"
-                  className="w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white py-2.5 px-4 rounded-lg hover:from-blue-700 hover:to-blue-800 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 text-sm font-medium flex items-center justify-center space-x-2 disabled:opacity-50"
-                  onClick={tambahAnggota}
-                  disabled={loading || !addMemberUid}
-                >
-                  {loading ? (
-                    <>
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                      <span>Menambah...</span>
-                    </>
-                  ) : (
-                    <>
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                      </svg>
-                      <span>Tambah Anggota</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* List anggota */}
-          <div className="overflow-hidden rounded-xl border border-gray-200 shadow-sm">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                    Nama Siswa
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                    Jabatan
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                    Aksi
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {orgAnggota.map(a => (
-                  <tr key={a.id} className="hover:bg-gray-50 transition-colors duration-150">
-                    <td className="px-4 py-3">
-                      <div className="flex items-center">
-                        <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center mr-3">
-                          <span className="text-blue-600 text-xs">👤</span>
-                        </div>
+                    {promotionMode === 'kelas' ? (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
-                          <span className="text-sm font-medium text-gray-900">{a.nama}</span>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      {editAnggotaId === a.id ? (
-                        <div className="flex items-center space-x-2">
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Kelas Asal</label>
                           <select
-                            className="px-2 py-1 border border-gray-300 rounded-lg text-sm bg-white"
-                            value={editAnggotaData.jabatan || ''}
-                            onChange={e => setEditAnggotaData(d => ({ ...d, jabatan: e.target.value }))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-indigo-500"
+                            value={promotionFromKelas}
+                            onChange={(event) => setPromotionFromKelas(event.target.value)}
                           >
-                            <option value="">Pilih jabatan</option>
-                            {JABATAN_OPTS.map(j => (
-                              <option key={j} value={j}>{j}</option>
+                            <option value="">Pilih kelas asal</option>
+                            {kelasOptions.map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
                             ))}
                           </select>
                         </div>
-                      ) : (
-                        <span className={`text-sm px-2 py-1 rounded-full ${
-                          a.jabatan === 'Ketua' 
-                            ? 'bg-yellow-100 text-yellow-800'
-                            : a.jabatan === 'Wakil Ketua' || a.jabatan === 'Sekretaris' || a.jabatan === 'Bendahara'
-                            ? 'bg-green-100 text-green-800'
-                            : 'bg-blue-100 text-blue-800'
-                        }`}>
-                          {a.jabatan || 'Anggota'}
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Tujuan</label>
+                          <select
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-indigo-500"
+                            value={promotionToKelas}
+                            onChange={(event) => setPromotionToKelas(event.target.value)}
+                          >
+                            <option value="">Pilih tujuan</option>
+                            {kelasOptions.map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                            <option value={PROMO_ALUMNI}>Alumni / Lulus</option>
+                            <option value={PROMO_MUTASI}>Mutasi / Pindah Sekolah</option>
+                          </select>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Filter Tingkatan</label>
+                            <select
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-indigo-500"
+                              value={promotionFilterGrade}
+                              onChange={(event) => {
+                                setPromotionFilterGrade(event.target.value)
+                                setPromotionFilterKelas('')
+                              }}
+                            >
+                              <option value="">Semua tingkatan</option>
+                              {gradeLabelsForPromotion.map((grade) => (
+                                <option key={grade} value={grade}>{grade}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Filter Kelas</label>
+                            <select
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-indigo-500"
+                              value={promotionFilterKelas}
+                              onChange={(event) => setPromotionFilterKelas(event.target.value)}
+                            >
+                              <option value="">Semua kelas</option>
+                              {kelasOptions
+                                .filter((option) => !promotionFilterGrade || option.grade === promotionFilterGrade)
+                                .map((option) => (
+                                  <option key={option.value} value={option.value}>{option.label}</option>
+                                ))}
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="rounded-xl border border-gray-200 overflow-hidden">
+                          <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between gap-3">
+                            <p className="text-xs text-gray-600">
+                              Siswa terlihat: <span className="font-semibold">{promotionCandidateSiswa.length}</span>
+                              {' '}• Dipilih: <span className="font-semibold">{promotionSelectedIds.length}</span>
+                            </p>
+                            <button
+                              type="button"
+                              className="text-xs text-indigo-600 hover:underline disabled:text-gray-400"
+                              onClick={togglePromotionSelectAllVisible}
+                              disabled={!promotionCandidateSiswa.length}
+                            >
+                              {promotionCandidateSiswa.length > 0 && promotionCandidateSiswa.every((siswa) => promotionSelectedIds.includes(siswa.uid))
+                                ? 'Hapus pilih semua'
+                                : 'Pilih semua terlihat'}
+                            </button>
+                          </div>
+                          <div className="max-h-64 overflow-y-auto divide-y divide-gray-100">
+                            {promotionCandidateSiswa.length ? (
+                              promotionCandidateSiswa.map((siswa) => (
+                                <label key={siswa.uid} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50">
+                                  <input
+                                    type="checkbox"
+                                    className="h-4 w-4 text-indigo-600 border-gray-300 rounded"
+                                    checked={promotionSelectedIds.includes(siswa.uid)}
+                                    onChange={() => togglePromotionSelect(siswa.uid)}
+                                  />
+                                  <span className="flex-1 min-w-0">
+                                    <span className="block text-sm font-medium text-gray-900 truncate">{siswa.nama}</span>
+                                    <span className="block text-xs text-gray-500 truncate">
+                                      {getKelasName(siswa.kelas)} • Angkatan {siswa.angkatan || '-'} • {siswa.email}
+                                    </span>
+                                  </span>
+                                </label>
+                              ))
+                            ) : (
+                              <div className="px-4 py-8 text-center text-sm text-gray-500">
+                                Tidak ada siswa aktif yang cocok dengan filter.
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Tujuan</label>
+                          <select
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-indigo-500"
+                            value={promotionToKelas}
+                            onChange={(event) => setPromotionToKelas(event.target.value)}
+                          >
+                            <option value="">Pilih tujuan</option>
+                            {kelasOptions.map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                            <option value={PROMO_ALUMNI}>Alumni / Lulus</option>
+                            <option value={PROMO_MUTASI}>Mutasi / Pindah Sekolah</option>
+                          </select>
+                        </div>
+                      </div>
+                    )}
+
+                    {(promotionToKelas === PROMO_ALUMNI || promotionToKelas === PROMO_MUTASI) && (
+                      <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 space-y-3">
+                        {promotionToKelas === PROMO_ALUMNI && (
+                          <div>
+                            <label className="block text-sm font-medium text-yellow-900 mb-1">Tahun Lulus</label>
+                            <input
+                              type="number"
+                              min="2000"
+                              max="2100"
+                              className="w-full px-3 py-2 border border-yellow-300 rounded-lg bg-white focus:ring-2 focus:ring-yellow-500"
+                              value={promotionAlumniYear}
+                              onChange={(event) => setPromotionAlumniYear(event.target.value)}
+                            />
+                          </div>
+                        )}
+                        <div>
+                          <label className="block text-sm font-medium text-yellow-900 mb-1">Alasan / Catatan</label>
+                          <textarea
+                            className="w-full px-3 py-2 border border-yellow-300 rounded-lg bg-white focus:ring-2 focus:ring-yellow-500 resize-none"
+                            rows={3}
+                            value={promotionExitReason}
+                            onChange={(event) => setPromotionExitReason(event.target.value)}
+                            placeholder={promotionToKelas === PROMO_ALUMNI ? 'Contoh: Lulus sesuai keputusan sekolah.' : 'Contoh: Mutasi mengikuti perpindahan orang tua.'}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    <label className="flex items-start gap-3 rounded-xl border border-indigo-200 bg-indigo-50 p-4">
+                      <input
+                        type="checkbox"
+                        className="mt-1 h-4 w-4 text-indigo-600 border-gray-300 rounded"
+                        checked={promotionAdvancePeriod}
+                        onChange={(event) => setPromotionAdvancePeriod(event.target.checked)}
+                      />
+                      <span>
+                        <span className="block text-sm font-semibold text-indigo-900">
+                          Setelah proses, aktifkan periode berikutnya
                         </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right space-x-2">
-                      {editAnggotaId === a.id ? (
-                        <>
-                          <button
-                            className="text-green-600 hover:text-green-800 px-3 py-1.5 rounded-lg hover:bg-green-50 text-sm font-medium transition-colors duration-200"
-                            onClick={saveEditAnggota}
-                          >
-                            Simpan
-                          </button>
-                          <button
-                            className="text-gray-600 hover:text-gray-800 px-3 py-1.5 rounded-lg hover:bg-gray-50 text-sm font-medium transition-colors duration-200"
-                            onClick={batalEditAnggota}
-                          >
-                            Batal
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            className="text-blue-600 hover:text-blue-800 px-3 py-1.5 rounded-lg hover:bg-blue-50 text-sm font-medium transition-colors duration-200"
-                            onClick={() => startEditAnggota(a)}
-                            title="Edit jabatan"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            className="text-red-600 hover:text-red-800 px-3 py-1.5 rounded-lg hover:bg-red-50 text-sm font-medium transition-colors duration-200"
-                            onClick={() => hapusAnggota(a)}
-                            title="Hapus anggota"
-                          >
-                            Hapus
-                          </button>
-                        </>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-                {!orgAnggota.length && (
-                  <tr>
-                    <td colSpan={3} className="px-4 py-8 text-center text-gray-500">
-                      <div className="w-16 h-16 mx-auto mb-3 bg-gray-100 rounded-full flex items-center justify-center">
-                        <span>👥</span>
-                      </div>
-                      <p className="text-sm">Belum ada anggota</p>
-                      <p className="text-xs mt-1">Tambahkan siswa sebagai anggota organisasi ini</p>
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                        <span className="block text-xs text-indigo-700 mt-1">
+                          {nextAcademicPeriod.tahunAjaran} - {nextAcademicPeriod.semester}. Aktifkan ini saat kenaikan kelas akhir tahun benar-benar selesai.
+                        </span>
+                      </span>
+                    </label>
+                  </div>
 
-          {/* Summary */}
-          {orgAnggota.length > 0 && (
-            <div className="mt-4 text-sm text-gray-600 bg-gray-50 p-3 rounded-lg">
-              <div className="flex flex-wrap gap-4">
-                <div>
-                  <span className="font-medium">Total:</span> {orgAnggota.length} anggota
+                  <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
+                    <button
+                      type="button"
+                      className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                      onClick={closePromotionModal}
+                      disabled={promotionLoading}
+                    >
+                      Batal
+                    </button>
+                    <button
+                      type="button"
+                      className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60"
+                      onClick={handlePromotion}
+                      disabled={
+                        promotionLoading ||
+                        !promotionToKelas ||
+                        (promotionMode === 'kelas' && !promotionFromKelas) ||
+                        (promotionMode === 'selected' && !promotionSelectedIds.length) ||
+                        ([PROMO_ALUMNI, PROMO_MUTASI].includes(promotionToKelas) && !promotionExitReason.trim())
+                      }
+                    >
+                      {promotionLoading ? 'Memproses...' : 'Jalankan Kenaikan'}
+                    </button>
+                  </div>
                 </div>
-                {JABATAN_OPTS.map(jabatan => {
-                  const count = orgAnggota.filter(a => a.jabatan === jabatan).length
-                  if (count > 0) {
-                    return (
-                      <div key={jabatan}>
-                        <span className="font-medium">{jabatan}:</span> {count}
-                      </div>
-                    )
-                  }
-                  return null
-                })}
               </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {loading && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl p-6 flex items-center space-x-3 shadow-2xl">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-            <span className="text-gray-700 font-medium">Memproses...</span>
+            )}
           </div>
         </div>
       )}

@@ -145,6 +145,58 @@ class AuthSuperAdminHardeningTest extends TestCase
         ]);
     }
 
+    public function test_public_register_rejects_guru_role_when_setting_is_not_explicitly_enabled(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        DB::table('settings')->where('tenant_id', $tenantId)->delete();
+
+        $response = $this
+            ->withServerVariables(['REMOTE_ADDR' => '10.10.10.6'])
+            ->postJson('/api/auth/register', [
+                'nama' => 'Guru Publik',
+                'email' => 'public-guru@example.com',
+                'password' => 'Str0ng!Passw0rd',
+                'role' => 'guru',
+            ]);
+
+        $response->assertStatus(403);
+        $response->assertJsonPath('error', 'Registrasi role ini tidak dibuka');
+        $this->assertDatabaseMissing('users', [
+            'email' => 'public-guru@example.com',
+        ]);
+    }
+
+    public function test_public_register_allows_guru_role_when_setting_is_explicitly_enabled(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        DB::table('settings')->where('tenant_id', $tenantId)->delete();
+
+        DB::table('settings')->insert([
+            'tenant_id' => $tenantId,
+            'registrasi_siswa_aktif' => true,
+            'registrasi_guru_aktif' => true,
+            'registrasi_admin_aktif' => false,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $response = $this
+            ->withServerVariables(['REMOTE_ADDR' => '10.10.10.7'])
+            ->postJson('/api/auth/register', [
+                'nama' => 'Guru Diundang',
+                'email' => 'enabled-guru@example.com',
+                'password' => 'Str0ng!Passw0rd',
+                'role' => 'guru',
+            ]);
+
+        $response->assertStatus(201);
+        $this->assertDatabaseHas('profiles', [
+            'tenant_id' => $tenantId,
+            'email' => 'enabled-guru@example.com',
+            'role' => 'guru',
+        ]);
+    }
+
     public function test_reset_password_rejects_admin_role(): void
     {
         $tenantId = $this->defaultTenantId();

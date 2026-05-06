@@ -60,11 +60,11 @@ const NavigationIcon = ({ name, className = 'w-5 h-5' }) => {
 const Navbar = () => {
   const navigate = useNavigate()
   const location = useLocation()
-  const { user, profile, logout, isSuperAdmin } = useAuthStore()
+  const { user, profile, settings: authSettings, logout, isSuperAdmin } = useAuthStore()
 
-  const [settings, setSettings] = useState({})
-  const [settingsId, setSettingsId] = useState(null)
-  const [isLoading, setIsLoading] = useState(true)
+  const [settings, setSettings] = useState(authSettings || {})
+  const [settingsId, setSettingsId] = useState(authSettings?.id || null)
+  const [isLoading, setIsLoading] = useState(false)
   const [isCollapsed, setIsCollapsed] = useState(false)
   const [avatarUrl, setAvatarUrl] = useState('')
   const [isWaliKelas, setIsWaliKelas] = useState(false)
@@ -76,10 +76,17 @@ const Navbar = () => {
   useEffect(() => {
     let isCancelled = false
     const loadSettings = async () => {
+      if (authSettings?.id) {
+        setSettings(authSettings || {})
+        setSettingsId(authSettings.id)
+        setIsLoading(false)
+        return
+      }
+
       try {
         let { data, error } = await supabase
           .from('settings')
-          .select('*')
+          .select('id,nama_sekolah,updated_at')
           .order('id', { ascending: true })
           .limit(1)
           .single()
@@ -94,7 +101,7 @@ const Navbar = () => {
     }
     loadSettings()
     return () => { isCancelled = true }
-  }, [])
+  }, [authSettings])
 
   useEffect(() => {
     if (!settingsId) return
@@ -229,7 +236,9 @@ const Navbar = () => {
       .filter((to) => !(location.pathname === to || location.pathname.startsWith(`${to}/`)))
 
     return scheduleRoutePrefetch(nextRoutes, {
-      max: effectiveRole === 'admin' ? 4 : 3
+      max: 1,
+      delay: 1800,
+      timeout: 3000
     })
   }, [effectiveRole, location.pathname, navLinks])
 

@@ -1,12 +1,35 @@
 // src/pages/guru/AbsensiGuru.jsx
 import React, { useState, useEffect, useMemo, useRef } from 'react'
-import { Clock3, QrCode, RefreshCw, ShieldCheck } from 'lucide-react'
+import { CalendarDays, ChevronLeft, ChevronRight, Clock3, QrCode, RefreshCw, ShieldCheck, UserCheck } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import ProfileAvatar from '../../components/ProfileAvatar'
+import {
+  SEMESTER_GANJIL,
+  SEMESTER_GENAP,
+  normalizeAcademicYear,
+  normalizeSemester,
+  resolveAcademicPeriod
+} from '../../utils/academicPeriod'
+import {
+  fetchAbsensiSettings,
+  isMissingAllowSelfAbsenColumnError
+} from '../../utils/absensiSettings'
 
 let qrCodePromise = null
+
+const JADWAL_COLUMNS = 'id,kelas_id,hari,mapel,guru_id,guru_nama,jam_mulai,jam_selesai,created_at,updated_at,tahun_ajaran,semester'
+const STUDENT_COLUMNS = 'id,nama,kelas,role,photo_url,photo_path,photo_updated_at,rfid_uid,status,updated_at'
+const GURU_COLUMNS = 'id,nama'
+const ABSENSI_COLUMNS = 'id,kelas,tanggal,uid,mapel,status,nama,waktu,komentar,oleh,dikonfirmasi,tahun_ajaran,semester'
+const AJUAN_COLUMNS = 'id,kelas,tanggal,uid,nama,alasan,mapel,created_at,status_guru,kategori_final,guru_id,guru_nama,waktu_respon,tahun_ajaran,semester'
+const RFID_SETTINGS_COLUMNS = 'id,rfid_aktif,rfid_mulai,rfid_selesai,updated_at'
+const JAM_KOSONG_COLUMNS = 'id,tanggal,kelas,mapel,jam_mulai,jam_selesai,alasan,guru_pengganti,created_by,created_at,updated_at'
+const SEMESTER_OPTIONS = [
+  { value: SEMESTER_GANJIL, label: 'Semester 1 (Ganjil)' },
+  { value: SEMESTER_GENAP, label: 'Semester 2 (Genap)' }
+]
 
 /* ===== Error Boundary Component ===== */
 const ErrorBoundary = ({ children }) => {
@@ -107,6 +130,10 @@ const toMinutes = (hhmm) => {
   return (h * 60) + (m || 0)
 }
 
+const normalizeRfidUid = (value = '') => (
+  String(value || '').toUpperCase().replace(/\s+/g, '')
+)
+
 const getDayName = (tglString) => {
   try {
     const date = new Date(tglString + 'T12:00:00Z')
@@ -129,6 +156,17 @@ const getCurrentDateTime = () => {
   }
 }
 
+const isSameClockMinute = (left, right) => (
+  left?.date === right?.date &&
+  left?.dayName === right?.dayName &&
+  left?.minutes === right?.minutes
+)
+
+const getMsUntilNextMinute = () => {
+  const now = new Date()
+  return Math.max(1000, (60 - now.getSeconds()) * 1000 - now.getMilliseconds() + 50)
+}
+
 const formatDateDisplay = (dateString) => {
   try {
     const date = new Date(dateString + 'T12:00:00Z')
@@ -140,6 +178,54 @@ const formatDateDisplay = (dateString) => {
   } catch (error) {
     return dateString
   }
+}
+
+const getAcademicYearOptions = (period = resolveAcademicPeriod()) => {
+  const start = Number(period.startYear || String(period.tahunAjaran || '').slice(0, 4)) || resolveAcademicPeriod().startYear
+  return Array.from({ length: 5 }, (_, index) => {
+    const year = start - 2 + index
+    return `${year}/${year + 1}`
+  })
+}
+
+const normalizePeriodFilter = (period = {}) => {
+  const fallback = resolveAcademicPeriod()
+  return {
+    tahunAjaran: normalizeAcademicYear(period.tahunAjaran || period.tahun_ajaran) || fallback.tahunAjaran,
+    semester: normalizeSemester(period.semester || period.semester_aktif) || fallback.semester
+  }
+}
+
+const dateToMonthState = (dateString = getToday()) => {
+  const safeDate = /^\d{4}-\d{2}-\d{2}$/.test(dateString) ? dateString : getToday()
+  const [year, month] = safeDate.split('-').map(Number)
+  return { year, month }
+}
+
+const monthLabel = ({ year, month }) => (
+  new Date(year, month - 1, 1).toLocaleDateString('id-ID', {
+    month: 'long',
+    year: 'numeric'
+  })
+)
+
+const shiftMonth = ({ year, month }, delta) => {
+  const next = new Date(year, month - 1 + delta, 1)
+  return { year: next.getFullYear(), month: next.getMonth() + 1 }
+}
+
+const buildMonthCalendar = ({ year, month }) => {
+  const daysInMonth = new Date(year, month, 0).getDate()
+  const firstDay = new Date(year, month - 1, 1).getDay()
+  const cells = []
+
+  for (let i = 0; i < firstDay; i += 1) cells.push(null)
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    cells.push(`${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`)
+  }
+
+  while (cells.length % 7 !== 0) cells.push(null)
+  return cells
 }
 
 const loadQRCode = () => {
@@ -163,6 +249,7 @@ const AttendanceQrPanel = ({ currentSchedule, kelas, tgl, isActive, pushToast })
   const [isLoadingQr, setIsLoadingQr] = useState(false)
   const [qrError, setQrError] = useState('')
   const [nowTick, setNowTick] = useState(Date.now())
+  const requestSeqRef = useRef(0)
 
   const canRequestQr = Boolean(currentSchedule?.id && kelas && tgl === getToday() && isActive)
 
@@ -175,6 +262,7 @@ const AttendanceQrPanel = ({ currentSchedule, kelas, tgl, isActive, pushToast })
 
   const loadSession = async ({ silent = false } = {}) => {
     if (!canRequestQr) return
+    const requestId = ++requestSeqRef.current
     if (!silent) setIsLoadingQr(true)
     setQrError('')
 
@@ -186,6 +274,7 @@ const AttendanceQrPanel = ({ currentSchedule, kelas, tgl, isActive, pushToast })
 
       if (error) throw error
       if (!data?.token) throw new Error('Token QR tidak tersedia')
+      if (requestId !== requestSeqRef.current) return
 
       const QRCode = await loadQRCode()
       const dataUrl = await QRCode.toDataURL(buildQrScanValue(data.token), {
@@ -198,26 +287,31 @@ const AttendanceQrPanel = ({ currentSchedule, kelas, tgl, isActive, pushToast })
         errorCorrectionLevel: 'M'
       })
 
+      if (requestId !== requestSeqRef.current) return
       setSession(data)
       setQrDataUrl(dataUrl)
       setNowTick(Date.now())
       if (!silent) pushToast('success', 'QR absensi diperbarui')
     } catch (err) {
+      if (requestId !== requestSeqRef.current) return
       const message = err?.message || 'Gagal membuat QR absensi'
       setQrError(message)
       setQrDataUrl('')
       setSession(null)
       if (!silent) pushToast('error', message)
     } finally {
-      if (!silent) setIsLoadingQr(false)
+      if (!silent && requestId === requestSeqRef.current) setIsLoadingQr(false)
     }
   }
 
   useEffect(() => {
+    requestSeqRef.current += 1
+    setQrDataUrl('')
+    setSession(null)
+    setQrError('')
+    setIsLoadingQr(false)
+
     if (!canRequestQr) {
-      setQrDataUrl('')
-      setSession(null)
-      setQrError('')
       return undefined
     }
 
@@ -514,6 +608,141 @@ const JadwalCard = ({ jadwal, onSelect, isSelected = false }) => {
   )
 }
 
+const SubjectDatePicker = ({
+  value,
+  selectedSchedule,
+  schedulesForClass,
+  disabled = false,
+  onSelectDate
+}) => {
+  const [visibleMonth, setVisibleMonth] = useState(() => dateToMonthState(value))
+
+  useEffect(() => {
+    setVisibleMonth(dateToMonthState(value))
+  }, [value])
+
+  const sameSubjectSchedules = useMemo(() => {
+    if (!selectedSchedule?.mapel) return []
+    return (schedulesForClass || []).filter((jadwal) => jadwal.mapel === selectedSchedule.mapel)
+  }, [schedulesForClass, selectedSchedule?.mapel])
+
+  const activeDates = useMemo(() => {
+    const map = new Map()
+    if (!sameSubjectSchedules.length) return map
+
+    buildMonthCalendar(visibleMonth).forEach((dateKey) => {
+      if (!dateKey) return
+      const dayName = getDayName(dateKey)
+      const matches = sameSubjectSchedules.filter((jadwal) => jadwal.hari === dayName)
+      if (matches.length) map.set(dateKey, matches)
+    })
+
+    return map
+  }, [sameSubjectSchedules, visibleMonth])
+
+  const cells = useMemo(() => buildMonthCalendar(visibleMonth), [visibleMonth])
+  const selectedLabel = formatDateDisplay(value)
+  const selectedSubject = selectedSchedule?.mapel || ''
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-500">
+            <CalendarDays className="h-4 w-4 text-blue-600" />
+            Tanggal Absen
+          </div>
+          <div className="mt-1 truncate text-sm font-bold text-slate-900">{selectedLabel}</div>
+        </div>
+        <button
+          type="button"
+          onClick={() => onSelectDate(getToday())}
+          className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white shadow-sm transition-colors hover:bg-blue-700 disabled:bg-slate-300"
+          disabled={disabled}
+        >
+          Hari Ini
+        </button>
+      </div>
+
+      <div className="mt-3 flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-2 py-2">
+        <button
+          type="button"
+          onClick={() => setVisibleMonth((prev) => shiftMonth(prev, -1))}
+          className="grid h-8 w-8 place-items-center rounded-lg text-slate-600 hover:bg-white hover:text-blue-700"
+          disabled={disabled}
+          title="Bulan sebelumnya"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+        <div className="text-sm font-bold text-slate-800">{monthLabel(visibleMonth)}</div>
+        <button
+          type="button"
+          onClick={() => setVisibleMonth((prev) => shiftMonth(prev, 1))}
+          className="grid h-8 w-8 place-items-center rounded-lg text-slate-600 hover:bg-white hover:text-blue-700"
+          disabled={disabled}
+          title="Bulan berikutnya"
+        >
+          <ChevronRight className="h-4 w-4" />
+        </button>
+      </div>
+
+      <div className="mt-3 grid grid-cols-7 gap-1 text-center text-[10px] font-bold uppercase text-slate-400">
+        {['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'].map((day) => (
+          <div key={day} className="py-1">{day}</div>
+        ))}
+      </div>
+
+      <div className="mt-1 grid grid-cols-7 gap-1">
+        {cells.map((dateKey, index) => {
+          if (!dateKey) return <div key={`empty-${index}`} className="aspect-square" />
+
+          const isSelected = dateKey === value
+          const matches = activeDates.get(dateKey) || []
+          const isSubjectDate = matches.length > 0
+          const suggestedSchedule =
+            matches.find((jadwal) => jadwal.id === selectedSchedule?.id) ||
+            matches[0] ||
+            null
+
+          return (
+            <button
+              key={dateKey}
+              type="button"
+              onClick={() => onSelectDate(dateKey, suggestedSchedule)}
+              disabled={disabled || (selectedSubject && !isSubjectDate)}
+              title={
+                isSubjectDate
+                  ? `${selectedSubject} tersedia pada ${formatDateDisplay(dateKey)}`
+                  : selectedSubject
+                    ? `${selectedSubject} tidak terjadwal pada tanggal ini`
+                    : 'Pilih jadwal terlebih dahulu'
+              }
+              className={`aspect-square rounded-xl border text-xs font-bold transition-all ${
+                isSubjectDate
+                  ? 'border-emerald-300 bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                  : 'border-slate-100 bg-slate-50 text-slate-400'
+              } ${
+                isSelected
+                  ? 'ring-2 ring-blue-500 ring-offset-1'
+                  : ''
+              } disabled:cursor-not-allowed disabled:opacity-60`}
+            >
+              {Number(dateKey.slice(-2))}
+            </button>
+          )
+        })}
+      </div>
+
+      <div className="mt-3 flex items-center gap-2 text-[11px] text-slate-500">
+        <span className="h-3 w-3 rounded bg-emerald-100 border border-emerald-300" />
+        {selectedSubject
+          ? `Hijau berarti ada jadwal ${selectedSubject} pada tanggal tersebut.`
+          : 'Pilih jadwal untuk menandai tanggal mapel.'}
+      </div>
+    </div>
+  )
+}
+
 /* ===== Main Component ===== */
 function AbsensiGuru() {
   const { user } = useAuthStore()
@@ -565,6 +794,13 @@ function AbsensiGuru() {
     }
   })
 
+  const initialAcademicPeriod = resolveAcademicPeriod()
+  const [activeAcademicPeriod, setActiveAcademicPeriod] = useState(initialAcademicPeriod)
+  const [periodFilter, setPeriodFilter] = useState(() => ({
+    tahunAjaran: initialAcademicPeriod.tahunAjaran,
+    semester: initialAcademicPeriod.semester
+  }))
+
   // Data states
   const [jadwalAll, setJadwalAll] = useState([])
   const [siswa, setSiswa] = useState([])
@@ -574,6 +810,7 @@ function AbsensiGuru() {
   const [currentSchedule, setCurrentSchedule] = useState(null)
   const [todayName, setTodayName] = useState('')
   const [loadingActions, setLoadingActions] = useState({})
+  const [allowSelfAbsen, setAllowSelfAbsen] = useState(false)
 
   // Modals
   const [isIzinModalOpen, setIsIzinModalOpen] = useState(false)
@@ -625,14 +862,20 @@ function AbsensiGuru() {
   const [lastUpdate, setLastUpdate] = useState(new Date())
 
   // Refs
-  const siswaRef = useRef([])
   const absensiRef = useRef([])
-  const jadwalRef = useRef([])
   const currentScheduleRef = useRef(null)
+  const absensiLoadSeqRef = useRef(0)
+  const loadErrorToastRef = useRef({})
 
-  useEffect(() => { siswaRef.current = siswa }, [siswa])
+  const pushLoadErrorToast = (key, message) => {
+    const now = Date.now()
+    const lastShownAt = loadErrorToastRef.current[key] || 0
+    if (now - lastShownAt < 8000) return
+    loadErrorToastRef.current[key] = now
+    pushToast('error', message)
+  }
+
   useEffect(() => { absensiRef.current = absensi }, [absensi])
-  useEffect(() => { jadwalRef.current = jadwalAll }, [jadwalAll])
   useEffect(() => { currentScheduleRef.current = currentSchedule }, [currentSchedule])
 
   /* ===== Helper mutasi state ABSENSI & AJUAN (supaya live & ringan) ===== */
@@ -728,12 +971,25 @@ function AbsensiGuru() {
     }
   }, [lastAutoAlphaRun])
 
-  /* ===== Real-time Clock ===== */
+  /* ===== Minute Clock For Page Logic ===== */
   useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentDateTime(getCurrentDateTime())
-    }, 1000)
-    return () => clearInterval(timer)
+    let minuteTimer = null
+    let alignTimer = null
+
+    const updateMinute = () => {
+      const next = getCurrentDateTime()
+      setCurrentDateTime(prev => (isSameClockMinute(prev, next) ? prev : next))
+    }
+
+    alignTimer = window.setTimeout(() => {
+      updateMinute()
+      minuteTimer = window.setInterval(updateMinute, 60000)
+    }, getMsUntilNextMinute())
+
+    return () => {
+      window.clearTimeout(alignTimer)
+      if (minuteTimer) window.clearInterval(minuteTimer)
+    }
   }, [])
 
   /* ===== Online Status ===== */
@@ -785,11 +1041,12 @@ function AbsensiGuru() {
 
   /* ===== Subscription Absensi & Ajuan (live, tanpa reload berat) ===== */
   useEffect(() => {
-    if (!kelas || !currentScheduleRef.current?.mapel || !tgl) return
+    const activeMapel = currentSchedule?.mapel
+    if (!kelas || !activeMapel || !tgl) return
 
     // Realtime ABSENSI
     const absensiChannel = supabase
-      .channel(`absensi-changes-${kelas}-${currentScheduleRef.current.mapel}-${tgl}`)
+      .channel(`absensi-changes-${kelas}-${activeMapel}-${tgl}`)
       .on(
         'postgres_changes',
         {
@@ -806,7 +1063,7 @@ function AbsensiGuru() {
 
           if (
             row.kelas !== kelas ||
-            row.mapel !== currentScheduleRef.current?.mapel ||
+            row.mapel !== activeMapel ||
             row.tanggal !== tgl
           ) {
             return
@@ -821,7 +1078,7 @@ function AbsensiGuru() {
 
     // Realtime AJUAN IZIN
     const ajuanChannel = supabase
-      .channel(`ajuan-changes-${kelas}-${currentScheduleRef.current.mapel}-${tgl}`)
+      .channel(`ajuan-changes-${kelas}-${activeMapel}-${tgl}`)
       .on(
         'postgres_changes',
         {
@@ -838,7 +1095,7 @@ function AbsensiGuru() {
 
           if (
             row.kelas !== kelas ||
-            row.mapel !== currentScheduleRef.current?.mapel ||
+            row.mapel !== activeMapel ||
             row.tanggal !== tgl
           ) {
             return
@@ -862,7 +1119,7 @@ function AbsensiGuru() {
       supabase.removeChannel(absensiChannel)
       supabase.removeChannel(ajuanChannel)
     }
-  }, [kelas, tgl, view, pushToast])
+  }, [kelas, currentSchedule?.mapel, tgl, view, pushToast])
 
   /* ===== Subscription Jam Kosong ===== */
   useEffect(() => {
@@ -898,7 +1155,7 @@ function AbsensiGuru() {
       try {
         const { data, error } = await supabase
           .from('absensi_rfid_settings')
-          .select('*')
+          .select(RFID_SETTINGS_COLUMNS)
           .order('updated_at', { ascending: false })
           .order('created_at', { ascending: false })
           .limit(1)
@@ -955,20 +1212,68 @@ function AbsensiGuru() {
     checkModeSwitch()
   }, [currentDateTime, currentSchedule, tgl, view, absenMode])
 
+  useEffect(() => {
+    const loadAcademicPeriod = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('settings')
+          .select('tahun_ajaran,semester_aktif')
+          .limit(1)
+          .maybeSingle()
+
+        if (error && error.code !== 'PGRST116') {
+          console.warn('Gagal memuat periode akademik aktif:', error)
+          return
+        }
+
+        const resolved = resolveAcademicPeriod(data || {})
+        setActiveAcademicPeriod(resolved)
+        setPeriodFilter((prev) => {
+          const normalized = normalizePeriodFilter(prev)
+          if (
+            normalized.tahunAjaran === initialAcademicPeriod.tahunAjaran &&
+            normalized.semester === initialAcademicPeriod.semester
+          ) {
+            return {
+              tahunAjaran: resolved.tahunAjaran,
+              semester: resolved.semester
+            }
+          }
+          return {
+            tahunAjaran: normalized.tahunAjaran,
+            semester: normalized.semester
+          }
+        })
+      } catch (error) {
+        console.warn('Gagal memuat periode akademik aktif:', error)
+      }
+    }
+
+    loadAcademicPeriod()
+  }, [])
+
   /* ===== Load Data Jadwal & Guru ===== */
   useEffect(() => {
     loadJadwal()
     loadGuruList()
-  }, [user?.id])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, periodFilter.tahunAjaran, periodFilter.semester])
 
   const loadJadwal = async () => {
     if (!user?.id) return
 
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('jadwal')
-        .select('*')
+        .select(JADWAL_COLUMNS)
         .eq('guru_id', user.id)
+        .order('hari')
+        .order('jam_mulai')
+
+      if (periodFilter.tahunAjaran) query = query.eq('tahun_ajaran', periodFilter.tahunAjaran)
+      if (periodFilter.semester) query = query.eq('semester', periodFilter.semester)
+
+      const { data, error } = await query
 
       if (error) {
         console.error('Error loading jadwal:', error)
@@ -977,6 +1282,11 @@ function AbsensiGuru() {
       }
 
       setJadwalAll(data || [])
+      if (selectedScheduleId && !(data || []).some((jadwal) => jadwal.id === selectedScheduleId)) {
+        setSelectedScheduleId('')
+        setCurrentSchedule(null)
+        setAllowSelfAbsen(false)
+      }
       setLastUpdate(new Date())
     } catch (error) {
       console.error('Exception loading jadwal:', error)
@@ -988,7 +1298,7 @@ function AbsensiGuru() {
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('id, nama')
+        .select(GURU_COLUMNS)
         .eq('role', 'guru')
         .order('nama')
 
@@ -1008,13 +1318,18 @@ function AbsensiGuru() {
 
     setIsLoadingJamKosong(true)
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('jam_kosong')
-        .select('*')
+        .select(JAM_KOSONG_COLUMNS)
         .eq('created_by', user.id)
         .order('tanggal', { ascending: false })
         .order('created_at', { ascending: false })
         .limit(50)
+
+      if (periodFilter.tahunAjaran) query = query.eq('tahun_ajaran', periodFilter.tahunAjaran)
+      if (periodFilter.semester) query = query.eq('semester', periodFilter.semester)
+
+      const { data, error } = await query
 
       if (error) {
         console.error('Error loading riwayat jam kosong:', error)
@@ -1033,14 +1348,16 @@ function AbsensiGuru() {
 
   useEffect(() => {
     if (view === 'jam_kosong') loadRiwayatJamKosong()
-  }, [view])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, periodFilter.tahunAjaran, periodFilter.semester])
 
   /* ===== Computed Data ===== */
-  const { myKelasList, schedulesForSelectedClass, jadwalByHari, jadwalHariIni } = useMemo(() => {
+  const { myKelasList, schedulesForSelectedClass, schedulesForActiveClass, jadwalByHari, jadwalHariIni } = useMemo(() => {
     if (!user?.id || !jadwalAll.length)
       return {
         myKelasList: [],
         schedulesForSelectedClass: [],
+        schedulesForActiveClass: [],
         jadwalByHari: {},
         jadwalHariIni: []
       }
@@ -1059,10 +1376,14 @@ function AbsensiGuru() {
     })
 
     const schedulesList = []
+    const schedulesForActiveClassTemp = kelas
+      ? jadwalAll.filter(j => j.kelas_id === kelas)
+      : []
+
     if (kelas) {
       const now = currentDateTime.minutes
-      jadwalAll
-        .filter(j => j.kelas_id === kelas && j.hari === selectedDayName)
+      schedulesForActiveClassTemp
+        .filter(j => j.hari === selectedDayName)
         .forEach(j => {
           const isCurrent =
             j.hari === todayDayName &&
@@ -1081,6 +1402,7 @@ function AbsensiGuru() {
     return {
       myKelasList: Array.from(kelasSet).sort(),
       schedulesForSelectedClass: schedulesList,
+      schedulesForActiveClass: schedulesForActiveClassTemp,
       jadwalByHari: jadwalByHariTemp,
       jadwalHariIni: jadwalHariIniTemp
     }
@@ -1109,6 +1431,53 @@ function AbsensiGuru() {
     return now > endTime + 5
   }, [currentSchedule, tgl, currentDateTime])
 
+  const academicYearOptions = useMemo(
+    () => getAcademicYearOptions(activeAcademicPeriod),
+    [activeAcademicPeriod]
+  )
+
+  const academicPeriodPayload = useMemo(() => ({
+    tahun_ajaran: periodFilter.tahunAjaran,
+    semester: periodFilter.semester
+  }), [periodFilter.semester, periodFilter.tahunAjaran])
+
+  const selectedScheduleForPicker = useMemo(() => {
+    return (
+      schedulesForSelectedClass.find((s) => s.id === selectedScheduleId)?.schedule ||
+      currentSchedule ||
+      schedulesForActiveClass.find((jadwal) => jadwal.id === selectedScheduleId) ||
+      null
+    )
+  }, [currentSchedule, schedulesForActiveClass, schedulesForSelectedClass, selectedScheduleId])
+
+  const handleSelectAttendanceDate = (dateKey, suggestedSchedule = null) => {
+    setTgl(dateKey)
+
+    if (suggestedSchedule?.id) {
+      setSelectedScheduleId(suggestedSchedule.id)
+      setCurrentSchedule(suggestedSchedule)
+      setAllowSelfAbsen(false)
+      return
+    }
+
+    const selectedMapel = selectedScheduleForPicker?.mapel
+    if (!kelas || !selectedMapel) return
+
+    const dayName = getDayName(dateKey)
+    const matchingSchedule = schedulesForActiveClass.find(
+      (jadwal) => jadwal.mapel === selectedMapel && jadwal.hari === dayName
+    )
+
+    if (matchingSchedule) {
+      setSelectedScheduleId(matchingSchedule.id)
+      setCurrentSchedule(matchingSchedule)
+    } else {
+      setSelectedScheduleId('')
+      setCurrentSchedule(null)
+    }
+    setAllowSelfAbsen(false)
+  }
+
   /* ===== Auto Select Schedule ===== */
   useEffect(() => {
     if (jadwalAll.length > 0 && kelas && !selectedScheduleId && view === 'absen') {
@@ -1118,21 +1487,47 @@ function AbsensiGuru() {
   }, [jadwalAll, kelas, selectedScheduleId, view, schedulesForSelectedClass])
 
   useEffect(() => {
+    if (view !== 'absen' || !kelas || !selectedScheduleId) return
+    const stillAvailable = schedulesForSelectedClass.some((schedule) => schedule.id === selectedScheduleId)
+    if (stillAvailable) return
+
+    const previousSchedule = schedulesForActiveClass.find((jadwal) => jadwal.id === selectedScheduleId) || currentSchedule
+    const fallback =
+      schedulesForSelectedClass.find((schedule) => schedule.schedule.mapel === previousSchedule?.mapel) ||
+      schedulesForSelectedClass.find((schedule) => schedule.isCurrent) ||
+      schedulesForSelectedClass[0]
+
+    if (fallback) {
+      setSelectedScheduleId(fallback.id)
+      setCurrentSchedule(fallback.schedule)
+    } else {
+      setSelectedScheduleId('')
+      setCurrentSchedule(null)
+      setAllowSelfAbsen(false)
+    }
+  }, [currentSchedule, kelas, schedulesForActiveClass, schedulesForSelectedClass, selectedScheduleId, view])
+
+  useEffect(() => {
     if (kelas && selectedScheduleId && tgl && view === 'absen') loadDataAbsensi()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kelas, selectedScheduleId, tgl, view])
+  }, [kelas, selectedScheduleId, tgl, view, periodFilter.tahunAjaran, periodFilter.semester])
 
   const loadDataAbsensi = async () => {
     if (!kelas || !selectedScheduleId || !tgl) return
+
+    const requestId = absensiLoadSeqRef.current + 1
+    absensiLoadSeqRef.current = requestId
+    const isLatestRequest = () => absensiLoadSeqRef.current === requestId
 
     setIsLoading(true)
     setSiswa([])
     setAbsensi([])
     setAjuan([])
+    setAllowSelfAbsen(false)
 
     const selectedScheduleObj = schedulesForSelectedClass.find(s => s.id === selectedScheduleId)
     if (!selectedScheduleObj) {
-      setIsLoading(false)
+      if (isLatestRequest()) setIsLoading(false)
       return
     }
 
@@ -1141,33 +1536,59 @@ function AbsensiGuru() {
     setTodayName(getDayName(tgl))
 
     try {
-      // Load settings
-      try {
-        const { data: settings, error: settingsError } = await supabase
-          .from('absensi_settings')
-          .select('mode')
+      let absenQuery = supabase
+          .from('absensi')
+          .select(ABSENSI_COLUMNS)
           .eq('kelas', kelas)
           .eq('tanggal', tgl)
           .eq('mapel', schedule.mapel)
-          .single()
+      let reqsQuery = supabase
+          .from('absensi_ajuan')
+          .select(AJUAN_COLUMNS)
+          .eq('kelas', kelas)
+          .eq('tanggal', tgl)
+          .eq('mapel', schedule.mapel)
 
-        if (settingsError && settingsError.code !== 'PGRST116') {
-          console.error('Error loading settings:', settingsError)
-        } else if (settings) {
-          setAbsenMode(settings.mode)
-        }
-      } catch (settingsErr) {
-        console.warn('Error loading settings:', settingsErr)
+      if (periodFilter.tahunAjaran) {
+        absenQuery = absenQuery.eq('tahun_ajaran', periodFilter.tahunAjaran)
+        reqsQuery = reqsQuery.eq('tahun_ajaran', periodFilter.tahunAjaran)
+      }
+      if (periodFilter.semester) {
+        absenQuery = absenQuery.eq('semester', periodFilter.semester)
+        reqsQuery = reqsQuery.eq('semester', periodFilter.semester)
       }
 
-      // Load siswa
-      const { data: students, error: studentsError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('role', 'siswa')
-        .eq('kelas', kelas)
-        .order('nama')
+      const [settingsRes, studentsRes, absenRes, reqsRes] = await Promise.all([
+        fetchAbsensiSettings({
+          kelas,
+          tanggal: tgl,
+          mapel: schedule.mapel,
+          periodFilter,
+          single: true
+        }),
+        supabase
+          .from('profiles')
+          .select(STUDENT_COLUMNS)
+          .eq('role', 'siswa')
+          .eq('kelas', kelas)
+          .order('nama'),
+        absenQuery,
+        reqsQuery
+      ])
 
+      if (!isLatestRequest()) return
+
+      const { data: settings, error: settingsError } = settingsRes
+      if (settingsError) {
+        console.error('Error loading settings:', settingsError)
+      } else if (settings) {
+        setAbsenMode(settings.mode)
+        setAllowSelfAbsen(Boolean(settings.allow_self_absen))
+      } else {
+        setAllowSelfAbsen(false)
+      }
+
+      const { data: students, error: studentsError } = studentsRes
       if (studentsError) {
         console.error('Error loading students:', studentsError)
         pushToast('error', 'Gagal memuat data siswa')
@@ -1176,30 +1597,16 @@ function AbsensiGuru() {
         setSiswa(students || [])
       }
 
-      // Load absensi
-      const { data: absen, error: absenError } = await supabase
-        .from('absensi')
-        .select('*')
-        .eq('kelas', kelas)
-        .eq('tanggal', tgl)
-        .eq('mapel', schedule.mapel)
-
+      const { data: absen, error: absenError } = absenRes
       if (absenError) {
         console.error('Error loading absensi:', absenError)
-        pushToast('error', 'Gagal memuat data absensi')
+        pushLoadErrorToast('load-absensi', 'Gagal memuat data absensi')
         setAbsensi([])
       } else {
         setAbsensi(absen || [])
       }
 
-      // Load ajuan
-      const { data: reqs, error: reqsError } = await supabase
-        .from('absensi_ajuan')
-        .select('*')
-        .eq('kelas', kelas)
-        .eq('tanggal', tgl)
-        .eq('mapel', schedule.mapel)
-
+      const { data: reqs, error: reqsError } = reqsRes
       if (reqsError) {
         console.error('Error loading ajuan:', reqsError)
         pushToast('error', 'Gagal memuat data ajuan izin')
@@ -1210,10 +1617,12 @@ function AbsensiGuru() {
 
       setLastUpdate(new Date())
     } catch (e) {
-      console.error('General error in loadDataAbsensi:', e)
-      pushToast('error', 'Terjadi kesalahan saat memuat data')
+      if (isLatestRequest()) {
+        console.error('General error in loadDataAbsensi:', e)
+        pushToast('error', 'Terjadi kesalahan saat memuat data')
+      }
     } finally {
-      setIsLoading(false)
+      if (isLatestRequest()) setIsLoading(false)
     }
   }
 
@@ -1230,6 +1639,23 @@ function AbsensiGuru() {
     return now >= toMinutes(currentSchedule.jam_mulai) && now <= toMinutes(currentSchedule.jam_selesai) + 5
   }, [currentSchedule, tgl, currentDateTime])
 
+  const siswaById = useMemo(() => {
+    return new Map(siswa.map(s => [s.id, s]))
+  }, [siswa])
+
+  const siswaByRfidUid = useMemo(() => {
+    const map = new Map()
+    siswa.forEach(s => {
+      const card = normalizeRfidUid(s.rfid_uid)
+      if (card) map.set(card, s)
+    })
+    return map
+  }, [siswa])
+
+  const absensiByUid = useMemo(() => {
+    return new Map(absensi.map(a => [a.uid, a]))
+  }, [absensi])
+
   const { listHadir, listIzin, listSakit, listAlpha, listBelumHadir } = useMemo(() => {
     const listHadir = []
     const listIzin = []
@@ -1238,7 +1664,7 @@ function AbsensiGuru() {
     const listBelumHadir = []
 
     siswa.forEach(s => {
-      const absen = absensi.find(a => a.uid === s.id)
+      const absen = absensiByUid.get(s.id)
       const row = {
         ...s,
         absenId: absen?.id,
@@ -1255,7 +1681,7 @@ function AbsensiGuru() {
       else listBelumHadir.push(row)
     })
     return { listHadir, listIzin, listSakit, listAlpha, listBelumHadir }
-  }, [siswa, absensi])
+  }, [siswa, absensiByUid])
 
   /* ===== Action Handlers ===== */
   const setStatus = async (uid, st, alasan = '') => {
@@ -1264,7 +1690,7 @@ function AbsensiGuru() {
     setLoadingActions(prev => ({ ...prev, [uid]: true }))
 
     try {
-      const siswaData = siswa.find(s => s.id === uid)
+      const siswaData = siswaById.get(uid)
       if (!siswaData) {
         pushToast('error', 'Data siswa tidak ditemukan')
         return
@@ -1279,7 +1705,8 @@ function AbsensiGuru() {
         status: st,
         komentar: alasan || `${st} (Manual Guru)`,
         oleh: user.id,
-        waktu: new Date().toISOString()
+        waktu: new Date().toISOString(),
+        ...academicPeriodPayload
       }
 
       const { data, error } = await supabase
@@ -1353,20 +1780,39 @@ function AbsensiGuru() {
     }
 
     try {
-      const { error } = await supabase
+      const payload = {
+        kelas,
+        tanggal: tgl,
+        mapel: currentSchedule.mapel,
+        mode,
+        allow_self_absen: allowSelfAbsen,
+        updated_at: new Date().toISOString(),
+        ...academicPeriodPayload
+      }
+
+      let { error } = await supabase
         .from('absensi_settings')
-        .upsert(
-          {
-            kelas,
-            tanggal: tgl,
-            mapel: currentSchedule.mapel,
-            mode,
-            updated_at: new Date().toISOString()
-          },
-          {
+        .upsert(payload, {
+          onConflict: 'kelas,tanggal,mapel'
+        })
+
+      if (isMissingAllowSelfAbsenColumnError(error)) {
+        const { allow_self_absen: _allowSelfAbsen, ...legacyPayload } = payload
+        const retry = await supabase
+          .from('absensi_settings')
+          .upsert(legacyPayload, {
             onConflict: 'kelas,tanggal,mapel'
-          }
-        )
+          })
+        error = retry.error
+
+        if (!error) {
+          setAllowSelfAbsen(false)
+          pushToast(
+            'warning',
+            'Mode tersimpan. Fitur absen mandiri perlu migration database terbaru sebelum bisa dipakai.'
+          )
+        }
+      }
 
       if (error) {
         console.error('Error updating absensi mode:', error)
@@ -1378,6 +1824,63 @@ function AbsensiGuru() {
       }
     } catch (err) {
       console.error('Exception in toggleAbsenMode:', err)
+      pushToast('error', 'Terjadi kesalahan sistem')
+    }
+  }
+
+  const toggleSelfAbsen = async () => {
+    if (!currentSchedule?.mapel) {
+      pushToast('error', 'Pilih jadwal terlebih dahulu')
+      return
+    }
+
+    if (tgl !== getToday()) {
+      pushToast('error', 'Absen mandiri siswa hanya bisa dibuka untuk tanggal hari ini')
+      return
+    }
+
+    const nextValue = !allowSelfAbsen
+
+    try {
+      const { error } = await supabase
+        .from('absensi_settings')
+        .upsert(
+          {
+            kelas,
+            tanggal: tgl,
+            mapel: currentSchedule.mapel,
+            mode: absenMode || 'manual',
+            allow_self_absen: nextValue,
+            updated_at: new Date().toISOString(),
+            ...academicPeriodPayload
+          },
+          {
+            onConflict: 'kelas,tanggal,mapel'
+          }
+        )
+
+      if (error) {
+        if (isMissingAllowSelfAbsenColumnError(error)) {
+          pushToast(
+            'error',
+            'Database belum memiliki kolom absen mandiri. Jalankan migration terbaru lalu coba lagi.'
+          )
+          return
+        }
+        console.error('Error updating self attendance setting:', error)
+        pushToast('error', 'Gagal mengubah izin absen mandiri siswa')
+        return
+      }
+
+      setAllowSelfAbsen(nextValue)
+      pushToast(
+        'success',
+        nextValue
+          ? 'Siswa sudah diizinkan klik absen mandiri untuk mapel ini'
+          : 'Absen mandiri siswa ditutup untuk mapel ini'
+      )
+    } catch (err) {
+      console.error('Exception in toggleSelfAbsen:', err)
       pushToast('error', 'Terjadi kesalahan sistem')
     }
   }
@@ -1401,10 +1904,22 @@ function AbsensiGuru() {
     setIsRunningAutoAlpha(true)
 
     try {
+      let absensiQuery = supabase.from('absensi').select(ABSENSI_COLUMNS).eq('kelas', kelas).eq('tanggal', tgl).eq('mapel', currentSchedule.mapel)
+      let ajuanQuery = supabase.from('absensi_ajuan').select(AJUAN_COLUMNS).eq('kelas', kelas).eq('tanggal', tgl).eq('mapel', currentSchedule.mapel)
+
+      if (periodFilter.tahunAjaran) {
+        absensiQuery = absensiQuery.eq('tahun_ajaran', periodFilter.tahunAjaran)
+        ajuanQuery = ajuanQuery.eq('tahun_ajaran', periodFilter.tahunAjaran)
+      }
+      if (periodFilter.semester) {
+        absensiQuery = absensiQuery.eq('semester', periodFilter.semester)
+        ajuanQuery = ajuanQuery.eq('semester', periodFilter.semester)
+      }
+
       const [siswaRes, absensiRes, ajuanRes] = await Promise.all([
-        supabase.from('profiles').select('*').eq('role', 'siswa').eq('kelas', kelas).order('nama'),
-        supabase.from('absensi').select('*').eq('kelas', kelas).eq('tanggal', tgl).eq('mapel', currentSchedule.mapel),
-        supabase.from('absensi_ajuan').select('*').eq('kelas', kelas).eq('tanggal', tgl).eq('mapel', currentSchedule.mapel)
+        supabase.from('profiles').select(STUDENT_COLUMNS).eq('role', 'siswa').eq('kelas', kelas).order('nama'),
+        absensiQuery,
+        ajuanQuery
       ])
 
       if (siswaRes.error) {
@@ -1414,7 +1929,7 @@ function AbsensiGuru() {
       }
       if (absensiRes.error) {
         console.error('Error loading absensi for auto-alpha:', absensiRes.error)
-        pushToast('error', 'Gagal memuat data absensi')
+        pushLoadErrorToast('auto-alpha-absensi', 'Gagal memuat data absensi')
         return
       }
       if (ajuanRes.error) {
@@ -1426,15 +1941,14 @@ function AbsensiGuru() {
       const siswa = siswaRes.data || []
       const absensi = absensiRes.data || []
       const ajuan = ajuanRes.data || []
+      const absenUidSet = new Set(absensi.map(a => a.uid))
+      const ajuanUidSet = new Set(ajuan.map(a => a.uid))
 
       let updatedCount = 0
       const updates = []
 
       for (const s of siswa) {
-        const sudahAbsen = absensi.find(a => a.uid === s.id)
-        const punyaAjuan = ajuan.find(a => a.uid === s.id)
-
-        if (!sudahAbsen && !punyaAjuan) {
+        if (!absenUidSet.has(s.id) && !ajuanUidSet.has(s.id)) {
           updates.push({
             kelas,
             tanggal: tgl,
@@ -1444,7 +1958,8 @@ function AbsensiGuru() {
             status: 'Alpha',
             komentar: 'Alpha (Manual Trigger)',
             oleh: user.id,
-            waktu: new Date().toISOString()
+            waktu: new Date().toISOString(),
+            ...academicPeriodPayload
           })
           updatedCount++
         }
@@ -1499,22 +2014,34 @@ function AbsensiGuru() {
       }
 
       try {
+        let absensiQuery = supabase
+          .from('absensi')
+          .select(ABSENSI_COLUMNS)
+          .eq('kelas', kelas)
+          .eq('tanggal', tgl)
+          .eq('mapel', currentSchedule.mapel)
+        let ajuanQuery = supabase
+          .from('absensi_ajuan')
+          .select(AJUAN_COLUMNS)
+          .eq('kelas', kelas)
+          .eq('tanggal', tgl)
+          .eq('mapel', currentSchedule.mapel)
+
+        if (periodFilter.tahunAjaran) {
+          absensiQuery = absensiQuery.eq('tahun_ajaran', periodFilter.tahunAjaran)
+          ajuanQuery = ajuanQuery.eq('tahun_ajaran', periodFilter.tahunAjaran)
+        }
+        if (periodFilter.semester) {
+          absensiQuery = absensiQuery.eq('semester', periodFilter.semester)
+          ajuanQuery = ajuanQuery.eq('semester', periodFilter.semester)
+        }
+
         const [absensiRes, ajuanRes, siswaRes] = await Promise.all([
-          supabase
-            .from('absensi')
-            .select('*')
-            .eq('kelas', kelas)
-            .eq('tanggal', tgl)
-            .eq('mapel', currentSchedule.mapel),
-          supabase
-            .from('absensi_ajuan')
-            .select('*')
-            .eq('kelas', kelas)
-            .eq('tanggal', tgl)
-            .eq('mapel', currentSchedule.mapel),
+          absensiQuery,
+          ajuanQuery,
           supabase
             .from('profiles')
-            .select('*')
+            .select(STUDENT_COLUMNS)
             .eq('role', 'siswa')
             .eq('kelas', kelas)
             .order('nama')
@@ -1536,9 +2063,11 @@ function AbsensiGuru() {
         const siswa = siswaRes.data || []
         const absensi = absensiRes.data || []
         const ajuan = ajuanRes.data || []
+        const absenUidSet = new Set(absensi.map(a => a.uid))
+        const ajuanUidSet = new Set(ajuan.map(a => a.uid))
 
         const siswaBelumAbsen = siswa.filter(
-          s => !absensi.find(a => a.uid === s.id) && !ajuan.find(a => a.uid === s.id)
+          s => !absenUidSet.has(s.id) && !ajuanUidSet.has(s.id)
         )
 
         if (siswaBelumAbsen.length === 0) return
@@ -1552,7 +2081,8 @@ function AbsensiGuru() {
           status: 'Alpha',
           komentar: `Alpha (Auto - ${isPastDate ? 'Tanggal Lewat' : 'Jam Berakhir'})`,
           oleh: 'system',
-          waktu: new Date().toISOString()
+          waktu: new Date().toISOString(),
+          ...academicPeriodPayload
         }))
 
         const { data, error: upsertError } = await supabase
@@ -1582,7 +2112,7 @@ function AbsensiGuru() {
 
     const interval = setInterval(checkEnhancedAutoAlpha, 120000)
     return () => clearInterval(interval)
-  }, [currentSchedule, kelas, tgl, currentDateTime, pushToast, lastAutoAlphaRun])
+  }, [academicPeriodPayload, currentSchedule, kelas, tgl, currentDateTime, pushToast, lastAutoAlphaRun, periodFilter.semester, periodFilter.tahunAjaran])
 
   /* ===== Jam Kosong Functions ===== */
   const handleJamKosong = async () => {
@@ -1615,7 +2145,8 @@ function AbsensiGuru() {
           jam_selesai: j.jam_selesai,
           alasan: jamKosong.alasan,
           guru_pengganti: jamKosong.guru_pengganti,
-          created_by: user.id
+          created_by: user.id,
+          ...academicPeriodPayload
         })
 
       if (error) {
@@ -1763,10 +2294,8 @@ function AbsensiGuru() {
         },
         async (payload) => {
           const scan = payload.new
-          const cardUid = (scan.card_uid || '').toString().toUpperCase().replace(/\s+/g, '')
-          const target = siswaRef.current.find(
-            s => (s.rfid_uid || '').toString().toUpperCase().replace(/\s+/g, '') === cardUid
-          )
+          const cardUid = normalizeRfidUid(scan.card_uid)
+          const target = siswaByRfidUid.get(cardUid)
 
           if (!target) {
             pushToast('warning', 'Kartu tidak dikenal')
@@ -1792,7 +2321,8 @@ function AbsensiGuru() {
                   status: 'Hadir',
                   komentar: 'Hadir (RFID)',
                   oleh: user?.id || 'rfid:device',
-                  waktu: new Date().toISOString()
+                  waktu: new Date().toISOString(),
+                  ...academicPeriodPayload
                 },
                 {
                   onConflict: 'kelas,tanggal,uid,mapel'
@@ -1822,7 +2352,7 @@ function AbsensiGuru() {
       .subscribe()
 
     return () => supabase.removeChannel(channel)
-  }, [kelas, currentSchedule, absenMode, tgl, siswa.length, pushToast, user?.id])
+  }, [academicPeriodPayload, kelas, currentSchedule, absenMode, tgl, siswa.length, siswaByRfidUid, pushToast, user?.id])
 
   /* ===== RENDER TABLE SISWA ===== */
   const renderSiswaTable = (list, type) => {
@@ -2014,13 +2544,13 @@ function AbsensiGuru() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50/30 p-4 sm:p-6">
       <div className="max-w-full mx-auto space-y-6">
         {/* Header */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-6 transition-all duration-300 hover:shadow-md">
+        <div className="page-title-card">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
             <div className="flex items-center gap-4">
               <div className="w-3 h-12 bg-gradient-to-b from-blue-500 to-indigo-600 rounded-full"></div>
               <div>
-                <h1 className="text-2xl lg:text-3xl font-bold text-slate-800 mb-1">Absensi Guru</h1>
-                <p className="text-slate-600 text-base">Sistem manajemen kehadiran siswa real-time.</p>
+                <h1 className="page-title-heading">Absensi Guru</h1>
+                <p className="page-title-description">Sistem manajemen kehadiran siswa real-time.</p>
               </div>
             </div>
             <div className="flex flex-col items-stretch lg:items-end gap-3">
@@ -2087,7 +2617,47 @@ function AbsensiGuru() {
                 <p className="text-xs text-slate-500 mt-0.5">Pilih kelas, jadwal, dan tanggal untuk memulai absensi.</p>
               </div>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5 items-start">
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wide">
+                  Periode
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <select
+                    className="w-full px-3 py-3 rounded-2xl border border-slate-300 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm"
+                    value={periodFilter.tahunAjaran}
+                    onChange={(event) => {
+                      const tahunAjaran = normalizeAcademicYear(event.target.value) || activeAcademicPeriod.tahunAjaran
+                      setPeriodFilter((prev) => ({ ...prev, tahunAjaran }))
+                      setSelectedScheduleId('')
+                      setCurrentSchedule(null)
+                      setAllowSelfAbsen(false)
+                    }}
+                  >
+                    {academicYearOptions.map((year) => (
+                      <option key={year} value={year}>{year}</option>
+                    ))}
+                  </select>
+                  <select
+                    className="w-full px-3 py-3 rounded-2xl border border-slate-300 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm"
+                    value={periodFilter.semester}
+                    onChange={(event) => {
+                      const semester = normalizeSemester(event.target.value) || activeAcademicPeriod.semester
+                      setPeriodFilter((prev) => ({ ...prev, semester }))
+                      setSelectedScheduleId('')
+                      setCurrentSchedule(null)
+                      setAllowSelfAbsen(false)
+                    }}
+                  >
+                    {SEMESTER_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="mt-1 text-[11px] text-slate-500">
+                  Aktif: {activeAcademicPeriod.tahunAjaran} - {activeAcademicPeriod.semester}
+                </div>
+              </div>
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wide">
                   Pilih Kelas
@@ -2099,6 +2669,7 @@ function AbsensiGuru() {
                     setKelas(e.target.value)
                     setSelectedScheduleId('')
                     setCurrentSchedule(null)
+                    setAllowSelfAbsen(false)
                   }}
                 >
                   <option value="">— Pilih Kelas —</option>
@@ -2119,8 +2690,11 @@ function AbsensiGuru() {
                       className="w-full px-4 py-3 rounded-2xl border border-slate-300 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm"
                       value={selectedScheduleId}
                       onChange={e => {
-                        setSelectedScheduleId(e.target.value)
-                        setCurrentSchedule(null)
+                        const nextId = e.target.value
+                        const selected = schedulesForSelectedClass.find((schedule) => schedule.id === nextId)
+                        setSelectedScheduleId(nextId)
+                        setCurrentSchedule(selected?.schedule || null)
+                        setAllowSelfAbsen(false)
                       }}
                       disabled={!kelas}
                     >
@@ -2132,24 +2706,14 @@ function AbsensiGuru() {
                       ))}
                     </select>
                   </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wide">
-                      Tanggal Absen
-                    </label>
-                    <div className="flex gap-2">
-                      <input
-                        type="date"
-                        className="flex-1 px-4 py-3 rounded-2xl border border-slate-300 text-sm focus:ring-2 focus:ring-blue-500 shadow-sm"
-                        value={tgl}
-                        onChange={e => setTgl(e.target.value)}
-                      />
-                      <button
-                        onClick={() => setTgl(getToday())}
-                        className="px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-xs font-bold shadow-sm transition-colors"
-                      >
-                        Hari Ini
-                      </button>
-                    </div>
+                  <div className="md:col-span-2 xl:col-span-1">
+                    <SubjectDatePicker
+                      value={tgl}
+                      selectedSchedule={selectedScheduleForPicker}
+                      schedulesForClass={schedulesForActiveClass}
+                      disabled={!kelas}
+                      onSelectDate={handleSelectAttendanceDate}
+                    />
                   </div>
                 </>
               )}
@@ -2183,12 +2747,21 @@ function AbsensiGuru() {
                         Toleransi Aktif (5 menit)
                       </span>
                     )}
+                    <span
+                      className={`font-semibold px-2 py-0.5 rounded-xl border ${
+                        allowSelfAbsen
+                          ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                          : 'text-slate-500 bg-white border-slate-200'
+                      }`}
+                    >
+                      Mandiri {allowSelfAbsen ? 'dibuka' : 'ditutup'}
+                    </span>
                   </div>
                 </div>
               </div>
 
               {/* Right: Mode Toggle + Auto Alpha Button */}
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center justify-end gap-3">
                 <button
                   onClick={triggerAutoAlphaManual}
                   disabled={isRunningAutoAlpha || !currentSchedule}
@@ -2203,6 +2776,21 @@ function AbsensiGuru() {
                   ) : (
                     <>⚡ Auto Alpha</>
                   )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={toggleSelfAbsen}
+                  disabled={!currentSchedule || tgl !== getToday()}
+                  className={`px-3 py-2 rounded-2xl text-xs font-bold border transition-all flex items-center gap-2 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${
+                    allowSelfAbsen
+                      ? 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700'
+                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                  }`}
+                  title="Izinkan atau tutup tombol Hadir mandiri di halaman siswa"
+                >
+                  <UserCheck className="h-4 w-4" />
+                  {allowSelfAbsen ? 'Absen Mandiri Dibuka' : 'Izinkan Absen Mandiri'}
                 </button>
 
                 <div className="flex items-center bg-slate-100 rounded-2xl p-1 border border-slate-200">

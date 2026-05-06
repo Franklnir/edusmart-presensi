@@ -1543,7 +1543,7 @@ class AuthController extends ApiController
 
         if (! $allowAdminCreate) {
             $settings = DB::table('settings')->where('tenant_id', $tenantId)->orderBy('id')->first();
-            $allow = true;
+            $allow = $role === 'siswa';
             if ($role === 'siswa' && $settings && isset($settings->registrasi_siswa_aktif)) {
                 $allow = (bool) $settings->registrasi_siswa_aktif;
             }
@@ -2088,11 +2088,12 @@ class AuthController extends ApiController
             return $otpResponse;
         }
 
-        DB::transaction(function () use ($user, $email, $password, $tenantId, $emailChanged, $hasPasswordChange, $requiresVerification) {
+        DB::transaction(function () use ($user, $email, $password, $tenantId, $emailChanged, $hasPasswordChange, $requiresVerification, $profile) {
+            $now = now();
             $userPayload = [];
             if ($emailChanged) {
                 $userPayload['email'] = $email;
-                $userPayload['email_verified_at'] = $requiresVerification ? now() : null;
+                $userPayload['email_verified_at'] = $requiresVerification ? $now : null;
             }
             if ($hasPasswordChange) {
                 $userPayload['password'] = Hash::make($password);
@@ -2102,7 +2103,7 @@ class AuthController extends ApiController
             }
 
             $profilePayload = [
-                'updated_at' => now(),
+                'updated_at' => $now,
             ];
             if ($emailChanged) {
                 $profilePayload['email'] = $email;
@@ -2112,6 +2113,16 @@ class AuthController extends ApiController
             }
 
             Profile::query()->where('id', $user->id)->where('tenant_id', $tenantId)->update($profilePayload);
+
+            $role = strtolower((string) ($profile?->role ?? ''));
+            if ($emailChanged && in_array($role, ['guru', 'teacher'], true)) {
+                $this->syncTeacherDisplayNameSnapshots(
+                    (string) $tenantId,
+                    (string) $user->id,
+                    (string) ($profile?->nama ?? $user->name ?? ''),
+                    $now
+                );
+            }
 
             // Security: Jika password berubah, logout perangkat lain
             if ($hasPasswordChange && method_exists($user, 'tokens')) {

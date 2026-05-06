@@ -1787,7 +1787,7 @@ export default function JadwalGuru() {
       <div className="w-full space-y-6">
 
         {/* HEADER */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 relative overflow-hidden">
+        <div className="page-title-card relative overflow-hidden">
           <div className="absolute top-0 right-0 w-64 h-64 bg-blue-50 rounded-full blur-3xl -mr-16 -mt-16 opacity-50 pointer-events-none"></div>
 
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 relative z-10">
@@ -1798,8 +1798,8 @@ export default function JadwalGuru() {
                 </svg>
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-gray-900">Dashboard Mengajar</h1>
-                <p className="text-gray-500 font-medium">
+                <h1 className="page-title-heading">Dashboard Mengajar</h1>
+                <p className="page-title-description font-medium">
                   Selamat Datang, <span className="text-blue-600">{profile?.nama || 'Guru'}</span>
                 </p>
                 <div className="flex flex-wrap gap-2 mt-3">

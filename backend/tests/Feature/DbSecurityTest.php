@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\User;
+use App\Support\AcademicPeriod;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -44,6 +45,60 @@ class DbSecurityTest extends TestCase
         $this->assertArrayNotHasKey('manual_jam_masuk_selesai', $row);
         $this->assertArrayNotHasKey('admin_lock_enabled', $row);
         $this->assertArrayNotHasKey('registrasi_admin_aktif', $row);
+    }
+
+    public function test_authenticated_non_admin_settings_select_is_sanitized(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        [$user] = $this->createUserWithProfile($tenantId, 'siswa', 'X-1');
+
+        DB::table('settings')->insert([
+            'tenant_id' => $tenantId,
+            'nama_sekolah' => 'Sekolah Aman',
+            'email' => 'sekolah@example.com',
+            'tahun_ajaran' => '2026/2027',
+            'semester_aktif' => 'ganjil',
+            'ranking_weight_tugas' => 40,
+            'ranking_weight_quiz' => 40,
+            'ranking_weight_absensi' => 20,
+            'ranking_tiebreak_order' => json_encode(['nilai_akhir', 'nama']),
+            'ranking_core_mapel' => json_encode(['Matematika']),
+            'nilai_freeze_enabled' => true,
+            'nilai_freeze_reason' => 'Rilis rapor',
+            'manual_jam_masuk_mulai' => '07:00:00',
+            'manual_jam_masuk_selesai' => '08:00:00',
+            'admin_lock_enabled' => true,
+            'registrasi_admin_aktif' => true,
+            'approval_maker_checker_enabled' => true,
+            'approval_require_second_approver' => true,
+            'anomaly_alert_enabled' => true,
+            'anomaly_bulk_threshold' => 30,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $response = $this->actingAs($user)->postJson('/api/db', [
+            'table' => 'settings',
+            'action' => 'select',
+            'columns' => '*',
+        ]);
+
+        $response->assertOk();
+        $row = $response->json('data.0');
+
+        $this->assertIsArray($row);
+        $this->assertSame('Sekolah Aman', $row['nama_sekolah'] ?? null);
+        $this->assertSame('2026/2027', $row['tahun_ajaran'] ?? null);
+        $this->assertArrayHasKey('ranking_weight_tugas', $row);
+        $this->assertArrayHasKey('nilai_freeze_enabled', $row);
+        $this->assertArrayNotHasKey('manual_jam_masuk_mulai', $row);
+        $this->assertArrayNotHasKey('manual_jam_masuk_selesai', $row);
+        $this->assertArrayNotHasKey('admin_lock_enabled', $row);
+        $this->assertArrayNotHasKey('registrasi_admin_aktif', $row);
+        $this->assertArrayNotHasKey('approval_maker_checker_enabled', $row);
+        $this->assertArrayNotHasKey('approval_require_second_approver', $row);
+        $this->assertArrayNotHasKey('anomaly_alert_enabled', $row);
+        $this->assertArrayNotHasKey('anomaly_bulk_threshold', $row);
     }
 
     public function test_db_rejects_unknown_filter_and_order_columns(): void
@@ -182,6 +237,7 @@ class DbSecurityTest extends TestCase
         [$guru] = $this->createUserWithProfile($tenantId, 'guru', 'X-1');
         [$siswaWali] = $this->createUserWithProfile($tenantId, 'siswa', 'X-1');
         [$siswaMapel] = $this->createUserWithProfile($tenantId, 'siswa', 'X-2');
+        $period = AcademicPeriod::current();
 
         DB::table('kelas')->updateOrInsert(
             ['id' => 'X-1'],
@@ -224,6 +280,8 @@ class DbSecurityTest extends TestCase
                 'guru_nama' => 'Guru Wali',
                 'jam_mulai' => '07:00:00',
                 'jam_selesai' => '08:00:00',
+                'tahun_ajaran' => $period['tahun_ajaran'],
+                'semester' => $period['semester'],
                 'created_at' => now(),
                 'updated_at' => now(),
                 'tenant_id' => $tenantId,

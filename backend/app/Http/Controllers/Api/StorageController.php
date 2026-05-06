@@ -22,6 +22,12 @@ class StorageController extends ApiController
 
     private const ASSIGNMENT_IMAGE_MAX_BYTES = 100 * 1024;
 
+    private const ASSIGNMENT_DOCUMENT_MAX_BYTES = 3 * 1024 * 1024;
+
+    private const ASSIGNMENT_PRESENTATION_MAX_BYTES = 5 * 1024 * 1024;
+
+    private const ASSIGNMENT_LOCAL_DOCUMENT_MAX_BYTES = 2 * 1024 * 1024;
+
     private const QUIZ_MEDIA_IMAGE_MAX_BYTES = 70 * 1024;
 
     private const MAX_SIGNED_URL_EXPIRES_SECONDS = 3600;
@@ -34,6 +40,14 @@ class StorageController extends ApiController
         'php', 'php3', 'php4', 'php5', 'php7', 'php8', 'phtml', 'phar',
         'exe', 'dll', 'so', 'bat', 'cmd', 'com', 'msi', 'ps1', 'vbs', 'wsf', 'hta', 'sh',
         'cgi', 'pl', 'py', 'rb', 'jar', 'asp', 'aspx', 'jsp',
+    ];
+
+    private const ASSIGNMENT_DOCUMENT_EXTENSIONS = [
+        'pdf', 'doc', 'docx', 'odt', 'rtf', 'xls', 'xlsx', 'txt',
+    ];
+
+    private const ASSIGNMENT_PRESENTATION_EXTENSIONS = [
+        'ppt', 'pptx', 'odp',
     ];
 
     private const UPLOAD_POLICY = [
@@ -138,6 +152,16 @@ class StorageController extends ApiController
             return $uploadPolicyError;
         }
 
+        $assignmentUsesDrive = $this->googleDriveService->canUploadAssignmentDocument(
+            $request,
+            $bucket,
+            $file
+        );
+        $assignmentFileSizeError = $this->validateAssignmentFileSizePolicy($bucket, $file, $assignmentUsesDrive);
+        if ($assignmentFileSizeError) {
+            return $assignmentFileSizeError;
+        }
+
         $imageRuleError = $this->validateImageSizePolicy($bucket, $path, $file);
         if ($imageRuleError) {
             return $imageRuleError;
@@ -154,9 +178,15 @@ class StorageController extends ApiController
                 return response()->json(['data' => $driveUpload]);
             }
         } catch (\Throwable $e) {
-            return response()->json([
-                'error' => 'Google Drive sekolah belum siap: '.$e->getMessage(),
-            ], 422);
+            $localLimitError = $this->validateAssignmentFileSizePolicy(
+                $bucket,
+                $file,
+                false,
+                'Google Drive sekolah tidak terhubung/penuh. Karena file akan disimpan di VPS, '
+            );
+            if ($localLimitError) {
+                return $localLimitError;
+            }
         }
 
         $storage = Storage::disk('local');
@@ -184,8 +214,40 @@ class StorageController extends ApiController
                 'path' => $path,
                 'fullPath' => $path,
                 'bucket' => $bucket,
+                'provider' => 'local',
+                'providerLabel' => 'VPS',
                 'uploadedSizeBytes' => $uploadedSizeBytes,
                 'uploadedSizeLabel' => $this->formatBytes($uploadedSizeBytes),
+            ],
+        ]);
+    }
+
+    public function uploadDestination(Request $request)
+    {
+        $bucket = trim((string) $request->input('bucket', ''));
+        $fileName = trim((string) $request->input('filename', ''));
+        $mime = trim((string) $request->input('mime_type', $request->input('mime', '')));
+
+        if ($bucket === '' || $fileName === '') {
+            return $this->deny('Bucket dan nama file wajib diisi', 422);
+        }
+
+        if (! in_array($bucket, $this->allowedBuckets, true)) {
+            return $this->deny('Bucket tidak diizinkan', 400);
+        }
+
+        $usesDrive = $this->googleDriveService->canUploadAssignmentDocumentMetadata(
+            $request,
+            $bucket,
+            $fileName,
+            $mime
+        );
+
+        return response()->json([
+            'data' => [
+                'bucket' => $bucket,
+                'provider' => $usesDrive ? 'google_drive' : 'local',
+                'providerLabel' => $usesDrive ? 'Google Drive' : 'VPS',
             ],
         ]);
     }
@@ -754,6 +816,52 @@ class StorageController extends ApiController
         }
 
         return null;
+    }
+
+    private function validateAssignmentFileSizePolicy(
+        string $bucket,
+        UploadedFile $file,
+        bool $usesDrive = false,
+        string $messagePrefix = ''
+    ): ?\Illuminate\Http\JsonResponse
+    {
+        if ($bucket !== 'assignments') {
+            return null;
+        }
+
+        $extension = $this->normalizeExtension($file);
+        $maxBytes = null;
+        $label = null;
+
+        if (in_array($extension, self::ASSIGNMENT_DOCUMENT_EXTENSIONS, true)) {
+            $maxBytes = $usesDrive
+                ? self::ASSIGNMENT_DOCUMENT_MAX_BYTES
+                : self::ASSIGNMENT_LOCAL_DOCUMENT_MAX_BYTES;
+            $label = 'PDF/dokumen';
+        } elseif (in_array($extension, self::ASSIGNMENT_PRESENTATION_EXTENSIONS, true)) {
+            $maxBytes = $usesDrive
+                ? self::ASSIGNMENT_PRESENTATION_MAX_BYTES
+                : self::ASSIGNMENT_LOCAL_DOCUMENT_MAX_BYTES;
+            $label = 'PPT/presentasi';
+        }
+
+        if (! $maxBytes || ! $label) {
+            return null;
+        }
+
+        $actualBytes = (int) ($file->getSize() ?: 0);
+        if ($actualBytes <= $maxBytes) {
+            return null;
+        }
+
+        return response()->json([
+            'error' => $messagePrefix.sprintf(
+                'Ukuran %s maksimal %s. File saat ini %s.',
+                $label,
+                $this->formatBytes($maxBytes),
+                $this->formatBytes($actualBytes)
+            ),
+        ], 422);
     }
 
     private function validateUploadPolicy(string $bucket, UploadedFile $file): ?\Illuminate\Http\JsonResponse

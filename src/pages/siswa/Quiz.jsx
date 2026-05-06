@@ -2093,13 +2093,13 @@ export default function SiswaQuiz() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-cyan-50/40 to-blue-50/50 py-6 px-4 sm:px-6">
       <div className="max-w-full mx-auto space-y-6">
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 transition-all duration-300 hover:shadow-md">
+        <div className="page-title-card">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div className="flex items-center gap-4">
               <div className="w-3 h-12 bg-gradient-to-b from-cyan-500 to-blue-600 rounded-full"></div>
               <div>
-                <h1 className="text-2xl lg:text-3xl font-bold text-slate-900">Quiz Siswa</h1>
-                <p className="text-sm text-slate-500">Kerjakan quiz sesuai jadwal yang ditentukan guru.</p>
+                <h1 className="page-title-heading">Quiz Siswa</h1>
+                <p className="page-title-description">Kerjakan quiz sesuai jadwal yang ditentukan guru.</p>
               </div>
             </div>
             <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">

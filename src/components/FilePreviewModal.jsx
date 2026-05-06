@@ -128,6 +128,16 @@ function getGoogleDriveEmbedUrl(url) {
   return ''
 }
 
+function isGoogleWorkspaceUrl(url) {
+  const resolved = resolveUrl(url)
+  if (!resolved) return false
+  const host = resolved.hostname.toLowerCase()
+  if (host !== 'docs.google.com') return false
+
+  const docType = resolved.pathname.split('/').filter(Boolean)[0] || ''
+  return ['document', 'spreadsheets', 'presentation', 'forms', 'drawings'].includes(docType)
+}
+
 function getGoogleDocsViewerUrl(url) {
   const resolved = resolveUrl(url)
   if (!resolved || !isHttpUrl(resolved.toString())) return ''
@@ -137,6 +147,7 @@ function getGoogleDocsViewerUrl(url) {
 function detectFileType(fileUrl) {
   if (getYouTubeEmbedUrl(fileUrl)) return 'youtube'
   if (getGoogleDriveEmbedUrl(fileUrl)) return 'drive'
+  if (isGoogleWorkspaceUrl(fileUrl)) return 'drive'
 
   const ext = getSafeExtension(fileUrl)
   if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(ext)) return 'image'
@@ -174,11 +185,15 @@ const FilePreviewModal = ({ fileUrl, onClose }) => {
     }
 
     if (detectedType === 'drive') {
+      const previewUrl = getGoogleDriveEmbedUrl(sourceUrl)
+      const embedBlocked = isGoogleWorkspaceUrl(sourceUrl) || isGoogleWorkspaceUrl(previewUrl)
+
       return {
         type: 'drive',
         sourceUrl,
-        previewUrl: getGoogleDriveEmbedUrl(sourceUrl),
-        canDownload: true
+        previewUrl,
+        canDownload: !embedBlocked,
+        embedBlocked
       }
     }
 
@@ -253,6 +268,38 @@ const FilePreviewModal = ({ fileUrl, onClose }) => {
     setScale(1)
     setPos({ x: 0, y: 0 })
   }
+
+  const renderExternalPreviewBlocked = () => (
+    <div className="w-full h-full bg-slate-100 flex items-center justify-center p-6">
+      <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
+        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-blue-50 text-2xl text-blue-700">
+          ↗
+        </div>
+        <h4 className="text-lg font-bold text-slate-900">Preview Google dibatasi</h4>
+        <p className="mt-2 text-sm leading-6 text-slate-600">
+          Google Docs/Sheets/Slides menolak dibuka di dalam overlay aplikasi. File tetap aman dan bisa dibuka lewat tab baru.
+        </p>
+        <div className="mt-5 flex flex-col justify-center gap-2 sm:flex-row">
+          <a
+            href={openUrl || '#'}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(e) => { if (!openUrl) e.preventDefault() }}
+            className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white transition-colors hover:bg-blue-700"
+          >
+            Buka Tab Baru
+          </a>
+          <button
+            type="button"
+            onClick={() => onClose?.()}
+            className="inline-flex items-center justify-center rounded-lg border border-slate-300 px-4 py-2 font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+          >
+            Tutup Preview
+          </button>
+        </div>
+      </div>
+    </div>
+  )
 
   const zoomTo = useCallback(
     (nextScale, originClientX, originClientY) => {
@@ -430,6 +477,10 @@ const FilePreviewModal = ({ fileUrl, onClose }) => {
       case 'document':
       case 'spreadsheet':
       case 'presentation':
+        if (previewSource.embedBlocked) {
+          return renderExternalPreviewBlocked()
+        }
+
         return (
           <div className="w-full h-full bg-white">
             <iframe
@@ -535,9 +586,10 @@ const FilePreviewModal = ({ fileUrl, onClose }) => {
         {/* Footer */}
         <div className="flex justify-between items-center p-4 border-t border-slate-200 bg-white rounded-b-2xl">
           <div className="text-sm text-slate-600">
-            {fileType === 'image' && 'Scroll untuk zoom • Drag untuk geser • ESC untuk tutup'}
-            {fileType === 'youtube' && 'Mode video YouTube • ESC untuk tutup'}
-            {fileType === 'drive' && 'Preview Google Drive • ESC untuk tutup'}
+            {previewSource.embedBlocked && 'Google membatasi preview overlay • buka tab baru'}
+            {!previewSource.embedBlocked && fileType === 'image' && 'Scroll untuk zoom • Drag untuk geser • ESC untuk tutup'}
+            {!previewSource.embedBlocked && fileType === 'youtube' && 'Mode video YouTube • ESC untuk tutup'}
+            {!previewSource.embedBlocked && fileType === 'drive' && 'Preview Google Drive • ESC untuk tutup'}
           </div>
 
           <div className="flex gap-3">

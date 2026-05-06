@@ -19,6 +19,7 @@ const RoleGate = ({ allow = [] }) => {
   const loginTarget = loginParams.toString() ? `/login?${loginParams.toString()}` : '/login'
 
   const canBypassAdmin = allow.includes('admin') && isSuperAdmin
+  const needsSuperAdminCheck = allow.includes('admin') && role !== 'admin' && !superAdminChecked
   const needsAccountSetup = shouldForceAccountSetup(profile, user?.email)
 
   useEffect(() => {
@@ -29,7 +30,7 @@ const RoleGate = ({ allow = [] }) => {
     if (!user) attemptedRef.current = false
   }, [initialized, user, profile, refreshProfile])
 
-  if (!initialized || isLoading || (allow.includes('admin') && !superAdminChecked)) {
+  if (!initialized || isLoading || needsSuperAdminCheck) {
     return <LoadingSpinner />
   }
 

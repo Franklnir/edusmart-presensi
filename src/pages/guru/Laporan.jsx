@@ -4,6 +4,11 @@ import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import { loadExcelJsBrowser } from '../../utils/excelBrowser'
+import {
+  SEMESTER_GANJIL,
+  SEMESTER_GENAP,
+  resolveAcademicPeriod
+} from '../../utils/academicPeriod'
 
 // === Dynamic imports (Hanya ExcelJS) ===
 let ExcelJS
@@ -812,6 +817,10 @@ export default function LaporanRekap() {
     String(new Date().getMonth() + 1).padStart(2, '0')
   ]) // Default: bulan berjalan
   const [tahun, setTahun] = useState(new Date().getFullYear())
+  const [activeAcademicPeriod, setActiveAcademicPeriod] = useState(() => resolveAcademicPeriod())
+  const [selectedTahunAjaran, setSelectedTahunAjaran] = useState(() => resolveAcademicPeriod().tahunAjaran)
+  const [selectedSemester, setSelectedSemester] = useState(() => resolveAcademicPeriod().semester)
+  const [selectedAngkatan, setSelectedAngkatan] = useState('')
 
   // -- Data Result State --
   const [absensiData, setAbsensiData] = useState(null)
@@ -838,6 +847,77 @@ export default function LaporanRekap() {
   const [rekapStatusFilter, setRekapStatusFilter] = useState('semua')
   const [searchRekapEskul, setSearchRekapEskul] = useState('')
 
+  const selectedKelasMeta = useMemo(
+    () => kelasList.find((kelas) => String(kelas.id) === String(selectedKelas)) || null,
+    [kelasList, selectedKelas]
+  )
+
+  const selectedWaliKelasMeta = useMemo(
+    () => waliKelasList.find((kelas) => String(kelas.id) === String(selectedWaliKelas)) || null,
+    [selectedWaliKelas, waliKelasList]
+  )
+
+  const selectedFilterKelasMeta = activeTab === 'rekap' ? selectedWaliKelasMeta : selectedKelasMeta
+
+  const reportPeriod = useMemo(
+    () => resolveAcademicPeriod({
+      tahun_ajaran: selectedTahunAjaran || activeAcademicPeriod.tahunAjaran,
+      semester_aktif: selectedSemester || activeAcademicPeriod.semester
+    }),
+    [activeAcademicPeriod, selectedSemester, selectedTahunAjaran]
+  )
+
+  const reportPeriodLabel = `${reportPeriod.tahunAjaran} ${reportPeriod.semester}`
+  const isActiveReportPeriod =
+    reportPeriod.tahunAjaran === activeAcademicPeriod.tahunAjaran &&
+    reportPeriod.semester === activeAcademicPeriod.semester
+
+  const academicYearOptions = useMemo(() => {
+    const start = Number(activeAcademicPeriod.startYear) || new Date().getFullYear()
+    return Array.from({ length: 7 }, (_, idx) => {
+      const year = start - 4 + idx
+      return `${year}/${year + 1}`
+    }).reverse()
+  }, [activeAcademicPeriod.startYear])
+
+  const applyReportAcademicFilters = useCallback(
+    (query, { withCohort = true } = {}) => {
+      let next = query
+      if (reportPeriod.tahunAjaran) next = next.eq('tahun_ajaran', reportPeriod.tahunAjaran)
+      if (reportPeriod.semester) next = next.eq('semester', reportPeriod.semester)
+      if (withCohort && selectedAngkatan) next = next.eq('angkatan', selectedAngkatan)
+      return next
+    },
+    [reportPeriod.semester, reportPeriod.tahunAjaran, selectedAngkatan]
+  )
+
+  const loadSiswaForReport = useCallback(
+    async (kelasId, recordUserIds = []) => {
+      const ids = Array.from(new Set((recordUserIds || []).map((id) => String(id || '').trim()).filter(Boolean)))
+      let query = supabase
+        .from('profiles')
+        .select('id, nama, nis, kelas, angkatan')
+        .eq('role', 'siswa')
+        .order('nama')
+
+      if (!isActiveReportPeriod) {
+        if (!ids.length) return []
+        query = query.in('id', ids)
+      } else {
+        query = query.eq('kelas', kelasId)
+      }
+
+      if (selectedAngkatan) {
+        query = query.eq('angkatan', selectedAngkatan)
+      }
+
+      const { data, error } = await query
+      if (error) throw error
+      return data || []
+    },
+    [isActiveReportPeriod, selectedAngkatan]
+  )
+
   useEffect(() => {
     if (!rekapWaliData?.siswa?.length) return
 
@@ -850,6 +930,34 @@ export default function LaporanRekap() {
       return { ...prev, siswa: normalizedRank }
     })
   }, [rekapWaliData?.siswa, rekapWaliData?.policy, rankingPolicy])
+
+  useEffect(() => {
+    const loadAcademicPeriod = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('settings')
+          .select('tahun_ajaran, semester_aktif')
+          .order('id', { ascending: true })
+          .limit(1)
+          .maybeSingle()
+
+        if (error) throw error
+        const resolved = resolveAcademicPeriod(data || {})
+        setActiveAcademicPeriod(resolved)
+        setSelectedTahunAjaran((prev) => prev || resolved.tahunAjaran)
+        setSelectedSemester((prev) => prev || resolved.semester)
+      } catch (error) {
+        console.error('Gagal memuat periode akademik aktif:', error)
+      }
+    }
+
+    loadAcademicPeriod()
+  }, [])
+
+  useEffect(() => {
+    const classCohort = String(selectedFilterKelasMeta?.angkatan || '').trim()
+    setSelectedAngkatan(classCohort)
+  }, [selectedFilterKelasMeta?.id, selectedFilterKelasMeta?.angkatan])
 
   // 1. Initial Load (Lib & Click Outside)
   useEffect(() => {
@@ -869,14 +977,16 @@ export default function LaporanRekap() {
     const load = async () => {
       if (!user?.id) return
       try {
-        const { data } = await supabase.from('jadwal').select('*').eq('guru_id', user.id)
+        let query = supabase.from('jadwal').select('*').eq('guru_id', user.id)
+        query = applyReportAcademicFilters(query)
+        const { data } = await query
         setJadwalGuru(data || [])
       } catch (e) {
         console.error(e)
       }
     }
     load()
-  }, [user?.id])
+  }, [applyReportAcademicFilters, user?.id])
 
   useEffect(() => {
     const loadWaliKelas = async () => {
@@ -1158,21 +1268,21 @@ export default function LaporanRekap() {
         return
       }
 
-      const { data: siswaData } = await supabase
-        .from('profiles')
-        .select('id, nama, nis')
-        .eq('kelas', selectedKelas)
-        .eq('role', 'siswa')
-        .order('nama')
-      if (!siswaData) throw new Error('Data siswa tidak ditemukan')
-
-      const { data: absData } = await supabase
+      let absQuery = supabase
         .from('absensi')
         .select('*')
         .eq('kelas', selectedKelas)
         .eq('mapel', selectedMapel)
         .gte('tanggal', dateStrings[0])
         .lte('tanggal', dateStrings[dateStrings.length - 1])
+      absQuery = applyReportAcademicFilters(absQuery)
+      const { data: absData } = await absQuery
+
+      const siswaData = await loadSiswaForReport(
+        selectedKelas,
+        (absData || []).map((row) => row.uid)
+      )
+      if (!siswaData) throw new Error('Data siswa tidak ditemukan')
 
       const formatted = siswaData.map((s) => {
         const absS = absData?.filter((a) => a.uid === s.id) || []
@@ -1199,7 +1309,7 @@ export default function LaporanRekap() {
       setAbsensiData({
         siswa: formatted,
         dateStrings,
-        periode: `${namaBulanTerpilih} ${tahun}`
+        periode: `${namaBulanTerpilih} ${tahun} - ${reportPeriodLabel}${selectedAngkatan ? ` - Angkatan ${selectedAngkatan}` : ''}`
       })
     } catch (e) {
       console.error(e)
@@ -1207,7 +1317,18 @@ export default function LaporanRekap() {
     } finally {
       setLoading(false)
     }
-  }, [selectedKelas, selectedMapel, selectedBulan, tahun, setLoading, pushToast])
+  }, [
+    applyReportAcademicFilters,
+    loadSiswaForReport,
+    pushToast,
+    reportPeriodLabel,
+    selectedAngkatan,
+    selectedBulan,
+    selectedKelas,
+    selectedMapel,
+    setLoading,
+    tahun
+  ])
 
   const loadRekapTugas = useCallback(async () => {
     // Syarat: Kelas, Mapel, dan MINIMAL 1 Bulan dipilih
@@ -1220,17 +1341,10 @@ export default function LaporanRekap() {
       setLoading(true)
       const dateStrings = getDatesInPeriod(tahun, selectedBulan)
 
-      const { data: siswaData } = await supabase
-        .from('profiles')
-        .select('id, nama, nis')
-        .eq('kelas', selectedKelas)
-        .eq('role', 'siswa')
-        .order('nama')
-
       const startDate = `${dateStrings[0]}T00:00:00`
       const endDate = `${dateStrings[dateStrings.length - 1]}T23:59:59`
 
-      const { data: tugasList } = await supabase
+      let tugasQuery = supabase
         .from('tugas')
         .select('*')
         .eq('kelas', selectedKelas)
@@ -1238,6 +1352,8 @@ export default function LaporanRekap() {
         .gte('created_at', startDate)
         .lte('created_at', endDate)
         .order('created_at')
+      tugasQuery = applyReportAcademicFilters(tugasQuery)
+      const { data: tugasList } = await tugasQuery
 
       if (!tugasList) {
         setTugasData(null)
@@ -1246,10 +1362,17 @@ export default function LaporanRekap() {
       }
 
       const tugasIds = tugasList.map((t) => t.id)
-      const { data: jawabanList } = await supabase
+      let jawabanQuery = supabase
         .from('tugas_jawaban')
         .select('*')
         .in('tugas_id', tugasIds.length ? tugasIds : [-1])
+      jawabanQuery = applyReportAcademicFilters(jawabanQuery)
+      const { data: jawabanList } = await jawabanQuery
+
+      const siswaData = await loadSiswaForReport(
+        selectedKelas,
+        (jawabanList || []).map((row) => row.user_id)
+      )
 
       const formatted = siswaData.map((s) => {
         const nilaiTugas = {}
@@ -1268,7 +1391,7 @@ export default function LaporanRekap() {
       setTugasData({
         siswa: formatted,
         tugas: tugasList,
-        periode: `${namaBulanTerpilih} ${tahun}`
+        periode: `${namaBulanTerpilih} ${tahun} - ${reportPeriodLabel}${selectedAngkatan ? ` - Angkatan ${selectedAngkatan}` : ''}`
       })
     } catch (e) {
       console.error(e)
@@ -1276,7 +1399,18 @@ export default function LaporanRekap() {
     } finally {
       setLoading(false)
     }
-  }, [selectedKelas, selectedMapel, selectedBulan, tahun, setLoading, pushToast])
+  }, [
+    applyReportAcademicFilters,
+    loadSiswaForReport,
+    pushToast,
+    reportPeriodLabel,
+    selectedAngkatan,
+    selectedBulan,
+    selectedKelas,
+    selectedMapel,
+    setLoading,
+    tahun
+  ])
 
   const loadRekapQuiz = useCallback(async () => {
     if (!selectedKelas || !selectedMapel || selectedBulan.length === 0) {
@@ -1292,17 +1426,10 @@ export default function LaporanRekap() {
         return
       }
 
-      const { data: siswaData } = await supabase
-        .from('profiles')
-        .select('id, nama, nis')
-        .eq('kelas', selectedKelas)
-        .eq('role', 'siswa')
-        .order('nama')
-
       const startDate = `${dateStrings[0]}T00:00:00`
       const endDate = `${dateStrings[dateStrings.length - 1]}T23:59:59`
 
-      const { data: quizList } = await supabase
+      let quizQuery = supabase
         .from('quizzes')
         .select('*')
         .eq('kelas_id', selectedKelas)
@@ -1310,6 +1437,8 @@ export default function LaporanRekap() {
         .gte('created_at', startDate)
         .lte('created_at', endDate)
         .order('created_at')
+      quizQuery = applyReportAcademicFilters(quizQuery)
+      const { data: quizList } = await quizQuery
 
       if (!quizList) {
         setQuizData(null)
@@ -1318,10 +1447,17 @@ export default function LaporanRekap() {
       }
 
       const quizIds = quizList.map((q) => q.id)
-      const { data: submissionList } = await supabase
+      let submissionQuery = supabase
         .from('quiz_submissions')
         .select('*')
         .in('quiz_id', quizIds.length ? quizIds : [-1])
+      submissionQuery = applyReportAcademicFilters(submissionQuery)
+      const { data: submissionList } = await submissionQuery
+
+      const siswaData = await loadSiswaForReport(
+        selectedKelas,
+        (submissionList || []).map((row) => row.siswa_id)
+      )
 
       const submissionMap = new Map()
         ; (submissionList || []).forEach((s) => {
@@ -1346,7 +1482,7 @@ export default function LaporanRekap() {
       setQuizData({
         siswa: formatted,
         quizzes: quizList,
-        periode: `${namaBulanTerpilih} ${tahun}`
+        periode: `${namaBulanTerpilih} ${tahun} - ${reportPeriodLabel}${selectedAngkatan ? ` - Angkatan ${selectedAngkatan}` : ''}`
       })
     } catch (e) {
       console.error(e)
@@ -1354,7 +1490,18 @@ export default function LaporanRekap() {
     } finally {
       setLoading(false)
     }
-  }, [selectedKelas, selectedMapel, selectedBulan, tahun, setLoading, pushToast])
+  }, [
+    applyReportAcademicFilters,
+    loadSiswaForReport,
+    pushToast,
+    reportPeriodLabel,
+    selectedAngkatan,
+    selectedBulan,
+    selectedKelas,
+    selectedMapel,
+    setLoading,
+    tahun
+  ])
 
   const loadRekapWali = useCallback(async () => {
     if (!selectedWaliKelas || selectedBulan.length === 0) {
@@ -1419,7 +1566,7 @@ export default function LaporanRekap() {
 
       let siswaQuery = supabase
         .from('profiles')
-        .select('id, nama, nis, kelas')
+        .select('id, nama, nis, kelas, angkatan')
         .eq('role', 'siswa')
         .order('nama')
       if (kelasAliasesRaw.length === 1) {
@@ -1429,37 +1576,45 @@ export default function LaporanRekap() {
       }
       const { data: siswaRaw, error: siswaErr } = await siswaQuery
       if (siswaErr) throw siswaErr
-      const siswaData = (siswaRaw || []).filter((s) =>
+      let siswaData = (siswaRaw || []).filter((s) =>
         kelasAliasNormSet.has(normalizeKelasKey(s.kelas))
       )
 
       const startDate = `${dateStrings[0]}T00:00:00`
       const endDate = `${dateStrings[dateStrings.length - 1]}T23:59:59`
 
-      const { data: jadwalKelasList } = await supabase
+      let jadwalKelasQuery = supabase
         .from('jadwal')
         .select('mapel, guru_id')
         .eq('kelas_id', selectedWaliKelas)
+      jadwalKelasQuery = applyReportAcademicFilters(jadwalKelasQuery)
+      const { data: jadwalKelasList } = await jadwalKelasQuery
 
-      const { data: tugasList } = await supabase
+      let tugasQuery = supabase
         .from('tugas')
         .select('*')
         .eq('kelas', selectedWaliKelas)
         .gte('created_at', startDate)
         .lte('created_at', endDate)
+      tugasQuery = applyReportAcademicFilters(tugasQuery)
+      const { data: tugasList } = await tugasQuery
 
       const tugasIds = (tugasList || []).map((t) => t.id)
-      const { data: jawabanList } = await supabase
+      let jawabanQuery = supabase
         .from('tugas_jawaban')
         .select('*')
         .in('tugas_id', tugasIds.length ? tugasIds : [-1])
+      jawabanQuery = applyReportAcademicFilters(jawabanQuery)
+      const { data: jawabanList } = await jawabanQuery
 
-      const { data: quizList } = await supabase
+      let quizQuery = supabase
         .from('quizzes')
         .select('*')
         .eq('kelas_id', selectedWaliKelas)
         .gte('created_at', startDate)
         .lte('created_at', endDate)
+      quizQuery = applyReportAcademicFilters(quizQuery)
+      const { data: quizList } = await quizQuery
 
       const guruIdsPengampu = Array.from(
         new Set((jadwalKelasList || []).map((item) => String(item?.guru_id || '').trim()).filter(Boolean))
@@ -1479,17 +1634,52 @@ export default function LaporanRekap() {
       }
 
       const quizIds = (quizList || []).map((q) => q.id)
-      const { data: submissionList } = await supabase
+      let submissionQuery = supabase
         .from('quiz_submissions')
         .select('*')
         .in('quiz_id', quizIds.length ? quizIds : [-1])
+      submissionQuery = applyReportAcademicFilters(submissionQuery)
+      const { data: submissionList } = await submissionQuery
 
-      const { data: absensiList } = await supabase
+      let absensiQuery = supabase
         .from('absensi')
         .select('*')
         .eq('kelas', selectedWaliKelas)
         .gte('tanggal', dateStrings[0])
         .lte('tanggal', dateStrings[dateStrings.length - 1])
+      absensiQuery = applyReportAcademicFilters(absensiQuery)
+      const { data: absensiList } = await absensiQuery
+
+      if (!isActiveReportPeriod) {
+        const historicalStudentIds = Array.from(
+          new Set(
+            [
+              ...(jawabanList || []).map((row) => row.user_id),
+              ...(submissionList || []).map((row) => row.siswa_id),
+              ...(absensiList || []).map((row) => row.uid)
+            ]
+              .map((id) => String(id || '').trim())
+              .filter(Boolean)
+          )
+        )
+
+        if (historicalStudentIds.length) {
+          let historicalSiswaQuery = supabase
+            .from('profiles')
+            .select('id, nama, nis, kelas, angkatan')
+            .eq('role', 'siswa')
+            .in('id', historicalStudentIds)
+            .order('nama')
+          if (selectedAngkatan) {
+            historicalSiswaQuery = historicalSiswaQuery.eq('angkatan', selectedAngkatan)
+          }
+          const { data: historicalSiswaRaw, error: historicalSiswaErr } = await historicalSiswaQuery
+          if (historicalSiswaErr) throw historicalSiswaErr
+          siswaData = historicalSiswaRaw || []
+        } else {
+          siswaData = []
+        }
+      }
 
       const siswaIds = (siswaData || []).map((s) => s.id).filter(Boolean)
       let ekskulAnggotaList = []
@@ -1947,7 +2137,7 @@ export default function LaporanRekap() {
 
       setRekapWaliData({
         siswa: ranked,
-        periode: `${namaBulanTerpilih} ${tahun}`,
+        periode: `${namaBulanTerpilih} ${tahun} - ${reportPeriodLabel}${selectedAngkatan ? ` - Angkatan ${selectedAngkatan}` : ''}`,
         totalTugas: tugasList?.length || 0,
         totalQuiz: quizList?.length || 0,
         totalMapel: mapelUrutan.length,
@@ -1993,7 +2183,18 @@ export default function LaporanRekap() {
     } finally {
       setLoading(false)
     }
-  }, [selectedWaliKelas, selectedBulan, tahun, waliKelasList, setLoading, pushToast])
+  }, [
+    applyReportAcademicFilters,
+    isActiveReportPeriod,
+    pushToast,
+    reportPeriodLabel,
+    selectedAngkatan,
+    selectedBulan,
+    selectedWaliKelas,
+    setLoading,
+    tahun,
+    waliKelasList
+  ])
 
   const openDetailSiswaNilaiMapel = useCallback(
     async (siswa) => {
@@ -2026,20 +2227,27 @@ export default function LaporanRekap() {
         const startDate = `${dateStrings[0]}T00:00:00`
         const endDate = `${dateStrings[dateStrings.length - 1]}T23:59:59`
 
+        let jadwalDetailQuery = supabase.from('jadwal').select('mapel, guru_id').eq('kelas_id', selectedWaliKelas)
+        jadwalDetailQuery = applyReportAcademicFilters(jadwalDetailQuery)
+        let tugasDetailQuery = supabase
+          .from('tugas')
+          .select('id, mapel')
+          .eq('kelas', selectedWaliKelas)
+          .gte('created_at', startDate)
+          .lte('created_at', endDate)
+        tugasDetailQuery = applyReportAcademicFilters(tugasDetailQuery)
+        let quizDetailQuery = supabase
+          .from('quizzes')
+          .select('id, mapel, mode, is_live')
+          .eq('kelas_id', selectedWaliKelas)
+          .gte('created_at', startDate)
+          .lte('created_at', endDate)
+        quizDetailQuery = applyReportAcademicFilters(quizDetailQuery)
+
         const [jadwalRes, tugasRes, quizRes] = await Promise.all([
-          supabase.from('jadwal').select('mapel, guru_id').eq('kelas_id', selectedWaliKelas),
-          supabase
-            .from('tugas')
-            .select('id, mapel')
-            .eq('kelas', selectedWaliKelas)
-            .gte('created_at', startDate)
-            .lte('created_at', endDate),
-          supabase
-            .from('quizzes')
-            .select('id, mapel, mode, is_live')
-            .eq('kelas_id', selectedWaliKelas)
-            .gte('created_at', startDate)
-            .lte('created_at', endDate)
+          jadwalDetailQuery,
+          tugasDetailQuery,
+          quizDetailQuery
         ])
 
         if (jadwalRes.error) throw jadwalRes.error
@@ -2072,22 +2280,26 @@ export default function LaporanRekap() {
 
         let jawabanList = []
         if (tugasIds.length) {
-          const { data, error } = await supabase
+          let jawabanDetailQuery = supabase
             .from('tugas_jawaban')
             .select('tugas_id, nilai')
             .eq('user_id', siswa.id)
             .in('tugas_id', tugasIds)
+          jawabanDetailQuery = applyReportAcademicFilters(jawabanDetailQuery)
+          const { data, error } = await jawabanDetailQuery
           if (error) throw error
           jawabanList = data || []
         }
 
         let submissionList = []
         if (quizIds.length) {
-          const { data, error } = await supabase
+          let submissionDetailQuery = supabase
             .from('quiz_submissions')
             .select('quiz_id, score')
             .eq('siswa_id', siswa.id)
             .in('quiz_id', quizIds)
+          submissionDetailQuery = applyReportAcademicFilters(submissionDetailQuery)
+          const { data, error } = await submissionDetailQuery
           if (error) throw error
           submissionList = data || []
         }
@@ -2261,7 +2473,7 @@ export default function LaporanRekap() {
           siswa,
           rows,
           summary: {
-            periode: `${namaBulanTerpilih} ${tahun}`,
+            periode: `${namaBulanTerpilih} ${tahun} - ${reportPeriodLabel}${selectedAngkatan ? ` - Angkatan ${selectedAngkatan}` : ''}`,
             kelas: getNamaKelasFromList(selectedWaliKelas, waliKelasList),
             totalMapel,
             mapelDenganNilai,
@@ -2281,7 +2493,16 @@ export default function LaporanRekap() {
         setDetailSiswaLoading(false)
       }
     },
-    [selectedWaliKelas, selectedBulan, tahun, waliKelasList, pushToast]
+    [
+      applyReportAcademicFilters,
+      pushToast,
+      reportPeriodLabel,
+      selectedAngkatan,
+      selectedBulan,
+      selectedWaliKelas,
+      tahun,
+      waliKelasList
+    ]
   )
 
   // REALTIME TRIGGER
@@ -3691,15 +3912,15 @@ export default function LaporanRekap() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50/30 p-4 sm:p-6 print:bg-white print:p-0">
       <div className="max-w-full mx-auto space-y-6">
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-6 print:hidden">
+        <div className="page-title-card print:hidden">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
             <div className="flex items-center gap-4">
               <div className="w-14 h-14 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl flex items-center justify-center shadow-lg">
                 <span className="text-2xl text-white">📊</span>
               </div>
               <div>
-                <h1 className="text-2xl lg:text-3xl font-bold text-slate-800 mb-1">Laporan Guru</h1>
-                <p className="text-slate-600 text-base">Rekap absensi, tugas, quiz, dan laporan wali kelas dalam satu panel.</p>
+                <h1 className="page-title-heading">Laporan Guru</h1>
+                <p className="page-title-description">Rekap absensi, tugas, quiz, dan laporan wali kelas dalam satu panel.</p>
               </div>
             </div>
             <div className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3">
@@ -3711,8 +3932,7 @@ export default function LaporanRekap() {
 
         {/* === CONTROLS === */}
         <div
-          className={`bg-white p-6 rounded-2xl shadow-sm border border-slate-200/60 grid grid-cols-1 ${activeTab === 'rekap' ? 'md:grid-cols-3' : 'md:grid-cols-4'
-            } gap-4 print:hidden`}
+          className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200/60 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-7 gap-4 print:hidden"
         >
           {/* Kelas */}
           <div>
@@ -3752,40 +3972,104 @@ export default function LaporanRekap() {
             </div>
           )}
 
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Tahun Ajaran
+            </label>
+            <select
+              className="w-full border border-slate-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              value={selectedTahunAjaran}
+              onChange={(e) => setSelectedTahunAjaran(e.target.value)}
+            >
+              {academicYearOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+            <div className="mt-1 text-[11px] text-slate-500">
+              Aktif: {activeAcademicPeriod.tahunAjaran}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Semester
+            </label>
+            <select
+              className="w-full border border-slate-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              value={selectedSemester}
+              onChange={(e) => setSelectedSemester(e.target.value)}
+            >
+              <option value={SEMESTER_GANJIL}>Ganjil</option>
+              <option value={SEMESTER_GENAP}>Genap</option>
+            </select>
+            <div className="mt-1 text-[11px] text-slate-500">
+              Aktif: {activeAcademicPeriod.semester}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Angkatan
+            </label>
+            <input
+              type="number"
+              min="2000"
+              max="2100"
+              value={selectedAngkatan}
+              onChange={(e) => setSelectedAngkatan(e.target.value)}
+              placeholder={selectedFilterKelasMeta?.angkatan || 'Tahun'}
+              className="w-full border border-slate-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <div className="mt-1 text-[11px] text-slate-500 truncate">
+              Kelas: {selectedFilterKelasMeta?.angkatan || '-'}
+            </div>
+          </div>
+
           {/* Multi-Select Bulan */}
           <div className="relative" ref={dropdownRef}>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Bulan (Checklist)
+              Bulan & Tahun
             </label>
-            <button
-              type="button"
-              className="w-full border border-slate-300 rounded-xl px-4 py-3 text-left bg-white flex justify-between items-center text-sm"
-              onClick={() => setShowBulanDropdown(!showBulanDropdown)}
-            >
-              <span
-                className={`block truncate ${selectedBulan.length === 0
-                  ? 'text-gray-400'
-                  : 'text-gray-900'
-                  }`}
+            <div className="grid grid-cols-[1fr_88px] gap-2">
+              <button
+                type="button"
+                className="w-full border border-slate-300 rounded-xl px-4 py-3 text-left bg-white flex justify-between items-center text-sm min-w-0"
+                onClick={() => setShowBulanDropdown(!showBulanDropdown)}
               >
-                {selectedBulan.length === 0
-                  ? 'Pilih Bulan...'
-                  : `${selectedBulan.length} Bulan Terpilih`}
-              </span>
-              <svg
-                className="w-4 h-4 text-gray-500"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="2"
-                  d="M19 9l-7 7-7-7"
-                ></path>
-              </svg>
-            </button>
+                <span
+                  className={`block truncate ${selectedBulan.length === 0
+                    ? 'text-gray-400'
+                    : 'text-gray-900'
+                    }`}
+                >
+                  {selectedBulan.length === 0
+                    ? 'Pilih Bulan...'
+                    : `${selectedBulan.length} Bulan`}
+                </span>
+                <svg
+                  className="w-4 h-4 text-gray-500 shrink-0"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M19 9l-7 7-7-7"
+                  ></path>
+                </svg>
+              </button>
+              <input
+                type="number"
+                value={tahun}
+                onChange={(e) => setTahun(Number(e.target.value) || new Date().getFullYear())}
+                className="w-full border border-slate-300 rounded-xl px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                aria-label="Tahun kalender laporan"
+              />
+            </div>
 
             {showBulanDropdown && (
               <div className="absolute z-10 w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-60 overflow-y-auto">

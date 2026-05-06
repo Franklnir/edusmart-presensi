@@ -38,7 +38,7 @@ function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Passwor
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 backdrop-blur-sm">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[70] backdrop-blur-sm">
       <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4">
         <h3 className="text-lg font-bold text-gray-900 mb-2">{title}</h3>
         <p className="text-gray-600 text-sm mb-4">
@@ -395,6 +395,14 @@ export default function AGuru() {
 
   const [detailModalOpen, setDetailModalOpen] = useState(false)
   const [selectedGuru, setSelectedGuru] = useState(null)
+  const [editNameOpen, setEditNameOpen] = useState(false)
+  const [savingTeacherName, setSavingTeacherName] = useState(false)
+  const [teacherNameEdit, setTeacherNameEdit] = useState({
+    id: '',
+    nama: '',
+    currentName: '',
+    email: ''
+  })
 
   // Form tambah guru
   const [form, setForm] = useState({
@@ -1355,6 +1363,102 @@ export default function AGuru() {
     setDetailModalOpen(false)
   }
 
+  function openEditNameModal(guru) {
+    if (!guru) return
+
+    setTeacherNameEdit({
+      id: guru.id,
+      nama: guru.nama || '',
+      currentName: guru.nama || '',
+      email: guru.email || ''
+    })
+    setEditNameOpen(true)
+  }
+
+  function closeEditNameModal() {
+    if (savingTeacherName) return
+
+    setEditNameOpen(false)
+    setTeacherNameEdit({
+      id: '',
+      nama: '',
+      currentName: '',
+      email: ''
+    })
+  }
+
+  function applyTeacherNameUpdate(id, profile, fallbackName) {
+    const nextName = profile?.nama || fallbackName
+    if (!id || !nextName) return
+
+    const mergeName = (item) => (
+      item?.id === id
+        ? { ...item, ...(profile || {}), nama: nextName }
+        : item
+    )
+
+    setGuruRaw(prev => prev.map(mergeName))
+    setGuru(prev => prev.map(mergeName))
+    setSelectedGuru(prev => (prev?.id === id ? mergeName(prev) : prev))
+  }
+
+  const submitTeacherNameEdit = (event) => {
+    event.preventDefault()
+
+    const nextName = String(teacherNameEdit.nama || '').trim().replace(/\s+/g, ' ')
+    const currentName = String(teacherNameEdit.currentName || '').trim().replace(/\s+/g, ' ')
+
+    if (!teacherNameEdit.id) {
+      pushToast('error', 'Guru tidak valid')
+      return
+    }
+
+    if (!nextName) {
+      pushToast('error', 'Nama guru wajib diisi')
+      return
+    }
+
+    if (nextName.length > 120) {
+      pushToast('error', 'Nama guru maksimal 120 karakter')
+      return
+    }
+
+    if (nextName === currentName) {
+      pushToast('info', 'Nama guru belum berubah')
+      return
+    }
+
+    const target = {
+      id: teacherNameEdit.id,
+      nama: nextName
+    }
+
+    openPasswordModal(
+      'Konfirmasi Edit Nama Guru',
+      async () => {
+        setSavingTeacherName(true)
+
+        try {
+          const { data, error } = await supabase.admin.updateTeacherName(target.id, target.nama)
+          if (error) throw error
+
+          applyTeacherNameUpdate(target.id, data?.profile, target.nama)
+          closeEditNameModal()
+          pushToast('success', 'Nama guru berhasil diperbarui')
+
+          await Promise.all([
+            loadGuruRaw(),
+            loadJadwalAll(),
+            loadStrukturKelasAll(),
+            loadStrukturSekolah()
+          ])
+        } finally {
+          setSavingTeacherName(false)
+        }
+      }
+    )
+  }
+
   // Komponen untuk menampilkan badge jabatan
   const JabatanBadge = ({ jabatanList }) => {
     if (!jabatanList || jabatanList.length === 0) {
@@ -1663,15 +1767,15 @@ export default function AGuru() {
         )}
 
         {/* Header */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-6">
+        <div className="page-title-card">
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
             <div className="flex items-center gap-4">
               <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl flex items-center justify-center shadow-md">
                 <span className="text-2xl">👨‍🏫</span>
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-slate-900">Manajemen Guru</h1>
-                <p className="text-slate-500 text-sm mt-0.5">Kelola data guru, mata pelajaran, dan penugasan</p>
+                <h1 className="page-title-heading">Manajemen Guru</h1>
+                <p className="page-title-description">Kelola data guru, mata pelajaran, dan penugasan</p>
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -1857,6 +1961,7 @@ export default function AGuru() {
                         <td className="px-4 py-4 whitespace-nowrap text-right">
                           <div className="flex items-center justify-end gap-1">
                             <button onClick={() => openDetailModal(g)} className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-all">Detail</button>
+                            <button onClick={() => openEditNameModal(g)} className="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-800 text-white text-xs font-semibold transition-all">Edit Nama</button>
                             <button onClick={() => openDeleteConfirm(g)} disabled={deletingGuru} className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-semibold transition-all disabled:opacity-50">Hapus</button>
                             {g.status === 'nonaktif' ? (
                               <button onClick={() => aktif(g)} className="px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-semibold transition-all">Aktifkan</button>
@@ -1910,6 +2015,61 @@ export default function AGuru() {
                 <button onClick={simpanNonaktif} disabled={!alasanNonaktif.trim()} className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-semibold text-sm disabled:opacity-50 transition-all">⏸️ Nonaktifkan</button>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Modal Edit Nama Guru */}
+        {editNameOpen && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <form
+              onSubmit={submitTeacherNameEdit}
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-md border border-slate-200 overflow-hidden"
+            >
+              <div className="flex items-center gap-3 p-6 border-b border-slate-100 bg-slate-50/80">
+                <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center"><span className="text-xl">👤</span></div>
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900">Edit Nama Guru</h3>
+                  <p className="text-slate-500 text-sm">{teacherNameEdit.email || 'Email login'}</p>
+                </div>
+              </div>
+
+              <div className="p-6 space-y-4">
+                <Input
+                  label="Nama Guru *"
+                  value={teacherNameEdit.nama}
+                  onChange={(e) => setTeacherNameEdit(prev => ({ ...prev, nama: e.target.value }))}
+                  placeholder="Nama lengkap guru"
+                  maxLength={120}
+                  required
+                  autoFocus
+                  disabled={savingTeacherName}
+                />
+                <Input
+                  label="Email Login"
+                  value={teacherNameEdit.email}
+                  readOnly
+                  className="bg-slate-50 text-slate-500"
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 px-6 pb-6">
+                <button
+                  type="button"
+                  onClick={closeEditNameModal}
+                  disabled={savingTeacherName}
+                  className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-semibold text-sm hover:bg-slate-50 transition-all disabled:opacity-50"
+                >
+                  ✕ Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingTeacherName || !teacherNameEdit.nama.trim()}
+                  className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm disabled:opacity-50 transition-all"
+                >
+                  {savingTeacherName ? 'Menyimpan...' : 'Simpan Nama'}
+                </button>
+              </div>
+            </form>
           </div>
         )}
 
@@ -2012,6 +2172,7 @@ export default function AGuru() {
               {/* Footer */}
               <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-3">
                 <button onClick={closeDetailModal} className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-semibold text-sm hover:bg-slate-100 transition-all">✕ Tutup</button>
+                <button onClick={() => openEditNameModal(selectedGuru)} className="px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-800 text-white font-semibold text-sm transition-all">Edit Nama</button>
                 <button onClick={() => openDeleteConfirm(selectedGuru)} className="px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-semibold text-sm transition-all">🗑️ Hapus Akun</button>
               </div>
             </div>

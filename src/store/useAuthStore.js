@@ -13,6 +13,7 @@ import { hasRealLoginEmail, shouldForceAccountSetup } from '../utils/accountSetu
 // Helper kecil biar konsisten
 const normalizeEmail = (email) => email.trim().toLowerCase()
 let authInitPromise = null
+const SETTINGS_COLUMNS = 'id,nama_sekolah,admin_lock_enabled,updated_at'
 
 const buildProfilePayload = (user) => {
   const meta = user?.user_metadata || {}
@@ -102,20 +103,20 @@ export const useAuthStore = create((set, get) => ({
 
     authInitPromise = (async () => {
       try {
-        const settings = await get().loadSettings()
+        const [settings, sessionRes] = await Promise.all([
+          get().loadSettings(),
+          supabase.auth.getSession()
+        ])
 
-        const {
-          data: { session }
-        } = await supabase.auth.getSession()
-
+        const session = sessionRes?.data?.session || null
         const user = session?.user ?? null
-        let profile = null
+        let profile = session?.profile || sessionRes?.data?.profile || null
 
         if (!user) {
           clearAuthSessionHint()
         }
 
-        if (user) {
+        if (user && !profile) {
           const { profile: loadedProfile, error: profileError } = await ensureProfile(user)
           if (profileError) {
             logError('Error loading profile on init:', profileError)
@@ -145,7 +146,22 @@ export const useAuthStore = create((set, get) => ({
           }
 
           profile = loadedProfile
+        }
 
+        if (user && !isValidRole(profile?.role)) {
+          await supabase.auth.signOut()
+          clearAuthSessionHint()
+          set({
+            user: null,
+            profile: null,
+            settings,
+            initialized: true,
+            error: 'Role pengguna tidak valid. Hubungi administrator.'
+          })
+          return { user: null, profile: null, settings }
+        }
+
+        if (user) {
           // Blokir jika status nonaktif
           if (profile && profile.status === 'nonaktif') {
             await supabase.auth.signOut()
@@ -184,7 +200,7 @@ export const useAuthStore = create((set, get) => ({
         }
 
         set({ user, profile, settings, initialized: true })
-        await get().loadSuperAdmin(profile)
+        void get().loadSuperAdmin(profile)
 
         return { user, profile, settings }
       } catch (err) {
@@ -215,7 +231,7 @@ export const useAuthStore = create((set, get) => ({
     try {
       const { data, error } = await supabase
         .from('settings')
-        .select('*')
+        .select(SETTINGS_COLUMNS)
         .limit(1)
         .single()
 
@@ -314,7 +330,7 @@ export const useAuthStore = create((set, get) => ({
 
       setAuthSessionHint(true)
       set({ user, profile, settings, error: null })
-      await get().loadSuperAdmin(profile)
+      void get().loadSuperAdmin(profile)
 
       if (accountSetupRequired) {
         pushToast(
@@ -390,7 +406,7 @@ export const useAuthStore = create((set, get) => ({
 
       setAuthSessionHint(true)
       set({ user, profile, settings, error: null })
-      await get().loadSuperAdmin(profile)
+      void get().loadSuperAdmin(profile)
 
       if (accountSetupRequired) {
         pushToast(
@@ -466,7 +482,7 @@ export const useAuthStore = create((set, get) => ({
 
       setAuthSessionHint(true)
       set({ user, profile, settings, error: null })
-      await get().loadSuperAdmin(profile)
+      void get().loadSuperAdmin(profile)
 
       if (accountSetupRequired) {
         pushToast(
@@ -712,7 +728,7 @@ export const useAuthStore = create((set, get) => ({
         }
 
         set({ profile: data })
-        await get().loadSuperAdmin(data)
+        void get().loadSuperAdmin(data)
       } else if (error) {
         logError('Refresh profile error:', error)
         const { pushToast } = useUIStore.getState()
@@ -732,6 +748,12 @@ export const useAuthStore = create((set, get) => ({
   loadSuperAdmin: async (profileOverride = null) => {
     const user = get().user
     if (!user) {
+      set({ isSuperAdmin: false, superAdminChecked: true })
+      return false
+    }
+
+    const profile = profileOverride || get().profile
+    if (profile?.role && profile.role !== 'admin') {
       set({ isSuperAdmin: false, superAdminChecked: true })
       return false
     }

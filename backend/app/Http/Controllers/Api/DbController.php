@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Services\WhatsApp\WhatsAppNotificationService;
+use App\Support\AcademicPeriod;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -29,6 +30,41 @@ class DbController extends ApiController
     private const MAX_DB_PAYLOAD_ROWS = 500;
 
     private const MAX_DB_STRING_VALUE_LENGTH = 20000;
+
+    private const ACADEMIC_PERIOD_TABLES = [
+        'kelas',
+        'jadwal',
+        'tugas',
+        'quizzes',
+        'absensi',
+        'absensi_ajuan',
+        'absensi_settings',
+        'jam_kosong',
+    ];
+
+    private const ACADEMIC_DEFAULT_SCOPE_TABLES = [
+        'jadwal',
+        'tugas',
+        'quizzes',
+        'absensi',
+        'absensi_ajuan',
+        'absensi_settings',
+        'jam_kosong',
+    ];
+
+    private const ACADEMIC_DATE_FILTER_COLUMNS = [
+        'tugas' => ['created_at', 'mulai', 'deadline'],
+        'quizzes' => ['created_at', 'starts_at', 'deadline_at'],
+        'absensi' => ['tanggal', 'waktu', 'created_at'],
+        'absensi_ajuan' => ['tanggal', 'created_at', 'waktu_respon'],
+        'absensi_settings' => ['tanggal', 'created_at'],
+        'jam_kosong' => ['tanggal', 'created_at'],
+    ];
+
+    private const ACADEMIC_CHILD_SNAPSHOT_TABLES = [
+        'tugas_jawaban',
+        'quiz_submissions',
+    ];
 
     public function __construct(
         private readonly WhatsAppNotificationService $whatsAppNotificationService
@@ -144,6 +180,12 @@ class DbController extends ApiController
 
     private array $tableJsonColumnCache = [];
 
+    private array $academicPeriodCache = [];
+
+    private array $classCohortCache = [];
+
+    private array $studentCohortCache = [];
+
     private array $knownJsonColumns = [
         'audit_log' => ['old_data', 'new_data'],
         'templat_sertifikat_publik' => ['fields'],
@@ -195,6 +237,7 @@ class DbController extends ApiController
 
         $filters = $request->input('filters', []);
         $this->applyFilters($query, $filters);
+        $this->applyDefaultAcademicSelectScope($table, $query, $filters, $tenantId);
 
         if (in_array($action, ['update', 'delete'], true) && ! $this->isAdmin($request)) {
             $hasFilters = $this->hasAnyFilter($filters);
@@ -265,7 +308,7 @@ class DbController extends ApiController
 
             $data = $head ? [] : $query->get();
 
-            if (! $head && $table === 'settings' && ! $user) {
+            if (! $head && $table === 'settings' && ! $this->isAdmin($request)) {
                 $data = $this->sanitizePublicSettingsRows($data);
             }
 
@@ -298,6 +341,7 @@ class DbController extends ApiController
             if ($tenantScoped && $tenantId) {
                 $rows = $this->attachTenantRows($rows, $tenantId);
             }
+            $rows = $this->attachAcademicPeriodRows($table, $rows, $tenantId);
             try {
                 $rows = $this->normalizeJsonRowsForTable($table, $rows);
             } catch (\InvalidArgumentException $e) {
@@ -380,20 +424,20 @@ class DbController extends ApiController
                 return $this->deny('Payload tidak memiliki kolom yang valid', 422);
             }
 
-            $profileIdForEmailSync = null;
-            $emailForSync = null;
-            if (
-                $table === 'profiles'
-                && $this->isAdmin($request)
-                && array_key_exists('email', $payload)
-                && is_string($payload['email'])
-            ) {
-                $candidateEmail = strtolower(trim($payload['email']));
-                if (filter_var($candidateEmail, FILTER_VALIDATE_EMAIL)) {
+            $profileIdForIdentitySync = null;
+            if ($table === 'profiles' && $this->isAdmin($request)) {
+                if (array_key_exists('email', $payload)) {
+                    $candidateEmail = strtolower(trim((string) $payload['email']));
+                    if (! filter_var($candidateEmail, FILTER_VALIDATE_EMAIL)) {
+                        return $this->deny('Email tidak valid', 422);
+                    }
+                    $payload['email'] = $candidateEmail;
+                }
+
+                if (array_key_exists('email', $payload) || array_key_exists('nama', $payload)) {
                     $profileIdFromFilter = $filters['eq']['id'] ?? null;
                     if (is_string($profileIdFromFilter) && $profileIdFromFilter !== '') {
-                        $profileIdForEmailSync = $profileIdFromFilter;
-                        $emailForSync = $candidateEmail;
+                        $profileIdForIdentitySync = $profileIdFromFilter;
                     }
                 }
             }
@@ -402,18 +446,56 @@ class DbController extends ApiController
                 $updated = DB::transaction(function () use (
                     $query,
                     $payload,
-                    $profileIdForEmailSync,
-                    $emailForSync
+                    $profileIdForIdentitySync,
+                    $tenantId
                 ) {
                     $updatedCount = $query->update($payload);
 
-                    if ($updatedCount && $profileIdForEmailSync && $emailForSync) {
-                        DB::table('users')
-                            ->where('id', $profileIdForEmailSync)
-                            ->update([
-                                'email' => $emailForSync,
-                                'updated_at' => now(),
-                            ]);
+                    if ($updatedCount && $profileIdForIdentitySync) {
+                        $freshProfileQuery = DB::table('profiles')
+                            ->where('id', $profileIdForIdentitySync);
+                        if ($tenantId) {
+                            $freshProfileQuery->where('tenant_id', $tenantId);
+                        }
+                        $freshProfile = $freshProfileQuery->first(['id', 'role', 'nama', 'email']);
+
+                        if ($freshProfile) {
+                            $now = now();
+                            $userPayload = ['updated_at' => $now];
+
+                            if (array_key_exists('email', $payload)) {
+                                $userPayload['email'] = strtolower(trim((string) ($freshProfile->email ?? $payload['email'])));
+                            }
+
+                            if (array_key_exists('nama', $payload)) {
+                                $userPayload['name'] = preg_replace('/\s+/', ' ', trim((string) ($freshProfile->nama ?? $payload['nama']))) ?? '';
+                            }
+
+                            if (count($userPayload) > 1) {
+                                DB::table('users')
+                                    ->where('id', $profileIdForIdentitySync)
+                                    ->update($userPayload);
+                            }
+
+                            $role = strtolower((string) ($freshProfile->role ?? ''));
+                            if (array_key_exists('email', $payload) || array_key_exists('nama', $payload)) {
+                                if (in_array($role, ['guru', 'teacher'], true)) {
+                                    $this->syncTeacherDisplayNameSnapshots(
+                                        (string) $tenantId,
+                                        $profileIdForIdentitySync,
+                                        (string) ($freshProfile->nama ?? ''),
+                                        $now
+                                    );
+                                } elseif ($role === 'siswa' && array_key_exists('nama', $payload)) {
+                                    $this->syncStudentDisplayNameSnapshots(
+                                        (string) $tenantId,
+                                        $profileIdForIdentitySync,
+                                        (string) ($freshProfile->nama ?? ''),
+                                        $now
+                                    );
+                                }
+                            }
+                        }
                     }
 
                     return $updatedCount;
@@ -517,6 +599,7 @@ class DbController extends ApiController
             if ($tenantScoped && $tenantId) {
                 $rows = $this->attachTenantRows($rows, $tenantId);
             }
+            $rows = $this->attachAcademicPeriodRows($table, $rows, $tenantId);
             try {
                 $rows = $this->normalizeJsonRowsForTable($table, $rows);
             } catch (\InvalidArgumentException $e) {
@@ -562,7 +645,7 @@ class DbController extends ApiController
             }
 
             if (
-                in_array($table, ['absensi', 'absensi_settings'], true) &&
+                in_array($table, ['absensi', 'absensi_settings', 'absensi_scan_temp'], true) &&
                 $tenantId &&
                 Schema::hasColumn($table, 'tenant_id')
             ) {
@@ -613,7 +696,7 @@ class DbController extends ApiController
             }
 
             $updateColumns = array_keys($rows[0]);
-            if (in_array($table, ['absensi', 'absensi_settings'], true) && ! empty($uniqueBy)) {
+            if (in_array($table, ['absensi', 'absensi_settings', 'absensi_scan_temp'], true) && ! empty($uniqueBy)) {
                 $resolved = [];
                 try {
                     DB::table($table)->upsert($rows, $uniqueBy, $updateColumns);
@@ -1109,7 +1192,24 @@ class DbController extends ApiController
                     return true;
                 }
                 if ($this->isSiswa($request)) {
-                    $query->where('kelas_id', $profile?->kelas);
+                    $kelas = $profile?->kelas;
+                    $tenantId = $this->currentTenantId;
+                    $query->where(function ($q) use ($kelas, $userId, $tenantId) {
+                        if ($kelas) {
+                            $q->where('kelas_id', $kelas);
+                        } else {
+                            $q->whereRaw('1 = 0');
+                        }
+
+                        $q->orWhereIn('id', function ($sub) use ($userId, $tenantId) {
+                            $sub->select('quiz_id')
+                                ->from('quiz_submissions')
+                                ->where('siswa_id', $userId);
+                            if ($tenantId && $this->isSelectableColumn('quiz_submissions', 'tenant_id')) {
+                                $sub->where('tenant_id', $tenantId);
+                            }
+                        });
+                    });
 
                     return true;
                 }
@@ -1639,7 +1739,7 @@ class DbController extends ApiController
                     return true;
                 }
                 if ($this->isSiswa($request)) {
-                    $query->where('kelas', $profile?->kelas);
+                    $query->where('uid', $userId);
 
                     return true;
                 }
@@ -1790,7 +1890,24 @@ class DbController extends ApiController
                     return true;
                 }
                 if ($this->isSiswa($request)) {
-                    $query->where('kelas', $profile?->kelas);
+                    $kelas = $profile?->kelas;
+                    $tenantId = $this->currentTenantId;
+                    $query->where(function ($q) use ($kelas, $userId, $tenantId) {
+                        if ($kelas) {
+                            $q->where('kelas', $kelas);
+                        } else {
+                            $q->whereRaw('1 = 0');
+                        }
+
+                        $q->orWhereIn('id', function ($sub) use ($userId, $tenantId) {
+                            $sub->select('tugas_id')
+                                ->from('tugas_jawaban')
+                                ->where('user_id', $userId);
+                            if ($tenantId && $this->isSelectableColumn('tugas_jawaban', 'tenant_id')) {
+                                $sub->where('tenant_id', $tenantId);
+                            }
+                        });
+                    });
 
                     return true;
                 }
@@ -2126,10 +2243,14 @@ class DbController extends ApiController
                     $wali = $this->guruWaliKelasIds($userId);
                     $tenantId = $this->currentTenantId;
                     $query->whereIn('tugas_id', function ($q) use ($userId, $wali, $tenantId) {
-                        $q->select('id')->from('tugas')->where('created_by', $userId);
-                        if (! empty($wali)) {
-                            $q->orWhereIn('kelas', $wali);
-                        }
+                        $q->select('id')
+                            ->from('tugas')
+                            ->where(function ($owned) use ($userId, $wali) {
+                                $owned->where('created_by', $userId);
+                                if (! empty($wali)) {
+                                    $owned->orWhereIn('kelas', $wali);
+                                }
+                            });
                         if ($tenantId) {
                             $q->where('tenant_id', $tenantId);
                         }
@@ -2279,6 +2400,19 @@ class DbController extends ApiController
             }
         }
 
+        if (! empty($filters['ilike']) && is_array($filters['ilike'])) {
+            foreach ($filters['ilike'] as $field => $value) {
+                $field = $this->sanitizeIdentifier($field);
+                if (! $field) {
+                    continue;
+                }
+
+                $pattern = strtolower((string) $value);
+                $wrapped = $query->getGrammar()->wrap($field);
+                $query->whereRaw("LOWER({$wrapped}) LIKE ?", [$pattern]);
+            }
+        }
+
         if (! empty($filters['in']) && is_array($filters['in'])) {
             foreach ($filters['in'] as $field => $values) {
                 $field = $this->sanitizeIdentifier($field);
@@ -2327,7 +2461,7 @@ class DbController extends ApiController
             return 'Format filters tidak valid';
         }
 
-        foreach (['eq', 'neq', 'is', 'gt', 'gte', 'lt', 'lte', 'in'] as $op) {
+        foreach (['eq', 'neq', 'is', 'gt', 'gte', 'lt', 'lte', 'in', 'ilike'] as $op) {
             if (! isset($filters[$op])) {
                 continue;
             }
@@ -3117,6 +3251,364 @@ class DbController extends ApiController
         }
     }
 
+    private function currentAcademicPeriodForTenant(?string $tenantId): array
+    {
+        $cacheKey = $tenantId ?: '__default__';
+        if (isset($this->academicPeriodCache[$cacheKey])) {
+            return $this->academicPeriodCache[$cacheKey];
+        }
+
+        $settings = null;
+        if (Schema::hasTable('settings')) {
+            $settingsQuery = DB::table('settings')->orderBy('id');
+            if ($tenantId && Schema::hasColumn('settings', 'tenant_id')) {
+                $settingsQuery->where('tenant_id', $tenantId);
+            }
+            $settings = $settingsQuery->first(['tahun_ajaran', 'semester_aktif']);
+        }
+
+        $this->academicPeriodCache[$cacheKey] = AcademicPeriod::fromSettings($settings);
+
+        return $this->academicPeriodCache[$cacheKey];
+    }
+
+    private function tableHasAcademicPeriodColumns(string $table): bool
+    {
+        return $this->isSelectableColumn($table, 'tahun_ajaran')
+            && $this->isSelectableColumn($table, 'semester');
+    }
+
+    private function tableHasCohortColumn(string $table): bool
+    {
+        return $this->isSelectableColumn($table, 'angkatan');
+    }
+
+    private function hasAcademicPeriodFilter($filters): bool
+    {
+        return $this->hasFilterOnAnyColumn($filters, ['tahun_ajaran', 'semester']);
+    }
+
+    private function hasFilterOnAnyColumn($filters, array $columns): bool
+    {
+        if (! is_array($filters) || empty($columns)) {
+            return false;
+        }
+
+        $columns = array_values(array_unique(array_filter($columns)));
+        foreach (['eq', 'neq', 'is', 'gt', 'gte', 'lt', 'lte', 'in', 'ilike'] as $op) {
+            if (empty($filters[$op]) || ! is_array($filters[$op])) {
+                continue;
+            }
+
+            foreach (array_keys($filters[$op]) as $field) {
+                $column = is_string($field) ? $this->sanitizeIdentifier($field) : null;
+                if (in_array($column, $columns, true)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private function applyDefaultAcademicSelectScope(string $table, $query, $filters, ?string $tenantId): void
+    {
+        if (
+            ! in_array($table, self::ACADEMIC_DEFAULT_SCOPE_TABLES, true)
+            || ! $this->tableHasAcademicPeriodColumns($table)
+        ) {
+            return;
+        }
+
+        if ($this->hasAcademicPeriodFilter($filters)) {
+            return;
+        }
+
+        $dateFilterColumns = self::ACADEMIC_DATE_FILTER_COLUMNS[$table] ?? [];
+        if ($this->hasFilterOnAnyColumn($filters, $dateFilterColumns)) {
+            return;
+        }
+
+        $period = $this->currentAcademicPeriodForTenant($tenantId);
+        $query->where('tahun_ajaran', $period['tahun_ajaran'])
+            ->where('semester', $period['semester']);
+    }
+
+    private function applyCurrentAcademicPeriodToQuery($query, string $table, ?string $tenantId = null): void
+    {
+        if (! $this->tableHasAcademicPeriodColumns($table)) {
+            return;
+        }
+
+        $period = $this->currentAcademicPeriodForTenant($tenantId ?: $this->currentTenantId);
+        $query->where('tahun_ajaran', $period['tahun_ajaran'])
+            ->where('semester', $period['semester']);
+    }
+
+    private function attachAcademicPeriodRows(string $table, array $rows, ?string $tenantId): array
+    {
+        if (in_array($table, self::ACADEMIC_CHILD_SNAPSHOT_TABLES, true)) {
+            return $this->attachChildAcademicSnapshotRows($table, $rows, $tenantId);
+        }
+
+        if (! in_array($table, self::ACADEMIC_PERIOD_TABLES, true)) {
+            return $rows;
+        }
+
+        $hasPeriodColumns = $this->tableHasAcademicPeriodColumns($table);
+        $hasCohortColumn = $this->tableHasCohortColumn($table);
+        if (! $hasPeriodColumns && ! $hasCohortColumn) {
+            return $rows;
+        }
+
+        $period = $this->currentAcademicPeriodForTenant($tenantId);
+
+        return array_map(function ($row) use ($table, $tenantId, $period, $hasPeriodColumns, $hasCohortColumn) {
+            if (! is_array($row)) {
+                return $row;
+            }
+
+            if ($hasPeriodColumns) {
+                $year = AcademicPeriod::normalizeAcademicYear($row['tahun_ajaran'] ?? null);
+                $semester = AcademicPeriod::normalizeSemester($row['semester'] ?? null);
+
+                $row['tahun_ajaran'] = $year ?: $period['tahun_ajaran'];
+                $row['semester'] = $semester ?: $period['semester'];
+            }
+
+            if ($hasCohortColumn && trim((string) ($row['angkatan'] ?? '')) === '') {
+                $cohort = $this->cohortFromRow($table, $row, $tenantId);
+                if ($cohort !== null && $cohort !== '') {
+                    $row['angkatan'] = $cohort;
+                }
+            }
+
+            return $row;
+        }, $rows);
+    }
+
+    private function attachChildAcademicSnapshotRows(string $table, array $rows, ?string $tenantId): array
+    {
+        $hasPeriodColumns = $this->tableHasAcademicPeriodColumns($table);
+        $hasCohortColumn = $this->tableHasCohortColumn($table);
+        if (! $hasPeriodColumns && ! $hasCohortColumn) {
+            return $rows;
+        }
+
+        return array_map(function ($row) use ($table, $tenantId, $hasPeriodColumns, $hasCohortColumn) {
+            if (! is_array($row)) {
+                return $row;
+            }
+
+            $snapshot = match ($table) {
+                'tugas_jawaban' => $this->academicSnapshotForTugas(
+                    $row['tugas_id'] ?? null,
+                    $row['user_id'] ?? null,
+                    $tenantId
+                ),
+                'quiz_submissions' => $this->academicSnapshotForQuiz(
+                    $row['quiz_id'] ?? null,
+                    $row['siswa_id'] ?? null,
+                    $tenantId
+                ),
+                default => [],
+            };
+
+            if ($hasPeriodColumns) {
+                $year = AcademicPeriod::normalizeAcademicYear($row['tahun_ajaran'] ?? null);
+                $semester = AcademicPeriod::normalizeSemester($row['semester'] ?? null);
+                if (! $year && ! empty($snapshot['tahun_ajaran'])) {
+                    $year = AcademicPeriod::normalizeAcademicYear($snapshot['tahun_ajaran']);
+                }
+                if (! $semester && ! empty($snapshot['semester'])) {
+                    $semester = AcademicPeriod::normalizeSemester($snapshot['semester']);
+                }
+
+                if ($year) {
+                    $row['tahun_ajaran'] = $year;
+                }
+                if ($semester) {
+                    $row['semester'] = $semester;
+                }
+            }
+
+            if ($hasCohortColumn && trim((string) ($row['angkatan'] ?? '')) === '') {
+                $cohort = trim((string) ($snapshot['angkatan'] ?? ''));
+                if ($cohort !== '') {
+                    $row['angkatan'] = $cohort;
+                }
+            }
+
+            return $row;
+        }, $rows);
+    }
+
+    private function cohortFromRow(string $table, array $row, ?string $tenantId): ?string
+    {
+        if ($table === 'kelas') {
+            return $this->inferCohortFromClassLabel($row['grade'] ?? $row['nama'] ?? $row['id'] ?? null, $tenantId);
+        }
+
+        $classId = match ($table) {
+            'jadwal', 'quizzes' => $row['kelas_id'] ?? null,
+            'tugas', 'absensi', 'absensi_ajuan', 'absensi_settings', 'jam_kosong' => $row['kelas'] ?? null,
+            default => null,
+        };
+
+        $cohort = $this->cohortForClass($classId, $tenantId);
+        if ($cohort) {
+            return $cohort;
+        }
+
+        if (in_array($table, ['absensi', 'absensi_ajuan'], true)) {
+            return $this->cohortForStudent($row['uid'] ?? null, $tenantId);
+        }
+
+        return null;
+    }
+
+    private function inferCohortFromClassLabel($classValue, ?string $tenantId): ?string
+    {
+        $period = $this->currentAcademicPeriodForTenant($tenantId);
+        $academicStartYear = (int) substr($period['tahun_ajaran'], 0, 4);
+        if ($academicStartYear <= 0) {
+            return null;
+        }
+
+        $grade = strtoupper(trim((string) ($classValue ?? '')));
+        if ($grade === '') {
+            return (string) $academicStartYear;
+        }
+        if (preg_match('/^(XII|XI|X|IX|VIII|VII)\b/', $grade, $matches)) {
+            $grade = $matches[1];
+        }
+
+        $offset = match ($grade) {
+            'VIII', 'XI' => -1,
+            'IX', 'XII' => -2,
+            default => 0,
+        };
+
+        return (string) ($academicStartYear + $offset);
+    }
+
+    private function cohortForClass($classId, ?string $tenantId): ?string
+    {
+        $classId = trim((string) ($classId ?? ''));
+        if ($classId === '' || ! Schema::hasTable('kelas') || ! $this->isSelectableColumn('kelas', 'angkatan')) {
+            return null;
+        }
+
+        $cacheKey = ($tenantId ?: '__default__').'|'.$classId;
+        if (array_key_exists($cacheKey, $this->classCohortCache)) {
+            return $this->classCohortCache[$cacheKey];
+        }
+
+        $query = DB::table('kelas')->where(function ($q) use ($classId) {
+            $q->where('id', $classId);
+            if ($this->isSelectableColumn('kelas', 'nama')) {
+                $q->orWhere('nama', $classId);
+            }
+        });
+        if ($tenantId && $this->isSelectableColumn('kelas', 'tenant_id')) {
+            $query->where('tenant_id', $tenantId);
+        }
+
+        $row = $query->orderBy('id')->first(['angkatan']);
+        $cohort = trim((string) ($row->angkatan ?? '')) ?: null;
+        $this->classCohortCache[$cacheKey] = $cohort;
+
+        return $cohort;
+    }
+
+    private function cohortForStudent($studentId, ?string $tenantId): ?string
+    {
+        $studentId = trim((string) ($studentId ?? ''));
+        if ($studentId === '' || ! Schema::hasTable('profiles') || ! $this->isSelectableColumn('profiles', 'angkatan')) {
+            return null;
+        }
+
+        $cacheKey = ($tenantId ?: '__default__').'|'.$studentId;
+        if (array_key_exists($cacheKey, $this->studentCohortCache)) {
+            return $this->studentCohortCache[$cacheKey];
+        }
+
+        $query = DB::table('profiles')->where('id', $studentId);
+        if ($tenantId && $this->isSelectableColumn('profiles', 'tenant_id')) {
+            $query->where('tenant_id', $tenantId);
+        }
+
+        $row = $query->first(['angkatan']);
+        $cohort = trim((string) ($row->angkatan ?? '')) ?: null;
+        $this->studentCohortCache[$cacheKey] = $cohort;
+
+        return $cohort;
+    }
+
+    private function academicSnapshotForTugas($tugasId, $studentId, ?string $tenantId): array
+    {
+        $tugasId = trim((string) ($tugasId ?? ''));
+        if ($tugasId === '' || ! Schema::hasTable('tugas')) {
+            return [];
+        }
+
+        $columns = ['tahun_ajaran', 'semester', 'angkatan'];
+        $select = array_values(array_filter($columns, fn ($column) => $this->isSelectableColumn('tugas', $column)));
+        if (empty($select)) {
+            return [];
+        }
+
+        $query = DB::table('tugas')->where('id', $tugasId);
+        if ($tenantId && $this->isSelectableColumn('tugas', 'tenant_id')) {
+            $query->where('tenant_id', $tenantId);
+        }
+
+        $row = $query->first($select);
+        if (! $row) {
+            return [];
+        }
+
+        $studentCohort = $this->cohortForStudent($studentId, $tenantId);
+
+        return [
+            'tahun_ajaran' => $row->tahun_ajaran ?? null,
+            'semester' => $row->semester ?? null,
+            'angkatan' => $studentCohort ?: ($row->angkatan ?? null),
+        ];
+    }
+
+    private function academicSnapshotForQuiz($quizId, $studentId, ?string $tenantId): array
+    {
+        $quizId = trim((string) ($quizId ?? ''));
+        if ($quizId === '' || ! Schema::hasTable('quizzes')) {
+            return [];
+        }
+
+        $columns = ['tahun_ajaran', 'semester', 'angkatan'];
+        $select = array_values(array_filter($columns, fn ($column) => $this->isSelectableColumn('quizzes', $column)));
+        if (empty($select)) {
+            return [];
+        }
+
+        $query = DB::table('quizzes')->where('id', $quizId);
+        if ($tenantId && $this->isSelectableColumn('quizzes', 'tenant_id')) {
+            $query->where('tenant_id', $tenantId);
+        }
+
+        $row = $query->first($select);
+        if (! $row) {
+            return [];
+        }
+
+        $studentCohort = $this->cohortForStudent($studentId, $tenantId);
+
+        return [
+            'tahun_ajaran' => $row->tahun_ajaran ?? null,
+            'semester' => $row->semester ?? null,
+            'angkatan' => $studentCohort ?: ($row->angkatan ?? null),
+        ];
+    }
+
     private function guruKelasIds(string $userId): array
     {
         if (isset($this->guruKelasCache[$userId])) {
@@ -3125,6 +3617,7 @@ class DbController extends ApiController
 
         $kelasQuery = DB::table('jadwal')->where('guru_id', $userId);
         $this->applyTenantFilter($kelasQuery);
+        $this->applyCurrentAcademicPeriodToQuery($kelasQuery, 'jadwal');
         $kelas = $kelasQuery
             ->distinct()
             ->pluck('kelas_id')
@@ -3910,6 +4403,7 @@ class DbController extends ApiController
             ->where('guru_id', $guruId)
             ->whereNotNull('mapel');
         $this->applyTenantFilter($jadwalQuery);
+        $this->applyCurrentAcademicPeriodToQuery($jadwalQuery, 'jadwal');
 
         $lookup = [];
         foreach ($jadwalQuery->pluck('mapel')->all() as $mapel) {
@@ -3970,6 +4464,7 @@ class DbController extends ApiController
             ->where('guru_id', $guruId)
             ->where('kelas_id', $kelasId);
         $this->applyTenantFilter($jadwalQuery);
+        $this->applyCurrentAcademicPeriodToQuery($jadwalQuery, 'jadwal');
         $mapelRows = $jadwalQuery->pluck('mapel')->filter()->all();
 
         foreach ($mapelRows as $mapelRow) {
@@ -4595,8 +5090,20 @@ class DbController extends ApiController
             'link_facebook',
             'link_youtube',
             'link_tiktok',
+            'tahun_ajaran',
+            'semester_aktif',
             'registrasi_siswa_aktif',
             'registrasi_guru_aktif',
+            'ranking_weight_tugas',
+            'ranking_weight_quiz',
+            'ranking_weight_absensi',
+            'ranking_tiebreak_order',
+            'ranking_core_mapel',
+            'ranking_policy_updated_at',
+            'nilai_freeze_enabled',
+            'nilai_freeze_start',
+            'nilai_freeze_end',
+            'nilai_freeze_reason',
         ];
 
         return $this->sanitizeRowsByAllowedFields($rows, $allowed);

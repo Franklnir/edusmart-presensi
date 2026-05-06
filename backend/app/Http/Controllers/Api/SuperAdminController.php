@@ -935,7 +935,7 @@ class SuperAdminController extends ApiController
                 'nama_sekolah' => $tenantName,
                 'email' => $adminEmail,
                 'registrasi_siswa_aktif' => true,
-                'registrasi_guru_aktif' => true,
+                'registrasi_guru_aktif' => false,
                 'registrasi_admin_aktif' => false,
                 'created_at' => now(),
                 'updated_at' => now(),
@@ -3678,7 +3678,20 @@ class SuperAdminController extends ApiController
     {
         $anomalies = [];
         $now = now();
-        $criticalTables = ['settings', 'absensi', 'absensi_settings', 'tugas_jawaban', 'quiz_submissions', 'quiz_answers'];
+        $criticalTables = [
+            'settings',
+            'users',
+            'profiles',
+            'tenants',
+            'tenant_domains',
+            'super_admins',
+            'approval_requests',
+            'absensi',
+            'absensi_settings',
+            'tugas_jawaban',
+            'quiz_submissions',
+            'quiz_answers',
+        ];
 
         if ($this->hasTable('audit_log')) {
             $deleteQuery = DB::table('audit_log')
@@ -3713,8 +3726,63 @@ class SuperAdminController extends ApiController
                 ];
             }
 
+            $scannerQuery = DB::table('audit_log')
+                ->where('timestamp', '>=', $now->copy()->subDay())
+                ->where(function ($query) {
+                    $query
+                        ->whereRaw('LOWER(CAST(new_data AS TEXT)) LIKE ?', ['%security_blocked_request%'])
+                        ->orWhereRaw('LOWER(CAST(new_data AS TEXT)) LIKE ?', ['%sqlmap%'])
+                        ->orWhereRaw('LOWER(CAST(new_data AS TEXT)) LIKE ?', ['%nikto%'])
+                        ->orWhereRaw('LOWER(CAST(new_data AS TEXT)) LIKE ?', ['%nuclei%']);
+                });
+            if ($tenantId && $this->tableHasColumn('audit_log', 'tenant_id')) {
+                $scannerQuery->where('tenant_id', $tenantId);
+            }
+            $scannerCount = (int) $scannerQuery->count();
+            if ($scannerCount >= 1) {
+                $anomalies[] = [
+                    'severity' => 'high',
+                    'code' => 'SCANNER_TRAFFIC_DETECTED',
+                    'message' => "Terdeteksi {$scannerCount} request dari scanner otomatis dalam 24 jam terakhir. Cek login_success dan perubahan tabel sensitif.",
+                ];
+            }
+
+            $adminHostDeniedQuery = DB::table('audit_log')
+                ->where('table_name', 'auth_events')
+                ->where('timestamp', '>=', $now->copy()->subHour())
+                ->whereRaw('LOWER(CAST(new_data AS TEXT)) LIKE ?', ['%login_denied_non_super_admin_on_admin_host%']);
+            if ($tenantId && $this->tableHasColumn('audit_log', 'tenant_id')) {
+                $adminHostDeniedQuery->where('tenant_id', $tenantId);
+            }
+            $adminHostDeniedCount = (int) $adminHostDeniedQuery->count();
+            if ($adminHostDeniedCount >= 3) {
+                $anomalies[] = [
+                    'severity' => 'medium',
+                    'code' => 'ADMIN_HOST_DENIED_BURST',
+                    'message' => "Ada {$adminHostDeniedCount} percobaan login non-super-admin di host admin dalam 1 jam.",
+                ];
+            }
+
+            $anonymousSecurityQuery = DB::table('audit_log')
+                ->whereNull('user_id')
+                ->whereIn('table_name', ['auth_events', 'security_events'])
+                ->where('timestamp', '>=', $now->copy()->subHour());
+            if ($tenantId && $this->tableHasColumn('audit_log', 'tenant_id')) {
+                $anonymousSecurityQuery->where('tenant_id', $tenantId);
+            }
+            $anonymousSecurityCount = (int) $anonymousSecurityQuery->count();
+            if ($anonymousSecurityCount >= 20) {
+                $anomalies[] = [
+                    'severity' => 'medium',
+                    'code' => 'ANONYMOUS_SECURITY_EVENT_BURST',
+                    'message' => "Terdeteksi {$anonymousSecurityCount} event login/keamanan anonim dalam 1 jam.",
+                ];
+            }
+
             $actorBurstQuery = DB::table('audit_log')
                 ->select('user_id', DB::raw('count(*) as total'))
+                ->whereNotNull('user_id')
+                ->whereNotIn('table_name', ['auth_events', 'security_events'])
                 ->where('timestamp', '>=', $now->copy()->subHour())
                 ->groupBy('user_id')
                 ->havingRaw('count(*) >= 40');
@@ -3726,7 +3794,7 @@ class SuperAdminController extends ApiController
                 $anomalies[] = [
                     'severity' => 'medium',
                     'code' => 'ACTIVITY_BURST',
-                    'message' => 'Akun '.((string) ($actor->user_id ?? 'unknown'))." membuat {$actor->total} perubahan dalam 1 jam.",
+                    'message' => 'Akun '.((string) $actor->user_id)." membuat {$actor->total} perubahan data dalam 1 jam.",
                 ];
             }
         }

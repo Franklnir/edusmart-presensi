@@ -262,11 +262,18 @@ const Plugins = () => {
 
   return (
     <div className="space-y-6 p-6">
-      <div className="space-y-2">
-        <h1 className="text-2xl font-bold text-slate-900">Plugin Manager</h1>
-        <p className="text-sm text-slate-600">
-          Upload ZIP plugin, verifikasi manifest lebih dulu, lalu aktifkan atau nonaktifkan plugin dengan aman dari area super admin.
-        </p>
+      <div className="page-title-card">
+        <div className="flex items-center gap-4">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-100 text-sm font-bold text-blue-700">
+            PL
+          </div>
+          <div>
+            <h1 className="page-title-heading">Plugin Manager</h1>
+            <p className="page-title-description">
+              Upload ZIP plugin, verifikasi manifest lebih dulu, lalu aktifkan atau nonaktifkan plugin dengan aman dari area super admin.
+            </p>
+          </div>
+        </div>
       </div>
 
       <div className="rounded-3xl border border-amber-200 bg-amber-50 p-6 shadow-sm">

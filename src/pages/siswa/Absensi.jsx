@@ -7,11 +7,24 @@ import React, {
   useMemo
 } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Camera, CheckCircle2, Loader2, QrCode, ScanLine, XCircle } from 'lucide-react'
+import { CalendarDays, Camera, CheckCircle2, Loader2, QrCode, ScanLine, XCircle } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import ProfileAvatar from '../../components/ProfileAvatar'
+import {
+  SEMESTER_GANJIL,
+  SEMESTER_GENAP,
+  normalizeAcademicYear,
+  normalizeSemester,
+  resolveAcademicPeriod
+} from '../../utils/academicPeriod'
+import { fetchAbsensiSettings } from '../../utils/absensiSettings'
+
+const SEMESTER_OPTIONS = [
+  { value: SEMESTER_GANJIL, label: 'Semester 1 (Ganjil)' },
+  { value: SEMESTER_GENAP, label: 'Semester 2 (Genap)' }
+]
 
 /* ======================= Helper ======================= */
 const getToday = () => {
@@ -51,6 +64,22 @@ const getCurrentDateTime = () => {
   }
 }
 
+const getAcademicYearOptions = (period = resolveAcademicPeriod()) => {
+  const start = Number(period.startYear || String(period.tahunAjaran || '').slice(0, 4)) || resolveAcademicPeriod().startYear
+  return Array.from({ length: 5 }, (_, index) => {
+    const year = start - 2 + index
+    return `${year}/${year + 1}`
+  })
+}
+
+const normalizePeriodFilter = (period = {}) => {
+  const fallback = resolveAcademicPeriod()
+  return {
+    tahunAjaran: normalizeAcademicYear(period.tahunAjaran || period.tahun_ajaran) || fallback.tahunAjaran,
+    semester: normalizeSemester(period.semester || period.semester_aktif) || fallback.semester
+  }
+}
+
 const extractQrToken = (rawValue = '') => {
   const value = String(rawValue || '').trim()
   if (!value) return ''
@@ -74,6 +103,16 @@ const extractQrToken = (rawValue = '') => {
     }
     return value
   }
+}
+
+const loadJsQrDecoder = () => {
+  if (typeof window === 'undefined') {
+    return Promise.reject(new Error('Scanner QR hanya tersedia di browser.'))
+  }
+  if (typeof window.jsQR === 'function') {
+    return Promise.resolve(window.jsQR)
+  }
+  return import('jsqr').then((mod) => mod.default || mod)
 }
 
 const QrSuccessOverlay = ({ data, onClose }) => {
@@ -137,6 +176,7 @@ const QrSuccessOverlay = ({ data, onClose }) => {
 
 const QrScannerPanel = ({ onSubmitToken, isSubmitting, lastError }) => {
   const videoRef = useRef(null)
+  const canvasRef = useRef(null)
   const streamRef = useRef(null)
   const frameRef = useRef(0)
   const processingRef = useRef(false)
@@ -183,15 +223,37 @@ const QrScannerPanel = ({ onSubmitToken, isSubmitting, lastError }) => {
   )
 
   const scanFrame = useCallback(
-    async (detector) => {
+    async (scanner) => {
       if (processingRef.current) return
       const video = videoRef.current
       if (!video) return
 
       try {
         if (video.readyState >= 2) {
-          const codes = await detector.detect(video)
-          const rawValue = codes?.[0]?.rawValue
+          let rawValue = ''
+
+          if (scanner?.type === 'native') {
+            const codes = await scanner.detector.detect(video)
+            rawValue = codes?.[0]?.rawValue || ''
+          } else if (scanner?.type === 'jsqr') {
+            const canvas = canvasRef.current
+            const width = video.videoWidth || 0
+            const height = video.videoHeight || 0
+            if (canvas && width > 0 && height > 0) {
+              const targetWidth = Math.min(640, width)
+              const targetHeight = Math.max(1, Math.round((height / width) * targetWidth))
+              canvas.width = targetWidth
+              canvas.height = targetHeight
+              const context = canvas.getContext('2d', { willReadFrequently: true })
+              context.drawImage(video, 0, 0, targetWidth, targetHeight)
+              const imageData = context.getImageData(0, 0, targetWidth, targetHeight)
+              const result = scanner.decode(imageData.data, targetWidth, targetHeight, {
+                inversionAttempts: 'attemptBoth'
+              })
+              rawValue = result?.data || ''
+            }
+          }
+
           if (rawValue) {
             await submitDecodedValue(rawValue)
             return
@@ -202,7 +264,7 @@ const QrScannerPanel = ({ onSubmitToken, isSubmitting, lastError }) => {
       }
 
       frameRef.current = window.requestAnimationFrame(() => {
-        void scanFrame(detector)
+        void scanFrame(scanner)
       })
     },
     [submitDecodedValue]
@@ -215,13 +277,9 @@ const QrScannerPanel = ({ onSubmitToken, isSubmitting, lastError }) => {
 
     try {
       if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
-        throw new Error('Browser belum mendukung akses kamera.')
-      }
-      if (typeof window === 'undefined' || typeof window.BarcodeDetector !== 'function') {
-        throw new Error('Browser belum mendukung scanner QR otomatis. Gunakan Chrome/Edge terbaru atau tempel kode QR.')
+        throw new Error('Akses kamera tidak tersedia di browser ini. Buka lewat HTTPS/localhost, Chrome/Edge terbaru, atau tempel kode QR secara manual.')
       }
 
-      const detector = new window.BarcodeDetector({ formats: ['qr_code'] })
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: { ideal: 'environment' }
@@ -234,9 +292,30 @@ const QrScannerPanel = ({ onSubmitToken, isSubmitting, lastError }) => {
         videoRef.current.srcObject = stream
         await videoRef.current.play()
       }
+
+      let scanner = null
+      if (typeof window !== 'undefined' && typeof window.BarcodeDetector === 'function') {
+        try {
+          scanner = {
+            type: 'native',
+            detector: new window.BarcodeDetector({ formats: ['qr_code'] })
+          }
+        } catch {
+          scanner = null
+        }
+      }
+
+      if (!scanner) {
+        const jsQR = await loadJsQrDecoder()
+        scanner = {
+          type: 'jsqr',
+          decode: jsQR
+        }
+      }
+
       setCameraState('active')
       frameRef.current = window.requestAnimationFrame(() => {
-        void scanFrame(detector)
+        void scanFrame(scanner)
       })
     } catch (err) {
       try {
@@ -247,7 +326,10 @@ const QrScannerPanel = ({ onSubmitToken, isSubmitting, lastError }) => {
       streamRef.current = null
       if (videoRef.current) videoRef.current.srcObject = null
       setCameraState('error')
-      setCameraError(err?.message || 'Tidak bisa membuka kamera.')
+      setCameraError(
+        err?.message ||
+        'Tidak bisa membuka kamera. Pastikan izin kamera aktif, akses lewat HTTPS, lalu coba lagi atau tempel kode QR.'
+      )
     }
   }, [cameraState, scanFrame])
 
@@ -263,6 +345,7 @@ const QrScannerPanel = ({ onSubmitToken, isSubmitting, lastError }) => {
       <div className="rounded-2xl border border-slate-200 bg-slate-950 overflow-hidden shadow-sm">
         <div className="relative aspect-[4/3] bg-slate-950">
           <video ref={videoRef} className="h-full w-full object-cover" muted playsInline />
+          <canvas ref={canvasRef} className="hidden" aria-hidden="true" />
           {cameraState !== 'active' && (
             <div className="absolute inset-0 grid place-items-center bg-slate-950">
               <div className="text-center px-6">
@@ -772,7 +855,7 @@ const JadwalCard = ({
   }
 
   const getCardStyle = () => {
-    if (isCurrent && isSesiAktif() && jadwal.mode === 'otomatis' && !jadwal.status) {
+    if (isCurrent && isSesiAktif() && jadwal.allow_self_absen && !jadwal.status) {
       return 'border-green-400 bg-green-50'
     }
     if (isCurrent) return 'border-blue-400 bg-blue-50'
@@ -781,13 +864,14 @@ const JadwalCard = ({
   }
 
   const isSesiAktifFlag = isSesiAktif()
+  const canSelfAttend = isCurrent && isSesiAktifFlag && jadwal.allow_self_absen && !jadwal.status
 
   return (
     <div className={`rounded-2xl border p-4 transition-all duration-200 shadow-sm hover:shadow-md ${getCardStyle()}`}>
       <div className="flex items-start justify-between mb-2">
         <div className="flex items-center space-x-2">
           <div
-            className={`w-2 h-2 rounded-full ${isCurrent && isSesiAktifFlag && jadwal.mode === 'otomatis' && !jadwal.status
+            className={`w-2 h-2 rounded-full ${canSelfAttend
               ? 'bg-green-500 animate-pulse'
               : isCurrent
                 ? 'bg-blue-500'
@@ -825,8 +909,8 @@ const JadwalCard = ({
       </div>
 
       <div className="flex items-center justify-between mb-2">
-        <Badge variant={jadwal.mode === 'otomatis' ? 'hadir' : 'warning'}>
-          {jadwal.mode === 'otomatis' ? 'Auto' : 'Manual'}
+        <Badge variant={jadwal.allow_self_absen ? 'hadir' : 'warning'}>
+          {jadwal.allow_self_absen ? 'Mandiri Dibuka' : 'Mandiri Ditutup'}
         </Badge>
         {jadwal.status && (
           <Badge
@@ -846,7 +930,7 @@ const JadwalCard = ({
       </div>
 
       <div className="grid grid-cols-2 gap-2">
-        {isCurrent && isSesiAktifFlag && jadwal.mode === 'otomatis' && !jadwal.status && (
+        {canSelfAttend && (
           <button
             className="w-full py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl font-semibold transition-all duration-200 text-[11px]"
             onClick={() => onAbsenClick(jadwal)}
@@ -855,7 +939,7 @@ const JadwalCard = ({
           </button>
         )}
         <button
-          className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold transition-all duration-200 text-[11px]"
+          className={`w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold transition-all duration-200 text-[11px] ${canSelfAttend ? '' : 'col-span-2'}`}
           onClick={() => onCalendarClick(jadwal)}
         >
           Kalender
@@ -866,7 +950,7 @@ const JadwalCard = ({
 }
 
 /* ======================= Calendar Overlay ======================= */
-const CalendarOverlay = ({ mapel, jadwalMingguIni, onClose, profile, userId }) => {
+const CalendarOverlay = ({ mapel, jadwalMingguIni, onClose, profile, userId, periodFilter }) => {
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1)
   const [absensiData, setAbsensiData] = useState({})
   const [isLoading, setIsLoading] = useState(false)
@@ -886,7 +970,8 @@ const CalendarOverlay = ({ mapel, jadwalMingguIni, onClose, profile, userId }) =
     'Desember'
   ]
 
-  const selectedYear = new Date().getFullYear()
+  const academicStartYear = Number(String(periodFilter?.tahunAjaran || '').slice(0, 4)) || new Date().getFullYear()
+  const selectedYear = periodFilter?.semester === SEMESTER_GENAP ? academicStartYear + 1 : academicStartYear
   const hariList = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']
 
   const getJadwalHari = () => {
@@ -909,7 +994,7 @@ const CalendarOverlay = ({ mapel, jadwalMingguIni, onClose, profile, userId }) =
         .toISOString()
         .split('T')[0]
 
-      const { data, error } = await supabase
+      let query = supabase
         .from('absensi')
         .select('*')
         .eq('kelas', profile.kelas)
@@ -917,6 +1002,11 @@ const CalendarOverlay = ({ mapel, jadwalMingguIni, onClose, profile, userId }) =
         .eq('uid', userId)
         .gte('tanggal', startDate)
         .lte('tanggal', endDate)
+
+      if (periodFilter?.tahunAjaran) query = query.eq('tahun_ajaran', periodFilter.tahunAjaran)
+      if (periodFilter?.semester) query = query.eq('semester', periodFilter.semester)
+
+      const { data, error } = await query
 
       if (error) throw error
 
@@ -935,7 +1025,7 @@ const CalendarOverlay = ({ mapel, jadwalMingguIni, onClose, profile, userId }) =
 
   useEffect(() => {
     loadAbsensiBulanan()
-  }, [selectedMonth, selectedYear, mapel])
+  }, [selectedMonth, selectedYear, mapel, periodFilter?.semester, periodFilter?.tahunAjaran])
 
   const generateCalendar = () => {
     const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate()
@@ -1141,7 +1231,7 @@ const CalendarOverlay = ({ mapel, jadwalMingguIni, onClose, profile, userId }) =
 }
 
 /* ======================= Mapel Options ======================= */
-const MapelOptions = ({ kelas, tanggal }) => {
+const MapelOptions = ({ kelas, tanggal, periodFilter }) => {
   const [list, setList] = useState([])
 
   useEffect(() => {
@@ -1151,11 +1241,16 @@ const MapelOptions = ({ kelas, tanggal }) => {
       try {
         const hari = tanggal ? getDayName(tanggal) : getDayName(getToday())
 
-        const { data, error } = await supabase
+        let query = supabase
           .from('jadwal')
           .select('mapel, guru_nama, jam_mulai, jam_selesai, hari')
           .eq('kelas_id', kelas)
           .eq('hari', hari)
+
+        if (periodFilter?.tahunAjaran) query = query.eq('tahun_ajaran', periodFilter.tahunAjaran)
+        if (periodFilter?.semester) query = query.eq('semester', periodFilter.semester)
+
+        const { data, error } = await query
 
         if (error) throw error
 
@@ -1174,7 +1269,7 @@ const MapelOptions = ({ kelas, tanggal }) => {
     }
 
     load()
-  }, [kelas, tanggal])
+  }, [kelas, tanggal, periodFilter?.semester, periodFilter?.tahunAjaran])
 
   return (
     <>
@@ -1202,6 +1297,12 @@ export default function SAbsensi() {
   const [tab, setTab] = useState('manual')
   const [mapel, setMapel] = useState('')
   const [tgl, setTgl] = useState(getToday())
+  const initialAcademicPeriod = resolveAcademicPeriod()
+  const [activeAcademicPeriod, setActiveAcademicPeriod] = useState(initialAcademicPeriod)
+  const [periodFilter, setPeriodFilter] = useState(() => ({
+    tahunAjaran: initialAcademicPeriod.tahunAjaran,
+    semester: initialAcademicPeriod.semester
+  }))
   const [status, setStatus] = useState(null)
   const [ringkas, setRingkas] = useState({ H: 0, I: 0, S: 0, A: 0 }) // 🆕 ada S
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -1253,6 +1354,15 @@ export default function SAbsensi() {
   const tglRef = useRef(tgl)
   const currentJadwalRef = useRef(null)
   const statusRef = useRef(status)
+  const loadErrorToastRef = useRef({})
+
+  const pushLoadErrorToast = useCallback((key, message) => {
+    const now = Date.now()
+    const lastShownAt = loadErrorToastRef.current[key] || 0
+    if (now - lastShownAt < 8000) return
+    loadErrorToastRef.current[key] = now
+    pushToast('error', message)
+  }, [pushToast])
 
   const hariOrder = [
     'Senin',
@@ -1264,6 +1374,16 @@ export default function SAbsensi() {
     'Minggu'
   ]
 
+  const academicYearOptions = useMemo(
+    () => getAcademicYearOptions(activeAcademicPeriod),
+    [activeAcademicPeriod]
+  )
+
+  const academicPeriodPayload = useMemo(() => ({
+    tahun_ajaran: periodFilter.tahunAjaran,
+    semester: periodFilter.semester
+  }), [periodFilter.semester, periodFilter.tahunAjaran])
+
   /* ========== Real-time Clock Global ========== */
   useEffect(() => {
     const timer = setInterval(() => {
@@ -1272,6 +1392,43 @@ export default function SAbsensi() {
       setCurrentDateTime(getCurrentDateTime())
     }, 1000)
     return () => clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    const loadAcademicPeriod = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('settings')
+          .select('tahun_ajaran,semester_aktif')
+          .limit(1)
+          .maybeSingle()
+
+        if (error && error.code !== 'PGRST116') {
+          console.warn('Gagal memuat periode akademik aktif:', error)
+          return
+        }
+
+        const resolved = resolveAcademicPeriod(data || {})
+        setActiveAcademicPeriod(resolved)
+        setPeriodFilter((prev) => {
+          const normalized = normalizePeriodFilter(prev)
+          if (
+            normalized.tahunAjaran === initialAcademicPeriod.tahunAjaran &&
+            normalized.semester === initialAcademicPeriod.semester
+          ) {
+            return {
+              tahunAjaran: resolved.tahunAjaran,
+              semester: resolved.semester
+            }
+          }
+          return normalized
+        })
+      } catch (error) {
+        console.warn('Gagal memuat periode akademik aktif:', error)
+      }
+    }
+
+    loadAcademicPeriod()
   }, [])
 
   /* ========== Load Pengaturan RFID ========== */
@@ -1322,13 +1479,8 @@ export default function SAbsensi() {
   }, [rfidSettings, currentDateTime])
 
   const isManualAbsenAllowed = useCallback(() => {
-    // If teacher explicitly opens "otomatis" mode, allow manual attendance as well
-    if (currentJadwal?.mode === 'otomatis') return true
-
-    // Otherwise, if RFID is active and in range, block manual attendance
-    if (rfidSettings.rfid_aktif && isInRfidTimeRange()) return false
-    return true
-  }, [rfidSettings, isInRfidTimeRange, currentJadwal])
+    return Boolean(currentJadwal?.allow_self_absen)
+  }, [currentJadwal?.allow_self_absen])
 
   /* ========== Statistik Kehadiran HARI INI ========== */
   const loadStatistikKehadiran = useCallback(async () => {
@@ -1336,11 +1488,16 @@ export default function SAbsensi() {
     try {
       const today = getToday()
 
-      const { data, error } = await supabase
+      let query = supabase
         .from('absensi')
         .select('status')
         .eq('uid', userId)
         .eq('tanggal', today)
+
+      if (periodFilter.tahunAjaran) query = query.eq('tahun_ajaran', periodFilter.tahunAjaran)
+      if (periodFilter.semester) query = query.eq('semester', periodFilter.semester)
+
+      const { data, error } = await query
 
       if (error) throw error
 
@@ -1355,25 +1512,30 @@ export default function SAbsensi() {
     } catch (error) {
       console.error('Error loading statistik kehadiran:', error)
     }
-  }, [userId])
+  }, [periodFilter.semester, periodFilter.tahunAjaran, userId])
 
   /* ========== Jam Kosong Hari Ini ========== */
   const loadJamKosongHariIni = useCallback(async () => {
     if (!profile?.kelas) return
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('jam_kosong')
         .select('*')
         .eq('kelas', profile.kelas)
         .eq('tanggal', getToday())
         .order('jam_mulai')
 
+      if (periodFilter.tahunAjaran) query = query.eq('tahun_ajaran', periodFilter.tahunAjaran)
+      if (periodFilter.semester) query = query.eq('semester', periodFilter.semester)
+
+      const { data, error } = await query
+
       if (error) throw error
       setJamKosongList(data || [])
     } catch (error) {
       console.error('Error loading jam kosong:', error)
     }
-  }, [profile?.kelas])
+  }, [periodFilter.semester, periodFilter.tahunAjaran, profile?.kelas])
 
   /* ========== Jadwal Hari Ini ========== */
   const loadJadwalHariIni = useCallback(async () => {
@@ -1382,20 +1544,29 @@ export default function SAbsensi() {
     try {
       const hari = getDayName(getToday())
 
-      const { data: jadwalList, error } = await supabase
+      let jadwalQuery = supabase
         .from('jadwal')
         .select('*')
         .eq('kelas_id', profile.kelas)
         .eq('hari', hari)
         .order('jam_mulai')
 
+      if (periodFilter.tahunAjaran) jadwalQuery = jadwalQuery.eq('tahun_ajaran', periodFilter.tahunAjaran)
+      if (periodFilter.semester) jadwalQuery = jadwalQuery.eq('semester', periodFilter.semester)
+
+      const { data: jadwalList, error } = await jadwalQuery
+
       if (error) throw error
 
-      const { data: settingsList } = await supabase
-        .from('absensi_settings')
-        .select('*')
-        .eq('kelas', profile.kelas)
-        .eq('tanggal', getToday())
+      const { data: settingsList, error: settingsError } = await fetchAbsensiSettings({
+        kelas: profile.kelas,
+        tanggal: getToday(),
+        periodFilter
+      })
+
+      if (settingsError) {
+        console.warn('Error loading absensi settings:', settingsError)
+      }
 
       const jadwalWithStatus = await Promise.all(
         (jadwalList || []).map(async (jadwalItem) => {
@@ -1403,9 +1574,10 @@ export default function SAbsensi() {
             (s) => s.mapel === jadwalItem.mapel
           )
           const mode = settingsForMapel?.mode || 'manual'
+          const allowSelfAbsen = Boolean(settingsForMapel?.allow_self_absen)
 
           // Hindari maybeSingle agar tidak error jika data lama duplikat.
-          const { data: absensiRows, error: absensiError } = await supabase
+          let absensiQuery = supabase
             .from('absensi')
             .select('status, waktu')
             .eq('kelas', profile.kelas)
@@ -1414,6 +1586,11 @@ export default function SAbsensi() {
             .eq('uid', userId)
             .order('waktu', { ascending: false })
             .limit(1)
+
+          if (periodFilter.tahunAjaran) absensiQuery = absensiQuery.eq('tahun_ajaran', periodFilter.tahunAjaran)
+          if (periodFilter.semester) absensiQuery = absensiQuery.eq('semester', periodFilter.semester)
+
+          const { data: absensiRows, error: absensiError } = await absensiQuery
 
           if (absensiError) {
             console.warn('Error load status absensi per mapel:', absensiError)
@@ -1433,6 +1610,7 @@ export default function SAbsensi() {
           return {
             ...jadwalItem,
             mode,
+            allow_self_absen: allowSelfAbsen,
             status: absensi?.status || null,
             isOpen,
             jamKosong: jamKosong || null
@@ -1466,15 +1644,17 @@ export default function SAbsensi() {
       }
     } catch (error) {
       console.error('Error loading jadwal:', error)
-      pushToast('error', 'Gagal memuat jadwal hari ini')
+      pushLoadErrorToast('jadwal-hari-ini', 'Gagal memuat jadwal hari ini')
     }
   }, [
     profile?.kelas,
     userId,
     jamKosongList,
     tab,
-    pushToast,
-    currentDateTime.minutes
+    pushLoadErrorToast,
+    currentDateTime.minutes,
+    periodFilter.semester,
+    periodFilter.tahunAjaran
   ])
 
   /* ========== Jadwal Minggu Ini ========== */
@@ -1483,14 +1663,29 @@ export default function SAbsensi() {
 
     setIsLoadingJadwalMinggu(true)
     try {
-      const { data: jadwalList, error } = await supabase
+      let query = supabase
         .from('jadwal')
         .select('*')
         .eq('kelas_id', profile.kelas)
         .order('hari')
         .order('jam_mulai')
 
+      if (periodFilter.tahunAjaran) query = query.eq('tahun_ajaran', periodFilter.tahunAjaran)
+      if (periodFilter.semester) query = query.eq('semester', periodFilter.semester)
+
+      const { data: jadwalList, error } = await query
+
       if (error) throw error
+
+      const { data: settingsList, error: settingsError } = await fetchAbsensiSettings({
+        kelas: profile.kelas,
+        tanggal: getToday(),
+        periodFilter
+      })
+
+      if (settingsError) {
+        console.warn('Error loading absensi settings:', settingsError)
+      }
 
       const jadwalByHari = {}
       hariOrder.forEach((hari) => {
@@ -1499,7 +1694,12 @@ export default function SAbsensi() {
 
         ; (jadwalList || []).forEach((jadwal) => {
           if (jadwalByHari[jadwal.hari]) {
-            jadwalByHari[jadwal.hari].push(jadwal)
+            const settingsForMapel = (settingsList || []).find((item) => item.mapel === jadwal.mapel)
+            jadwalByHari[jadwal.hari].push({
+              ...jadwal,
+              mode: settingsForMapel?.mode || 'manual',
+              allow_self_absen: Boolean(settingsForMapel?.allow_self_absen)
+            })
           }
         })
 
@@ -1512,22 +1712,27 @@ export default function SAbsensi() {
       setJadwalMingguIni(jadwalByHari)
     } catch (error) {
       console.error('Error loading jadwal minggu:', error)
-      pushToast('error', 'Gagal memuat jadwal minggu ini')
+      pushLoadErrorToast('jadwal-minggu', 'Gagal memuat jadwal minggu ini')
     } finally {
       setIsLoadingJadwalMinggu(false)
     }
-  }, [profile?.kelas, pushToast])
+  }, [periodFilter.semester, periodFilter.tahunAjaran, profile?.kelas, pushLoadErrorToast])
 
   /* ========== Ringkasan + Status Saya (per mapel & tanggal) ========== */
   const loadRingkasDanStatus = useCallback(async () => {
     if (!profile?.kelas || !userId || !mapel || !tgl) return
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('absensi')
         .select('uid, status')
         .eq('kelas', profile.kelas)
         .eq('tanggal', tgl)
         .eq('mapel', mapel)
+
+      if (periodFilter.tahunAjaran) query = query.eq('tahun_ajaran', periodFilter.tahunAjaran)
+      if (periodFilter.semester) query = query.eq('semester', periodFilter.semester)
+
+      const { data, error } = await query
 
       if (error) throw error
 
@@ -1548,11 +1753,11 @@ export default function SAbsensi() {
       statusRef.current = myStatus
     } catch (err) {
       console.error('Error loadRingkasDanStatus:', err)
-      pushToast('error', 'Gagal memuat data absensi')
+      pushLoadErrorToast('ringkas-absensi', 'Gagal memuat data absensi')
     } finally {
       setIsSubmitting(false)
     }
-  }, [profile?.kelas, userId, mapel, tgl, pushToast])
+  }, [periodFilter.semester, periodFilter.tahunAjaran, profile?.kelas, userId, mapel, tgl, pushLoadErrorToast])
 
   /* ========== Sinkron Refs ========== */
   useEffect(() => {
@@ -1684,7 +1889,8 @@ export default function SAbsensi() {
       nama: profile.nama,
       waktu: nowIso,
       komentar,
-      oleh: 'siswa'
+      oleh: 'siswa',
+      ...academicPeriodPayload
     }
 
     const { error } = await supabase.from('absensi').upsert(payload, {
@@ -1721,7 +1927,8 @@ export default function SAbsensi() {
         uid: userId,
         nama: profile.nama,
         alasan: izinReason || 'Izin (Tanpa Keterangan)',
-        mapel
+        mapel,
+        ...academicPeriodPayload
       })
 
       if (error) throw error
@@ -1749,7 +1956,7 @@ export default function SAbsensi() {
     }
 
     if (!isManualAbsenAllowed()) {
-      pushToast('error', 'Absensi mandiri ditutup. Silakan gunakan RFID untuk absen.')
+      pushToast('error', 'Absen mandiri ditutup oleh guru. Silakan ajukan izin bila diperlukan.')
       return
     }
 
@@ -1767,11 +1974,10 @@ export default function SAbsensi() {
         return
       }
 
-      // Check if mode is 'otomatis'
-      if (currentJadwal?.mode !== 'otomatis') {
+      if (!currentJadwal?.allow_self_absen) {
         pushToast(
           'error',
-          'Absensi mandiri belum dibuka. Silakan hubungi guru.'
+          'Absen mandiri belum diizinkan guru. Anda masih bisa mengajukan izin.'
         )
         return
       }
@@ -2103,7 +2309,8 @@ export default function SAbsensi() {
           nama: profile.nama,
           waktu: nowIso,
           komentar: `Absen via RFID (${scan.device_id || 'device'})`,
-          oleh: 'rfid'
+          oleh: 'rfid',
+          ...academicPeriodPayload
         }
 
         const { error } = await supabase
@@ -2186,6 +2393,7 @@ export default function SAbsensi() {
       if (rfidChannelRef.current) supabase.removeChannel(rfidChannelRef.current)
     }
   }, [
+    academicPeriodPayload,
     profile?.rfid_uid,
     profile?.kelas,
     profile?.nama,
@@ -2200,7 +2408,7 @@ export default function SAbsensi() {
     !!status ||
     isSubmitting ||
     !isAbsenOpen ||
-    currentJadwal?.mode !== 'otomatis' ||
+    !currentJadwal?.allow_self_absen ||
     !isManualAbsenAllowed()
 
   const isIzinActionDisabled = isSubmitting || !izinAvailability.allowed
@@ -2223,13 +2431,13 @@ export default function SAbsensi() {
       <QrSuccessOverlay data={qrSuccessData} onClose={() => setQrSuccessData(null)} />
       <div className="max-w-full mx-auto space-y-6">
         {/* Header */}
-        <div className="bg-white rounded-2xl border border-slate-200/60 p-6 shadow-sm transition-all duration-300 hover:shadow-md">
+        <div className="page-title-card">
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
             <div className="flex items-center gap-4">
               <div className="w-3 h-12 bg-gradient-to-b from-blue-500 to-purple-600 rounded-full"></div>
               <div>
-                <h1 className="text-2xl lg:text-3xl font-bold text-slate-900">Absensi Siswa</h1>
-                <p className="text-slate-600 text-sm mt-1">
+                <h1 className="page-title-heading">Absensi Siswa</h1>
+                <p className="page-title-description">
                   {profile.kelas} • {profile.nama}
                 </p>
                 <p className="text-[11px] text-slate-500 mt-1">
@@ -2358,7 +2566,46 @@ export default function SAbsensi() {
                         Pilih mata pelajaran yang diajar hari itu, lalu lakukan absensi.
                       </p>
                     </div>
-                    <div className="p-4 grid md:grid-cols-2 gap-3">
+                    <div className="p-4 grid md:grid-cols-2 xl:grid-cols-4 gap-3">
+                      <div className="md:col-span-2 xl:col-span-2">
+                        <label className="block text-[11px] font-semibold tracking-wide text-slate-600 uppercase mb-1.5">
+                          Periode Semester
+                        </label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <select
+                            className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-white text-sm"
+                            value={periodFilter.tahunAjaran}
+                            onChange={(event) => {
+                              const tahunAjaran = normalizeAcademicYear(event.target.value) || activeAcademicPeriod.tahunAjaran
+                              setPeriodFilter((prev) => ({ ...prev, tahunAjaran }))
+                              setMapel('')
+                              setStatus(null)
+                            }}
+                          >
+                            {academicYearOptions.map((year) => (
+                              <option key={year} value={year}>{year}</option>
+                            ))}
+                          </select>
+                          <select
+                            className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-white text-sm"
+                            value={periodFilter.semester}
+                            onChange={(event) => {
+                              const semester = normalizeSemester(event.target.value) || activeAcademicPeriod.semester
+                              setPeriodFilter((prev) => ({ ...prev, semester }))
+                              setMapel('')
+                              setStatus(null)
+                            }}
+                          >
+                            {SEMESTER_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-500">
+                          <CalendarDays className="h-3.5 w-3.5" />
+                          Aktif: {activeAcademicPeriod.tahunAjaran} - {activeAcademicPeriod.semester}
+                        </div>
+                      </div>
                       <div>
                         <label className="block text-[11px] font-semibold tracking-wide text-slate-600 uppercase mb-1.5">
                           Tanggal Absen
@@ -2391,7 +2638,11 @@ export default function SAbsensi() {
                         >
                           <option value="">— Pilih Mapel —</option>
                           {profile?.kelas && (
-                            <MapelOptions kelas={profile.kelas} tanggal={tgl} />
+                            <MapelOptions
+                              kelas={profile.kelas}
+                              tanggal={tgl}
+                              periodFilter={periodFilter}
+                            />
                           )}
                         </select>
                       </div>
@@ -2401,7 +2652,7 @@ export default function SAbsensi() {
                   {/* Status sesi hari ini */}
                   <div
                     className={`xl:col-span-2 rounded-2xl border p-4 shadow-sm transition-all duration-200 ${currentJadwal && tgl === getToday()
-                      ? isAbsenOpen && currentJadwal.mode === 'otomatis'
+                      ? isAbsenOpen && currentJadwal.allow_self_absen
                         ? 'bg-green-50 border-green-200 text-green-900'
                         : currentJadwalIndex !== -1
                           ? 'bg-blue-50 border-blue-200 text-blue-900'
@@ -2422,9 +2673,9 @@ export default function SAbsensi() {
                         </p>
                       </div>
                       {tgl === getToday() && currentJadwal ? (
-                        isAbsenOpen && currentJadwal.mode === 'otomatis' ? (
+                        isAbsenOpen && currentJadwal.allow_self_absen ? (
                           <Badge variant="live" className="text-[10px] shrink-0">
-                            SESI DIBUKA
+                            MANDIRI DIBUKA
                           </Badge>
                         ) : currentJadwalIndex !== -1 ? (
                           <Badge variant="info" className="text-[10px] shrink-0">
@@ -2432,9 +2683,7 @@ export default function SAbsensi() {
                           </Badge>
                         ) : (
                           <Badge variant="warning" className="text-[10px] shrink-0">
-                            {currentJadwal.mode === 'manual'
-                              ? 'MODE MANUAL'
-                              : 'SESI DITUTUP'}
+                            MANDIRI DITUTUP
                           </Badge>
                         )
                       ) : null}
@@ -2451,9 +2700,9 @@ export default function SAbsensi() {
                             </div>
                           </div>
                           <div className="rounded-xl bg-white/70 border border-white px-2.5 py-2">
-                            <div className="text-[10px] uppercase tracking-wide opacity-70">Mode</div>
+                            <div className="text-[10px] uppercase tracking-wide opacity-70">Absen Mandiri</div>
                             <div className="font-medium mt-0.5">
-                              {currentJadwal.mode === 'otomatis' ? 'Otomatis' : 'Manual'}
+                              {currentJadwal.allow_self_absen ? 'Dibuka Guru' : 'Ditutup Guru'}
                             </div>
                           </div>
                         </div>
@@ -2651,6 +2900,9 @@ export default function SAbsensi() {
                             {jadwalHari.length > 0 ? (
                               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                                 {jadwalHari.map((jadwal) => {
+                                  const hydratedJadwal = isHariIni
+                                    ? jadwalHariIni.find((j) => j.id === jadwal.id) || jadwal
+                                    : jadwal
                                   const isCurrent =
                                     isHariIni &&
                                     jadwalHariIni.find((j) => j.id === jadwal.id) ===
@@ -2658,7 +2910,7 @@ export default function SAbsensi() {
                                   return (
                                     <JadwalCard
                                       key={jadwal.id}
-                                      jadwal={jadwal}
+                                      jadwal={hydratedJadwal}
                                       currentTime={currentTime}
                                       isCurrent={isCurrent}
                                       onAbsenClick={handleAbsenFromCard}
@@ -2772,6 +3024,7 @@ export default function SAbsensi() {
           onClose={() => setShowCalendarOverlay(false)}
           profile={profile}
           userId={userId}
+          periodFilter={periodFilter}
         />
       )}
     </div>

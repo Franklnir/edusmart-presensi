@@ -133,7 +133,7 @@ return new class extends Migration
             $table->timestampTz('created_at')->useCurrent();
             $table->text('logourl')->nullable();
             $table->boolean('registrasisiswaaktif')->default(true);
-            $table->boolean('registrasiguruaktif')->default(true);
+            $table->boolean('registrasiguruaktif')->default(false);
             $table->boolean('registrasiadminaktif')->default(false);
             $table->text('tahun_ajaran')->nullable();
             $table->text('semester_aktif')->nullable();
@@ -141,7 +141,7 @@ return new class extends Migration
             $table->text('telepon')->nullable();
             $table->text('alamat')->nullable();
             $table->boolean('registrasi_siswa_aktif')->default(true);
-            $table->boolean('registrasi_guru_aktif')->default(true);
+            $table->boolean('registrasi_guru_aktif')->default(false);
             $table->boolean('registrasi_admin_aktif')->default(false);
             $table->timestampTz('updated_at')->useCurrent();
             $table->boolean('scan_manual_enabled')->default(false);

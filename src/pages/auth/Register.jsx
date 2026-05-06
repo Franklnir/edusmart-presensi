@@ -18,7 +18,7 @@ const DEFAULT_SETTINGS = {
   link_instagram: '',
   link_youtube: '',
   registrasi_siswa_aktif: true,
-  registrasi_guru_aktif: true,
+  registrasi_guru_aktif: false,
   registrasi_admin_aktif: false
 }
 

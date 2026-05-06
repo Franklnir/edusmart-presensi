@@ -112,12 +112,14 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->post('/quiz/complete-essay-
 Route::post('/db', [DbController::class, 'handle'])->middleware('throttle:db');
 
 Route::post('/storage/upload', [StorageController::class, 'upload'])->middleware(['auth:sanctum', 'throttle:storage']);
+Route::post('/storage/upload-destination', [StorageController::class, 'uploadDestination'])->middleware(['auth:sanctum', 'throttle:storage']);
 Route::post('/storage/remove', [StorageController::class, 'remove'])->middleware(['auth:sanctum', 'throttle:storage']);
 Route::get('/storage/signed', [StorageController::class, 'signed'])->middleware('throttle:storage');
 Route::get('/storage/object', [StorageController::class, 'object'])->middleware('throttle:storage');
 
 Route::middleware(['auth:sanctum', 'throttle:api'])->delete('/admin/users/{id}', [AdminController::class, 'deleteUser']);
 Route::middleware(['auth:sanctum', 'throttle:api'])->post('/admin/users/provision', [AdminController::class, 'provisionUser']);
+Route::middleware(['auth:sanctum', 'throttle:api'])->patch('/admin/teachers/{id}/name', [AdminController::class, 'updateTeacherName']);
 Route::middleware(['auth:sanctum', 'throttle:api'])->get('/admin/monitoring', [AdminController::class, 'monitoring']);
 Route::middleware(['auth:sanctum', 'throttle:api'])->get('/admin/backup', [AdminBackupController::class, 'backup']);
 Route::middleware(['auth:sanctum', 'throttle:api'])->post('/admin/backup/restore', [AdminBackupController::class, 'restore']);

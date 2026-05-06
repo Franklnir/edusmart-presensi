@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Services\Quiz\QuizScoringService;
+use App\Support\AcademicPeriod;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -1132,7 +1133,8 @@ class QuizController extends ApiController
             $now,
             $hasReviewCompletedAt,
             $hasReviewCompletedBy,
-            $request
+            $request,
+            $quiz
         ) {
             $payload = [
                 'score' => $score,
@@ -1141,6 +1143,7 @@ class QuizController extends ApiController
                 'finished_at' => $latestLog->previous_finished_at ?: $now,
                 'updated_at' => $now,
             ];
+            $payload = array_merge($payload, $this->quizSubmissionAcademicSnapshot($tenantId, $quiz, $siswaId));
 
             if ($hasReviewCompletedAt) {
                 $payload['essay_review_completed_at'] = $now;
@@ -1235,6 +1238,13 @@ class QuizController extends ApiController
             ];
         }
 
+        if (! $this->quizMatchesActiveAcademicPeriod($quiz, $tenantId)) {
+            return [
+                'quiz' => null,
+                'response' => $this->deny('Quiz bukan periode akademik aktif'),
+            ];
+        }
+
         $kelas = $this->profile($request)?->kelas;
         if ((string) ($quiz->kelas_id ?? '') !== (string) ($kelas ?? '')) {
             return [
@@ -1247,6 +1257,82 @@ class QuizController extends ApiController
             'quiz' => $quiz,
             'response' => null,
         ];
+    }
+
+    private function currentAcademicPeriodForTenant(string $tenantId): array
+    {
+        $settings = null;
+        if (Schema::hasTable('settings')) {
+            $settingsQuery = DB::table('settings')->orderBy('id');
+            if (Schema::hasColumn('settings', 'tenant_id')) {
+                $settingsQuery->where('tenant_id', $tenantId);
+            }
+            $settings = $settingsQuery->first(['tahun_ajaran', 'semester_aktif']);
+        }
+
+        return AcademicPeriod::fromSettings($settings);
+    }
+
+    private function quizMatchesActiveAcademicPeriod(object $quiz, string $tenantId): bool
+    {
+        if (! Schema::hasColumn('quizzes', 'tahun_ajaran') || ! Schema::hasColumn('quizzes', 'semester')) {
+            return true;
+        }
+
+        $quizYear = AcademicPeriod::normalizeAcademicYear($quiz->tahun_ajaran ?? null);
+        $quizSemester = AcademicPeriod::normalizeSemester($quiz->semester ?? null);
+        if (! $quizYear || ! $quizSemester) {
+            return true;
+        }
+
+        $period = $this->currentAcademicPeriodForTenant($tenantId);
+
+        return $quizYear === $period['tahun_ajaran'] && $quizSemester === $period['semester'];
+    }
+
+    private function quizSubmissionAcademicSnapshot(string $tenantId, object $quiz, string $siswaId): array
+    {
+        $snapshot = [];
+
+        if (Schema::hasColumn('quiz_submissions', 'tahun_ajaran')) {
+            $year = AcademicPeriod::normalizeAcademicYear($quiz->tahun_ajaran ?? null)
+                ?: $this->currentAcademicPeriodForTenant($tenantId)['tahun_ajaran'];
+            $snapshot['tahun_ajaran'] = $year;
+        }
+
+        if (Schema::hasColumn('quiz_submissions', 'semester')) {
+            $semester = AcademicPeriod::normalizeSemester($quiz->semester ?? null)
+                ?: $this->currentAcademicPeriodForTenant($tenantId)['semester'];
+            $snapshot['semester'] = $semester;
+        }
+
+        if (Schema::hasColumn('quiz_submissions', 'angkatan')) {
+            $cohort = $this->studentCohortForTenant($tenantId, $siswaId);
+            if (! $cohort && Schema::hasColumn('quizzes', 'angkatan')) {
+                $cohort = trim((string) ($quiz->angkatan ?? '')) ?: null;
+            }
+            if ($cohort) {
+                $snapshot['angkatan'] = $cohort;
+            }
+        }
+
+        return $snapshot;
+    }
+
+    private function studentCohortForTenant(string $tenantId, string $siswaId): ?string
+    {
+        if (! Schema::hasColumn('profiles', 'angkatan')) {
+            return null;
+        }
+
+        $query = DB::table('profiles')->where('id', $siswaId);
+        if (Schema::hasColumn('profiles', 'tenant_id')) {
+            $query->where('tenant_id', $tenantId);
+        }
+
+        $row = $query->first(['angkatan']);
+
+        return trim((string) ($row->angkatan ?? '')) ?: null;
     }
 
     private function quizNow(?object $quiz = null): Carbon
@@ -1450,6 +1536,7 @@ class QuizController extends ApiController
             'created_at' => $now,
             'updated_at' => $now,
         ];
+        $payload = array_merge($payload, $this->quizSubmissionAcademicSnapshot($tenantId, $quiz, $siswaId));
         if (Schema::hasColumn('quiz_submissions', 'attempt_no')) {
             $payload['attempt_no'] = $attemptNo;
         }

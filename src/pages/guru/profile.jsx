@@ -748,15 +748,15 @@ export default function ProfileGuru() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50/30 p-4 sm:p-6">
       <div className="max-w-full mx-auto space-y-6">
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-6">
+        <div className="page-title-card">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
             <div className="flex items-center gap-4">
               <div className="w-14 h-14 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl flex items-center justify-center shadow-lg">
                 <span className="text-2xl text-white">👨‍🏫</span>
               </div>
               <div>
-                <h1 className="text-2xl lg:text-3xl font-bold text-slate-800 mb-1">Profil Guru</h1>
-                <p className="text-slate-600 text-base">Kelola identitas akun, keamanan login, dan data pribadi Anda.</p>
+                <h1 className="page-title-heading">Profil Guru</h1>
+                <p className="page-title-description">Kelola identitas akun, keamanan login, dan data pribadi Anda.</p>
               </div>
             </div>
             <div className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3">

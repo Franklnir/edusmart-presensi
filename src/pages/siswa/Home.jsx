@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/useAuthStore'
 import { supabase } from '../../lib/supabase'
 
@@ -8,37 +9,17 @@ import {
   hydrateCertificateFileUrls,
   resolveCertificateFileUrl
 } from '../../utils/certificateFiles'
-import { sanitizeExternalUrl, sanitizeMediaUrl } from '../../utils/sanitize'
+import { resolveAcademicPeriod } from '../../utils/academicPeriod'
 
-// Helper: render link / gambar lampiran
-const renderLink = (url, text) => {
-  const safeMediaUrl = sanitizeMediaUrl(url)
-  if (!safeMediaUrl) return null
+const DASHBOARD_TASK_LIMIT = 6
+const DASHBOARD_TASK_QUERY_LIMIT = 80
+const DASHBOARD_TASK_COLUMNS = 'id, kelas, judul, mapel, deadline, keterangan, file_url, link'
 
-  const safeExternalUrl = sanitizeExternalUrl(url)
-  try {
-    if (/\.(jpeg|jpg|gif|png|webp)$/i.test(safeMediaUrl)) {
-      return (
-        <img
-          src={safeMediaUrl}
-          alt="lampiran"
-          className="max-w-xs max-h-32 rounded-lg mt-1 border border-gray-200 transition-transform duration-200 hover:scale-105"
-        />
-      )
-    }
-    return (
-      <a
-        href={safeExternalUrl || safeMediaUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="inline-flex items-center px-2 py-1 text-xs font-medium rounded-lg border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 transition-all duration-200 mt-1"
-      >
-        {text}
-      </a>
-    )
-  } catch {
-    return null
-  }
+const isValidDate = (date) => date instanceof Date && !Number.isNaN(date.getTime())
+
+const getTaskDeadlineTime = (task) => {
+  const deadline = task?.deadline ? new Date(task.deadline) : null
+  return deadline && isValidDate(deadline) ? deadline.getTime() : Number.POSITIVE_INFINITY
 }
 
 const formatDateTimeLabel = (value) => {
@@ -516,6 +497,7 @@ const SkeletonLoader = () => (
 export default function SHome() {
   const { profile, user } = useAuthStore()
   const { pushToast } = useUIStore()
+  const navigate = useNavigate()
   const userId = profile?.id || user?.id
 
   /* ============================
@@ -524,6 +506,8 @@ export default function SHome() {
   const [ringkas, setRingkas] = useState({ H: 0, I: 0, A: 0 })
   const [statusUser, setStatusUser] = useState('-')
   const [tugas, setTugas] = useState([])
+  const [tugasMeta, setTugasMeta] = useState({ pending: 0, overdue: 0 })
+  const [isTugasLoading, setIsTugasLoading] = useState(false)
   const [pengumuman, setPengumuman] = useState([])
   const [ekskul, setEkskul] = useState([])
   const [myEskul, setMyEkskul] = useState(new Set())
@@ -541,6 +525,7 @@ export default function SHome() {
   const [strukturSekolah, setStrukturSekolah] = useState([])
 
   const [isLoading, setIsLoading] = useState(true)
+  const tugasLoadSeqRef = useRef(0)
 
   const getToday = () => {
     const d = new Date()
@@ -548,6 +533,22 @@ export default function SHome() {
     const mm = String(d.getMonth() + 1).padStart(2, '0')
     const dd = String(d.getDate()).padStart(2, '0')
     return `${yyyy}-${mm}-${dd}`
+  }
+
+  const buildTugasPath = (tugasId = '') => {
+    const params = new URLSearchParams({ status: 'belum', range: 'all' })
+    if (tugasId) params.set('tugas', String(tugasId))
+    return `/siswa/tugas?${params.toString()}`
+  }
+
+  const goToTugas = (tugasId = '') => {
+    navigate(buildTugasPath(tugasId))
+  }
+
+  const handleTugasKeyDown = (event, tugasId = '') => {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    goToTugas(tugasId)
   }
 
   /* ============================
@@ -559,18 +560,20 @@ export default function SHome() {
     const loadAllData = async () => {
       setIsLoading(true)
       try {
-        await Promise.all([
-          loadPengumuman(),
+        await Promise.allSettled([loadPengumuman()])
+
+        setIsLoading(false)
+
+        void Promise.allSettled([
+          ...(profile?.kelas ? [loadAbsensi(), loadTugas()] : []),
           loadEskul(),
           loadOrganisasi(),
           loadSertifikat(),
-          loadStrukturSekolah(),
-          ...(profile?.kelas ? [loadAbsensi(), loadTugas()] : [])
+          loadStrukturSekolah()
         ])
       } catch (error) {
         console.error('Error loading data:', error)
         pushToast('error', 'Gagal memuat data dashboard')
-      } finally {
         setIsLoading(false)
       }
     }
@@ -688,6 +691,7 @@ export default function SHome() {
   const loadAbsensi = async () => {
     if (!profile?.kelas || !userId) return
     const today = getToday()
+    const period = resolveAcademicPeriod()
 
     try {
       const { data, error } = await supabase
@@ -695,6 +699,8 @@ export default function SHome() {
         .select('uid, status')
         .eq('kelas', profile.kelas)
         .eq('tanggal', today)
+        .eq('tahun_ajaran', period.tahunAjaran)
+        .eq('semester', period.semester)
 
       if (error) throw error
 
@@ -720,25 +726,124 @@ export default function SHome() {
   }
 
   const loadTugas = async () => {
-    if (!profile?.kelas) return
+    if (!profile?.kelas || !userId) return
     const nowIso = new Date().toISOString()
+    const period = resolveAcademicPeriod()
+    const requestId = ++tugasLoadSeqRef.current
 
     try {
-      const { data, error } = await supabase
-        .from('tugas')
-        .select('*')
-        .eq('kelas', profile.kelas)
-        .gte('deadline', nowIso)
-        .order('deadline', { ascending: true })
-        .limit(6)
+      setIsTugasLoading(true)
+      const [
+        { data: overdueData, error: overdueError },
+        { data: upcomingData, error: upcomingError },
+      ] = await Promise.all([
+        supabase
+          .from('tugas')
+          .select(DASHBOARD_TASK_COLUMNS)
+          .eq('kelas', profile.kelas)
+          .eq('tahun_ajaran', period.tahunAjaran)
+          .eq('semester', period.semester)
+          .lt('deadline', nowIso)
+          .order('deadline', { ascending: false })
+          .limit(DASHBOARD_TASK_QUERY_LIMIT),
+        supabase
+          .from('tugas')
+          .select(DASHBOARD_TASK_COLUMNS)
+          .eq('kelas', profile.kelas)
+          .eq('tahun_ajaran', period.tahunAjaran)
+          .eq('semester', period.semester)
+          .gte('deadline', nowIso)
+          .order('deadline', { ascending: true })
+          .limit(DASHBOARD_TASK_QUERY_LIMIT),
+      ])
 
-      if (error) throw error
-      setTugas(data || [])
+      if (overdueError) throw overdueError
+      if (upcomingError) throw upcomingError
+      if (requestId !== tugasLoadSeqRef.current) return
+
+      const byId = new Map()
+      ;[...(overdueData || []), ...(upcomingData || [])].forEach((row) => {
+        if (row?.id) byId.set(row.id, row)
+      })
+
+      const taskRows = Array.from(byId.values())
+      if (!taskRows.length) {
+        setTugas([])
+        setTugasMeta({ pending: 0, overdue: 0 })
+        return
+      }
+
+      const tugasIds = taskRows.map((row) => row.id)
+      const { data: jawabanData, error: jawabanError } = await supabase
+        .from('tugas_jawaban')
+        .select('tugas_id')
+        .eq('user_id', userId)
+        .in('tugas_id', tugasIds)
+
+      if (jawabanError) throw jawabanError
+      if (requestId !== tugasLoadSeqRef.current) return
+
+      const answeredIds = new Set((jawabanData || []).map((row) => row.tugas_id))
+      const nowTime = Date.now()
+      const pendingTasks = taskRows
+        .filter((row) => !answeredIds.has(row.id))
+        .map((row) => ({
+          ...row,
+          isOverdue: getTaskDeadlineTime(row) < nowTime
+        }))
+        .sort((a, b) => {
+          if (a.isOverdue !== b.isOverdue) return a.isOverdue ? -1 : 1
+          const aTime = getTaskDeadlineTime(a)
+          const bTime = getTaskDeadlineTime(b)
+          return a.isOverdue ? bTime - aTime : aTime - bTime
+        })
+
+      setTugas(pendingTasks.slice(0, DASHBOARD_TASK_LIMIT))
+      setTugasMeta({
+        pending: pendingTasks.length,
+        overdue: pendingTasks.filter((row) => row.isOverdue).length
+      })
     } catch (err) {
+      if (requestId !== tugasLoadSeqRef.current) return
       console.error('Error loading tugas:', err)
       pushToast('error', 'Gagal memuat tugas')
+    } finally {
+      if (requestId === tugasLoadSeqRef.current) setIsTugasLoading(false)
     }
   }
+
+  useEffect(() => {
+    if (!profile?.kelas || !userId) return
+
+    const refreshTugas = () => {
+      if (document.visibilityState === 'hidden') return
+      void loadTugas()
+    }
+
+    const channel = supabase
+      .channel(`siswa_home_tugas_${userId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tugas' }, (payload) => {
+        const row = payload.new || payload.old
+        if (row?.kelas && row.kelas !== profile.kelas) return
+        refreshTugas()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tugas_jawaban' }, (payload) => {
+        const uid = (payload.new && payload.new.user_id) || (payload.old && payload.old.user_id)
+        if (uid !== userId) return
+        refreshTugas()
+      })
+      .subscribe()
+
+    window.addEventListener('focus', refreshTugas)
+    document.addEventListener('visibilitychange', refreshTugas)
+
+    return () => {
+      supabase.removeChannel(channel)
+      window.removeEventListener('focus', refreshTugas)
+      document.removeEventListener('visibilitychange', refreshTugas)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.kelas, userId])
 
   const loadEskul = async () => {
     if (!userId) return
@@ -985,38 +1090,88 @@ export default function SHome() {
             {/* --- TUGAS & ORGANISASI grid --- */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-              {/* --- TUGAS --- */}
-              <div className="bg-white rounded-2xl border border-slate-100 shadow-card overflow-hidden">
-                <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white">
-                  <div className="flex items-center gap-3">
-                    <div className="w-2 h-7 bg-violet-600 rounded-full" />
-                    <h2 className="text-base font-bold text-slate-900">Tugas Mendatang</h2>
-                  </div>
-                  <span className="px-2.5 py-1 bg-violet-50 text-violet-700 rounded-full text-xs font-semibold">{tugas.length}</span>
-                </div>
-                <div className="max-h-72 overflow-y-auto divide-y divide-slate-50">
-                  {tugas.map((t) => (
-                    <div key={t.id} className="px-5 py-4 hover:bg-slate-50/60 transition-colors group">
-                      <div className="flex items-start justify-between gap-2 mb-1">
-                        <h3 className="font-semibold text-slate-800 text-sm group-hover:text-violet-700 transition-colors">{t.judul}</h3>
-                        <span className="flex-shrink-0 text-[10px] px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 border border-violet-100 font-semibold">{t.mapel}</span>
-                      </div>
-                      <p className="text-slate-500 text-xs line-clamp-2 mb-2">{t.keterangan || 'Tidak ada keterangan'}</p>
-                      <div className="flex items-center gap-1.5 text-xs text-violet-600 font-medium">
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                        {t.deadline ? new Date(t.deadline).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Tidak ada deadline'}
-                      </div>
-                      <div className="flex flex-wrap gap-2 mt-2">{renderLink(t.file_url, '📎 File')}{renderLink(t.link, '🔗 Link')}</div>
-                    </div>
-                  ))}
-                  {!tugas.length && (
-                    <div className="text-center py-8">
-                      <div className="text-4xl mb-2 opacity-30">📚</div>
-                      <p className="text-slate-500 text-sm">Tidak ada tugas baru</p>
-                    </div>
-                  )}
-                </div>
-              </div>
+	              {/* --- TUGAS --- */}
+	              <div className="bg-white rounded-2xl border border-slate-100 shadow-card overflow-hidden">
+	                <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white">
+	                  <button
+	                    type="button"
+	                    onClick={() => goToTugas()}
+	                    className="flex items-center gap-3 text-left group"
+	                  >
+	                    <div className="w-2 h-7 bg-violet-600 rounded-full" />
+	                    <h2 className="text-base font-bold text-slate-900 group-hover:text-violet-700 transition-colors">Tugas Mendatang</h2>
+	                  </button>
+	                  <div className="flex items-center gap-2">
+	                    {tugasMeta.overdue > 0 && (
+	                      <span className="px-2.5 py-1 bg-red-600 text-white rounded-full text-xs font-extrabold shadow-sm">
+	                        -{tugasMeta.overdue}
+	                      </span>
+	                    )}
+	                    <span className="px-2.5 py-1 bg-violet-50 text-violet-700 rounded-full text-xs font-semibold">{tugasMeta.pending}</span>
+	                  </div>
+	                </div>
+	                <div className="max-h-72 overflow-y-auto divide-y divide-slate-50">
+	                  {tugas.map((t) => (
+	                    <div
+	                      key={t.id}
+	                      role="button"
+	                      tabIndex={0}
+	                      onClick={() => goToTugas(t.id)}
+	                      onKeyDown={(event) => handleTugasKeyDown(event, t.id)}
+	                      className={`px-5 py-4 transition-colors cursor-pointer group focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-inset ${t.isOverdue ? 'bg-red-50/70 hover:bg-red-50' : 'hover:bg-slate-50/60'}`}
+	                    >
+	                      <div className="flex items-start justify-between gap-2 mb-1">
+	                        <h3 className={`font-semibold text-sm transition-colors ${t.isOverdue ? 'text-red-800 group-hover:text-red-900' : 'text-slate-800 group-hover:text-violet-700'}`}>{t.judul}</h3>
+	                        <div className="flex flex-shrink-0 items-center gap-1.5">
+	                          {t.isOverdue && (
+	                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-600 text-white border border-red-600 font-extrabold">
+	                              -1
+	                            </span>
+	                          )}
+	                          <span className={`text-[10px] px-2 py-0.5 rounded-full border font-semibold ${t.isOverdue ? 'bg-red-100 text-red-700 border-red-200' : 'bg-violet-50 text-violet-700 border-violet-100'}`}>{t.mapel}</span>
+	                        </div>
+	                      </div>
+	                      <p className="text-slate-500 text-xs line-clamp-2 mb-2">{t.keterangan || 'Tidak ada keterangan'}</p>
+	                      <div className={`flex items-center gap-1.5 text-xs font-medium ${t.isOverdue ? 'text-red-700' : 'text-violet-600'}`}>
+	                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+	                        {t.isOverdue ? 'Lewat deadline: ' : 'Deadline: '}
+	                        {t.deadline ? new Date(t.deadline).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Tidak ada deadline'}
+	                      </div>
+		                      <div className="flex items-center justify-between gap-3 mt-2">
+		                        <div className="flex flex-wrap gap-2">
+		                          {t.file_url && (
+		                            <span className="inline-flex items-center px-2 py-1 text-xs font-medium rounded-lg border border-blue-200 text-blue-700 bg-blue-50">
+		                              📎 File
+		                            </span>
+		                          )}
+		                          {t.link && (
+		                            <span className="inline-flex items-center px-2 py-1 text-xs font-medium rounded-lg border border-indigo-200 text-indigo-700 bg-indigo-50">
+		                              🔗 Link
+		                            </span>
+		                          )}
+		                        </div>
+		                        <span className={`text-[11px] font-bold ${t.isOverdue ? 'text-red-700' : 'text-violet-700'}`}>Buka</span>
+		                      </div>
+	                    </div>
+	                  ))}
+	                  {isTugasLoading && !tugas.length && (
+	                    <div className="w-full text-center py-8">
+	                      <div className="mx-auto mb-3 h-8 w-8 rounded-full border-4 border-violet-500 border-t-transparent animate-spin" />
+	                      <p className="text-slate-500 text-sm">Memuat tugas...</p>
+	                    </div>
+	                  )}
+	                  {!isTugasLoading && !tugas.length && (
+	                    <button
+	                      type="button"
+	                      onClick={() => goToTugas()}
+	                      className="w-full text-center py-8 hover:bg-slate-50/70 transition-colors"
+	                    >
+	                      <div className="text-4xl mb-2 opacity-30">📚</div>
+		                      <p className="text-slate-500 text-sm">Semua tugas sudah dikerjakan</p>
+	                    </button>
+	                  )}
+	                </div>
+	              </div>
 
               {/* --- ORGANISASI --- */}
               <div className="bg-white rounded-2xl border border-slate-100 shadow-card overflow-hidden">
@@ -1159,10 +1314,16 @@ export default function SHome() {
                   <span className="text-sm text-slate-600 font-medium">Pengumuman</span>
                   <span className="px-2 py-0.5 bg-brand-100 text-brand-700 rounded-lg text-xs font-bold">{pengumuman.length}</span>
                 </div>
-                <div className="flex justify-between items-center p-2.5 bg-slate-50 rounded-lg">
-                  <span className="text-sm text-slate-600 font-medium">Tugas Aktif</span>
-                  <span className="px-2 py-0.5 bg-violet-100 text-violet-700 rounded-lg text-xs font-bold">{tugas.length}</span>
-                </div>
+	                <button
+	                  type="button"
+	                  onClick={() => goToTugas()}
+	                  className="w-full flex justify-between items-center p-2.5 bg-slate-50 hover:bg-violet-50 rounded-lg transition-colors text-left"
+	                >
+	                  <span className="text-sm text-slate-600 font-medium">Perlu Dikerjakan</span>
+	                  <span className={`px-2 py-0.5 rounded-lg text-xs font-bold ${tugasMeta.overdue > 0 ? 'bg-red-600 text-white' : 'bg-violet-100 text-violet-700'}`}>
+	                    {tugasMeta.overdue > 0 ? `-${tugasMeta.overdue}` : tugasMeta.pending}
+	                  </span>
+	                </button>
                 <div className="flex justify-between items-center p-2.5 bg-slate-50 rounded-lg">
                   <span className="text-sm text-slate-600 font-medium">Ekskul Diikuti</span>
                   <span className="px-2 py-0.5 bg-orange-100 text-orange-700 rounded-lg text-xs font-bold">{myEskul.size}/3</span>

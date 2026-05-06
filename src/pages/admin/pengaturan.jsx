@@ -378,7 +378,7 @@ export default function APengaturan() {
     link_youtube: '',
     link_tiktok: '',
     registrasi_siswa_aktif: true,
-    registrasi_guru_aktif: true,
+    registrasi_guru_aktif: false,
     registrasi_admin_aktif: false,
     ...DEFAULT_RANKING_FORM
   })
@@ -609,7 +609,7 @@ export default function APengaturan() {
             link_youtube: data.link_youtube || '',
             link_tiktok: data.link_tiktok || '',
             registrasi_siswa_aktif: data.registrasi_siswa_aktif ?? true,
-            registrasi_guru_aktif: data.registrasi_guru_aktif ?? true,
+            registrasi_guru_aktif: data.registrasi_guru_aktif ?? false,
             registrasi_admin_aktif: data.registrasi_admin_aktif ?? false,
             ranking_weight_tugas: normalizeRankingWeight(
               data.ranking_weight_tugas,
@@ -632,7 +632,7 @@ export default function APengaturan() {
           }))
         }
 
-        await ensureRfidSettings()
+        void ensureRfidSettings()
       } catch (err) {
         if (!isCancelled) pushToast('error', 'Gagal memuat pengaturan: ' + err.message)
       } finally {
@@ -749,7 +749,7 @@ export default function APengaturan() {
             link_youtube: row.link_youtube || '',
             link_tiktok: row.link_tiktok || '',
             registrasi_siswa_aktif: row.registrasi_siswa_aktif ?? true,
-            registrasi_guru_aktif: row.registrasi_guru_aktif ?? true,
+            registrasi_guru_aktif: row.registrasi_guru_aktif ?? false,
             registrasi_admin_aktif: row.registrasi_admin_aktif ?? false,
             ranking_weight_tugas: normalizeRankingWeight(
               row.ranking_weight_tugas,
@@ -1267,7 +1267,7 @@ export default function APengaturan() {
 
   async function handleDisconnectGoogleDrive() {
     const confirmed = window.confirm(
-      'Putuskan Google Drive sekolah? Upload dokumen berikutnya akan kembali ke storage lokal sampai disambungkan lagi.'
+      'Putuskan Google Drive sekolah? File lama tidak dihapus dari Google Drive, tetapi upload dokumen berikutnya akan kembali ke storage lokal sampai disambungkan lagi.'
     )
     if (!confirmed) return
 
@@ -1355,7 +1355,7 @@ export default function APengaturan() {
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="w-full space-y-8 px-4 sm:px-6 lg:px-8 pt-2 pb-8">
-        <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
+        <div className="page-title-card">
           <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
             <div className="flex items-center space-x-4">
               <div className="p-3 bg-blue-100 rounded-2xl">
@@ -1365,8 +1365,8 @@ export default function APengaturan() {
                 </svg>
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-gray-900">Pengaturan Sistem</h1>
-                <p className="text-gray-600 mt-1">
+                <h1 className="page-title-heading">Pengaturan Sistem</h1>
+                <p className="page-title-description">
                   Kelola identitas sekolah, pengaturan registrasi, dan absensi RFID
                 </p>
               </div>
@@ -1780,7 +1780,7 @@ export default function APengaturan() {
                   </div>
 
                   <p className="mt-3 text-xs text-slate-500">
-                    Dokumen tugas PDF, DOC, XLS, PPT, TXT, ODT, RTF, dan ODP akan dikirim ke Drive saat status siap. Gambar dan link tetap memakai alur biasa.
+                    Dokumen tugas masuk Google Drive saat status siap. Jika Drive tidak terhubung atau penuh, file disimpan ke VPS dan PDF/PPT dibatasi maksimal 2MB. Link manual hanya disimpan di database/VPS.
                   </p>
                 </div>
               </div>

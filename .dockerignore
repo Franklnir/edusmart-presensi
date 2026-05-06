@@ -36,3 +36,8 @@ backend/database/*.sqlite.*
 # binaries / installers
 composer.phar
 composer-setup.php
+
+# crash dumps / generated heavy files
+core
+core.*
+*.core

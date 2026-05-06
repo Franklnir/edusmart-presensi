@@ -296,6 +296,126 @@ class AdminController extends ApiController
         return response()->json(['data' => 'deleted']);
     }
 
+    public function updateTeacherName(Request $request, string $id)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'nama' => ['required', 'string', 'max:120'],
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['error' => $validator->errors()->first()], 422);
+        }
+
+        $newName = preg_replace('/\s+/', ' ', trim((string) $request->input('nama', ''))) ?? '';
+        if ($newName === '') {
+            return $this->deny('Nama guru wajib diisi.', 422);
+        }
+
+        $profile = DB::table('profiles')
+            ->where('id', $id)
+            ->where('tenant_id', $tenantId)
+            ->first();
+        if (! $profile) {
+            return $this->deny('Guru tidak ditemukan', 404);
+        }
+
+        $role = strtolower((string) ($profile->role ?? ''));
+        if (! in_array($role, ['guru', 'teacher'], true)) {
+            return $this->deny('Hanya nama guru yang bisa diubah dari form ini.', 409);
+        }
+
+        $oldName = (string) ($profile->nama ?? '');
+        if ($oldName === $newName) {
+            return response()->json([
+                'data' => [
+                    'profile' => $profile,
+                    'changed' => false,
+                    'synced_snapshots' => [
+                        'jadwal' => 0,
+                        'kelas_struktur' => 0,
+                        'struktur_sekolah' => 0,
+                        'organisasi' => 0,
+                        'absensi_ajuan' => 0,
+                    ],
+                ],
+            ]);
+        }
+
+        $now = now();
+        $syncedSnapshots = [];
+
+        DB::transaction(function () use ($id, $tenantId, $newName, $now, &$syncedSnapshots) {
+            DB::table('profiles')
+                ->where('id', $id)
+                ->where('tenant_id', $tenantId)
+                ->update([
+                    'nama' => $newName,
+                    'updated_at' => $now,
+                ]);
+
+            DB::table('users')
+                ->where('id', $id)
+                ->update([
+                    'name' => $newName,
+                    'updated_at' => $now,
+                ]);
+
+            $syncedSnapshots = $this->syncTeacherDisplayNameSnapshots($tenantId, $id, $newName, $now);
+        });
+
+        $fresh = Profile::query()
+            ->where('id', $id)
+            ->where('tenant_id', $tenantId)
+            ->first();
+
+        $editor = $this->profile($request);
+        $this->logAudit(
+            $request,
+            'profiles',
+            $id,
+            'UPDATE',
+            [
+                'id' => $id,
+                'tenant_id' => $tenantId,
+                'role' => $role,
+                'email' => $profile->email,
+                'nama' => $oldName,
+            ],
+            [
+                'id' => $id,
+                'tenant_id' => $tenantId,
+                'role' => $role,
+                'email' => $profile->email,
+                'nama' => $fresh?->nama,
+                'synced_snapshots' => $syncedSnapshots,
+                'edited_by' => [
+                    'id' => $editor?->id ?? $request->user()?->id,
+                    'nama' => $editor?->nama ?? $request->user()?->name,
+                    'email' => $editor?->email ?? $request->user()?->email,
+                    'role' => $editor?->role,
+                ],
+                'edited_at' => $now->toISOString(),
+            ],
+            $tenantId
+        );
+
+        return response()->json([
+            'data' => [
+                'profile' => $fresh,
+                'changed' => true,
+                'synced_snapshots' => $syncedSnapshots,
+            ],
+        ]);
+    }
+
     public function updateStudentAdditionalInfo(Request $request, string $id)
     {
         if (! $this->isAdmin($request) && ! $this->isGuru($request)) {
@@ -403,6 +523,8 @@ class AdminController extends ApiController
                         'name' => $data['nama'],
                         'updated_at' => $now,
                     ]);
+
+                $this->syncStudentDisplayNameSnapshots($tenantId, $id, (string) $data['nama'], $now);
             }
         });
 

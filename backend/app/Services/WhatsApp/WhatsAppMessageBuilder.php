@@ -26,6 +26,32 @@ class WhatsAppMessageBuilder
         ]));
     }
 
+    public function buildAttendanceProblemMessage(array $school, array $student, array $problem): string
+    {
+        $schoolName = $this->schoolName($school);
+        $title = $this->value($problem, 'title', 'Masalah presensi');
+        $date = $this->formatDate($problem['tanggal'] ?? null);
+        $detectedAt = $this->formatDateTime($problem['detected_at'] ?? null, 'd-m-Y H:i');
+        $scanMasuk = $this->formatDateTime($problem['scan_masuk_at'] ?? null, 'H:i');
+        $scanPulang = $this->formatDateTime($problem['scan_pulang_at'] ?? null, 'H:i');
+
+        return trim(implode("\n", [
+            "Halo orang tua/wali dari {$this->value($student, 'nama', 'siswa')},",
+            '',
+            "Notifikasi presensi dari {$schoolName}:",
+            "Kejadian: {$title}",
+            "Nama: {$this->value($student, 'nama', '-')}",
+            "Kelas: {$this->value($student, 'kelas', '-')}",
+            "Tanggal: {$date}",
+            "Mapel/Sesi terkait: {$this->value($problem, 'mapel', '-')}",
+            "Scan masuk: {$scanMasuk}",
+            "Scan pulang: {$scanPulang}",
+            "Waktu tercatat: {$detectedAt}",
+            '',
+            'Silakan hubungi pihak sekolah bila data presensi perlu dikonfirmasi.',
+        ]));
+    }
+
     public function buildProfileUpdateMessage(array $school, array $student, array $changes): string
     {
         $schoolName = $this->schoolName($school);

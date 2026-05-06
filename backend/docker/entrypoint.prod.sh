@@ -39,6 +39,14 @@ mkdir -p \
   bootstrap/cache
 chown -R www-data:www-data storage bootstrap/cache || true
 
+if [ -n "${RFID_MOSQUITTO_PASSWORD_FILE:-}" ] || [ -n "${RFID_MOSQUITTO_ACL_FILE:-}" ]; then
+  MOSQUITTO_PASSWORD_DIR="$(dirname "${RFID_MOSQUITTO_PASSWORD_FILE:-/var/www/html/mosquitto/passwords}")"
+  MOSQUITTO_ACL_DIR="$(dirname "${RFID_MOSQUITTO_ACL_FILE:-/var/www/html/mosquitto/aclfile}")"
+  mkdir -p "$MOSQUITTO_PASSWORD_DIR" "$MOSQUITTO_ACL_DIR" || true
+  chown -R "${RFID_MOSQUITTO_FILE_UID:-82}:${RFID_MOSQUITTO_FILE_GID:-82}" "$MOSQUITTO_PASSWORD_DIR" "$MOSQUITTO_ACL_DIR" || true
+  chmod 0770 "$MOSQUITTO_PASSWORD_DIR" "$MOSQUITTO_ACL_DIR" || true
+fi
+
 # Remove stale caches that may reference dev-only providers
 # (e.g. laravel/pail) when container is built with --no-dev.
 rm -f \

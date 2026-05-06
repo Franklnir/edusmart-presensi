@@ -1,8 +1,10 @@
 // src/pages/siswa/TugasSiswa.jsx
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   supabase,
   ASSIGNMENT_BUCKET,
+  apiFetch,
   extractObjectPath,
   getSignedUrlForValue
 } from '../../lib/supabase'
@@ -10,6 +12,7 @@ import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import FileDropzone from '../../components/FileDropzone'
 import FilePreviewModal from '../../components/FilePreviewModal'
+import UploadProgressTrain from '../../components/UploadProgressTrain'
 import { parseSupabaseError } from '../../utils/supabaseError'
 
 /* =========================
@@ -20,12 +23,64 @@ const MONTH_NAMES_ID = [
   'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
 ]
 
+const STATUS_FILTER_VALUES = new Set(['all', 'belum', 'menunggu', 'dinilai'])
+const TIME_RANGE_VALUES = new Set(['week', 'all', 'custom_months'])
+const TUGAS_LIST_COLUMNS = 'id, kelas, judul, mapel, mulai, deadline, keterangan, file_url, link, created_at, updated_at'
+const TUGAS_MAPEL_COLUMNS = 'mapel'
+const TUGAS_JAWABAN_LIST_COLUMNS = 'tugas_id, user_id, nilai, status, file_url, link_url, waktu_submit'
+const MAPEL_CACHE_TTL_MS = 5 * 60 * 1000
+
+const normalizeStatusFilter = (value) => (
+  STATUS_FILTER_VALUES.has(value) ? value : ''
+)
+
+const normalizeTimeRange = (value) => (
+  TIME_RANGE_VALUES.has(value) ? value : ''
+)
+
+const normalizeMapelOptions = (rows = []) =>
+  Array.from(
+    new Set(
+      (rows || [])
+        .map((row) => String(row?.mapel || '').trim())
+        .filter(Boolean)
+    )
+  ).sort((a, b) => a.localeCompare(b, 'id'))
+
+const buildMapelCacheKey = (userId, kelas) =>
+  `siswa:tugas:mapel:${userId || 'anon'}:${kelas || '-'}`
+
+const readMapelOptionsCache = (userId, kelas) => {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.sessionStorage.getItem(buildMapelCacheKey(userId, kelas))
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (!parsed?.savedAt || Date.now() - parsed.savedAt > MAPEL_CACHE_TTL_MS) return null
+    return Array.isArray(parsed.items) ? parsed.items : null
+  } catch {
+    return null
+  }
+}
+
+const writeMapelOptionsCache = (userId, kelas, items) => {
+  if (typeof window === 'undefined') return
+  try {
+    window.sessionStorage.setItem(
+      buildMapelCacheKey(userId, kelas),
+      JSON.stringify({ savedAt: Date.now(), items })
+    )
+  } catch {
+    // Cache ini hanya optimasi UX; kalau storage penuh, halaman tetap jalan normal.
+  }
+}
+
 const FILE_SIZE_LIMITS = {
   IMAGE: 100 * 1024,
-  PDF: 2 * 1024 * 1024,
-  DOCUMENT: 2 * 1024 * 1024,
-  SPREADSHEET: 2 * 1024 * 1024,
-  PRESENTATION: 3 * 1024 * 1024
+  PDF: 3 * 1024 * 1024,
+  DOCUMENT: 3 * 1024 * 1024,
+  SPREADSHEET: 3 * 1024 * 1024,
+  PRESENTATION: 5 * 1024 * 1024
 }
 
 const ASSIGNMENT_FILE_ACCEPT = {
@@ -40,6 +95,40 @@ const ASSIGNMENT_FILE_ACCEPT = {
   'application/vnd.ms-powerpoint': ['.ppt'],
   'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'],
   'application/vnd.oasis.opendocument.presentation': ['.odp']
+}
+
+const uploadToneForProvider = (provider) => {
+  if (provider === 'google_drive') return 'emerald'
+  if (provider === 'local') return 'red'
+  return 'blue'
+}
+
+const uploadDetailForProvider = (provider, fallback) => {
+  if (provider === 'google_drive') return 'File sedang dikirim ke Google Drive sekolah.'
+  if (provider === 'local') return 'File sedang dikirim ke VPS.'
+  return fallback
+}
+
+const MIN_UPLOAD_ANIMATION_MS = 1400
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+const holdUploadAnimation = async (startedAt) => {
+  const remaining = MIN_UPLOAD_ANIMATION_MS - (Date.now() - startedAt)
+  if (remaining > 0) await wait(remaining)
+}
+
+const resolveAssignmentUploadProvider = async (file) => {
+  const res = await apiFetch('/api/storage/upload-destination', {
+    method: 'POST',
+    body: {
+      bucket: ASSIGNMENT_BUCKET,
+      filename: file?.name || '',
+      mime_type: file?.type || '',
+      size_bytes: file?.size || 0
+    }
+  })
+
+  if (res.error) return 'local'
+  return res.data?.provider === 'google_drive' ? 'google_drive' : 'local'
 }
 
 const looksLikeDomainUrl = (v = '') => /^[a-z0-9-]+(\.[a-z0-9-]+)+(?::\d+)?(\/|$)/i.test(String(v || '').trim())
@@ -356,16 +445,23 @@ function MiniCard({ title, value, icon, cls }) {
 export default function TugasSiswa() {
   const { user, profile } = useAuthStore()
   const { pushToast, setLoading } = useUIStore()
+  const [searchParams] = useSearchParams()
+  const requestedTugasId = String(searchParams.get('tugas') || '').trim()
 
   /* ---------- State ---------- */
   const [tugasList, setTugasList] = useState([])
-  const [selectedKelas, setSelectedKelas] = useState('')
   const [selectedMapel, setSelectedMapel] = useState('')
   const [mapelOptions, setMapelOptions] = useState([])
+  const [isMapelLoading, setIsMapelLoading] = useState(false)
+  const [isListLoading, setIsListLoading] = useState(false)
 
-  const [timeRange, setTimeRange] = useState('week') // week | all | custom_months
+  const [timeRange, setTimeRange] = useState(() => (
+    requestedTugasId ? 'all' : normalizeTimeRange(searchParams.get('range')) || 'week'
+  )) // week | all | custom_months
   const [selectedMonths, setSelectedMonths] = useState([])
-  const [statusFilter, setStatusFilter] = useState('all') // all | belum | menunggu | dinilai
+  const [statusFilter, setStatusFilter] = useState(() => (
+    normalizeStatusFilter(searchParams.get('status')) || 'all'
+  )) // all | belum | menunggu | dinilai
   const [searchTerm, setSearchTerm] = useState('')
 
   const [selectedTugas, setSelectedTugas] = useState(null)
@@ -378,19 +474,32 @@ export default function TugasSiswa() {
 
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(null)
+  const [answerUploadProvider, setAnswerUploadProvider] = useState(null)
+  const [pendingJawabanFile, setPendingJawabanFile] = useState(null)
 
   const [previewFile, setPreviewFile] = useState(null)
 
-  const searchDebounceRef = useRef(null)
+  const autoOpenedTugasIdRef = useRef('')
+  const listRequestSeqRef = useRef(0)
+  const mapelRequestSeqRef = useRef(0)
 
   /* ---------- Derived ---------- */
   const monthOptions = useMemo(() => buildLast12Months(), [])
 
   const kelasSiswa = useMemo(() => profile?.kelas || profile?.kelas_id || '', [profile])
+  const selectedKelas = kelasSiswa
 
   useEffect(() => {
-    if (kelasSiswa && !selectedKelas) setSelectedKelas(kelasSiswa)
-  }, [kelasSiswa, selectedKelas])
+    const nextStatus = normalizeStatusFilter(searchParams.get('status'))
+    const nextRange = normalizeTimeRange(searchParams.get('range'))
+
+    if (nextStatus && nextStatus !== statusFilter) setStatusFilter(nextStatus)
+    if (requestedTugasId && timeRange !== 'all') {
+      setTimeRange('all')
+    } else if (!requestedTugasId && nextRange && nextRange !== timeRange) {
+      setTimeRange(nextRange)
+    }
+  }, [requestedTugasId, searchParams, statusFilter, timeRange])
 
   /* =========================
      Load Tugas List
@@ -398,17 +507,53 @@ export default function TugasSiswa() {
      - siswa hanya baca tugas berdasarkan kelasnya sendiri
      - siswa hanya baca jawaban miliknya sendiri pada tugas_jawaban (RLS harus enforce)
 ========================= */
-  const loadTugasList = useCallback(async () => {
+  const loadMapelOptions = useCallback(async () => {
     if (!user?.id) return
     const kelas = selectedKelas || kelasSiswa
     if (!kelas) return
 
+    const requestId = ++mapelRequestSeqRef.current
+    const cached = readMapelOptionsCache(user.id, kelas)
+    if (cached && requestId === mapelRequestSeqRef.current) {
+      setMapelOptions(cached)
+    }
+
     try {
-      setLoading(true)
+      setIsMapelLoading(true)
+      const { data, error } = await supabase
+        .from('tugas')
+        .select(TUGAS_MAPEL_COLUMNS)
+        .eq('kelas', kelas)
+        .order('mapel', { ascending: true })
+
+      if (error) throw error
+      if (requestId !== mapelRequestSeqRef.current) return
+
+      const mapels = normalizeMapelOptions(data || [])
+      setMapelOptions(mapels)
+      writeMapelOptionsCache(user.id, kelas, mapels)
+    } catch (error) {
+      if (requestId !== mapelRequestSeqRef.current) return
+      console.warn('Gagal memuat opsi mapel tugas:', error)
+    } finally {
+      if (requestId === mapelRequestSeqRef.current) {
+        setIsMapelLoading(false)
+      }
+    }
+  }, [user?.id, selectedKelas, kelasSiswa])
+
+  const loadTugasList = useCallback(async () => {
+    if (!user?.id) return
+    const kelas = selectedKelas || kelasSiswa
+    if (!kelas) return
+    const requestId = ++listRequestSeqRef.current
+
+    try {
+      setIsListLoading(true)
       const now = new Date()
 
       // tugas untuk kelas siswa
-      let query = supabase.from('tugas').select('*').eq('kelas', kelas)
+      let query = supabase.from('tugas').select(TUGAS_LIST_COLUMNS).eq('kelas', kelas)
 
       if (selectedMapel) query = query.eq('mapel', selectedMapel)
 
@@ -456,27 +601,24 @@ export default function TugasSiswa() {
       query = query.order('created_at', { ascending: false })
       const { data: tugasData, error } = await query
       if (error) throw error
+      if (requestId !== listRequestSeqRef.current) return
 
       const tugasArr = tugasData || []
       if (tugasArr.length === 0) {
         setTugasList([])
-        setMapelOptions([])
         return
       }
-
-      // mapel options dari tugas kelas tsb
-      const mapels = [...new Set(tugasArr.map((t) => t.mapel).filter(Boolean))].sort()
-      setMapelOptions(mapels)
 
       // ambil jawaban milik siswa ini untuk tugas-tugas tersebut
       const tugasIds = tugasArr.map((t) => t.id)
       const { data: jawabanData, error: jErr } = await supabase
         .from('tugas_jawaban')
-        .select('tugas_id, user_id, nilai, status, file_url, link_url, waktu_submit')
+        .select(TUGAS_JAWABAN_LIST_COLUMNS)
         .eq('user_id', user.id)
         .in('tugas_id', tugasIds)
 
       if (jErr) throw jErr
+      if (requestId !== listRequestSeqRef.current) return
 
       const jawabanArr = jawabanData || []
       const jawabanByTugas = jawabanArr.reduce((acc, j) => {
@@ -516,24 +658,16 @@ export default function TugasSiswa() {
         merged = merged.filter((t) => t.myStatus === statusFilter)
       }
 
-      if (searchTerm.trim()) {
-        const q = searchTerm.toLowerCase()
-        merged = merged.filter((t) => {
-          return (
-            String(t.judul || '').toLowerCase().includes(q) ||
-            String(t.mapel || '').toLowerCase().includes(q) ||
-            String(t.keterangan || '').toLowerCase().includes(q)
-          )
-        })
-      }
-
       setTugasList(merged)
     } catch (error) {
+      if (requestId !== listRequestSeqRef.current) return
       console.error('Error load tugas list:', error)
       const parsed = parseSupabaseError(error)
       pushToast('error', `Gagal memuat tugas: ${parsed.message}`)
     } finally {
-      setLoading(false)
+      if (requestId === listRequestSeqRef.current) {
+        setIsListLoading(false)
+      }
     }
   }, [
     user?.id,
@@ -543,26 +677,24 @@ export default function TugasSiswa() {
     timeRange,
     selectedMonths,
     statusFilter,
-    searchTerm,
-    setLoading,
     pushToast
   ])
 
   useEffect(() => {
-    if (user?.id) loadTugasList()
+    if (!user?.id) return
+    void loadMapelOptions()
+  }, [user?.id, loadMapelOptions])
+
+  useEffect(() => {
+    if (user?.id) void loadTugasList()
   }, [user?.id, loadTugasList])
 
-  /* Debounce search */
   useEffect(() => {
-    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
-    searchDebounceRef.current = setTimeout(() => {
-      if (user?.id) loadTugasList()
-    }, 300)
-    return () => {
-      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
+    if (!selectedMapel || isMapelLoading) return
+    if (mapelOptions.length > 0 && !mapelOptions.includes(selectedMapel)) {
+      setSelectedMapel('')
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchTerm])
+  }, [selectedMapel, mapelOptions, isMapelLoading])
 
   /* Reset months when range changes */
   useEffect(() => {
@@ -588,6 +720,8 @@ export default function TugasSiswa() {
     setJawabanFileSize('')
     setJawabanLink(tugas?.myJawaban?.link_url || '')
     setUploadProgress(null)
+    setAnswerUploadProvider(null)
+    setPendingJawabanFile(null)
 
     try {
       setIsLoadingDetail(true)
@@ -595,7 +729,7 @@ export default function TugasSiswa() {
       // ambil data tugas terbaru (optional, biar sinkron)
       const { data: tugasData, error: tErr } = await supabase
         .from('tugas')
-        .select('*')
+        .select(TUGAS_LIST_COLUMNS)
         .eq('id', tugas.id)
         .single()
 
@@ -656,6 +790,16 @@ export default function TugasSiswa() {
   }
 
   useEffect(() => {
+    if (!requestedTugasId || !user?.id || autoOpenedTugasIdRef.current === requestedTugasId) return
+    const targetedTask = tugasList.find((item) => String(item.id) === requestedTugasId)
+    if (!targetedTask) return
+
+    autoOpenedTugasIdRef.current = requestedTugasId
+    void openDetail(targetedTask)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestedTugasId, tugasList, user?.id])
+
+  useEffect(() => {
     if (selectedTugas) {
       document.body.style.overflow = 'hidden'
     } else {
@@ -666,12 +810,33 @@ export default function TugasSiswa() {
     }
   }, [selectedTugas])
 
+  const discardPendingJawabanFile = useCallback(async () => {
+    const pendingValue = pendingJawabanFile?.value
+    if (!pendingValue || !selectedTugas?.id || !user?.id) return
+
+    try {
+      await deleteJawabanFileFromStorage(pendingValue, selectedTugas.id, user.id)
+    } catch (error) {
+      console.warn('Gagal menghapus file jawaban sementara:', error)
+    } finally {
+      setPendingJawabanFile(null)
+    }
+  }, [pendingJawabanFile?.value, selectedTugas?.id, user?.id])
+
+  const closeDetail = useCallback(async () => {
+    await discardPendingJawabanFile()
+    setSelectedTugas(null)
+    setPendingJawabanFile(null)
+    setAnswerUploadProvider(null)
+  }, [discardPendingJawabanFile])
+
   /* =========================
      Upload / Delete jawaban
 ========================= */
   const handleUploadJawabanFile = async (files) => {
     if (!files?.length || !user?.id || !selectedTugas) return
     const file = files[0]
+    const animationStartedAt = Date.now()
 
     // ANTI-IDOR: siswa hanya upload untuk tugas yang sedang dibuka
     const kelas = selectedKelas || kelasSiswa
@@ -688,6 +853,11 @@ export default function TugasSiswa() {
 
     try {
       setIsUploading(true)
+      setAnswerUploadProvider(null)
+      setUploadProgress('Mengecek tujuan upload...')
+
+      const plannedProvider = await resolveAssignmentUploadProvider(file)
+      setAnswerUploadProvider(plannedProvider)
       setUploadProgress('Mengkompresi file...')
 
       const compressed = await compressFileBeforeUpload(file)
@@ -703,20 +873,22 @@ export default function TugasSiswa() {
 
       if (uploadError) throw new Error(uploadError.message)
 
-      // hapus file lama (kalau ada) milik siswa sendiri
-      if (detail?.myJawaban?.file_url) {
+      const storedFileValue = uploadData?.path || uploadData?.fullPath || filePath
+      const sizeLabel = uploadData?.uploadedSizeLabel || formatFileSize(uploadData?.uploadedSizeBytes || compressed.size)
+      const storedProvider = uploadData?.provider === 'google_drive' ? 'google_drive' : 'local'
+
+      const oldPendingFile = pendingJawabanFile?.value
+      if (oldPendingFile && oldPendingFile !== storedFileValue) {
         try {
-          await deleteJawabanFileFromStorage(detail.myJawaban.file_url, selectedTugas.id, user.id)
+          await deleteJawabanFileFromStorage(oldPendingFile, selectedTugas.id, user.id)
         } catch (e) {
-          console.warn('Gagal hapus file lama:', e)
+          console.warn('Gagal hapus file jawaban sementara:', e)
         }
       }
 
-      const storedFileValue = uploadData?.path || uploadData?.fullPath || filePath
-      const sizeLabel = uploadData?.uploadedSizeLabel || formatFileSize(uploadData?.uploadedSizeBytes || compressed.size)
-
       setJawabanFileKey(storedFileValue)
       setJawabanFileSize(sizeLabel)
+      setPendingJawabanFile({ value: storedFileValue, sizeLabel, provider: storedProvider })
       setUploadProgress(null)
 
       pushToast('success', `File jawaban berhasil diupload (${sizeLabel})`)
@@ -726,7 +898,9 @@ export default function TugasSiswa() {
       const parsed = parseSupabaseError(error)
       pushToast('error', `Gagal upload file: ${parsed.message}`)
     } finally {
+      await holdUploadAnimation(animationStartedAt)
       setIsUploading(false)
+      setAnswerUploadProvider(null)
     }
   }
 
@@ -742,6 +916,21 @@ export default function TugasSiswa() {
 
     // eslint-disable-next-line no-restricted-globals
     if (!confirm('Hapus file jawaban ini?')) return
+
+    const pendingValue = pendingJawabanFile?.value
+    if (pendingValue && jawabanFileKey === pendingValue) {
+      try {
+        await deleteJawabanFileFromStorage(pendingValue, selectedTugas.id, user.id)
+      } catch (error) {
+        console.warn('Gagal menghapus file jawaban sementara:', error)
+      }
+
+      setPendingJawabanFile(null)
+      setJawabanFileKey(detail?.myJawaban?.file_url || '')
+      setJawabanFileSize('')
+      pushToast('success', 'File pengganti dibatalkan')
+      return
+    }
 
     try {
       setLoading(true)
@@ -875,6 +1064,15 @@ export default function TugasSiswa() {
         if (error) throw error
       }
 
+      if (existing?.file_url && existing.file_url !== payload.file_url) {
+        try {
+          await deleteJawabanFileFromStorage(existing.file_url, selectedTugas.id, user.id)
+        } catch (deleteError) {
+          console.warn('Gagal menghapus file jawaban lama:', deleteError)
+        }
+      }
+
+      setPendingJawabanFile(null)
       pushToast('success', 'Jawaban berhasil dikirim')
 
       // refresh detail & list
@@ -925,9 +1123,19 @@ export default function TugasSiswa() {
 ========================= */
   useEffect(() => {
     if (!user?.id) return
+    const kelas = selectedKelas || kelasSiswa
 
     const channel = supabase
       .channel(`tugas_siswa_${user.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tugas' }, async (payload) => {
+        const row = payload.new || payload.old
+        if (row?.kelas && kelas && row.kelas !== kelas) return
+        await Promise.all([loadTugasList(), loadMapelOptions()])
+
+        if (selectedTugas && String(row?.id) === String(selectedTugas.id)) {
+          await openDetail({ ...selectedTugas, ...row })
+        }
+      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tugas_jawaban' }, async (payload) => {
         // refresh hanya kalau yang berubah adalah jawaban user ini
         const uid = (payload.new && payload.new.user_id) || (payload.old && payload.old.user_id)
@@ -946,18 +1154,28 @@ export default function TugasSiswa() {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [user?.id, selectedTugas, loadTugasList])
+  }, [user?.id, selectedTugas, selectedKelas, kelasSiswa, loadTugasList, loadMapelOptions])
 
   /* =========================
      Dashboard Stats
 ========================= */
+  const visibleTugasList = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase()
+    if (!q) return tugasList
+    return tugasList.filter((t) => (
+      String(t.judul || '').toLowerCase().includes(q) ||
+      String(t.mapel || '').toLowerCase().includes(q) ||
+      String(t.keterangan || '').toLowerCase().includes(q)
+    ))
+  }, [tugasList, searchTerm])
+
   const stats = useMemo(() => {
-    const total = tugasList.length
-    const belum = tugasList.filter((t) => t.myStatus === 'belum').length
-    const menunggu = tugasList.filter((t) => t.myStatus === 'menunggu').length
-    const dinilai = tugasList.filter((t) => t.myStatus === 'dinilai').length
+    const total = visibleTugasList.length
+    const belum = visibleTugasList.filter((t) => t.myStatus === 'belum').length
+    const menunggu = visibleTugasList.filter((t) => t.myStatus === 'menunggu').length
+    const dinilai = visibleTugasList.filter((t) => t.myStatus === 'dinilai').length
     return { total, belum, menunggu, dinilai }
-  }, [tugasList])
+  }, [visibleTugasList])
 
   const submitLockReason = useMemo(() => {
     return getSubmitLockReason(detail?.tugas, detail?.myJawaban, detail?.myStatus)
@@ -972,15 +1190,15 @@ export default function TugasSiswa() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-purple-50/30 p-4 sm:p-6">
       <div className="max-w-full mx-auto space-y-6">
         {/* HEADER */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-6">
+        <div className="page-title-card">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
             <div className="flex items-center gap-4">
               <div className="w-14 h-14 bg-gradient-to-br from-purple-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg">
                 <span className="text-2xl text-white">🧑‍🎓</span>
               </div>
               <div>
-                <h1 className="text-2xl lg:text-3xl font-bold text-slate-800 mb-2">Tugas Saya</h1>
-                <p className="text-slate-600 text-base">Lihat tugas kelas, kumpulkan jawaban, dan pantau nilai</p>
+                <h1 className="page-title-heading">Tugas Saya</h1>
+                <p className="page-title-description">Lihat tugas kelas, kumpulkan jawaban, dan pantau nilai</p>
               </div>
             </div>
 
@@ -995,12 +1213,13 @@ export default function TugasSiswa() {
                 type="button"
                 onClick={async () => {
                   pushToast('info', 'Memperbarui data...')
-                  await loadTugasList()
+                  await Promise.all([loadMapelOptions(), loadTugasList()])
                   pushToast('success', 'Data diperbarui')
                 }}
-                className="px-4 py-3 bg-white border border-slate-200 rounded-2xl hover:bg-slate-50 transition-colors font-semibold text-slate-700 shadow-sm"
+                disabled={isListLoading}
+                className="px-4 py-3 bg-white border border-slate-200 rounded-2xl hover:bg-slate-50 transition-colors font-semibold text-slate-700 shadow-sm disabled:opacity-60"
               >
-                🔄 Refresh
+                {isListLoading ? '⏳ Memuat...' : '🔄 Refresh'}
               </button>
             </div>
           </div>
@@ -1040,8 +1259,12 @@ export default function TugasSiswa() {
                 className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white text-sm"
                 value={selectedMapel}
                 onChange={(e) => setSelectedMapel(e.target.value)}
+                disabled={isMapelLoading && mapelOptions.length === 0}
               >
                 <option value="">Semua mapel</option>
+                {isMapelLoading && mapelOptions.length === 0 && (
+                  <option value="" disabled>Memuat mapel...</option>
+                )}
                 {mapelOptions.map((m) => (
                   <option key={m} value={m}>
                     {m}
@@ -1135,9 +1358,10 @@ export default function TugasSiswa() {
             <button
               type="button"
               onClick={loadTugasList}
-              className="px-4 py-3 rounded-2xl bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white font-bold transition-all shadow-lg"
+              disabled={isListLoading}
+              className="px-4 py-3 rounded-2xl bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white font-bold transition-all shadow-lg disabled:opacity-60"
             >
-              🔎 Terapkan
+              {isListLoading ? '⏳ Memuat...' : '🔎 Terapkan'}
             </button>
           </div>
         </div>
@@ -1172,7 +1396,13 @@ export default function TugasSiswa() {
             </div>
           </div>
 
-          {tugasList.length === 0 ? (
+          {isListLoading && visibleTugasList.length === 0 ? (
+            <div className="text-center py-14 text-slate-500 bg-slate-50 rounded-2xl border border-slate-200">
+              <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-purple-600" />
+              <div className="font-bold text-slate-700">Memuat tugas</div>
+              <div className="text-sm mt-1">Mengambil data tugas terbaru...</div>
+            </div>
+          ) : visibleTugasList.length === 0 ? (
             <div className="text-center py-14 text-slate-500 bg-slate-50 rounded-2xl border border-slate-200">
               <div className="text-6xl mb-4">🗂️</div>
               <div className="font-bold text-slate-700">Belum ada tugas</div>
@@ -1180,7 +1410,7 @@ export default function TugasSiswa() {
             </div>
           ) : (
             <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {tugasList.map((t) => {
+              {visibleTugasList.map((t) => {
                 const expired = t.isExpired
                 const beforeStart = t.isBeforeStart
                 const nearDeadline = t.isNearDeadline
@@ -1275,11 +1505,11 @@ export default function TugasSiswa() {
           <div className="fixed inset-0 z-50">
             <div
               className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-              onClick={() => setSelectedTugas(null)}
+              onClick={() => { void closeDetail() }}
               role="button"
               tabIndex={0}
               onKeyDown={(e) => {
-                if (e.key === 'Escape') setSelectedTugas(null)
+                if (e.key === 'Escape') void closeDetail()
               }}
             />
 
@@ -1352,7 +1582,7 @@ export default function TugasSiswa() {
 
                       <button
                         type="button"
-                        onClick={() => setSelectedTugas(null)}
+                        onClick={() => { void closeDetail() }}
                         className="px-4 py-2 rounded-2xl bg-white border border-slate-200 text-slate-700 font-semibold hover:bg-slate-50 transition-colors"
                       >
                         ❌ Tutup
@@ -1429,7 +1659,7 @@ export default function TugasSiswa() {
                               disabled={isSubmissionLocked}
                             />
                             <div className="text-[11px] text-slate-500 mt-1">
-                              Boleh tanpa http(s) (nanti otomatis ditambahkan).
+                              Boleh tanpa http(s). Link manual disimpan di database/VPS, bukan di Google Drive sekolah.
                             </div>
                           </div>
 
@@ -1464,22 +1694,12 @@ export default function TugasSiswa() {
                               )}
                             </div>
 
-                            {uploadProgress && (
-                              <div className="mb-3 p-3 bg-purple-50 border border-purple-200 rounded-xl">
-                                <div className="flex items-center gap-2 text-purple-700 text-sm">
-                                  <div className="w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
-                                  {uploadProgress}
-                                </div>
-                              </div>
-                            )}
-
                             {isUploading ? (
-                              <div className="p-4 bg-purple-50 border border-purple-200 rounded-xl text-slate-600 text-center">
-                                <div className="flex items-center justify-center gap-2">
-                                  <div className="w-5 h-5 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
-                                  <span>Mengupload file...</span>
-                                </div>
-                              </div>
+                              <UploadProgressTrain
+                                label={uploadProgress || 'Mengupload file...'}
+                                detail={uploadDetailForProvider(answerUploadProvider, 'Jawaban sedang diproses dan dikirim.')}
+                                tone={uploadToneForProvider(answerUploadProvider)}
+                              />
                             ) : (jawabanFileKey || detail?.myJawaban?.file_url) ? (
                               <div className="p-4 bg-green-50 border border-green-200 rounded-xl flex items-center justify-between gap-3">
                                 <div className="flex items-center gap-3">
@@ -1513,8 +1733,8 @@ export default function TugasSiswa() {
                               <p className="text-xs font-semibold text-slate-700 mb-2">📋 Batas Ukuran File:</p>
                               <ul className="text-xs text-slate-600 space-y-1">
                                 <li>🖼️ Gambar: maks 100KB (otomatis dikompresi)</li>
-                                <li>📄 PDF/Dokumen: maks 2MB</li>
-                                <li>📊 PPT: maks 3MB</li>
+                                <li>📄 PDF/Dokumen: Drive siap maks 3MB, VPS maks 2MB</li>
+                                <li>📊 PPT: Drive siap maks 5MB, VPS maks 2MB</li>
                               </ul>
                             </div>
                           </div>

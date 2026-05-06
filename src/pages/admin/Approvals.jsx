@@ -162,15 +162,15 @@ const Approvals = () => {
 
   return (
     <div className="w-full space-y-8 px-4 pt-2 sm:px-6 lg:px-8">
-      <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-lg">
+      <div className="page-title-card">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex items-center gap-4">
             <div className="rounded-2xl bg-blue-100 p-3 text-blue-700">
               <ShieldCheck size={30} strokeWidth={2.2} />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">Approval Maker-Checker</h1>
-              <p className="mt-1 text-gray-600">
+              <h1 className="page-title-heading">Approval Maker-Checker</h1>
+              <p className="page-title-description">
                 Perubahan kritikal menunggu persetujuan admin sebelum diterapkan.
               </p>
             </div>
