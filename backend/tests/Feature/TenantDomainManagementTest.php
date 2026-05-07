@@ -1,0 +1,453 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
+use Tests\TestCase;
+
+class TenantDomainManagementTest extends TestCase
+{
+    use RefreshDatabase;
+
+    public function test_super_admin_can_register_tenant_custom_domain_and_resolve_it(): void
+    {
+        config()->set('tenancy.root_domain', 'edusmart.test');
+        config()->set('tenancy.admin_subdomain', 'admin');
+        config()->set('tenancy.admin_hosts', []);
+        config()->set('tenancy.allow_root_for_super_admin', false);
+
+        $superAdmin = $this->createSuperAdmin();
+        $tenantId = $this->createTenant('SMA Bali', 'bali');
+
+        $response = $this
+            ->actingAs($superAdmin)
+            ->postJson("http://admin.edusmart.test/api/super/tenants/{$tenantId}/domains", [
+                'host' => 'smabali.sch.id',
+                'is_primary' => true,
+            ]);
+
+        $response
+            ->assertStatus(201)
+            ->assertJsonPath('data.host', 'smabali.sch.id')
+            ->assertJsonPath('data.tenant_id', $tenantId)
+            ->assertJsonPath('data.domain_type', 'tenant');
+
+        $this->getJson('http://smabali.sch.id/api/health')
+            ->assertOk()
+            ->assertJsonPath('status', 'ok');
+    }
+
+    public function test_custom_admin_domain_works_and_unknown_host_is_rejected(): void
+    {
+        config()->set('tenancy.root_domain', 'edusmart.test');
+        config()->set('tenancy.admin_subdomain', 'admin');
+        config()->set('tenancy.admin_hosts', []);
+        config()->set('tenancy.allow_root_for_super_admin', false);
+
+        $superAdmin = $this->createSuperAdmin();
+
+        $response = $this
+            ->actingAs($superAdmin)
+            ->postJson('http://admin.edusmart.test/api/super/domains', [
+                'host' => 'panel.grupsekolah.id',
+                'is_primary' => true,
+            ]);
+
+        $response
+            ->assertStatus(201)
+            ->assertJsonPath('data.host', 'panel.grupsekolah.id')
+            ->assertJsonPath('data.domain_type', 'admin');
+
+        $this
+            ->actingAs($superAdmin)
+            ->getJson('http://panel.grupsekolah.id/api/super/me')
+            ->assertOk()
+            ->assertJsonPath('data.is_super_admin', true);
+
+        $this->getJson('http://asing.grupsekolah.id/api/health')
+            ->assertStatus(404)
+            ->assertJsonPath('error', 'Host tenant belum terdaftar. Tambahkan domain ini dari panel super admin terlebih dahulu.');
+    }
+
+    public function test_tls_ask_endpoint_allows_known_hosts_and_rejects_unknown_hosts(): void
+    {
+        config()->set('tenancy.root_domain', 'edusmart.test');
+        config()->set('tenancy.admin_subdomain', 'admin');
+        config()->set('tenancy.admin_hosts', []);
+        config()->set('tenancy.allow_root_for_super_admin', false);
+        config()->set('services.caddy.ask_secret', 'test-secret');
+        config()->set('services.caddy.evolution_host', 'wa.edusmart.test');
+
+        $superAdmin = $this->createSuperAdmin();
+        $tenantId = $this->createTenant('SMA Bali', 'bali');
+
+        $this
+            ->actingAs($superAdmin)
+            ->postJson("http://admin.edusmart.test/api/super/tenants/{$tenantId}/domains", [
+                'host' => 'smabali.sch.id',
+                'is_primary' => true,
+            ])
+            ->assertCreated();
+
+        $this->get('http://nginx/api/internal/tls/authorize?secret=test-secret&domain=bali.edusmart.test')
+            ->assertNoContent();
+
+        $this->get('http://nginx/api/internal/tls/authorize?secret=test-secret&domain=smabali.sch.id')
+            ->assertNoContent();
+
+        $this->get('http://nginx/api/internal/tls/authorize?secret=test-secret&domain=wa.edusmart.test')
+            ->assertNoContent();
+
+        $this->get('http://nginx/api/internal/tls/authorize?secret=test-secret&domain=asing.edusmart.test')
+            ->assertStatus(403)
+            ->assertJsonPath('error', 'Domain belum terdaftar untuk auto TLS.');
+    }
+
+    public function test_tls_ask_endpoint_rejects_invalid_secret(): void
+    {
+        config()->set('tenancy.root_domain', 'edusmart.test');
+        config()->set('tenancy.admin_subdomain', 'admin');
+        config()->set('tenancy.admin_hosts', []);
+        config()->set('tenancy.allow_root_for_super_admin', false);
+        config()->set('services.caddy.ask_secret', 'test-secret');
+
+        $this->createTenant('SMA Bali', 'bali');
+
+        $this->get('http://nginx/api/internal/tls/authorize?secret=salah&domain=bali.edusmart.test')
+            ->assertStatus(403)
+            ->assertJsonPath('error', 'Permintaan TLS tidak valid.');
+    }
+
+    public function test_super_admin_tenant_detail_prepares_stable_rfid_device_but_requires_tenant_mqtt_config(): void
+    {
+        config()->set('app.url', 'https://edusmart.test');
+        config()->set('tenancy.root_domain', 'edusmart.test');
+        config()->set('tenancy.admin_subdomain', 'admin');
+        config()->set('tenancy.admin_hosts', []);
+        config()->set('tenancy.allow_root_for_super_admin', false);
+        config()->set('rfid.mqtt.host', 'mqtt.edusmart.test');
+        config()->set('rfid.mqtt.port', 8883);
+        config()->set('rfid.mqtt.username', 'mqtt-user');
+        config()->set('rfid.mqtt.password', 'mqtt-pass');
+        config()->set('rfid.mqtt.scan_topic_template', 'edusmart/{tenant}/rfid/scan');
+        config()->set('rfid.mqtt.response_topic_template', 'edusmart/{tenant}/rfid/response');
+        config()->set('rfid.mqtt.mode_topic_template', 'edusmart/{tenant}/rfid/mode');
+
+        $superAdmin = $this->createSuperAdmin();
+        $tenantId = $this->createTenant('SMA Bali', 'bali');
+
+        $response = $this
+            ->actingAs($superAdmin)
+            ->getJson("http://admin.edusmart.test/api/super/tenants/{$tenantId}");
+
+        $response
+            ->assertOk()
+            ->assertJsonPath('data.rfid_template.available', false)
+            ->assertJsonPath('data.rfid_template.message', 'Klik Pakai Mosquitto agar sekolah ini punya credential dan topic MQTT sendiri.')
+            ->assertJsonPath('data.rfid_template.tenant_slug', 'bali')
+            ->assertJsonPath('data.rfid_template.device_id', 'rfid-template-bali-01')
+            ->assertJsonPath('data.rfid_template.api_base_url', 'https://edusmart.test')
+            ->assertJsonPath('data.rfid_template.mqtt.host', 'mqtt.edusmart.test')
+            ->assertJsonPath('data.rfid_template.topics.scan', 'edusmart/bali/rfid/scan');
+
+        $secret = data_get($response->json(), 'data.rfid_template.device_secret');
+        $this->assertNotEmpty($secret);
+
+        $this->assertDatabaseHas('rfid_devices', [
+            'tenant_id' => $tenantId,
+            'device_id' => 'rfid-template-bali-01',
+        ]);
+
+        $repeat = $this
+            ->actingAs($superAdmin)
+            ->getJson("http://admin.edusmart.test/api/super/tenants/{$tenantId}");
+
+        $repeat->assertOk();
+        $this->assertSame($secret, data_get($repeat->json(), 'data.rfid_template.device_secret'));
+    }
+
+    public function test_super_admin_can_store_tenant_mqtt_config_and_template_uses_it(): void
+    {
+        config()->set('app.url', 'https://edusmart.test');
+        config()->set('tenancy.root_domain', 'edusmart.test');
+        config()->set('tenancy.admin_subdomain', 'admin');
+        config()->set('tenancy.admin_hosts', []);
+        config()->set('tenancy.allow_root_for_super_admin', false);
+
+        $superAdmin = $this->createSuperAdmin();
+        $tenantId = $this->createTenant('SMA Bali', 'bali');
+
+        $response = $this
+            ->actingAs($superAdmin)
+            ->patchJson("http://admin.edusmart.test/api/super/tenants/{$tenantId}/rfid-mqtt", [
+                'enabled' => true,
+                'host' => 'mqtt.bali.test',
+                'port' => 8883,
+                'username' => 'bali-user',
+                'password' => 'bali-secret',
+                'use_tls' => true,
+                'tls_verify_peer' => true,
+                'tls_verify_peer_name' => true,
+                'tls_allow_self_signed' => false,
+                'qos' => 1,
+                'client_id_prefix' => 'bridge-bali',
+                'scan_topic_template' => 'school/{tenant}/scan',
+                'response_topic_template' => 'school/{tenant}/response',
+                'mode_topic_template' => 'school/{tenant}/mode',
+                'connect_timeout' => 20,
+                'socket_timeout' => 5,
+                'keep_alive' => 20,
+            ]);
+
+        $response
+            ->assertOk()
+            ->assertJsonPath('data.rfid_mqtt_config.source', 'tenant')
+            ->assertJsonPath('data.rfid_mqtt_config.available', true)
+            ->assertJsonPath('data.rfid_mqtt_config.host', 'mqtt.bali.test')
+            ->assertJsonPath('data.rfid_mqtt_config.password_set', true)
+            ->assertJsonPath('data.rfid_template.available', true)
+            ->assertJsonPath('data.rfid_template.mqtt.host', 'mqtt.bali.test')
+            ->assertJsonPath('data.rfid_template.mqtt.password', 'bali-secret')
+            ->assertJsonPath('data.rfid_template.topics.scan', 'school/bali/scan');
+
+        $this->assertArrayNotHasKey('password', data_get($response->json(), 'data.rfid_mqtt_config', []));
+        $this->assertDatabaseHas('tenant_mqtt_configs', [
+            'tenant_id' => $tenantId,
+            'host' => 'mqtt.bali.test',
+            'username' => 'bali-user',
+        ]);
+
+        $storedPassword = DB::table('tenant_mqtt_configs')
+            ->where('tenant_id', $tenantId)
+            ->value('password_ciphertext');
+        $this->assertNotSame('bali-secret', $storedPassword);
+        $this->assertNotEmpty($storedPassword);
+
+        $detail = $this
+            ->actingAs($superAdmin)
+            ->getJson("http://admin.edusmart.test/api/super/tenants/{$tenantId}");
+
+        $detail
+            ->assertOk()
+            ->assertJsonPath('data.rfid_mqtt_config.password_set', true)
+            ->assertJsonPath('data.rfid_template.mqtt.host', 'mqtt.bali.test')
+            ->assertJsonPath('data.rfid_template.topics.response', 'school/bali/response');
+    }
+
+    public function test_super_admin_can_provision_managed_mosquitto_for_tenant(): void
+    {
+        config()->set('app.url', 'https://edusmart.test');
+        config()->set('tenancy.root_domain', 'edusmart.test');
+        config()->set('tenancy.admin_subdomain', 'admin');
+        config()->set('tenancy.admin_hosts', []);
+        config()->set('tenancy.allow_root_for_super_admin', false);
+
+        $passwordFile = storage_path('framework/testing/mosquitto-passwords');
+        $aclFile = storage_path('framework/testing/mosquitto-aclfile');
+        @unlink($passwordFile);
+        @unlink($aclFile);
+
+        config()->set('rfid.mosquitto.enabled', true);
+        config()->set('rfid.mosquitto.public_host', 'mqtt.edusmart.test');
+        config()->set('rfid.mosquitto.public_port', 8883);
+        config()->set('rfid.mosquitto.public_use_tls', true);
+        config()->set('rfid.mosquitto.internal_host', 'mosquitto');
+        config()->set('rfid.mosquitto.internal_port', 1883);
+        config()->set('rfid.mosquitto.internal_use_tls', false);
+        config()->set('rfid.mosquitto.bridge_username', 'edusmart_bridge');
+        config()->set('rfid.mosquitto.bridge_password', 'bridge-secret-long');
+        config()->set('rfid.mosquitto.tenant_username_prefix', 'edusmart');
+        config()->set('rfid.mosquitto.topic_prefix', 'edusmart');
+        config()->set('rfid.mosquitto.password_file', $passwordFile);
+        config()->set('rfid.mosquitto.acl_file', $aclFile);
+
+        $superAdmin = $this->createSuperAdmin();
+        $tenantId = $this->createTenant('SMA Bali', 'bali');
+
+        $response = $this
+            ->actingAs($superAdmin)
+            ->postJson("http://admin.edusmart.test/api/super/tenants/{$tenantId}/rfid-mqtt/mosquitto");
+
+        $response
+            ->assertOk()
+            ->assertJsonPath('data.rfid_mqtt_config.provider', 'mosquitto')
+            ->assertJsonPath('data.rfid_mqtt_config.managed_by_platform', true)
+            ->assertJsonPath('data.rfid_mqtt_config.host', 'mqtt.edusmart.test')
+            ->assertJsonPath('data.rfid_mqtt_config.port', 8883)
+            ->assertJsonPath('data.rfid_mqtt_config.username', 'edusmart_bali_rfid')
+            ->assertJsonPath('data.rfid_mqtt_config.password_set', true)
+            ->assertJsonPath('data.rfid_template.mqtt.provider', 'mosquitto')
+            ->assertJsonPath('data.rfid_template.mqtt.managed_by_platform', true)
+            ->assertJsonPath('data.rfid_template.mqtt.host', 'mqtt.edusmart.test')
+            ->assertJsonPath('data.rfid_template.mqtt.use_tls', true)
+            ->assertJsonPath('data.rfid_template.topics.scan', 'edusmart/bali/rfid/scan')
+            ->assertJsonPath('data.mosquitto_sync.synced', true);
+
+        $devicePassword = (string) data_get($response->json(), 'data.rfid_template.mqtt.password');
+        $this->assertNotEmpty($devicePassword);
+
+        $this->assertFileExists($passwordFile);
+        $this->assertFileExists($aclFile);
+        $passwordContents = file_get_contents($passwordFile);
+        $aclContents = file_get_contents($aclFile);
+
+        $this->assertStringContainsString('edusmart_bridge:', $passwordContents);
+        $this->assertStringContainsString('edusmart_bali_rfid:', $passwordContents);
+        $this->assertStringNotContainsString($devicePassword, $passwordContents);
+        $this->assertStringContainsString('user edusmart_bridge', $aclContents);
+        $this->assertStringContainsString('topic read edusmart/bali/rfid/scan', $aclContents);
+        $this->assertStringContainsString('user edusmart_bali_rfid', $aclContents);
+        $this->assertStringContainsString('topic write edusmart/bali/rfid/scan', $aclContents);
+        $this->assertStringContainsString('topic read edusmart/bali/rfid/response', $aclContents);
+    }
+
+    public function test_managed_mosquitto_replaces_previous_custom_mqtt_credentials(): void
+    {
+        config()->set('app.url', 'https://edusmart.test');
+        config()->set('tenancy.root_domain', 'edusmart.test');
+        config()->set('tenancy.admin_subdomain', 'admin');
+        config()->set('tenancy.admin_hosts', []);
+        config()->set('tenancy.allow_root_for_super_admin', false);
+
+        $passwordFile = storage_path('framework/testing/mosquitto-passwords-switch');
+        $aclFile = storage_path('framework/testing/mosquitto-aclfile-switch');
+        @unlink($passwordFile);
+        @unlink($aclFile);
+
+        config()->set('rfid.mosquitto.enabled', true);
+        config()->set('rfid.mosquitto.public_host', 'mqtt.edusmart.test');
+        config()->set('rfid.mosquitto.public_port', 8883);
+        config()->set('rfid.mosquitto.public_use_tls', true);
+        config()->set('rfid.mosquitto.internal_host', 'mosquitto');
+        config()->set('rfid.mosquitto.internal_port', 1883);
+        config()->set('rfid.mosquitto.internal_use_tls', false);
+        config()->set('rfid.mosquitto.bridge_username', 'edusmart_bridge');
+        config()->set('rfid.mosquitto.bridge_password', 'bridge-secret-long');
+        config()->set('rfid.mosquitto.tenant_username_prefix', 'edusmart');
+        config()->set('rfid.mosquitto.topic_prefix', 'edusmart');
+        config()->set('rfid.mosquitto.password_file', $passwordFile);
+        config()->set('rfid.mosquitto.acl_file', $aclFile);
+
+        $superAdmin = $this->createSuperAdmin();
+        $tenantId = $this->createTenant('SMA Bali', 'bali');
+
+        $this
+            ->actingAs($superAdmin)
+            ->patchJson("http://admin.edusmart.test/api/super/tenants/{$tenantId}/rfid-mqtt", [
+                'enabled' => true,
+                'host' => 'old-cloud-mqtt.test',
+                'port' => 8883,
+                'username' => 'old-cloud-user',
+                'password' => 'old-cloud-secret',
+                'use_tls' => true,
+                'qos' => 1,
+                'scan_topic_template' => 'legacy/{tenant}/scan',
+                'response_topic_template' => 'legacy/{tenant}/response',
+                'mode_topic_template' => 'legacy/{tenant}/mode',
+            ])
+            ->assertOk();
+
+        $response = $this
+            ->actingAs($superAdmin)
+            ->postJson("http://admin.edusmart.test/api/super/tenants/{$tenantId}/rfid-mqtt/mosquitto");
+
+        $response
+            ->assertOk()
+            ->assertJsonPath('data.rfid_mqtt_config.provider', 'mosquitto')
+            ->assertJsonPath('data.rfid_mqtt_config.managed_by_platform', true)
+            ->assertJsonPath('data.rfid_mqtt_config.host', 'mqtt.edusmart.test')
+            ->assertJsonPath('data.rfid_mqtt_config.username', 'edusmart_bali_rfid')
+            ->assertJsonPath('data.rfid_template.available', true)
+            ->assertJsonPath('data.rfid_template.mqtt.host', 'mqtt.edusmart.test')
+            ->assertJsonPath('data.rfid_template.topics.scan', 'edusmart/bali/rfid/scan');
+
+        $this->assertNotSame(
+            'old-cloud-secret',
+            (string) data_get($response->json(), 'data.rfid_template.mqtt.password')
+        );
+
+        $this->assertDatabaseHas('tenant_mqtt_configs', [
+            'tenant_id' => $tenantId,
+            'provider' => 'mosquitto',
+            'managed_by_platform' => true,
+            'host' => 'mqtt.edusmart.test',
+            'runtime_host' => 'mosquitto',
+            'username' => 'edusmart_bali_rfid',
+        ]);
+    }
+
+    public function test_tenant_mqtt_config_rejects_scan_topic_conflict_on_same_host(): void
+    {
+        config()->set('tenancy.root_domain', 'edusmart.test');
+        config()->set('tenancy.admin_subdomain', 'admin');
+        config()->set('tenancy.admin_hosts', []);
+        config()->set('tenancy.allow_root_for_super_admin', false);
+
+        $superAdmin = $this->createSuperAdmin();
+        $baliTenantId = $this->createTenant('SMA Bali', 'bali');
+        $jawaTenantId = $this->createTenant('SMA Jawa', 'jawa');
+
+        $payload = [
+            'enabled' => true,
+            'host' => 'mqtt.shared.test',
+            'port' => 1883,
+            'username' => 'rfid-user',
+            'use_tls' => false,
+            'qos' => 1,
+            'scan_topic_template' => 'rfid/scan',
+            'response_topic_template' => 'rfid/response',
+            'mode_topic_template' => 'rfid/mode',
+        ];
+
+        $this
+            ->actingAs($superAdmin)
+            ->patchJson("http://admin.edusmart.test/api/super/tenants/{$baliTenantId}/rfid-mqtt", $payload)
+            ->assertOk();
+
+        $this
+            ->actingAs($superAdmin)
+            ->patchJson("http://admin.edusmart.test/api/super/tenants/{$jawaTenantId}/rfid-mqtt", $payload)
+            ->assertStatus(422)
+            ->assertJsonPath('error', 'Topik scan MQTT rfid/scan sudah dipakai oleh tenant SMA Bali pada host/port yang sama.');
+    }
+
+    private function createSuperAdmin(): User
+    {
+        $user = User::query()->create([
+            'id' => (string) Str::uuid(),
+            'name' => 'Super Admin',
+            'email' => 'super-admin@example.com',
+            'password' => Hash::make('password123'),
+        ]);
+
+        DB::table('super_admins')->insert([
+            'id' => (string) Str::uuid(),
+            'user_id' => $user->id,
+            'email' => $user->email,
+            'name' => $user->name,
+            'created_at' => now(),
+        ]);
+
+        return $user;
+    }
+
+    private function createTenant(string $name, string $slug): string
+    {
+        $tenantId = (string) Str::uuid();
+
+        DB::table('tenants')->insert([
+            'id' => $tenantId,
+            'name' => $name,
+            'slug' => $slug,
+            'status' => 'active',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return $tenantId;
+    }
+}

@@ -1,0 +1,63 @@
+<?php
+
+namespace App\Http\Controllers\Api;
+
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+
+class PengumumanController extends ApiController
+{
+    public function index(Request $request)
+    {
+        $query = DB::table('pengumuman')->orderBy('created_at', 'desc');
+
+        $role = $this->role($request);
+        if ($role === 'siswa') {
+            $query->whereIn(DB::raw('lower(target)'), ['', 'semua', 'all', 'siswa', 'student']);
+        } elseif ($role === 'guru' || $role === 'teacher') {
+            $query->whereIn(DB::raw('lower(target)'), ['', 'semua', 'all', 'guru', 'teacher']);
+        }
+
+        if ($limit = (int) $request->query('limit', 0)) {
+            $query->limit($limit);
+        }
+
+        return response()->json(['data' => $query->get()]);
+    }
+
+    public function store(Request $request)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+        $payload = $request->all();
+        $payload['created_at'] = now();
+        $payload['updated_at'] = now();
+        DB::table('pengumuman')->insert($payload);
+
+        return response()->json(['data' => $payload], 201);
+    }
+
+    public function update(Request $request, string $id)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+        $payload = $request->all();
+        $payload['updated_at'] = now();
+        DB::table('pengumuman')->where('id', $id)->update($payload);
+        $row = DB::table('pengumuman')->where('id', $id)->first();
+
+        return response()->json(['data' => $row]);
+    }
+
+    public function destroy(Request $request, string $id)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+        DB::table('pengumuman')->where('id', $id)->delete();
+
+        return response()->json(['data' => 'deleted']);
+    }
+}

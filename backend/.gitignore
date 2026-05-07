@@ -1,0 +1,59 @@
+# =========================
+# Logs & OS
+# =========================
+*.log
+.DS_Store
+Thumbs.db
+
+# =========================
+# IDE / Editor
+# =========================
+.fleet/
+.idea/
+.nova/
+.phpunit.cache/
+.vscode/
+.zed/
+
+# =========================
+# Node / Frontend
+# =========================
+node_modules/
+public/build
+public/hot
+dist/
+build/
+
+# =========================
+# Laravel / PHP
+# =========================
+vendor/
+storage/*.key
+storage/pail
+storage/logs/*
+!storage/logs/.gitignore
+storage/framework/views/*
+!storage/framework/views/.gitignore
+.phpactor.json
+.phpunit.result.cache
+auth.json
+Homestead.json
+Homestead.yaml
+
+# Misplaced artifacts (absolute-path dumps) must never go to web root
+public/D:*
+public/*storage*logs*
+public/*storage*framework*views*
+
+# =========================
+# Environment (SECURE)
+# =========================
+.env*
+!.env.example
+!.env.production.example
+backend/.env*
+!backend/.env.example
+!backend/.env.production.example
+
+*.sqlite
+*.sqlite-journal

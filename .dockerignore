@@ -1,0 +1,43 @@
+.git
+.gitignore
+node_modules
+dist
+build
+*.log
+
+# local/dev env files
+.env
+.env.local
+.env.*
+!.env.production.example
+
+# backend heavy/dev artifacts
+backend/.env
+backend/.env.local
+backend/.env.*
+!backend/.env.example
+!backend/.env.production.example
+backend/node_modules
+backend/vendor
+backend/storage/logs
+backend/storage/framework/cache
+backend/storage/framework/sessions
+backend/storage/framework/views
+backend/database/*.sqlite
+backend/database/*.sqlite.*
+
+# OS/editor
+.DS_Store
+.idea
+.vscode
+.fleet
+.zed
+
+# binaries / installers
+composer.phar
+composer-setup.php
+
+# crash dumps / generated heavy files
+core
+core.*
+*.core

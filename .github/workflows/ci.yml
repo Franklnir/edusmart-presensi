@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  frontend-build:
+    name: Frontend Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.19.0"
+          cache: npm
+
+      - name: Install frontend deps
+        run: npm ci
+
+      - name: Frontend security audit (high)
+        run: npm run security:audit
+
+      - name: Frontend quality gate
+        run: npm run check
+
+  backend-quality:
+    name: Backend Test And Pint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          tools: composer:v2
+          extensions: mbstring, pdo_sqlite, sqlite3, dom, curl, fileinfo
+          coverage: none
+
+      - name: Install backend deps
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Prepare app key
+        run: |
+          cp .env.example .env
+          php artisan key:generate --force
+
+      - name: Run backend tests
+        run: php artisan test
+
+      - name: Run Pint check
+        run: ./vendor/bin/pint --test
