@@ -164,7 +164,7 @@ class BlockSuspiciousRequests
             return true;
         }
 
-        $mask = (0xff << (8 - $remainder)) & 0xff;
+        $mask = (0xFF << (8 - $remainder)) & 0xFF;
 
         return (ord($ipBin[$bytes]) & $mask) === (ord($subnetBin[$bytes]) & $mask);
     }

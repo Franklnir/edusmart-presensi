@@ -1,8 +1,8 @@
 <?php
 
 use App\Services\Quiz\QuizScoringService;
-use App\Services\Rfid\RfidDeviceService;
 use App\Services\Rfid\MqttBridgeService;
+use App\Services\Rfid\RfidDeviceService;
 use App\Services\Rfid\TenantMqttConfigService;
 use App\Services\WhatsApp\WhatsAppIntegrationService;
 use Illuminate\Foundation\Inspiring;

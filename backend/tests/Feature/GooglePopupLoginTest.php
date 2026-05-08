@@ -60,7 +60,13 @@ class GooglePopupLoginTest extends TestCase
         config()->set('tenancy.allow_header_override', true);
 
         $tenantId = $this->defaultTenantId();
-        $this->createUserWithProfile($tenantId, 'siswa', 'akun-sekolah@example.com');
+        $user = $this->createUserWithProfile($tenantId, 'siswa', 'akun-sekolah@example.com');
+        DB::table('users')
+            ->where('id', $user->id)
+            ->update([
+                'google_id' => 'google-sub-456',
+                'google_email' => 'akun-sekolah@example.com',
+            ]);
 
         Http::fake([
             'https://oauth2.googleapis.com/tokeninfo*' => Http::response([

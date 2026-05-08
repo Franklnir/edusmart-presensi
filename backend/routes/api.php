@@ -2,8 +2,8 @@
 
 use App\Http\Controllers\Api\AdminBackupController;
 use App\Http\Controllers\Api\AdminController;
-use App\Http\Controllers\Api\AttendanceQrController;
 use App\Http\Controllers\Api\ApprovalController;
+use App\Http\Controllers\Api\AttendanceQrController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\DbController;
 use App\Http\Controllers\Api\GoogleDriveController;

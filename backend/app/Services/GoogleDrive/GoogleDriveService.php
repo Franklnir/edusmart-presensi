@@ -757,7 +757,7 @@ class GoogleDriveService
 
     private function driveQueryLiteral(string $value): string
     {
-        return str_replace(["\\", "'"], ["\\\\", "\\'"], $value);
+        return str_replace(['\\', "'"], ['\\\\', "\\'"], $value);
     }
 
     private function safeDriveFolderName(string $value): string

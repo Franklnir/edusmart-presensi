@@ -823,8 +823,7 @@ class StorageController extends ApiController
         UploadedFile $file,
         bool $usesDrive = false,
         string $messagePrefix = ''
-    ): ?\Illuminate\Http\JsonResponse
-    {
+    ): ?\Illuminate\Http\JsonResponse {
         if ($bucket !== 'assignments') {
             return null;
         }

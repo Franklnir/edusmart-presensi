@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\User;
+use App\Support\AcademicPeriod;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -19,6 +20,7 @@ class ProfileIdentitySyncTest extends TestCase
         $admin = $this->createUserWithProfile($tenantId, 'admin', 'Admin Sekolah', 'admin-sync@example.com');
         $teacher = $this->createUserWithProfile($tenantId, 'guru', 'Bu Rina Lama', 'rina.lama@example.com');
         $now = now();
+        $period = AcademicPeriod::current();
 
         DB::table('kelas')->insert([
             'id' => 'X-1',
@@ -28,6 +30,8 @@ class ProfileIdentitySyncTest extends TestCase
             'created_at' => $now,
             'updated_at' => $now,
             'tenant_id' => $tenantId,
+            'tahun_ajaran' => $period['tahun_ajaran'],
+            'semester' => $period['semester'],
         ]);
 
         DB::table('jadwal')->insert([
@@ -112,6 +116,7 @@ class ProfileIdentitySyncTest extends TestCase
         $admin = $this->createUserWithProfile($tenantId, 'admin', 'Admin Jadwal', 'admin-jadwal@example.com');
         $teacher = $this->createUserWithProfile($tenantId, 'guru', 'Pak Dedi', 'dedi@example.com');
         $now = now();
+        $period = AcademicPeriod::current();
 
         DB::table('kelas')->insert([
             'id' => 'XI-1',
@@ -121,6 +126,8 @@ class ProfileIdentitySyncTest extends TestCase
             'created_at' => $now,
             'updated_at' => $now,
             'tenant_id' => $tenantId,
+            'tahun_ajaran' => $period['tahun_ajaran'],
+            'semester' => $period['semester'],
         ]);
 
         DB::table('jadwal')->insert([
@@ -135,6 +142,8 @@ class ProfileIdentitySyncTest extends TestCase
             'created_at' => $now,
             'updated_at' => $now,
             'tenant_id' => $tenantId,
+            'tahun_ajaran' => $period['tahun_ajaran'],
+            'semester' => $period['semester'],
         ]);
 
         $response = $this->actingAs($admin)->postJson('/api/db', [

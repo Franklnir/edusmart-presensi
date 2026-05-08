@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\User;
 use App\Services\Quiz\QuizScoringService;
+use App\Support\AcademicPeriod;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -715,6 +716,8 @@ class QuizAutomationTest extends TestCase
 
     private function seedGuruTeachingMapel(string $tenantId, string $guruId, string $kelasId, string $mapel): void
     {
+        $period = AcademicPeriod::current();
+
         DB::table('kelas')->updateOrInsert(
             ['id' => $kelasId],
             [
@@ -722,6 +725,8 @@ class QuizAutomationTest extends TestCase
                 'nama' => $kelasId,
                 'grade' => '10',
                 'suffix' => 'A',
+                'tahun_ajaran' => $period['tahun_ajaran'],
+                'semester' => $period['semester'],
                 'created_at' => now(),
                 'updated_at' => now(),
             ]
@@ -737,6 +742,8 @@ class QuizAutomationTest extends TestCase
             'guru_nama' => 'Guru Uji',
             'jam_mulai' => '07:00:00',
             'jam_selesai' => '08:00:00',
+            'tahun_ajaran' => $period['tahun_ajaran'],
+            'semester' => $period['semester'],
             'created_at' => now(),
             'updated_at' => now(),
         ]);
