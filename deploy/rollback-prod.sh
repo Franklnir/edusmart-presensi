@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="${EDUSMART_ROOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 cd "$ROOT_DIR"
 
 COMPOSE_FILE="docker-compose.prod.yml"
@@ -9,6 +9,7 @@ ENV_FILE=".env.production"
 TARGET_REF=""
 RESTORE_DB_FILE=""
 SKIP_PRE_BACKUP="false"
+APP_SERVICES=(backend worker scheduler rfid_bridge nginx caddy)
 
 usage() {
   cat <<'USAGE'
@@ -150,7 +151,7 @@ git checkout "$TARGET_REF"
 
 echo "[4/7] Rebuild & restart service produksi..."
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --build \
-  backend backend_nginx frontend worker scheduler
+  "${APP_SERVICES[@]}"
 
 if [[ -n "$RESTORE_DB_FILE" ]]; then
   echo "[5/7] Restore database dari: $RESTORE_DB_FILE"

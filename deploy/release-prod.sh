@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="${EDUSMART_ROOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 cd "$ROOT_DIR"
 
 COMPOSE_FILE="docker-compose.prod.yml"
@@ -9,6 +9,7 @@ ENV_FILE=".env.production"
 TARGET_REF=""
 SKIP_BACKUP="false"
 SKIP_BUILD="false"
+APP_SERVICES=(backend worker scheduler rfid_bridge nginx caddy)
 
 usage() {
   cat <<'USAGE'
@@ -146,11 +147,11 @@ fi
 if [[ "$SKIP_BUILD" == "true" ]]; then
   echo "[4/8] Restart service tanpa rebuild..."
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d \
-    backend backend_nginx frontend worker scheduler
+    "${APP_SERVICES[@]}"
 else
   echo "[4/8] Build & deploy service..."
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --build \
-    backend backend_nginx frontend worker scheduler
+    "${APP_SERVICES[@]}"
 fi
 
 echo "[5/8] Jalankan migrasi..."
