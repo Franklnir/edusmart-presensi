@@ -74,12 +74,6 @@ export default function GoogleAuthPopup() {
         return
       }
 
-      if (!clientId) {
-        setError('Client ID Google belum terpasang di frontend.')
-        setStatus('')
-        return
-      }
-
       try {
         const url = new URL(window.location.href)
         const requestedOrigin = String(url.searchParams.get('origin') || '').trim()
@@ -108,6 +102,10 @@ export default function GoogleAuthPopup() {
         if (!validatedOrigin) {
           throw new Error('Origin tujuan Google tidak valid.')
         }
+        const runtimeClientId = String(popupContext.raw?.data?.client_id || clientId).trim()
+        if (!runtimeClientId) {
+          throw new Error('Konfigurasi Google OAuth belum lengkap.')
+        }
 
         targetOriginRef.current = validatedOrigin
         setStatus(
@@ -120,7 +118,7 @@ export default function GoogleAuthPopup() {
         if (cancelled || !buttonRef.current) return
 
         initializeGoogleSignIn({
-          clientId,
+          clientId: runtimeClientId,
           callback: (response) => {
             if (cancelled) return
 

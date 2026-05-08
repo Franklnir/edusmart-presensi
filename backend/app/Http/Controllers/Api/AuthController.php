@@ -109,6 +109,7 @@ class AuthController extends ApiController
             'data' => [
                 'origin' => $origin,
                 'mode' => (string) ($validated['mode'] ?? 'login'),
+                'client_id' => $this->googleClientId(),
             ],
         ]);
     }

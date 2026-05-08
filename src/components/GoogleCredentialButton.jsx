@@ -1,5 +1,4 @@
 import React, { useMemo, useState } from 'react'
-import { supabase } from '../lib/supabase'
 import { openGoogleAuthPopup, getGoogleAuthBridgeUrl } from '../lib/googlePopupBridge'
 
 const GoogleIcon = ({ className = '' }) => (
@@ -42,8 +41,6 @@ export default function GoogleCredentialButton({
   const [statusMessage, setStatusMessage] = useState('')
   const [isLaunching, setIsLaunching] = useState(false)
 
-  const isGoogleAuthEnabled = Boolean(supabase.auth.isGoogleEnabled?.())
-  const googleClientId = String(supabase.auth.getGoogleClientId?.() || '').trim()
   const bridgeUrl = String(getGoogleAuthBridgeUrl() || '').trim()
 
   const resolvedLabel = label || (mode === 'link' ? 'Tautkan Google' : 'Masuk dengan Google')
@@ -57,11 +54,9 @@ export default function GoogleCredentialButton({
   const resolvedIconClassName = iconClassName || 'inline-flex h-5 w-5 items-center justify-center'
 
   const availabilityMessage = useMemo(() => {
-    if (!isGoogleAuthEnabled) return unavailableLabel
-    if (!googleClientId) return 'Client ID Google belum terpasang di frontend.'
     if (!bridgeUrl) return 'URL auth Google pusat belum valid.'
     return ''
-  }, [bridgeUrl, googleClientId, isGoogleAuthEnabled, unavailableLabel])
+  }, [bridgeUrl])
 
   const disabled = busy || isLaunching || availabilityMessage !== ''
 
