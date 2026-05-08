@@ -1,6 +1,8 @@
 # GitHub Actions VPS Deploy
 
-Workflow `.github/workflows/ci.yml` sekarang akan menjalankan build/test di GitHub. Jika lolos dan push terjadi ke branch `main` atau `backup/vps-ready-20260430`, job `Deploy To VPS` akan SSH ke VPS dan menjalankan `deploy/release-prod.sh` untuk update stack production.
+Workflow `.github/workflows/ci.yml` sekarang menjalankan build/test di GitHub. Jika lolos dan push terjadi ke branch `main` atau `backup/vps-ready-20260430`, GitHub Actions akan build image Docker production, push ke GitHub Container Registry (`ghcr.io`), lalu SSH ke VPS untuk pull image dan restart stack.
+
+Dengan mode ini, VPS tidak compile image saat deploy. VPS hanya download image siap pakai.
 
 ## GitHub Secrets
 
@@ -11,6 +13,28 @@ Isi di `Repository > Settings > Secrets and variables > Actions`:
 - `VPS_USER`: user SSH di VPS.
 - `VPS_SSH_PRIVATE_KEY`: private key SSH yang boleh login ke VPS.
 - `VPS_APP_DIR`: path project di VPS, contoh `/opt/edusmart-presensi`.
+- `GHCR_USERNAME`: username GitHub untuk `docker login ghcr.io` dari VPS.
+- `GHCR_TOKEN`: Personal Access Token GitHub dengan permission `read:packages`.
+
+`GHCR_USERNAME` dan `GHCR_TOKEN` boleh dikosongkan hanya jika package GHCR dibuat public atau VPS sudah login manual ke `ghcr.io`.
+
+## GitHub Variables Opsional
+
+Isi di `Repository > Settings > Secrets and variables > Actions > Variables` jika frontend production perlu nilai build-time khusus:
+
+- `VITE_API_URL`
+- `VITE_TENANT_SLUG`
+- `VITE_ROOT_DOMAIN`
+- `VITE_ADMIN_SUBDOMAIN`
+- `VITE_REALTIME_POLL_MS`
+- `VITE_REALTIME_POLL_HIDDEN_MS`
+- `VITE_GOOGLE_AUTH_ENABLED`
+- `VITE_GOOGLE_AUTH_LOGIN_URL`
+- `VITE_GOOGLE_AUTH_LINK_URL`
+
+Jika Google Client ID perlu masuk ke frontend, simpan sebagai secret:
+
+- `VITE_GOOGLE_CLIENT_ID`
 
 ## Syarat di VPS
 
@@ -20,6 +44,7 @@ Isi di `Repository > Settings > Secrets and variables > Actions`:
 - User `VPS_USER` bisa menjalankan `docker compose` tanpa password sudo.
 - Working tree bersih saat deploy: `git status --porcelain` tidak mengeluarkan apa pun.
 - Repo di VPS bisa `git fetch` dari GitHub.
+- VPS bisa `docker pull` dari `ghcr.io`.
 
 ## Alur Setelah Aktif
 
@@ -33,7 +58,28 @@ Setelah push, buka tab `Actions` di GitHub. Urutannya:
 
 1. `Frontend Build`
 2. `Backend Test And Pint`
-3. `Deploy To VPS`
+3. `Build Production Images`
+4. `Deploy To VPS`
+
+Image production akan dibuat dengan tag commit, misalnya:
+
+```text
+ghcr.io/franklnir/edusmart-presensi/backend:<commit-sha>
+ghcr.io/franklnir/edusmart-presensi/nginx:<commit-sha>
+```
+
+Saat deploy, workflow mengirim tag image itu ke VPS lewat environment:
+
+```text
+EDUSMART_BACKEND_IMAGE
+EDUSMART_NGINX_IMAGE
+```
+
+Lalu VPS menjalankan:
+
+```bash
+deploy/release-prod.sh --ref <commit-sha> --pull-images
+```
 
 Jika deploy gagal sebelum update service, cek log job `Deploy To VPS` dan jalankan di VPS:
 

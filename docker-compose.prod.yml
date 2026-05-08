@@ -204,7 +204,7 @@ services:
       - internal
 
   backend:
-    image: edusmart-prod-backend:latest
+    image: ${EDUSMART_BACKEND_IMAGE:-edusmart-prod-backend:latest}
     build:
       context: .
       dockerfile: backend/docker/Dockerfile.prod
@@ -360,7 +360,7 @@ services:
       - internal
 
   worker:
-    image: edusmart-prod-backend:latest
+    image: ${EDUSMART_BACKEND_IMAGE:-edusmart-prod-backend:latest}
     container_name: edusmart-worker
     restart: unless-stopped
     depends_on:
@@ -430,7 +430,7 @@ services:
       - internal
 
   scheduler:
-    image: edusmart-prod-backend:latest
+    image: ${EDUSMART_BACKEND_IMAGE:-edusmart-prod-backend:latest}
     container_name: edusmart-scheduler
     restart: unless-stopped
     depends_on:
@@ -500,7 +500,7 @@ services:
       - internal
 
   rfid_bridge:
-    image: edusmart-prod-backend:latest
+    image: ${EDUSMART_BACKEND_IMAGE:-edusmart-prod-backend:latest}
     container_name: edusmart-rfid-bridge
     restart: unless-stopped
     depends_on:
@@ -616,6 +616,7 @@ services:
       - internal
 
   nginx:
+    image: ${EDUSMART_NGINX_IMAGE:-edusmart-prod-nginx:latest}
     build:
       context: .
       dockerfile: deploy/nginx/Dockerfile.prod

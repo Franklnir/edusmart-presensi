@@ -9,7 +9,9 @@ ENV_FILE=".env.production"
 TARGET_REF=""
 SKIP_BACKUP="false"
 SKIP_BUILD="false"
+PULL_IMAGES="false"
 APP_SERVICES=(backend worker scheduler rfid_bridge nginx caddy)
+IMAGE_SERVICES=(backend nginx)
 
 usage() {
   cat <<'USAGE'
@@ -22,11 +24,13 @@ Options:
   --compose-file <path>   Path docker compose file (default: docker-compose.prod.yml)
   --skip-backup           Lewati backup DB sebelum release
   --skip-build            Lewati rebuild image, hanya restart service
+  --pull-images           Pull image dari registry, lalu deploy tanpa build lokal
   -h, --help              Tampilkan bantuan
 
 Contoh:
   deploy/release-prod.sh --ref v1.5.0
   deploy/release-prod.sh --ref main --skip-build
+  EDUSMART_BACKEND_IMAGE=ghcr.io/org/repo/backend:sha EDUSMART_NGINX_IMAGE=ghcr.io/org/repo/nginx:sha deploy/release-prod.sh --ref main --pull-images
 USAGE
 }
 
@@ -77,6 +81,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-build)
       SKIP_BUILD="true"
+      shift
+      ;;
+    --pull-images)
+      PULL_IMAGES="true"
       shift
       ;;
     -h|--help)
@@ -144,7 +152,13 @@ else
   echo "[3/8] Skip backup DB (--skip-backup)"
 fi
 
-if [[ "$SKIP_BUILD" == "true" ]]; then
+if [[ "$PULL_IMAGES" == "true" ]]; then
+  echo "[4/8] Pull image registry & deploy tanpa build lokal..."
+  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" pull \
+    "${IMAGE_SERVICES[@]}"
+  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-build \
+    "${APP_SERVICES[@]}"
+elif [[ "$SKIP_BUILD" == "true" ]]; then
   echo "[4/8] Restart service tanpa rebuild..."
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d \
     "${APP_SERVICES[@]}"
