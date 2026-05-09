@@ -4,7 +4,6 @@ import {
   supabase,
   ASSIGNMENT_BUCKET,
   PROFILE_BUCKET,
-  apiFetch,
   extractObjectPath,
   getSignedUrlForValue,
   removeStorageObject
@@ -15,6 +14,7 @@ import FileDropzone from '../../components/FileDropzone'
 import FilePreviewModal from '../../components/FilePreviewModal'
 import PhotoGalleryModal from '../../components/PhotoGalleryModal'
 import UploadProgressTrain from '../../components/UploadProgressTrain'
+import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 import { parseSupabaseError } from '../../utils/supabaseError'
 import {
   ASSIGNMENT_PHOTO_MAX_BYTES,
@@ -87,26 +87,11 @@ const uploadDetailForProvider = (provider, fallback) => {
   return fallback
 }
 
-const MIN_UPLOAD_ANIMATION_MS = 1400
+const MIN_UPLOAD_ANIMATION_MS = 250
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const holdUploadAnimation = async (startedAt) => {
   const remaining = MIN_UPLOAD_ANIMATION_MS - (Date.now() - startedAt)
   if (remaining > 0) await wait(remaining)
-}
-
-const resolveAssignmentUploadProvider = async (file) => {
-  const res = await apiFetch('/api/storage/upload-destination', {
-    method: 'POST',
-    body: {
-      bucket: ASSIGNMENT_BUCKET,
-      filename: file?.name || '',
-      mime_type: file?.type || '',
-      size_bytes: file?.size || 0
-    }
-  })
-
-  if (res.error) return 'local'
-  return res.data?.provider === 'google_drive' ? 'google_drive' : 'local'
 }
 
 const addCacheBuster = (url) => {
@@ -449,6 +434,16 @@ const buildLast12Months = () => {
 export default function TugasGuru() {
   const { user, profile } = useAuthStore()
   const { pushToast, setLoading } = useUIStore()
+  const {
+    activeAcademicPeriod,
+    period,
+    academicYearOptions,
+    semesterOptions,
+    setAcademicYear,
+    setSemester,
+    applyPeriodFilters,
+    academicPeriodPayload
+  } = useActiveAcademicPeriod()
 
   /* ---------- State ---------- */
   const [jadwalAll, setJadwalAll] = useState([])
@@ -565,7 +560,9 @@ export default function TugasGuru() {
     const loadJadwal = async () => {
       if (!user?.id) return
       try {
-        const { data, error } = await supabase.from('jadwal').select('*').eq('guru_id', user.id)
+        let query = supabase.from('jadwal').select('*').eq('guru_id', user.id)
+        query = applyPeriodFilters(query)
+        const { data, error } = await query
         if (error) throw error
         setJadwalAll(data || [])
       } catch (error) {
@@ -574,7 +571,7 @@ export default function TugasGuru() {
       }
     }
     loadJadwal()
-  }, [user?.id, pushToast])
+  }, [applyPeriodFilters, user?.id, pushToast])
 
   /* =========================
      3) Mapel list untuk form create
@@ -626,6 +623,7 @@ export default function TugasGuru() {
       const now = new Date()
 
       let query = supabase.from('tugas').select('*').eq('created_by', user.id)
+      query = applyPeriodFilters(query)
 
       if (selectedKelasFilter) query = query.eq('kelas', selectedKelasFilter)
       if (selectedSubject) query = query.eq('mapel', selectedSubject)
@@ -676,7 +674,9 @@ export default function TugasGuru() {
 
       const jawabanPromise =
         tugasIds.length > 0
-          ? supabase.from('tugas_jawaban').select('tugas_id, user_id, nilai').in('tugas_id', tugasIds)
+          ? applyPeriodFilters(
+              supabase.from('tugas_jawaban').select('tugas_id, user_id, nilai').in('tugas_id', tugasIds)
+            )
           : Promise.resolve({ data: [], error: null })
 
       const siswaPromise =
@@ -750,6 +750,7 @@ export default function TugasGuru() {
       setLoading(false)
     }
   }, [
+    applyPeriodFilters,
     user?.id,
     selectedKelasFilter,
     selectedSubject,
@@ -772,10 +773,12 @@ export default function TugasGuru() {
     try {
       setIsLoadingTugasPerluDinilai(true)
 
-      const { data: tugasData, error: tugasError } = await supabase
+      let tugasQuery = supabase
         .from('tugas')
         .select('*')
         .eq('created_by', user.id)
+      tugasQuery = applyPeriodFilters(tugasQuery)
+      const { data: tugasData, error: tugasError } = await tugasQuery
 
       if (tugasError) throw tugasError
       if (!tugasData || tugasData.length === 0) {
@@ -784,11 +787,13 @@ export default function TugasGuru() {
       }
 
       const tugasIds = tugasData.map((t) => t.id)
-      const { data: jawabanData, error: jawabanError } = await supabase
+      let jawabanQuery = supabase
         .from('tugas_jawaban')
         .select('id, tugas_id, user_id, nilai')
         .in('tugas_id', tugasIds)
         .eq('nilai', null)
+      jawabanQuery = applyPeriodFilters(jawabanQuery)
+      const { data: jawabanData, error: jawabanError } = await jawabanQuery
 
       if (jawabanError) throw jawabanError
 
@@ -820,7 +825,7 @@ export default function TugasGuru() {
     } finally {
       setIsLoadingTugasPerluDinilai(false)
     }
-  }, [user?.id])
+  }, [applyPeriodFilters, user?.id])
 
   useEffect(() => {
     if (user?.id) loadTugasPerluDinilai()
@@ -1041,10 +1046,6 @@ export default function TugasGuru() {
     try {
       setIsUploadingFile(true)
       setUploadProvider(null)
-      setCompressionProgress('Mengecek tujuan upload...')
-
-      const plannedProvider = await resolveAssignmentUploadProvider(file)
-      setUploadProvider(plannedProvider)
       setCompressionProgress('Mengkompresi file...')
 
       const compressed = await compressFileBeforeUpload(file)
@@ -1056,7 +1057,7 @@ export default function TugasGuru() {
 
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from(ASSIGNMENT_BUCKET)
-        .upload(filePath, compressed, { upsert: false, cacheControl: '3600' })
+        .upload(filePath, compressed, { upsert: false, cacheControl: '3600', fastLocal: true })
 
       if (uploadError) {
         // RLS storage paling sering muncul di sini
@@ -1066,6 +1067,7 @@ export default function TugasGuru() {
       const storedFileValue = uploadData?.path || uploadData?.fullPath || filePath
       const sizeLabel = uploadData?.uploadedSizeLabel || formatFileSize(uploadData?.uploadedSizeBytes || compressed.size)
       const storedProvider = uploadData?.provider === 'google_drive' ? 'google_drive' : 'local'
+      setUploadProvider(storedProvider)
 
       if (mode === 'edit') {
         const oldPendingFile = pendingEditFile?.value
@@ -1239,7 +1241,8 @@ export default function TugasGuru() {
         mulai: new Date(form.mulai).toISOString(),
         deadline: new Date(form.deadline).toISOString(),
         file_url: form.file_url, // simpan PATH (bukan URL)
-        created_by: user.id
+        created_by: user.id,
+        ...academicPeriodPayload
       }
 
       const { error } = await supabase.from('tugas').insert(payload)
@@ -1928,6 +1931,10 @@ export default function TugasGuru() {
             </div>
           </div>
 
+          <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+            Periode tugas baru: <b>{period.tahunAjaran}</b> - Semester <b>{period.semester}</b>
+          </div>
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mt-4">
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-2">Keterangan Tugas</label>
@@ -2137,6 +2144,42 @@ export default function TugasGuru() {
                     <option value="active">Aktif</option>
                     <option value="expired">Expired</option>
                   </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Tahun Ajaran</label>
+                  <select
+                    className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+                    value={period.tahunAjaran}
+                    onChange={(e) => setAcademicYear(e.target.value)}
+                  >
+                    {academicYearOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="mt-1 text-[11px] text-slate-500">
+                    Aktif: {activeAcademicPeriod.tahunAjaran}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Semester</label>
+                  <select
+                    className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+                    value={period.semester}
+                    onChange={(e) => setSemester(e.target.value)}
+                  >
+                    {semesterOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="mt-1 text-[11px] text-slate-500">
+                    Aktif: {activeAcademicPeriod.semester}
+                  </div>
                 </div>
 
                 <div>

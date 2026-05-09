@@ -499,7 +499,8 @@ const RingkasanKelasTable = ({
   canClickIzin,
   izinDisabledReason,
   onHadir,
-  onIzin
+  onIzin,
+  periodFilter
 }) => {
   const [dataSiswa, setDataSiswa] = useState([])
   const [isLoading, setIsLoading] = useState(false)
@@ -535,12 +536,15 @@ const RingkasanKelasTable = ({
 
       let absensiData = []
       if (mapel) {
-        const { data, error: absensiError } = await supabase
+        let absensiQuery = supabase
           .from('absensi')
           .select('uid, status, komentar, oleh, waktu, nama')
           .eq('kelas', kelas)
           .eq('mapel', mapel)
           .eq('tanggal', tanggal)
+        if (periodFilter?.tahunAjaran) absensiQuery = absensiQuery.eq('tahun_ajaran', periodFilter.tahunAjaran)
+        if (periodFilter?.semester) absensiQuery = absensiQuery.eq('semester', periodFilter.semester)
+        const { data, error: absensiError } = await absensiQuery
 
         if (absensiError) throw absensiError
         absensiData = data || []
@@ -586,7 +590,7 @@ const RingkasanKelasTable = ({
     } finally {
       setIsLoading(false)
     }
-  }, [kelas, mapel, tanggal])
+  }, [kelas, mapel, tanggal, periodFilter?.semester, periodFilter?.tahunAjaran])
 
   useEffect(() => {
     loadDataSiswa()
@@ -2798,6 +2802,7 @@ export default function SAbsensi() {
                       izinDisabledReason={izinAvailability.reason}
                       onHadir={() => submit('Hadir')}
                       onIzin={() => setIsIzinModalOpen(true)}
+                      periodFilter={periodFilter}
                     />
                   </div>
                 </div>

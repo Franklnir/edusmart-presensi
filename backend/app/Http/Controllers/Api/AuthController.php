@@ -1714,8 +1714,14 @@ class AuthController extends ApiController
             .'<script>'
             .'const payload = '.Js::from($message).';'
             .'const targetOrigin = '.Js::from($origin).';'
-            .'if (window.opener) { window.opener.postMessage(payload, targetOrigin); }'
-            .'window.setTimeout(() => { window.close(); }, 250);'
+            .'let attempts = 0;'
+            .'const notify = () => {'
+            .'attempts += 1;'
+            .'try { if (window.opener && !window.opener.closed) window.opener.postMessage(payload, targetOrigin); } catch (error) {}'
+            .'};'
+            .'notify();'
+            .'const timer = window.setInterval(() => { notify(); if (attempts >= 8) window.clearInterval(timer); }, 120);'
+            .'window.setTimeout(() => { window.clearInterval(timer); window.close(); }, 1200);'
             .'</script></body></html>';
 
         return response($html, 200)->header('Content-Type', 'text/html; charset=UTF-8');

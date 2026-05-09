@@ -54,7 +54,10 @@ class DbController extends ApiController
         'absensi',
         'absensi_ajuan',
         'absensi_settings',
+        'absensi_eskul',
         'jam_kosong',
+        'ekskul_anggota',
+        'anggota_ekskul',
     ];
 
     private const ACADEMIC_DEFAULT_SCOPE_TABLES = [
@@ -64,7 +67,10 @@ class DbController extends ApiController
         'absensi',
         'absensi_ajuan',
         'absensi_settings',
+        'absensi_eskul',
         'jam_kosong',
+        'ekskul_anggota',
+        'anggota_ekskul',
     ];
 
     private const ACADEMIC_DATE_FILTER_COLUMNS = [
@@ -3654,6 +3660,10 @@ class DbController extends ApiController
             return $this->cohortForStudent($row['uid'] ?? null, $tenantId);
         }
 
+        if (in_array($table, ['absensi_eskul', 'ekskul_anggota', 'anggota_ekskul'], true)) {
+            return $this->cohortForStudent($row['user_id'] ?? null, $tenantId);
+        }
+
         return null;
     }
 
@@ -3998,6 +4008,7 @@ class DbController extends ApiController
 
         $existingMembershipQuery = DB::table('ekskul_anggota')->where('user_id', $userId);
         $this->applyTenantFilter($existingMembershipQuery);
+        $this->applyCurrentAcademicPeriodToQuery($existingMembershipQuery, 'ekskul_anggota');
         $existingIds = array_map(
             fn ($id) => (string) $id,
             $existingMembershipQuery->pluck('ekskul_id')->filter()->values()->all()
@@ -4019,6 +4030,7 @@ class DbController extends ApiController
 
         $targetQuery = DB::table('ekskul_anggota')->where('user_id', $userId);
         $this->applyTenantFilter($targetQuery);
+        $this->applyCurrentAcademicPeriodToQuery($targetQuery, 'ekskul_anggota');
         $this->applyFilters($targetQuery, $request->input('filters', []));
         $targets = $targetQuery->get(['ekskul_id']);
 

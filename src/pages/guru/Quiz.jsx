@@ -5,6 +5,7 @@ import { useUIStore } from '../../store/useUIStore'
 import { formatDateTime } from '../../lib/time'
 import ProfileAvatar from '../../components/ProfileAvatar'
 import FilePreviewModal from '../../components/FilePreviewModal'
+import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 
 const POINT_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20, 25, 30]
 const QUIZ_MAX_POINTS = 100
@@ -318,6 +319,16 @@ const ONLINE_ACTIVE_SECONDS = 120
 export default function GuruQuiz() {
   const { user } = useAuthStore()
   const { pushToast, setLoading } = useUIStore()
+  const {
+    activeAcademicPeriod,
+    period,
+    academicYearOptions,
+    semesterOptions,
+    setAcademicYear,
+    setSemester,
+    applyPeriodFilters,
+    academicPeriodPayload
+  } = useActiveAcademicPeriod()
 
   const [jadwal, setJadwal] = useState([])
   const [kelasList, setKelasList] = useState([])
@@ -810,14 +821,16 @@ export default function GuruQuiz() {
     const loadJadwal = async () => {
       if (!user?.id) return
       try {
-        const { data } = await supabase.from('jadwal').select('*').eq('guru_id', user.id)
+        let query = supabase.from('jadwal').select('*').eq('guru_id', user.id)
+        query = applyPeriodFilters(query)
+        const { data } = await query
         setJadwal(data || [])
       } catch (err) {
         console.error(err)
       }
     }
     loadJadwal()
-  }, [user?.id])
+  }, [applyPeriodFilters, user?.id])
 
   useEffect(() => {
     const timer = setInterval(() => setNowTick(new Date()), 1000)
@@ -865,12 +878,14 @@ export default function GuruQuiz() {
       setSelectedQuizId('')
       return
     }
-    const { data } = await supabase
+    let quizQuery = supabase
       .from('quizzes')
       .select('*')
       .eq('kelas_id', selectedKelas)
       .eq('mapel', selectedMapel)
       .order('created_at', { ascending: false })
+    quizQuery = applyPeriodFilters(quizQuery)
+    const { data } = await quizQuery
 
     const rows = data || []
     setQuizList(rows)
@@ -893,18 +908,22 @@ export default function GuruQuiz() {
 
     let submissionList = []
     try {
-      const { data, error } = await supabase
+      let submissionQuery = supabase
         .from('quiz_submissions')
         .select('id, quiz_id, siswa_id, status, essay_review_completed_at')
         .in('quiz_id', quizIds)
+      submissionQuery = applyPeriodFilters(submissionQuery)
+      const { data, error } = await submissionQuery
       if (error) throw error
       submissionList = data || []
     } catch (err) {
       if (/essay_review_completed_at/i.test(String(err?.message || ''))) {
-        const { data } = await supabase
+        let fallbackSubmissionQuery = supabase
           .from('quiz_submissions')
           .select('id, quiz_id, siswa_id, status')
           .in('quiz_id', quizIds)
+        fallbackSubmissionQuery = applyPeriodFilters(fallbackSubmissionQuery)
+        const { data } = await fallbackSubmissionQuery
         submissionList = (data || []).map((row) => ({ ...row, essay_review_completed_at: null }))
       } else {
         throw err
@@ -1016,7 +1035,7 @@ export default function GuruQuiz() {
   useEffect(() => {
     loadQuizzes()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedKelas, selectedMapel, quizRealtimeTick])
+  }, [selectedKelas, selectedMapel, quizRealtimeTick, period.tahunAjaran, period.semester])
 
   const loadQuizDetails = async () => {
     if (!selectedQuizId) {
@@ -1075,10 +1094,12 @@ export default function GuruQuiz() {
         }
       }
 
-      const { data: submissionRows } = await supabase
+      let submissionQuery = supabase
         .from('quiz_submissions')
         .select('*')
         .eq('quiz_id', selectedQuizId)
+      submissionQuery = applyPeriodFilters(submissionQuery)
+      const { data: submissionRows } = await submissionQuery
 
       const submissionMap = new Map((submissionRows || []).map((s) => [s.siswa_id, s]))
       const peserta = (siswaRows || []).map((s) => ({
@@ -1211,7 +1232,7 @@ export default function GuruQuiz() {
   useEffect(() => {
     loadQuizDetails()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedQuizId, detailRealtimeTick])
+  }, [selectedQuizId, detailRealtimeTick, period.tahunAjaran, period.semester])
 
   useEffect(() => {
     setDetailStudent(null)
@@ -1426,6 +1447,7 @@ export default function GuruQuiz() {
       live_started_at: null,
       duration_minutes: quizForm.mode !== 'regular' ? 60 : null,
       result_visible_to_students: false,
+      ...academicPeriodPayload,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     }
@@ -2235,7 +2257,7 @@ export default function GuruQuiz() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4 mt-5">
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-2">Kelas</label>
               <select
@@ -2280,6 +2302,40 @@ export default function GuruQuiz() {
                   </option>
                 ))}
               </select>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">Tahun Ajaran</label>
+              <select
+                className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white text-sm shadow-sm"
+                value={period.tahunAjaran}
+                onChange={(e) => setAcademicYear(e.target.value)}
+              >
+                {academicYearOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <div className="mt-1 text-[11px] text-slate-500">
+                Aktif: {activeAcademicPeriod.tahunAjaran}
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">Semester</label>
+              <select
+                className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white text-sm shadow-sm"
+                value={period.semester}
+                onChange={(e) => setSemester(e.target.value)}
+              >
+                {semesterOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+              <div className="mt-1 text-[11px] text-slate-500">
+                Aktif: {activeAcademicPeriod.semester}
+              </div>
             </div>
           </div>
         </div>
@@ -2678,8 +2734,45 @@ export default function GuruQuiz() {
                       Belum ada soal.
                     </div>
                   )}
+                  {questions.length > 0 && (
+                    <div className="sticky top-3 z-10 rounded-2xl border border-indigo-100 bg-white/95 p-3 shadow-sm backdrop-blur">
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                          Navigasi Soal
+                        </span>
+                        <span className="text-xs font-semibold text-slate-600">
+                          {questions.length} soal
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {questions.map((question) => (
+                          <button
+                            key={`nav-${question.id}`}
+                            type="button"
+                            onClick={() => {
+                              document
+                                .getElementById(`quiz-question-${question.id}`)
+                                ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                            }}
+                            className={`h-9 min-w-9 rounded-xl border px-3 text-sm font-bold transition-colors ${
+                              normalizeQuestionType(question.question_type) === 'essay'
+                                ? 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'
+                                : 'border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
+                            }`}
+                            title={`Soal ${question.nomor} - ${getQuestionTypeLabel(question.question_type)}`}
+                          >
+                            {question.nomor}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   {questions.map((q) => (
-                    <div key={q.id} className="border border-slate-200 rounded-2xl p-4 bg-white transition-all duration-300 hover:shadow-sm hover:border-indigo-200">
+                    <div
+                      key={q.id}
+                      id={`quiz-question-${q.id}`}
+                      className="scroll-mt-28 border border-slate-200 rounded-2xl p-4 bg-white transition-all duration-300 hover:shadow-sm hover:border-indigo-200"
+                    >
                       <div className="flex items-center justify-between">
                         <div className="font-semibold text-slate-900">
                           Soal {q.nomor} • {q.poin} poin

@@ -5,6 +5,7 @@ import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import { formatDateTime } from '../../lib/time'
 import FilePreviewModal from '../../components/FilePreviewModal'
+import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 
 const safeDate = (value) => {
   if (!value) return null
@@ -342,6 +343,7 @@ export default function SiswaQuiz() {
 
   const { user, profile } = useAuthStore()
   const { pushToast, setLoading } = useUIStore()
+  const { activeAcademicPeriod, period, applyPeriodFilters } = useActiveAcademicPeriod()
 
   const [quizList, setQuizList] = useState([])
   const [quizLoadDone, setQuizLoadDone] = useState(false)
@@ -874,17 +876,21 @@ export default function SiswaQuiz() {
     try {
       setQuizLoadDone(false)
       setLoading(true)
-      const { data: quizRows, error } = await supabase
+      let quizQuery = supabase
         .from('quizzes')
         .select('*')
         .eq('kelas_id', kelasId)
         .order('created_at', { ascending: false })
+      quizQuery = applyPeriodFilters(quizQuery)
+      const { data: quizRows, error } = await quizQuery
       if (error) throw error
 
-      const { data: submissionRows } = await supabase
+      let submissionQuery = supabase
         .from('quiz_submissions')
         .select('*')
         .eq('siswa_id', user.id)
+      submissionQuery = applyPeriodFilters(submissionQuery)
+      const { data: submissionRows } = await submissionQuery
 
       const submissionMap = new Map()
       ;(submissionRows || []).forEach((row) => {
@@ -915,7 +921,7 @@ export default function SiswaQuiz() {
   useEffect(() => {
     if (user?.id && kelasId) loadQuizzes()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, kelasId, quizRealtimeTick])
+  }, [user?.id, kelasId, quizRealtimeTick, period.tahunAjaran, period.semester])
 
   useEffect(() => {
     if (!user?.id || !kelasId) return undefined
@@ -1078,12 +1084,13 @@ export default function SiswaQuiz() {
 
       let submissionRow = selectedQuiz.submission
       if (!submissionRow) {
-        const { data: sub, error: subError } = await supabase
+        let submissionQuery = supabase
           .from('quiz_submissions')
           .select('*')
           .eq('quiz_id', targetQuizId)
           .eq('siswa_id', user.id)
-          .maybeSingle()
+        submissionQuery = applyPeriodFilters(submissionQuery)
+        const { data: sub, error: subError } = await submissionQuery.maybeSingle()
         if (subError) throw subError
         submissionRow = sub || null
       }
@@ -1134,7 +1141,7 @@ export default function SiswaQuiz() {
   useEffect(() => {
     loadQuizDetails()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedQuizId, selectedQuiz?.id, selectedQuiz?.submission?.id, user?.id, quizDetailsRetryTick, quizDetailRealtimeTick])
+  }, [selectedQuizId, selectedQuiz?.id, selectedQuiz?.submission?.id, user?.id, quizDetailsRetryTick, quizDetailRealtimeTick, period.tahunAjaran, period.semester])
 
   useEffect(() => {
     if (!isSessionPage || !selectedQuiz?.id) return
@@ -2107,6 +2114,16 @@ export default function SiswaQuiz() {
                 <div className="text-xs text-slate-500">Siswa</div>
                 <div className="font-semibold text-slate-800">{profile?.nama || '-'}</div>
                 <div className="text-xs text-slate-500 mt-1">Kelas: {kelasId || '-'}</div>
+              </div>
+              <div className="bg-gradient-to-r from-emerald-50 to-cyan-50 border border-emerald-100 rounded-2xl px-4 py-3">
+                <div className="text-xs text-emerald-700 font-semibold">Periode Aktif</div>
+                <div className="font-semibold text-slate-800">{period.tahunAjaran}</div>
+                <div className="text-xs text-slate-500 mt-1">
+                  Semester {period.semester}
+                  {period.tahunAjaran !== activeAcademicPeriod.tahunAjaran || period.semester !== activeAcademicPeriod.semester
+                    ? `, sekolah: ${activeAcademicPeriod.tahunAjaran} ${activeAcademicPeriod.semester}`
+                    : ''}
+                </div>
               </div>
               <select
                 className="border border-slate-200 rounded-2xl px-4 py-3 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"

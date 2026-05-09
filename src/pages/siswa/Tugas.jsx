@@ -5,7 +5,6 @@ import { ImagePlus, Images } from 'lucide-react'
 import {
   supabase,
   ASSIGNMENT_BUCKET,
-  apiFetch,
   extractObjectPath,
   getSignedUrlForValue
 } from '../../lib/supabase'
@@ -15,6 +14,7 @@ import FileDropzone from '../../components/FileDropzone'
 import FilePreviewModal from '../../components/FilePreviewModal'
 import PhotoGalleryModal from '../../components/PhotoGalleryModal'
 import UploadProgressTrain from '../../components/UploadProgressTrain'
+import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 import { parseSupabaseError } from '../../utils/supabaseError'
 import {
   ASSIGNMENT_PHOTO_MAX_BYTES,
@@ -118,26 +118,11 @@ const uploadDetailForProvider = (provider, fallback) => {
   return fallback
 }
 
-const MIN_UPLOAD_ANIMATION_MS = 1400
+const MIN_UPLOAD_ANIMATION_MS = 250
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const holdUploadAnimation = async (startedAt) => {
   const remaining = MIN_UPLOAD_ANIMATION_MS - (Date.now() - startedAt)
   if (remaining > 0) await wait(remaining)
-}
-
-const resolveAssignmentUploadProvider = async (file) => {
-  const res = await apiFetch('/api/storage/upload-destination', {
-    method: 'POST',
-    body: {
-      bucket: ASSIGNMENT_BUCKET,
-      filename: file?.name || '',
-      mime_type: file?.type || '',
-      size_bytes: file?.size || 0
-    }
-  })
-
-  if (res.error) return 'local'
-  return res.data?.provider === 'google_drive' ? 'google_drive' : 'local'
 }
 
 const looksLikeDomainUrl = (v = '') => /^[a-z0-9-]+(\.[a-z0-9-]+)+(?::\d+)?(\/|$)/i.test(String(v || '').trim())
@@ -454,6 +439,7 @@ function MiniCard({ title, value, icon, cls }) {
 export default function TugasSiswa() {
   const { user, profile } = useAuthStore()
   const { pushToast, setLoading } = useUIStore()
+  const { activeAcademicPeriod, period, applyPeriodFilters, academicPeriodPayload } = useActiveAcademicPeriod()
   const [searchParams] = useSearchParams()
   const requestedTugasId = String(searchParams.get('tugas') || '').trim()
 
@@ -534,11 +520,13 @@ export default function TugasSiswa() {
 
     try {
       setIsMapelLoading(true)
-      const { data, error } = await supabase
+      let query = supabase
         .from('tugas')
         .select(TUGAS_MAPEL_COLUMNS)
         .eq('kelas', kelas)
         .order('mapel', { ascending: true })
+      query = applyPeriodFilters(query)
+      const { data, error } = await query
 
       if (error) throw error
       if (requestId !== mapelRequestSeqRef.current) return
@@ -554,7 +542,7 @@ export default function TugasSiswa() {
         setIsMapelLoading(false)
       }
     }
-  }, [user?.id, selectedKelas, kelasSiswa])
+  }, [applyPeriodFilters, user?.id, selectedKelas, kelasSiswa])
 
   const loadTugasList = useCallback(async () => {
     if (!user?.id) return
@@ -568,6 +556,7 @@ export default function TugasSiswa() {
 
       // tugas untuk kelas siswa
       let query = supabase.from('tugas').select(TUGAS_LIST_COLUMNS).eq('kelas', kelas)
+      query = applyPeriodFilters(query)
 
       if (selectedMapel) query = query.eq('mapel', selectedMapel)
 
@@ -625,11 +614,13 @@ export default function TugasSiswa() {
 
       // ambil jawaban milik siswa ini untuk tugas-tugas tersebut
       const tugasIds = tugasArr.map((t) => t.id)
-      const { data: jawabanData, error: jErr } = await supabase
+      let jawabanQuery = supabase
         .from('tugas_jawaban')
         .select(TUGAS_JAWABAN_LIST_COLUMNS)
         .eq('user_id', user.id)
         .in('tugas_id', tugasIds)
+      jawabanQuery = applyPeriodFilters(jawabanQuery)
+      const { data: jawabanData, error: jErr } = await jawabanQuery
 
       if (jErr) throw jErr
       if (requestId !== listRequestSeqRef.current) return
@@ -684,6 +675,7 @@ export default function TugasSiswa() {
       }
     }
   }, [
+    applyPeriodFilters,
     user?.id,
     selectedKelas,
     kelasSiswa,
@@ -746,21 +738,25 @@ export default function TugasSiswa() {
       setIsLoadingDetail(true)
 
       // ambil data tugas terbaru (optional, biar sinkron)
-      const { data: tugasData, error: tErr } = await supabase
+      let tugasQuery = supabase
         .from('tugas')
         .select(TUGAS_LIST_COLUMNS)
         .eq('id', tugas.id)
         .single()
+      tugasQuery = applyPeriodFilters(tugasQuery)
+      const { data: tugasData, error: tErr } = await tugasQuery
 
       if (tErr) throw tErr
 
       // ambil jawaban milik siswa untuk tugas ini
-      const { data: jawabanData, error: jErr } = await supabase
+      let jawabanQuery = supabase
         .from('tugas_jawaban')
         .select('id, tugas_id, user_id, file_url, file_urls, link_url, nilai, status, waktu_submit')
         .eq('tugas_id', tugas.id)
         .eq('user_id', user.id)
         .maybeSingle()
+      jawabanQuery = applyPeriodFilters(jawabanQuery)
+      const { data: jawabanData, error: jErr } = await jawabanQuery
 
       if (jErr) throw jErr
 
@@ -881,10 +877,6 @@ export default function TugasSiswa() {
     try {
       setIsUploading(true)
       setAnswerUploadProvider(null)
-      setUploadProgress('Mengecek tujuan upload...')
-
-      const plannedProvider = await resolveAssignmentUploadProvider(file)
-      setAnswerUploadProvider(plannedProvider)
       setUploadProgress('Mengkompresi file...')
 
       const compressed = await compressFileBeforeUpload(file)
@@ -896,13 +888,14 @@ export default function TugasSiswa() {
 
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from(ASSIGNMENT_BUCKET)
-        .upload(filePath, compressed, { upsert: false, cacheControl: '3600' })
+        .upload(filePath, compressed, { upsert: false, cacheControl: '3600', fastLocal: true })
 
       if (uploadError) throw new Error(uploadError.message)
 
       const storedFileValue = uploadData?.path || uploadData?.fullPath || filePath
       const sizeLabel = uploadData?.uploadedSizeLabel || formatFileSize(uploadData?.uploadedSizeBytes || compressed.size)
       const storedProvider = uploadData?.provider === 'google_drive' ? 'google_drive' : 'local'
+      setAnswerUploadProvider(storedProvider)
 
       const oldPendingFile = pendingJawabanFile?.value
       if (oldPendingFile && oldPendingFile !== storedFileValue) {
@@ -974,30 +967,24 @@ export default function TugasSiswa() {
       setAnswerUploadProvider(null)
       setUploadProgress(`Menyiapkan ${files.length} foto...`)
 
-      const uploaded = []
-      for (let i = 0; i < files.length; i += 1) {
-        const file = files[i]
-        setUploadProgress(`Mengkompresi foto ${i + 1}/${files.length}...`)
-
-        const plannedProvider = await resolveAssignmentUploadProvider(file)
-        setAnswerUploadProvider(plannedProvider)
-
+      setUploadProgress(`Mengupload ${files.length} foto...`)
+      const uploaded = await Promise.all(files.map(async (file, i) => {
         const compressed = await compressImage(file, ASSIGNMENT_PHOTO_MAX_BYTES / 1024)
         const safeName = sanitizeFileName(compressed.name || `foto-${i + 1}.jpg`)
         const filePath = `${selectedTugas.id}/${user.id}-${Date.now()}-${i + 1}-${safeName}`
 
-        setUploadProgress(`Mengupload foto ${i + 1}/${files.length}...`)
         const { data: uploadData, error: uploadError } = await supabase.storage
           .from(ASSIGNMENT_BUCKET)
-          .upload(filePath, compressed, { upsert: false, cacheControl: '3600' })
+          .upload(filePath, compressed, { upsert: false, cacheControl: '3600', fastLocal: true })
 
         if (uploadError) throw new Error(uploadError.message)
 
         const storedFileValue = uploadData?.path || uploadData?.fullPath || filePath
         const sizeLabel = uploadData?.uploadedSizeLabel || formatFileSize(uploadData?.uploadedSizeBytes || compressed.size)
         const storedProvider = uploadData?.provider === 'google_drive' ? 'google_drive' : 'local'
-        uploaded.push({ value: storedFileValue, sizeLabel, provider: storedProvider })
-      }
+        return { value: storedFileValue, sizeLabel, provider: storedProvider }
+      }))
+      setAnswerUploadProvider(uploaded.some((item) => item.provider === 'google_drive') ? 'google_drive' : 'local')
 
       const stalePending = [
         pendingJawabanFile?.value,
@@ -1200,7 +1187,8 @@ export default function TugasSiswa() {
         file_urls: photoValues.length > 0 ? photoValues : null,
         link_url: safeLink || null,
         status: existing?.nilai != null ? 'dinilai' : 'menunggu',
-        waktu_submit: new Date().toISOString()
+        waktu_submit: new Date().toISOString(),
+        ...academicPeriodPayload
       }
 
       if (existing?.id) {
@@ -1399,6 +1387,16 @@ export default function TugasSiswa() {
                 <div className="text-xs text-slate-500">Siswa</div>
                 <div className="font-semibold text-slate-800">{profile?.nama || '-'}</div>
                 <div className="text-xs text-slate-500 mt-1">Kelas: {kelasSiswa || '-'}</div>
+              </div>
+              <div className="bg-purple-50 border border-purple-100 rounded-2xl px-4 py-3">
+                <div className="text-xs text-purple-600">Periode Aktif</div>
+                <div className="font-semibold text-purple-900">{period.tahunAjaran}</div>
+                <div className="text-xs text-purple-700 mt-1">
+                  Semester {period.semester}
+                  {period.tahunAjaran !== activeAcademicPeriod.tahunAjaran || period.semester !== activeAcademicPeriod.semester
+                    ? ` • Aktif sekolah ${activeAcademicPeriod.tahunAjaran} ${activeAcademicPeriod.semester}`
+                    : ''}
+                </div>
               </div>
 
               <button

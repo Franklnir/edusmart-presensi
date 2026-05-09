@@ -1454,7 +1454,6 @@ export default function LaporanRekap() {
 
     try {
       setLoading(true)
-      setRekapWaliData(null)
 
       // Hard guard: hanya kelas yang memang diwali guru ini
       if (
@@ -1613,10 +1612,12 @@ export default function LaporanRekap() {
       const siswaIds = (siswaData || []).map((s) => s.id).filter(Boolean)
       let ekskulAnggotaList = []
       if (siswaIds.length) {
-        const { data, error } = await supabase
+        let ekskulAnggotaQuery = supabase
           .from('ekskul_anggota')
           .select('user_id, ekskul_id')
           .in('user_id', siswaIds)
+        ekskulAnggotaQuery = applyReportAcademicFilters(ekskulAnggotaQuery)
+        const { data, error } = await ekskulAnggotaQuery
         if (error) throw error
         ekskulAnggotaList = data || []
       }
@@ -1637,13 +1638,15 @@ export default function LaporanRekap() {
 
       let absensiEskulList = []
       if (siswaIds.length && ekskulIds.length) {
-        const { data, error } = await supabase
+        let absensiEskulQuery = supabase
           .from('absensi_eskul')
           .select('user_id, ekskul_id, status, tanggal')
           .in('user_id', siswaIds)
           .in('ekskul_id', ekskulIds)
           .gte('tanggal', dateStrings[0])
           .lte('tanggal', dateStrings[dateStrings.length - 1])
+        absensiEskulQuery = applyReportAcademicFilters(absensiEskulQuery)
+        const { data, error } = await absensiEskulQuery
         if (error) throw error
         absensiEskulList = data || []
       }
@@ -2435,27 +2438,29 @@ export default function LaporanRekap() {
 
   // REALTIME TRIGGER
   useEffect(() => {
-    if (selectedKelas && selectedMapel) {
-      if (activeTab === 'absensi') loadRekapAbsensi()
-      else if (activeTab === 'tugas') loadRekapTugas()
-      else if (activeTab === 'quiz') loadRekapQuiz()
-    }
     if (activeTab === 'rekap') {
       loadRekapWali()
+      return
     }
 
     if (!selectedKelas || !selectedMapel) {
-      setAbsensiData(null)
-      setTugasData(null)
-      setQuizData(null)
+      if (activeTab === 'absensi') setAbsensiData(null)
+      else if (activeTab === 'tugas') setTugasData(null)
+      else if (activeTab === 'quiz') setQuizData(null)
+      return
     }
+
+    if (activeTab === 'absensi') loadRekapAbsensi()
+    else if (activeTab === 'tugas') loadRekapTugas()
+    else if (activeTab === 'quiz') loadRekapQuiz()
   }, [
+    activeTab,
+    loadRekapAbsensi,
+    loadRekapQuiz,
+    loadRekapTugas,
+    loadRekapWali,
     selectedKelas,
-    selectedMapel,
-    selectedBulan,
-    selectedWaliKelas,
-    tahun,
-    activeTab
+    selectedMapel
   ])
 
   // ==============================
@@ -2657,12 +2662,13 @@ export default function LaporanRekap() {
         nilaiFinal = Math.round(n)
       }
 
-      const { data: existing, error: fetchErr } = await supabase
+      let existingJawabanQuery = supabase
         .from('tugas_jawaban')
         .select('id')
         .eq('user_id', siswaId)
         .eq('tugas_id', tugasId)
-        .maybeSingle()
+      existingJawabanQuery = applyReportAcademicFilters(existingJawabanQuery)
+      const { data: existing, error: fetchErr } = await existingJawabanQuery.maybeSingle()
       if (fetchErr) throw fetchErr
 
       if (existing) {
@@ -2719,12 +2725,13 @@ export default function LaporanRekap() {
         scoreFinal = Math.round(n)
       }
 
-      const { data: existing, error: fetchErr } = await supabase
+      let existingSubmissionQuery = supabase
         .from('quiz_submissions')
         .select('id, status, created_at')
         .eq('siswa_id', siswaId)
         .eq('quiz_id', quizId)
-        .maybeSingle()
+      existingSubmissionQuery = applyReportAcademicFilters(existingSubmissionQuery)
+      const { data: existing, error: fetchErr } = await existingSubmissionQuery.maybeSingle()
       if (fetchErr) throw fetchErr
 
       const nowIso = new Date().toISOString()

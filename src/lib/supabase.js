@@ -944,6 +944,7 @@ class StorageBucket {
     form.append('path', path)
     form.append('file', uploadFile)
     if (options?.upsert) form.append('upsert', 'true')
+    if (options?.fastLocal) form.append('fast_local', 'true')
 
     const res = await apiFetch('/api/storage/upload', { method: 'POST', body: form })
 

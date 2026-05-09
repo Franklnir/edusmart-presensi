@@ -18,11 +18,22 @@ class SecureHeaders
         $response->headers->set('X-Content-Type-Options', 'nosniff');
         $response->headers->set('Referrer-Policy', 'strict-origin-when-cross-origin');
         $response->headers->set('Permissions-Policy', 'geolocation=(), camera=(), microphone=(), payment=(), usb=()');
-        $response->headers->set('Cross-Origin-Opener-Policy', 'same-origin');
+        $isGooglePopupHtml = $request->is('api/auth/google/callback')
+            || $request->is('api/auth/google/finalize-login');
+
+        $response->headers->set(
+            'Cross-Origin-Opener-Policy',
+            $isGooglePopupHtml ? 'same-origin-allow-popups' : 'same-origin'
+        );
         $response->headers->set('Cross-Origin-Resource-Policy', 'same-site');
         $response->headers->set('X-Permitted-Cross-Domain-Policies', 'none');
 
-        if ($isApiResponse) {
+        if ($isApiResponse && $isGooglePopupHtml) {
+            $response->headers->set(
+                'Content-Security-Policy',
+                "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+            );
+        } elseif ($isApiResponse) {
             $response->headers->set(
                 'Content-Security-Policy',
                 "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"

@@ -27,7 +27,7 @@ class StorageController extends ApiController
 
     private const ASSIGNMENT_PRESENTATION_MAX_BYTES = 5 * 1024 * 1024;
 
-    private const ASSIGNMENT_LOCAL_DOCUMENT_MAX_BYTES = 2 * 1024 * 1024;
+    private const ASSIGNMENT_LOCAL_DOCUMENT_MAX_BYTES = 5 * 1024 * 1024;
 
     private const QUIZ_MEDIA_IMAGE_MAX_BYTES = 70 * 1024;
 
@@ -121,6 +121,7 @@ class StorageController extends ApiController
         $path = $request->input('path');
         $file = $request->file('file');
         $upsert = filter_var($request->input('upsert', false), FILTER_VALIDATE_BOOLEAN);
+        $fastLocal = filter_var($request->input('fast_local', false), FILTER_VALIDATE_BOOLEAN);
 
         if (! $bucket || ! $path || ! $file) {
             return $this->deny('Bucket, path, dan file wajib diisi', 422);
@@ -153,7 +154,7 @@ class StorageController extends ApiController
             return $uploadPolicyError;
         }
 
-        $assignmentUsesDrive = $this->googleDriveService->canUploadAssignmentDocument(
+        $assignmentUsesDrive = ! $fastLocal && $this->googleDriveService->canUploadAssignmentDocument(
             $request,
             $bucket,
             $file
@@ -168,25 +169,27 @@ class StorageController extends ApiController
             return $imageRuleError;
         }
 
-        try {
-            $driveUpload = $this->googleDriveService->uploadAssignmentDocumentIfAvailable(
-                $request,
-                $bucket,
-                $path,
-                $file
-            );
-            if (is_array($driveUpload)) {
-                return response()->json(['data' => $driveUpload]);
-            }
-        } catch (\Throwable $e) {
-            $localLimitError = $this->validateAssignmentFileSizePolicy(
-                $bucket,
-                $file,
-                false,
-                'Google Drive sekolah tidak terhubung/penuh. Karena file akan disimpan di VPS, '
-            );
-            if ($localLimitError) {
-                return $localLimitError;
+        if (! $fastLocal) {
+            try {
+                $driveUpload = $this->googleDriveService->uploadAssignmentDocumentIfAvailable(
+                    $request,
+                    $bucket,
+                    $path,
+                    $file
+                );
+                if (is_array($driveUpload)) {
+                    return response()->json(['data' => $driveUpload]);
+                }
+            } catch (\Throwable $e) {
+                $localLimitError = $this->validateAssignmentFileSizePolicy(
+                    $bucket,
+                    $file,
+                    false,
+                    'Google Drive sekolah tidak terhubung/penuh. Karena file akan disimpan di VPS, '
+                );
+                if ($localLimitError) {
+                    return $localLimitError;
+                }
             }
         }
 
