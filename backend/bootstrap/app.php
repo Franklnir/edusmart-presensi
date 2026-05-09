@@ -1,9 +1,16 @@
 <?php
 
+use App\Http\Middleware\BlockSuspiciousRequests;
+use App\Http\Middleware\EnsureSuperAdminDomain;
+use App\Http\Middleware\EnsureTenantMatchesProfile;
+use App\Http\Middleware\ResolveTenant;
+use App\Http\Middleware\SecureHeaders;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Middleware\HandleCors;
 use Illuminate\Http\Request;
+use Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -37,7 +44,7 @@ return Application::configure(basePath: dirname(__DIR__))
         });
 
         $middleware->alias([
-            'super.domain' => \App\Http\Middleware\EnsureSuperAdminDomain::class,
+            'super.domain' => EnsureSuperAdminDomain::class,
         ]);
 
         $middleware->trustProxies(
@@ -47,18 +54,18 @@ return Application::configure(basePath: dirname(__DIR__))
                 | Request::HEADER_X_FORWARDED_PORT
                 | Request::HEADER_X_FORWARDED_PROTO
         );
-        $middleware->append(\Illuminate\Http\Middleware\HandleCors::class);
-        $middleware->append(\App\Http\Middleware\SecureHeaders::class);
-        $middleware->append(\App\Http\Middleware\BlockSuspiciousRequests::class);
+        $middleware->append(HandleCors::class);
+        $middleware->append(SecureHeaders::class);
+        $middleware->append(BlockSuspiciousRequests::class);
         $middleware->api(append: [
-            \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
-            \App\Http\Middleware\ResolveTenant::class,
-            \App\Http\Middleware\EnsureTenantMatchesProfile::class,
+            EnsureFrontendRequestsAreStateful::class,
+            ResolveTenant::class,
+            EnsureTenantMatchesProfile::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         // Force API endpoints to always return JSON errors (no redirect to web login route).
-        $exceptions->shouldRenderJsonWhen(function (Request $request, \Throwable $e): bool {
+        $exceptions->shouldRenderJsonWhen(function (Request $request, Throwable $e): bool {
             return $request->is('api/*') || $request->expectsJson();
         });
     })->create();

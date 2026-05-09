@@ -35,7 +35,7 @@ return new class extends Migration
             Schema::table('settings', function (Blueprint $table) {
                 $table->dropForeign(['approval_primary_admin_id']);
             });
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             // Ignore when foreign key does not exist.
         }
 

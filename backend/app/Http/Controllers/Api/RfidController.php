@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Services\Rfid\RfidDeviceService;
 use App\Services\Rfid\RfidIngressService;
 use App\Services\Rfid\RfidScanService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
@@ -279,7 +280,7 @@ class RfidController extends ApiController
         return Str::lower($currentTenantSlug);
     }
 
-    private function tenantRequiredResponse(): \Illuminate\Http\JsonResponse
+    private function tenantRequiredResponse(): JsonResponse
     {
         return response()->json([
             'success' => false,

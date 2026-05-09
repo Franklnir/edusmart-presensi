@@ -16,6 +16,8 @@ use App\Http\Controllers\Api\SuperAdminController;
 use App\Http\Controllers\Api\SuperPluginController;
 use App\Http\Controllers\Api\WhatsAppController;
 use App\Http\Controllers\Api\WhatsAppWebhookController;
+use App\Http\Middleware\EnsureTenantMatchesProfile;
+use App\Http\Middleware\ResolveTenant;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/health', function () {
@@ -25,32 +27,32 @@ Route::get('/health', function () {
 Route::get('/internal/tls/authorize', [InfrastructureController::class, 'authorizeTlsDomain'])
     ->middleware('throttle:api')
     ->withoutMiddleware([
-        \App\Http\Middleware\ResolveTenant::class,
-        \App\Http\Middleware\EnsureTenantMatchesProfile::class,
+        ResolveTenant::class,
+        EnsureTenantMatchesProfile::class,
     ]);
 
 Route::post('/auth/register', [AuthController::class, 'register'])->middleware('throttle:auth');
 Route::post('/auth/login', [AuthController::class, 'login'])->middleware('throttle:auth');
 Route::get('/auth/google/redirect', [AuthController::class, 'googleRedirect'])
     ->middleware(['web', 'throttle:auth'])
-    ->withoutMiddleware([\App\Http\Middleware\EnsureTenantMatchesProfile::class]);
+    ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
 Route::get('/auth/google/popup-context', [AuthController::class, 'googlePopupContext'])
     ->middleware('throttle:auth')
     ->withoutMiddleware([
-        \App\Http\Middleware\ResolveTenant::class,
-        \App\Http\Middleware\EnsureTenantMatchesProfile::class,
+        ResolveTenant::class,
+        EnsureTenantMatchesProfile::class,
     ]);
 Route::post('/auth/google/code-login', [AuthController::class, 'googleCodeLogin'])->middleware('throttle:auth');
 Route::post('/auth/google/credential-login', [AuthController::class, 'googleCredentialLogin'])->middleware('throttle:auth');
 Route::get('/auth/google/callback', [AuthController::class, 'googleCallback'])
     ->middleware(['web', 'throttle:auth'])
     ->withoutMiddleware([
-        \App\Http\Middleware\ResolveTenant::class,
-        \App\Http\Middleware\EnsureTenantMatchesProfile::class,
+        ResolveTenant::class,
+        EnsureTenantMatchesProfile::class,
     ]);
 Route::get('/auth/google/finalize-login', [AuthController::class, 'googleFinalizeLogin'])
     ->middleware(['web', 'throttle:auth'])
-    ->withoutMiddleware([\App\Http\Middleware\EnsureTenantMatchesProfile::class]);
+    ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
 Route::post('/auth/forgot-password', [AuthController::class, 'forgotPassword'])->middleware('throttle:auth');
 Route::post('/auth/reset-password', [AuthController::class, 'resetPassword'])->middleware('throttle:auth');
 Route::get('/auth/verify-email/{id}/{hash}', [AuthController::class, 'verifyEmail'])
@@ -74,26 +76,26 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->patch('/students/{id}/addit
 Route::post('/rfid/scan', [RfidController::class, 'scan'])
     ->middleware('throttle:rfid')
     ->withoutMiddleware([
-        \App\Http\Middleware\ResolveTenant::class,
-        \App\Http\Middleware\EnsureTenantMatchesProfile::class,
+        ResolveTenant::class,
+        EnsureTenantMatchesProfile::class,
     ]);
 Route::get('/rfid/mode', [RfidController::class, 'mode'])
     ->middleware('throttle:rfid')
     ->withoutMiddleware([
-        \App\Http\Middleware\ResolveTenant::class,
-        \App\Http\Middleware\EnsureTenantMatchesProfile::class,
+        ResolveTenant::class,
+        EnsureTenantMatchesProfile::class,
     ]);
 Route::post('/rfid/sync', [RfidController::class, 'sync'])
     ->middleware('throttle:rfid')
     ->withoutMiddleware([
-        \App\Http\Middleware\ResolveTenant::class,
-        \App\Http\Middleware\EnsureTenantMatchesProfile::class,
+        ResolveTenant::class,
+        EnsureTenantMatchesProfile::class,
     ]);
 Route::post('/rfid/heartbeat', [RfidController::class, 'heartbeat'])
     ->middleware('throttle:rfid')
     ->withoutMiddleware([
-        \App\Http\Middleware\ResolveTenant::class,
-        \App\Http\Middleware\EnsureTenantMatchesProfile::class,
+        ResolveTenant::class,
+        EnsureTenantMatchesProfile::class,
     ]);
 Route::post('/rfid/set-mode', [RfidController::class, 'setMode'])
     ->middleware(['auth:sanctum', 'throttle:api']);
@@ -139,14 +141,14 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->post('/admin/google-drive/d
 Route::get('/admin/google-drive/callback', [GoogleDriveController::class, 'callback'])
     ->middleware(['web', 'throttle:auth'])
     ->withoutMiddleware([
-        \App\Http\Middleware\ResolveTenant::class,
-        \App\Http\Middleware\EnsureTenantMatchesProfile::class,
+        ResolveTenant::class,
+        EnsureTenantMatchesProfile::class,
     ]);
 Route::post('/whatsapp/webhook/{secret}/{event?}', [WhatsAppWebhookController::class, 'handle'])
     ->middleware('throttle:webhook')
     ->withoutMiddleware([
-        \App\Http\Middleware\ResolveTenant::class,
-        \App\Http\Middleware\EnsureTenantMatchesProfile::class,
+        ResolveTenant::class,
+        EnsureTenantMatchesProfile::class,
     ]);
 
 Route::middleware(['auth:sanctum', 'throttle:super', 'super.domain'])->group(function () {

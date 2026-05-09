@@ -25,7 +25,7 @@ return new class extends Migration
         if (in_array($driver, ['mysql', 'mariadb'], true)) {
             try {
                 DB::statement('ALTER TABLE profiles DROP INDEX profiles_rfid_uid_unique');
-            } catch (\Throwable $e) {
+            } catch (Throwable $e) {
                 // ignore when old index is absent
             }
             DB::statement('CREATE UNIQUE INDEX profiles_tenant_rfid_uid_unique ON profiles (tenant_id, rfid_uid)');
@@ -50,7 +50,7 @@ return new class extends Migration
         if (in_array($driver, ['mysql', 'mariadb'], true)) {
             try {
                 DB::statement('DROP INDEX profiles_tenant_rfid_uid_unique ON profiles');
-            } catch (\Throwable $e) {
+            } catch (Throwable $e) {
                 // ignore when index is absent
             }
             DB::statement('CREATE UNIQUE INDEX profiles_rfid_uid_unique ON profiles (rfid_uid)');

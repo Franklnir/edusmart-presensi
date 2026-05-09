@@ -31,13 +31,13 @@ return new class extends Migration
 
         try {
             DB::statement('ALTER TABLE rfid_device_events DROP INDEX rfid_device_events_device_event_unique');
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             // Index lama mungkin sudah tidak ada di environment tertentu.
         }
 
         try {
             DB::statement('CREATE UNIQUE INDEX rfid_device_events_tenant_device_event_unique ON rfid_device_events (tenant_id, device_id, event_id)');
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             // Biarkan migration idempotent saat index sudah dibuat manual.
         }
     }
@@ -66,13 +66,13 @@ return new class extends Migration
 
         try {
             DB::statement('ALTER TABLE rfid_device_events DROP INDEX rfid_device_events_tenant_device_event_unique');
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             // Index tenant-scoped mungkin belum dibuat.
         }
 
         try {
             DB::statement('CREATE UNIQUE INDEX rfid_device_events_device_event_unique ON rfid_device_events (device_id, event_id)');
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             // Biarkan rollback idempotent saat index lama sudah ada.
         }
     }

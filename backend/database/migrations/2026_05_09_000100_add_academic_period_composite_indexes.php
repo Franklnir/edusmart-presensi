@@ -74,7 +74,7 @@ return new class extends Migration
 
                 try {
                     $table->dropIndex($indexName);
-                } catch (\Throwable $e) {
+                } catch (Throwable $e) {
                     // ignore if index doesn't exist
                 }
             });
@@ -84,7 +84,7 @@ return new class extends Migration
             Schema::table('settings', function (Blueprint $table) {
                 try {
                     $table->dropIndex('settings_tenant_tahun_idx');
-                } catch (\Throwable $e) {
+                } catch (Throwable $e) {
                     // ignore if index doesn't exist
                 }
             });

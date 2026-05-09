@@ -39,7 +39,7 @@ return new class extends Migration
             Schema::table($this->tableName, function (Blueprint $table) {
                 $table->dropUnique($this->indexName);
             });
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             // Index mungkin tidak pernah dibuat di database lama.
         }
     }

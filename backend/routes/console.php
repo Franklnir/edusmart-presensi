@@ -62,7 +62,7 @@ Artisan::command('rfid:mqtt-bridge {--once : Jalankan sekali lalu keluar} {--ten
 Artisan::command('rfid:mosquitto-sync', function (TenantMqttConfigService $configs) {
     try {
         $result = $configs->syncManagedMosquittoFiles();
-    } catch (\Throwable $e) {
+    } catch (Throwable $e) {
         $this->error('Gagal sync Mosquitto: '.$e->getMessage());
 
         return 1;

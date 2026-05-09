@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Services\GoogleDrive\GoogleDriveService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -769,7 +770,7 @@ class StorageController extends ApiController
         return in_array($mime, ['application/pdf', 'text/plain'], true);
     }
 
-    private function validateImageSizePolicy(string $bucket, string $path, $file): ?\Illuminate\Http\JsonResponse
+    private function validateImageSizePolicy(string $bucket, string $path, $file): ?JsonResponse
     {
         if (! $this->isImageUpload($file)) {
             return null;
@@ -818,7 +819,7 @@ class StorageController extends ApiController
         return null;
     }
 
-    private function validateQuizMediaTypePolicy(string $bucket, $file): ?\Illuminate\Http\JsonResponse
+    private function validateQuizMediaTypePolicy(string $bucket, $file): ?JsonResponse
     {
         if ($bucket !== 'quiz-media') {
             return null;
@@ -848,7 +849,7 @@ class StorageController extends ApiController
         UploadedFile $file,
         bool $usesDrive = false,
         string $messagePrefix = ''
-    ): ?\Illuminate\Http\JsonResponse {
+    ): ?JsonResponse {
         if ($bucket !== 'assignments') {
             return null;
         }
@@ -888,7 +889,7 @@ class StorageController extends ApiController
         ], 422);
     }
 
-    private function validateUploadPolicy(string $bucket, UploadedFile $file): ?\Illuminate\Http\JsonResponse
+    private function validateUploadPolicy(string $bucket, UploadedFile $file): ?JsonResponse
     {
         $policy = self::UPLOAD_POLICY[$bucket] ?? null;
         if (! is_array($policy)) {
