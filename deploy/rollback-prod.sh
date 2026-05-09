@@ -10,6 +10,7 @@ TARGET_REF=""
 RESTORE_DB_FILE=""
 SKIP_PRE_BACKUP="false"
 APP_SERVICES=(backend worker scheduler rfid_bridge nginx caddy)
+IMAGE_SERVICES=(backend nginx)
 
 usage() {
   cat <<'USAGE'
@@ -25,8 +26,8 @@ Options:
   -h, --help              Tampilkan bantuan
 
 Contoh:
-  deploy/rollback-prod.sh --ref v1.4.2
-  deploy/rollback-prod.sh --ref 8d4a1f2 --restore-db backups/pre-release-2026-02-21.sql.gz
+  EDUSMART_BACKEND_IMAGE=ghcr.io/org/repo/backend:sha EDUSMART_NGINX_IMAGE=ghcr.io/org/repo/nginx:sha deploy/rollback-prod.sh --ref v1.4.2
+  EDUSMART_BACKEND_IMAGE=ghcr.io/org/repo/backend:sha EDUSMART_NGINX_IMAGE=ghcr.io/org/repo/nginx:sha deploy/rollback-prod.sh --ref 8d4a1f2 --restore-db backups/pre-release-2026-02-21.sql.gz
 USAGE
 }
 
@@ -149,8 +150,10 @@ fi
 echo "[3/7] Checkout target ref: $TARGET_REF"
 git checkout "$TARGET_REF"
 
-echo "[4/7] Rebuild & restart service produksi..."
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --build \
+echo "[4/7] Pull image registry & restart service produksi tanpa build lokal..."
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" pull \
+  "${IMAGE_SERVICES[@]}"
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-build \
   "${APP_SERVICES[@]}"
 
 if [[ -n "$RESTORE_DB_FILE" ]]; then

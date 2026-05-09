@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Support\AcademicPeriod;
 use App\Traits\HasTenantBackupLogic;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -98,15 +99,27 @@ class SettingsController extends ApiController
             'manual_jam_pulang_mulai', 'manual_jam_pulang_selesai',
             'visi', 'misi', 'link_instagram', 'link_facebook', 'link_youtube', 'link_tiktok',
             'auto_alpha_enabled',
-            'ranking_weight_tugas', 'ranking_weight_quiz', 'ranking_weight_absensi',
-            'ranking_tiebreak_order', 'ranking_core_mapel', 'ranking_policy_updated_at',
-            'nilai_freeze_enabled', 'nilai_freeze_start', 'nilai_freeze_end', 'nilai_freeze_reason',
-            'nilai_freeze_updated_by', 'nilai_freeze_updated_at',
             'approval_maker_checker_enabled', 'approval_require_second_approver',
             'anomaly_alert_enabled', 'anomaly_bulk_threshold',
         ];
 
         $update = array_intersect_key($payload, array_flip($allowed));
+        if (array_key_exists('tahun_ajaran', $update)) {
+            $year = AcademicPeriod::normalizeAcademicYear($update['tahun_ajaran']);
+            if (! $year) {
+                return $this->deny('Tahun ajaran harus berformat 2025/2026', 422);
+            }
+            $update['tahun_ajaran'] = $year;
+        }
+
+        if (array_key_exists('semester_aktif', $update)) {
+            $semester = AcademicPeriod::normalizeSemester($update['semester_aktif']);
+            if (! $semester) {
+                return $this->deny('Semester aktif harus Ganjil atau Genap', 422);
+            }
+            $update['semester_aktif'] = $semester;
+        }
+
         $update['updated_at'] = now();
 
         $existing = DB::table('settings')->where('tenant_id', $tenantId)->orderBy('id')->first();

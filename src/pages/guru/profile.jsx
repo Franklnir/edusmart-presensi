@@ -149,7 +149,7 @@ async function savePhotoPathToProfile(uid, filePath) {
 }
 
 export default function ProfileGuru() {
-  const { user, profile, logout, refreshProfile, linkGoogleCredential } = useAuthStore()
+  const { user, profile, logout, refreshProfile, linkGoogleCredential, refreshAuthSession } = useAuthStore()
   const { pushToast } = useUIStore()
 
   const fileInputRef = useRef(null)
@@ -552,6 +552,26 @@ export default function ProfileGuru() {
     }
   }
 
+  const handleLinkGoogleOAuthSuccess = async () => {
+    if (googleLinkBlockedReason) {
+      pushToast('info', googleLinkBlockedReason)
+      return
+    }
+
+    if (googleLinked) {
+      pushToast('info', 'Akun Google sudah tertaut.')
+      return
+    }
+
+    setLinkingGoogle(true)
+    try {
+      await refreshAuthSession({ successMessage: 'Akun Google berhasil ditautkan' })
+      await refreshProfile()
+    } finally {
+      setLinkingGoogle(false)
+    }
+  }
+
   const handleUnlinkGoogle = async () => {
     if (!googleLinked) {
       pushToast('info', 'Akun Google belum tertaut.')
@@ -716,6 +736,7 @@ export default function ProfileGuru() {
               <GoogleCredentialButton
                 mode="link"
                 onCredential={handleLinkGoogle}
+                onOAuthSuccess={handleLinkGoogleOAuthSuccess}
                 busy={linkingGoogle}
                 className="w-full md:w-[260px]"
                 buttonClassName="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-70"

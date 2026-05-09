@@ -1,10 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { apiFetch, supabase } from '../../lib/supabase'
-import {
-  initializeGoogleSignIn,
-  loadGoogleIdentityScript,
-  renderGoogleSignInButton
-} from '../../lib/googleIdentity'
+import { apiFetch } from '../../lib/supabase'
 
 const VALID_MODES = new Set(['login', 'link'])
 
@@ -35,16 +30,12 @@ const GoogleBadge = () => (
 )
 
 export default function GoogleAuthPopup() {
-  const buttonRef = useRef(null)
   const targetOriginRef = useRef('')
   const stateRef = useRef('')
   const modeRef = useRef('login')
 
-  const [status, setStatus] = useState('Menyiapkan login Google...')
+  const [status, setStatus] = useState('Menyiapkan OAuth Google...')
   const [error, setError] = useState('')
-  const [buttonReady, setButtonReady] = useState(false)
-
-  const clientId = String(supabase.auth.getGoogleClientId?.() || '').trim()
 
   const notifyOpener = useCallback((type, payload = {}) => {
     if (typeof window === 'undefined') return
@@ -79,6 +70,7 @@ export default function GoogleAuthPopup() {
         const requestedOrigin = String(url.searchParams.get('origin') || '').trim()
         const requestedState = String(url.searchParams.get('state') || '').trim()
         const requestedMode = String(url.searchParams.get('mode') || 'login').trim().toLowerCase()
+        const requestedReturnTo = String(url.searchParams.get('return_to') || '').trim()
 
         if (!requestedOrigin || !requestedState) {
           throw new Error('Parameter popup Google tidak lengkap.')
@@ -102,59 +94,30 @@ export default function GoogleAuthPopup() {
         if (!validatedOrigin) {
           throw new Error('Origin tujuan Google tidak valid.')
         }
-        const runtimeClientId = String(popupContext.raw?.data?.client_id || clientId).trim()
-        if (!runtimeClientId) {
-          throw new Error('Konfigurasi Google OAuth belum lengkap.')
-        }
 
         targetOriginRef.current = validatedOrigin
         setStatus(
           modeRef.current === 'link'
-            ? 'Pilih akun Google yang ingin ditautkan.'
-            : 'Pilih akun Google untuk melanjutkan login.'
+            ? 'Mengarahkan ke Google untuk menautkan akun...'
+            : 'Mengarahkan ke Google untuk melanjutkan login...'
         )
 
-        await loadGoogleIdentityScript()
-        if (cancelled || !buttonRef.current) return
-
-        initializeGoogleSignIn({
-          clientId: runtimeClientId,
-          callback: (response) => {
-            if (cancelled) return
-
-            const credential = String(response?.credential || '').trim()
-            if (!credential) {
-              const message = 'Google tidak mengembalikan identitas akun yang valid.'
-              setError(message)
-              setStatus('')
-              notifyOpener('edusmart-google-error', { error: message })
-              return
-            }
-
-            setError('')
-            setStatus('Identitas Google diterima. Menutup popup...')
-            notifyOpener('edusmart-google-credential', { credential })
-
-            window.setTimeout(() => {
-              try {
-                window.close()
-              } catch {
-                // ignore close failure
-              }
-            }, 300)
-          }
-        })
-
-        buttonRef.current.innerHTML = ''
-        const buttonWidth = Math.max(
-          280,
-          Math.min(380, Math.round(buttonRef.current.getBoundingClientRect().width || 360))
+        const endpoint = modeRef.current === 'link'
+          ? '/api/auth/google/link'
+          : '/api/auth/google/redirect'
+        const oauthUrl = new URL(endpoint, validatedOrigin)
+        oauthUrl.searchParams.set('popup', '1')
+        oauthUrl.searchParams.set('origin', validatedOrigin)
+        oauthUrl.searchParams.set('popup_state', requestedState)
+        oauthUrl.searchParams.set('mode', modeRef.current)
+        oauthUrl.searchParams.set(
+          'redirect',
+          requestedReturnTo || `${validatedOrigin}${modeRef.current === 'link' ? '/admin/pengaturan' : '/login'}`
         )
-        renderGoogleSignInButton({
-          element: buttonRef.current,
-          width: buttonWidth
-        })
-        setButtonReady(true)
+
+        window.setTimeout(() => {
+          if (!cancelled) window.location.replace(oauthUrl.toString())
+        }, 250)
       } catch (err) {
         if (cancelled) return
         const message = err?.message || 'Popup Google gagal dipersiapkan.'
@@ -171,11 +134,8 @@ export default function GoogleAuthPopup() {
 
     return () => {
       cancelled = true
-      if (buttonRef.current) {
-        buttonRef.current.innerHTML = ''
-      }
     }
-  }, [clientId, notifyOpener])
+  }, [notifyOpener])
 
   const isLinkMode = modeRef.current === 'link'
 
@@ -205,14 +165,10 @@ export default function GoogleAuthPopup() {
               {status && <p className="text-sm text-slate-700">{status}</p>}
               {error && <p className="text-sm font-medium text-rose-600">{error}</p>}
 
-              <div className="mt-3 flex justify-center">
-                <div ref={buttonRef} className="w-full max-w-[340px]" />
-              </div>
-
-              {!error && !buttonReady && (
+              {!error && (
                 <div className="mt-3 flex items-center justify-center gap-2 text-xs text-slate-500">
                   <span className="inline-flex h-2 w-2 rounded-full bg-sky-500" aria-hidden="true" />
-                  <span>Menyiapkan tombol login Google...</span>
+                  <span>Mohon tunggu sebentar...</span>
                 </div>
               )}
             </div>

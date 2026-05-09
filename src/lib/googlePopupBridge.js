@@ -109,6 +109,10 @@ export const openGoogleAuthPopup = ({
   popupUrl.searchParams.set('mode', mode)
   popupUrl.searchParams.set('origin', window.location.origin)
   popupUrl.searchParams.set('state', state)
+  popupUrl.searchParams.set(
+    'return_to',
+    `${window.location.origin}${window.location.pathname}${window.location.search}${window.location.hash}`
+  )
 
   const popup = window.open(
     popupUrl.toString(),
@@ -150,6 +154,15 @@ export const openGoogleAuthPopup = ({
       if (payload?.type === 'edusmart-google-credential') {
         finalize(() => resolve({
           credential: String(payload.credential || ''),
+          mode: String(payload.mode || mode)
+        }))
+        return
+      }
+
+      if (payload?.type === 'edusmart-google-oauth-success') {
+        finalize(() => resolve({
+          oauth: true,
+          status: String(payload.status || 'success'),
           mode: String(payload.mode || mode)
         }))
         return

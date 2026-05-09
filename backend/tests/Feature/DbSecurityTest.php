@@ -89,8 +89,10 @@ class DbSecurityTest extends TestCase
         $this->assertIsArray($row);
         $this->assertSame('Sekolah Aman', $row['nama_sekolah'] ?? null);
         $this->assertSame('2026/2027', $row['tahun_ajaran'] ?? null);
-        $this->assertArrayHasKey('ranking_weight_tugas', $row);
-        $this->assertArrayHasKey('nilai_freeze_enabled', $row);
+        $this->assertArrayNotHasKey('ranking_weight_tugas', $row);
+        $this->assertArrayNotHasKey('ranking_tiebreak_order', $row);
+        $this->assertArrayNotHasKey('nilai_freeze_enabled', $row);
+        $this->assertArrayNotHasKey('nilai_freeze_reason', $row);
         $this->assertArrayNotHasKey('manual_jam_masuk_mulai', $row);
         $this->assertArrayNotHasKey('manual_jam_masuk_selesai', $row);
         $this->assertArrayNotHasKey('admin_lock_enabled', $row);
@@ -99,6 +101,51 @@ class DbSecurityTest extends TestCase
         $this->assertArrayNotHasKey('approval_require_second_approver', $row);
         $this->assertArrayNotHasKey('anomaly_alert_enabled', $row);
         $this->assertArrayNotHasKey('anomaly_bulk_threshold', $row);
+    }
+
+    public function test_removed_ranking_and_freeze_settings_fields_are_ignored_on_admin_update(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        [$user] = $this->createUserWithProfile($tenantId, 'admin', 'X-1');
+
+        $settingsId = DB::table('settings')->insertGetId([
+            'tenant_id' => $tenantId,
+            'nama_sekolah' => 'Sekolah Lama',
+            'ranking_weight_tugas' => 40,
+            'ranking_weight_quiz' => 40,
+            'ranking_weight_absensi' => 20,
+            'ranking_tiebreak_order' => json_encode(['nilai_akhir', 'nama']),
+            'ranking_core_mapel' => json_encode(['Matematika']),
+            'nilai_freeze_enabled' => false,
+            'nilai_freeze_reason' => null,
+            'approval_maker_checker_enabled' => false,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $response = $this->actingAs($user)->postJson('/api/db', [
+            'table' => 'settings',
+            'action' => 'update',
+            'filters' => [
+                'eq' => ['id' => $settingsId],
+            ],
+            'payload' => [
+                'nama_sekolah' => 'Sekolah Baru',
+                'ranking_weight_tugas' => 90,
+                'ranking_tiebreak_order' => ['nama'],
+                'nilai_freeze_enabled' => true,
+                'nilai_freeze_reason' => 'Tidak boleh tersimpan',
+            ],
+        ]);
+
+        $response->assertOk();
+
+        $row = DB::table('settings')->where('id', $settingsId)->first();
+        $this->assertSame('Sekolah Baru', $row->nama_sekolah);
+        $this->assertSame(40.0, (float) $row->ranking_weight_tugas);
+        $this->assertSame(json_encode(['nilai_akhir', 'nama']), $row->ranking_tiebreak_order);
+        $this->assertFalse((bool) $row->nilai_freeze_enabled);
+        $this->assertNull($row->nilai_freeze_reason);
     }
 
     public function test_db_rejects_unknown_filter_and_order_columns(): void
@@ -127,6 +174,63 @@ class DbSecurityTest extends TestCase
 
         $badOrder->assertStatus(422);
         $badOrder->assertJsonPath('error', 'Kolom order tidak diizinkan');
+    }
+
+    public function test_kelas_insert_normalizes_full_suffix_and_avoids_cross_tenant_slug_collision(): void
+    {
+        config(['tenancy.allow_header_override' => true]);
+
+        $defaultTenantId = $this->defaultTenantId();
+        DB::table('kelas')->insert([
+            'id' => 'x-mipa-1',
+            'nama' => 'X MIPA 1',
+            'grade' => 'X',
+            'suffix' => 'MIPA 1',
+            'created_at' => now(),
+            'updated_at' => now(),
+            'tenant_id' => $defaultTenantId,
+        ]);
+
+        $tenantId = (string) Str::uuid();
+        DB::table('tenants')->insert([
+            'id' => $tenantId,
+            'name' => 'Tenant Dua',
+            'slug' => 'tenant-dua',
+            'status' => 'active',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        [$admin] = $this->createUserWithProfile($tenantId, 'admin', '');
+
+        $response = $this
+            ->actingAs($admin)
+            ->withHeader('X-Tenant', 'tenant-dua')
+            ->postJson('/api/db', [
+                'table' => 'kelas',
+                'action' => 'insert',
+                'payload' => [
+                    'id' => 'x-mipa-1',
+                    'nama' => 'X X MIPA 1',
+                    'grade' => 'X',
+                    'suffix' => 'X MIPA 1',
+                ],
+            ]);
+
+        $response->assertOk();
+
+        $row = $response->json('data.0');
+        $this->assertIsArray($row);
+        $this->assertSame('X MIPA 1', $row['nama'] ?? null);
+        $this->assertSame('MIPA 1', $row['suffix'] ?? null);
+        $this->assertNotSame('x-mipa-1', $row['id'] ?? null);
+        $this->assertStringStartsWith('x-mipa-1-', $row['id'] ?? '');
+
+        $this->assertDatabaseHas('kelas', [
+            'id' => $row['id'],
+            'tenant_id' => $tenantId,
+            'nama' => 'X MIPA 1',
+            'suffix' => 'MIPA 1',
+        ]);
     }
 
     public function test_siswa_cannot_insert_tugas_jawaban_for_other_class(): void

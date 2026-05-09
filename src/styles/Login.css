@@ -1,6 +1,4 @@
 /* src/styles/Login.css */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-
 :root {
   --primary: #473cd2;
   --primary-dark: #352bb3;
@@ -17,6 +15,13 @@
   --surface: #f9fafb;
 
   --error: #dc2626;
+}
+
+.auth-icon__svg {
+  display: block;
+  width: 1em;
+  height: 1em;
+  stroke: currentColor;
 }
 
 * {

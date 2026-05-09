@@ -18,10 +18,13 @@ Default local yang sudah disiapkan di `.env.production`:
 - `https://bali.localhost:8443`
 - `https://wa.localhost:8443`
 
-Jalankan:
+Production compose sekarang memakai image prebuilt dari GitHub Container Registry. Untuk preview lokal production, set dulu image yang mau diuji:
 
 ```bash
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+export EDUSMART_BACKEND_IMAGE=ghcr.io/<org>/<repo>/backend:<tag>
+export EDUSMART_NGINX_IMAGE=ghcr.io/<org>/<repo>/nginx:<tag>
+docker compose --env-file .env.production -f docker-compose.prod.yml pull backend nginx
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d --no-build
 ```
 
 Catatan local:
@@ -86,16 +89,20 @@ docker compose --env-file .env.production -f docker-compose.prod.yml run --rm ba
 
 ## 3. Jalankan Stack Production
 
+Deploy normal production dilakukan oleh GitHub Actions. Workflow membuild image backend dan nginx di GitHub, lalu VPS hanya pull image dan menjalankan container tanpa build lokal.
+
+Untuk menjalankan manual di VPS, pastikan `EDUSMART_BACKEND_IMAGE` dan `EDUSMART_NGINX_IMAGE` mengarah ke image registry yang sudah ada, lalu jalankan:
+
 ```bash
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+deploy/release-prod.sh --ref <commit-or-tag> --pull-images
 ```
 
 Catatan:
 
-- Stack ini sudah dirapikan untuk VPS kecil: React dibuild sekali saat image `nginx` dibuat, lalu hasil static build diserve langsung oleh Nginx yang sama.
+- Stack ini sudah dirapikan untuk VPS kecil: React dibuild di GitHub saat image `nginx` dibuat, lalu hasil static build diserve langsung oleh Nginx yang sama.
 - Tidak ada container `frontend` runtime terpisah.
 - `caddy` sekarang menjadi edge proxy publik untuk auto HTTPS, sedangkan `nginx` tetap internal-only.
-- Untuk update frontend, cukup `docker compose ... up -d --build nginx`.
+- Untuk update frontend/backend, push ke branch deploy agar GitHub Actions membuild image baru dan deploy script VPS melakukan pull image.
 
 Cek status service:
 
@@ -115,11 +122,10 @@ Cek ekstensi PostgreSQL di runtime backend container:
 docker compose --env-file .env.production -f docker-compose.prod.yml exec backend php -m | grep -i pdo_pgsql
 ```
 
-Jika output kosong, rebuild image tanpa cache:
+Jika output kosong, image backend yang dipakai belum valid. Re-run GitHub Actions build image backend, lalu deploy ulang:
 
 ```bash
-docker compose --env-file .env.production -f docker-compose.prod.yml build --no-cache backend worker scheduler rfid_bridge nginx
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d
+deploy/release-prod.sh --ref <commit-or-tag> --pull-images
 ```
 
 ## 3.1 Konfigurasi Email (Brevo)
@@ -146,13 +152,10 @@ docker compose --env-file .env.production -f docker-compose.prod.yml restart bac
 Agar tombol Google di halaman login bisa dipakai langsung:
 
 1. Buat OAuth Client di Google Cloud Console (type: `Web application`).
-2. Isi **Authorized JavaScript origins** minimal:
-   - `https://edusmart.example.com`
-   - `https://admin.edusmart.example.com`
-   - jika multi-tenant, tambahkan domain host yang dipakai user untuk membuka frontend.
-3. Isi **Authorized redirect URIs**:
+2. Isi **Authorized redirect URIs**:
    - `https://edusmart.example.com/api/auth/google/callback`
    - jika pakai host callback lain, samakan dengan `GOOGLE_REDIRECT_URI`.
+3. Bagian **Authorized JavaScript origins** tidak wajib untuk flow login aktif sekarang, karena popup memakai OAuth redirect backend. Jika masih melihat `Error 400: origin_mismatch`, deploy frontend terbaru dan pastikan tombol Google tidak lagi memuat Google Identity Services.
 4. Set env di `.env.production`:
    - `VITE_GOOGLE_AUTH_ENABLED=true`
    - `VITE_GOOGLE_AUTH_LOGIN_URL=/api/auth/google/redirect`
@@ -165,12 +168,12 @@ Agar tombol Google di halaman login bisa dipakai langsung:
 
 ```bash
 docker compose --env-file .env.production -f docker-compose.prod.yml exec backend php artisan config:clear
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build nginx backend
+deploy/release-prod.sh --ref <commit-or-tag> --pull-images
 ```
 
 Catatan multi-tenant:
-- `SESSION_DOMAIN` sebaiknya `.edusmart.example.com` agar state OAuth tetap valid lintas subdomain.
 - Gunakan URL Google frontend yang relatif (`/api/auth/google/...`) agar otomatis mengikuti host tenant aktif.
+- Pastikan `GOOGLE_REDIRECT_URI` memakai root domain publik yang sama dengan `VITE_ROOT_DOMAIN`, misalnya `https://edusmart.example.com/api/auth/google/callback`.
 
 ## 3.3 Konfigurasi RFID MQTT Bridge
 
@@ -193,7 +196,7 @@ untuk membuat username/password dan ACL topic khusus sekolah tersebut.
 Jalankan/refresh service bridge:
 
 ```bash
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build mosquitto_init mosquitto mosquitto_reloader backend rfid_bridge
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d --no-build mosquitto_init mosquitto mosquitto_reloader backend rfid_bridge
 docker compose --env-file .env.production -f docker-compose.prod.yml exec backend php artisan rfid:mosquitto-sync
 docker compose --env-file .env.production -f docker-compose.prod.yml logs -f rfid_bridge
 ```

@@ -7,6 +7,7 @@ import { useAuthStore } from './store/useAuthStore'
 import { SESSION_EXPIRED_EVENT, supabase } from './lib/supabase'
 
 const AUTH_PATHS = ['/login', '/register', '/forgot-password', '/reset-password']
+const SESSION_REVALIDATE_INTERVAL_MS = 60 * 1000
 const buildLoginRedirectPath = ({ reason = '', next = '' } = {}) => {
   const params = new URLSearchParams()
   if (reason) params.set('reason', reason)
@@ -21,6 +22,7 @@ const App = () => {
   const { user, initialized, init, expireSession } = useAuthStore()
   const deviceIdRef = useRef('')
   const lastPathRef = useRef('')
+  const lastSessionRevalidateRef = useRef(0)
 
   const isAuthPage = AUTH_PATHS.some((p) => location.pathname.startsWith(p))
   const isQuizSessionPage = location.pathname.startsWith('/siswa/quiz/session/')
@@ -123,6 +125,9 @@ const App = () => {
 
     const revalidateSession = () => {
       if (document.visibilityState === 'hidden') return
+      const now = Date.now()
+      if (now - lastSessionRevalidateRef.current < SESSION_REVALIDATE_INTERVAL_MS) return
+      lastSessionRevalidateRef.current = now
       void supabase.auth.getSession()
     }
 

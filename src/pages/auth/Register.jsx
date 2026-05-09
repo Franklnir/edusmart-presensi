@@ -6,6 +6,7 @@ import { validatePassword } from '../../utils/passwordPolicy'
 import { Link, useNavigate } from 'react-router-dom'
 import '../../styles/Login.css'
 import PasswordInput from '../../components/PasswordInput'
+import AuthIcon from '../../components/AuthIcon'
 
 const DEFAULT_SETTINGS = {
   nama_sekolah: 'Sekolah',
@@ -53,7 +54,7 @@ export default function Register() {
       try {
         let { data, error } = await supabase
           .from('settings')
-          .select('*')
+          .select('id,nama_sekolah,logo_url,logo_path,alamat,telepon,email,link_facebook,link_tiktok,link_instagram,link_youtube,registrasi_siswa_aktif,registrasi_guru_aktif')
           .order('id', { ascending: true })
           .limit(1)
           .single()
@@ -244,7 +245,7 @@ export default function Register() {
                 />
               ) : (
                 <div className="login__logo-fallback">
-                  <i className="ri-school-fill"></i>
+                  <AuthIcon className="ri-school-fill" />
                 </div>
               )}
               <div className="login__school-text">
@@ -255,13 +256,13 @@ export default function Register() {
 
             <div className="login__features">
               <div className="login__feature-item">
-                <i className="ri-shield-check-fill"></i><span>Terpercaya</span>
+                <AuthIcon className="ri-shield-check-fill" /><span>Terpercaya</span>
               </div>
               <div className="login__feature-item">
-                <i className="ri-time-fill"></i><span>Real-time</span>
+                <AuthIcon className="ri-time-fill" /><span>Real-time</span>
               </div>
               <div className="login__feature-item">
-                <i className="ri-smartphone-fill"></i><span>Responsive</span>
+                <AuthIcon className="ri-smartphone-fill" /><span>Responsive</span>
               </div>
             </div>
 
@@ -270,7 +271,7 @@ export default function Register() {
                 <div className="login__social-links">
                   {socials.map(s => (
                     <a key={s.key} href={s.href} target="_blank" rel="noopener noreferrer" className="login__social-link">
-                      <i className={s.icon}></i>
+                      <AuthIcon className={s.icon} />
                     </a>
                   ))}
                 </div>
@@ -299,7 +300,7 @@ export default function Register() {
 
             {allDisabled ? (
               <div className="login__error login__error--warning">
-                <i className="ri-alert-fill"></i>
+                <AuthIcon className="ri-alert-fill" />
                 <div className="login__error-content">
                   <strong>Registrasi Ditutup</strong>
                   <span>Registrasi akun sedang tidak dibuka. Silakan hubungi admin sekolah.</span>
@@ -310,13 +311,13 @@ export default function Register() {
               <>
                 {errorMessage && (
                   <div className="login__error">
-                    <i className="ri-alert-fill"></i>
+                    <AuthIcon className="ri-alert-fill" />
                     <span>{errorMessage}</span>
                   </div>
                 )}
                 {successMessage && (
                   <div className="login__success">
-                    <i className="ri-checkbox-circle-fill"></i>
+                    <AuthIcon className="ri-checkbox-circle-fill" />
                     <span>{successMessage}</span>
                   </div>
                 )}
@@ -328,7 +329,7 @@ export default function Register() {
                     <button type="button" onClick={() => handleSelectRole('siswa')}
                       className={`login__role-btn ${selectedRole === 'siswa' ? 'login__role-btn--active' : ''}`}>
                       <div className="login__role-content">
-                        <i className="ri-user-fill"></i>
+                        <AuthIcon className="ri-user-fill" />
                         <div className="login__role-text">
                           <span className="login__role-name">Siswa</span>
                           <span className="login__role-desc">Akses absensi dan tugas</span>
@@ -344,7 +345,7 @@ export default function Register() {
                     <button type="button" onClick={() => handleSelectRole('guru')}
                       className={`login__role-btn ${selectedRole === 'guru' ? 'login__role-btn--active' : ''}`}>
                       <div className="login__role-content">
-                        <i className="ri-user-star-fill"></i>
+                        <AuthIcon className="ri-user-star-fill" />
                         <div className="login__role-text">
                           <span className="login__role-name">Guru</span>
                           <span className="login__role-desc">Kelola kelas dan tugas</span>
@@ -362,26 +363,26 @@ export default function Register() {
                   <form onSubmit={handleSubmit} className="login__form" noValidate>
                     <div className="login__input-group">
                       <div className="login__input-field">
-                        <i className="ri-user-3-fill"></i>
+                        <AuthIcon className="ri-user-3-fill" />
                         <input type="text" name="nama" placeholder="Nama Lengkap"
                           value={form.nama} onChange={handleInputChange} required />
                       </div>
 
                       <div className="login__input-field">
-                        <i className="ri-mail-fill"></i>
+                        <AuthIcon className="ri-mail-fill" />
                         <input type="email" name="email" placeholder="Email aktif"
                           value={form.email} onChange={handleInputChange} required />
                       </div>
 
                       <div className="login__input-row">
                         <div className="login__input-field">
-                          <i className="ri-lock-password-fill"></i>
+                          <AuthIcon className="ri-lock-password-fill" />
                           <PasswordInput name="password" placeholder="Password"
                             value={form.password} onChange={handleInputChange} required />
                         </div>
 
                         <div className="login__input-field">
-                          <i className="ri-lock-password-fill"></i>
+                          <AuthIcon className="ri-lock-password-fill" />
                           <PasswordInput name="confirmPassword" placeholder="Konfirmasi Password"
                             value={form.confirmPassword} onChange={handleInputChange} required />
                         </div>
@@ -396,7 +397,7 @@ export default function Register() {
                         </>
                       ) : (
                         <>
-                          <i className="ri-user-add-fill"></i>
+                          <AuthIcon className="ri-user-add-fill" />
                           Daftar Sekarang
                         </>
                       )}

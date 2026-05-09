@@ -321,88 +321,12 @@ class ApiController extends Controller
 
     protected function getNilaiFreezeState(Request $request): ?array
     {
-        $tenantId = $this->tenantId($request);
-        if (! $tenantId) {
-            return null;
-        }
-
-        $settings = DB::table('settings')
-            ->where('tenant_id', $tenantId)
-            ->orderBy('id')
-            ->first([
-                'nilai_freeze_enabled',
-                'nilai_freeze_start',
-                'nilai_freeze_end',
-                'nilai_freeze_reason',
-            ]);
-
-        if (! $settings || ! (bool) ($settings->nilai_freeze_enabled ?? false)) {
-            return null;
-        }
-
-        $startAt = null;
-        $endAt = null;
-
-        try {
-            if (! empty($settings->nilai_freeze_start)) {
-                $startAt = Carbon::parse((string) $settings->nilai_freeze_start);
-            }
-        } catch (\Throwable $e) {
-            $startAt = null;
-        }
-
-        try {
-            if (! empty($settings->nilai_freeze_end)) {
-                $endAt = Carbon::parse((string) $settings->nilai_freeze_end);
-            }
-        } catch (\Throwable $e) {
-            $endAt = null;
-        }
-
-        $now = now();
-        $inRange = ($startAt === null || $now->greaterThanOrEqualTo($startAt))
-            && ($endAt === null || $now->lessThanOrEqualTo($endAt));
-
-        if (! $inRange) {
-            return null;
-        }
-
-        return [
-            'enabled' => true,
-            'start' => $startAt ? $startAt->toIso8601String() : null,
-            'end' => $endAt ? $endAt->toIso8601String() : null,
-            'reason' => trim((string) ($settings->nilai_freeze_reason ?? '')) ?: null,
-        ];
+        return null;
     }
 
     protected function denyIfNilaiFrozen(Request $request, string $context = 'Perubahan nilai')
     {
-        $freeze = $this->getNilaiFreezeState($request);
-        if (! $freeze) {
-            return null;
-        }
-
-        $range = [];
-        if (! empty($freeze['start'])) {
-            $range[] = 'mulai '.$freeze['start'];
-        }
-        if (! empty($freeze['end'])) {
-            $range[] = 'sampai '.$freeze['end'];
-        }
-
-        $message = $context.' dikunci karena periode nilai sedang freeze.';
-        if (! empty($range)) {
-            $message .= ' Periode: '.implode(' ', $range).'.';
-        }
-        if (! empty($freeze['reason'])) {
-            $message .= ' Alasan: '.$freeze['reason'].'.';
-        }
-
-        return response()->json([
-            'error' => $message,
-            'code' => 'NILAI_FREEZE_ACTIVE',
-            'freeze' => $freeze,
-        ], 423);
+        return null;
     }
 
     protected function isSuperAdminByIdentity(?string $userId = null, ?string $email = null): bool

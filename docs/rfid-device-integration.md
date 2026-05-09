@@ -80,7 +80,7 @@ Catatan:
 Jalankan service production:
 
 ```bash
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build backend rfid_bridge
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d --no-build backend rfid_bridge
 ```
 
 Bridge MQTT dijalankan oleh service `rfid_bridge`.

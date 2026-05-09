@@ -144,6 +144,39 @@ export const SESSION_EXPIRED_EVENT = 'edusmart:session-expired'
 const SESSION_EXPIRED_MESSAGE =
   'Sesi login Anda telah berakhir. Silakan masuk lagi untuk melanjutkan.'
 let lastSessionExpiredNotifiedAt = 0
+const pendingApiRequests = new Map()
+
+const isPlainObjectValue = (value) => (
+  value !== null && typeof value === 'object' && !Array.isArray(value)
+)
+
+const stableRequestStringify = (value) => {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableRequestStringify).join(',')}]`
+  }
+
+  if (isPlainObjectValue(value)) {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableRequestStringify(value[key])}`)
+      .join(',')}}`
+  }
+
+  return JSON.stringify(value)
+}
+
+const buildPendingRequestKey = (path, method, body, options = {}) => {
+  if (options?.dedupe === false) return ''
+  if (method === 'GET' || method === 'HEAD') {
+    return `${method}:${path}`
+  }
+
+  if (method === 'POST' && path === '/api/db' && body?.action === 'select') {
+    return `${method}:${path}:${stableRequestStringify(body)}`
+  }
+
+  return ''
+}
 
 const getSessionStorage = () => {
   if (typeof window === 'undefined') return null
@@ -467,7 +500,7 @@ const compressImageToTarget = async (file, maxBytes) => {
   })
 }
 
-export const apiFetch = async (path, options = {}) => {
+const runApiFetch = async (path, options = {}) => {
   const method = (options.method || 'GET').toUpperCase()
   const body = options.body
   const isForm = typeof FormData !== 'undefined' && body instanceof FormData
@@ -587,6 +620,25 @@ export const apiFetch = async (path, options = {}) => {
     error: null,
     raw: json
   }
+}
+
+export const apiFetch = async (path, options = {}) => {
+  const method = (options.method || 'GET').toUpperCase()
+  const dedupeKey = buildPendingRequestKey(path, method, options.body, options)
+
+  if (!dedupeKey) {
+    return runApiFetch(path, options)
+  }
+
+  const pending = pendingApiRequests.get(dedupeKey)
+  if (pending) return pending
+
+  const request = runApiFetch(path, options).finally(() => {
+    pendingApiRequests.delete(dedupeKey)
+  })
+  pendingApiRequests.set(dedupeKey, request)
+
+  return request
 }
 
 const parseDownloadFilename = (contentDisposition = '', fallback = 'download.bin') => {
@@ -834,6 +886,10 @@ class QueryBuilder {
         ),
         count
       }
+    }
+
+    if (this.action !== 'select') {
+      pulseRealtimeForMutation(this.table)
     }
 
     if (this.singleFlag) {
@@ -1301,10 +1357,16 @@ const auth = {
     if (res.error) return { data: { session: null }, error: res.error }
     const user = normalizeUser(res.raw?.data?.user, res.raw?.data?.profile)
     const profile = res.raw?.data?.profile || null
+    const settings = res.raw?.data?.settings || null
+    const hasSuperAdminFlag = Object.prototype.hasOwnProperty.call(res.raw?.data || {}, 'is_super_admin')
+    const isSuperAdmin = Boolean(res.raw?.data?.is_super_admin)
     return {
       data: {
+        isSuperAdmin,
+        settings,
+        superAdminChecked: hasSuperAdminFlag,
         profile,
-        session: user ? { user, profile } : null
+        session: user ? { user, profile, settings, isSuperAdmin, superAdminChecked: hasSuperAdminFlag } : null
       },
       error: null
     }
@@ -1314,7 +1376,15 @@ const auth = {
     const res = await apiFetch('/api/auth/me', { method: 'GET' })
     if (res.error) return { data: { user: null }, error: res.error }
     const user = normalizeUser(res.raw?.data?.user, res.raw?.data?.profile)
-    return { data: { user, profile: res.raw?.data?.profile || null }, error: null }
+    return {
+      data: {
+        user,
+        profile: res.raw?.data?.profile || null,
+        settings: res.raw?.data?.settings || null,
+        isSuperAdmin: Boolean(res.raw?.data?.is_super_admin)
+      },
+      error: null
+    }
   },
 
   async resetPasswordForEmail(email) {
@@ -2081,6 +2151,18 @@ class RealtimePollingManager {
     this.schedule(0)
   }
 
+  pulse(table) {
+    if (this.entries.size === 0) return
+    const normalizedTable = String(table || '').trim()
+    if (normalizedTable) {
+      const hasMatchingEntry = Array.from(this.entries.values()).some(
+        (entry) => entry.table === normalizedTable
+      )
+      if (!hasMatchingEntry) return
+    }
+    this.schedule(0)
+  }
+
   async tick() {
     if (this.polling) {
       this.schedule()
@@ -2182,6 +2264,10 @@ class RealtimePollingManager {
 }
 
 const realtimeManager = new RealtimePollingManager()
+
+function pulseRealtimeForMutation(table) {
+  realtimeManager.pulse(table)
+}
 
 class RealtimeChannel {
   constructor(name) {

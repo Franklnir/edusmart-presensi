@@ -7,6 +7,7 @@ import { supabase, PROFILE_BUCKET, getSignedUrlForValue } from '../../lib/supaba
 import { getRoleHome, isValidRole } from '../../utils/role';
 import { shouldForceAccountSetup } from '../../utils/accountSetup';
 import { sanitizeExternalUrl, sanitizeMediaUrl } from '../../utils/sanitize';
+import AuthIcon from '../../components/AuthIcon';
 import '../../styles/Login.css';
 
 const sanitizeNextPath = (value) => {
@@ -43,7 +44,7 @@ const sanitizeNextPath = (value) => {
 const Login = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, profile, login, loginWithGoogleCredential } = useAuthStore();
+  const { user, profile, login, loginWithGoogleCredential, completeGooglePopupLogin } = useAuthStore();
 
   const [form, setForm] = useState({
     email: '',
@@ -100,7 +101,7 @@ const Login = () => {
       try {
         let { data, error } = await supabase
           .from('settings')
-          .select('*')
+          .select('id,nama_sekolah,alamat,telepon,email,logo_url,logo_path,link_facebook,link_tiktok,link_instagram,link_youtube')
           .order('id', { ascending: true })
           .limit(1)
           .single();
@@ -407,6 +408,26 @@ const Login = () => {
     }
   }, [loginWithGoogleCredential, setCooldownEnd, setFailCount])
 
+  const handleGoogleOAuthSuccess = useCallback(async () => {
+    setError('')
+    setInfo('')
+    setIsGoogleSubmitting(true)
+
+    try {
+      const result = await completeGooglePopupLogin()
+      if (result?.error) {
+        setError(result.error)
+        return
+      }
+
+      setFailCount(0)
+      setCooldownEnd(0)
+      setInfo('Login Google berhasil. Mengarahkan ke dashboard...')
+    } finally {
+      setIsGoogleSubmitting(false)
+    }
+  }, [completeGooglePopupLogin, setCooldownEnd, setFailCount])
+
   // Loading state
   if (isLoadingSettings) {
     return (
@@ -452,7 +473,7 @@ const Login = () => {
                 />
               ) : (
                 <div className="login__logo-fallback">
-                  <i className="ri-school-fill"></i>
+                  <AuthIcon className="ri-school-fill" />
                 </div>
               )}
               <div className="login__school-text">
@@ -465,15 +486,15 @@ const Login = () => {
 
             <div className="login__features">
               <div className="login__feature-item">
-                <i className="ri-shield-check-fill"></i>
+                <AuthIcon className="ri-shield-check-fill" />
                 <span>Terpercaya</span>
               </div>
               <div className="login__feature-item">
-                <i className="ri-time-fill"></i>
+                <AuthIcon className="ri-time-fill" />
                 <span>Real-time</span>
               </div>
               <div className="login__feature-item">
-                <i className="ri-smartphone-fill"></i>
+                <AuthIcon className="ri-smartphone-fill" />
                 <span>Responsive</span>
               </div>
             </div>
@@ -492,7 +513,7 @@ const Login = () => {
                       title={social.label}
                       aria-label={social.label}
                     >
-                      <i className={social.icon}></i>
+                      <AuthIcon className={social.icon} />
                     </a>
                   ))}
                 </div>
@@ -526,7 +547,7 @@ const Login = () => {
 
             {error && (
               <div className="login__error" role="alert">
-                <i className="ri-alert-fill"></i>
+                <AuthIcon className="ri-alert-fill" />
                 <span>{error}</span>
               </div>
             )}
@@ -535,7 +556,7 @@ const Login = () => {
                 className={isSessionExpiredNotice ? 'login__error login__error--warning' : 'login__success'}
                 role="status"
               >
-                <i className={isSessionExpiredNotice ? 'ri-time-line' : 'ri-checkbox-circle-fill'}></i>
+                <AuthIcon className={isSessionExpiredNotice ? 'ri-time-line' : 'ri-checkbox-circle-fill'} />
                 <span>{info}</span>
               </div>
             )}
@@ -548,7 +569,7 @@ const Login = () => {
             >
               <div className="login__input-group">
                 <div className="login__input-field">
-                  <i className="ri-user-3-fill"></i>
+                  <AuthIcon className="ri-user-3-fill" />
                   <input
                     type="text"
                     placeholder="Email / NIS"
@@ -567,7 +588,7 @@ const Login = () => {
                 </div>
 
                 <div className="login__input-field">
-                  <i className="ri-lock-password-fill"></i>
+                  <AuthIcon className="ri-lock-password-fill" />
                   <input
                     type={showPassword ? 'text' : 'password'}
                     placeholder="Password"
@@ -595,10 +616,10 @@ const Login = () => {
                         : 'Tampilkan password'
                     }
                   >
-                    <i
+                    <AuthIcon
                       className={`ri-eye-${showPassword ? 'off' : ''
                         }-fill`}
-                    ></i>
+                    />
                   </button>
                 </div>
               </div>
@@ -625,7 +646,7 @@ const Login = () => {
                     </>
                   ) : (
                     <>
-                      <i className="ri-login-box-fill"></i>
+                      <AuthIcon className="ri-login-box-fill" />
                       <span>Masuk</span>
                     </>
                   )}
@@ -639,6 +660,7 @@ const Login = () => {
               <div className="login__google-slot">
                 <GoogleCredentialButton
                   onCredential={handleGoogleCredential}
+                  onOAuthSuccess={handleGoogleOAuthSuccess}
                   busy={isGoogleSubmitting}
                   className="w-full"
                   buttonClassName="login__google-btn"

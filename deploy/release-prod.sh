@@ -8,8 +8,7 @@ COMPOSE_FILE="docker-compose.prod.yml"
 ENV_FILE=".env.production"
 TARGET_REF=""
 SKIP_BACKUP="false"
-SKIP_BUILD="false"
-PULL_IMAGES="false"
+PULL_IMAGES="true"
 APP_SERVICES=(backend worker scheduler rfid_bridge nginx caddy)
 IMAGE_SERVICES=(backend nginx)
 
@@ -23,13 +22,13 @@ Options:
   --env-file <path>       Path env file (default: .env.production)
   --compose-file <path>   Path docker compose file (default: docker-compose.prod.yml)
   --skip-backup           Lewati backup DB sebelum release
-  --skip-build            Lewati rebuild image, hanya restart service
-  --pull-images           Pull image dari registry, lalu deploy tanpa build lokal
+  --skip-build            Legacy alias; build lokal production sudah dinonaktifkan
+  --pull-images           Pull image dari registry sebelum deploy (default)
+  --no-pull-images        Jangan pull registry; pakai image lokal yang sudah ada, tetap tanpa build
   -h, --help              Tampilkan bantuan
 
 Contoh:
-  deploy/release-prod.sh --ref v1.5.0
-  deploy/release-prod.sh --ref main --skip-build
+  EDUSMART_BACKEND_IMAGE=ghcr.io/org/repo/backend:sha EDUSMART_NGINX_IMAGE=ghcr.io/org/repo/nginx:sha deploy/release-prod.sh --ref v1.5.0
   EDUSMART_BACKEND_IMAGE=ghcr.io/org/repo/backend:sha EDUSMART_NGINX_IMAGE=ghcr.io/org/repo/nginx:sha deploy/release-prod.sh --ref main --pull-images
 USAGE
 }
@@ -80,11 +79,15 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --skip-build)
-      SKIP_BUILD="true"
+      PULL_IMAGES="true"
       shift
       ;;
     --pull-images)
       PULL_IMAGES="true"
+      shift
+      ;;
+    --no-pull-images)
+      PULL_IMAGES="false"
       shift
       ;;
     -h|--help)
@@ -153,20 +156,15 @@ else
 fi
 
 if [[ "$PULL_IMAGES" == "true" ]]; then
-  echo "[4/8] Pull image registry & deploy tanpa build lokal..."
+  echo "[4/8] Pull image registry..."
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" pull \
     "${IMAGE_SERVICES[@]}"
-  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-build \
-    "${APP_SERVICES[@]}"
-elif [[ "$SKIP_BUILD" == "true" ]]; then
-  echo "[4/8] Restart service tanpa rebuild..."
-  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d \
-    "${APP_SERVICES[@]}"
 else
-  echo "[4/8] Build & deploy service..."
-  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --build \
-    "${APP_SERVICES[@]}"
+  echo "[4/8] Lewati pull image registry (--no-pull-images)"
 fi
+echo "[4/8] Deploy service tanpa build lokal..."
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-build \
+  "${APP_SERVICES[@]}"
 
 echo "[5/8] Jalankan migrasi..."
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T backend php artisan migrate --force

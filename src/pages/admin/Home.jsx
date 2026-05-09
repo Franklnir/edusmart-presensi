@@ -170,7 +170,13 @@ export default function AHome() {
 
   const loadStatistics = useCallback(async () => {
     try {
-      const period = resolveAcademicPeriod()
+      const { data: settingsRow } = await supabase
+        .from('settings')
+        .select('tahun_ajaran, semester_aktif')
+        .order('id')
+        .limit(1)
+        .maybeSingle()
+      const period = resolveAcademicPeriod(settingsRow || {})
       const [
         { count: siswa },
         { count: guru },
@@ -215,6 +221,19 @@ export default function AHome() {
       pushToast('error', 'Gagal memuat statistik')
     }
   }, [pushToast])
+
+  useEffect(() => {
+    const channel = supabase
+      .channel('admin_home_period')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, () => {
+        void loadStatistics()
+      })
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [loadStatistics])
 
   const loadAdminList = useCallback(async () => {
     try {

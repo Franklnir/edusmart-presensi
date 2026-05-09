@@ -207,7 +207,7 @@ Di VPS baru:
 
 ```bash
 cd /opt/edusmart-presensi
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+deploy/release-prod.sh --ref <commit-or-tag> --pull-images
 ```
 
 Cek status:
@@ -305,7 +305,7 @@ tar xzf backups/mosquitto-generated.tgz
 Setelah restore:
 
 ```bash
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d --no-build
 ```
 
 ## 11. Checklist Setelah Online
@@ -328,17 +328,17 @@ Untuk update dari GitHub di VPS baru:
 ```bash
 cd /opt/edusmart-presensi
 git pull
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+deploy/release-prod.sh --ref <commit-or-tag> --pull-images
 ```
 
 Jika hanya frontend yang berubah:
 
 ```bash
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build nginx
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d --no-build nginx
 ```
 
 Jika hanya backend yang berubah:
 
 ```bash
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build backend worker scheduler rfid_bridge
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d --no-build backend worker scheduler rfid_bridge
 ```

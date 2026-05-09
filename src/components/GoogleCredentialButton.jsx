@@ -27,6 +27,7 @@ const GoogleIcon = ({ className = '' }) => (
 export default function GoogleCredentialButton({
   mode = 'login',
   onCredential,
+  onOAuthSuccess,
   busy = false,
   className = '',
   buttonClassName = '',
@@ -68,6 +69,11 @@ export default function GoogleCredentialButton({
 
     try {
       const result = await openGoogleAuthPopup({ mode })
+      if (result?.oauth) {
+        await onOAuthSuccess?.(result)
+        return
+      }
+
       const credential = String(result?.credential || '').trim()
       if (!credential) {
         throw new Error('Google tidak mengembalikan identitas akun yang valid.')

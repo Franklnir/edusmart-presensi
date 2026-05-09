@@ -243,7 +243,7 @@ const buildQrScanValue = (token) => {
   return `${window.location.origin}/siswa/absensi?qr=${encodeURIComponent(cleanToken)}`
 }
 
-const AttendanceQrPanel = ({ currentSchedule, kelas, tgl, isActive, pushToast }) => {
+const AttendanceQrPanel = ({ currentSchedule, kelas, tgl, isActive, pushToast, embedded = false }) => {
   const [qrDataUrl, setQrDataUrl] = useState('')
   const [session, setSession] = useState(null)
   const [isLoadingQr, setIsLoadingQr] = useState(false)
@@ -331,8 +331,12 @@ const AttendanceQrPanel = ({ currentSchedule, kelas, tgl, isActive, pushToast })
     return () => clearInterval(timer)
   }, [session?.expires_at])
 
+  const shellClassName = embedded
+    ? 'rounded-2xl border border-slate-200 bg-white p-4 shadow-sm'
+    : 'border-b border-slate-200 bg-white px-6 py-5'
+
   return (
-    <div className="border-b border-slate-200 bg-white px-6 py-5">
+    <div className={shellClassName}>
       <div className="grid grid-cols-1 xl:grid-cols-[320px,1fr] gap-5">
         <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
           <div className="flex items-center justify-between gap-3 mb-3">
@@ -2540,6 +2544,113 @@ function AbsensiGuru() {
   }
 
   /* ===== RENDER UI UTAMA ===== */
+  const attendanceSessionTools = view === 'absen' && currentSchedule ? (
+    <div className="rounded-2xl border border-slate-200 bg-white/95 px-4 py-3 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      <div className="flex items-center gap-3 w-full lg:w-auto">
+        <div
+          className={`p-2.5 rounded-2xl flex-shrink-0 ${
+            isAbsenOpen ? 'bg-green-100 text-green-600' : 'bg-slate-100 text-slate-500'
+          }`}
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        </div>
+        <div>
+          <div className="font-bold text-slate-800 text-sm">{currentSchedule.mapel}</div>
+          <div className="text-xs text-slate-500 flex flex-wrap items-center gap-2">
+            <span>
+              {currentSchedule.jam_mulai} - {currentSchedule.jam_selesai}
+            </span>
+            <span>•</span>
+            <span>{formatKelasDisplay(kelas)}</span>
+            {isWithinTolerance && (
+              <span className="text-amber-700 font-semibold bg-amber-50 px-2 py-0.5 rounded-xl border border-amber-200">
+                Toleransi Aktif (5 menit)
+              </span>
+            )}
+            <span
+              className={`font-semibold px-2 py-0.5 rounded-xl border ${
+                allowSelfAbsen
+                  ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                  : 'text-slate-500 bg-white border-slate-200'
+              }`}
+            >
+              Mandiri {allowSelfAbsen ? 'dibuka' : 'ditutup'}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-end gap-3">
+        <button
+          onClick={triggerAutoAlphaManual}
+          disabled={isRunningAutoAlpha || !currentSchedule}
+          className="px-3 py-2 bg-red-500 hover:bg-red-600 text-white text-xs font-bold rounded-2xl disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors flex items-center gap-1 shadow-sm"
+          title="Jalankan Auto Alpha untuk siswa yang belum absen"
+        >
+          {isRunningAutoAlpha ? (
+            <>
+              <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+              Processing...
+            </>
+          ) : (
+            <>⚡ Auto Alpha</>
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={toggleSelfAbsen}
+          disabled={!currentSchedule || tgl !== getToday()}
+          className={`px-3 py-2 rounded-2xl text-xs font-bold border transition-all flex items-center gap-2 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${
+            allowSelfAbsen
+              ? 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700'
+              : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+          }`}
+          title="Izinkan atau tutup tombol Hadir mandiri di halaman siswa"
+        >
+          <UserCheck className="h-4 w-4" />
+          {allowSelfAbsen ? 'Absen Mandiri Dibuka' : 'Izinkan Absen Mandiri'}
+        </button>
+
+        <div className="flex items-center bg-slate-100 rounded-2xl p-1 border border-slate-200">
+          <button
+            onClick={() => toggleAbsenMode('manual')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+              absenMode === 'manual'
+                ? 'bg-white text-blue-600 shadow-sm border border-slate-200'
+                : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            <span>👨‍🏫</span> Manual
+          </button>
+          <button
+            onClick={() => toggleAbsenMode('otomatis')}
+            disabled={tgl !== getToday() || !isWithinTolerance}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+              absenMode === 'otomatis'
+                ? 'bg-white text-green-600 shadow-sm border border-slate-200'
+                : 'text-slate-500 hover:text-slate-700'
+            } ${tgl !== getToday() || !isWithinTolerance ? 'opacity-50 cursor-not-allowed' : ''}`}
+            title={
+              tgl !== getToday()
+                ? 'Mode otomatis hanya tersedia untuk hari ini'
+                : !isWithinTolerance
+                ? 'Mode otomatis hanya tersedia selama jam pelajaran'
+                : ''
+            }
+          >
+            <span>🤖</span> Otomatis{' '}
+            {rfidSettings.rfid_aktif && (
+              <span className="text-[9px] bg-green-500 text-white px-1 rounded ml-1">RFID</span>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50/30 p-4 sm:p-6">
       <div className="max-w-full mx-auto space-y-6">
@@ -2617,7 +2728,9 @@ function AbsensiGuru() {
                 <p className="text-xs text-slate-500 mt-0.5">Pilih kelas, jadwal, dan tanggal untuk memulai absensi.</p>
               </div>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5 items-start">
+            <div className={view === 'absen' ? 'grid grid-cols-1 2xl:grid-cols-[minmax(0,1fr)_390px] gap-5 items-start' : 'grid grid-cols-1 gap-5'}>
+              <div className="min-w-0 space-y-5">
+                <div className={`grid grid-cols-1 md:grid-cols-2 gap-5 items-start ${view === 'absen' ? 'xl:grid-cols-3' : 'xl:grid-cols-2'}`}>
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wide">
                   Periode
@@ -2706,140 +2819,37 @@ function AbsensiGuru() {
                       ))}
                     </select>
                   </div>
-                  <div className="md:col-span-2 xl:col-span-1">
-                    <SubjectDatePicker
-                      value={tgl}
-                      selectedSchedule={selectedScheduleForPicker}
-                      schedulesForClass={schedulesForActiveClass}
-                      disabled={!kelas}
-                      onSelectDate={handleSelectAttendanceDate}
-                    />
-                  </div>
                 </>
+              )}
+                </div>
+
+                {attendanceSessionTools}
+
+                {view === 'absen' && currentSchedule && (
+                  <AttendanceQrPanel
+                    currentSchedule={currentSchedule}
+                    kelas={kelas}
+                    tgl={tgl}
+                    isActive={isAbsenOpen}
+                    pushToast={pushToast}
+                    embedded
+                  />
+                )}
+              </div>
+
+              {view === 'absen' && (
+                <div className="2xl:sticky 2xl:top-4">
+                  <SubjectDatePicker
+                    value={tgl}
+                    selectedSchedule={selectedScheduleForPicker}
+                    schedulesForClass={schedulesForActiveClass}
+                    disabled={!kelas}
+                    onSelectDate={handleSelectAttendanceDate}
+                  />
+                </div>
               )}
             </div>
           </div>
-
-          {/* Compact Info & Toggle Bar */}
-          {view === 'absen' && currentSchedule && (
-            <div className="bg-slate-50/80 border-b border-slate-200 px-6 py-4 flex flex-col md:flex-row items-center justify-between gap-4">
-              {/* Left: Schedule Info */}
-              <div className="flex items-center gap-3 w-full md:w-auto">
-                <div
-                  className={`p-2.5 rounded-2xl flex-shrink-0 ${
-                    isAbsenOpen ? 'bg-green-100 text-green-600' : 'bg-slate-100 text-slate-500'
-                  }`}
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </div>
-                <div>
-                  <div className="font-bold text-slate-800 text-sm">{currentSchedule.mapel}</div>
-                  <div className="text-xs text-slate-500 flex items-center gap-2">
-                    <span>
-                      {currentSchedule.jam_mulai} - {currentSchedule.jam_selesai}
-                    </span>
-                    <span>•</span>
-                    <span>{formatKelasDisplay(kelas)}</span>
-                    {isWithinTolerance && (
-                      <span className="text-amber-700 font-semibold bg-amber-50 px-2 py-0.5 rounded-xl border border-amber-200">
-                        Toleransi Aktif (5 menit)
-                      </span>
-                    )}
-                    <span
-                      className={`font-semibold px-2 py-0.5 rounded-xl border ${
-                        allowSelfAbsen
-                          ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
-                          : 'text-slate-500 bg-white border-slate-200'
-                      }`}
-                    >
-                      Mandiri {allowSelfAbsen ? 'dibuka' : 'ditutup'}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Right: Mode Toggle + Auto Alpha Button */}
-              <div className="flex flex-wrap items-center justify-end gap-3">
-                <button
-                  onClick={triggerAutoAlphaManual}
-                  disabled={isRunningAutoAlpha || !currentSchedule}
-                  className="px-3 py-2 bg-red-500 hover:bg-red-600 text-white text-xs font-bold rounded-2xl disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors flex items-center gap-1 shadow-sm"
-                  title="Jalankan Auto Alpha untuk siswa yang belum absen"
-                >
-                  {isRunningAutoAlpha ? (
-                    <>
-                      <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                      Processing...
-                    </>
-                  ) : (
-                    <>⚡ Auto Alpha</>
-                  )}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={toggleSelfAbsen}
-                  disabled={!currentSchedule || tgl !== getToday()}
-                  className={`px-3 py-2 rounded-2xl text-xs font-bold border transition-all flex items-center gap-2 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${
-                    allowSelfAbsen
-                      ? 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700'
-                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                  }`}
-                  title="Izinkan atau tutup tombol Hadir mandiri di halaman siswa"
-                >
-                  <UserCheck className="h-4 w-4" />
-                  {allowSelfAbsen ? 'Absen Mandiri Dibuka' : 'Izinkan Absen Mandiri'}
-                </button>
-
-                <div className="flex items-center bg-slate-100 rounded-2xl p-1 border border-slate-200">
-                  <button
-                    onClick={() => toggleAbsenMode('manual')}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
-                      absenMode === 'manual'
-                        ? 'bg-white text-blue-600 shadow-sm border border-slate-200'
-                        : 'text-slate-500 hover:text-slate-700'
-                    }`}
-                  >
-                    <span>👨‍🏫</span> Manual
-                  </button>
-                  <button
-                    onClick={() => toggleAbsenMode('otomatis')}
-                    disabled={tgl !== getToday() || !isWithinTolerance}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
-                      absenMode === 'otomatis'
-                        ? 'bg-white text-green-600 shadow-sm border border-slate-200'
-                        : 'text-slate-500 hover:text-slate-700'
-                    } ${tgl !== getToday() || !isWithinTolerance ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    title={
-                      tgl !== getToday()
-                        ? 'Mode otomatis hanya tersedia untuk hari ini'
-                        : !isWithinTolerance
-                        ? 'Mode otomatis hanya tersedia selama jam pelajaran'
-                        : ''
-                    }
-                  >
-                    <span>🤖</span> Otomatis{' '}
-                    {rfidSettings.rfid_aktif && (
-                      <span className="text-[9px] bg-green-500 text-white px-1 rounded ml-1">RFID</span>
-                    )}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {view === 'absen' && currentSchedule && (
-            <AttendanceQrPanel
-              currentSchedule={currentSchedule}
-              kelas={kelas}
-              tgl={tgl}
-              isActive={isAbsenOpen}
-              pushToast={pushToast}
-            />
-          )}
-
           {/* Navigation Tabs */}
           <div className="border-b border-slate-200 px-6 pt-2 bg-white">
             <div className="flex gap-2 overflow-x-auto">

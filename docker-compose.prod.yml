@@ -204,10 +204,7 @@ services:
       - internal
 
   backend:
-    image: ${EDUSMART_BACKEND_IMAGE:-edusmart-prod-backend:latest}
-    build:
-      context: .
-      dockerfile: backend/docker/Dockerfile.prod
+    image: ${EDUSMART_BACKEND_IMAGE:?EDUSMART_BACKEND_IMAGE is required. Build and push production images in GitHub Actions, then deploy with --pull-images.}
     container_name: edusmart-backend
     restart: unless-stopped
     depends_on:
@@ -360,7 +357,7 @@ services:
       - internal
 
   worker:
-    image: ${EDUSMART_BACKEND_IMAGE:-edusmart-prod-backend:latest}
+    image: ${EDUSMART_BACKEND_IMAGE:?EDUSMART_BACKEND_IMAGE is required. Build and push production images in GitHub Actions, then deploy with --pull-images.}
     container_name: edusmart-worker
     restart: unless-stopped
     depends_on:
@@ -430,7 +427,7 @@ services:
       - internal
 
   scheduler:
-    image: ${EDUSMART_BACKEND_IMAGE:-edusmart-prod-backend:latest}
+    image: ${EDUSMART_BACKEND_IMAGE:?EDUSMART_BACKEND_IMAGE is required. Build and push production images in GitHub Actions, then deploy with --pull-images.}
     container_name: edusmart-scheduler
     restart: unless-stopped
     depends_on:
@@ -500,7 +497,7 @@ services:
       - internal
 
   rfid_bridge:
-    image: ${EDUSMART_BACKEND_IMAGE:-edusmart-prod-backend:latest}
+    image: ${EDUSMART_BACKEND_IMAGE:?EDUSMART_BACKEND_IMAGE is required. Build and push production images in GitHub Actions, then deploy with --pull-images.}
     container_name: edusmart-rfid-bridge
     restart: unless-stopped
     depends_on:
@@ -616,21 +613,7 @@ services:
       - internal
 
   nginx:
-    image: ${EDUSMART_NGINX_IMAGE:-edusmart-prod-nginx:latest}
-    build:
-      context: .
-      dockerfile: deploy/nginx/Dockerfile.prod
-      args:
-        VITE_API_URL: ${VITE_API_URL:-}
-        VITE_TENANT_SLUG: ${VITE_TENANT_SLUG:-}
-        VITE_ROOT_DOMAIN: ${VITE_ROOT_DOMAIN:-}
-        VITE_ADMIN_SUBDOMAIN: ${VITE_ADMIN_SUBDOMAIN:-admin}
-        VITE_REALTIME_POLL_MS: ${VITE_REALTIME_POLL_MS:-4000}
-        VITE_REALTIME_POLL_HIDDEN_MS: ${VITE_REALTIME_POLL_HIDDEN_MS:-12000}
-        VITE_GOOGLE_AUTH_ENABLED: ${VITE_GOOGLE_AUTH_ENABLED:-false}
-        VITE_GOOGLE_CLIENT_ID: ${VITE_GOOGLE_CLIENT_ID:-}
-        VITE_GOOGLE_AUTH_LOGIN_URL: ${VITE_GOOGLE_AUTH_LOGIN_URL:-/api/auth/google/redirect}
-        VITE_GOOGLE_AUTH_LINK_URL: ${VITE_GOOGLE_AUTH_LINK_URL:-/api/auth/google/link}
+    image: ${EDUSMART_NGINX_IMAGE:?EDUSMART_NGINX_IMAGE is required. Build and push production images in GitHub Actions, then deploy with --pull-images.}
     container_name: edusmart-nginx
     restart: unless-stopped
     depends_on:

@@ -23,6 +23,21 @@ class DbController extends ApiController
         'quiz_answers',
     ];
 
+    private const REMOVED_SETTINGS_POLICY_FIELDS = [
+        'ranking_weight_tugas',
+        'ranking_weight_quiz',
+        'ranking_weight_absensi',
+        'ranking_tiebreak_order',
+        'ranking_core_mapel',
+        'ranking_policy_updated_at',
+        'nilai_freeze_enabled',
+        'nilai_freeze_start',
+        'nilai_freeze_end',
+        'nilai_freeze_reason',
+        'nilai_freeze_updated_by',
+        'nilai_freeze_updated_at',
+    ];
+
     private const MAX_DB_FILTER_FIELDS = 40;
 
     private const MAX_DB_ORDER_FIELDS = 8;
@@ -351,6 +366,12 @@ class DbController extends ApiController
             if (empty($rows)) {
                 return $this->deny('Payload tidak memiliki kolom yang valid', 422);
             }
+            if ($table === 'kelas') {
+                $kelasError = $this->prepareKelasRowsForInsert($rows, $tenantId);
+                if ($kelasError !== null) {
+                    return $this->deny($kelasError['message'], $kelasError['status']);
+                }
+            }
             if ($table === 'settings') {
                 $saved = $this->saveSettingsSingletonRows($rows, $tenantId, $tenantScoped);
 
@@ -372,7 +393,14 @@ class DbController extends ApiController
                 $beforeRows = $this->fetchTugasJawabanRowsForPayload($rows, $tenantId);
             }
 
-            DB::table($table)->insert($rows);
+            try {
+                DB::table($table)->insert($rows);
+            } catch (QueryException $e) {
+                if ($this->isUniqueConstraintException($e)) {
+                    return $this->deny('Data sudah ada atau bentrok dengan data yang sudah tersimpan', 409);
+                }
+                throw $e;
+            }
 
             $this->notifyWhatsAppMutation($tenantId, $table, 'insert', [], $rows);
 
@@ -647,7 +675,7 @@ class DbController extends ApiController
             if (
                 in_array($table, ['absensi', 'absensi_settings', 'absensi_scan_temp'], true) &&
                 $tenantId &&
-                Schema::hasColumn($table, 'tenant_id')
+                $this->isSelectableColumn($table, 'tenant_id')
             ) {
                 $uniqueBy = array_values(array_unique(array_merge(['tenant_id'], $uniqueBy)));
             }
@@ -757,7 +785,7 @@ class DbController extends ApiController
                 return $this->deny();
             }
 
-            $normalizeError = $this->normalizeSettingsGovernancePayload($payload, $userId);
+            $normalizeError = $this->normalizeSettingsGovernancePayload($payload);
             if ($normalizeError !== null) {
                 return $this->deny($normalizeError, 422);
             }
@@ -2840,12 +2868,171 @@ class DbController extends ApiController
         }, $rows);
     }
 
+    private function prepareKelasRowsForInsert(array &$rows, ?string $tenantId): ?array
+    {
+        foreach ($rows as $index => $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+
+            $normalized = $this->normalizeKelasRow($row);
+            if ($normalized === null) {
+                return [
+                    'message' => 'Data kelas tidak valid',
+                    'status' => 422,
+                ];
+            }
+
+            $duplicate = $this->findDuplicateKelasInTenant($normalized['nama'], $tenantId);
+            if ($duplicate) {
+                return [
+                    'message' => 'Kelas '.$normalized['nama'].' sudah ada',
+                    'status' => 409,
+                ];
+            }
+
+            $normalized['id'] = $this->resolveKelasInsertId($normalized['id'], $normalized['nama'], $tenantId);
+            $rows[$index] = array_merge($row, $normalized);
+        }
+
+        return null;
+    }
+
+    private function normalizeKelasRow(array $row): ?array
+    {
+        $rawGrade = $this->normalizeWhitespace((string) ($row['grade'] ?? ''));
+        $rawSuffix = $this->normalizeWhitespace((string) ($row['suffix'] ?? ''));
+        $rawName = $this->normalizeWhitespace((string) ($row['nama'] ?? ''));
+
+        $grade = $this->normalizeKelasGrade($rawGrade);
+        if ($grade === '') {
+            $grade = $this->parseKelasGrade($rawName) ?: $this->parseKelasGrade($rawSuffix);
+        }
+
+        if ($grade === '') {
+            return null;
+        }
+
+        $suffix = $rawSuffix;
+        if ($suffix === '' && $rawName !== '') {
+            $suffix = $this->stripKelasGradePrefix($rawName, $grade);
+        }
+        $suffix = $this->stripKelasGradePrefix($suffix, $grade);
+        $suffix = strtoupper($this->normalizeWhitespace($suffix));
+
+        if ($suffix === '') {
+            return null;
+        }
+
+        $nama = strtoupper($this->normalizeWhitespace($grade.' '.$suffix));
+        $baseId = $this->makeKelasSlug($nama);
+
+        return [
+            'id' => $baseId,
+            'nama' => $nama,
+            'grade' => $grade,
+            'suffix' => $suffix,
+        ];
+    }
+
+    private function normalizeWhitespace(string $value): string
+    {
+        return trim((string) preg_replace('/\s+/', ' ', $value));
+    }
+
+    private function normalizeKelasGrade(string $value): string
+    {
+        $grade = strtoupper($this->normalizeWhitespace($value));
+
+        return in_array($grade, ['VII', 'VIII', 'IX', 'X', 'XI', 'XII'], true) ? $grade : '';
+    }
+
+    private function parseKelasGrade(string $value): string
+    {
+        $normalized = strtoupper($this->normalizeWhitespace($value));
+        if (preg_match('/^(XII|XI|X|IX|VIII|VII)\b/', $normalized, $matches)) {
+            return $matches[1];
+        }
+
+        return '';
+    }
+
+    private function stripKelasGradePrefix(string $value, string $grade): string
+    {
+        $normalized = $this->normalizeWhitespace($value);
+        if ($normalized === '' || $grade === '') {
+            return $normalized;
+        }
+
+        return $this->normalizeWhitespace((string) preg_replace(
+            '/^'.preg_quote($grade, '/').'\b\s*/i',
+            '',
+            $normalized,
+            1
+        ));
+    }
+
+    private function makeKelasSlug(string $value): string
+    {
+        $slug = Str::slug($value);
+        $slug = trim(substr($slug, 0, 80), '-');
+
+        return $slug !== '' ? $slug : 'kelas';
+    }
+
+    private function findDuplicateKelasInTenant(string $nama, ?string $tenantId): ?object
+    {
+        if ($nama === '') {
+            return null;
+        }
+
+        $query = DB::table('kelas')
+            ->whereRaw('upper(nama) = ?', [strtoupper($nama)]);
+
+        if ($tenantId && $this->isSelectableColumn('kelas', 'tenant_id')) {
+            $query->where('tenant_id', $tenantId);
+        }
+
+        return $query->first(['id', 'nama', 'tenant_id']);
+    }
+
+    private function resolveKelasInsertId(string $baseId, string $nama, ?string $tenantId): string
+    {
+        $baseId = $this->makeKelasSlug($baseId ?: $nama);
+        $candidate = $baseId;
+        $tenantSuffix = $tenantId ? substr(str_replace('-', '', $tenantId), 0, 8) : '';
+        $attempt = 0;
+
+        while (DB::table('kelas')->where('id', $candidate)->exists()) {
+            $attempt++;
+            $suffix = $tenantSuffix !== '' ? $tenantSuffix : (string) $attempt;
+            if ($attempt > 1) {
+                $suffix .= '-'.$attempt;
+            }
+
+            $maxBaseLength = max(1, 80 - strlen($suffix) - 1);
+            $trimmedBase = trim(substr($baseId, 0, $maxBaseLength), '-');
+            $candidate = ($trimmedBase !== '' ? $trimmedBase : 'kelas').'-'.$suffix;
+        }
+
+        return $candidate;
+    }
+
+    private function isUniqueConstraintException(QueryException $e): bool
+    {
+        $message = strtolower($e->getMessage());
+
+        return str_contains($message, 'unique')
+            || str_contains($message, 'duplicate')
+            || str_contains($message, 'constraint failed');
+    }
+
     private function saveTenantSingletonRows(string $table, array $rows, string $tenantId): array
     {
         $results = [];
-        $hasCreatedAt = Schema::hasColumn($table, 'created_at');
-        $hasUpdatedAt = Schema::hasColumn($table, 'updated_at');
-        $hasId = Schema::hasColumn($table, 'id');
+        $hasCreatedAt = $this->isSelectableColumn($table, 'created_at');
+        $hasUpdatedAt = $this->isSelectableColumn($table, 'updated_at');
+        $hasId = $this->isSelectableColumn($table, 'id');
 
         foreach ($rows as $row) {
             if (! is_array($row)) {
@@ -2910,9 +3097,9 @@ class DbController extends ApiController
     {
         $results = [];
         $table = 'settings';
-        $hasCreatedAt = Schema::hasColumn($table, 'created_at');
-        $hasUpdatedAt = Schema::hasColumn($table, 'updated_at');
-        $hasTenantId = Schema::hasColumn($table, 'tenant_id');
+        $hasCreatedAt = $this->isSelectableColumn($table, 'created_at');
+        $hasUpdatedAt = $this->isSelectableColumn($table, 'updated_at');
+        $hasTenantId = $this->isSelectableColumn($table, 'tenant_id');
 
         foreach ($rows as $row) {
             if (! is_array($row)) {
@@ -3128,7 +3315,7 @@ class DbController extends ApiController
     private function manualUpsertByKeys(string $table, array $rows, array $uniqueBy, ?string $tenantId): array
     {
         $results = [];
-        $hasTenantColumn = $tenantId && Schema::hasColumn($table, 'tenant_id');
+        $hasTenantColumn = $tenantId && $this->isSelectableColumn($table, 'tenant_id');
 
         foreach ($rows as $row) {
             if (! is_array($row)) {
@@ -3194,7 +3381,7 @@ class DbController extends ApiController
     private function fetchRowsByKeys(string $table, array $rows, array $uniqueBy, ?string $tenantId): array
     {
         $results = [];
-        $hasTenantColumn = $tenantId && Schema::hasColumn($table, 'tenant_id');
+        $hasTenantColumn = $tenantId && $this->isSelectableColumn($table, 'tenant_id');
 
         foreach ($rows as $row) {
             if (! is_array($row)) {
@@ -3259,9 +3446,9 @@ class DbController extends ApiController
         }
 
         $settings = null;
-        if (Schema::hasTable('settings')) {
+        if ($this->isSelectableColumn('settings', 'id')) {
             $settingsQuery = DB::table('settings')->orderBy('id');
-            if ($tenantId && Schema::hasColumn('settings', 'tenant_id')) {
+            if ($tenantId && $this->isSelectableColumn('settings', 'tenant_id')) {
                 $settingsQuery->where('tenant_id', $tenantId);
             }
             $settings = $settingsQuery->first(['tahun_ajaran', 'semester_aktif']);
@@ -3777,7 +3964,7 @@ class DbController extends ApiController
         }
 
         $ekskulIds = array_values(array_unique($ekskulIds));
-        $hasDeadlineColumn = Schema::hasColumn('ekskul', 'registration_deadline_at');
+        $hasDeadlineColumn = $this->isSelectableColumn('ekskul', 'registration_deadline_at');
 
         $ekskulQuery = DB::table('ekskul')->whereIn('id', $ekskulIds);
         $this->applyTenantFilter($ekskulQuery);
@@ -3836,7 +4023,7 @@ class DbController extends ApiController
             return null;
         }
 
-        if (! Schema::hasColumn('ekskul', 'registration_deadline_at')) {
+        if (! $this->isSelectableColumn('ekskul', 'registration_deadline_at')) {
             return null;
         }
 
@@ -5094,16 +5281,6 @@ class DbController extends ApiController
             'semester_aktif',
             'registrasi_siswa_aktif',
             'registrasi_guru_aktif',
-            'ranking_weight_tugas',
-            'ranking_weight_quiz',
-            'ranking_weight_absensi',
-            'ranking_tiebreak_order',
-            'ranking_core_mapel',
-            'ranking_policy_updated_at',
-            'nilai_freeze_enabled',
-            'nilai_freeze_start',
-            'nilai_freeze_end',
-            'nilai_freeze_reason',
         ];
 
         return $this->sanitizeRowsByAllowedFields($rows, $allowed);
@@ -5470,7 +5647,7 @@ class DbController extends ApiController
             return false;
         }
 
-        if (! Schema::hasColumn('settings', 'approval_maker_checker_enabled')) {
+        if (! $this->isSelectableColumn('settings', 'approval_maker_checker_enabled')) {
             return true;
         }
 
@@ -5495,7 +5672,7 @@ class DbController extends ApiController
             return false;
         }
 
-        if (! Schema::hasTable('settings') || ! Schema::hasColumn('settings', 'approval_primary_admin_id')) {
+        if (! $this->isSelectableColumn('settings', 'approval_primary_admin_id')) {
             return false;
         }
 
@@ -5584,99 +5761,46 @@ class DbController extends ApiController
         return null;
     }
 
-    private function normalizeSettingsGovernancePayload(&$payload, ?string $userId): ?string
+    private function normalizeSettingsGovernancePayload(&$payload): ?string
     {
         if (! is_array($payload)) {
             return null;
         }
 
         $error = null;
-        $now = now();
 
-        $this->mapPayload($payload, function ($row) use (&$error, $userId, $now) {
+        $this->mapPayload($payload, function ($row) use (&$error) {
             if ($error !== null || ! is_array($row)) {
                 return $row;
             }
-
-            $touchRankingPolicy = false;
-            $touchFreezePolicy = false;
 
             // Admin utama tenant hanya boleh diubah dari panel super admin.
             if (array_key_exists('approval_primary_admin_id', $row)) {
                 unset($row['approval_primary_admin_id']);
             }
 
-            $weightKeys = [
-                'ranking_weight_tugas',
-                'ranking_weight_quiz',
-                'ranking_weight_absensi',
-            ];
-            $weightValues = [];
-            foreach ($weightKeys as $key) {
-                if (! array_key_exists($key, $row)) {
-                    continue;
-                }
-
-                $touchRankingPolicy = true;
-                $raw = $row[$key];
-                if ($raw === '' || $raw === null) {
-                    $row[$key] = 0;
-                    $weightValues[$key] = 0.0;
-
-                    continue;
-                }
-                if (! is_numeric($raw)) {
-                    $error = 'Bobot ranking harus berupa angka';
-
-                    return $row;
-                }
-
-                $weight = round((float) $raw, 2);
-                if ($weight < 0) {
-                    $error = 'Bobot ranking tidak boleh negatif';
-
-                    return $row;
-                }
-
-                $row[$key] = $weight;
-                $weightValues[$key] = $weight;
+            foreach (self::REMOVED_SETTINGS_POLICY_FIELDS as $field) {
+                unset($row[$field]);
             }
 
-            if (count($weightValues) === count($weightKeys)) {
-                $total = array_sum($weightValues);
-                if (abs($total - 100) > 0.01) {
-                    $error = 'Total bobot tugas + quiz + absensi harus tepat 100';
+            if (array_key_exists('tahun_ajaran', $row)) {
+                $year = AcademicPeriod::normalizeAcademicYear($row['tahun_ajaran']);
+                if (! $year) {
+                    $error = 'Tahun ajaran harus berformat 2025/2026';
 
                     return $row;
                 }
+                $row['tahun_ajaran'] = $year;
             }
 
-            if (array_key_exists('ranking_tiebreak_order', $row)) {
-                $touchRankingPolicy = true;
-                $normalizedTieBreak = $this->normalizeSettingsTieBreakOrder($row['ranking_tiebreak_order']);
-                if ($normalizedTieBreak === null) {
-                    $error = 'Format urutan tie-break ranking tidak valid';
+            if (array_key_exists('semester_aktif', $row)) {
+                $semester = AcademicPeriod::normalizeSemester($row['semester_aktif']);
+                if (! $semester) {
+                    $error = 'Semester aktif harus Ganjil atau Genap';
 
                     return $row;
                 }
-                $row['ranking_tiebreak_order'] = json_encode(
-                    $normalizedTieBreak,
-                    JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
-                );
-            }
-
-            if (array_key_exists('ranking_core_mapel', $row)) {
-                $touchRankingPolicy = true;
-                $normalizedCoreMapel = $this->normalizeSettingsMapelList($row['ranking_core_mapel']);
-                if ($normalizedCoreMapel === null) {
-                    $error = 'Format mapel inti tidak valid';
-
-                    return $row;
-                }
-                $row['ranking_core_mapel'] = json_encode(
-                    $normalizedCoreMapel,
-                    JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
-                );
+                $row['semester_aktif'] = $semester;
             }
 
             foreach ([
@@ -5709,196 +5833,10 @@ class DbController extends ApiController
                 $row['anomaly_bulk_threshold'] = $threshold;
             }
 
-            foreach (['nilai_freeze_enabled', 'nilai_freeze_start', 'nilai_freeze_end', 'nilai_freeze_reason'] as $key) {
-                if (array_key_exists($key, $row)) {
-                    $touchFreezePolicy = true;
-                }
-            }
-
-            if (array_key_exists('nilai_freeze_enabled', $row)) {
-                $row['nilai_freeze_enabled'] = filter_var(
-                    $row['nilai_freeze_enabled'],
-                    FILTER_VALIDATE_BOOLEAN,
-                    FILTER_NULL_ON_FAILURE
-                );
-                if ($row['nilai_freeze_enabled'] === null) {
-                    $row['nilai_freeze_enabled'] = false;
-                }
-            }
-
-            if (array_key_exists('nilai_freeze_start', $row)) {
-                if ($row['nilai_freeze_start'] === '' || $row['nilai_freeze_start'] === null) {
-                    $row['nilai_freeze_start'] = null;
-                } elseif (! $this->isValidDateTimeValue($row['nilai_freeze_start'])) {
-                    $error = 'Tanggal mulai freeze nilai tidak valid';
-
-                    return $row;
-                }
-            }
-
-            if (array_key_exists('nilai_freeze_end', $row)) {
-                if ($row['nilai_freeze_end'] === '' || $row['nilai_freeze_end'] === null) {
-                    $row['nilai_freeze_end'] = null;
-                } elseif (! $this->isValidDateTimeValue($row['nilai_freeze_end'])) {
-                    $error = 'Tanggal akhir freeze nilai tidak valid';
-
-                    return $row;
-                }
-            }
-
-            if (
-                array_key_exists('nilai_freeze_start', $row)
-                && array_key_exists('nilai_freeze_end', $row)
-                && $row['nilai_freeze_start']
-                && $row['nilai_freeze_end']
-            ) {
-                try {
-                    $start = Carbon::parse((string) $row['nilai_freeze_start']);
-                    $end = Carbon::parse((string) $row['nilai_freeze_end']);
-                    if ($start->gt($end)) {
-                        $error = 'Tanggal akhir freeze nilai harus setelah tanggal mulai';
-
-                        return $row;
-                    }
-                } catch (\Throwable $e) {
-                    $error = 'Rentang tanggal freeze nilai tidak valid';
-
-                    return $row;
-                }
-            }
-
-            if (array_key_exists('nilai_freeze_reason', $row)) {
-                $reason = trim((string) ($row['nilai_freeze_reason'] ?? ''));
-                $row['nilai_freeze_reason'] = $reason === '' ? null : Str::limit($reason, 500, '');
-            }
-
-            if ($touchRankingPolicy) {
-                $row['ranking_policy_updated_at'] = $now;
-            }
-
-            if ($touchFreezePolicy) {
-                $row['nilai_freeze_updated_at'] = $now;
-                $row['nilai_freeze_updated_by'] = $userId ?: null;
-            }
-
             return $row;
         });
 
         return $error;
-    }
-
-    private function isValidDateTimeValue($value): bool
-    {
-        try {
-            Carbon::parse((string) $value);
-
-            return true;
-        } catch (\Throwable $e) {
-            return false;
-        }
-    }
-
-    private function normalizeSettingsTieBreakOrder($value): ?array
-    {
-        $defaultOrder = ['nilai_akhir', 'mapel_inti', 'absensi', 'nama'];
-        $normalized = [];
-
-        $source = $value;
-        if (is_string($source)) {
-            $trimmed = trim($source);
-            if ($trimmed === '') {
-                return $defaultOrder;
-            }
-
-            $decoded = null;
-            if (str_starts_with($trimmed, '[')) {
-                $decoded = json_decode($trimmed, true);
-            }
-
-            if (is_array($decoded)) {
-                $source = $decoded;
-            } else {
-                $source = preg_split('/[,;\\n\\r]+/', $trimmed) ?: [];
-            }
-        }
-
-        if (! is_array($source)) {
-            return null;
-        }
-
-        foreach ($source as $item) {
-            $token = strtolower(trim((string) $item));
-            if ($token === '') {
-                continue;
-            }
-
-            $mapped = match ($token) {
-                'nilai_akhir', 'nilaiakhir', 'final_score', 'akhir' => 'nilai_akhir',
-                'mapel_inti', 'mapelinti', 'core_mapel', 'core' => 'mapel_inti',
-                'absensi', 'attendance' => 'absensi',
-                'nama', 'name' => 'nama',
-                default => null,
-            };
-
-            if ($mapped === null) {
-                return null;
-            }
-
-            if (! in_array($mapped, $normalized, true)) {
-                $normalized[] = $mapped;
-            }
-        }
-
-        foreach ($defaultOrder as $fallback) {
-            if (! in_array($fallback, $normalized, true)) {
-                $normalized[] = $fallback;
-            }
-        }
-
-        return $normalized;
-    }
-
-    private function normalizeSettingsMapelList($value): ?array
-    {
-        if ($value === null || $value === '') {
-            return [];
-        }
-
-        $source = $value;
-        if (is_string($source)) {
-            $trimmed = trim($source);
-            if ($trimmed === '') {
-                return [];
-            }
-
-            $decoded = null;
-            if (str_starts_with($trimmed, '[')) {
-                $decoded = json_decode($trimmed, true);
-            }
-
-            if (is_array($decoded)) {
-                $source = $decoded;
-            } else {
-                $source = preg_split('/[,;\\n\\r]+/', $trimmed) ?: [];
-            }
-        }
-
-        if (! is_array($source)) {
-            return null;
-        }
-
-        $result = [];
-        foreach ($source as $item) {
-            $name = trim((string) $item);
-            if ($name === '') {
-                continue;
-            }
-            if (! in_array($name, $result, true)) {
-                $result[] = $name;
-            }
-        }
-
-        return $result;
     }
 
     private function payloadHasInvalidScore($payload): bool

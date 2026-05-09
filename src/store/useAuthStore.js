@@ -103,14 +103,19 @@ export const useAuthStore = create((set, get) => ({
 
     authInitPromise = (async () => {
       try {
-        const [settings, sessionRes] = await Promise.all([
-          get().loadSettings(),
-          supabase.auth.getSession()
-        ])
+        const sessionRes = await supabase.auth.getSession()
+        const sessionData = sessionRes?.data || {}
 
-        const session = sessionRes?.data?.session || null
+        const session = sessionData?.session || null
         const user = session?.user ?? null
-        let profile = session?.profile || sessionRes?.data?.profile || null
+        let profile = session?.profile || sessionData?.profile || null
+        let settings = session?.settings || sessionData?.settings || null
+        const hasSuperAdminBootstrap =
+          sessionData?.superAdminChecked === true ||
+          session?.superAdminChecked === true
+        const bootstrapIsSuperAdmin = Boolean(
+          sessionData?.isSuperAdmin || session?.isSuperAdmin
+        )
 
         if (!user) {
           clearAuthSessionHint()
@@ -126,6 +131,8 @@ export const useAuthStore = create((set, get) => ({
               user: null,
               profile: null,
               settings,
+              isSuperAdmin: false,
+              superAdminChecked: true,
               initialized: true,
               error: profileError?.message || 'Gagal memuat data profil'
             })
@@ -139,6 +146,8 @@ export const useAuthStore = create((set, get) => ({
               user: null,
               profile: null,
               settings,
+              isSuperAdmin: false,
+              superAdminChecked: true,
               initialized: true,
               error: 'Role pengguna tidak valid. Hubungi administrator.'
             })
@@ -155,6 +164,8 @@ export const useAuthStore = create((set, get) => ({
             user: null,
             profile: null,
             settings,
+            isSuperAdmin: false,
+            superAdminChecked: true,
             initialized: true,
             error: 'Role pengguna tidak valid. Hubungi administrator.'
           })
@@ -187,6 +198,8 @@ export const useAuthStore = create((set, get) => ({
               user: null,
               profile: null,
               settings,
+              isSuperAdmin: false,
+              superAdminChecked: true,
               initialized: true,
               error: errorMessage
             })
@@ -199,8 +212,22 @@ export const useAuthStore = create((set, get) => ({
           setAuthSessionHint(true)
         }
 
-        set({ user, profile, settings, initialized: true })
-        void get().loadSuperAdmin(profile)
+        if (user && profile?.role === 'admin' && !settings) {
+          settings = await get().loadSettings()
+        }
+
+        set({
+          user,
+          profile,
+          settings,
+          isSuperAdmin: hasSuperAdminBootstrap ? bootstrapIsSuperAdmin : false,
+          superAdminChecked: hasSuperAdminBootstrap || !user || profile?.role !== 'admin',
+          initialized: true
+        })
+
+        if (user && !hasSuperAdminBootstrap) {
+          void get().loadSuperAdmin(profile)
+        }
 
         return { user, profile, settings }
       } catch (err) {
@@ -255,6 +282,89 @@ export const useAuthStore = create((set, get) => ({
     const settings = await get().loadSettings()
     set({ settings })
     return settings
+  },
+
+  refreshAuthSession: async ({ successMessage = '' } = {}) => {
+    const { pushToast } = useUIStore.getState()
+
+    try {
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+      if (sessionError) {
+        throw new Error(sessionError.message || 'Gagal memuat sesi login')
+      }
+
+      const session = sessionData?.session || null
+      const user = session?.user || null
+      const profile = session?.profile || sessionData?.profile || null
+      let settings = session?.settings || sessionData?.settings || get().settings || null
+      const hasSuperAdminBootstrap =
+        sessionData?.superAdminChecked === true ||
+        session?.superAdminChecked === true
+      const bootstrapIsSuperAdmin = Boolean(
+        sessionData?.isSuperAdmin || session?.isSuperAdmin
+      )
+      if (!user || !profile) {
+        throw new Error('Sesi login belum aktif. Silakan coba lagi.')
+      }
+
+      if (!isValidRole(profile?.role)) {
+        await supabase.auth.signOut()
+        throw new Error('Role pengguna tidak valid. Hubungi administrator.')
+      }
+
+      if (profile.status === 'nonaktif') {
+        const baseMessage = profile.role === 'guru'
+          ? 'Akun guru dinonaktifkan. Silahkan hubungi administrator.'
+          : profile.role === 'siswa'
+            ? 'Akun siswa dinonaktifkan. Silahkan hubungi wali kelas atau admin.'
+            : 'Akun ini dinonaktifkan. Silahkan hubungi administrator.'
+        const errorMessage = profile.alasan_nonaktif
+          ? `${baseMessage} Alasan: ${profile.alasan_nonaktif}`
+          : baseMessage
+
+        await supabase.auth.signOut()
+        throw new Error(errorMessage)
+      }
+
+      if (profile?.role === 'admin' && !settings) {
+        settings = await get().loadSettings()
+      }
+
+      const accountSetupRequired = shouldForceAccountSetup(profile, user?.email)
+
+      setAuthSessionHint(true)
+      set({
+        user,
+        profile,
+        settings,
+        isSuperAdmin: hasSuperAdminBootstrap ? bootstrapIsSuperAdmin : false,
+        superAdminChecked: hasSuperAdminBootstrap || profile?.role !== 'admin',
+        error: null
+      })
+      if (!hasSuperAdminBootstrap) {
+        void get().loadSuperAdmin(profile)
+      }
+
+      if (accountSetupRequired) {
+        pushToast(
+          'warning',
+          'Anda harus mengganti password akun sekarang.',
+          5000
+        )
+      }
+
+      if (successMessage) {
+        pushToast('success', successMessage)
+      }
+
+      return { user, profile }
+    } catch (err) {
+      logError('Refresh auth session error:', err)
+      const errorMessage = err?.message || 'Gagal memuat sesi login'
+      set({ error: errorMessage })
+      pushToast('error', errorMessage)
+      return { error: errorMessage }
+    }
   },
 
   /* ===========================
@@ -501,6 +611,18 @@ export const useAuthStore = create((set, get) => ({
       set({ error: errorMessage })
       pushToast('error', errorMessage)
       return { error: errorMessage }
+    } finally {
+      set({ isLoading: false })
+    }
+  },
+
+  completeGooglePopupLogin: async () => {
+    set({ isLoading: true, error: null })
+
+    try {
+      return await get().refreshAuthSession({
+        successMessage: 'Login Google berhasil'
+      })
     } finally {
       set({ isLoading: false })
     }

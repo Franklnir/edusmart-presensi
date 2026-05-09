@@ -114,4 +114,17 @@ return [
 
     'prefix' => env('CACHE_PREFIX', Str::slug((string) env('APP_NAME', 'laravel')).'-cache-'),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Cache Object Unserialization
+    |--------------------------------------------------------------------------
+    |
+    | Laravel 13 can restrict which cached PHP objects may be unserialized.
+    | This application stores scalar / array payloads in cache, so arbitrary
+    | object unserialization is disabled by default.
+    |
+    */
+
+    'serializable_classes' => false,
+
 ];

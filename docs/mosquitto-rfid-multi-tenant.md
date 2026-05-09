@@ -35,7 +35,7 @@ Untuk DNS, arahkan `mqtt.edusmart.example.com` ke server yang menjalankan
 ## Deploy
 
 ```bash
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build mosquitto_init mosquitto mosquitto_reloader backend rfid_bridge
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d --no-build mosquitto_init mosquitto mosquitto_reloader backend rfid_bridge
 docker compose --env-file .env.production -f docker-compose.prod.yml exec backend php artisan migrate --force
 docker compose --env-file .env.production -f docker-compose.prod.yml exec backend php artisan rfid:mosquitto-sync
 docker compose --env-file .env.production -f docker-compose.prod.yml restart rfid_bridge

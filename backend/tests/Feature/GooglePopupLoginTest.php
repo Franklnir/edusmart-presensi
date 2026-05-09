@@ -133,6 +133,80 @@ class GooglePopupLoginTest extends TestCase
         ]);
     }
 
+    public function test_google_oauth_popup_redirect_completes_login_without_javascript_origin(): void
+    {
+        config()->set('services.google.enabled', true);
+        config()->set('services.google.client_id', 'google-client-id');
+        config()->set('services.google.client_secret', 'google-client-secret');
+        config()->set('services.google.redirect_uri', 'https://xiaozhiscig.biz.id/api/auth/google/callback');
+        config()->set('tenancy.allow_header_override', true);
+        config()->set('tenancy.root_domain', 'xiaozhiscig.biz.id');
+
+        $tenantId = $this->defaultTenantId();
+        $user = $this->createUserWithProfile($tenantId, 'siswa', 'siswa-oauth@example.com');
+
+        $redirect = $this
+            ->withServerVariables(['HTTP_HOST' => 'xiaozhiscig.biz.id'])
+            ->withHeader('X-Tenant', 'default')
+            ->get('/api/auth/google/redirect?'.http_build_query([
+                'popup' => '1',
+                'origin' => 'https://xiaozhiscig.biz.id',
+                'popup_state' => 'popup-state-123',
+                'redirect' => 'https://xiaozhiscig.biz.id/login',
+            ]));
+
+        $redirect->assertRedirect();
+        $location = $redirect->headers->get('Location');
+        $this->assertStringStartsWith('https://accounts.google.com/o/oauth2/v2/auth?', (string) $location);
+
+        parse_str((string) parse_url((string) $location, PHP_URL_QUERY), $query);
+        $this->assertSame('google-client-id', $query['client_id'] ?? null);
+        $this->assertSame('https://xiaozhiscig.biz.id/api/auth/google/callback', $query['redirect_uri'] ?? null);
+        $this->assertNotEmpty($query['state'] ?? '');
+
+        Http::fake([
+            'https://oauth2.googleapis.com/token' => Http::response([
+                'id_token' => 'google-id-token',
+            ], 200),
+            'https://oauth2.googleapis.com/tokeninfo*' => Http::response([
+                'aud' => 'google-client-id',
+                'iss' => 'https://accounts.google.com',
+                'sub' => 'google-sub-oauth',
+                'email' => 'siswa-oauth@example.com',
+                'email_verified' => 'true',
+                'name' => 'Siswa OAuth',
+            ], 200),
+        ]);
+
+        $callback = $this
+            ->withServerVariables(['HTTP_HOST' => 'xiaozhiscig.biz.id'])
+            ->get('/api/auth/google/callback?'.http_build_query([
+                'state' => $query['state'],
+                'code' => 'google-auth-code',
+            ]));
+
+        if ($callback->isRedirection()) {
+            $handoffLocation = (string) $callback->headers->get('Location');
+            $this->assertStringContainsString('/api/auth/google/finalize-login', $handoffLocation);
+
+            $handoffParts = parse_url($handoffLocation);
+            $callback = $this
+                ->withServerVariables(['HTTP_HOST' => $handoffParts['host'] ?? 'xiaozhiscig.biz.id'])
+                ->get(($handoffParts['path'] ?? '/api/auth/google/finalize-login')
+                    .(isset($handoffParts['query']) ? '?'.$handoffParts['query'] : ''));
+        }
+
+        $callback->assertOk();
+        $callback->assertSee('edusmart-google-oauth-success', false);
+        $callback->assertSee('popup-state-123', false);
+
+        $this->assertDatabaseHas('users', [
+            'id' => $user->id,
+            'google_id' => 'google-sub-oauth',
+            'google_email' => 'siswa-oauth@example.com',
+        ]);
+    }
+
     public function test_google_popup_context_accepts_allowed_origin(): void
     {
         config()->set('services.google.enabled', true);

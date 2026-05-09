@@ -526,6 +526,7 @@ export default function SHome() {
 
   const [isLoading, setIsLoading] = useState(true)
   const tugasLoadSeqRef = useRef(0)
+  const activeAcademicPeriodRef = useRef(null)
 
   const getToday = () => {
     const d = new Date()
@@ -549,6 +550,23 @@ export default function SHome() {
     if (event.key !== 'Enter' && event.key !== ' ') return
     event.preventDefault()
     goToTugas(tugasId)
+  }
+
+  const loadActiveAcademicPeriod = async ({ force = false } = {}) => {
+    if (!force && activeAcademicPeriodRef.current) {
+      return activeAcademicPeriodRef.current
+    }
+
+    const { data } = await supabase
+      .from('settings')
+      .select('tahun_ajaran, semester_aktif')
+      .order('id')
+      .limit(1)
+      .maybeSingle()
+
+    const period = resolveAcademicPeriod(data || {})
+    activeAcademicPeriodRef.current = period
+    return period
   }
 
   /* ============================
@@ -579,6 +597,27 @@ export default function SHome() {
     }
 
     loadAllData()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, profile?.kelas])
+
+  useEffect(() => {
+    if (!userId) return
+
+    const refreshAcademicScopedData = () => {
+      activeAcademicPeriodRef.current = null
+      if (!profile?.kelas) return
+      void loadAbsensi()
+      void loadTugas()
+    }
+
+    const channel = supabase
+      .channel(`siswa_home_period_${userId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, refreshAcademicScopedData)
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, profile?.kelas])
 
@@ -691,9 +730,9 @@ export default function SHome() {
   const loadAbsensi = async () => {
     if (!profile?.kelas || !userId) return
     const today = getToday()
-    const period = resolveAcademicPeriod()
 
     try {
+      const period = await loadActiveAcademicPeriod()
       const { data, error } = await supabase
         .from('absensi')
         .select('uid, status')
@@ -728,11 +767,11 @@ export default function SHome() {
   const loadTugas = async () => {
     if (!profile?.kelas || !userId) return
     const nowIso = new Date().toISOString()
-    const period = resolveAcademicPeriod()
     const requestId = ++tugasLoadSeqRef.current
 
     try {
       setIsTugasLoading(true)
+      const period = await loadActiveAcademicPeriod()
       const [
         { data: overdueData, error: overdueError },
         { data: upcomingData, error: upcomingError },

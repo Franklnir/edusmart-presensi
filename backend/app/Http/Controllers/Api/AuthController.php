@@ -19,9 +19,9 @@ use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Js;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password as PasswordRule;
-use Laravel\Socialite\Facades\Socialite;
 
 class AuthController extends ApiController
 {
@@ -43,6 +43,17 @@ class AuthController extends ApiController
 
     private const EMAIL_VERIFICATION_CODE_MAX_ATTEMPTS = 5;
 
+    private const BOOTSTRAP_SETTINGS_COLUMNS = [
+        'id',
+        'nama_sekolah',
+        'logo_url',
+        'logo_path',
+        'admin_lock_enabled',
+        'tahun_ajaran',
+        'semester_aktif',
+        'updated_at',
+    ];
+
     public function __construct(
         private readonly TenantDomainService $tenantDomainService
     ) {}
@@ -60,16 +71,77 @@ class AuthController extends ApiController
             'data' => [
                 'user' => $user,
                 'profile' => $profile,
+                'settings' => $this->bootstrapSettings($request),
+                'is_super_admin' => $this->isSuperAdmin($request),
             ],
         ]);
     }
 
+    private function bootstrapSettings(Request $request): ?array
+    {
+        try {
+            if (! Schema::hasTable('settings')) {
+                return null;
+            }
+
+            $availableColumns = Schema::getColumnListing('settings');
+            $columns = array_values(array_filter(
+                self::BOOTSTRAP_SETTINGS_COLUMNS,
+                fn (string $column) => in_array($column, $availableColumns, true)
+            ));
+
+            if (empty($columns)) {
+                return null;
+            }
+
+            $query = DB::table('settings')->orderBy('id');
+            $tenantId = $this->tenantId($request);
+            if ($tenantId && in_array('tenant_id', $availableColumns, true)) {
+                $query->where('tenant_id', $tenantId);
+            }
+
+            $settings = $query->first($columns);
+
+            return $settings ? (array) $settings : null;
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
     public function googleRedirect(Request $request): RedirectResponse
     {
-        return redirect()->away($this->frontendAuthUrl('/login', [
-            'google' => 'failed',
-            'google_error' => 'Flow Google lama dinonaktifkan. Muat ulang halaman lalu gunakan tombol Google terbaru.',
-        ], $request));
+        $redirectTarget = $this->sanitizeFrontendRedirect(
+            $request,
+            (string) $request->query('redirect', $request->query('next', ''))
+        );
+
+        if (! $this->isGoogleAuthEnabled()) {
+            return redirect()->away($this->appendQueryToUrl($redirectTarget, [
+                'google' => 'disabled',
+            ]));
+        }
+
+        if ($this->googleClientId() === '' || $this->googleClientSecret() === '') {
+            return redirect()->away($this->appendQueryToUrl($redirectTarget, [
+                'google' => 'failed',
+                'google_error' => 'Konfigurasi Google OAuth belum lengkap.',
+            ]));
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return redirect()->away($this->appendQueryToUrl($redirectTarget, [
+                'google' => 'tenant_invalid',
+            ]));
+        }
+
+        $state = $this->createGoogleState($request, 'login', array_merge([
+            'tenant_id' => $tenantId,
+            'host' => $this->currentHost($request),
+            'redirect' => $redirectTarget,
+        ], $this->googlePopupStatePayload($request)));
+
+        return redirect()->away($this->googleAuthorizationUrl($request, $state));
     }
 
     public function googleLinkRedirect(Request $request): RedirectResponse
@@ -79,10 +151,41 @@ class AuthController extends ApiController
             (string) $request->query('redirect', $request->query('next', ''))
         );
 
-        return redirect()->away($this->appendQueryToUrl($redirectTarget, [
-            'google' => 'failed',
-            'google_error' => 'Flow tautkan Google lama dinonaktifkan. Muat ulang halaman lalu gunakan tombol Google terbaru.',
-        ]));
+        if (! $this->isGoogleAuthEnabled()) {
+            return redirect()->away($this->appendQueryToUrl($redirectTarget, [
+                'google' => 'disabled',
+            ]));
+        }
+
+        if ($this->googleClientId() === '' || $this->googleClientSecret() === '') {
+            return redirect()->away($this->appendQueryToUrl($redirectTarget, [
+                'google' => 'failed',
+                'google_error' => 'Konfigurasi Google OAuth belum lengkap.',
+            ]));
+        }
+
+        $user = $request->user();
+        if (! $user?->id) {
+            return redirect()->away($this->appendQueryToUrl($redirectTarget, [
+                'google' => 'unauthenticated',
+            ]));
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return redirect()->away($this->appendQueryToUrl($redirectTarget, [
+                'google' => 'tenant_invalid',
+            ]));
+        }
+
+        $state = $this->createGoogleState($request, 'link', array_merge([
+            'tenant_id' => $tenantId,
+            'host' => $this->currentHost($request),
+            'redirect' => $redirectTarget,
+            'link_user_id' => (string) $user->id,
+        ], $this->googlePopupStatePayload($request)));
+
+        return redirect()->away($this->googleAuthorizationUrl($request, $state));
     }
 
     public function googlePopupContext(Request $request)
@@ -312,7 +415,7 @@ class AuthController extends ApiController
         ]);
     }
 
-    public function googleCallback(Request $request): RedirectResponse
+    public function googleCallback(Request $request)
     {
         $defaultReturn = $this->frontendAuthUrl('/login', [], $request);
 
@@ -334,6 +437,10 @@ class AuthController extends ApiController
 
         $googleError = trim((string) $request->query('error', ''));
         if ($googleError !== '') {
+            if ($popupResponse = $this->googlePopupErrorResponse($statePayload, 'Login Google dibatalkan atau ditolak.')) {
+                return $popupResponse;
+            }
+
             return redirect()->away($this->appendQueryToUrl($redirectTarget, [
                 'google' => 'failed',
                 'google_error' => 'Login Google dibatalkan atau ditolak.',
@@ -342,6 +449,10 @@ class AuthController extends ApiController
 
         $code = trim((string) $request->query('code', ''));
         if ($code === '') {
+            if ($popupResponse = $this->googlePopupErrorResponse($statePayload, 'Kode autentikasi Google tidak ditemukan.')) {
+                return $popupResponse;
+            }
+
             return redirect()->away($this->appendQueryToUrl($redirectTarget, [
                 'google' => 'failed',
                 'google_error' => 'Kode autentikasi Google tidak ditemukan.',
@@ -350,6 +461,10 @@ class AuthController extends ApiController
 
         $googleUser = $this->exchangeGoogleCodeForUser($request, $code);
         if (! $googleUser['ok']) {
+            if ($popupResponse = $this->googlePopupErrorResponse($statePayload, (string) $googleUser['message'])) {
+                return $popupResponse;
+            }
+
             return redirect()->away($this->appendQueryToUrl($redirectTarget, [
                 'google' => 'failed',
                 'google_error' => $googleUser['message'],
@@ -360,6 +475,10 @@ class AuthController extends ApiController
             $mode = (string) ($statePayload['mode'] ?? 'login');
             if ($mode === 'link') {
                 $this->completeGoogleLink($request, $statePayload, $googleUser);
+
+                if ($popupResponse = $this->googlePopupSuccessResponse($statePayload, 'linked')) {
+                    return $popupResponse;
+                }
 
                 return redirect()->away($this->appendQueryToUrl($redirectTarget, [
                     'google' => 'linked',
@@ -377,11 +496,19 @@ class AuthController extends ApiController
                 return $handoffResponse;
             }
 
+            if ($popupResponse = $this->googlePopupSuccessResponse($statePayload, 'success')) {
+                return $popupResponse;
+            }
+
             return redirect()->away($this->appendQueryToUrl($redirectTarget, [
                 'google' => 'success',
             ]));
         } catch (\Throwable $e) {
             report($e);
+
+            if ($popupResponse = $this->googlePopupErrorResponse($statePayload, $this->safeGoogleErrorMessage($e->getMessage()))) {
+                return $popupResponse;
+            }
 
             return redirect()->away($this->appendQueryToUrl($redirectTarget, [
                 'google' => 'failed',
@@ -713,25 +840,47 @@ class AuthController extends ApiController
         return rtrim($request->getSchemeAndHttpHost(), '/').'/api/auth/google/callback';
     }
 
-    private function socialiteGoogleDriver(Request $request)
+    private function googleAuthorizationUrl(Request $request, string $state): string
     {
-        config([
-            'services.google.redirect' => $this->googleRedirectUri($request),
-        ]);
-
-        $provider = Socialite::driver('google')
-            ->stateless()
-            ->scopes(['openid', 'email', 'profile'])
-            ->with([
-                'include_granted_scopes' => 'true',
-            ]);
+        $query = [
+            'client_id' => $this->googleClientId(),
+            'redirect_uri' => $this->googleRedirectUri($request),
+            'response_type' => 'code',
+            'scope' => 'openid email profile',
+            'state' => $state,
+            'include_granted_scopes' => 'true',
+        ];
 
         $prompt = trim((string) config('services.google.prompt', 'select_account'));
         if ($prompt !== '') {
-            $provider = $provider->with(['prompt' => $prompt]);
+            $query['prompt'] = $prompt;
         }
 
-        return $provider;
+        return 'https://accounts.google.com/o/oauth2/v2/auth?'.http_build_query(
+            $query,
+            '',
+            '&',
+            PHP_QUERY_RFC3986
+        );
+    }
+
+    private function googlePopupStatePayload(Request $request): array
+    {
+        if (! $request->boolean('popup')) {
+            return [];
+        }
+
+        $origin = $this->sanitizeAllowedFrontendOrigin((string) $request->query('origin', ''));
+        $popupState = trim((string) $request->query('popup_state', ''));
+        if ($origin === null || $popupState === '') {
+            return [];
+        }
+
+        return [
+            'popup' => true,
+            'popup_origin' => $origin,
+            'popup_state' => $popupState,
+        ];
     }
 
     private function createGoogleState(Request $request, string $mode, array $payload = []): string
@@ -857,7 +1006,16 @@ class AuthController extends ApiController
         }
 
         try {
-            $socialiteUser = $this->socialiteGoogleDriver($request)->user();
+            $tokenResponse = Http::asForm()
+                ->acceptJson()
+                ->timeout(20)
+                ->post('https://oauth2.googleapis.com/token', [
+                    'code' => trim($code),
+                    'client_id' => $clientId,
+                    'client_secret' => $clientSecret,
+                    'redirect_uri' => $this->googleRedirectUri($request),
+                    'grant_type' => 'authorization_code',
+                ]);
         } catch (\Throwable $e) {
             report($e);
 
@@ -867,34 +1025,26 @@ class AuthController extends ApiController
             ];
         }
 
-        $raw = is_array($socialiteUser->user ?? null)
-            ? $socialiteUser->user
-            : [];
-        $email = strtolower(trim((string) ($socialiteUser->getEmail() ?: ($raw['email'] ?? ''))));
-        $sub = trim((string) ($socialiteUser->getId() ?: ($raw['sub'] ?? '')));
-        $name = trim((string) ($socialiteUser->getName() ?: $socialiteUser->getNickname() ?: ($raw['name'] ?? '')));
-        $avatar = trim((string) ($socialiteUser->getAvatar() ?: ($raw['picture'] ?? '')));
-        $emailVerifiedRaw = $raw['email_verified'] ?? $raw['verified_email'] ?? false;
-        $emailVerified = filter_var($emailVerifiedRaw, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE);
-        if ($emailVerified === null) {
-            $emailVerified = (bool) $emailVerifiedRaw;
-        }
-
-        if ($sub === '' || $email === '') {
+        if (! $tokenResponse->successful()) {
             return [
                 'ok' => false,
-                'message' => 'Akun Google tidak mengembalikan identitas email.',
+                'message' => $this->extractGoogleApiErrorMessage(
+                    $tokenResponse,
+                    'Kode autentikasi Google tidak valid atau sudah kedaluwarsa.'
+                ),
             ];
         }
 
-        return [
-            'ok' => true,
-            'sub' => $sub,
-            'email' => $email,
-            'name' => $name,
-            'avatar' => $avatar,
-            'email_verified' => $emailVerified,
-        ];
+        $payload = is_array($tokenResponse->json()) ? $tokenResponse->json() : [];
+        $idToken = trim((string) ($payload['id_token'] ?? ''));
+        if ($idToken === '') {
+            return [
+                'ok' => false,
+                'message' => 'Google tidak mengembalikan identitas akun.',
+            ];
+        }
+
+        return $this->verifyGoogleIdToken($idToken, $clientId);
     }
 
     private function exchangeGooglePopupCodeForUser(string $code): array
@@ -1121,7 +1271,7 @@ class AuthController extends ApiController
         });
     }
 
-    public function googleFinalizeLogin(Request $request): RedirectResponse
+    public function googleFinalizeLogin(Request $request)
     {
         $defaultReturn = $this->frontendAuthUrl('/login', [], $request);
         $ticket = trim((string) $request->query('ticket', ''));
@@ -1140,6 +1290,10 @@ class AuthController extends ApiController
 
         $createdAt = (int) ($payload['created_at'] ?? 0);
         if ($createdAt <= 0 || (time() - $createdAt) > self::GOOGLE_LOGIN_HANDOFF_TTL_SECONDS) {
+            if ($popupResponse = $this->googlePopupErrorResponse($payload, 'Sesi login Google sudah kedaluwarsa.')) {
+                return $popupResponse;
+            }
+
             return redirect()->away($this->appendQueryToUrl($defaultReturn, [
                 'google' => 'state_invalid',
             ]));
@@ -1148,6 +1302,10 @@ class AuthController extends ApiController
         $expectedHost = strtolower(trim((string) ($payload['host'] ?? '')));
         $currentHost = $this->currentHost($request);
         if ($expectedHost === '' || $expectedHost !== $currentHost) {
+            if ($popupResponse = $this->googlePopupErrorResponse($payload, 'Sesi login Google tidak cocok dengan domain aplikasi.')) {
+                return $popupResponse;
+            }
+
             return redirect()->away($this->appendQueryToUrl($defaultReturn, [
                 'google' => 'state_invalid',
             ]));
@@ -1155,6 +1313,10 @@ class AuthController extends ApiController
 
         $userId = trim((string) ($payload['user_id'] ?? ''));
         if ($userId === '') {
+            if ($popupResponse = $this->googlePopupErrorResponse($payload, 'Sesi login Google tidak valid.')) {
+                return $popupResponse;
+            }
+
             return redirect()->away($this->appendQueryToUrl($defaultReturn, [
                 'google' => 'failed',
                 'google_error' => 'Sesi login Google tidak valid.',
@@ -1163,6 +1325,10 @@ class AuthController extends ApiController
 
         $user = User::query()->find($userId);
         if (! $user) {
+            if ($popupResponse = $this->googlePopupErrorResponse($payload, 'Akun pengguna tidak ditemukan.')) {
+                return $popupResponse;
+            }
+
             return redirect()->away($this->appendQueryToUrl($defaultReturn, [
                 'google' => 'failed',
                 'google_error' => 'Akun pengguna tidak ditemukan.',
@@ -1180,6 +1346,10 @@ class AuthController extends ApiController
                 ->where('tenant_id', $tenantId)
                 ->first();
             if (! $profile) {
+                if ($popupResponse = $this->googlePopupErrorResponse($payload, 'Akun tidak memiliki akses tenant ini.')) {
+                    return $popupResponse;
+                }
+
                 return redirect()->away($this->appendQueryToUrl($defaultReturn, [
                     'google' => 'failed',
                     'google_error' => 'Akun tidak memiliki akses tenant ini.',
@@ -1196,6 +1366,10 @@ class AuthController extends ApiController
             $request,
             (string) ($payload['redirect'] ?? $defaultReturn)
         );
+
+        if ($popupResponse = $this->googlePopupSuccessResponse($payload, 'success')) {
+            return $popupResponse;
+        }
 
         return redirect()->away($this->appendQueryToUrl($redirectTarget, [
             'google' => 'success',
@@ -1323,6 +1497,10 @@ class AuthController extends ApiController
             'tenant_id' => (string) ($statePayload['tenant_id'] ?? ''),
             'host' => $originHost,
             'redirect' => $redirectTarget,
+            'mode' => (string) ($statePayload['mode'] ?? 'login'),
+            'popup' => (bool) ($statePayload['popup'] ?? false),
+            'popup_origin' => (string) ($statePayload['popup_origin'] ?? ''),
+            'popup_state' => (string) ($statePayload['popup_state'] ?? ''),
             'created_at' => time(),
         ]);
         if ($ticket === '') {
@@ -1492,6 +1670,55 @@ class AuthController extends ApiController
         }
 
         return Str::limit($value, 140, '...');
+    }
+
+    private function googlePopupSuccessResponse(array $statePayload, string $status): ?\Illuminate\Http\Response
+    {
+        return $this->googlePopupResponse($statePayload, [
+            'type' => 'edusmart-google-oauth-success',
+            'status' => $status,
+        ]);
+    }
+
+    private function googlePopupErrorResponse(array $statePayload, string $message): ?\Illuminate\Http\Response
+    {
+        return $this->googlePopupResponse($statePayload, [
+            'type' => 'edusmart-google-error',
+            'error' => $this->safeGoogleErrorMessage($message),
+        ]);
+    }
+
+    private function googlePopupResponse(array $statePayload, array $payload): ?\Illuminate\Http\Response
+    {
+        if (! (bool) ($statePayload['popup'] ?? false)) {
+            return null;
+        }
+
+        $origin = $this->sanitizeAllowedFrontendOrigin((string) ($statePayload['popup_origin'] ?? ''));
+        $popupState = trim((string) ($statePayload['popup_state'] ?? ''));
+        if ($origin === null || $popupState === '') {
+            return null;
+        }
+
+        $message = array_merge([
+            'source' => 'edusmart-google-popup',
+            'state' => $popupState,
+            'mode' => (string) ($statePayload['mode'] ?? 'login'),
+        ], $payload);
+
+        $html = '<!doctype html><html lang="id"><head><meta charset="utf-8">'
+            .'<meta name="viewport" content="width=device-width,initial-scale=1">'
+            .'<title>Google Login - EduSmart</title></head>'
+            .'<body style="font-family:system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;padding:24px;color:#0f172a">'
+            .'<p>Proses Google selesai. Jendela ini akan tertutup otomatis.</p>'
+            .'<script>'
+            .'const payload = '.Js::from($message).';'
+            .'const targetOrigin = '.Js::from($origin).';'
+            .'if (window.opener) { window.opener.postMessage(payload, targetOrigin); }'
+            .'window.setTimeout(() => { window.close(); }, 250);'
+            .'</script></body></html>';
+
+        return response($html, 200)->header('Content-Type', 'text/html; charset=UTF-8');
     }
 
     public function register(Request $request)

@@ -525,18 +525,9 @@ const normalizeRankingPolicy = (settingsRow) => {
   const nestedWeights = source.weights || {}
 
   const weights = {
-    tugas: normalizeWeight(
-      source.ranking_weight_tugas ?? nestedWeights.tugas,
-      fallback.weights.tugas
-    ),
-    quiz: normalizeWeight(
-      source.ranking_weight_quiz ?? nestedWeights.quiz,
-      fallback.weights.quiz
-    ),
-    absensi: normalizeWeight(
-      source.ranking_weight_absensi ?? nestedWeights.absensi,
-      fallback.weights.absensi
-    )
+    tugas: normalizeWeight(nestedWeights.tugas, fallback.weights.tugas),
+    quiz: normalizeWeight(nestedWeights.quiz, fallback.weights.quiz),
+    absensi: normalizeWeight(nestedWeights.absensi, fallback.weights.absensi)
   }
 
   const totalWeight = weights.tugas + weights.quiz + weights.absensi
@@ -548,10 +539,8 @@ const normalizeRankingPolicy = (settingsRow) => {
 
   return {
     weights,
-    tieBreakOrder: normalizeTieBreakOrder(
-      source.ranking_tiebreak_order ?? source.tieBreakOrder
-    ),
-    coreMapel: normalizeCoreMapelList(source.ranking_core_mapel ?? source.coreMapel)
+    tieBreakOrder: normalizeTieBreakOrder(source.tieBreakOrder),
+    coreMapel: normalizeCoreMapelList(source.coreMapel)
   }
 }
 
@@ -584,52 +573,6 @@ const formatMiniDate = (value) => {
     month: '2-digit',
     year: '2-digit'
   })
-}
-
-const getNilaiFreezeStateFromSettings = (settingsRow) => {
-  const enabled = Boolean(settingsRow?.nilai_freeze_enabled)
-  const startDate = toDateOrNull(settingsRow?.nilai_freeze_start)
-  const endDate = toDateOrNull(settingsRow?.nilai_freeze_end)
-  const reason = String(settingsRow?.nilai_freeze_reason || '').trim()
-
-  if (!enabled) {
-    return {
-      enabled: false,
-      active: false,
-      start: startDate ? startDate.toISOString() : null,
-      end: endDate ? endDate.toISOString() : null,
-      reason: reason || null
-    }
-  }
-
-  const now = new Date()
-  const active = (!startDate || now >= startDate) && (!endDate || now <= endDate)
-
-  return {
-    enabled: true,
-    active,
-    start: startDate ? startDate.toISOString() : null,
-    end: endDate ? endDate.toISOString() : null,
-    reason: reason || null
-  }
-}
-
-const buildFreezeMessage = (freezeState) => {
-  if (!freezeState?.enabled) return ''
-
-  const periods = []
-  if (freezeState.start) periods.push(`mulai ${freezeState.start}`)
-  if (freezeState.end) periods.push(`sampai ${freezeState.end}`)
-
-  let message = 'Perubahan nilai sedang dikunci (freeze).'
-  if (periods.length) {
-    message += ` Periode: ${periods.join(' ')}.`
-  }
-  if (freezeState.reason) {
-    message += ` Alasan: ${freezeState.reason}.`
-  }
-
-  return message
 }
 
 const hitungRataSederhana = (values = []) => {
@@ -1021,7 +964,7 @@ export default function LaporanRekap() {
       }
     }
     loadWaliKelas()
-  }, [user?.id, selectedWaliKelas])
+  }, [user?.id])
 
   useEffect(() => {
     const load = async () => {
@@ -1052,7 +995,7 @@ export default function LaporanRekap() {
       }
     }
     load()
-  }, [jadwalGuru, selectedKelas])
+  }, [jadwalGuru])
 
   useEffect(() => {
     if (!selectedKelas || !jadwalGuru.length) {
@@ -1068,7 +1011,7 @@ export default function LaporanRekap() {
     setMapelList(mapels)
     if (mapels.length && !selectedMapel) setSelectedMapel(mapels[0])
     else if (!mapels.length) setSelectedMapel('')
-  }, [selectedKelas, jadwalGuru, selectedMapel])
+  }, [selectedKelas, jadwalGuru])
 
   useEffect(() => {
     const loadMapelComponentWeights = async () => {
@@ -1529,22 +1472,8 @@ export default function LaporanRekap() {
         return
       }
 
-      let settingsRow = null
-      const { data: settingsData, error: settingsErr } = await supabase
-        .from('settings')
-        .select('*')
-        .order('id', { ascending: true })
-        .limit(1)
-        .maybeSingle()
-      if (settingsErr) {
-        console.error('Gagal memuat kebijakan ranking, fallback ke default:', settingsErr)
-      } else {
-        settingsRow = settingsData || null
-      }
-
-      const activePolicy = normalizeRankingPolicy(settingsRow)
+      const activePolicy = DEFAULT_RANKING_POLICY
       const policySummary = describeRankingPolicy(activePolicy)
-      const freezeState = getNilaiFreezeStateFromSettings(settingsRow)
       setRankingPolicy(activePolicy)
 
       const waliKelasNama = getNamaKelasFromList(selectedWaliKelas, waliKelasList)
@@ -2143,7 +2072,6 @@ export default function LaporanRekap() {
         totalMapel: mapelUrutan.length,
         totalPertemuanKelas,
         policy: policySummary,
-        freeze: freezeState,
         eskul: {
           summary: {
             totalEkskul: ekskulIds.length,
@@ -2527,11 +2455,7 @@ export default function LaporanRekap() {
     selectedBulan,
     selectedWaliKelas,
     tahun,
-    activeTab,
-    loadRekapAbsensi,
-    loadRekapTugas,
-    loadRekapQuiz,
-    loadRekapWali
+    activeTab
   ])
 
   // ==============================
@@ -2707,31 +2631,9 @@ export default function LaporanRekap() {
     })
   }, [rankedRekapWaliSiswa, searchRekapEskul])
 
-  const loadNilaiFreezeState = useCallback(async () => {
-    const { data, error } = await supabase
-      .from('settings')
-      .select('*')
-      .order('id', { ascending: true })
-      .limit(1)
-      .maybeSingle()
-    if (error) throw error
-    return getNilaiFreezeStateFromSettings(data)
-  }, [])
-
   const ensureNilaiMutationAllowed = useCallback(async () => {
-    try {
-      const freezeState = await loadNilaiFreezeState()
-      if (freezeState?.enabled && freezeState?.active) {
-        pushToast('error', buildFreezeMessage(freezeState))
-        return false
-      }
-      return true
-    } catch (error) {
-      console.error('Gagal cek status freeze nilai:', error)
-      pushToast('error', 'Tidak bisa memverifikasi status freeze nilai. Coba lagi.')
-      return false
-    }
-  }, [loadNilaiFreezeState, pushToast])
+    return true
+  }, [])
 
   // ==============================
   // ===== CRUD & ACTIONS =========
@@ -4958,18 +4860,6 @@ export default function LaporanRekap() {
                   Urutan tie-break resmi: {rekapWaliData.policy?.tieBreakText || '-'}.
                   Mapel inti: {rekapWaliData.policy?.coreMapelText || 'Tidak diatur'}.
                 </div>
-                {rekapWaliData.freeze?.enabled && (
-                  <div
-                    className={`mt-2 inline-flex px-2.5 py-1 rounded-full text-[11px] border ${
-                      rekapWaliData.freeze?.active
-                        ? 'bg-red-50 text-red-700 border-red-200'
-                        : 'bg-amber-50 text-amber-700 border-amber-200'
-                    }`}
-                  >
-                    Freeze nilai {rekapWaliData.freeze?.active ? 'AKTIF' : 'TERJADWAL'} •{' '}
-                    {buildFreezeMessage(rekapWaliData.freeze)}
-                  </div>
-                )}
                 {rekapWaliData.audit && (
                   <div className="mt-2 flex flex-wrap gap-2">
                     <span className="px-2.5 py-1 rounded-full text-[11px] bg-emerald-50 text-emerald-700 border border-emerald-200">

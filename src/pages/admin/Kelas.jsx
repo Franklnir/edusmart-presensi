@@ -5,6 +5,7 @@ import PasswordInput from '../../components/PasswordInput'
 import { loadExcelJsBrowser } from '../../utils/excelBrowser'
 import {
   getCurrentAcademicPeriod,
+  generateAcademicYearOptions,
   getNextAcademicPeriod,
   inferCohortYear,
   normalizeAcademicYear,
@@ -376,6 +377,19 @@ const stripGradePrefix = (name = '') => {
 }
 
 const makeClassName = (grade, suffix) => (grade + (suffix ? ' ' + suffix.trim() : '')).trim()
+
+const normalizeClassSuffixInput = (value = '', grade = '') => {
+  const selectedGrade = String(grade || '').toUpperCase().trim()
+  let suffix = String(value || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+
+  if (selectedGrade) {
+    suffix = suffix.replace(new RegExp(`^${selectedGrade}\\b\\s*`, 'i'), '')
+  }
+
+  return suffix.trim()
+}
 
 /* quick helpers */
 const confirmDelete = (msg = 'Yakin mau dihapus?') => window.confirm(msg)
@@ -1215,7 +1229,7 @@ export default function AKelas() {
   /* ------- KELAS ------- */
   async function tambahKelas() {
     const grade = (newGrade || '').toUpperCase().trim()
-    const suffix = (newSuffix || '').toUpperCase().trim()
+    const suffix = normalizeClassSuffixInput(newSuffix, grade).toUpperCase()
     
     if (!GRADE_OPTS.includes(grade)) {
       pushToast('error', 'Pilih grade: VII–XII.')
@@ -1239,19 +1253,31 @@ export default function AKelas() {
     try {
       setLoading(true)
       
-      // Cek apakah sudah ada
-      const { data: existing } = await supabase
-        .from('kelas')
-        .select('id')
-        .eq('id', id)
-        .single()
+      // Cek kelas di tenant aktif. Nama dicek juga karena backend bisa menambahkan
+      // suffix internal pada id saat slug bentrok dengan tenant lain.
+      const [existingById, existingByName] = await Promise.all([
+        supabase
+          .from('kelas')
+          .select('id')
+          .eq('id', id)
+          .maybeSingle(),
+        supabase
+          .from('kelas')
+          .select('id')
+          .eq('nama', nama)
+          .maybeSingle()
+      ])
 
-      if (existing) {
+      if (existingById.error || existingByName.error) {
+        throw existingById.error || existingByName.error
+      }
+
+      if (existingById.data || existingByName.data) {
         pushToast('error', 'Kelas sudah ada.')
         return
       }
 
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('kelas')
         .insert({
           id,
@@ -1267,11 +1293,14 @@ export default function AKelas() {
 
       if (error) throw error
 
+      const insertedRow = Array.isArray(data) ? data[0] : data
+      const savedId = insertedRow?.id || id
+
       pushToast('success', `Kelas ${nama} berhasil ditambahkan`)
       setNewGrade('')
       setNewSuffix('')
       setNewAngkatan('')
-      setKelasSelected(id)
+      setKelasSelected(savedId)
       await loadKelas()
     } catch (error) {
       console.error('Error adding kelas:', error)
@@ -2220,13 +2249,18 @@ export default function AKelas() {
                       </p>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-[160px_140px_auto] gap-3 w-full lg:w-auto">
-                      <input
-                        className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    <div className="grid grid-cols-1 sm:grid-cols-[180px_140px_auto] gap-3 w-full lg:w-auto">
+                      <select
+                        className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         value={periodForm.tahunAjaran}
                         onChange={(event) => setPeriodForm((prev) => ({ ...prev, tahunAjaran: event.target.value }))}
-                        placeholder="2025/2026"
-                      />
+                      >
+                        {generateAcademicYearOptions().map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}{opt.isCurrent ? ' (saat ini)' : ''}
+                          </option>
+                        ))}
+                      </select>
                       <select
                         className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         value={periodForm.semester}
@@ -2253,6 +2287,11 @@ export default function AKelas() {
                     <span className="px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
                       Periode berikutnya: {nextAcademicPeriod.tahunAjaran} - {nextAcademicPeriod.semester}
                     </span>
+                    {academicPeriod.rangeLabel && (
+                      <span className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        Bulan semester: {academicPeriod.rangeLabel}
+                      </span>
+                    )}
                   </div>
                 </div>
 
