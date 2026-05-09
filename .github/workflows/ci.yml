@@ -212,8 +212,8 @@ jobs:
           RELEASE_REF: ${{ github.sha }}
           EDUSMART_BACKEND_IMAGE: ${{ needs.build-production-images.outputs.backend_image }}
           EDUSMART_NGINX_IMAGE: ${{ needs.build-production-images.outputs.nginx_image }}
-          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
-          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ github.token }}
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_PORT: ${{ secrets.VPS_PORT }}
           VPS_USER: ${{ secrets.VPS_USER }}
