@@ -27,7 +27,7 @@ class StorageController extends ApiController
 
     private const ASSIGNMENT_PRESENTATION_MAX_BYTES = 5 * 1024 * 1024;
 
-    private const ASSIGNMENT_LOCAL_DOCUMENT_MAX_BYTES = 5 * 1024 * 1024;
+    private const ASSIGNMENT_LOCAL_DOCUMENT_MAX_BYTES = 2 * 1024 * 1024;
 
     private const QUIZ_MEDIA_IMAGE_MAX_BYTES = 70 * 1024;
 
