@@ -352,6 +352,7 @@ export default function APengaturan() {
   const [savingPeriod, setSavingPeriod] = useState(false)
 
   const autoSaveTimerRef = useRef(null)
+  const initialLoadDoneRef = useRef(false)
 
   const handlePasswordConfirm = async (password) => {
     setPasswordLoading(true)
@@ -559,7 +560,12 @@ export default function APengaturan() {
       } catch (err) {
         if (!isCancelled) pushToast('error', 'Gagal memuat pengaturan: ' + err.message)
       } finally {
-        if (!isCancelled) setLoading(false)
+        if (!isCancelled) {
+          setLoading(false)
+          // Mark initial load complete after a short delay so auto-save
+          // does not fire from the form state change that loadSettings triggers.
+          setTimeout(() => { initialLoadDoneRef.current = true }, 1000)
+        }
       }
     }
 
@@ -730,7 +736,7 @@ export default function APengaturan() {
   }
 
   useEffect(() => {
-    if (!settingsId || !isAuthorized) return
+    if (!settingsId || !isAuthorized || !initialLoadDoneRef.current) return
 
     const {
       nama_sekolah,

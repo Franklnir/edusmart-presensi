@@ -37,14 +37,15 @@ function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Passwor
 
   // Close on ESC key
   useEffect(() => {
+    if (!isOpen) return
     const handleEsc = (e) => {
-      if (e.key === 'Escape' && isOpen) {
+      if (e.key === 'Escape') {
         handleClose()
       }
     }
     window.addEventListener('keydown', handleEsc)
     return () => window.removeEventListener('keydown', handleEsc)
-  }, [isOpen])
+  }, [isOpen]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!isOpen) return null
 
@@ -696,15 +697,16 @@ export default function AKelas() {
       })
 
       setKelas(rows)
-      if (!kelasSelected && rows.length) {
-        setKelasSelected(rows[0].id)
-      }
+      setKelasSelected((prev) => {
+        if (prev && rows.some((r) => r.id === prev)) return prev
+        return rows.length ? rows[0].id : ''
+      })
     } catch (error) {
       console.error('Error loading kelas:', error)
       pushToast('error', 'Gagal memuat data kelas')
       throw error
     }
-  }, [kelasSelected, pushToast])
+  }, [pushToast])
 
   const loadJadwal = useCallback(async () => {
     if (!kelasSelected) return

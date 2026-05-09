@@ -989,7 +989,10 @@ export default function LaporanRekap() {
           getKelasDisplayName(a).localeCompare(getKelasDisplayName(b))
         )
         setKelasList(sorted)
-        if (sorted.length && !selectedKelas) setSelectedKelas(sorted[0].id)
+        setSelectedKelas((prev) => {
+          if (prev && sorted.some((k) => k.id === prev)) return prev
+          return sorted.length ? sorted[0].id : ''
+        })
       } catch (e) {
         console.error(e)
       }
@@ -1009,8 +1012,10 @@ export default function LaporanRekap() {
       .filter((v, i, s) => s.indexOf(v) === i)
       .sort()
     setMapelList(mapels)
-    if (mapels.length && !selectedMapel) setSelectedMapel(mapels[0])
-    else if (!mapels.length) setSelectedMapel('')
+    setSelectedMapel((prev) => {
+      if (prev && mapels.includes(prev)) return prev
+      return mapels.length ? mapels[0] : ''
+    })
   }, [selectedKelas, jadwalGuru])
 
   useEffect(() => {
