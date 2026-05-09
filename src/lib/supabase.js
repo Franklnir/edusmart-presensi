@@ -285,7 +285,7 @@ export const CERT_BUCKET = 'certificates'
 export const CERT_TEMPLATE_BUCKET = 'certificate-templates'
 
 const PROFILE_IMAGE_MAX_BYTES = 50 * 1024
-const ASSIGNMENT_IMAGE_MAX_BYTES = 100 * 1024
+const ASSIGNMENT_IMAGE_MAX_BYTES = 150 * 1024
 const QUIZ_MEDIA_IMAGE_MAX_BYTES = 70 * 1024
 const KNOWN_IMAGE_EXTENSIONS = [
   'jpg',

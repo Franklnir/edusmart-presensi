@@ -34,18 +34,12 @@ class SecureHeaders
             $response->headers->set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
         }
 
-        // Cache policy for authenticated API responses.
-        // - Mutating methods: no-store to prevent stale data.
-        // - Read-only methods: short private cache so browser page navigation feels instant.
+        // Authenticated API payloads can contain tenant or profile data, so avoid
+        // browser/proxy reuse even for read-only endpoints like /api/auth/me.
         if ($isApiResponse && $request->user()) {
-            $method = strtoupper($request->getMethod());
-            if (in_array($method, ['GET', 'HEAD'], true)) {
-                $response->headers->set('Cache-Control', 'private, max-age=5, must-revalidate');
-            } else {
-                $response->headers->set('Cache-Control', 'no-store, private');
-                $response->headers->set('Pragma', 'no-cache');
-                $response->headers->set('Expires', '0');
-            }
+            $response->headers->set('Cache-Control', 'no-store, private');
+            $response->headers->set('Pragma', 'no-cache');
+            $response->headers->set('Expires', '0');
         }
 
         return $response;

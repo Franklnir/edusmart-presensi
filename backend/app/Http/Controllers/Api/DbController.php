@@ -205,6 +205,7 @@ class DbController extends ApiController
         'audit_log' => ['old_data', 'new_data'],
         'templat_sertifikat_publik' => ['fields'],
         'quiz_violation_logs' => ['event_meta'],
+        'tugas_jawaban' => ['file_urls'],
     ];
 
     public function handle(Request $request)
@@ -2306,6 +2307,7 @@ class DbController extends ApiController
                             'id',
                             'tugas_id',
                             'file_url',
+                            'file_urls',
                             'link_url',
                             'file_name',
                             'waktu_submit',
@@ -2357,6 +2359,7 @@ class DbController extends ApiController
                     if ($action === 'update' && is_array($payload)) {
                         $payload = $this->filterPayload($payload, [
                             'file_url',
+                            'file_urls',
                             'link_url',
                             'file_name',
                             'waktu_submit',

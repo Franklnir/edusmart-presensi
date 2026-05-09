@@ -1,6 +1,6 @@
 // src/pages/guru/AbsensiGuru.jsx
 import React, { useState, useEffect, useMemo, useRef } from 'react'
-import { CalendarDays, ChevronLeft, ChevronRight, Clock3, QrCode, RefreshCw, ShieldCheck, UserCheck } from 'lucide-react'
+import { CalendarDays, ChevronLeft, ChevronRight, Clock3, Maximize2, QrCode, RefreshCw, ShieldCheck, UserCheck, X } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
@@ -249,6 +249,7 @@ const AttendanceQrPanel = ({ currentSchedule, kelas, tgl, isActive, pushToast, e
   const [isLoadingQr, setIsLoadingQr] = useState(false)
   const [qrError, setQrError] = useState('')
   const [nowTick, setNowTick] = useState(Date.now())
+  const [isQrExpanded, setIsQrExpanded] = useState(false)
   const requestSeqRef = useRef(0)
 
   const canRequestQr = Boolean(currentSchedule?.id && kelas && tgl === getToday() && isActive)
@@ -278,13 +279,13 @@ const AttendanceQrPanel = ({ currentSchedule, kelas, tgl, isActive, pushToast, e
 
       const QRCode = await loadQRCode()
       const dataUrl = await QRCode.toDataURL(buildQrScanValue(data.token), {
-        width: 280,
-        margin: 1,
+        width: 720,
+        margin: 2,
         color: {
           dark: '#0f172a',
           light: '#ffffff'
         },
-        errorCorrectionLevel: 'M'
+        errorCorrectionLevel: 'H'
       })
 
       if (requestId !== requestSeqRef.current) return
@@ -357,6 +358,15 @@ const AttendanceQrPanel = ({ currentSchedule, kelas, tgl, isActive, pushToast, e
               title="Perbarui QR"
             >
               <RefreshCw className={`h-4 w-4 ${isLoadingQr ? 'animate-spin' : ''}`} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsQrExpanded(true)}
+              disabled={!qrDataUrl}
+              className="h-9 w-9 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed grid place-items-center"
+              title="Perbesar QR"
+            >
+              <Maximize2 className="h-4 w-4" />
             </button>
           </div>
 
@@ -441,6 +451,46 @@ const AttendanceQrPanel = ({ currentSchedule, kelas, tgl, isActive, pushToast, e
           )}
         </div>
       </div>
+
+      {isQrExpanded && qrDataUrl && (
+        <div className="fixed inset-0 z-[70] bg-slate-950/90 p-4 text-white">
+          <button
+            type="button"
+            className="absolute inset-0 cursor-default"
+            aria-label="Tutup QR besar"
+            onClick={() => setIsQrExpanded(false)}
+          />
+          <div className="relative z-10 mx-auto flex h-full max-w-5xl flex-col">
+            <div className="flex items-center justify-between gap-3 py-3">
+              <div className="min-w-0">
+                <div className="truncate text-base font-bold">QR Absensi {currentSchedule?.mapel || ''}</div>
+                <div className="text-sm text-white/70">
+                  {formatKelasDisplay(kelas)} • {currentSchedule?.jam_mulai || '-'} - {currentSchedule?.jam_selesai || '-'}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsQrExpanded(false)}
+                className="grid h-11 w-11 place-items-center rounded-full border border-white/15 bg-white/10 hover:bg-white/20"
+                title="Tutup"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 rounded-2xl bg-white p-4 shadow-2xl sm:p-8">
+              <img src={qrDataUrl} alt="QR absensi diperbesar" className="h-full w-full object-contain" />
+            </div>
+
+            {secondsLeft > 0 && (
+              <div className="flex items-center justify-center gap-2 py-4 text-sm font-bold">
+                <Clock3 className="h-5 w-5 text-blue-300" />
+                Berlaku {secondsLeft} detik
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

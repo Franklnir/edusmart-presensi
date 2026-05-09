@@ -90,6 +90,17 @@ const createStateToken = () => {
   return `google_${Date.now()}_${Math.random().toString(36).slice(2)}`
 }
 
+const allowedPopupMessageOrigins = (bridgeOrigin) => {
+  const origins = new Set()
+  if (bridgeOrigin) origins.add(bridgeOrigin)
+
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    origins.add(window.location.origin)
+  }
+
+  return origins
+}
+
 export const openGoogleAuthPopup = ({
   mode = 'login',
   timeoutMs = 180000
@@ -130,6 +141,7 @@ export const openGoogleAuthPopup = ({
     let settled = false
     let closeTimer = null
     let timeoutTimer = null
+    const allowedOrigins = allowedPopupMessageOrigins(bridgeOrigin)
 
     const cleanup = () => {
       if (closeTimer) window.clearInterval(closeTimer)
@@ -145,7 +157,7 @@ export const openGoogleAuthPopup = ({
     }
 
     const handleMessage = (event) => {
-      if (event.origin !== bridgeOrigin) return
+      if (!allowedOrigins.has(event.origin)) return
 
       const payload = event.data || {}
       if (payload?.source !== 'edusmart-google-popup') return

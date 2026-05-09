@@ -4,6 +4,7 @@ namespace App\Services\GoogleDrive;
 
 use App\Models\TenantGoogleDriveConfig;
 use App\Models\TenantGoogleDriveFile;
+use App\Support\AcademicPeriod;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
@@ -311,7 +312,7 @@ class GoogleDriveService
         if ($schoolFolderId === '') {
             throw new RuntimeException('Folder Google Drive sekolah belum siap.');
         }
-        $targetFolder = $this->ensureAssignmentUploadFolder($accessToken, $schoolFolderId, $sourcePath);
+        $targetFolder = $this->ensureAssignmentUploadFolder($accessToken, $schoolFolderId, $sourcePath, $tenantId);
         $folderId = (string) ($targetFolder['id'] ?? $schoolFolderId);
         $folderPath = (string) ($targetFolder['path'] ?? '');
 
@@ -651,9 +652,9 @@ class GoogleDriveService
         throw new RuntimeException($this->googleErrorMessage($response->json(), 'Gagal memeriksa folder Google Drive sekolah.'));
     }
 
-    private function ensureAssignmentUploadFolder(string $accessToken, string $schoolFolderId, string $sourcePath): array
+    private function ensureAssignmentUploadFolder(string $accessToken, string $schoolFolderId, string $sourcePath, string $tenantId): array
     {
-        $segments = $this->assignmentFolderSegments($sourcePath);
+        $segments = $this->assignmentFolderSegments($sourcePath, $tenantId);
         $parentId = $schoolFolderId;
         $path = [];
 
@@ -676,25 +677,115 @@ class GoogleDriveService
         ];
     }
 
-    private function assignmentFolderSegments(string $sourcePath): array
+    private function assignmentFolderSegments(string $sourcePath, string $tenantId): array
     {
         $parts = array_values(array_filter(explode('/', trim($sourcePath, '/')), static fn ($part) => trim($part) !== ''));
         $first = (string) ($parts[0] ?? '');
+        $period = $this->periodFolderSegments($tenantId);
 
         if ($first === 'tugas_lampiran') {
             $teacherId = $this->folderLabel('Guru', (string) ($parts[1] ?? 'tanpa-user'));
 
-            return ['Tugas', 'Lampiran Guru', $teacherId];
+            return array_merge(['Tugas'], $period, ['Lampiran Guru', $teacherId]);
         }
 
+        $task = $this->assignmentTaskSnapshot($first, $tenantId);
+        $taskYear = AcademicPeriod::normalizeAcademicYear($task['tahun_ajaran'] ?? null);
+        $taskSemester = AcademicPeriod::normalizeSemester($task['semester'] ?? null);
+        if ($taskYear || $taskSemester) {
+            $period = $this->formatPeriodFolderSegments(
+                $taskYear ?: 'Aktif',
+                $taskSemester ?: 'Aktif'
+            );
+        }
         $taskId = $this->folderLabel('Tugas', $first !== '' ? $first : 'tanpa-id');
+        $cohort = trim((string) ($task['angkatan'] ?? ''));
+        $class = trim((string) ($task['kelas'] ?? ''));
         $filename = (string) ($parts[1] ?? '');
         $studentId = 'tanpa-user';
         if (preg_match('/^([0-9a-fA-F-]{32,36})-/', $filename, $matches)) {
             $studentId = (string) $matches[1];
         }
 
-        return ['Tugas', 'Jawaban Siswa', $taskId, $this->folderLabel('Siswa', $studentId)];
+        $segments = array_merge(['Tugas'], $period);
+        if ($cohort !== '') {
+            $segments[] = $this->folderLabel('Angkatan', $cohort);
+        }
+        if ($class !== '') {
+            $segments[] = $this->folderLabel('Kelas', $class);
+        }
+
+        return array_merge($segments, ['Jawaban Siswa', $taskId, $this->folderLabel('Siswa', $studentId)]);
+    }
+
+    private function periodFolderSegments(string $tenantId): array
+    {
+        $period = AcademicPeriod::current();
+
+        if (
+            $tenantId !== ''
+            && Schema::hasTable('settings')
+            && Schema::hasColumn('settings', 'tahun_ajaran')
+            && Schema::hasColumn('settings', 'semester_aktif')
+        ) {
+            $query = DB::table('settings');
+            if (Schema::hasColumn('settings', 'tenant_id')) {
+                $query->where('tenant_id', $tenantId);
+            }
+
+            $settings = $query->orderBy('id')->first(['tahun_ajaran', 'semester_aktif']);
+            if ($settings) {
+                $year = AcademicPeriod::normalizeAcademicYear($settings->tahun_ajaran ?? null);
+                $semester = AcademicPeriod::normalizeSemester($settings->semester_aktif ?? null);
+                if ($year) {
+                    $period['tahun_ajaran'] = $year;
+                }
+                if ($semester) {
+                    $period['semester'] = $semester;
+                }
+            }
+        }
+
+        return $this->formatPeriodFolderSegments(
+            (string) ($period['tahun_ajaran'] ?? 'Aktif'),
+            (string) ($period['semester'] ?? 'Aktif')
+        );
+    }
+
+    private function formatPeriodFolderSegments(string $tahunAjaran, string $semester): array
+    {
+        return [
+            'Tahun Ajaran '.str_replace('/', '-', $tahunAjaran ?: 'Aktif'),
+            'Semester '.($semester ?: 'Aktif'),
+        ];
+    }
+
+    private function assignmentTaskSnapshot(string $taskId, string $tenantId): array
+    {
+        $taskId = trim($taskId);
+        if ($taskId === '' || ! Schema::hasTable('tugas')) {
+            return [];
+        }
+
+        $columns = array_values(array_filter(
+            ['kelas', 'tahun_ajaran', 'semester', 'angkatan'],
+            fn ($column) => Schema::hasColumn('tugas', $column)
+        ));
+        if (empty($columns)) {
+            return [];
+        }
+
+        $query = DB::table('tugas')->where('id', $taskId);
+        if ($tenantId !== '' && Schema::hasColumn('tugas', 'tenant_id')) {
+            $query->where('tenant_id', $tenantId);
+        }
+
+        $row = $query->first($columns);
+        if (! $row) {
+            return [];
+        }
+
+        return (array) $row;
     }
 
     private function folderLabel(string $prefix, string $value): string
@@ -929,13 +1020,10 @@ class GoogleDriveService
         $mime = strtolower(trim($mime));
 
         if ($mime !== '' && str_starts_with($mime, 'image/')) {
-            return false;
-        }
-        if (in_array($extension, self::IMAGE_EXTENSIONS, true)) {
-            return false;
+            return true;
         }
 
-        return in_array($extension, self::DOCUMENT_EXTENSIONS, true);
+        return in_array($extension, array_merge(self::DOCUMENT_EXTENSIONS, self::IMAGE_EXTENSIONS), true);
     }
 
     private function driveUploadStats(string $tenantId): array

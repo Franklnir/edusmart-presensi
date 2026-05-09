@@ -20,7 +20,7 @@ class StorageController extends ApiController
 
     private const PROFILE_IMAGE_MAX_BYTES = 50 * 1024;
 
-    private const ASSIGNMENT_IMAGE_MAX_BYTES = 100 * 1024;
+    private const ASSIGNMENT_IMAGE_MAX_BYTES = 150 * 1024;
 
     private const ASSIGNMENT_DOCUMENT_MAX_BYTES = 3 * 1024 * 1024;
 
@@ -491,6 +491,9 @@ class StorageController extends ApiController
                 $ownQuery = DB::table('tugas_jawaban')->where('user_id', $userId);
                 $this->applyTenantScope($ownQuery, 'tugas_jawaban', $tenantId);
                 $own = $this->queryHasMatchingPath($ownQuery, 'file_url', $path);
+                if (! $own && Schema::hasColumn('tugas_jawaban', 'file_urls')) {
+                    $own = $this->queryHasMatchingPath($ownQuery, 'file_urls', $path);
+                }
                 if ($own) {
                     return true;
                 }
@@ -510,6 +513,9 @@ class StorageController extends ApiController
                 $this->applyTenantScope($existsQuery, 'tugas', $tenantId);
                 $this->applyTenantScope($existsQuery, 'tugas_jawaban', $tenantId);
                 $exists = $this->queryHasMatchingPath($existsQuery, 'tugas_jawaban.file_url', $path);
+                if (! $exists && Schema::hasColumn('tugas_jawaban', 'file_urls')) {
+                    $exists = $this->queryHasMatchingPath($existsQuery, 'tugas_jawaban.file_urls', $path);
+                }
                 if ($exists) {
                     return true;
                 }
@@ -578,6 +584,14 @@ class StorageController extends ApiController
             $this->applyTenantScope($ownAnswerQuery, 'tugas_jawaban', $tenantId);
             if ($ownAnswerQuery->exists()) {
                 return true;
+            }
+
+            if (Schema::hasColumn('tugas_jawaban', 'file_urls')) {
+                $ownAnswerUrlsQuery = DB::table('tugas_jawaban')->where('user_id', $userId);
+                $this->applyTenantScope($ownAnswerUrlsQuery, 'tugas_jawaban', $tenantId);
+                if ($this->queryHasMatchingPath($ownAnswerUrlsQuery, 'file_urls', $url)) {
+                    return true;
+                }
             }
         }
 
@@ -662,6 +676,17 @@ class StorageController extends ApiController
         $candidate = trim((string) $stored);
         if ($candidate === '') {
             return false;
+        }
+
+        if (str_starts_with($candidate, '[')) {
+            $items = json_decode($candidate, true);
+            if (is_array($items)) {
+                foreach ($items as $item) {
+                    if (is_string($item) && $this->matchesStoredPath($item, $path)) {
+                        return true;
+                    }
+                }
+            }
         }
 
         $candidateNormalized = ltrim(str_replace('\\', '/', $candidate), '/');

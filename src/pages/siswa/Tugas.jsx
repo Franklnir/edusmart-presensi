@@ -1,6 +1,7 @@
 // src/pages/siswa/TugasSiswa.jsx
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { ImagePlus, Images } from 'lucide-react'
 import {
   supabase,
   ASSIGNMENT_BUCKET,
@@ -12,8 +13,16 @@ import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import FileDropzone from '../../components/FileDropzone'
 import FilePreviewModal from '../../components/FilePreviewModal'
+import PhotoGalleryModal from '../../components/PhotoGalleryModal'
 import UploadProgressTrain from '../../components/UploadProgressTrain'
 import { parseSupabaseError } from '../../utils/supabaseError'
+import {
+  ASSIGNMENT_PHOTO_MAX_BYTES,
+  MAX_ASSIGNMENT_PHOTOS,
+  isImageLikeFile,
+  normalizePhotoFiles,
+  parseAssignmentFileList
+} from '../../utils/assignmentFiles'
 
 /* =========================
    Constants & Helpers
@@ -27,7 +36,7 @@ const STATUS_FILTER_VALUES = new Set(['all', 'belum', 'menunggu', 'dinilai'])
 const TIME_RANGE_VALUES = new Set(['week', 'all', 'custom_months'])
 const TUGAS_LIST_COLUMNS = 'id, kelas, judul, mapel, mulai, deadline, keterangan, file_url, link, created_at, updated_at'
 const TUGAS_MAPEL_COLUMNS = 'mapel'
-const TUGAS_JAWABAN_LIST_COLUMNS = 'tugas_id, user_id, nilai, status, file_url, link_url, waktu_submit'
+const TUGAS_JAWABAN_LIST_COLUMNS = 'tugas_id, user_id, nilai, status, file_url, file_urls, link_url, waktu_submit'
 const MAPEL_CACHE_TTL_MS = 5 * 60 * 1000
 
 const normalizeStatusFilter = (value) => (
@@ -76,7 +85,7 @@ const writeMapelOptionsCache = (userId, kelas, items) => {
 }
 
 const FILE_SIZE_LIMITS = {
-  IMAGE: 100 * 1024,
+  IMAGE: ASSIGNMENT_PHOTO_MAX_BYTES,
   PDF: 3 * 1024 * 1024,
   DOCUMENT: 3 * 1024 * 1024,
   SPREADSHEET: 3 * 1024 * 1024,
@@ -470,16 +479,21 @@ export default function TugasSiswa() {
 
   const [jawabanFileKey, setJawabanFileKey] = useState('')
   const [jawabanFileSize, setJawabanFileSize] = useState('')
+  const [jawabanPhotoValues, setJawabanPhotoValues] = useState([])
+  const [jawabanPhotoSizes, setJawabanPhotoSizes] = useState([])
   const [jawabanLink, setJawabanLink] = useState('')
 
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(null)
   const [answerUploadProvider, setAnswerUploadProvider] = useState(null)
   const [pendingJawabanFile, setPendingJawabanFile] = useState(null)
+  const [pendingJawabanPhotos, setPendingJawabanPhotos] = useState([])
 
   const [previewFile, setPreviewFile] = useState(null)
+  const [photoGallery, setPhotoGallery] = useState(null)
 
   const autoOpenedTugasIdRef = useRef('')
+  const galleryInputRef = useRef(null)
   const listRequestSeqRef = useRef(0)
   const mapelRequestSeqRef = useRef(0)
 
@@ -718,10 +732,15 @@ export default function TugasSiswa() {
     setDetail(null)
     setJawabanFileKey('')
     setJawabanFileSize('')
+    setJawabanPhotoValues(
+      parseAssignmentFileList(tugas?.myJawaban?.file_urls, tugas?.myJawaban?.file_url).filter(isImageLikeFile)
+    )
+    setJawabanPhotoSizes([])
     setJawabanLink(tugas?.myJawaban?.link_url || '')
     setUploadProgress(null)
     setAnswerUploadProvider(null)
     setPendingJawabanFile(null)
+    setPendingJawabanPhotos([])
 
     try {
       setIsLoadingDetail(true)
@@ -738,7 +757,7 @@ export default function TugasSiswa() {
       // ambil jawaban milik siswa untuk tugas ini
       const { data: jawabanData, error: jErr } = await supabase
         .from('tugas_jawaban')
-        .select('id, tugas_id, user_id, file_url, link_url, nilai, status, waktu_submit')
+        .select('id, tugas_id, user_id, file_url, file_urls, link_url, nilai, status, waktu_submit')
         .eq('tugas_id', tugas.id)
         .eq('user_id', user.id)
         .maybeSingle()
@@ -762,6 +781,10 @@ export default function TugasSiswa() {
       })
 
       // set current file key
+      const existingPhotos = parseAssignmentFileList(jawabanData?.file_urls, jawabanData?.file_url).filter(isImageLikeFile)
+      setJawabanPhotoValues(existingPhotos)
+      setJawabanPhotoSizes(existingPhotos.map(() => 'maks 150KB'))
+
       if (jawabanData?.file_url) setJawabanFileKey(jawabanData.file_url)
 
       // fetch file size
@@ -812,21 +835,25 @@ export default function TugasSiswa() {
 
   const discardPendingJawabanFile = useCallback(async () => {
     const pendingValue = pendingJawabanFile?.value
-    if (!pendingValue || !selectedTugas?.id || !user?.id) return
+    const pendingPhotoValues = pendingJawabanPhotos.map((item) => item?.value).filter(Boolean)
+    if ((!pendingValue && pendingPhotoValues.length === 0) || !selectedTugas?.id || !user?.id) return
 
     try {
-      await deleteJawabanFileFromStorage(pendingValue, selectedTugas.id, user.id)
+      const values = Array.from(new Set([pendingValue, ...pendingPhotoValues].filter(Boolean)))
+      await Promise.all(values.map((value) => deleteJawabanFileFromStorage(value, selectedTugas.id, user.id)))
     } catch (error) {
-      console.warn('Gagal menghapus file jawaban sementara:', error)
+      console.warn('Gagal menghapus file/foto jawaban sementara:', error)
     } finally {
       setPendingJawabanFile(null)
+      setPendingJawabanPhotos([])
     }
-  }, [pendingJawabanFile?.value, selectedTugas?.id, user?.id])
+  }, [pendingJawabanFile?.value, pendingJawabanPhotos, selectedTugas?.id, user?.id])
 
   const closeDetail = useCallback(async () => {
     await discardPendingJawabanFile()
     setSelectedTugas(null)
     setPendingJawabanFile(null)
+    setPendingJawabanPhotos([])
     setAnswerUploadProvider(null)
   }, [discardPendingJawabanFile])
 
@@ -885,10 +912,21 @@ export default function TugasSiswa() {
           console.warn('Gagal hapus file jawaban sementara:', e)
         }
       }
+      if (pendingJawabanPhotos.length > 0) {
+        await Promise.allSettled(
+          pendingJawabanPhotos
+            .map((item) => item?.value)
+            .filter(Boolean)
+            .map((value) => deleteJawabanFileFromStorage(value, selectedTugas.id, user.id))
+        )
+      }
 
       setJawabanFileKey(storedFileValue)
       setJawabanFileSize(sizeLabel)
+      setJawabanPhotoValues([])
+      setJawabanPhotoSizes([])
       setPendingJawabanFile({ value: storedFileValue, sizeLabel, provider: storedProvider })
+      setPendingJawabanPhotos([])
       setUploadProgress(null)
 
       pushToast('success', `File jawaban berhasil diupload (${sizeLabel})`)
@@ -904,9 +942,102 @@ export default function TugasSiswa() {
     }
   }
 
+  const handleUploadJawabanPhotos = async (inputFiles) => {
+    if (!inputFiles?.length || !user?.id || !selectedTugas) return
+    const files = normalizePhotoFiles(inputFiles)
+    const animationStartedAt = Date.now()
+
+    if (files.length === 0) {
+      pushToast('error', 'Pilih file foto dari galeri perangkat.')
+      return
+    }
+
+    if (files.length > MAX_ASSIGNMENT_PHOTOS) {
+      pushToast('error', `Maksimal ${MAX_ASSIGNMENT_PHOTOS} foto untuk satu tugas.`)
+      return
+    }
+
+    const kelas = selectedKelas || kelasSiswa
+    if (selectedTugas.kelas !== kelas) {
+      pushToast('error', 'Akses ditolak: tugas bukan untuk kelas Anda')
+      return
+    }
+
+    const lockReason = getSubmitLockReason(detail?.tugas, detail?.myJawaban, detail?.myStatus)
+    if (lockReason) {
+      pushToast('error', lockReason)
+      return
+    }
+
+    try {
+      setIsUploading(true)
+      setAnswerUploadProvider(null)
+      setUploadProgress(`Menyiapkan ${files.length} foto...`)
+
+      const uploaded = []
+      for (let i = 0; i < files.length; i += 1) {
+        const file = files[i]
+        setUploadProgress(`Mengkompresi foto ${i + 1}/${files.length}...`)
+
+        const plannedProvider = await resolveAssignmentUploadProvider(file)
+        setAnswerUploadProvider(plannedProvider)
+
+        const compressed = await compressImage(file, ASSIGNMENT_PHOTO_MAX_BYTES / 1024)
+        const safeName = sanitizeFileName(compressed.name || `foto-${i + 1}.jpg`)
+        const filePath = `${selectedTugas.id}/${user.id}-${Date.now()}-${i + 1}-${safeName}`
+
+        setUploadProgress(`Mengupload foto ${i + 1}/${files.length}...`)
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from(ASSIGNMENT_BUCKET)
+          .upload(filePath, compressed, { upsert: false, cacheControl: '3600' })
+
+        if (uploadError) throw new Error(uploadError.message)
+
+        const storedFileValue = uploadData?.path || uploadData?.fullPath || filePath
+        const sizeLabel = uploadData?.uploadedSizeLabel || formatFileSize(uploadData?.uploadedSizeBytes || compressed.size)
+        const storedProvider = uploadData?.provider === 'google_drive' ? 'google_drive' : 'local'
+        uploaded.push({ value: storedFileValue, sizeLabel, provider: storedProvider })
+      }
+
+      const stalePending = [
+        pendingJawabanFile?.value,
+        ...pendingJawabanPhotos.map((item) => item?.value)
+      ].filter(Boolean)
+      if (stalePending.length > 0) {
+        await Promise.allSettled(
+          stalePending.map((value) => deleteJawabanFileFromStorage(value, selectedTugas.id, user.id))
+        )
+      }
+
+      const values = uploaded.map((item) => item.value)
+      setJawabanPhotoValues(values)
+      setJawabanPhotoSizes(uploaded.map((item) => item.sizeLabel))
+      setJawabanFileKey(values[0] || '')
+      setJawabanFileSize(`${values.length} foto`)
+      setPendingJawabanFile(null)
+      setPendingJawabanPhotos(uploaded)
+      setUploadProgress(null)
+
+      pushToast('success', `${values.length} foto berhasil diupload. Klik Kirim Jawaban untuk menyimpan.`)
+    } catch (error) {
+      console.error('Upload foto jawaban error:', error)
+      setUploadProgress(null)
+      const parsed = parseSupabaseError(error)
+      pushToast('error', `Gagal upload foto: ${parsed.message}`)
+    } finally {
+      await holdUploadAnimation(animationStartedAt)
+      setIsUploading(false)
+      setAnswerUploadProvider(null)
+      if (galleryInputRef.current) galleryInputRef.current.value = ''
+    }
+  }
+
   const handleDeleteJawabanFile = async () => {
     if (!user?.id || !selectedTugas) return
-    if (!jawabanFileKey && !detail?.myJawaban?.file_url) return
+    const activePhotos = jawabanPhotoValues.length
+      ? jawabanPhotoValues
+      : parseAssignmentFileList(detail?.myJawaban?.file_urls, detail?.myJawaban?.file_url).filter(isImageLikeFile)
+    if (!jawabanFileKey && !detail?.myJawaban?.file_url && activePhotos.length === 0) return
 
     const lockReason = getSubmitLockReason(detail?.tugas, detail?.myJawaban, detail?.myStatus)
     if (lockReason) {
@@ -917,16 +1048,30 @@ export default function TugasSiswa() {
     // eslint-disable-next-line no-restricted-globals
     if (!confirm('Hapus file jawaban ini?')) return
 
-    const pendingValue = pendingJawabanFile?.value
-    if (pendingValue && jawabanFileKey === pendingValue) {
+    const pendingValues = Array.from(new Set([
+      pendingJawabanFile?.value,
+      ...pendingJawabanPhotos.map((item) => item?.value)
+    ].filter(Boolean)))
+    const isOnlyPending =
+      pendingValues.length > 0 &&
+      (activePhotos.length > 0
+        ? activePhotos.every((value) => pendingValues.includes(value))
+        : pendingValues.includes(jawabanFileKey))
+
+    if (isOnlyPending) {
       try {
-        await deleteJawabanFileFromStorage(pendingValue, selectedTugas.id, user.id)
+        await Promise.all(pendingValues.map((value) => deleteJawabanFileFromStorage(value, selectedTugas.id, user.id)))
       } catch (error) {
         console.warn('Gagal menghapus file jawaban sementara:', error)
       }
 
       setPendingJawabanFile(null)
+      setPendingJawabanPhotos([])
       setJawabanFileKey(detail?.myJawaban?.file_url || '')
+      setJawabanPhotoValues(
+        parseAssignmentFileList(detail?.myJawaban?.file_urls, detail?.myJawaban?.file_url).filter(isImageLikeFile)
+      )
+      setJawabanPhotoSizes([])
       setJawabanFileSize('')
       pushToast('success', 'File pengganti dibatalkan')
       return
@@ -935,10 +1080,12 @@ export default function TugasSiswa() {
     try {
       setLoading(true)
 
-      const key = jawabanFileKey || detail?.myJawaban?.file_url
+      const keys = activePhotos.length > 0
+        ? activePhotos
+        : [jawabanFileKey || detail?.myJawaban?.file_url].filter(Boolean)
       let storageError = null
       try {
-        await deleteJawabanFileFromStorage(key, selectedTugas.id, user.id)
+        await Promise.all(keys.map((key) => deleteJawabanFileFromStorage(key, selectedTugas.id, user.id)))
       } catch (err) {
         storageError = err
         console.warn('Delete storage error (non-blocking):', err)
@@ -951,7 +1098,7 @@ export default function TugasSiswa() {
         if (currentLink) {
           const { error } = await supabase
             .from('tugas_jawaban')
-            .update({ file_url: null })
+            .update({ file_url: null, file_urls: null })
             .eq('id', existing.id)
             .eq('user_id', user.id)
 
@@ -959,7 +1106,7 @@ export default function TugasSiswa() {
 
           setDetail((prev) => {
             if (!prev) return prev
-            const nextJawaban = prev.myJawaban ? { ...prev.myJawaban, file_url: null } : null
+            const nextJawaban = prev.myJawaban ? { ...prev.myJawaban, file_url: null, file_urls: null } : null
             const nextStatus = nextJawaban?.nilai != null ? 'dinilai' : nextJawaban ? 'menunggu' : 'belum'
             return { ...prev, myJawaban: nextJawaban, myStatus: nextStatus }
           })
@@ -978,6 +1125,8 @@ export default function TugasSiswa() {
 
       setJawabanFileKey('')
       setJawabanFileSize('')
+      setJawabanPhotoValues([])
+      setJawabanPhotoSizes([])
       await loadTugasList()
 
       if (storageError) {
@@ -1006,7 +1155,8 @@ export default function TugasSiswa() {
     }
 
     // validasi minimal: harus ada file atau link (pilih salah satu)
-    const hasFile = Boolean(jawabanFileKey || detail?.myJawaban?.file_url)
+    const photoValues = jawabanPhotoValues.slice(0, MAX_ASSIGNMENT_PHOTOS)
+    const hasFile = Boolean(jawabanFileKey || detail?.myJawaban?.file_url || photoValues.length > 0)
     const link = (jawabanLink || '').trim()
     const hasLink = Boolean(link)
 
@@ -1040,11 +1190,14 @@ export default function TugasSiswa() {
       setLoading(true)
 
       const existing = detail.myJawaban
+      const existingFiles = parseAssignmentFileList(existing?.file_urls, existing?.file_url)
+      const nextFileValue = photoValues[0] || jawabanFileKey || existing?.file_url || null
 
       const payload = {
         tugas_id: selectedTugas.id,
         user_id: user.id,
-        file_url: jawabanFileKey || existing?.file_url || null,
+        file_url: nextFileValue,
+        file_urls: photoValues.length > 0 ? photoValues : null,
         link_url: safeLink || null,
         status: existing?.nilai != null ? 'dinilai' : 'menunggu',
         waktu_submit: new Date().toISOString()
@@ -1064,15 +1217,20 @@ export default function TugasSiswa() {
         if (error) throw error
       }
 
-      if (existing?.file_url && existing.file_url !== payload.file_url) {
-        try {
-          await deleteJawabanFileFromStorage(existing.file_url, selectedTugas.id, user.id)
-        } catch (deleteError) {
-          console.warn('Gagal menghapus file jawaban lama:', deleteError)
-        }
+      const nextFiles = photoValues.length > 0
+        ? photoValues
+        : payload.file_url
+        ? [payload.file_url]
+        : []
+      const staleFiles = existingFiles.filter((value) => value && !nextFiles.includes(value))
+      if (staleFiles.length > 0) {
+        await Promise.allSettled(
+          staleFiles.map((value) => deleteJawabanFileFromStorage(value, selectedTugas.id, user.id))
+        )
       }
 
       setPendingJawabanFile(null)
+      setPendingJawabanPhotos([])
       pushToast('success', 'Jawaban berhasil dikirim')
 
       // refresh detail & list
@@ -1115,6 +1273,33 @@ export default function TugasSiswa() {
       console.error(error)
       const parsed = parseSupabaseError(error)
       pushToast('error', `Gagal membuka preview: ${parsed.message}`)
+    }
+  }
+
+  const openPhotoGallery = async (values, initialIndex = 0, title = 'Preview Tugas Saya') => {
+    const items = parseAssignmentFileList(values).filter(isImageLikeFile)
+    if (items.length === 0) {
+      pushToast('error', 'Foto belum tersedia')
+      return
+    }
+
+    try {
+      const resolved = await Promise.all(
+        items.map(async (item) => {
+          if (/^https?:\/\//i.test(item)) return item
+          if (looksLikeDomainUrl(item)) return `https://${item}`
+          return createSignedUrlForKey(item, 60 * 30)
+        })
+      )
+      setPhotoGallery({
+        items: resolved.filter(Boolean),
+        initialIndex,
+        title
+      })
+    } catch (error) {
+      console.error(error)
+      const parsed = parseSupabaseError(error)
+      pushToast('error', `Gagal membuka galeri: ${parsed.message}`)
     }
   }
 
@@ -1182,6 +1367,13 @@ export default function TugasSiswa() {
   }, [detail?.tugas, detail?.myJawaban, detail?.myStatus])
 
   const isSubmissionLocked = Boolean(submitLockReason)
+
+  const currentPhotoValues = useMemo(() => {
+    const source = jawabanPhotoValues.length
+      ? jawabanPhotoValues
+      : parseAssignmentFileList(detail?.myJawaban?.file_urls, detail?.myJawaban?.file_url)
+    return source.filter(isImageLikeFile).slice(0, MAX_ASSIGNMENT_PHOTOS)
+  }, [jawabanPhotoValues, detail?.myJawaban?.file_urls, detail?.myJawaban?.file_url])
 
   /* =========================
      Render
@@ -1415,6 +1607,8 @@ export default function TugasSiswa() {
                 const beforeStart = t.isBeforeStart
                 const nearDeadline = t.isNearDeadline
                 const doneAndGraded = t.myStatus === 'dinilai'
+                const photoCount = parseAssignmentFileList(t.myJawaban?.file_urls, t.myJawaban?.file_url)
+                  .filter(isImageLikeFile).length
                 const cardTone = doneAndGraded
                   ? 'border-green-200 bg-green-50/50'
                   : expired
@@ -1474,6 +1668,11 @@ export default function TugasSiswa() {
                       {t.myJawaban?.file_url && (
                         <span className="px-3 py-1 rounded-full border bg-blue-50 text-blue-700 border-blue-200 text-xs font-bold">
                           📎 Ada file
+                        </span>
+                      )}
+                      {photoCount > 0 && (
+                        <span className="px-3 py-1 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200 text-xs font-bold">
+                          🖼️ {photoCount} foto
                         </span>
                       )}
                       {t.myJawaban?.link_url && (
@@ -1663,6 +1862,71 @@ export default function TugasSiswa() {
                             </div>
                           </div>
 
+                          <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                              <div>
+                                <div className="flex items-center gap-2 text-sm font-bold text-slate-800">
+                                  <Images className="h-4 w-4 text-purple-600" />
+                                  Foto dari galeri perangkat
+                                </div>
+                                <div className="mt-1 text-xs text-slate-500">
+                                  Maksimal {MAX_ASSIGNMENT_PHOTOS} foto, masing-masing otomatis dikompresi sampai 150KB.
+                                </div>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                {currentPhotoValues.length > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => openPhotoGallery(currentPhotoValues, 0, 'Preview Tugas Saya')}
+                                    className="inline-flex items-center gap-2 rounded-2xl border border-purple-200 bg-purple-50 px-4 py-2 text-sm font-bold text-purple-700 hover:bg-purple-100"
+                                  >
+                                    <Images className="h-4 w-4" />
+                                    Preview ({currentPhotoValues.length})
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => galleryInputRef.current?.click()}
+                                  disabled={isSubmissionLocked || isUploading}
+                                  className="inline-flex items-center gap-2 rounded-2xl bg-purple-600 px-4 py-2 text-sm font-bold text-white hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  <ImagePlus className="h-4 w-4" />
+                                  Pilih Foto
+                                </button>
+                              </div>
+                            </div>
+                            <input
+                              ref={galleryInputRef}
+                              type="file"
+                              accept="image/*"
+                              multiple
+                              className="hidden"
+                              onChange={(event) => {
+                                void handleUploadJawabanPhotos(event.target.files)
+                              }}
+                            />
+
+                            {currentPhotoValues.length > 0 && (
+                              <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-6">
+                                {currentPhotoValues.map((value, idx) => (
+                                  <button
+                                    key={`${value}-${idx}`}
+                                    type="button"
+                                    onClick={() => openPhotoGallery(currentPhotoValues, idx, 'Preview Tugas Saya')}
+                                    className="aspect-square rounded-xl border border-slate-200 bg-slate-50 text-xs font-bold text-slate-600 hover:border-purple-300 hover:bg-purple-50"
+                                  >
+                                    Foto {idx + 1}
+                                    {jawabanPhotoSizes[idx] && (
+                                      <span className="mt-1 block text-[10px] font-medium text-slate-400">
+                                        {jawabanPhotoSizes[idx]}
+                                      </span>
+                                    )}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+
                           {/* File upload */}
                           <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
                             <div className="flex items-center justify-between gap-3 mb-3">
@@ -1732,7 +1996,7 @@ export default function TugasSiswa() {
                             <div className="mt-3 p-3 bg-white rounded-xl border border-slate-200">
                               <p className="text-xs font-semibold text-slate-700 mb-2">📋 Batas Ukuran File:</p>
                               <ul className="text-xs text-slate-600 space-y-1">
-                                <li>🖼️ Gambar: maks 100KB (otomatis dikompresi)</li>
+                                <li>🖼️ Gambar: maks 150KB (otomatis dikompresi)</li>
                                 <li>📄 PDF/Dokumen: Drive siap maks 3MB, VPS maks 2MB</li>
                                 <li>📊 PPT: Drive siap maks 5MB, VPS maks 2MB</li>
                               </ul>
@@ -1824,6 +2088,14 @@ export default function TugasSiswa() {
 
         {/* Preview Modal */}
         {previewFile && <FilePreviewModal fileUrl={previewFile} onClose={() => setPreviewFile(null)} />}
+        {photoGallery && (
+          <PhotoGalleryModal
+            items={photoGallery.items}
+            initialIndex={photoGallery.initialIndex}
+            title={photoGallery.title}
+            onClose={() => setPhotoGallery(null)}
+          />
+        )}
       </div>
     </div>
   )

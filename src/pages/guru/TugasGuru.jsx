@@ -13,8 +13,15 @@ import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import FileDropzone from '../../components/FileDropzone'
 import FilePreviewModal from '../../components/FilePreviewModal'
+import PhotoGalleryModal from '../../components/PhotoGalleryModal'
 import UploadProgressTrain from '../../components/UploadProgressTrain'
 import { parseSupabaseError } from '../../utils/supabaseError'
+import {
+  ASSIGNMENT_PHOTO_MAX_BYTES,
+  MAX_ASSIGNMENT_PHOTOS,
+  isImageLikeFile,
+  parseAssignmentFileList
+} from '../../utils/assignmentFiles'
 
 /* =========================
    Constants & Helpers
@@ -25,7 +32,7 @@ const MONTH_NAMES_ID = [
 ]
 
 const FILE_SIZE_LIMITS = {
-  IMAGE: 100 * 1024,
+  IMAGE: ASSIGNMENT_PHOTO_MAX_BYTES,
   PDF: 3 * 1024 * 1024,
   DOCUMENT: 3 * 1024 * 1024,
   SPREADSHEET: 3 * 1024 * 1024,
@@ -494,6 +501,7 @@ export default function TugasGuru() {
 
   // Preview
   const [previewFile, setPreviewFile] = useState(null)
+  const [photoGallery, setPhotoGallery] = useState(null)
   const detailLoadIdRef = useRef(0)
 
   /* ---------- Derived: kelas yang guru ampu ---------- */
@@ -870,7 +878,7 @@ export default function TugasGuru() {
 
         const jawabanPromise = supabase
           .from('tugas_jawaban')
-          .select('id, tugas_id, user_id, file_url, link_url, nilai, status, waktu_submit, profiles(nama, photo_url)')
+          .select('id, tugas_id, user_id, file_url, file_urls, link_url, nilai, status, waktu_submit, profiles(nama, photo_url)')
           .eq('tugas_id', tugas.id)
 
         const [
@@ -1505,6 +1513,33 @@ export default function TugasGuru() {
     }
   }
 
+  const openPhotoGallery = async (values, initialIndex = 0, title = 'Galeri Jawaban Siswa') => {
+    const items = parseAssignmentFileList(values).filter(isImageLikeFile).slice(0, MAX_ASSIGNMENT_PHOTOS)
+    if (items.length === 0) {
+      pushToast('error', 'Foto jawaban belum tersedia')
+      return
+    }
+
+    try {
+      const resolved = await Promise.all(
+        items.map(async (item) => {
+          if (/^https?:\/\//i.test(item)) return item
+          if (looksLikeDomainUrl(item)) return `https://${item}`
+          return createSignedUrlForAssignment(item, 60 * 30)
+        })
+      )
+      setPhotoGallery({
+        items: resolved.filter(Boolean),
+        initialIndex,
+        title
+      })
+    } catch (error) {
+      console.error(error)
+      const parsed = parseSupabaseError(error)
+      pushToast('error', `Gagal membuka galeri: ${parsed.message}`)
+    }
+  }
+
   const renderFileButton = (keyOrUrl, text, fileSize = '') => {
     if (!hasUsableValue(keyOrUrl)) return null
 
@@ -1602,6 +1637,9 @@ export default function TugasGuru() {
               <tbody>
                 {siswaList.map((siswa) => {
                   const jawaban = siswa.jawaban
+                  const photoValues = parseAssignmentFileList(jawaban?.file_urls, jawaban?.file_url)
+                    .filter(isImageLikeFile)
+                    .slice(0, MAX_ASSIGNMENT_PHOTOS)
                   return (
                     <tr key={siswa.id} className="border-b border-slate-100 hover:bg-white/60 transition-colors">
                       <td className="py-3 px-2">
@@ -1619,6 +1657,15 @@ export default function TugasGuru() {
                           <span className="text-xs text-slate-500">-</span>
                         ) : (
                           <div className="flex flex-wrap gap-2">
+                            {photoValues.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => openPhotoGallery(photoValues, 0, `Galeri ${siswa.nama || 'Siswa'}`)}
+                                className="inline-flex items-center gap-1 px-2 py-1 bg-emerald-100 text-emerald-700 rounded-lg text-xs hover:bg-emerald-200 transition-colors"
+                              >
+                                🖼️ Galeri ({photoValues.length})
+                              </button>
+                            )}
                             {jawaban?.file_url && (
                               <button
                                 type="button"
@@ -1961,7 +2008,7 @@ export default function TugasGuru() {
               <div className="mt-3 p-3 bg-slate-50 rounded-xl border border-slate-200">
                 <p className="text-xs font-semibold text-slate-700 mb-2">📋 Batas Ukuran File:</p>
                 <ul className="text-xs text-slate-600 space-y-1">
-                  <li>🖼️ Gambar: maks 100KB (otomatis dikompresi)</li>
+                  <li>🖼️ Gambar: maks 150KB (otomatis dikompresi)</li>
                   <li>📄 PDF/Dokumen: Drive siap maks 3MB, VPS maks 2MB</li>
                   <li>📊 PPT: Drive siap maks 5MB, VPS maks 2MB</li>
                 </ul>
@@ -2635,6 +2682,14 @@ export default function TugasGuru() {
 
         {/* Preview Modal */}
         {previewFile && <FilePreviewModal fileUrl={previewFile} onClose={() => setPreviewFile(null)} />}
+        {photoGallery && (
+          <PhotoGalleryModal
+            items={photoGallery.items}
+            initialIndex={photoGallery.initialIndex}
+            title={photoGallery.title}
+            onClose={() => setPhotoGallery(null)}
+          />
+        )}
       </div>
     </div>
   )
