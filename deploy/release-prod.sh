@@ -181,6 +181,13 @@ compose_service_state() {
   docker inspect --format '{{.State.Status}}' "$container_id" 2>/dev/null || true
 }
 
+git_status_for_release() {
+  git status --porcelain -- . \
+    ':!deploy/mosquitto/generated' \
+    ':!backups' \
+    ':!.env.production'
+}
+
 check_compose_service() {
   local service="$1"
   local container_id
@@ -415,8 +422,10 @@ if [[ -n "$ENV_CORE_HEALTH_SERVICES" ]]; then
   CORE_HEALTH_SERVICES=("${SPLIT_WORDS_RESULT[@]}")
 fi
 
-if [[ -n "$(git status --porcelain)" ]]; then
+WORKTREE_CHANGES="$(git_status_for_release)"
+if [[ -n "$WORKTREE_CHANGES" ]]; then
   echo "Error: working tree tidak bersih. Commit/stash dulu sebelum release." >&2
+  printf '%s\n' "$WORKTREE_CHANGES" >&2
   exit 1
 fi
 
