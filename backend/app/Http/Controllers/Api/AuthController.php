@@ -1831,11 +1831,37 @@ class AuthController extends ApiController
             'mode' => (string) ($statePayload['mode'] ?? 'login'),
         ], $payload);
 
+        $isError = ($message['type'] ?? '') === 'edusmart-google-error';
+        $title = $isError ? 'Login Google belum selesai' : 'Login Google berhasil';
+        $description = $isError
+            ? ($message['error'] ?? 'Login Google gagal diproses.')
+            : 'Kami sedang mengembalikan Anda ke EduSmart.';
+        $fallbackUrl = $origin;
+
         $html = '<!doctype html><html lang="id"><head><meta charset="utf-8">'
             .'<meta name="viewport" content="width=device-width,initial-scale=1">'
-            .'<title>Google Login - EduSmart</title></head>'
-            .'<body style="font-family:system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;padding:24px;color:#0f172a">'
-            .'<p>Proses Google selesai. Jendela ini akan tertutup otomatis.</p>'
+            .'<title>Google Login - EduSmart</title>'
+            .'<style>'
+            .'*,*::before,*::after{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f8fafc;color:#0f172a;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}'
+            .'.card{width:min(420px,calc(100vw - 32px));border:1px solid #e2e8f0;border-radius:20px;background:#fff;box-shadow:0 24px 70px rgba(15,23,42,.14);padding:28px;text-align:center}'
+            .'.mark{width:52px;height:52px;margin:0 auto 18px;border-radius:18px;display:grid;place-items:center;background:#eef2ff;color:#4f46e5;font-weight:800;font-size:24px}'
+            .'.mark.error{background:#fff1f2;color:#e11d48}h1{margin:0;font-size:22px;line-height:1.25;letter-spacing:0;font-weight:750}p{margin:10px 0 0;color:#475569;font-size:14px;line-height:1.6}'
+            .'.actions{margin-top:22px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap}a,button{appearance:none;border:1px solid #cbd5e1;border-radius:12px;background:#fff;color:#0f172a;font:inherit;font-size:14px;font-weight:700;padding:10px 14px;text-decoration:none;cursor:pointer}'
+            .'button.primary{border-color:#4f46e5;background:#4f46e5;color:#fff}.hint{margin-top:16px;font-size:12px;color:#64748b}.manual{display:none}.needs-manual-close .manual{display:block}.spinner{width:18px;height:18px;margin:18px auto 0;border-radius:999px;border:2px solid #cbd5e1;border-top-color:#4f46e5;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}'
+            .'</style></head>'
+            .'<body>'
+            .'<main class="card" aria-live="polite">'
+            .'<div class="mark'.($isError ? ' error' : '').'">'.($isError ? '!' : 'G').'</div>'
+            .'<h1>'.e($title).'</h1>'
+            .'<p>'.e($description).'</p>'
+            .'<div class="spinner" aria-hidden="true"></div>'
+            .'<p class="hint">Jendela ini akan tertutup otomatis.</p>'
+            .'<div class="manual">'
+            .'<p class="hint">Jika masih terbuka, tutup jendela ini atau kembali ke aplikasi.</p>'
+            .'<div class="actions">'
+            .'<button class="primary" type="button" id="close-button">Tutup jendela</button>'
+            .'<a href="'.e($fallbackUrl).'" id="return-button">Kembali ke aplikasi</a>'
+            .'</div></div></main>'
             .'<script>'
             .'const payload = '.Js::from($message).';'
             .'const targetOrigin = '.Js::from($origin).';'
@@ -1844,9 +1870,11 @@ class AuthController extends ApiController
             .'attempts += 1;'
             .'try { if (window.opener && !window.opener.closed) window.opener.postMessage(payload, targetOrigin); } catch (error) {}'
             .'};'
+            .'const closePopup = () => { try { window.close(); } catch (error) {} window.setTimeout(() => document.body.classList.add("needs-manual-close"), 500); };'
             .'notify();'
-            .'const timer = window.setInterval(() => { notify(); if (attempts >= 8) window.clearInterval(timer); }, 120);'
-            .'window.setTimeout(() => { window.clearInterval(timer); window.close(); }, 1200);'
+            .'const timer = window.setInterval(() => { notify(); if (attempts >= 12) window.clearInterval(timer); }, 120);'
+            .'window.setTimeout(() => { window.clearInterval(timer); closePopup(); }, 900);'
+            .'document.getElementById("close-button")?.addEventListener("click", closePopup);'
             .'</script></body></html>';
 
         return response($html, 200)->header('Content-Type', 'text/html; charset=UTF-8');
