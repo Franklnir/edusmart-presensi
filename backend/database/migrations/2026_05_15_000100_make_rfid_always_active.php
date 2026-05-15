@@ -51,7 +51,7 @@ return new class extends Migration
             $row = DB::selectOne(
                 "select pg_get_functiondef('public.absensi_rfid_auto(text,text,uuid)'::regprocedure) as definition"
             );
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             return;
         }
 

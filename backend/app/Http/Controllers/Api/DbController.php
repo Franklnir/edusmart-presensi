@@ -3,8 +3,8 @@
 namespace App\Http\Controllers\Api;
 
 use App\Services\Db\DbDeleteExecutor;
-use App\Services\Db\DbRequestShapeValidator;
 use App\Services\Db\DbInsertExecutor;
+use App\Services\Db\DbRequestShapeValidator;
 use App\Services\Db\DbSelectExecutor;
 use App\Services\Db\DbTableRegistry;
 use App\Services\Db\DbUpdateExecutor;
@@ -346,6 +346,7 @@ class DbController extends ApiController
                     'message' => 'Item batch tidak valid',
                     'status' => 422,
                 ];
+
                 continue;
             }
 
@@ -360,6 +361,7 @@ class DbController extends ApiController
                     'message' => 'Batch hanya mendukung aksi select',
                     'status' => 422,
                 ];
+
                 continue;
             }
 
@@ -391,6 +393,7 @@ class DbController extends ApiController
                     'code' => $payload['code'] ?? null,
                     'status' => $response->getStatusCode(),
                 ];
+
                 continue;
             }
 
@@ -2699,6 +2702,7 @@ class DbController extends ApiController
                         'status' => 422,
                     ];
                 }
+
                 continue;
             }
 

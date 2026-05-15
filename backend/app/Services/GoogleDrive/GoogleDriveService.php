@@ -883,8 +883,7 @@ class GoogleDriveService
         string $bucket,
         string $sourcePath,
         string $tenantId
-    ): array
-    {
+    ): array {
         $segments = $this->assignmentFolderSegments($sourcePath, $tenantId);
         if ($bucket === 'quiz-media') {
             $segments = $this->quizFolderSegments($sourcePath, $tenantId);

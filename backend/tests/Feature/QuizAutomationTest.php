@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Services\Quiz\QuizScoringService;
 use App\Support\AcademicPeriod;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -426,7 +427,7 @@ class QuizAutomationTest extends TestCase
         $storedDeadline = DB::table('quizzes')->where('id', $quizId)->value('deadline_at');
         $this->assertSame(
             $newDeadline->timestamp,
-            \Illuminate\Support\Carbon::parse($storedDeadline)->timestamp
+            Carbon::parse($storedDeadline)->timestamp
         );
     }
 
@@ -569,11 +570,11 @@ class QuizAutomationTest extends TestCase
         $this->assertSame($duration, (int) $fresh->duration_minutes);
         $this->assertSame(
             $startsAt->copy()->addMinutes($duration)->timestamp,
-            \Illuminate\Support\Carbon::parse($fresh->deadline_at)->timestamp
+            Carbon::parse($fresh->deadline_at)->timestamp
         );
         $this->assertSame(
             $startsAt->timestamp,
-            \Illuminate\Support\Carbon::parse($fresh->live_started_at)->timestamp
+            Carbon::parse($fresh->live_started_at)->timestamp
         );
     }
 

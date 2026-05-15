@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 class ClassHistoryController extends ApiController
 {
@@ -125,7 +126,7 @@ class ClassHistoryController extends ApiController
 
                 return DB::table('kelas_deleted_histories')->where('id', $historyId)->first();
             });
-        } catch (\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $exception) {
+        } catch (HttpExceptionInterface $exception) {
             throw $exception;
         }
 
