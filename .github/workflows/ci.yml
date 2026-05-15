@@ -67,14 +67,18 @@ jobs:
         run: ./vendor/bin/pint --test
 
   build-production-images:
-    name: Build Production Images
+    name: Build Release Images
     runs-on: ubuntu-latest
     needs:
       - frontend-build
       - backend-quality
     if: >
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
-      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/backup/vps-ready-20260430')
+      (
+        github.ref == 'refs/heads/main' ||
+        github.ref == 'refs/heads/backup/vps-ready-20260430' ||
+        github.ref == 'refs/heads/staging'
+      )
     outputs:
       backend_image: ${{ steps.images.outputs.backend_image }}
       nginx_image: ${{ steps.images.outputs.nginx_image }}
@@ -170,11 +174,15 @@ jobs:
       - build-production-images
     if: >
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
-      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/backup/vps-ready-20260430')
+      (
+        github.ref == 'refs/heads/main' ||
+        github.ref == 'refs/heads/backup/vps-ready-20260430' ||
+        github.ref == 'refs/heads/staging'
+      )
     concurrency:
-      group: production-deploy
+      group: ${{ github.ref == 'refs/heads/staging' && 'staging-deploy' || 'production-deploy' }}
       cancel-in-progress: false
-    environment: production
+    environment: ${{ github.ref == 'refs/heads/staging' && 'staging' || 'production' }}
 
     steps:
       - name: Validate deploy secrets

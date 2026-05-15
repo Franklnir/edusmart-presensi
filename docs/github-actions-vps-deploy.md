@@ -1,8 +1,23 @@
 # GitHub Actions VPS Deploy
 
-Workflow `.github/workflows/ci.yml` sekarang menjalankan build/test di GitHub. Jika lolos dan push terjadi ke branch `main` atau `backup/vps-ready-20260430`, GitHub Actions akan build image Docker production, push ke GitHub Container Registry (`ghcr.io`), lalu SSH ke VPS untuk pull image dan restart stack.
+Workflow `.github/workflows/ci.yml` sekarang menjalankan build/test di GitHub. Jika lolos dan push terjadi ke branch `staging`, `main`, atau `backup/vps-ready-20260430`, GitHub Actions akan build image Docker release, push ke GitHub Container Registry (`ghcr.io`), lalu SSH ke VPS sesuai environment untuk pull image dan restart stack.
 
 Dengan mode ini, VPS tidak compile image saat deploy. VPS hanya download image siap pakai.
+
+## Branch dan Environment
+
+Flow yang direkomendasikan:
+
+1. Kerjakan fitur di branch `feature/...`.
+2. Buka pull request ke `staging` untuk uji di server staging.
+3. Setelah staging hijau, buka pull request dari `staging` ke `backup/vps-ready-20260430`.
+4. Merge ke `backup/vps-ready-20260430` hanya setelah review dan check hijau.
+
+Mapping environment:
+
+- `feature/...`: hanya CI frontend/backend, tidak build Docker release dan tidak deploy.
+- `staging`: build image, push GHCR, deploy ke environment GitHub `staging`.
+- `backup/vps-ready-20260430` dan `main`: build image, push GHCR, deploy ke environment GitHub `production`.
 
 ## GitHub Secrets
 
@@ -15,6 +30,42 @@ Isi di `Repository > Settings > Secrets and variables > Actions`:
 - `VPS_APP_DIR`: path project di VPS, contoh `/opt/edusmart-presensi`.
 
 Workflow login ke GHCR memakai `GITHUB_TOKEN` job yang sedang berjalan, lalu mengirim login sementara ke VPS saat deploy. Jika package GHCR dibuat private lintas repo/org, pastikan permission package mengizinkan repo ini menarik image.
+
+Untuk staging, buat GitHub Environment bernama `staging`, lalu isi secrets dengan nama yang sama tetapi mengarah ke VPS/folder staging:
+
+- `VPS_HOST`
+- `VPS_PORT`
+- `VPS_USER`
+- `VPS_SSH_PRIVATE_KEY`
+- `VPS_APP_DIR`
+
+Untuk production, gunakan GitHub Environment bernama `production` atau repository secrets yang sudah ada. Nama secret tetap sama.
+
+## Proteksi Branch Production
+
+Aktifkan di GitHub:
+
+```text
+Repository > Settings > Branches > Add branch protection rule
+```
+
+Pattern:
+
+```text
+backup/vps-ready-20260430
+```
+
+Rekomendasi rule:
+
+- Require a pull request before merging.
+- Require approvals: minimal 1.
+- Require review from Code Owners.
+- Require status checks to pass before merging.
+- Pilih check: `Frontend Build` dan `Backend Test And Pint`.
+- Require branches to be up to date before merging.
+- Do not allow bypassing the above settings.
+
+File `.github/CODEOWNERS` sudah mengarahkan semua perubahan ke owner repo. Rule `Require review from Code Owners` baru efektif setelah branch protection diaktifkan.
 
 ## GitHub Variables Opsional
 
@@ -53,11 +104,11 @@ git commit -m "Update aplikasi"
 git push origin backup/vps-ready-20260430
 ```
 
-Setelah push, buka tab `Actions` di GitHub. Urutannya:
+Setelah push ke branch deploy, buka tab `Actions` di GitHub. Urutannya:
 
 1. `Frontend Build`
 2. `Backend Test And Pint`
-3. `Build Production Images`
+3. `Build Release Images`
 4. `Deploy To VPS`
 
 Image production akan dibuat dengan tag commit, misalnya:
@@ -79,6 +130,14 @@ Lalu VPS menjalankan:
 ```bash
 deploy/release-prod.sh --ref <commit-sha> --pull-images
 ```
+
+Script deploy melakukan health check internal setelah service naik:
+
+- status container inti: `postgres`, `redis`, `backend`, `worker`, `scheduler`, `nginx`, `caddy`
+- endpoint lokal `http://127.0.0.1:<NGINX_HTTP_PORT>/api/health`
+- koneksi Laravel ke database via `php artisan migrate:status`
+
+Jika deploy gagal setelah service mulai diganti, script otomatis rollback aplikasi ke ref dan image sebelumnya. Database tidak otomatis direstore karena restore data otomatis bisa lebih berbahaya daripada rollback aplikasi. Backup pre-release tetap dibuat dan bisa dipakai manual jika benar-benar perlu restore DB.
 
 Jika deploy gagal sebelum update service, cek log job `Deploy To VPS` dan jalankan di VPS:
 

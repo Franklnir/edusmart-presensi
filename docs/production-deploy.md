@@ -383,7 +383,9 @@ Catatan:
 - `deploy/nginx/gateway.prod.conf` sudah diberi rate-limit tambahan untuk `/api/auth/*` dan `/api/*` sebagai lapisan proteksi brute-force di edge.
 - `nginx` sekarang menjadi internal web layer untuk SPA + Laravel API, sementara `caddy` menangani TLS dan host routing di depan.
 - Endpoint file sekarang pakai signed URL dengan masa berlaku + validasi signature untuk akses guest.
-- Jalankan `deploy/scripts/prod_smoke_check.sh` setiap selesai deploy untuk cek DNS, HTTPS health, dan status container.
+- `deploy/release-prod.sh` sekarang menjalankan health check internal setiap deploy: container inti, endpoint `/api/health`, dan koneksi Laravel ke database.
+- Jika health check internal gagal setelah service diganti, script release otomatis rollback aplikasi ke ref dan image sebelumnya. Backup database pre-release tetap tersedia untuk restore manual bila benar-benar diperlukan.
+- Jalankan `deploy/scripts/prod_smoke_check.sh` setelah deploy untuk cek tambahan dari sisi DNS/HTTPS publik dan status container lengkap.
 
 ## 7. Deploy Native (Tanpa Docker)
 

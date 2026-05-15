@@ -35,6 +35,16 @@ VPS production
 
 Jadi VPS tidak compile image production saat deploy. VPS hanya download image siap pakai dari GitHub Container Registry.
 
+Branch deploy yang direkomendasikan:
+
+```text
+feature/...                 CI saja, tidak deploy
+staging                     build image dan deploy ke VPS staging
+backup/vps-ready-20260430   build image dan deploy ke VPS production
+```
+
+Untuk production, aktifkan branch protection di GitHub agar merge ke `backup/vps-ready-20260430` wajib lewat pull request, wajib review, dan wajib status check hijau.
+
 ## GitHub Secrets
 
 Buka repo GitHub:
