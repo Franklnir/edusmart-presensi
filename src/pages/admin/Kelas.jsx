@@ -1,17 +1,48 @@
-import React, { useEffect, useState, useCallback } from 'react'
-import { supabase } from '../../lib/supabase'
+﻿import React, { useEffect, useState, useCallback } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { startTransition } from 'react'
+import { supabase, apiFetch } from '../../lib/supabase'
+import { queryClient, queryKeys } from '../../lib/queryClient'
 import { useUIStore } from '../../store/useUIStore'
 import PasswordInput from '../../components/PasswordInput'
+import { verifyCurrentUserPassword as verifyPassword } from '../../services/authService'
 import { loadExcelJsBrowser } from '../../utils/excelBrowser'
 import {
-  getCurrentAcademicPeriod,
-  generateAcademicYearOptions,
   getNextAcademicPeriod,
   inferCohortYear,
   normalizeAcademicYear,
   normalizeSemester,
-  resolveAcademicPeriod
+  resolveAcademicPeriod,
+  semesterRangeFields,
 } from '../../utils/academicPeriod'
+import {
+  HARI_OPTS,
+  GRADE_OPTS,
+  GRADE_ORDER,
+  FORBIDDEN,
+  DEFAULT_SCHEDULE_DAYS,
+  loadJsPdf,
+  loadAutoTable,
+  slug,
+  toMinutes,
+  toTimeHHMM,
+  toTimeLabel,
+  toRangeLabel,
+  normalizeMapelInput,
+  normalizeMapelName,
+  normalizeScheduleDay,
+  classSlug,
+  buildSheetName,
+  buildScheduleCellExcelValue,
+  buildScheduleMatrix,
+  timesOverlap,
+  parseGrade,
+  stripGradePrefix,
+  makeClassName,
+  normalizeClassSuffixInput,
+} from '../../features/classes/utils/classUtils'
+import SchedulePreviewTable from '../../features/classes/components/SchedulePreviewTable'
+
 
 /* ===== Password Modal Component (Akses Halaman) ===== */
 function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Password", loading = false }) {
@@ -122,322 +153,96 @@ function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Passwor
   )
 }
 
-/* ===== Password Verification Utility ===== */
-const verifyPassword = async (password) => {
-  try {
-    // Get current session first
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession()
-    
-    if (sessionError || !session) {
-      throw new Error('Silakan login terlebih dahulu')
-    }
-
-    // Re-authenticate with current user's email
-    const { error } = await supabase.auth.signInWithPassword({
-      email: session.user.email,
-      password
-    })
-
-    if (error) {
-      if (error.message.includes('Invalid login credentials')) {
-        throw new Error('Password salah')
-      }
-      throw error
-    }
-
-    return true
-  } catch (error) {
-    console.error('Password verification error:', error)
-    throw error
-  }
-}
-
-/* ===== Utils ===== */
-const HARI_OPTS = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu']
-const GRADE_OPTS = ['VII', 'VIII', 'IX', 'X', 'XI', 'XII']
-const GRADE_ORDER = Object.fromEntries(GRADE_OPTS.map((g, i) => [g, i]))
-const FORBIDDEN = /[.#$[\]]/
-const DEFAULT_SCHEDULE_DAYS = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']
-
-let jsPdfPromise = null
-const loadJsPdf = async () => {
-  if (!jsPdfPromise) {
-    jsPdfPromise = import('jspdf')
-  }
-  const mod = await jsPdfPromise
-  return mod.jsPDF || mod.default
-}
-
-let autoTablePromise = null
-const loadAutoTable = async () => {
-  if (!autoTablePromise) {
-    autoTablePromise = import('jspdf-autotable')
-  }
-  const mod = await autoTablePromise
-  return mod.default || mod.autoTable || null
-}
-
-const slug = (s = '') => s.toString().trim().toLowerCase()
-  .replace(/[^\w\s-]/g, '')
-  .replace(/\s+/g, '-')
-  .replace(/-+/g, '-')
-  .slice(0, 80)
-
-const toMinutes = (hhmm) => {
-  const value = toTimeHHMM(hhmm)
-  if (!value) return NaN
-  const [h, m] = value.split(':').map(Number)
-  if (!Number.isFinite(h) || !Number.isFinite(m)) return NaN
-  return (h * 60) + m
-}
-
-const toTimeHHMM = (hhmm) => {
-  const value = String(hhmm || '').trim()
-  if (!value) return ''
-  const normalized = value.replace('.', ':')
-  const match = normalized.match(/^(\d{1,2}):(\d{1,2})/)
-  if (!match) return normalized.length >= 5 ? normalized.slice(0, 5) : normalized
-  const hour = Math.max(0, Math.min(23, Number(match[1])))
-  const minute = Math.max(0, Math.min(59, Number(match[2])))
-  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
-}
-
-const toTimeLabel = (hhmm) => toTimeHHMM(hhmm).replace(':', '.')
-
-const toRangeLabel = (start, end) => `${toTimeLabel(start)}-${toTimeLabel(end)}`
-
-const normalizeMapelInput = (value = '') => String(value || '').toUpperCase()
-
-const normalizeMapelName = (value = '') =>
-  String(value || '')
-    .trim()
-    .replace(/\s+/g, ' ')
-    .toUpperCase()
-
-const normalizeScheduleDay = (day) => {
-  const raw = String(day || '').trim().toLowerCase()
-  const map = {
-    senin: 'Senin',
-    monday: 'Senin',
-    selasa: 'Selasa',
-    tuesday: 'Selasa',
-    rabu: 'Rabu',
-    wednesday: 'Rabu',
-    kamis: 'Kamis',
-    thursday: 'Kamis',
-    jumat: 'Jumat',
-    friday: 'Jumat',
-    sabtu: 'Sabtu',
-    saturday: 'Sabtu',
-    minggu: 'Minggu',
-    sunday: 'Minggu'
-  }
-
-  return map[raw] || String(day || '').trim()
-}
-
-const classSlug = (value = '') =>
-  String(value || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-+|-+$/g, '') || 'kelas'
-
-const buildSheetName = (source = '', used = new Set()) => {
-  const base = String(source || 'Jadwal')
-    .replace(/[:\\/?*\[\]]/g, ' ')
-    .trim() || 'Jadwal'
-  const candidate = base.slice(0, 31)
-  if (!used.has(candidate)) {
-    used.add(candidate)
-    return candidate
-  }
-
-  let i = 2
-  while (i < 999) {
-    const suffix = ` (${i})`
-    const next = `${base.slice(0, Math.max(0, 31 - suffix.length))}${suffix}`
-    if (!used.has(next)) {
-      used.add(next)
-      return next
-    }
-    i += 1
-  }
-
-  return `Sheet-${Date.now()}`
-}
-
-const normalizeScheduleCellEntries = (entries = []) =>
-  (entries || [])
-    .map((item) => ({
-      mapel: String(item?.mapel || '').trim(),
-      guruNama: String(item?.guruNama || '').trim()
-    }))
-    .filter((item) => item.mapel || item.guruNama)
-
-const buildScheduleCellExportText = (entries = []) =>
-  entries
-    .map((item) => {
-      const mapel = item.mapel || '-'
-      return item.guruNama ? `${mapel}\n${item.guruNama}` : mapel
-    })
-    .join('\n\n')
-
-const buildScheduleCellExcelValue = (entries = []) => {
-  const richText = []
-
-  entries.forEach((item, index) => {
-    if (index > 0) richText.push({ text: '\n\n' })
-    richText.push({
-      text: item.mapel || '-',
-      font: { size: 10, bold: true, color: { argb: 'FF111827' } }
-    })
-    if (item.guruNama) {
-      richText.push({
-        text: `\n${item.guruNama}`,
-        font: { size: 8, italic: true, color: { argb: 'FF4B5563' } }
-      })
-    }
-  })
-
-  return richText.length > 0 ? { richText } : ''
-}
-
-const buildScheduleMatrix = (rows = [], days = DEFAULT_SCHEDULE_DAYS) => {
-  const slotMap = new Map()
-
-  ;(rows || []).forEach((row) => {
-    const start = toTimeHHMM(row.jamMulai)
-    const end = toTimeHHMM(row.jamSelesai)
-    if (!start || !end) return
-    const key = `${start}-${end}`
-
-    if (!slotMap.has(key)) {
-      const cells = {}
-      days.forEach((day) => {
-        cells[day] = []
-      })
-      slotMap.set(key, { key, start, end, cells })
-    }
-
-    const slot = slotMap.get(key)
-    const day = normalizeScheduleDay(row.hari)
-    if (!slot.cells[day]) {
-      slot.cells[day] = []
-    }
-
-    slot.cells[day].push({
-      mapel: String(row.mapel || '').trim(),
-      guruNama: String(row.guruNama || '').trim()
-    })
-  })
-
-  const sortedSlots = Array.from(slotMap.values()).sort((a, b) => toMinutes(a.start) - toMinutes(b.start))
-
-  return sortedSlots.map((slot, index) => {
-    const cellEntries = {}
-    const cellText = {}
-    days.forEach((day) => {
-      const entries = normalizeScheduleCellEntries(slot.cells[day] || [])
-      cellEntries[day] = entries
-      cellText[day] = buildScheduleCellExportText(entries)
-    })
-
-    const isBreakRow = days.some((day) =>
-      (cellEntries[day] || []).some((item) => /istirahat/i.test(item.mapel || ''))
-    )
-    return {
-      ...slot,
-      jamKe: index + 1,
-      rangeLabel: toRangeLabel(slot.start, slot.end),
-      cellEntries,
-      cellText,
-      isBreakRow
-    }
-  })
-}
-
-const timesOverlap = (aStart, aEnd, bStart, bEnd) => {
-  const as = toMinutes(aStart), ae = toMinutes(aEnd)
-  const bs = toMinutes(bStart), be = toMinutes(bEnd)
-  if ([as, ae, bs, be].some(Number.isNaN)) return false
-  return as < be && bs < ae
-}
-
-const GRADE_REGEX = /^\s*(VII|VIII|IX|X|XI|XII)\b/i
-const parseGrade = (name = '') => {
-  const m = String(name || '').toUpperCase().match(GRADE_REGEX)
-  return m ? m[1] : ''
-}
-
-const stripGradePrefix = (name = '') => {
-  const g = parseGrade(name)
-  if (!g) return name.trim()
-  return name.toUpperCase().startsWith(g) ? name.slice(g.length).trim() : name.trim()
-}
-
-const makeClassName = (grade, suffix) => (grade + (suffix ? ' ' + suffix.trim() : '')).trim()
-
-const normalizeClassSuffixInput = (value = '', grade = '') => {
-  const selectedGrade = String(grade || '').toUpperCase().trim()
-  let suffix = String(value || '')
-    .trim()
-    .replace(/\s+/g, ' ')
-
-  if (selectedGrade) {
-    suffix = suffix.replace(new RegExp(`^${selectedGrade}\\b\\s*`, 'i'), '')
-  }
-
-  return suffix.trim()
-}
-
 /* quick helpers */
 const confirmDelete = (msg = 'Yakin mau dihapus?') => window.confirm(msg)
 
-let strukturSekolahTabPromise = null
-const loadStrukturSekolahTab = () => {
-  if (!strukturSekolahTabPromise) {
-    strukturSekolahTabPromise = import('./kelas/StrukturSekolahTab')
+const mapTeacherOptions = (rows = []) => (rows || []).map((user) => {
+  const name = user.nama || user.email || user.id
+  return {
+    id: user.id,
+    name,
+    label: name + (user.email ? ` (${user.email})` : '')
   }
-  return strukturSekolahTabPromise
+})
+
+const mapClassRows = (rows = []) => {
+  const mapped = (rows || []).map((kelas) => ({
+    id: kelas.id,
+    nama: kelas.nama || kelas.id,
+    grade: kelas.grade || parseGrade(kelas.id),
+    suffix: kelas.suffix || stripGradePrefix(kelas.nama || kelas.id),
+    angkatan: kelas.angkatan || '',
+    tahunAjaran: kelas.tahun_ajaran || '',
+    semester: kelas.semester || '',
+    isActive: kelas.is_active !== false,
+    ...kelas
+  }))
+
+  mapped.sort((a, b) => {
+    const ag = GRADE_ORDER[a.grade] ?? 999
+    const bg = GRADE_ORDER[b.grade] ?? 999
+    if (ag !== bg) return ag - bg
+    return (a.suffix || '').localeCompare(b.suffix || '', 'id')
+  })
+
+  return mapped
 }
 
-let organisasiTabPromise = null
-const loadOrganisasiTab = () => {
-  if (!organisasiTabPromise) {
-    organisasiTabPromise = import('./kelas/OrganisasiTab')
-  }
-  return organisasiTabPromise
+const mapStudentRows = (rows = []) => (rows || []).map((user) => ({
+  uid: user.id,
+  nama: user.nama || user.email || user.id,
+  email: user.email || '',
+  kelas: user.kelas || '',
+  status: user.status || 'active',
+  angkatan: user.angkatan || ''
+}))
+
+const mapScheduleRows = (rows = [], period = {}) => {
+  const mapped = (rows || []).map((row) => ({
+    id: row.id,
+    hari: row.hari,
+    mapel: normalizeMapelName(row.mapel),
+    guruId: row.guru_id,
+    guruNama: row.guru_nama || '',
+    jamMulai: toTimeHHMM(row.jam_mulai),
+    jamSelesai: toTimeHHMM(row.jam_selesai),
+    tahunAjaran: row.tahun_ajaran || period.tahunAjaran,
+    semester: row.semester || period.semester
+  }))
+
+  mapped.sort((a, b) => {
+    const ai = HARI_OPTS.indexOf(a.hari)
+    const bi = HARI_OPTS.indexOf(b.hari)
+    if (ai !== bi) return ai - bi
+    return toMinutes(a.jamMulai) - toMinutes(b.jamMulai)
+  })
+
+  return mapped
 }
 
-const StrukturSekolahTab = React.lazy(loadStrukturSekolahTab)
-const OrganisasiTab = React.lazy(loadOrganisasiTab)
+const mapSubjectRows = (rows = []) => (rows || []).map((item) => ({
+  ...item,
+  id: item.id,
+  nama: normalizeMapelName(item.nama || item.id)
+}))
 
-const lazyTabLoaders = {
-  struktur: loadStrukturSekolahTab,
-  org: loadOrganisasiTab
-}
+const buildStudentDetailKey = (classId = '') => `${classId}|all`
 
-const prefetchLazyTab = (key) => {
-  const loader = lazyTabLoaders[key]
-  if (loader) void loader()
-}
-
-function TabContentFallback({ label = 'Memuat tab...' }) {
-  return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-8 shadow-sm">
-      <div className="flex items-center justify-center gap-3 text-sm font-medium text-gray-500">
-        <span className="h-5 w-5 animate-spin rounded-full border-2 border-gray-200 border-t-blue-600" />
-        <span>{label}</span>
-      </div>
-    </div>
-  )
-}
+const buildScheduleDetailKey = (classId = '', period = {}) => (
+  `${classId}|${period.tahunAjaran || ''}|${period.semester || ''}`
+)
 
 /* ===== Component Utama: AKelas (Terkunci Password) ===== */
-export default function AKelas() {
+export default function AKelas({ initialTab = 'kelas' }) {
   const { pushToast } = useUIStore()
+  const location = useLocation()
+  const navigate = useNavigate()
+  const isSchedulePage = initialTab === 'jadwal'
+  const routeClassId = React.useMemo(() => {
+    const params = new URLSearchParams(location.search)
+    return String(params.get('kelas') || '').trim()
+  }, [location.search])
+  const [initialRouteClassId] = useState(routeClassId)
 
   /* ---------- LOCK SCREEN STATE ---------- */
   const [isAuthorized, setIsAuthorized] = useState(true)
@@ -450,7 +255,7 @@ export default function AKelas() {
       await verifyPassword(password)
       setIsAuthorized(true)
       setPasswordModalOpen(false)
-      pushToast('success', 'Akses diizinkan. Selamat datang di Manajemen Kelas & Jadwal.')
+      pushToast('success', `Akses diizinkan. Selamat datang di ${isSchedulePage ? 'Jadwal Pelajaran' : 'Manajemen Kelas'}.`)
     } catch (error) {
       console.error('Password verification failed:', error)
       pushToast('error', error.message || 'Gagal verifikasi password')
@@ -464,12 +269,17 @@ export default function AKelas() {
   }
 
   /* ---------- State Lama ---------- */
-  const [tab, setTab] = useState('kelas')
+  const [tab, setTab] = useState(isSchedulePage ? 'jadwal' : 'kelas')
   const [loading, setLoading] = useState(false)
 
   /* Data umum: guru & siswa */
   const [guruList, setGuruList] = useState([])
   const [siswaList, setSiswaList] = useState([])
+  const [classDetailLoading, setClassDetailLoading] = useState(false)
+  const [selectedStudentsLoadedKey, setSelectedStudentsLoadedKey] = useState('')
+  const [promotionSiswaList, setPromotionSiswaList] = useState([])
+  const [promotionStudentsLoaded, setPromotionStudentsLoaded] = useState(false)
+  const [promotionStudentsLoading, setPromotionStudentsLoading] = useState(false)
 
   /* =========================================================
      TAB 1 — KELAS & JADWAL + STRUKTUR KELAS
@@ -478,19 +288,18 @@ export default function AKelas() {
   const [filterGrade, setFilterGrade] = useState('')
   const [kelasSelected, setKelasSelected] = useState('')
   const [jadwal, setJadwal] = useState([])
+  const [jadwalLoadedKey, setJadwalLoadedKey] = useState('')
   const [filterHari, setFilterHari] = useState('')
-  const [settingsRow, setSettingsRow] = useState(null)
   const [academicPeriod, setAcademicPeriod] = useState(() => resolveAcademicPeriod())
-  const [periodForm, setPeriodForm] = useState(() => {
-    const current = getCurrentAcademicPeriod()
-    return { tahunAjaran: current.tahunAjaran, semester: current.semester }
-  })
-  const [savingPeriod, setSavingPeriod] = useState(false)
+  const [deletedHistoryOpen, setDeletedHistoryOpen] = useState(false)
+  const [deletedHistoryLoading, setDeletedHistoryLoading] = useState(false)
+  const [deletedClassHistories, setDeletedClassHistories] = useState([])
+  const [selectedHistoryId, setSelectedHistoryId] = useState('')
+  const [restoringHistoryId, setRestoringHistoryId] = useState('')
 
   // Form buat kelas
   const [newGrade, setNewGrade] = useState('')
   const [newSuffix, setNewSuffix] = useState('')
-  const [newAngkatan, setNewAngkatan] = useState('')
   const selObj = React.useMemo(() => kelas.find(k => k.id === kelasSelected) || null, [kelas, kelasSelected])
 
   // Struktur kelas
@@ -522,8 +331,89 @@ export default function AKelas() {
   const [promotionExitReason, setPromotionExitReason] = useState('')
   const [promotionAdvancePeriod, setPromotionAdvancePeriod] = useState(false)
   const [promotionLoading, setPromotionLoading] = useState(false)
+  const [promotionQueryHandled, setPromotionQueryHandled] = useState(false)
+
+  const invalidateAcademicQueries = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['admin', 'academic-summary'] })
+    queryClient.invalidateQueries({ queryKey: ['admin', 'student-options'] })
+  }, [])
+
+  const loadSelectedClassData = useCallback(async ({ includeSchedule = false, force = false } = {}) => {
+    if (!kelasSelected) return
+
+    const studentKey = buildStudentDetailKey(kelasSelected)
+    const scheduleKey = buildScheduleDetailKey(kelasSelected, academicPeriod)
+    const needsStudents = !isSchedulePage && (force || selectedStudentsLoadedKey !== studentKey)
+    const needsSchedule = includeSchedule && (force || jadwalLoadedKey !== scheduleKey)
+    const needsMapel = includeSchedule && mapelList.length === 0
+
+    if (!needsStudents && !needsSchedule && !needsMapel) return
+
+    setClassDetailLoading(true)
+    try {
+      const params = {
+        class_id: kelasSelected,
+        include_students: needsStudents,
+        include_schedule: needsSchedule,
+        include_mapel: needsMapel,
+        tahun_ajaran: academicPeriod.tahunAjaran,
+        semester: academicPeriod.semester,
+        students_limit: 1000
+      }
+
+      if (force) {
+        queryClient.invalidateQueries({ queryKey: ['admin', 'academic-summary'] })
+      }
+
+      const data = await queryClient.fetchQuery({
+        queryKey: queryKeys.admin.academicSummary(params),
+        queryFn: async () => {
+          const { data, error } = await supabase.admin.academicSummary(params)
+          if (error) throw error
+          return data
+        },
+        staleTime: force ? 0 : 60 * 1000,
+      })
+
+      const nextStudents = needsStudents ? mapStudentRows(data?.selected_students || []) : null
+      const nextSchedule = needsSchedule ? mapScheduleRows(data?.schedule || [], academicPeriod) : null
+      const nextMapel = needsMapel ? mapSubjectRows(data?.mapel || []) : null
+
+      startTransition(() => {
+        if (needsStudents) {
+          setSiswaList(nextStudents)
+          setSelectedStudentsLoadedKey(studentKey)
+          setWaliGuruId(data?.selected_structure?.wali_guru_id || '')
+          setKetuaUid(data?.selected_structure?.ketua_siswa_id || '')
+        }
+        if (needsSchedule) {
+          setJadwal(nextSchedule)
+          setJadwalLoadedKey(scheduleKey)
+        }
+        if (needsMapel) {
+          setMapelList(nextMapel)
+        }
+      })
+    } catch (error) {
+      console.error('Error loading selected class data:', error)
+      pushToast('error', error?.message || 'Gagal memuat detail kelas')
+    } finally {
+      setClassDetailLoading(false)
+    }
+  }, [
+    academicPeriod,
+    isSchedulePage,
+    jadwalLoadedKey,
+    kelasSelected,
+    mapelList.length,
+    pushToast,
+    selectedStudentsLoadedKey
+  ])
 
   /* ====== EFFECTS ====== */
+  useEffect(() => {
+    setTab(isSchedulePage ? 'jadwal' : 'kelas')
+  }, [isSchedulePage])
 
   // Load guru & siswa setelah password benar
   useEffect(() => {
@@ -532,44 +422,100 @@ export default function AKelas() {
     const loadData = async () => {
       setLoading(true)
       try {
-        await Promise.all([
-          loadSettings(),
-          loadGuruList(),
-          loadKelas(),
-          loadMapelList()
-        ])
+        const params = {
+          class_id: initialRouteClassId,
+          include_students: !isSchedulePage,
+          include_schedule: isSchedulePage,
+          include_mapel: isSchedulePage,
+          students_limit: 1000
+        }
 
-        void loadSiswaList().catch(() => {})
+        const data = await queryClient.fetchQuery({
+          queryKey: queryKeys.admin.academicSummary(params),
+          queryFn: async () => {
+            const { data, error } = await supabase.admin.academicSummary(params)
+            if (error) throw error
+            return data
+          },
+          staleTime: 60 * 1000,
+        })
+
+        const nextPeriod = resolveAcademicPeriod(data?.settings || {})
+        const kelasRows = mapClassRows(data?.kelas || [])
+        const selectedClassId = data?.selected_class_id || initialRouteClassId || kelasRows[0]?.id || ''
+        const scheduleRows = mapScheduleRows(data?.schedule || [], nextPeriod)
+
+        startTransition(() => {
+          setAcademicPeriod(nextPeriod)
+          setGuruList(mapTeacherOptions(data?.guru || []))
+          setKelas(kelasRows)
+          setKelasSelected((prev) => {
+            if (selectedClassId && kelasRows.some((row) => row.id === selectedClassId)) return selectedClassId
+            if (prev && kelasRows.some((row) => row.id === prev)) return prev
+            return kelasRows.length ? kelasRows[0].id : ''
+          })
+          setWaliGuruId(data?.selected_structure?.wali_guru_id || '')
+          setKetuaUid(data?.selected_structure?.ketua_siswa_id || '')
+          setSiswaList(mapStudentRows(data?.selected_students || []))
+          setSelectedStudentsLoadedKey(!isSchedulePage && selectedClassId ? buildStudentDetailKey(selectedClassId) : '')
+
+          if (isSchedulePage) {
+            setJadwal(scheduleRows)
+            setJadwalLoadedKey(selectedClassId ? buildScheduleDetailKey(selectedClassId, nextPeriod) : '')
+            setMapelList(mapSubjectRows(data?.mapel || []))
+          }
+        })
       } catch (error) {
         console.error('Error loading initial data:', error)
+        pushToast('error', error?.message || 'Gagal memuat data akademik')
       } finally {
         setLoading(false)
       }
     }
     
     loadData()
-  }, [isAuthorized])
+  }, [initialRouteClassId, isAuthorized, isSchedulePage, pushToast])
 
-  // Load jadwal & struktur kelas ketika kelasSelected berubah
   useEffect(() => {
-    if (!isAuthorized || !kelasSelected) return
+    if (!isAuthorized || promotionQueryHandled || typeof window === 'undefined') return
 
-    const loadKelasData = async () => {
-      setLoading(true)
-      try {
-        await Promise.all([
-          loadJadwal(),
-          loadStrukturKelas()
-        ])
-      } catch (error) {
-        console.error('Error loading kelas data:', error)
-      } finally {
-        setLoading(false)
-      }
-    }
+    const url = new URL(window.location.href)
+    if (url.searchParams.get('openPromotion') !== '1') return
 
-    loadKelasData()
-  }, [isAuthorized, kelasSelected, academicPeriod.tahunAjaran, academicPeriod.semester])
+    setPromotionQueryHandled(true)
+    setTab('kelas')
+    openPromotionModal()
+    pushToast('info', 'Pilih siswa yang tidak naik kelas, lalu jalankan proses kenaikan kelas sesuai tujuan kelas.', {
+      title: 'Mode kenaikan kelas',
+      duration: 7000
+    })
+    url.searchParams.delete('openPromotion')
+    window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`)
+  }, [isAuthorized, promotionQueryHandled, pushToast])
+
+  // Load struktur kelas ketika kelasSelected berubah. Jadwal dipisah agar tab Kelas tetap ringan.
+  useEffect(() => {
+    if (!isAuthorized || !kelasSelected || isSchedulePage) return
+    loadSelectedClassData()
+  }, [isAuthorized, isSchedulePage, kelasSelected, loadSelectedClassData])
+
+  useEffect(() => {
+    if (!isAuthorized || tab !== 'jadwal' || !kelasSelected) return
+
+    const key = `${kelasSelected}|${academicPeriod.tahunAjaran}|${academicPeriod.semester}`
+    if (jadwalLoadedKey === key) return
+
+    loadSelectedClassData({ includeSchedule: true })
+  }, [
+    academicPeriod.semester,
+    academicPeriod.tahunAjaran,
+    isAuthorized,
+    jadwalLoadedKey,
+    kelasSelected,
+    loadSelectedClassData,
+    mapelList.length,
+    tab
+  ])
 
   useEffect(() => {
     if (!exportClassId && kelasSelected) {
@@ -583,17 +529,12 @@ export default function AKelas() {
     }
   }, [exportClassId, exportFormat])
 
-  useEffect(() => {
-    if (!newGrade) return
-    setNewAngkatan(inferCohortYear(newGrade, academicPeriod.startYear))
-  }, [newGrade, academicPeriod.startYear])
-
   /* ================== LOADERS ================== */
   const loadSettings = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('settings')
-        .select('id, tahun_ajaran, semester_aktif')
+        .select('id, tahun_ajaran, semester_aktif, periode_mulai, periode_selesai, periode_ganjil_mulai, periode_ganjil_selesai, periode_genap_mulai, periode_genap_selesai')
         .order('id')
         .limit(1)
         .maybeSingle()
@@ -601,12 +542,7 @@ export default function AKelas() {
       if (error && error.code !== 'PGRST116') throw error
 
       const resolved = resolveAcademicPeriod(data || {})
-      setSettingsRow(data || null)
       setAcademicPeriod(resolved)
-      setPeriodForm({
-        tahunAjaran: resolved.tahunAjaran,
-        semester: resolved.semester
-      })
     } catch (error) {
       console.error('Error loading settings:', error)
       pushToast('error', 'Gagal memuat tahun ajaran aktif')
@@ -698,6 +634,7 @@ export default function AKelas() {
 
       setKelas(rows)
       setKelasSelected((prev) => {
+        if (routeClassId && rows.some((r) => r.id === routeClassId)) return routeClassId
         if (prev && rows.some((r) => r.id === prev)) return prev
         return rows.length ? rows[0].id : ''
       })
@@ -743,6 +680,7 @@ export default function AKelas() {
       })
 
       setJadwal(rows)
+      setJadwalLoadedKey(`${kelasSelected}|${academicPeriod.tahunAjaran}|${academicPeriod.semester}`)
     } catch (error) {
       console.error('Error loading jadwal:', error)
       pushToast('error', 'Gagal memuat jadwal')
@@ -850,11 +788,11 @@ export default function AKelas() {
   }, [kelas])
 
   const activeSiswaList = React.useMemo(() => (
-    siswaList.filter((siswa) => {
+    promotionSiswaList.filter((siswa) => {
       const status = String(siswa.status || 'active').toLowerCase()
       return status === 'active' || status === ''
     })
-  ), [siswaList])
+  ), [promotionSiswaList])
 
   const promotionCandidateSiswa = React.useMemo(() => {
     let rows = activeSiswaList
@@ -871,6 +809,10 @@ export default function AKelas() {
       return (a.nama || '').localeCompare(b.nama || '', 'id')
     })
   }, [activeSiswaList, promotionFilterGrade, promotionFilterKelas, kelas])
+
+  const selectedDeletedHistory = React.useMemo(() => {
+    return deletedClassHistories.find((item) => String(item.id) === String(selectedHistoryId)) || deletedClassHistories[0] || null
+  }, [deletedClassHistories, selectedHistoryId])
 
   const nextAcademicPeriod = React.useMemo(
     () => getNextAcademicPeriod({
@@ -892,6 +834,89 @@ export default function AKelas() {
     return kelas.find((item) => item.id === kelasId)?.nama || kelasId || '-'
   }
 
+  function formatHistoryDate(value) {
+    if (!value) return '-'
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return String(value)
+    return date.toLocaleString('id-ID', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+  }
+
+  function selectKelas(id, { openSchedule = false } = {}) {
+    if (!id) return
+    if (openSchedule && !isSchedulePage) {
+      navigate(`/admin/jadwal?kelas=${encodeURIComponent(id)}`)
+      return
+    }
+    setKelasSelected(id)
+    setFilterHari('')
+    setJadwal([])
+    setJadwalLoadedKey('')
+    setSelectedStudentsLoadedKey('')
+    setSiswaList([])
+    setEditId(null)
+    setEditData(null)
+    setExportClassId(id)
+    if (isSchedulePage) {
+      navigate(`/admin/jadwal?kelas=${encodeURIComponent(id)}`, { replace: true })
+    }
+  }
+
+  const loadDeletedClassHistory = useCallback(async () => {
+    setDeletedHistoryLoading(true)
+    try {
+      const res = await apiFetch('/api/admin/classes/deleted-history')
+      if (res.error) throw res.error
+      const rows = Array.isArray(res.raw?.data) ? res.raw.data : Array.isArray(res.data) ? res.data : []
+      setDeletedClassHistories(rows)
+      setSelectedHistoryId((prev) => {
+        if (prev && rows.some((row) => String(row.id) === String(prev))) return prev
+        return rows[0]?.id ? String(rows[0].id) : ''
+      })
+    } catch (error) {
+      console.error('Error loading deleted class history:', error)
+      pushToast('error', error?.message || 'Gagal memuat riwayat kelas terhapus')
+    } finally {
+      setDeletedHistoryLoading(false)
+    }
+  }, [pushToast, routeClassId])
+
+  async function openDeletedClassHistory() {
+    setDeletedHistoryOpen(true)
+    await loadDeletedClassHistory()
+  }
+
+  async function restoreDeletedClass(history) {
+    if (!history?.id || history.restored_at) return
+    const className = history.class_name || history.class_id
+    const confirmed = window.confirm(`Pulihkan kelas ${className} beserta struktur dan jadwal yang tersimpan?`)
+    if (!confirmed) return
+
+    try {
+      setRestoringHistoryId(String(history.id))
+      const res = await apiFetch(`/api/admin/classes/deleted-history/${encodeURIComponent(history.id)}/restore`, {
+        method: 'POST'
+      })
+      if (res.error) throw res.error
+
+      pushToast('success', `Kelas ${className} berhasil dipulihkan`)
+      setKelasSelected(history.class_id)
+      setJadwal([])
+      setJadwalLoadedKey('')
+      await Promise.all([loadKelas(), loadDeletedClassHistory()])
+    } catch (error) {
+      console.error('Error restoring class:', error)
+      pushToast('error', error?.message || 'Gagal memulihkan kelas')
+    } finally {
+      setRestoringHistoryId('')
+    }
+  }
+
   function buildJadwalKey({ hari, mapel, jamMulai, jamSelesai }) {
     const cleanMapel = normalizeMapelName(mapel).replace(/\s+/g, '_').replace(/[^\w-]/g, '')
     const cleanHari = (hari || '').replace(/\s+/g, '_')
@@ -906,44 +931,58 @@ export default function AKelas() {
   async function persistAcademicPeriod(nextPeriod, { silent = false } = {}) {
     const tahunAjaran = normalizeAcademicYear(nextPeriod?.tahunAjaran)
     const semester = normalizeSemester(nextPeriod?.semester)
+    const ganjilRange = resolveAcademicPeriod({
+      tahun_ajaran: tahunAjaran,
+      semester_aktif: 'Ganjil',
+      periode_mulai: nextPeriod?.periodeGanjilMulai,
+      periode_selesai: nextPeriod?.periodeGanjilSelesai
+    })
+    const genapRange = resolveAcademicPeriod({
+      tahun_ajaran: tahunAjaran,
+      semester_aktif: 'Genap',
+      periode_mulai: nextPeriod?.periodeGenapMulai,
+      periode_selesai: nextPeriod?.periodeGenapSelesai
+    })
+    const activeRangeFields = semesterRangeFields(semester)
+    const activeStart = activeRangeFields?.camelStart ? nextPeriod?.[activeRangeFields.camelStart] : nextPeriod?.periodeMulai
+    const activeEnd = activeRangeFields?.camelEnd ? nextPeriod?.[activeRangeFields.camelEnd] : nextPeriod?.periodeSelesai
+    const resolvedCandidate = resolveAcademicPeriod({
+      tahun_ajaran: tahunAjaran,
+      semester_aktif: semester,
+      periode_mulai: activeStart || nextPeriod?.periodeMulai || nextPeriod?.startsAt,
+      periode_selesai: activeEnd || nextPeriod?.periodeSelesai || nextPeriod?.endsAt
+    })
 
     if (!tahunAjaran || !semester) {
       throw new Error('Tahun ajaran atau semester tidak valid')
+    }
+    if (!ganjilRange.customRange || !genapRange.customRange || !resolvedCandidate.customRange) {
+      throw new Error('Rentang bulan semester Ganjil/Genap tidak valid untuk tahun ajaran ini')
     }
 
     const payload = {
       tahun_ajaran: tahunAjaran,
       semester_aktif: semester,
+      periode_mulai: resolvedCandidate.startsAt,
+      periode_selesai: resolvedCandidate.endsAt,
+      periode_ganjil_mulai: ganjilRange.startsAt,
+      periode_ganjil_selesai: ganjilRange.endsAt,
+      periode_genap_mulai: genapRange.startsAt,
+      periode_genap_selesai: genapRange.endsAt,
       updated_at: new Date().toISOString()
     }
 
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from('settings')
       .upsert(payload)
 
     if (error) throw error
 
     const resolved = resolveAcademicPeriod(payload)
-    setSettingsRow(Array.isArray(data) ? data[0] : data || settingsRow)
     setAcademicPeriod(resolved)
-    setPeriodForm({ tahunAjaran: resolved.tahunAjaran, semester: resolved.semester })
     if (!silent) pushToast('success', `Periode aktif disimpan: ${resolved.tahunAjaran} - ${resolved.semester}`)
 
     return resolved
-  }
-
-  async function simpanPeriodeAktif() {
-    try {
-      setSavingPeriod(true)
-      await persistAcademicPeriod(periodForm)
-      setJadwal([])
-      await loadKelas()
-    } catch (error) {
-      console.error('Error saving academic period:', error)
-      pushToast('error', error.message || 'Gagal menyimpan tahun ajaran aktif')
-    } finally {
-      setSavingPeriod(false)
-    }
   }
 
   async function hasConflict({ hari, jamMulai, jamSelesai, guruId, mapel, kelasId }, ignoreId = null) {
@@ -1016,6 +1055,46 @@ export default function AKelas() {
     }
   }
 
+  async function loadPromotionStudents({ force = false } = {}) {
+    if (promotionStudentsLoaded && !force) return
+
+    setPromotionStudentsLoading(true)
+    try {
+      const params = {
+        all: true,
+        per_page: 10000,
+        status: 'active'
+      }
+
+      if (force) {
+        queryClient.invalidateQueries({ queryKey: ['admin', 'student-options'] })
+      }
+
+      const data = await queryClient.fetchQuery({
+        queryKey: queryKeys.admin.studentOptions(params),
+        queryFn: async () => {
+          const { data, error } = await supabase.admin.studentOptions(params)
+          if (error) throw error
+          return data
+        },
+        staleTime: force ? 0 : 60 * 1000,
+      })
+
+      startTransition(() => {
+        const rows = mapStudentRows(data?.rows || [])
+        setPromotionSiswaList(rows)
+        setPromotionStudentsLoaded(true)
+      })
+      return mapStudentRows(data?.rows || [])
+    } catch (error) {
+      console.error('Error loading promotion students:', error)
+      pushToast('error', error?.message || 'Gagal memuat siswa untuk kenaikan kelas')
+      return []
+    } finally {
+      setPromotionStudentsLoading(false)
+    }
+  }
+
   function openPromotionModal() {
     setPromotionMode('kelas')
     setPromotionFromKelas(kelasSelected || '')
@@ -1027,6 +1106,7 @@ export default function AKelas() {
     setPromotionExitReason('')
     setPromotionAdvancePeriod(false)
     setPromotionModalOpen(true)
+    void loadPromotionStudents()
   }
 
   function closePromotionModal() {
@@ -1056,6 +1136,11 @@ export default function AKelas() {
 
   async function handlePromotion() {
     try {
+      let availableActiveStudents = activeSiswaList
+      if (!promotionStudentsLoaded) {
+        availableActiveStudents = await loadPromotionStudents()
+      }
+
       if (!promotionToKelas) {
         pushToast('error', 'Pilih tujuan kenaikan/pindah kelas terlebih dahulu')
         return
@@ -1067,13 +1152,13 @@ export default function AKelas() {
           pushToast('error', 'Pilih kelas asal terlebih dahulu')
           return
         }
-        selectedSiswa = activeSiswaList.filter((siswa) => siswa.kelas === promotionFromKelas)
+        selectedSiswa = availableActiveStudents.filter((siswa) => siswa.kelas === promotionFromKelas)
       } else {
         if (!promotionSelectedIds.length) {
           pushToast('error', 'Pilih minimal 1 siswa')
           return
         }
-        selectedSiswa = activeSiswaList.filter((siswa) => promotionSelectedIds.includes(siswa.uid))
+        selectedSiswa = availableActiveStudents.filter((siswa) => promotionSelectedIds.includes(siswa.uid))
       }
 
       const selectedIds = selectedSiswa.map((siswa) => siswa.uid)
@@ -1218,8 +1303,14 @@ export default function AKelas() {
         pushToast('success', `Periode aktif diperbarui ke ${nextAcademicPeriod.tahunAjaran} - ${nextAcademicPeriod.semester}`)
       }
 
+      invalidateAcademicQueries()
       closePromotionModal()
-      await Promise.all([loadSiswaList(), loadStrukturKelas(), loadKelas()])
+      setPromotionStudentsLoaded(false)
+      setPromotionSiswaList([])
+      await Promise.all([
+        loadSelectedClassData({ force: true }),
+        loadKelas()
+      ])
     } catch (error) {
       console.error('Error running promotion:', error)
       pushToast('error', error.message || 'Gagal memproses kenaikan kelas')
@@ -1250,7 +1341,7 @@ export default function AKelas() {
 
     const nama = makeClassName(grade, suffix).toUpperCase()
     const id = slug(nama)
-    const angkatan = String(newAngkatan || inferCohortYear(grade, academicPeriod.startYear)).trim()
+    const angkatan = String(inferCohortYear(grade, academicPeriod.startYear)).trim()
 
     try {
       setLoading(true)
@@ -1301,8 +1392,10 @@ export default function AKelas() {
       pushToast('success', `Kelas ${nama} berhasil ditambahkan`)
       setNewGrade('')
       setNewSuffix('')
-      setNewAngkatan('')
       setKelasSelected(savedId)
+      setJadwal([])
+      setJadwalLoadedKey('')
+      invalidateAcademicQueries()
       await loadKelas()
     } catch (error) {
       console.error('Error adding kelas:', error)
@@ -1313,55 +1406,26 @@ export default function AKelas() {
   }
 
   async function hapusKelas(id) {
-    if (!confirmDelete(`Yakin mau hapus kelas? Semua data terkait (jadwal, struktur) juga akan dihapus.`)) return
+    if (!confirmDelete('Yakin mau hapus kelas? Snapshot kelas, struktur, dan jadwal akan disimpan di riwayat pemulihan.')) return
 
     try {
       setLoading(true)
 
-      // Cek siswa
-      const { data: siswaData, error: siswaError } = await supabase
-        .from('profiles')
-        .select('id, nama, kelas')
-        .eq('kelas', id)
+      const res = await apiFetch(`/api/admin/classes/${encodeURIComponent(id)}`, { method: 'DELETE' })
+      if (res.error) throw res.error
 
-      if (siswaError) throw siswaError
-
-      if (siswaData && siswaData.length > 0) {
-        const siswaNames = siswaData.slice(0, 3).map(s => s.nama).join(', ')
-        const sisa = siswaData.length > 3 ? ` dan ${siswaData.length - 3} lainnya` : ''
-        
-        pushToast('error', 
-          `Tidak bisa hapus: kelas masih digunakan oleh ${siswaData.length} siswa. 
-          ${siswaNames}${sisa}. Pindahkan siswa terlebih dahulu.`)
-        return
-      }
-
-      // Hapus terkait dalam urutan yang benar
-      await supabase.from('jam_kosong').delete().eq('kelas', id)
-      await supabase.from('absensi_settings').delete().eq('kelas', id)
-      await supabase.from('absensi').delete().eq('kelas', id)
-      await supabase.from('tugas').delete().eq('kelas', id)
-      await supabase.from('jadwal').delete().eq('kelas_id', id)
-      await supabase.from('kelas_struktur').delete().eq('kelas_id', id)
-
-      const { error } = await supabase
-        .from('kelas')
-        .delete()
-        .eq('id', id)
-
-      if (error) throw error
-
-      pushToast('success', 'Kelas dan semua data terkait berhasil dihapus')
+      pushToast('success', 'Kelas berhasil dihapus dan tersimpan di riwayat pemulihan')
       if (kelasSelected === id) setKelasSelected('')
+      setJadwal([])
+      setJadwalLoadedKey('')
+      invalidateAcademicQueries()
       await loadKelas()
+      if (deletedHistoryOpen) {
+        await loadDeletedClassHistory()
+      }
     } catch (error) {
       console.error('Error deleting kelas:', error)
-      
-      if (error.code === '23503') {
-        pushToast('error', 'Tidak dapat menghapus kelas karena masih terkait dengan data lain.')
-      } else {
-        pushToast('error', 'Gagal menghapus kelas: ' + (error.message || 'Unknown error'))
-      }
+      pushToast('error', error?.message || 'Gagal menghapus kelas')
     } finally {
       setLoading(false)
     }
@@ -1392,6 +1456,7 @@ export default function AKelas() {
       if (error) throw error
 
       pushToast('success', 'Struktur kelas berhasil disimpan')
+      invalidateAcademicQueries()
     } catch (error) {
       console.error('Error saving struktur:', error)
       pushToast('error', 'Gagal menyimpan struktur kelas')
@@ -1416,6 +1481,7 @@ export default function AKelas() {
       setWaliGuruId('')
       setKetuaUid('')
       pushToast('success', 'Struktur kelas berhasil dikosongkan')
+      invalidateAcademicQueries()
     } catch (error) {
       console.error('Error clearing struktur:', error)
       pushToast('error', 'Gagal mengosongkan struktur')
@@ -1471,6 +1537,7 @@ export default function AKelas() {
 
       pushToast('success', `Mata pelajaran "${nama}" berhasil ditambahkan`)
       setNewMapel('')
+      invalidateAcademicQueries()
       await loadMapelList()
       
       // Update form jadwal jika mapel ini dipilih
@@ -1517,6 +1584,7 @@ export default function AKelas() {
       if (error) throw error
 
       pushToast('success', 'Mata pelajaran berhasil dihapus')
+      invalidateAcademicQueries()
       await loadMapelList()
     } catch (error) {
       console.error('Error deleting mapel:', error)
@@ -1585,6 +1653,7 @@ export default function AKelas() {
 
       pushToast('success', 'Jadwal berhasil ditambahkan')
       setForm({ hari: '', mapel: '', guruId: '', jamMulai: '', jamSelesai: '' })
+      invalidateAcademicQueries()
       await loadJadwal()
     } catch (error) {
       console.error('Error adding jadwal:', error)
@@ -1617,6 +1686,7 @@ export default function AKelas() {
         setEditId(null)
         setEditData(null)
       }
+      invalidateAcademicQueries()
       await loadJadwal()
     } catch (error) {
       console.error('Error deleting jadwal:', error)
@@ -1719,6 +1789,7 @@ export default function AKelas() {
       pushToast('success', 'Jadwal berhasil diupdate')
       setEditId(null)
       setEditData(null)
+      invalidateAcademicQueries()
       await loadJadwal()
     } catch (error) {
       console.error('Error saving jadwal:', error)
@@ -2112,7 +2183,7 @@ export default function AKelas() {
         isOpen={passwordModalOpen && !isAuthorized}
         onClose={handlePasswordClose}
         onConfirm={handlePasswordConfirm}
-        title="Akses Manajemen Kelas & Jadwal"
+        title={isSchedulePage ? 'Akses Jadwal Pelajaran' : 'Akses Manajemen Kelas'}
         loading={passwordLoading}
       />
 
@@ -2154,77 +2225,50 @@ export default function AKelas() {
           <div className="page-title-card">
             <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
               <div className="flex items-center space-x-4">
-                <div className="p-3 bg-blue-100 rounded-2xl">
-                  <span className="text-2xl text-blue-600">🏫</span>
+                <div className={`p-3 rounded-2xl ${isSchedulePage ? 'bg-orange-100' : 'bg-blue-100'}`}>
+                  <span className={`text-2xl ${isSchedulePage ? 'text-orange-600' : 'text-blue-600'}`}>
+                    {isSchedulePage ? '📅' : '🏫'}
+                  </span>
                 </div>
                 <div>
-                  <h1 className="page-title-heading">Manajemen Kelas & Jadwal</h1>
+                  <h1 className="page-title-heading">{isSchedulePage ? 'Jadwal Pelajaran' : 'Manajemen Kelas'}</h1>
                   <p className="page-title-description">
-                    Kelola data kelas, jadwal pelajaran, dan struktur organisasi sekolah
+                    {isSchedulePage
+                      ? 'Kelola jadwal pelajaran dan mata pelajaran per kelas.'
+                      : 'Kelola data kelas dan struktur kelas aktif.'}
                   </p>
                 </div>
               </div>
 
-              {/* Tab Navigation */}
               <div className="flex flex-wrap gap-2">
-                {[
-                  {
-                    key: 'kelas',
-                    label: 'Kelas & Jadwal',
-                    icon: '📚',
-                    activeClass: 'bg-blue-600 text-white border border-blue-600 shadow-sm',
-                    idleClass: 'bg-gray-50 text-gray-700 border border-gray-200 hover:bg-blue-50 hover:text-blue-700'
-                  },
-                  {
-                    key: 'struktur',
-                    label: 'Struktur Sekolah',
-                    icon: '🏢',
-                    activeClass: 'bg-purple-600 text-white border border-purple-600 shadow-sm',
-                    idleClass: 'bg-gray-50 text-gray-700 border border-gray-200 hover:bg-purple-50 hover:text-purple-700'
-                  },
-                  {
-                    key: 'org',
-                    label: 'Organisasi',
-                    icon: '👥',
-                    activeClass: 'bg-green-600 text-white border border-green-600 shadow-sm',
-                    idleClass: 'bg-gray-50 text-gray-700 border border-gray-200 hover:bg-green-50 hover:text-green-700'
-                  }
-                ].map(({ key, label, icon, activeClass, idleClass }) => {
-                  const active = tab === key
-                  return (
+                {!isSchedulePage && (
+                  <>
                     <button
-                      key={key}
-                      className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 flex items-center space-x-2 ${
-                        active ? activeClass : idleClass
-                      }`}
-                      onPointerEnter={() => prefetchLazyTab(key)}
-                      onFocus={() => prefetchLazyTab(key)}
-                      onClick={() => {
-                        prefetchLazyTab(key)
-                        setTab(key)
-                      }}
+                      type="button"
+                      className="px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 flex items-center space-x-2 bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100"
+                      onClick={openPromotionModal}
                     >
-                      <span>{icon}</span>
-                      <span>{label}</span>
+                      <span>⬆️</span>
+                      <span>Kenaikan Kelas</span>
                     </button>
-                  )
-                })}
-                <button
-                  type="button"
-                  className="px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 flex items-center space-x-2 bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100"
-                  onClick={openPromotionModal}
-                >
-                  <span>⬆️</span>
-                  <span>Kenaikan Kelas</span>
-                </button>
+                    <button
+                      type="button"
+                      className="px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 flex items-center space-x-2 bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100"
+                      onClick={openDeletedClassHistory}
+                    >
+                      <span>↩</span>
+                      <span>Riwayat Terhapus</span>
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>
 
           {/* Main Content */}
           <div className="space-y-6">
-            {/* Loading Overlay */}
-            {(loading || passwordLoading) && (
+            {/* Loading password tetap blocking; refresh data biasa dibuat kontekstual agar halaman tetap responsif. */}
+            {passwordLoading && (
               <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm">
                 <div className="bg-white rounded-2xl p-6 flex flex-col items-center space-y-4 shadow-2xl">
                   <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
@@ -2236,69 +2280,30 @@ export default function AKelas() {
               </div>
             )}
 
-            {/* ===================== TAB: KELAS & JADWAL ===================== */}
-            {tab === 'kelas' && (
-              <div className="space-y-6">
-                <div className="bg-white rounded-2xl shadow-lg p-5 border border-blue-200">
-                  <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+            {loading && !passwordLoading && (
+              <div className="rounded-2xl border border-blue-100 bg-white p-4 shadow-sm">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
                     <div>
-                      <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-                        <span className="p-2 bg-blue-100 rounded-lg">🎓</span>
-                        <span>Periode Akademik Aktif</span>
-                      </h2>
-                      <p className="text-sm text-gray-600 mt-1">
-                        Jadwal baru dan pengecekan konflik memakai periode ini agar data semester lain tetap tersimpan.
-                      </p>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-[180px_140px_auto] gap-3 w-full lg:w-auto">
-                      <select
-                        className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        value={periodForm.tahunAjaran}
-                        onChange={(event) => setPeriodForm((prev) => ({ ...prev, tahunAjaran: event.target.value }))}
-                      >
-                        {generateAcademicYearOptions().map((opt) => (
-                          <option key={opt.value} value={opt.value}>
-                            {opt.label}{opt.isCurrent ? ' (saat ini)' : ''}
-                          </option>
-                        ))}
-                      </select>
-                      <select
-                        className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        value={periodForm.semester}
-                        onChange={(event) => setPeriodForm((prev) => ({ ...prev, semester: event.target.value }))}
-                      >
-                        <option value="Ganjil">Ganjil</option>
-                        <option value="Genap">Genap</option>
-                      </select>
-                      <button
-                        type="button"
-                        onClick={simpanPeriodeAktif}
-                        disabled={savingPeriod}
-                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60 text-sm font-medium"
-                      >
-                        {savingPeriod ? 'Menyimpan...' : 'Simpan Periode'}
-                      </button>
+                      <p className="text-sm font-semibold text-slate-700">Memuat data terbaru...</p>
+                      <p className="text-xs text-slate-500">Konten yang sudah ada tetap bisa digunakan.</p>
                     </div>
                   </div>
-
-                  <div className="mt-4 flex flex-wrap gap-2 text-xs">
-                    <span className="px-3 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
-                      Saat ini: {academicPeriod.tahunAjaran} - {academicPeriod.semester}
-                    </span>
-                    <span className="px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
-                      Periode berikutnya: {nextAcademicPeriod.tahunAjaran} - {nextAcademicPeriod.semester}
-                    </span>
-                    {academicPeriod.rangeLabel && (
-                      <span className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                        Bulan semester: {academicPeriod.rangeLabel}
-                      </span>
-                    )}
+                  <div className="grid grid-cols-3 gap-2 sm:w-64">
+                    <div className="h-2 rounded-full bg-slate-100" />
+                    <div className="h-2 rounded-full bg-slate-100" />
+                    <div className="h-2 rounded-full bg-slate-100" />
                   </div>
                 </div>
+              </div>
+            )}
 
+            {/* ===================== TAB: KELAS ===================== */}
+            {tab === 'kelas' && (
+              <div className="space-y-6">
                 {/* Statistik Ringkas */}
-                <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   <div className="bg-white rounded-xl p-4 shadow border border-gray-200">
                     <div className="flex items-center justify-between">
                       <div>
@@ -2324,22 +2329,11 @@ export default function AKelas() {
                   <div className="bg-white rounded-xl p-4 shadow border border-gray-200">
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="text-sm text-gray-500">Total Mapel</p>
-                        <p className="text-2xl font-bold text-gray-900">{mapelList.length}</p>
+                        <p className="text-sm text-gray-500">Siswa Kelas Ini</p>
+                        <p className="text-2xl font-bold text-gray-900">{classDetailLoading ? '...' : siswaDiKelasTerpilih.length}</p>
                       </div>
-                      <div className="p-3 bg-purple-100 rounded-lg">
-                        <span className="text-xl">📚</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="bg-white rounded-xl p-4 shadow border border-gray-200">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-gray-500">Total Jadwal</p>
-                        <p className="text-2xl font-bold text-gray-900">{jadwal.length}</p>
-                      </div>
-                      <div className="p-3 bg-orange-100 rounded-lg">
-                        <span className="text-xl">📅</span>
+                      <div className="p-3 bg-emerald-100 rounded-lg">
+                        <span className="text-xl">👥</span>
                       </div>
                     </div>
                   </div>
@@ -2366,7 +2360,7 @@ export default function AKelas() {
                         <span>Daftar Kelas</span>
                       </h2>
                       <p className="text-gray-600 text-sm mt-1">
-                        Pilih kelas untuk melihat dan mengelola jadwal
+                        Pilih kelas untuk mengelola struktur kelas. Jadwal sudah dipindahkan ke menu Jadwal di sidebar.
                       </p>
                     </div>
                     <div className="flex flex-col sm:flex-row gap-3">
@@ -2380,7 +2374,7 @@ export default function AKelas() {
                           onChange={e => {
                             setFilterGrade(e.target.value)
                             const first = kelas.find(k => k.grade === e.target.value)
-                            if (first) setKelasSelected(first.id)
+                            if (first) selectKelas(first.id)
                           }}
                         >
                           <option value="">Semua Grade</option>
@@ -2390,9 +2384,13 @@ export default function AKelas() {
                         </select>
                       </div>
 
-                      <div className="px-3 py-2 text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-lg">
-                        Export jadwal tersedia di panel "Jadwal Pelajaran".
-                      </div>
+                      <button
+                        type="button"
+                        className="px-3 py-2 text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded-lg hover:bg-rose-100"
+                        onClick={openDeletedClassHistory}
+                      >
+                        Riwayat Kelas Terhapus
+                      </button>
                     </div>
                   </div>
 
@@ -2405,7 +2403,7 @@ export default function AKelas() {
                               ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white border-blue-600 shadow-lg transform scale-105'
                               : 'bg-white text-gray-700 border-gray-300 hover:border-blue-400 hover:text-blue-600 hover:shadow-md'
                           }`}
-                          onClick={() => setKelasSelected(k.id)}
+                          onClick={() => selectKelas(k.id)}
                           title={k.nama || k.id}
                         >
                           <span className="block text-lg font-bold">{(k.nama || k.id).toUpperCase()}</span>
@@ -2444,8 +2442,8 @@ export default function AKelas() {
                   </div>
                 </div>
 
-                {/* Grid untuk Form Kelas dan Mata Pelajaran */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Form Kelas */}
+                <div className="grid grid-cols-1 gap-6">
                   {/* Form Buat Kelas */}
                   <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-200">
                     <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center space-x-2">
@@ -2486,14 +2484,11 @@ export default function AKelas() {
                         <label className="block text-sm font-medium text-gray-700 mb-2">
                           Angkatan
                         </label>
-                        <input
-                          className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm text-gray-900"
-                          placeholder={newGrade ? inferCohortYear(newGrade, academicPeriod.startYear) : 'Contoh: 2026'}
-                          value={newAngkatan}
-                          onChange={e => setNewAngkatan(String(e.target.value || '').replace(/[^\d]/g, '').slice(0, 4))}
-                        />
+                        <div className="block w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-gray-900 shadow-sm">
+                          {newGrade ? inferCohortYear(newGrade, academicPeriod.startYear) : '-'}
+                        </div>
                         <p className="text-xs text-gray-500 mt-1">
-                          Digunakan untuk menandai cohort/angkatan siswa dan kelas.
+                          Otomatis mengikuti tahun ajaran aktif dan grade kelas.
                         </p>
                       </div>
                       <button
@@ -2509,83 +2504,6 @@ export default function AKelas() {
                     </div>
                   </div>
 
-                  {/* Mata Pelajaran */}
-                  <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-200">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center space-x-2">
-                      <span className="p-2 bg-purple-100 rounded-lg">📖</span>
-                      <span>Kelola Mata Pelajaran</span>
-                    </h3>
-                    <div className="space-y-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Nama Mata Pelajaran Baru <span className="text-red-500">*</span>
-                        </label>
-                        <div className="flex space-x-3">
-                          <input
-                            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm text-gray-900"
-                            placeholder="Contoh: Matematika Wajib"
-                            value={newMapel}
-                            onChange={e => setNewMapel(normalizeMapelInput(e.target.value))}
-                            onKeyPress={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault()
-                                tambahMapel()
-                              }
-                            }}
-                          />
-                          <button
-                            className="bg-gradient-to-r from-purple-600 to-purple-700 text-white px-5 py-2 rounded-lg hover:from-purple-700 hover:to-purple-800 focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 transition-all duration-200 font-medium shadow-md flex items-center space-x-2"
-                            onClick={tambahMapel}
-                            disabled={!newMapel.trim()}
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                            </svg>
-                            <span>Tambah</span>
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="border-t pt-4">
-                        <h4 className="text-sm font-medium text-gray-700 mb-3">Daftar Mata Pelajaran</h4>
-                        <div className="space-y-2 max-h-60 overflow-y-auto pr-2">
-                          {mapelList.map(m => (
-                            <div
-                              key={m.id}
-                              className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200 hover:bg-gray-100 transition-colors duration-150 group"
-                            >
-                              <div className="flex items-center space-x-3">
-                                <div className="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center">
-                                  <span className="text-purple-600">📚</span>
-                                </div>
-                                <span className="font-medium text-gray-800">{m.nama}</span>
-                              </div>
-                              <button
-                                className="text-red-500 hover:text-red-700 p-2 rounded-lg transition-all duration-200 hover:bg-red-50 opacity-0 group-hover:opacity-100"
-                                onClick={() => hapusMapel(m)}
-                                title="Hapus mata pelajaran"
-                              >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                </svg>
-                              </button>
-                            </div>
-                          ))}
-                          {!mapelList.length && (
-                            <div className="text-center py-8 text-gray-500">
-                              <div className="w-12 h-12 mx-auto mb-3 bg-gray-100 rounded-full flex items-center justify-center">
-                                <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                                </svg>
-                              </div>
-                              <p>Belum ada mata pelajaran</p>
-                              <p className="text-xs mt-1">Tambahkan mata pelajaran untuk digunakan di jadwal</p>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
                 </div>
 
                 {/* Struktur Kelas */}
@@ -2671,6 +2589,113 @@ export default function AKelas() {
                         </div>
                       </div>
                     </div>
+                  </div>
+                )}
+
+              </div>
+            )}
+
+            {/* ===================== TAB: JADWAL ===================== */}
+            {tab === 'jadwal' && (
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+                  <div className="xl:col-span-1 bg-white rounded-2xl shadow-lg p-6 border border-gray-200">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center space-x-2">
+                      <span className="p-2 bg-orange-100 rounded-lg">📅</span>
+                      <span>Pilih Kelas Jadwal</span>
+                    </h3>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Kelas</label>
+                        <select
+                          className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 bg-white shadow-sm text-gray-900"
+                          value={kelasSelected}
+                          onChange={(event) => selectKelas(event.target.value)}
+                        >
+                          <option value="">Pilih kelas</option>
+                          {kelas.map((item) => (
+                            <option key={item.id} value={item.id}>
+                              {String(item.nama || item.id).toUpperCase()}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="rounded-xl border border-orange-100 bg-orange-50 p-4 text-sm text-orange-900">
+                        <p className="font-semibold">Periode jadwal</p>
+                        <p className="mt-1">{academicPeriod.tahunAjaran} - Semester {academicPeriod.semester}</p>
+                        <p className="mt-2 text-xs text-orange-700">Perubahan periode aktif tetap dikelola dari halaman Pengaturan.</p>
+                      </div>
+                      {kelasSelected && (
+                        <button
+                          type="button"
+                          className="w-full px-4 py-2.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-medium"
+                          onClick={() => navigate('/admin/kelas')}
+                        >
+                          Edit Struktur Kelas
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="xl:col-span-2 bg-white rounded-2xl shadow-lg p-6 border border-gray-200">
+                    <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-5">
+                      <div>
+                        <h3 className="text-lg font-semibold text-gray-900 flex items-center space-x-2">
+                          <span className="p-2 bg-purple-100 rounded-lg">📚</span>
+                          <span>Mata Pelajaran</span>
+                        </h3>
+                        <p className="text-sm text-gray-600 mt-1">Dipakai saat membuat jadwal pelajaran.</p>
+                      </div>
+                      <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+                        <input
+                          className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 text-gray-900"
+                          placeholder="Nama mapel baru"
+                          value={newMapel}
+                          onChange={(event) => setNewMapel(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') tambahMapel()
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
+                          onClick={tambahMapel}
+                          disabled={!newMapel.trim()}
+                        >
+                          Tambah
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      {mapelList.map((mapel) => (
+                        <span
+                          key={mapel.id}
+                          className="inline-flex items-center gap-2 px-3 py-1.5 bg-purple-50 text-purple-800 border border-purple-100 rounded-full text-sm"
+                        >
+                          <span>{mapel.nama}</span>
+                          <button
+                            type="button"
+                            className="text-purple-500 hover:text-red-600"
+                            title="Hapus mapel"
+                            onClick={() => hapusMapel(mapel.id)}
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                      {!mapelList.length && (
+                        <p className="text-sm text-gray-500">Belum ada mata pelajaran.</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {!kelasSelected && (
+                  <div className="bg-white rounded-2xl shadow-lg p-10 border border-gray-200 text-center text-gray-500">
+                    <div className="w-16 h-16 mx-auto mb-4 bg-orange-100 rounded-full flex items-center justify-center text-2xl">📅</div>
+                    <p className="text-lg font-semibold text-gray-700">Pilih kelas untuk membuka jadwal</p>
+                    <p className="text-sm mt-1">Data jadwal baru dimuat saat submenu ini dibuka agar halaman Kelas tetap ringan.</p>
                   </div>
                 )}
 
@@ -2772,100 +2797,10 @@ export default function AKelas() {
                       )}
                     </div>
 
-                    <div className="mb-6 rounded-xl border border-blue-200 overflow-hidden">
-                      <div className="px-4 py-3 bg-blue-50 border-b border-blue-200">
-                        <h4 className="font-semibold text-blue-900">Preview Jadwal Format Cetak / Export</h4>
-                        <p className="text-xs text-blue-700 mt-1">
-                          Tata letak ini mengikuti format tabel untuk PDF landscape dan Excel.
-                        </p>
-                      </div>
-                      <div className="overflow-auto">
-                        <table className="min-w-[920px] w-full border-collapse text-sm">
-                          <thead>
-                            <tr>
-                              <th
-                                rowSpan={2}
-                                className="border border-gray-900 bg-rose-100 px-2 py-2 text-center font-semibold text-gray-900"
-                              >
-                                JAM KE
-                              </th>
-                              <th
-                                rowSpan={2}
-                                className="border border-gray-900 bg-rose-100 px-2 py-2 text-center font-semibold text-gray-900"
-                              >
-                                WAKTU
-                              </th>
-                              <th
-                                colSpan={exportDays.length}
-                                className="border border-gray-900 bg-sky-500 px-2 py-2 text-center font-semibold text-gray-900"
-                              >
-                                HARI
-                              </th>
-                            </tr>
-                            <tr>
-                              {exportDays.map((day) => (
-                                <th
-                                  key={day}
-                                  className="border border-gray-900 bg-yellow-300 px-2 py-2 text-center font-semibold text-gray-900"
-                                >
-                                  {day.toUpperCase()}
-                                </th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {jadwalMatrix.length > 0 ? (
-                              jadwalMatrix.map((slot) => (
-                                <tr key={slot.key} className={slot.isBreakRow ? 'bg-lime-300' : 'bg-white'}>
-                                  <td className="border border-gray-900 px-2 py-2 text-center font-semibold">{slot.jamKe}</td>
-                                  <td className="border border-gray-900 px-2 py-2 text-center font-medium whitespace-nowrap">
-                                    {slot.rangeLabel}
-                                  </td>
-                                  {exportDays.map((day) => (
-                                    <td
-                                      key={`${slot.key}-${day}`}
-                                      className="border border-gray-900 px-2 py-2 text-center align-middle"
-                                    >
-                                      {(slot.cellEntries?.[day] || []).length > 0 ? (
-                                        <div className="space-y-1">
-                                          {(slot.cellEntries[day] || []).map((entry, idx) => (
-                                            <div
-                                              key={`${slot.key}-${day}-${idx}-${entry.mapel || entry.guruNama || 'jadwal'}`}
-                                              className={idx > 0 ? 'border-t border-gray-300 pt-1' : ''}
-                                            >
-                                              <p className="font-medium text-gray-900 leading-tight">
-                                                {entry.mapel || '-'}
-                                              </p>
-                                              {entry.guruNama ? (
-                                                <p className="text-[11px] text-gray-600 leading-tight mt-0.5">
-                                                  {entry.guruNama}
-                                                </p>
-                                              ) : null}
-                                            </div>
-                                          ))}
-                                        </div>
-                                      ) : (
-                                        '-'
-                                      )}
-                                    </td>
-                                  ))}
-                                </tr>
-                              ))
-                            ) : (
-                              <tr>
-                                <td
-                                  colSpan={2 + exportDays.length}
-                                  className="border border-gray-900 px-3 py-6 text-center text-gray-500"
-                                >
-                                  Belum ada jadwal untuk kelas ini.
-                                </td>
-                              </tr>
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-
+                    <SchedulePreviewTable
+                      exportDays={exportDays}
+                      jadwalMatrix={jadwalMatrix}
+                    />
                     {/* Form Tambah Jadwal */}
                     <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-5 mb-6 border border-blue-200">
                       <h4 className="font-semibold text-blue-900 mb-4 flex items-center space-x-2">
@@ -3172,18 +3107,219 @@ export default function AKelas() {
               </div>
             )}
 
-            {/* ===================== TAB: STRUKTUR SEKOLAH ===================== */}
-            {tab === 'struktur' && (
-              <React.Suspense fallback={<TabContentFallback label="Memuat struktur sekolah..." />}>
-                <StrukturSekolahTab guruList={guruList} pushToast={pushToast} />
-              </React.Suspense>
-            )}
+            {deletedHistoryOpen && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
+                  <div className="px-6 py-4 border-b border-gray-200 flex items-start justify-between gap-4">
+                    <div>
+                      <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                        <span className="p-2 bg-rose-100 text-rose-700 rounded-lg">↩</span>
+                        <span>Riwayat Kelas Terhapus</span>
+                      </h3>
+                      <p className="text-sm text-gray-600 mt-1">
+                        Lihat snapshot kelas yang sudah dihapus, termasuk struktur dan jadwal yang bisa dipulihkan.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                      onClick={() => setDeletedHistoryOpen(false)}
+                      disabled={deletedHistoryLoading || Boolean(restoringHistoryId)}
+                    >
+                      Tutup
+                    </button>
+                  </div>
 
-            {/* ===================== TAB: ORGANISASI ===================== */}
-            {tab === 'org' && (
-              <React.Suspense fallback={<TabContentFallback label="Memuat organisasi..." />}>
-                <OrganisasiTab guruList={guruList} siswaList={siswaList} pushToast={pushToast} />
-              </React.Suspense>
+                  <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] min-h-0 flex-1">
+                    <div className="border-r border-gray-200 bg-gray-50 p-4 overflow-y-auto">
+                      {deletedHistoryLoading ? (
+                        <div className="py-10 text-center text-sm text-gray-500">
+                          <span className="inline-block h-6 w-6 animate-spin rounded-full border-2 border-gray-200 border-t-rose-600 mb-3" />
+                          <p>Memuat riwayat...</p>
+                        </div>
+                      ) : deletedClassHistories.length ? (
+                        <div className="space-y-2">
+                          {deletedClassHistories.map((history) => {
+                            const active = selectedDeletedHistory && String(selectedDeletedHistory.id) === String(history.id)
+                            return (
+                              <button
+                                key={history.id}
+                                type="button"
+                                className={`w-full text-left rounded-xl border p-3 transition-colors ${
+                                  active ? 'bg-white border-rose-300 shadow-sm' : 'bg-gray-50 border-gray-200 hover:bg-white'
+                                }`}
+                                onClick={() => setSelectedHistoryId(String(history.id))}
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-semibold text-gray-900 truncate">
+                                    {String(history.class_name || history.class_id || '-').toUpperCase()}
+                                  </span>
+                                  <span className={`text-[11px] px-2 py-0.5 rounded-full ${
+                                    history.restored_at ? 'bg-green-100 text-green-700' : 'bg-rose-100 text-rose-700'
+                                  }`}>
+                                    {history.restored_at ? 'Dipulihkan' : 'Terhapus'}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-gray-500 mt-1">{formatHistoryDate(history.deleted_at)}</p>
+                                <p className="text-xs text-gray-600 mt-1">
+                                  {history.summary?.jadwal || 0} jadwal • {history.summary?.struktur || 0} struktur
+                                </p>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        <div className="py-10 text-center text-sm text-gray-500">
+                          <div className="w-14 h-14 mx-auto mb-3 bg-white rounded-full flex items-center justify-center text-xl">📦</div>
+                          <p>Belum ada riwayat kelas terhapus.</p>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="p-6 overflow-y-auto">
+                      {selectedDeletedHistory ? (
+                        <div className="space-y-6">
+                          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+                            <div>
+                              <h4 className="text-2xl font-bold text-gray-900">
+                                {String(selectedDeletedHistory.class_name || selectedDeletedHistory.class_id || '-').toUpperCase()}
+                              </h4>
+                              <p className="text-sm text-gray-600 mt-1">
+                                ID kelas: {selectedDeletedHistory.class_id || '-'} • Grade {selectedDeletedHistory.grade || '-'} • Angkatan {selectedDeletedHistory.angkatan || '-'}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              className="px-4 py-2.5 rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                              onClick={() => restoreDeletedClass(selectedDeletedHistory)}
+                              disabled={Boolean(selectedDeletedHistory.restored_at) || String(restoringHistoryId) === String(selectedDeletedHistory.id)}
+                            >
+                              {selectedDeletedHistory.restored_at
+                                ? 'Sudah Dipulihkan'
+                                : String(restoringHistoryId) === String(selectedDeletedHistory.id)
+                                  ? 'Memulihkan...'
+                                  : 'Pulihkan Kelas'}
+                            </button>
+                          </div>
+
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                            {[
+                              ['Siswa Terkait', selectedDeletedHistory.summary?.siswa || 0],
+                              ['Jadwal', selectedDeletedHistory.summary?.jadwal || 0],
+                              ['Absensi', selectedDeletedHistory.summary?.absensi || 0],
+                              ['Tugas/Quiz', (selectedDeletedHistory.summary?.tugas || 0) + (selectedDeletedHistory.summary?.quizzes || 0)]
+                            ].map(([label, value]) => (
+                              <div key={label} className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                                <p className="text-xs text-gray-500">{label}</p>
+                                <p className="text-2xl font-bold text-gray-900">{value}</p>
+                              </div>
+                            ))}
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                            <div className="rounded-xl border border-gray-200 p-4">
+                              <p className="font-semibold text-gray-900 mb-3">Detail Penghapusan</p>
+                              <dl className="space-y-2 text-gray-600">
+                                <div className="flex justify-between gap-4">
+                                  <dt>Dihapus</dt>
+                                  <dd className="text-right text-gray-900">{formatHistoryDate(selectedDeletedHistory.deleted_at)}</dd>
+                                </div>
+                                <div className="flex justify-between gap-4">
+                                  <dt>Oleh</dt>
+                                  <dd className="text-right text-gray-900">{selectedDeletedHistory.deleted_by_name || selectedDeletedHistory.deleted_by || '-'}</dd>
+                                </div>
+                                <div className="flex justify-between gap-4">
+                                  <dt>Dipulihkan</dt>
+                                  <dd className="text-right text-gray-900">{formatHistoryDate(selectedDeletedHistory.restored_at)}</dd>
+                                </div>
+                              </dl>
+                            </div>
+                            <div className="rounded-xl border border-gray-200 p-4">
+                              <p className="font-semibold text-gray-900 mb-3">Detail Akademik</p>
+                              <dl className="space-y-2 text-gray-600">
+                                <div className="flex justify-between gap-4">
+                                  <dt>Tahun Ajaran</dt>
+                                  <dd className="text-right text-gray-900">{selectedDeletedHistory.tahun_ajaran || selectedDeletedHistory.snapshot?.kelas?.tahun_ajaran || '-'}</dd>
+                                </div>
+                                <div className="flex justify-between gap-4">
+                                  <dt>Semester</dt>
+                                  <dd className="text-right text-gray-900">{selectedDeletedHistory.semester || selectedDeletedHistory.snapshot?.kelas?.semester || '-'}</dd>
+                                </div>
+                                <div className="flex justify-between gap-4">
+                                  <dt>Sufiks</dt>
+                                  <dd className="text-right text-gray-900">{selectedDeletedHistory.suffix || selectedDeletedHistory.snapshot?.kelas?.suffix || '-'}</dd>
+                                </div>
+                              </dl>
+                            </div>
+                          </div>
+
+                          <div className="rounded-xl border border-gray-200 p-4">
+                            <p className="font-semibold text-gray-900 mb-3">Struktur Kelas</p>
+                            {selectedDeletedHistory.snapshot?.kelas_struktur?.length ? (
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                                <div className="rounded-lg bg-gray-50 p-3">
+                                  <p className="text-xs text-gray-500">Wali Kelas</p>
+                                  <p className="font-medium text-gray-900">
+                                    {selectedDeletedHistory.snapshot.kelas_struktur[0]?.wali_guru_nama || selectedDeletedHistory.snapshot.kelas_struktur[0]?.wali_guru_id || '-'}
+                                  </p>
+                                </div>
+                                <div className="rounded-lg bg-gray-50 p-3">
+                                  <p className="text-xs text-gray-500">Ketua Kelas</p>
+                                  <p className="font-medium text-gray-900">
+                                    {selectedDeletedHistory.snapshot.kelas_struktur[0]?.ketua_siswa_nama || selectedDeletedHistory.snapshot.kelas_struktur[0]?.ketua_siswa_id || '-'}
+                                  </p>
+                                </div>
+                              </div>
+                            ) : (
+                              <p className="text-sm text-gray-500">Belum ada struktur yang tersimpan.</p>
+                            )}
+                          </div>
+
+                          <div className="rounded-xl border border-gray-200 overflow-hidden">
+                            <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+                              <p className="font-semibold text-gray-900">Snapshot Jadwal</p>
+                              <span className="text-xs text-gray-500">{selectedDeletedHistory.snapshot?.jadwal?.length || 0} baris</span>
+                            </div>
+                            <div className="overflow-x-auto">
+                              <table className="min-w-full divide-y divide-gray-200 text-sm">
+                                <thead className="bg-white">
+                                  <tr>
+                                    <th className="px-4 py-3 text-left font-semibold text-gray-600">Hari</th>
+                                    <th className="px-4 py-3 text-left font-semibold text-gray-600">Jam</th>
+                                    <th className="px-4 py-3 text-left font-semibold text-gray-600">Mapel</th>
+                                    <th className="px-4 py-3 text-left font-semibold text-gray-600">Guru</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                  {(selectedDeletedHistory.snapshot?.jadwal || []).map((row) => (
+                                    <tr key={row.id || `${row.hari}-${row.jam_mulai}-${row.mapel}`}>
+                                      <td className="px-4 py-3 text-gray-900">{row.hari || '-'}</td>
+                                      <td className="px-4 py-3 text-gray-700">{toTimeHHMM(row.jam_mulai)} - {toTimeHHMM(row.jam_selesai)}</td>
+                                      <td className="px-4 py-3 text-gray-700">{row.mapel || '-'}</td>
+                                      <td className="px-4 py-3 text-gray-700">{row.guru_nama || row.guru_id || '-'}</td>
+                                    </tr>
+                                  ))}
+                                  {!selectedDeletedHistory.snapshot?.jadwal?.length && (
+                                    <tr>
+                                      <td colSpan="4" className="px-4 py-8 text-center text-gray-500">
+                                        Tidak ada jadwal dalam snapshot ini.
+                                      </td>
+                                    </tr>
+                                  )}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="py-16 text-center text-gray-500">
+                          <p>Pilih riwayat untuk melihat detail kelas.</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
             )}
 
             {promotionModalOpen && (
@@ -3297,7 +3433,7 @@ export default function AKelas() {
                         <div className="rounded-xl border border-gray-200 overflow-hidden">
                           <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between gap-3">
                             <p className="text-xs text-gray-600">
-                              Siswa terlihat: <span className="font-semibold">{promotionCandidateSiswa.length}</span>
+                              Siswa terlihat: <span className="font-semibold">{promotionStudentsLoading ? '...' : promotionCandidateSiswa.length}</span>
                               {' '}• Dipilih: <span className="font-semibold">{promotionSelectedIds.length}</span>
                             </p>
                             <button
@@ -3312,7 +3448,11 @@ export default function AKelas() {
                             </button>
                           </div>
                           <div className="max-h-64 overflow-y-auto divide-y divide-gray-100">
-                            {promotionCandidateSiswa.length ? (
+                            {promotionStudentsLoading ? (
+                              <div className="px-4 py-8 text-center text-sm text-gray-500">
+                                Memuat daftar siswa...
+                              </div>
+                            ) : promotionCandidateSiswa.length ? (
                               promotionCandidateSiswa.map((siswa) => (
                                 <label key={siswa.uid} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50">
                                   <input
@@ -3416,6 +3556,7 @@ export default function AKelas() {
                       onClick={handlePromotion}
                       disabled={
                         promotionLoading ||
+                        promotionStudentsLoading ||
                         !promotionToKelas ||
                         (promotionMode === 'kelas' && !promotionFromKelas) ||
                         (promotionMode === 'selected' && !promotionSelectedIds.length) ||
@@ -3434,3 +3575,4 @@ export default function AKelas() {
     </div>
   )
 }
+

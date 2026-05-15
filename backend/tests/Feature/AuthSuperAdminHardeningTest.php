@@ -121,6 +121,95 @@ class AuthSuperAdminHardeningTest extends TestCase
         $siswaResponse->assertStatus(200);
     }
 
+    public function test_same_email_can_login_to_different_tenants_with_each_tenant_account(): void
+    {
+        config()->set('tenancy.allow_header_override', true);
+
+        $tenantA = $this->defaultTenantId();
+        $tenantB = $this->createTenant('Sekolah Dua', 'sekolah-dua');
+        [$userA] = $this->createUserWithProfile($tenantA, 'siswa', 'kelas-a', 'shared@example.com', 'TenantA123!');
+        [$userB] = $this->createUserWithProfile($tenantB, 'siswa', 'kelas-b', 'shared@example.com', 'TenantB123!');
+
+        $loginA = $this
+            ->withServerVariables(['REMOTE_ADDR' => '10.10.20.1'])
+            ->withHeader('X-Tenant', 'default')
+            ->postJson('/api/auth/login', [
+                'email' => 'shared@example.com',
+                'password' => 'TenantA123!',
+            ]);
+
+        $loginA->assertOk();
+        $loginA->assertJsonPath('data.user.id', $userA->id);
+
+        $loginB = $this
+            ->withServerVariables(['REMOTE_ADDR' => '10.10.20.2'])
+            ->withHeader('X-Tenant', 'sekolah-dua')
+            ->postJson('/api/auth/login', [
+                'email' => 'shared@example.com',
+                'password' => 'TenantB123!',
+            ]);
+
+        $loginB->assertOk();
+        $loginB->assertJsonPath('data.user.id', $userB->id);
+
+        $wrongTenantPassword = $this
+            ->withServerVariables(['REMOTE_ADDR' => '10.10.20.3'])
+            ->withHeader('X-Tenant', 'sekolah-dua')
+            ->postJson('/api/auth/login', [
+                'email' => 'shared@example.com',
+                'password' => 'TenantA123!',
+            ]);
+
+        $wrongTenantPassword->assertStatus(401);
+        $wrongTenantPassword->assertJsonPath('error', 'Email/NIS atau password salah');
+    }
+
+    public function test_public_register_checks_duplicate_email_inside_current_tenant_only(): void
+    {
+        config()->set('tenancy.allow_header_override', true);
+
+        $tenantA = $this->defaultTenantId();
+        $tenantB = $this->createTenant('Sekolah Tiga', 'sekolah-tiga');
+        $this->createUserWithProfile($tenantA, 'siswa', 'kelas-a', 'lintas@example.com');
+        DB::table('settings')->insert([
+            'tenant_id' => $tenantB,
+            'registrasi_siswa_aktif' => true,
+            'registrasi_guru_aktif' => false,
+            'registrasi_admin_aktif' => false,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $allowedInOtherTenant = $this
+            ->withServerVariables(['REMOTE_ADDR' => '10.10.21.1'])
+            ->withHeader('X-Tenant', 'sekolah-tiga')
+            ->postJson('/api/auth/register', [
+                'nama' => 'Siswa Sekolah Tiga',
+                'email' => 'lintas@example.com',
+                'password' => 'Str0ng!Passw0rd',
+                'role' => 'siswa',
+            ]);
+
+        $allowedInOtherTenant->assertCreated();
+        $this->assertDatabaseHas('profiles', [
+            'tenant_id' => $tenantB,
+            'email' => 'lintas@example.com',
+        ]);
+
+        $duplicateInSameTenant = $this
+            ->withServerVariables(['REMOTE_ADDR' => '10.10.21.2'])
+            ->withHeader('X-Tenant', 'sekolah-tiga')
+            ->postJson('/api/auth/register', [
+                'nama' => 'Duplikat',
+                'email' => 'lintas@example.com',
+                'password' => 'Str0ng!Passw0rd',
+                'role' => 'siswa',
+            ]);
+
+        $duplicateInSameTenant->assertStatus(409);
+        $duplicateInSameTenant->assertJsonPath('error', 'Email sudah terdaftar di sekolah ini');
+    }
+
     public function test_public_register_rejects_admin_role_even_when_setting_enabled(): void
     {
         $tenantId = $this->defaultTenantId();
@@ -226,13 +315,33 @@ class AuthSuperAdminHardeningTest extends TestCase
         return $tenantId;
     }
 
-    private function createUserWithProfile(string $tenantId, string $role, string $kelas, string $email): array
+    private function createTenant(string $name, string $slug): string
     {
+        $tenantId = (string) Str::uuid();
+        DB::table('tenants')->insert([
+            'id' => $tenantId,
+            'name' => $name,
+            'slug' => $slug,
+            'status' => 'active',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return $tenantId;
+    }
+
+    private function createUserWithProfile(
+        string $tenantId,
+        string $role,
+        string $kelas,
+        string $email,
+        string $password = 'password123'
+    ): array {
         $user = User::query()->create([
             'id' => (string) Str::uuid(),
             'name' => $role.' test',
             'email' => $email,
-            'password' => Hash::make('password123'),
+            'password' => Hash::make($password),
         ]);
 
         DB::table('profiles')->insert([

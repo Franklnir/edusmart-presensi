@@ -61,6 +61,11 @@ if [ "${APP_ROLE:-web}" = "web" ] && [ "${RUN_MIGRATIONS:-false}" = "true" ]; th
   php artisan migrate --force
 fi
 
+if [ "${APP_ROLE:-web}" = "web" ] && [ -n "${SUPER_ADMIN_BOOTSTRAP_PASSWORD:-}" ]; then
+  echo "[entrypoint] bootstrapping configured super admin..."
+  php artisan super-admin:bootstrap --no-interaction
+fi
+
 if [ "${APP_ROLE:-web}" = "web" ] && [ "${APP_ENV:-production}" = "production" ]; then
   echo "[entrypoint] refreshing Laravel caches..."
   php artisan config:clear || true

@@ -1,15 +1,23 @@
 import React from 'react'
+import { hasMenuChildren, menuItemKey } from '../../navigation/menu.utils'
 import Avatar from './Avatar'
 import { Icon } from './icons'
 import NavGroup from './NavGroup'
 import NavItem from './NavItem'
 
-const renderNavItems = (items, collapsed) => (
-  items.map((item, idx) => {
-    if (item.group && item.items) {
-      return <NavGroup key={`${item.group}-${idx}`} group={item} collapsed={collapsed} />
+const renderNavItems = (items, collapsed, menuExpansion) => (
+  items.map((item, index) => {
+    if (hasMenuChildren(item)) {
+      return (
+        <NavGroup
+          key={menuItemKey(item, index)}
+          collapsed={collapsed}
+          group={item}
+          menuExpansion={menuExpansion}
+        />
+      )
     }
-    return <NavItem key={item.to} link={item} collapsed={collapsed} />
+    return <NavItem key={menuItemKey(item, index)} link={item} collapsed={collapsed} />
   })
 )
 
@@ -17,6 +25,7 @@ const DesktopSidebar = React.memo(({
   avatarUrl,
   collapsed,
   effectiveRole,
+  menuExpansion,
   navItems,
   onAvatarError,
   onLogout,
@@ -31,7 +40,7 @@ const DesktopSidebar = React.memo(({
   <>
     <div className={`hidden md:block flex-shrink-0 transition-all duration-300 ease-in-out ${collapsed ? 'w-[64px]' : 'w-52'}`} />
 
-    <aside className={`hidden md:flex fixed inset-y-0 left-0 flex-col min-h-0 z-40 bg-white border-r border-slate-100 shadow-sidebar transition-all duration-300 ease-in-out ${collapsed ? 'w-[64px]' : 'w-52'}`}>
+    <aside className={`theme-sidebar hidden md:flex fixed inset-y-0 left-0 flex-col min-h-0 z-40 bg-white border-r border-slate-100 shadow-sidebar transition-all duration-300 ease-in-out ${collapsed ? 'w-[64px]' : 'w-52'}`}>
       <div className="flex items-center gap-2 px-3 pt-3 pb-2 border-b border-slate-100">
         <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 shadow-brand-sm flex-shrink-0">
           <span className="font-extrabold text-white text-[15px]">{schoolName.charAt(0).toUpperCase()}</span>
@@ -80,7 +89,7 @@ const DesktopSidebar = React.memo(({
       )}
 
       <nav className="flex-1 min-h-0 px-3 py-3 space-y-1 overflow-y-auto overflow-x-hidden">
-        {renderNavItems(navItems, collapsed)}
+        {renderNavItems(navItems, collapsed, menuExpansion)}
       </nav>
 
       <div className="border-t border-slate-100 p-3">
@@ -104,13 +113,15 @@ const DesktopSidebar = React.memo(({
                 {roleBadge.label}
               </span>
             </div>
-            <button
-              onClick={onLogout}
-              title="Keluar"
-              className="p-2 rounded-xl text-slate-400 hover:text-red-500 hover:bg-red-50 transition-all duration-200 flex-shrink-0"
-            >
-              <Icon name="logout" className="w-3.5 h-3.5" />
-            </button>
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              <button
+                onClick={onLogout}
+                title="Keluar"
+                className="p-2 rounded-xl text-slate-400 hover:text-red-500 hover:bg-red-50 transition-all duration-200 flex-shrink-0"
+              >
+                <Icon name="logout" className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
         )}
       </div>

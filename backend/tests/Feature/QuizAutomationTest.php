@@ -341,6 +341,242 @@ class QuizAutomationTest extends TestCase
         $pastStartResponse->assertJsonPath('error', 'Tanggal mulai quiz tidak boleh di masa lalu');
     }
 
+    public function test_guru_can_update_deadline_but_not_content_while_submission_ongoing(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        [$siswa] = $this->createUserWithProfile($tenantId, 'siswa', 'X-1');
+        [$guru] = $this->createUserWithProfile($tenantId, 'guru', 'X-1');
+        $this->seedGuruTeachingMapel($tenantId, $guru->id, 'X-1', 'Matematika');
+        $period = AcademicPeriod::current();
+
+        $quizId = (string) Str::uuid();
+        $questionId = (string) Str::uuid();
+        DB::table('quizzes')->insert([
+            'id' => $quizId,
+            'tenant_id' => $tenantId,
+            'guru_id' => $guru->id,
+            'kelas_id' => 'X-1',
+            'mapel' => 'Matematika',
+            'nama' => 'Quiz Terkunci',
+            'starts_at' => now()->subMinute(),
+            'deadline_at' => now()->addHour(),
+            'mode' => 'regular',
+            'is_live' => false,
+            'is_active' => true,
+            'tahun_ajaran' => $period['tahun_ajaran'],
+            'semester' => $period['semester'],
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        DB::table('quiz_questions')->insert([
+            'id' => $questionId,
+            'tenant_id' => $tenantId,
+            'quiz_id' => $quizId,
+            'nomor' => 1,
+            'soal' => 'Soal awal',
+            'poin' => 10,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        DB::table('quiz_submissions')->insert([
+            'id' => (string) Str::uuid(),
+            'tenant_id' => $tenantId,
+            'quiz_id' => $quizId,
+            'siswa_id' => $siswa->id,
+            'status' => 'ongoing',
+            'started_at' => now()->subMinute(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $questionUpdate = $this->actingAs($guru)->postJson('/api/db', [
+            'table' => 'quiz_questions',
+            'action' => 'update',
+            'filters' => ['eq' => ['id' => $questionId]],
+            'payload' => ['soal' => 'Soal berubah'],
+        ]);
+        $questionUpdate->assertStatus(409);
+        $questionUpdate->assertJsonPath('error', 'Soal quiz tidak bisa diubah saat masih ada siswa yang mengerjakan quiz.');
+
+        $quizUpdate = $this->actingAs($guru)->postJson('/api/db', [
+            'table' => 'quizzes',
+            'action' => 'update',
+            'filters' => ['eq' => ['id' => $quizId]],
+            'payload' => ['nama' => 'Nama berubah'],
+        ]);
+        $quizUpdate->assertStatus(422);
+        $quizUpdate->assertJsonPath('error', 'Quiz sedang dikerjakan siswa. Hanya deadline atau durasi yang boleh diubah.');
+
+        $securityUpdate = $this->actingAs($guru)->postJson('/api/quiz/publish', [
+            'quiz_id' => $quizId,
+            'shuffle_questions' => true,
+        ]);
+        $securityUpdate->assertStatus(409);
+        $securityUpdate->assertJsonPath('error', 'Quiz sedang dikerjakan siswa. Keamanan dan pengaturan non-waktu tidak bisa diubah.');
+
+        $newDeadline = now()->addHours(2)->startOfMinute();
+        $deadlineUpdate = $this->actingAs($guru)->postJson('/api/db', [
+            'table' => 'quizzes',
+            'action' => 'update',
+            'filters' => ['eq' => ['id' => $quizId]],
+            'payload' => ['deadline_at' => $newDeadline->toISOString()],
+        ]);
+        $deadlineUpdate->assertOk();
+
+        $storedDeadline = DB::table('quizzes')->where('id', $quizId)->value('deadline_at');
+        $this->assertSame(
+            $newDeadline->timestamp,
+            \Illuminate\Support\Carbon::parse($storedDeadline)->timestamp
+        );
+    }
+
+    public function test_guru_cannot_schedule_quiz_outside_academic_year(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        [$guru] = $this->createUserWithProfile($tenantId, 'guru', 'X-1');
+        $this->seedGuruTeachingMapel($tenantId, $guru->id, 'X-1', 'Matematika');
+        $period = AcademicPeriod::current();
+
+        $quizId = (string) Str::uuid();
+        DB::table('quizzes')->insert([
+            'id' => $quizId,
+            'tenant_id' => $tenantId,
+            'guru_id' => $guru->id,
+            'kelas_id' => 'X-1',
+            'mapel' => 'Matematika',
+            'nama' => 'Quiz Periode',
+            'starts_at' => now()->addDay(),
+            'deadline_at' => now()->addDays(2),
+            'mode' => 'regular',
+            'is_live' => false,
+            'is_active' => true,
+            'tahun_ajaran' => $period['tahun_ajaran'],
+            'semester' => $period['semester'],
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $outsideStart = now()->addYears(3)->startOfMinute();
+        $response = $this->actingAs($guru)->postJson('/api/db', [
+            'table' => 'quizzes',
+            'action' => 'update',
+            'filters' => ['eq' => ['id' => $quizId]],
+            'payload' => [
+                'starts_at' => $outsideStart->toISOString(),
+                'deadline_at' => $outsideStart->copy()->addHour()->toISOString(),
+            ],
+        ]);
+
+        $response->assertStatus(422);
+        $this->assertStringContainsString('tahun periode', (string) $response->json('error'));
+    }
+
+    public function test_guru_can_update_draft_quiz_name_and_mode(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        [$guru] = $this->createUserWithProfile($tenantId, 'guru', 'X-1');
+        $this->seedGuruTeachingMapel($tenantId, $guru->id, 'X-1', 'Matematika');
+        $period = AcademicPeriod::current();
+
+        $quizId = (string) Str::uuid();
+        DB::table('quizzes')->insert([
+            'id' => $quizId,
+            'tenant_id' => $tenantId,
+            'guru_id' => $guru->id,
+            'kelas_id' => 'X-1',
+            'mapel' => 'Matematika',
+            'nama' => 'Quiz Draft',
+            'starts_at' => null,
+            'deadline_at' => null,
+            'mode' => 'regular',
+            'is_live' => false,
+            'is_active' => false,
+            'tahun_ajaran' => $period['tahun_ajaran'],
+            'semester' => $period['semester'],
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $response = $this->actingAs($guru)->postJson('/api/db', [
+            'table' => 'quizzes',
+            'action' => 'update',
+            'filters' => ['eq' => ['id' => $quizId]],
+            'payload' => [
+                'nama' => 'Quiz Draft Edit',
+                'mode' => 'uas',
+                'is_live' => true,
+                'duration_minutes' => 60,
+            ],
+        ]);
+
+        $response->assertOk();
+        $this->assertDatabaseHas('quizzes', [
+            'id' => $quizId,
+            'tenant_id' => $tenantId,
+            'nama' => 'Quiz Draft Edit',
+            'mode' => 'uas',
+            'is_live' => true,
+            'duration_minutes' => 60,
+        ]);
+    }
+
+    public function test_guru_uts_schedule_deadline_is_derived_from_duration(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        [$guru] = $this->createUserWithProfile($tenantId, 'guru', 'X-1');
+        $this->seedGuruTeachingMapel($tenantId, $guru->id, 'X-1', 'Matematika');
+        $period = AcademicPeriod::current();
+
+        $quizId = (string) Str::uuid();
+        DB::table('quizzes')->insert([
+            'id' => $quizId,
+            'tenant_id' => $tenantId,
+            'guru_id' => $guru->id,
+            'kelas_id' => 'X-1',
+            'mapel' => 'Matematika',
+            'nama' => 'UTS Durasi',
+            'starts_at' => now()->addDay(),
+            'deadline_at' => now()->addDays(2),
+            'mode' => 'uts',
+            'is_live' => true,
+            'is_active' => true,
+            'duration_minutes' => 60,
+            'tahun_ajaran' => $period['tahun_ajaran'],
+            'semester' => $period['semester'],
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $startsAt = now()->addDays(2)->startOfMinute();
+        $duration = 19;
+        $response = $this->actingAs($guru)->postJson('/api/db', [
+            'table' => 'quizzes',
+            'action' => 'update',
+            'filters' => ['eq' => ['id' => $quizId]],
+            'payload' => [
+                'starts_at' => $startsAt->toISOString(),
+                'duration_minutes' => $duration,
+                'deadline_at' => $startsAt->copy()->addHours(3)->toISOString(),
+                'is_live' => true,
+                'is_active' => true,
+            ],
+        ]);
+
+        $response->assertOk();
+
+        $fresh = DB::table('quizzes')->where('id', $quizId)->first();
+        $this->assertSame('uts', $fresh->mode);
+        $this->assertSame($duration, (int) $fresh->duration_minutes);
+        $this->assertSame(
+            $startsAt->copy()->addMinutes($duration)->timestamp,
+            \Illuminate\Support\Carbon::parse($fresh->deadline_at)->timestamp
+        );
+        $this->assertSame(
+            $startsAt->timestamp,
+            \Illuminate\Support\Carbon::parse($fresh->live_started_at)->timestamp
+        );
+    }
+
     public function test_expired_ongoing_submission_is_finalized_automatically(): void
     {
         $tenantId = $this->defaultTenantId();

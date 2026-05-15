@@ -14,7 +14,7 @@ Repo ini juga sudah disiapkan agar local preview memakai stack yang hampir sama 
 Default local yang sudah disiapkan di `.env.production`:
 
 - `https://localhost:8443`
-- `https://admin.localhost:8443`
+- `https://admin26.localhost:8443`
 - `https://bali.localhost:8443`
 - `https://wa.localhost:8443`
 
@@ -32,7 +32,7 @@ Catatan local:
 - Browser bisa menampilkan warning sertifikat saat pertama kali membuka `https://*.localhost:8443` karena Caddy memakai local CA/internal certificate untuk host lokal.
 - Setelah warning diterima di browser, alur cookie, session, dan subdomain akan jauh lebih mirip production dibanding mode HTTP biasa.
 - Untuk domain publik asli di VPS, Caddy tetap memakai on-demand TLS, jadi custom domain tenant/admin tetap bisa otomatis mendapatkan sertifikat HTTPS setelah DNS diarahkan dengan benar.
-- Host lokal default seperti `localhost`, `admin.localhost`, `bali.localhost`, `demo.localhost`, dan `wa.localhost` sekarang dibuat eksplisit agar browser dan tool CLI lokal lebih konsisten saat memeriksa nama sertifikat.
+- Host lokal default seperti `localhost`, `admin.localhost`, `admin26.localhost`, `bali.localhost`, `demo.localhost`, dan `wa.localhost` sekarang dibuat eksplisit agar browser dan tool CLI lokal lebih konsisten saat memeriksa nama sertifikat.
 
 ## 1. Prasyarat
 
@@ -69,11 +69,12 @@ cp .env.production.example .env.production
 - `CORS_ALLOWED_ORIGINS`
 - `CORS_ALLOWED_ORIGIN_PATTERNS` (jika pakai subdomain tenant)
 - `TENANT_ROOT_DOMAIN`
-- `TENANT_ADMIN_SUBDOMAIN` (contoh: `admin`)
+- `TENANT_ADMIN_SUBDOMAIN` (contoh: `admin26`)
 - `TENANT_PUBLIC_SCHEME`
 - `TENANT_DNS_A_RECORD` atau `TENANT_DNS_CNAME_TARGET`
 - `SUPER_ADMIN_EMAILS`
-- `TENANT_RESERVED` (pastikan mengandung `admin`)
+- `SUPER_ADMIN_BOOTSTRAP_PASSWORD` (opsional untuk fresh install agar akun super admin dibuat otomatis)
+- `TENANT_RESERVED` (pastikan mengandung `admin` dan `admin26`)
 - `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_FROM_ADDRESS`
 - `EVOLUTION_PUBLIC_URL`, `EVOLUTION_API_KEY`
 - `EVOLUTION_DB_PASSWORD`, `EVOLUTION_REDIS_PASSWORD`
@@ -127,6 +128,16 @@ Jika output kosong, image backend yang dipakai belum valid. Re-run GitHub Action
 ```bash
 deploy/release-prod.sh --ref <commit-or-tag> --pull-images
 ```
+
+## 3.0 Bootstrap Super Admin Fresh Install
+
+Untuk database fresh, isi env ini sebelum first deploy:
+
+- `SUPER_ADMIN_EMAILS=admin26@domain-kamu`
+- `SUPER_ADMIN_BOOTSTRAP_PASSWORD=<password-kuat>`
+- opsional: `SUPER_ADMIN_BOOTSTRAP_NAME`, `SUPER_ADMIN_BOOTSTRAP_ID`
+
+Saat container `backend` start setelah migrasi, entrypoint menjalankan `php artisan super-admin:bootstrap` otomatis. Password tidak dicetak ke log. Setelah akun ada, `SUPER_ADMIN_BOOTSTRAP_PASSWORD` boleh dikosongkan lagi; deploy berikutnya tidak akan reset password kecuali `SUPER_ADMIN_BOOTSTRAP_FORCE=true`.
 
 ## 3.1 Konfigurasi Email (Brevo)
 
@@ -261,13 +272,13 @@ Catatan:
 
 - Root domain tenant: `edusmart.myid`
 - Tenant sekolah: `bali.edusmart.myid`, `jakarta.edusmart.myid`, dst
-- Panel super admin: `admin.edusmart.myid`
+- Panel super admin: `admin26.edusmart.myid`
 
 Set env:
 
 - `TENANT_ROOT_DOMAIN=edusmart.myid`
-- `TENANT_ADMIN_SUBDOMAIN=admin`
-- `TENANT_RESERVED=www,app,api,admin`
+- `TENANT_ADMIN_SUBDOMAIN=admin26`
+- `TENANT_RESERVED=www,app,api,admin,admin26`
 - `TENANT_ALLOW_ROOT_FOR_SUPER_ADMIN=false`
 
 Catatan:
@@ -306,7 +317,7 @@ Catatan penting:
 
 - Tenant bawaan cepat: `smabali.edusmart.myid`
 - Domain sekolah sendiri: `portal.smabali.sch.id`
-- Panel super admin: `admin.edusmart.myid`
+- Panel super admin: `admin26.edusmart.myid`
 - Host WhatsApp/Evolution: `wa.edusmart.myid`
 
 ## 4.3 Alur Saat Sekolah Baru Berlangganan

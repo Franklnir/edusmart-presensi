@@ -5,6 +5,7 @@ namespace App\Services\Rfid;
 use App\Services\WhatsApp\WhatsAppNotificationService;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 class RfidScanService
@@ -93,6 +94,7 @@ class RfidScanService
 
         $deviceId = trim((string) $deviceId);
         $deviceId = $deviceId !== '' ? $deviceId : 'RFID_DEVICE';
+        $this->ensureRfidAlwaysActive((string) $tenant->id);
 
         try {
             $row = DB::selectOne(
@@ -173,29 +175,27 @@ class RfidScanService
             ]);
         }
 
+        $settingsColumns = [
+            'scan_manual_enabled',
+            'manual_jam_masuk_mulai',
+            'manual_jam_masuk_selesai',
+            'manual_jam_pulang_mulai',
+            'manual_jam_pulang_selesai',
+            'rfid_mode',
+        ];
+        if (Schema::hasColumn('settings', 'scan_always_active')) {
+            $settingsColumns[] = 'scan_always_active';
+        }
+
         $settings = DB::table('settings')
             ->where('tenant_id', $tenant->id)
             ->orderBy('id')
-            ->first([
-                'scan_manual_enabled',
-                'manual_jam_masuk_mulai',
-                'manual_jam_masuk_selesai',
-                'manual_jam_pulang_mulai',
-                'manual_jam_pulang_selesai',
-                'rfid_mode',
-            ]);
+            ->first($settingsColumns);
 
-        $rfidSettings = DB::table('absensi_rfid_settings')
-            ->where('tenant_id', $tenant->id)
-            ->orderBy('created_at')
-            ->orderBy('id')
-            ->first([
-                'rfid_aktif',
-                'rfid_mulai',
-                'rfid_selesai',
-            ]);
+        $this->ensureRfidAlwaysActive((string) $tenant->id);
 
-        $manualEnabled = (bool) ($settings->scan_manual_enabled ?? false);
+        $alwaysActive = (bool) ($settings->scan_always_active ?? false);
+        $manualEnabled = $alwaysActive || (bool) ($settings->scan_manual_enabled ?? false);
         $dbMode = trim((string) ($settings->rfid_mode ?? ''));
 
         // Mode logic:
@@ -213,13 +213,14 @@ class RfidScanService
             'tenant_slug' => (string) $tenant->slug,
             'mode' => $mode,
             'scan_manual_enabled' => $manualEnabled,
+            'scan_always_active' => $alwaysActive,
             'manual_jam_masuk_mulai' => $settings->manual_jam_masuk_mulai ?? null,
             'manual_jam_masuk_selesai' => $settings->manual_jam_masuk_selesai ?? null,
             'manual_jam_pulang_mulai' => $settings->manual_jam_pulang_mulai ?? null,
             'manual_jam_pulang_selesai' => $settings->manual_jam_pulang_selesai ?? null,
-            'rfid_aktif' => (bool) ($rfidSettings->rfid_aktif ?? false),
-            'rfid_mulai' => $rfidSettings->rfid_mulai ?? null,
-            'rfid_selesai' => $rfidSettings->rfid_selesai ?? null,
+            'rfid_aktif' => true,
+            'rfid_mulai' => null,
+            'rfid_selesai' => null,
         ]);
     }
 
@@ -246,6 +247,75 @@ class RfidScanService
             ]);
         } catch (\Throwable $e) {
             return $this->result(500, ['success' => false, 'message' => 'Gagal update mode di database']);
+        }
+    }
+
+    private function ensureRfidAlwaysActive(string $tenantId): void
+    {
+        try {
+            if (
+                ! Schema::hasTable('absensi_rfid_settings') ||
+                ! Schema::hasColumn('absensi_rfid_settings', 'rfid_aktif')
+            ) {
+                return;
+            }
+
+            $hasTenant = Schema::hasColumn('absensi_rfid_settings', 'tenant_id');
+            $hasId = Schema::hasColumn('absensi_rfid_settings', 'id');
+            $hasCreatedAt = Schema::hasColumn('absensi_rfid_settings', 'created_at');
+            $hasUpdatedAt = Schema::hasColumn('absensi_rfid_settings', 'updated_at');
+            $hasMulai = Schema::hasColumn('absensi_rfid_settings', 'rfid_mulai');
+            $hasSelesai = Schema::hasColumn('absensi_rfid_settings', 'rfid_selesai');
+
+            $payload = ['rfid_aktif' => true];
+            if ($hasMulai) {
+                $payload['rfid_mulai'] = null;
+            }
+            if ($hasSelesai) {
+                $payload['rfid_selesai'] = null;
+            }
+            if ($hasUpdatedAt) {
+                $payload['updated_at'] = now();
+            }
+
+            $query = DB::table('absensi_rfid_settings');
+            if ($hasTenant) {
+                $query->where('tenant_id', $tenantId);
+            }
+            if ($hasCreatedAt) {
+                $query->orderBy('created_at');
+            }
+            if ($hasId) {
+                $query->orderBy('id');
+            }
+
+            $row = $query->first($hasId ? ['id'] : ['*']);
+            if ($row) {
+                $updateQuery = DB::table('absensi_rfid_settings');
+                if ($hasId) {
+                    $updateQuery->where('id', $row->id);
+                }
+                if ($hasTenant) {
+                    $updateQuery->where('tenant_id', $tenantId);
+                }
+                $updateQuery->update($payload);
+
+                return;
+            }
+
+            if ($hasId) {
+                $payload['id'] = (string) Str::uuid();
+            }
+            if ($hasTenant) {
+                $payload['tenant_id'] = $tenantId;
+            }
+            if ($hasCreatedAt) {
+                $payload['created_at'] = now();
+            }
+
+            DB::table('absensi_rfid_settings')->insert($payload);
+        } catch (\Throwable $e) {
+            // RFID tetap diproses oleh fungsi utama; sinkronisasi flag lama bersifat best-effort.
         }
     }
 

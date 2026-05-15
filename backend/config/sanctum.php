@@ -40,10 +40,16 @@ if (! $isProduction) {
         'localhost:5173',
         '127.0.0.1',
         '127.0.0.1:8000',
+        '127.0.0.1.nip.io',
+        '127.0.0.1.nip.io:5173',
+        '127.0.0.1.nip.io:8000',
         '::1',
         '*.localhost',
         '*.localhost:3000',
         '*.localhost:5173',
+        '*.127.0.0.1.nip.io',
+        '*.127.0.0.1.nip.io:5173',
+        '*.127.0.0.1.nip.io:8000',
     ]))));
 }
 
@@ -74,10 +80,8 @@ $expandStatefulEntry = static function (?string $value) use ($normalizeHost): ar
     return [$value];
 };
 
-$rawStateful = array_map('trim', explode(
-    ',',
-    (string) env('SANCTUM_STATEFUL_DOMAINS', implode(',', $defaultStateful))
-));
+$rawEnvStateful = array_map('trim', explode(',', (string) env('SANCTUM_STATEFUL_DOMAINS', '')));
+$rawStateful = array_values(array_unique(array_filter(array_merge($defaultStateful, $rawEnvStateful))));
 
 $stateful = [];
 foreach ($rawStateful as $entry) {

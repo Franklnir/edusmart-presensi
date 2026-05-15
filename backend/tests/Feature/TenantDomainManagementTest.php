@@ -73,6 +73,113 @@ class TenantDomainManagementTest extends TestCase
             ->assertJsonPath('error', 'Host tenant belum terdaftar. Tambahkan domain ini dari panel super admin terlebih dahulu.');
     }
 
+    public function test_admin_subdomain_is_reserved_even_when_reserved_env_omits_it(): void
+    {
+        config()->set('tenancy.root_domain', 'edusmart.test');
+        config()->set('tenancy.admin_subdomain', 'admin26');
+        config()->set('tenancy.admin_hosts', []);
+        config()->set('tenancy.allow_root_for_super_admin', false);
+        config()->set('tenancy.reserved_subdomains', ['www', 'app', 'api', 'admin']);
+
+        $superAdmin = $this->createSuperAdmin();
+
+        $this
+            ->actingAs($superAdmin)
+            ->postJson('http://admin26.edusmart.test/api/super/tenants', [
+                'name' => 'Admin Host School',
+                'slug' => 'admin26',
+                'admin_name' => 'Admin Sekolah',
+                'admin_email' => 'school-admin@example.com',
+                'admin_password' => 'Admin26Strong!234',
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('error', 'Subdomain tidak bisa digunakan');
+    }
+
+    public function test_super_admin_create_tenant_sets_first_admin_as_primary_admin(): void
+    {
+        config()->set('tenancy.root_domain', 'edusmart.test');
+        config()->set('tenancy.admin_subdomain', 'admin26');
+        config()->set('tenancy.admin_hosts', []);
+        config()->set('tenancy.allow_root_for_super_admin', false);
+
+        $superAdmin = $this->createSuperAdmin();
+
+        $response = $this
+            ->actingAs($superAdmin)
+            ->postJson('http://admin26.edusmart.test/api/super/tenants', [
+                'name' => 'SMA Bali',
+                'slug' => 'bali',
+                'admin_name' => 'Admin Bali',
+                'admin_email' => 'admin-bali@example.com',
+                'admin_password' => 'AdminBaliStrong!234',
+            ]);
+
+        $response->assertCreated();
+
+        $tenantId = (string) $response->json('data.tenant.id');
+        $adminUserId = (string) $response->json('data.admin.id');
+        $this->assertNotSame('', $tenantId);
+        $this->assertNotSame('', $adminUserId);
+
+        $this->assertDatabaseHas('settings', [
+            'tenant_id' => $tenantId,
+            'approval_primary_admin_id' => $adminUserId,
+        ]);
+
+        $this
+            ->actingAs($superAdmin)
+            ->getJson("http://admin26.edusmart.test/api/super/tenants/{$tenantId}")
+            ->assertOk()
+            ->assertJsonPath('data.tenant.primary_admin_user_id', $adminUserId)
+            ->assertJsonPath('data.tenant.primary_admin_email', 'admin-bali@example.com');
+    }
+
+    public function test_generated_tenant_admin_reset_password_satisfies_password_policy_shape(): void
+    {
+        config()->set('tenancy.root_domain', 'edusmart.test');
+        config()->set('tenancy.admin_subdomain', 'admin26');
+        config()->set('tenancy.admin_hosts', []);
+        config()->set('tenancy.allow_root_for_super_admin', false);
+
+        $superAdmin = $this->createSuperAdmin();
+        $tenantId = $this->createTenant('SMA Bali', 'bali');
+        $admin = User::query()->create([
+            'id' => (string) Str::uuid(),
+            'name' => 'Admin Bali',
+            'email' => 'admin-reset@example.com',
+            'password' => Hash::make('OldPassword!234'),
+        ]);
+        DB::table('profiles')->insert([
+            'id' => $admin->id,
+            'tenant_id' => $tenantId,
+            'email' => $admin->email,
+            'nama' => $admin->name,
+            'role' => 'admin',
+            'status' => 'active',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        DB::table('admin_users')->insert([
+            'id' => $admin->id,
+            'tenant_id' => $tenantId,
+            'created_at' => now(),
+        ]);
+
+        $response = $this
+            ->actingAs($superAdmin)
+            ->postJson("http://admin26.edusmart.test/api/super/tenants/{$tenantId}/admins/{$admin->id}/reset-password");
+
+        $response->assertOk();
+
+        $temporaryPassword = (string) $response->json('data.temporary_password');
+        $this->assertGreaterThanOrEqual(12, strlen($temporaryPassword));
+        $this->assertMatchesRegularExpression('/[a-z]/', $temporaryPassword);
+        $this->assertMatchesRegularExpression('/[A-Z]/', $temporaryPassword);
+        $this->assertMatchesRegularExpression('/[0-9]/', $temporaryPassword);
+        $this->assertMatchesRegularExpression('/[^a-zA-Z0-9]/', $temporaryPassword);
+    }
+
     public function test_tls_ask_endpoint_allows_known_hosts_and_rejects_unknown_hosts(): void
     {
         config()->set('tenancy.root_domain', 'edusmart.test');

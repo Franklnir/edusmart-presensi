@@ -1,5 +1,6 @@
 // src/pages/guru/TugasGuru.jsx
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { MessageSquare, X } from 'lucide-react'
 import {
   supabase,
   ASSIGNMENT_BUCKET,
@@ -18,6 +19,7 @@ import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 import { parseSupabaseError } from '../../utils/supabaseError'
 import {
   ASSIGNMENT_PHOTO_MAX_BYTES,
+  ASSIGNMENT_PHOTOS_MAX_TOTAL_BYTES,
   MAX_ASSIGNMENT_PHOTOS,
   isImageLikeFile,
   parseAssignmentFileList
@@ -437,10 +439,6 @@ export default function TugasGuru() {
   const {
     activeAcademicPeriod,
     period,
-    academicYearOptions,
-    semesterOptions,
-    setAcademicYear,
-    setSemester,
     applyPeriodFilters,
     academicPeriodPayload
   } = useActiveAcademicPeriod()
@@ -497,6 +495,7 @@ export default function TugasGuru() {
   // Preview
   const [previewFile, setPreviewFile] = useState(null)
   const [photoGallery, setPhotoGallery] = useState(null)
+  const [studentCommentPreview, setStudentCommentPreview] = useState(null)
   const detailLoadIdRef = useRef(0)
 
   /* ---------- Derived: kelas yang guru ampu ---------- */
@@ -635,9 +634,13 @@ export default function TugasGuru() {
         const weekAgo = new Date(now)
         weekAgo.setDate(now.getDate() - 7)
         query = query.gte('created_at', weekAgo.toISOString())
-      } else {
-        const yearAgo = new Date(now.getFullYear(), now.getMonth() - 11, 1)
-        query = query.gte('created_at', yearAgo.toISOString())
+      } else if (timeRange === 'all') {
+        if (period.startsAt && period.endsAt) {
+          const start = new Date(`${period.startsAt}T00:00:00`)
+          const end = new Date(`${period.endsAt}T00:00:00`)
+          end.setDate(end.getDate() + 1)
+          query = query.gte('created_at', start.toISOString()).lt('created_at', end.toISOString())
+        }
       }
 
       query = query.order('created_at', { ascending: false })
@@ -647,11 +650,7 @@ export default function TugasGuru() {
       let tugasData = tugasRaw || []
 
       if (timeRange === 'custom_months') {
-        const yearAgo = new Date(now.getFullYear(), now.getMonth() - 11, 1)
-        // jika belum pilih bulan, fallback 12 bulan terakhir
-        if (selectedMonths.length === 0) {
-          tugasData = tugasData.filter((t) => t.created_at && new Date(t.created_at) >= yearAgo)
-        } else {
+        if (selectedMonths.length > 0) {
           const setMonths = new Set(selectedMonths)
           tugasData = tugasData.filter((t) => {
             if (!t.created_at) return false
@@ -757,6 +756,8 @@ export default function TugasGuru() {
     timeRange,
     filterStatus,
     selectedMonths,
+    period.endsAt,
+    period.startsAt,
     setLoading,
     pushToast
   ])
@@ -883,7 +884,7 @@ export default function TugasGuru() {
 
         const jawabanPromise = supabase
           .from('tugas_jawaban')
-          .select('id, tugas_id, user_id, file_url, file_urls, link_url, nilai, status, waktu_submit, profiles(nama, photo_url)')
+          .select('id, tugas_id, user_id, file_url, file_urls, link_url, komentar_siswa, nilai, status, waktu_submit, profiles(nama, photo_url)')
           .eq('tugas_id', tugas.id)
 
         const [
@@ -1057,7 +1058,7 @@ export default function TugasGuru() {
 
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from(ASSIGNMENT_BUCKET)
-        .upload(filePath, compressed, { upsert: false, cacheControl: '3600', fastLocal: true })
+        .upload(filePath, compressed, { upsert: false, cacheControl: '3600' })
 
       if (uploadError) {
         // RLS storage paling sering muncul di sini
@@ -1643,6 +1644,7 @@ export default function TugasGuru() {
                   const photoValues = parseAssignmentFileList(jawaban?.file_urls, jawaban?.file_url)
                     .filter(isImageLikeFile)
                     .slice(0, MAX_ASSIGNMENT_PHOTOS)
+                  const studentComment = String(jawaban?.komentar_siswa || '').trim()
                   return (
                     <tr key={siswa.id} className="border-b border-slate-100 hover:bg-white/60 transition-colors">
                       <td className="py-3 px-2">
@@ -1696,7 +1698,22 @@ export default function TugasGuru() {
                                 🔗 Link
                               </button>
                             )}
-                            {!jawaban?.file_url && !jawaban?.link_url && (
+                            {studentComment && (
+                              <button
+                                type="button"
+                                onClick={() => setStudentCommentPreview({
+                                  siswa: siswa.nama || jawaban?.nama || 'Siswa',
+                                  kelas: siswa.kelas || '',
+                                  waktu: jawaban?.waktu_submit || '',
+                                  komentar: studentComment
+                                })}
+                                className="inline-flex items-center gap-1 px-2 py-1 bg-amber-100 text-amber-800 rounded-lg text-xs font-semibold hover:bg-amber-200 transition-colors"
+                              >
+                                <MessageSquare className="h-3.5 w-3.5" />
+                                Komentar
+                              </button>
+                            )}
+                            {!jawaban?.file_url && !jawaban?.link_url && !studentComment && (
                               <span className="text-xs text-slate-500">-</span>
                             )}
                           </div>
@@ -1771,7 +1788,12 @@ export default function TugasGuru() {
     )
   }
 
-  const monthOptions = useMemo(() => buildLast12Months(), [])
+  const monthOptions = useMemo(() => (
+    (period.months || []).map((month) => ({
+      value: month.value,
+      label: month.label
+    }))
+  ), [period.months])
 
   const dashboardStats = useMemo(() => {
     const total = listTugas.length
@@ -2015,7 +2037,7 @@ export default function TugasGuru() {
               <div className="mt-3 p-3 bg-slate-50 rounded-xl border border-slate-200">
                 <p className="text-xs font-semibold text-slate-700 mb-2">📋 Batas Ukuran File:</p>
                 <ul className="text-xs text-slate-600 space-y-1">
-                  <li>🖼️ Gambar: maks 150KB (otomatis dikompresi)</li>
+                  <li>🖼️ Gambar: maks {formatFileSize(ASSIGNMENT_PHOTO_MAX_BYTES)}/foto, total sekitar {formatFileSize(ASSIGNMENT_PHOTOS_MAX_TOTAL_BYTES)}</li>
                   <li>📄 PDF/Dokumen: Drive siap maks 3MB, VPS maks 2MB</li>
                   <li>📊 PPT: Drive siap maks 5MB, VPS maks 2MB</li>
                 </ul>
@@ -2147,38 +2169,10 @@ export default function TugasGuru() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">Tahun Ajaran</label>
-                  <select
-                    className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
-                    value={period.tahunAjaran}
-                    onChange={(e) => setAcademicYear(e.target.value)}
-                  >
-                    {academicYearOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="mt-1 text-[11px] text-slate-500">
-                    Aktif: {activeAcademicPeriod.tahunAjaran}
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">Semester</label>
-                  <select
-                    className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
-                    value={period.semester}
-                    onChange={(e) => setSemester(e.target.value)}
-                  >
-                    {semesterOptions.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="mt-1 text-[11px] text-slate-500">
-                    Aktif: {activeAcademicPeriod.semester}
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Periode Aktif</label>
+                  <div className="w-full px-4 py-3 border border-slate-300 rounded-xl bg-slate-50 text-sm">
+                    <div className="font-semibold text-slate-900">{activeAcademicPeriod.tahunAjaran}</div>
+                    <div className="text-xs text-slate-500">Semester {activeAcademicPeriod.semester}</div>
                   </div>
                 </div>
 
@@ -2190,7 +2184,7 @@ export default function TugasGuru() {
                     onChange={(e) => setTimeRange(e.target.value)}
                   >
                     <option value="week">7 hari terakhir</option>
-                    <option value="all">12 bulan terakhir</option>
+                    <option value="all">Semua bulan periode</option>
                     <option value="custom_months">Pilih bulan</option>
                   </select>
                 </div>
@@ -2718,6 +2712,48 @@ export default function TugasGuru() {
                     </>
                   )}
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {studentCommentPreview && (
+          <div className="fixed inset-0 z-[75] flex items-center justify-center bg-slate-950/45 p-4">
+            <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white shadow-2xl">
+              <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4">
+                <div>
+                  <div className="flex items-center gap-2 text-sm font-extrabold text-slate-900">
+                    <MessageSquare className="h-4 w-4 text-amber-600" />
+                    Komentar Siswa
+                  </div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    {studentCommentPreview.siswa}
+                    {studentCommentPreview.kelas ? ` • ${studentCommentPreview.kelas}` : ''}
+                    {studentCommentPreview.waktu ? ` • ${formatDateTime(studentCommentPreview.waktu)}` : ''}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setStudentCommentPreview(null)}
+                  className="rounded-xl p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                  aria-label="Tutup komentar"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="px-5 py-4">
+                <div className="whitespace-pre-wrap rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm leading-relaxed text-slate-800">
+                  {studentCommentPreview.komentar}
+                </div>
+              </div>
+              <div className="flex justify-end border-t border-slate-100 px-5 py-4">
+                <button
+                  type="button"
+                  onClick={() => setStudentCommentPreview(null)}
+                  className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800"
+                >
+                  Tutup
+                </button>
               </div>
             </div>
           </div>

@@ -1,5 +1,7 @@
 <?php
 
+use App\Models\Profile;
+use App\Models\User;
 use App\Services\Quiz\QuizScoringService;
 use App\Services\Rfid\MqttBridgeService;
 use App\Services\Rfid\RfidDeviceService;
@@ -7,11 +9,230 @@ use App\Services\Rfid\TenantMqttConfigService;
 use App\Services\WhatsApp\WhatsAppIntegrationService;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schedule;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
+use Illuminate\Validation\Rules\Password as PasswordRule;
 
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
+
+Artisan::command('super-admin:bootstrap {--force-password : Reset password user yang sudah ada}', function () {
+    $email = strtolower(trim((string) env('SUPER_ADMIN_BOOTSTRAP_EMAIL', '')));
+    if ($email === '') {
+        $emails = array_values(array_filter(array_map(
+            static fn ($item) => strtolower(trim((string) $item)),
+            (array) config('superadmin.emails', [])
+        )));
+        $email = (string) ($emails[0] ?? '');
+    }
+
+    if ($email === '') {
+        $this->warn('SUPER_ADMIN_EMAILS belum diisi; bootstrap super admin dilewati.');
+
+        return 0;
+    }
+
+    if (! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $this->error('Email bootstrap super admin tidak valid.');
+
+        return 1;
+    }
+
+    $password = (string) env('SUPER_ADMIN_BOOTSTRAP_PASSWORD', '');
+    $name = trim((string) env('SUPER_ADMIN_BOOTSTRAP_NAME', 'Super Admin'));
+    if ($name === '') {
+        $name = 'Super Admin';
+    }
+
+    $tenantSlug = strtolower(trim((string) env(
+        'SUPER_ADMIN_BOOTSTRAP_TENANT_SLUG',
+        (string) config('tenancy.default_slug', 'default')
+    )));
+    if ($tenantSlug === '') {
+        $tenantSlug = 'default';
+    }
+
+    $forcedId = trim((string) env('SUPER_ADMIN_BOOTSTRAP_ID', ''));
+    if ($forcedId === '') {
+        $ids = array_values(array_filter(array_map(
+            static fn ($item) => trim((string) $item),
+            (array) config('superadmin.ids', [])
+        )));
+        $forcedId = (string) ($ids[0] ?? '');
+    }
+    if ($forcedId !== '' && ! Str::isUuid($forcedId)) {
+        $this->error('SUPER_ADMIN_BOOTSTRAP_ID / SUPER_ADMIN_IDS harus berupa UUID valid.');
+
+        return 1;
+    }
+
+    $forcePassword = (bool) $this->option('force-password')
+        || filter_var(env('SUPER_ADMIN_BOOTSTRAP_FORCE', false), FILTER_VALIDATE_BOOL);
+
+    $tenant = DB::table('tenants')->where('slug', $tenantSlug)->first(['id', 'name', 'slug']);
+    if (! $tenant) {
+        $this->error("Tenant '{$tenantSlug}' tidak ditemukan. Jalankan migrasi terlebih dahulu.");
+
+        return 1;
+    }
+
+    $existingUser = null;
+    if ($forcedId !== '') {
+        $existingUser = User::query()->where('id', $forcedId)->first();
+    }
+    if (! $existingUser) {
+        $existingUser = User::query()->whereRaw('lower(email) = ?', [$email])->first();
+    }
+
+    $mustSetPassword = ! $existingUser || $forcePassword;
+    if ($mustSetPassword) {
+        if ($password === '') {
+            $this->error('SUPER_ADMIN_BOOTSTRAP_PASSWORD wajib diisi untuk membuat/reset user bootstrap.');
+
+            return 1;
+        }
+
+        $validator = Validator::make(
+            ['password' => $password],
+            ['password' => ['required', 'string', PasswordRule::defaults()]]
+        );
+        if ($validator->fails()) {
+            $this->error($validator->errors()->first());
+
+            return 1;
+        }
+    }
+
+    try {
+        DB::transaction(function () use ($email, $password, $name, $tenant, $forcedId, $existingUser, $forcePassword): void {
+            $now = now();
+            $user = $existingUser;
+
+            if (! $user) {
+                $user = User::query()->create([
+                    'id' => $forcedId !== '' ? $forcedId : (string) Str::uuid(),
+                    'name' => $name,
+                    'email' => $email,
+                    'password' => Hash::make($password),
+                    'email_verified_at' => $now,
+                ]);
+            } else {
+                $updates = [
+                    'name' => $name,
+                    'email' => $email,
+                    'email_verified_at' => $user->email_verified_at ?: $now,
+                    'updated_at' => $now,
+                ];
+                if ($forcePassword) {
+                    $updates['password'] = Hash::make($password);
+                }
+                $user->forceFill($updates)->save();
+            }
+
+            $profile = Profile::query()->where('id', $user->id)->first();
+            if ($profile && (string) $profile->tenant_id !== (string) $tenant->id) {
+                throw new RuntimeException('User bootstrap sudah terdaftar di tenant lain.');
+            }
+            if ($profile && strtolower((string) $profile->role) !== 'admin') {
+                throw new RuntimeException('User bootstrap sudah terdaftar sebagai non-admin.');
+            }
+
+            if (! $profile) {
+                Profile::query()->create([
+                    'id' => (string) $user->id,
+                    'tenant_id' => (string) $tenant->id,
+                    'email' => $email,
+                    'nama' => $name,
+                    'role' => 'admin',
+                    'status' => 'active',
+                    'must_change_password' => false,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ]);
+            } else {
+                $profile->fill([
+                    'email' => $email,
+                    'nama' => $name,
+                    'role' => 'admin',
+                    'status' => 'active',
+                    'must_change_password' => false,
+                    'updated_at' => $now,
+                ])->save();
+            }
+
+            $adminPayload = ['id' => (string) $user->id, 'created_at' => $now];
+            if (Schema::hasColumn('admin_users', 'tenant_id')) {
+                $adminPayload['tenant_id'] = (string) $tenant->id;
+            }
+            if (! DB::table('admin_users')->where('id', $user->id)->exists()) {
+                DB::table('admin_users')->insert($adminPayload);
+            } elseif (isset($adminPayload['tenant_id'])) {
+                DB::table('admin_users')->where('id', $user->id)->update([
+                    'tenant_id' => (string) $tenant->id,
+                ]);
+            }
+
+            $superAdmin = DB::table('super_admins')
+                ->where('user_id', $user->id)
+                ->orWhereRaw('lower(email) = ?', [$email])
+                ->first();
+            if (! $superAdmin) {
+                DB::table('super_admins')->insert([
+                    'id' => (string) Str::uuid(),
+                    'user_id' => (string) $user->id,
+                    'email' => $email,
+                    'name' => $name,
+                    'created_at' => $now,
+                ]);
+            } else {
+                DB::table('super_admins')->where('id', $superAdmin->id)->update([
+                    'user_id' => (string) $user->id,
+                    'email' => $email,
+                    'name' => $name,
+                ]);
+            }
+
+            if (Schema::hasTable('settings') && Schema::hasColumn('settings', 'tenant_id')) {
+                $settings = DB::table('settings')->where('tenant_id', $tenant->id)->orderBy('id')->first(['id']);
+                if (! $settings) {
+                    DB::table('settings')->insert([
+                        'tenant_id' => (string) $tenant->id,
+                        'nama_sekolah' => (string) ($tenant->name ?? 'EduSmart'),
+                        'email' => $email,
+                        'registrasi_siswa_aktif' => true,
+                        'registrasi_guru_aktif' => false,
+                        'registrasi_admin_aktif' => false,
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ]);
+                    $settings = DB::table('settings')->where('tenant_id', $tenant->id)->orderBy('id')->first(['id']);
+                }
+
+                if ($settings && Schema::hasColumn('settings', 'approval_primary_admin_id')) {
+                    DB::table('settings')->where('id', $settings->id)->update([
+                        'approval_primary_admin_id' => (string) $user->id,
+                        'updated_at' => $now,
+                    ]);
+                }
+            }
+        });
+    } catch (Throwable $e) {
+        $this->error('Bootstrap super admin gagal: '.$e->getMessage());
+
+        return 1;
+    }
+
+    $this->info('Super admin bootstrap siap.');
+    $this->line('Email  : '.$email);
+    $this->line('Tenant : '.$tenantSlug);
+
+    return 0;
+})->purpose('Bootstrap super admin utama dari env production tanpa membuka password di log');
 
 Schedule::call(function (QuizScoringService $scoringService) {
     $scoringService->finalizeExpiredSubmissions();

@@ -1,11 +1,12 @@
 // src/pages/siswa/EditProfile.jsx
 import React, { useState, useEffect, useRef } from 'react'
-import { supabase, PROFILE_BUCKET } from '../../lib/supabase'
+import { supabase, PROFILE_BUCKET, getSignedUrlForValue } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import GoogleCredentialButton from '../../components/GoogleCredentialButton'
 import PasswordInput from '../../components/PasswordInput'
 import VerificationCodeModal from '../../components/VerificationCodeModal'
+import UserThemeSettings from '../../components/UserThemeSettings'
 import {
   hasRealLoginEmail,
   isEmailFormat,
@@ -32,7 +33,7 @@ const isProbablyUrl = (value) => typeof value === 'string' && /^https?:\/\//i.te
 
 async function compressImageToMaxBytes(file, maxBytes = 100 * 1024) {
   if (!file) throw new Error('File tidak ada')
-  if (file.size <= maxBytes) return file
+  if (file.size <= maxBytes && /^image\/jpe?g$/i.test(file.type || '')) return file
 
   // Baca file ke DataURL
   const dataUrl = await new Promise((resolve, reject) => {
@@ -295,18 +296,15 @@ export default function EditProfile() {
 
   const getSignedUrlFromPath = async (objectKey) => {
     if (!objectKey) return ''
-    const { data, error } = await supabase.storage
-      .from(PROFILE_BUCKET)
-      .createSignedUrl(objectKey, SIGNED_URL_EXPIRES_IN)
-
-    if (error) throw error
-    return data?.signedUrl ? addCacheBuster(data.signedUrl) : ''
+    const signedUrl = await getSignedUrlForValue(PROFILE_BUCKET, objectKey, SIGNED_URL_EXPIRES_IN)
+    return signedUrl ? addCacheBuster(signedUrl) : ''
   }
 
   // Update DB: simpan PATH saja (anti IDOR dibantu policy + trigger)
   const updateProfilePhotoPathInDb = async (uid, objectKeyOrNull) => {
     const payload = {
       photo_path: objectKeyOrNull,
+      photo_url: objectKeyOrNull,
       updated_at: new Date().toISOString()
     }
 
@@ -1142,6 +1140,8 @@ export default function EditProfile() {
                 </div>
               </div>
             </div>
+
+            <UserThemeSettings />
 
             {/* VERIFICATION */}
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-5">

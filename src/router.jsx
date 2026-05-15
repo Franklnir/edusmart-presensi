@@ -26,6 +26,9 @@ const GQuiz = lazyRoute('/guru/quiz')
 
 const AHome = lazyRoute('/admin/home')
 const AKelas = lazyRoute('/admin/kelas')
+const AJadwal = lazyRoute('/admin/jadwal')
+const AStrukturSekolah = lazyRoute('/admin/struktur-sekolah')
+const AOrganisasi = lazyRoute('/admin/organisasi')
 const AGuru = lazyRoute('/admin/guru')
 const ASiswa = lazyRoute('/admin/siswa')
 const AScan = lazyRoute('/admin/scan')
@@ -109,6 +112,9 @@ const AppRoutes = () => (
       <Route element={<AdminLockGate />}>
         <Route path="/admin/home" element={lazyElement(AHome)} />
         <Route path="/admin/kelas" element={lazyElement(AKelas)} />
+        <Route path="/admin/jadwal" element={lazyElement(AJadwal)} />
+        <Route path="/admin/struktur-sekolah" element={lazyElement(AStrukturSekolah)} />
+        <Route path="/admin/organisasi" element={lazyElement(AOrganisasi)} />
         <Route path="/admin/guru" element={lazyElement(AGuru)} />
         <Route path="/admin/siswa" element={lazyElement(ASiswa)} />
         <Route path="/admin/scan" element={lazyElement(AScan)} />

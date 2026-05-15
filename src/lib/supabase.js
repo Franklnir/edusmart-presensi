@@ -6,12 +6,23 @@ const getRuntimeHostname = () => {
   return window.location?.hostname || 'localhost'
 }
 
-const ADMIN_SUBDOMAIN = String(import.meta.env.VITE_ADMIN_SUBDOMAIN || 'admin')
+const ADMIN_SUBDOMAIN = String(import.meta.env.VITE_ADMIN_SUBDOMAIN || 'admin26')
   .trim()
   .toLowerCase()
 const ROOT_DOMAIN = String(import.meta.env.VITE_ROOT_DOMAIN || '')
   .trim()
   .toLowerCase()
+
+const isLocalApiHost = (host) => {
+  const normalized = String(host || '').toLowerCase()
+  return (
+    normalized === 'localhost' ||
+    normalized === '127.0.0.1' ||
+    normalized === '127.0.0.1.nip.io' ||
+    normalized.endsWith('.localhost') ||
+    normalized.endsWith('.127.0.0.1.nip.io')
+  )
+}
 
 const deriveApiHost = (host) => {
   const normalized = String(host || '').toLowerCase()
@@ -32,6 +43,11 @@ const deriveTenantSlug = (host) => {
     if (!first || first === 'www' || first === ADMIN_SUBDOMAIN) return ''
     return first
   }
+  if (normalized.endsWith('.127.0.0.1.nip.io')) {
+    const first = normalized.split('.')[0]
+    if (!first || first === 'www' || first === ADMIN_SUBDOMAIN) return ''
+    return first
+  }
   return ''
 }
 
@@ -46,10 +62,7 @@ const isWithinRootDomain = (host, rootDomain) => {
 
 const normalizeApiUrl = (rawApiUrl, runtimeHost) => {
   const runtime = String(runtimeHost || '').toLowerCase()
-  const runtimeIsLocal =
-    runtime === 'localhost' ||
-    runtime === '127.0.0.1' ||
-    runtime.endsWith('.localhost')
+  const runtimeIsLocal = isLocalApiHost(runtime)
   const runtimeProtocol =
     typeof window !== 'undefined' && window.location?.protocol
       ? window.location.protocol
@@ -64,10 +77,7 @@ const normalizeApiUrl = (rawApiUrl, runtimeHost) => {
     const url = new URL(input)
     const apiHost = String(url.hostname || '').toLowerCase()
 
-    const apiIsLocal =
-      apiHost === 'localhost' ||
-      apiHost === '127.0.0.1' ||
-      apiHost.endsWith('.localhost')
+    const apiIsLocal = isLocalApiHost(apiHost)
 
     // Keep frontend and API on the same local host to avoid CSRF cookie mismatch.
     if (runtimeIsLocal && apiIsLocal && runtime && runtime !== apiHost) {
@@ -106,14 +116,8 @@ const normalizeAuthEndpointUrl = (rawUrl, fallbackPath) => {
     const runtime = String(RUNTIME_HOST || '').toLowerCase()
     const targetHost = String(url.hostname || '').toLowerCase()
 
-    const runtimeIsLocal =
-      runtime === 'localhost' ||
-      runtime === '127.0.0.1' ||
-      runtime.endsWith('.localhost')
-    const targetIsLocal =
-      targetHost === 'localhost' ||
-      targetHost === '127.0.0.1' ||
-      targetHost.endsWith('.localhost')
+    const runtimeIsLocal = isLocalApiHost(runtime)
+    const targetIsLocal = isLocalApiHost(targetHost)
 
     if (runtimeIsLocal && targetIsLocal && runtime && runtime !== targetHost) {
       url.hostname = runtime
@@ -145,6 +149,15 @@ const SESSION_EXPIRED_MESSAGE =
   'Sesi login Anda telah berakhir. Silakan masuk lagi untuk melanjutkan.'
 let lastSessionExpiredNotifiedAt = 0
 const pendingApiRequests = new Map()
+const staleRequestControllers = new Map()
+const apiResponseCache = new Map()
+const PERSISTED_API_CACHE_PREFIX = 'edusmart_api_cache:'
+const PERSISTED_API_CACHE_INDEX_KEY = 'edusmart_api_cache:index'
+const MAX_PERSISTED_API_CACHE_ENTRIES = 80
+const DEFAULT_DB_SELECT_CACHE_TTL_MS = Number(
+  import.meta.env.VITE_DB_SELECT_CACHE_TTL_MS || 1000 * 60 * 5
+)
+const MAX_API_RESPONSE_CACHE_ENTRIES = 250
 
 const isPlainObjectValue = (value) => (
   value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -175,7 +188,196 @@ const buildPendingRequestKey = (path, method, body, options = {}) => {
     return `${method}:${path}:${stableRequestStringify(body)}`
   }
 
+  if (method === 'POST' && path === '/api/db/batch') {
+    return `${method}:${path}:${stableRequestStringify(body)}`
+  }
+
   return ''
+}
+
+const cloneApiResult = (value) => {
+  if (typeof structuredClone === 'function') {
+    try {
+      return structuredClone(value)
+    } catch { }
+  }
+
+  try {
+    return JSON.parse(JSON.stringify(value))
+  } catch {
+    return value
+  }
+}
+
+const isCacheableApiRequest = (path, method, body, options = {}) => {
+  if (method === 'GET' || method === 'HEAD') {
+    return options.cache === true || [
+      '/api/admin/dashboard-summary',
+      '/api/admin/students',
+      '/api/admin/academic-summary',
+      '/api/admin/student-options',
+      '/api/admin/teachers',
+      '/api/admin/certificates',
+      '/api/admin/scan-session-summary',
+      '/api/reports/teacher-summary',
+      '/api/quiz/dashboard',
+      '/api/storage/signed'
+    ].some((prefix) => path.startsWith(prefix)) || /^\/api\/quiz\/[^/]+\/detail(?:\?|$)/.test(path)
+  }
+
+  return method === 'POST' && (
+    path === '/api/db/batch' ||
+    (options.cache === true && path === '/api/db' && body?.action === 'select')
+  )
+}
+
+const canPersistApiCache = (path, method) => {
+  if (method !== 'GET' && method !== 'HEAD') return false
+  return [
+    '/api/admin/dashboard-summary',
+    '/api/admin/students',
+    '/api/admin/academic-summary',
+    '/api/admin/student-options',
+    '/api/admin/teachers',
+    '/api/admin/certificates',
+    '/api/admin/scan-session-summary',
+    '/api/reports/teacher-summary',
+    '/api/quiz/dashboard',
+  ].some((prefix) => path.startsWith(prefix)) || /^\/api\/quiz\/[^/]+\/detail(?:\?|$)/.test(path)
+}
+
+const getApiCacheStorage = () => {
+  if (typeof window === 'undefined') return null
+  try {
+    return window.sessionStorage
+  } catch {
+    return null
+  }
+}
+
+const persistedCacheKey = (key) => `${PERSISTED_API_CACHE_PREFIX}${key}`
+
+const readPersistedCacheIndex = (storage) => {
+  try {
+    const parsed = JSON.parse(storage.getItem(PERSISTED_API_CACHE_INDEX_KEY) || '[]')
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+const writePersistedCacheIndex = (storage, entries) => {
+  try {
+    storage.setItem(PERSISTED_API_CACHE_INDEX_KEY, JSON.stringify(entries.slice(-MAX_PERSISTED_API_CACHE_ENTRIES)))
+  } catch { }
+}
+
+const getPersistedApiResponse = (key) => {
+  const storage = getApiCacheStorage()
+  if (!storage || !key) return null
+
+  const storageKey = persistedCacheKey(key)
+  try {
+    const entry = JSON.parse(storage.getItem(storageKey) || 'null')
+    if (!entry || entry.expiresAt <= Date.now()) {
+      storage.removeItem(storageKey)
+      return null
+    }
+
+    return cloneApiResult(entry.value)
+  } catch {
+    storage.removeItem(storageKey)
+    return null
+  }
+}
+
+const setPersistedApiResponse = (key, value, ttlMs) => {
+  const storage = getApiCacheStorage()
+  if (!storage || !key || !Number.isFinite(ttlMs) || ttlMs <= 0) return
+
+  const storageKey = persistedCacheKey(key)
+  try {
+    storage.setItem(storageKey, JSON.stringify({
+      expiresAt: Date.now() + ttlMs,
+      value: cloneApiResult(value)
+    }))
+
+    const nextIndex = readPersistedCacheIndex(storage).filter((item) => item !== storageKey)
+    nextIndex.push(storageKey)
+    while (nextIndex.length > MAX_PERSISTED_API_CACHE_ENTRIES) {
+      const oldest = nextIndex.shift()
+      if (oldest) storage.removeItem(oldest)
+    }
+    writePersistedCacheIndex(storage, nextIndex)
+  } catch { }
+}
+
+const clearPersistedApiCache = (matcher = null) => {
+  const storage = getApiCacheStorage()
+  if (!storage) return
+  const index = readPersistedCacheIndex(storage)
+  const keep = []
+
+  for (const key of index) {
+    const shouldDelete = typeof matcher === 'function' ? matcher(key) : true
+    if (shouldDelete) {
+      try { storage.removeItem(key) } catch { }
+    } else {
+      keep.push(key)
+    }
+  }
+
+  writePersistedCacheIndex(storage, keep)
+}
+
+const getCachedApiResponse = (key) => {
+  const entry = apiResponseCache.get(key)
+  if (!entry) return null
+  if (entry.expiresAt <= Date.now()) {
+    apiResponseCache.delete(key)
+    return null
+  }
+  return cloneApiResult(entry.value)
+}
+
+const setCachedApiResponse = (key, value, ttlMs) => {
+  if (!key || !Number.isFinite(ttlMs) || ttlMs <= 0) return
+  if (apiResponseCache.size >= MAX_API_RESPONSE_CACHE_ENTRIES) {
+    const oldestKey = apiResponseCache.keys().next().value
+    if (oldestKey) apiResponseCache.delete(oldestKey)
+  }
+  apiResponseCache.set(key, {
+    expiresAt: Date.now() + ttlMs,
+    value: cloneApiResult(value)
+  })
+}
+
+const invalidateDbSelectCache = (table = '') => {
+  const normalizedTable = String(table || '').trim()
+  if (!normalizedTable) {
+    apiResponseCache.clear()
+    clearPersistedApiCache()
+    return
+  }
+
+  const tableNeedle = `"table":${JSON.stringify(normalizedTable)}`
+  for (const key of Array.from(apiResponseCache.keys())) {
+    if (
+      key.includes(tableNeedle) ||
+      key.includes('/api/admin/') ||
+      key.includes('/api/reports/') ||
+      key.includes('/api/quiz/')
+    ) {
+      apiResponseCache.delete(key)
+    }
+  }
+
+  clearPersistedApiCache((key) => (
+    key.includes(tableNeedle) ||
+    key.includes('/api/admin/') ||
+    key.includes('/api/reports/') ||
+    key.includes('/api/quiz/')
+  ))
 }
 
 const getSessionStorage = () => {
@@ -285,7 +487,7 @@ export const CERT_BUCKET = 'certificates'
 export const CERT_TEMPLATE_BUCKET = 'certificate-templates'
 
 const PROFILE_IMAGE_MAX_BYTES = 50 * 1024
-const ASSIGNMENT_IMAGE_MAX_BYTES = 150 * 1024
+const ASSIGNMENT_IMAGE_MAX_BYTES = 680 * 1024
 const QUIZ_MEDIA_IMAGE_MAX_BYTES = 70 * 1024
 const KNOWN_IMAGE_EXTENSIONS = [
   'jpg',
@@ -343,6 +545,12 @@ const makeError = (message, status, code) => ({
   status,
   code
 })
+
+const isAbortError = (error) => (
+  error?.name === 'AbortError' ||
+  error?.code === 20 ||
+  /aborted|abort/i.test(String(error?.message || ''))
+)
 
 const isSessionExpiredStatus = (status) => status === 401 || status === 419
 
@@ -504,6 +712,7 @@ const runApiFetch = async (path, options = {}) => {
   const method = (options.method || 'GET').toUpperCase()
   const body = options.body
   const isForm = typeof FormData !== 'undefined' && body instanceof FormData
+  const signal = options.signal
 
   if (method !== 'GET' && method !== 'HEAD') {
     try {
@@ -544,14 +753,24 @@ const runApiFetch = async (path, options = {}) => {
       method,
       credentials: 'include',
       headers: requestHeaders,
-      body: finalBody
+      body: finalBody,
+      signal
     })
   }
 
   let res
   try {
     res = await runFetch(headers)
-  } catch {
+  } catch (error) {
+    if (isAbortError(error)) {
+      return {
+        data: null,
+        error: makeError('Request dibatalkan', 0, 'REQUEST_ABORTED'),
+        raw: null,
+        aborted: true
+      }
+    }
+
     return {
       data: null,
       error: makeError(
@@ -575,7 +794,16 @@ const runApiFetch = async (path, options = {}) => {
         delete retryHeaders['X-XSRF-TOKEN']
       }
       res = await runFetch(retryHeaders)
-    } catch {
+    } catch (error) {
+      if (isAbortError(error)) {
+        return {
+          data: null,
+          error: makeError('Request dibatalkan', 0, 'REQUEST_ABORTED'),
+          raw: null,
+          aborted: true
+        }
+      }
+
       return {
         data: null,
         error: makeError(
@@ -622,23 +850,122 @@ const runApiFetch = async (path, options = {}) => {
   }
 }
 
+const createAbortableOptions = (path, method, options = {}) => {
+  const canAbort = typeof AbortController !== 'undefined'
+  const staleKey = options.staleKey ? String(options.staleKey) : ''
+  const timeoutMs = Number(options.timeoutMs || 0)
+  const needsController = canAbort && (staleKey || timeoutMs > 0 || options.signal)
+
+  if (!needsController) {
+    return {
+      options,
+      cleanup: () => {}
+    }
+  }
+
+  const controller = new AbortController()
+  let timeoutId = null
+  const externalSignal = options.signal
+
+  if (staleKey) {
+    const previous = staleRequestControllers.get(staleKey)
+    if (previous && !previous.signal.aborted) {
+      previous.abort()
+    }
+    staleRequestControllers.set(staleKey, controller)
+  }
+
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      controller.abort()
+    } else {
+      externalSignal.addEventListener('abort', () => controller.abort(), { once: true })
+    }
+  }
+
+  if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+    timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+  }
+
+  return {
+    options: {
+      ...options,
+      signal: controller.signal
+    },
+    cleanup: () => {
+      if (timeoutId) clearTimeout(timeoutId)
+      if (staleKey && staleRequestControllers.get(staleKey) === controller) {
+        staleRequestControllers.delete(staleKey)
+      }
+    }
+  }
+}
+
 export const apiFetch = async (path, options = {}) => {
   const method = (options.method || 'GET').toUpperCase()
   const dedupeKey = buildPendingRequestKey(path, method, options.body, options)
+  const cacheTtlMs = options.cacheTtlMs === undefined
+    ? DEFAULT_DB_SELECT_CACHE_TTL_MS
+    : Number(options.cacheTtlMs)
+  const canUseCache =
+    dedupeKey &&
+    Number.isFinite(cacheTtlMs) &&
+    cacheTtlMs > 0 &&
+    isCacheableApiRequest(path, method, options.body, options)
+
+  if (canUseCache) {
+    const cached = getCachedApiResponse(dedupeKey)
+    if (cached) return cached
+    if (canPersistApiCache(path, method)) {
+      const persisted = getPersistedApiResponse(dedupeKey)
+      if (persisted) {
+        setCachedApiResponse(dedupeKey, persisted, cacheTtlMs)
+        return persisted
+      }
+    }
+  }
 
   if (!dedupeKey) {
-    return runApiFetch(path, options)
+    const abortable = createAbortableOptions(path, method, options)
+    return runApiFetch(path, abortable.options).finally(abortable.cleanup)
   }
 
   const pending = pendingApiRequests.get(dedupeKey)
   if (pending) return pending
 
-  const request = runApiFetch(path, options).finally(() => {
-    pendingApiRequests.delete(dedupeKey)
-  })
+  const abortable = createAbortableOptions(path, method, options)
+  const request = runApiFetch(path, abortable.options)
+    .then((result) => {
+      const hasBatchErrors = Object.keys(result?.raw?.errors || {}).length > 0
+      if (canUseCache && !result?.error && !hasBatchErrors) {
+        setCachedApiResponse(dedupeKey, result, cacheTtlMs)
+        if (canPersistApiCache(path, method) && options.persistCache !== false) {
+          setPersistedApiResponse(dedupeKey, result, cacheTtlMs)
+        }
+      }
+      return result
+    })
+    .finally(() => {
+      abortable.cleanup()
+      pendingApiRequests.delete(dedupeKey)
+    })
   pendingApiRequests.set(dedupeKey, request)
 
   return request
+}
+
+const buildQueryString = (params = {}) => {
+  const query = new URLSearchParams()
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === '') return
+    if (Array.isArray(value)) {
+      const filtered = value.map((item) => String(item ?? '').trim()).filter(Boolean)
+      if (filtered.length) query.set(String(key), filtered.join(','))
+      return
+    }
+    query.set(String(key), String(value))
+  })
+  return query.toString() ? `?${query.toString()}` : ''
 }
 
 const parseDownloadFilename = (contentDisposition = '', fallback = 'download.bin') => {
@@ -782,6 +1109,20 @@ class QueryBuilder {
     return this
   }
 
+  match(values = {}) {
+    if (!values || typeof values !== 'object' || Array.isArray(values)) {
+      return this
+    }
+
+    Object.entries(values).forEach(([field, value]) => {
+      if (value !== undefined) {
+        this.filters.eq[field] = value
+      }
+    })
+
+    return this
+  }
+
   neq(field, value) {
     this.filters.neq[field] = value
     return this
@@ -851,8 +1192,8 @@ class QueryBuilder {
     return this
   }
 
-  async execute() {
-    const body = {
+  toRequestBody() {
+    return {
       table: this.table,
       action: this.action,
       columns: this.columns,
@@ -865,8 +1206,9 @@ class QueryBuilder {
       count: this.options?.count || null,
       head: this.options?.head || false
     }
+  }
 
-    const res = await apiFetch('/api/db', { method: 'POST', body })
+  formatResponse(res) {
     const count = res.raw?.count ?? null
 
     if (res.error) {
@@ -889,6 +1231,7 @@ class QueryBuilder {
     }
 
     if (this.action !== 'select') {
+      invalidateDbSelectCache(this.table)
       pulseRealtimeForMutation(this.table)
     }
 
@@ -908,12 +1251,96 @@ class QueryBuilder {
     return { data, error: null, count }
   }
 
+  async execute() {
+    const res = await apiFetch('/api/db', { method: 'POST', body: this.toRequestBody() })
+    return this.formatResponse(res)
+  }
+
   then(resolve, reject) {
     return this.execute().then(resolve, reject)
   }
 }
 
+const dbBatch = async (items = []) => {
+  const normalizedItems = (Array.isArray(items) ? items : [])
+    .map((item, index) => {
+      const query = item?.query || item?.builder
+      const key = String(item?.key ?? index)
+      return { key, query }
+    })
+    .filter(({ query }) => query instanceof QueryBuilder)
+
+  if (normalizedItems.length === 0) {
+    return { data: {}, error: null, errors: {} }
+  }
+
+  const body = {
+    requests: normalizedItems.map(({ key, query }) => ({
+      key,
+      ...query.toRequestBody()
+    }))
+  }
+
+  const res = await apiFetch('/api/db/batch', { method: 'POST', body })
+  if (res.error) {
+    return { data: null, error: res.error, errors: {} }
+  }
+
+  const rawData = res.raw?.data ?? res.data ?? {}
+  const rawErrors = res.raw?.errors || {}
+  const data = {}
+
+  normalizedItems.forEach(({ key, query }) => {
+    const item = rawData?.[key]
+    if (!item) {
+      const batchError = rawErrors?.[key]
+      data[key] = {
+        data: null,
+        count: null,
+        error: batchError
+          ? makeError(batchError.message || 'Request batch gagal', batchError.status || 500, batchError.code)
+          : makeError('Response batch tidak lengkap', 502, 'BATCH_RESPONSE_MISSING')
+      }
+      return
+    }
+
+    data[key] = query.formatResponse({
+      data: item.data,
+      error: null,
+      raw: item
+    })
+  })
+
+  const hasErrors = Object.keys(rawErrors).length > 0
+  return {
+    data,
+    error: hasErrors ? makeError('Sebagian request batch gagal', 207, 'BATCH_PARTIAL_ERROR') : null,
+    errors: rawErrors
+  }
+}
+
 /* ===================== STORAGE ===================== */
+const signedUrlCache = new Map()
+const signedUrlCacheKey = (bucket, path) => `${bucket}:${String(path || '').replace(/\\/g, '/')}`
+const getCachedSignedUrl = (bucket, path) => {
+  const cached = signedUrlCache.get(signedUrlCacheKey(bucket, path))
+  if (!cached || cached.expiresAt <= Date.now() + 30 * 1000) {
+    signedUrlCache.delete(signedUrlCacheKey(bucket, path))
+    return null
+  }
+  return cached.data
+}
+const setCachedSignedUrl = (bucket, path, data, expiresInSec) => {
+  const ttlMs = Math.max(30 * 1000, (Number(expiresInSec) || 900) * 1000 - 30 * 1000)
+  signedUrlCache.set(signedUrlCacheKey(bucket, path), {
+    data,
+    expiresAt: Date.now() + ttlMs
+  })
+}
+const invalidateSignedUrlCache = (bucket, path) => {
+  signedUrlCache.delete(signedUrlCacheKey(bucket, path))
+}
+
 class StorageBucket {
   constructor(bucket) {
     this.bucket = bucket
@@ -952,6 +1379,7 @@ class StorageBucket {
     const baseData = rawData && typeof rawData === 'object' ? { ...rawData } : { value: rawData }
 
     if (!res.error) {
+      invalidateSignedUrlCache(this.bucket, path)
       const originalSize = Number(file?.size || 0)
       const uploadedSize = Number(baseData.uploadedSizeBytes || uploadFile?.size || 0)
       baseData.originalSizeBytes = originalSize
@@ -969,6 +1397,14 @@ class StorageBucket {
 
   async remove(paths) {
     const list = (Array.isArray(paths) ? paths : [paths]).map((item) => {
+      const raw = String(item || '').trim()
+      const normalizedRaw = raw.replace(/\\/g, '/').replace(/^\/+/, '')
+      if (
+        this.bucket === QUIZ_MEDIA_BUCKET &&
+        (normalizedRaw.startsWith(`${QUIZ_MEDIA_BUCKET}/`) || /^https?:\/\/(?:drive|docs)\.google\.com\//i.test(raw))
+      ) {
+        return raw
+      }
       const parsed = extractObjectPath(this.bucket, item)
       return parsed || item
     })
@@ -976,16 +1412,28 @@ class StorageBucket {
       method: 'POST',
       body: { bucket: this.bucket, paths: list }
     })
+    if (!res.error) {
+      list.forEach((path) => invalidateSignedUrlCache(this.bucket, path))
+    }
     return { data: res.raw?.data ?? res.data, error: res.error }
   }
 
   async createSignedUrl(path, expiresInSec = 900) {
     const normalized = extractObjectPath(this.bucket, path) || path
+    const cached = getCachedSignedUrl(this.bucket, normalized)
+    if (cached) return { data: cached, error: null }
+
     const res = await apiFetch(
       `/api/storage/signed?bucket=${encodeURIComponent(this.bucket)}&path=${encodeURIComponent(normalized)}&expires=${expiresInSec}`,
       { method: 'GET' }
     )
-    return { data: res.raw?.data ?? res.data, error: res.error }
+    const data = res.raw?.data ?? res.data
+    if (data?.signedUrl) {
+      const resolvedData = { ...data, signedUrl: resolveApiAssetUrl(data.signedUrl) }
+      setCachedSignedUrl(this.bucket, normalized, resolvedData, expiresInSec)
+      return { data: resolvedData, error: res.error }
+    }
+    return { data, error: res.error }
   }
 
   getPublicUrl(path) {
@@ -1196,8 +1644,10 @@ const auth = {
 
     if (res.error) return { data: null, error: res.error }
 
-    const user = normalizeUser(res.raw?.data?.user, res.raw?.data?.profile)
-    return { data: { user, session: user ? { user } : null }, error: null }
+    invalidateDbSelectCache()
+    const profile = res.raw?.data?.profile || null
+    const user = normalizeUser(res.raw?.data?.user, profile)
+    return { data: { user, profile, session: user ? { user } : null }, error: null }
   },
 
   async signInWithGoogle(options = {}) {
@@ -1240,6 +1690,7 @@ const auth = {
 
     if (res.error) return { data: null, error: res.error }
 
+    invalidateDbSelectCache()
     const user = normalizeUser(res.raw?.data?.user, res.raw?.data?.profile)
 
     return {
@@ -1260,6 +1711,7 @@ const auth = {
 
     if (res.error) return { data: null, error: res.error }
 
+    invalidateDbSelectCache()
     const user = normalizeUser(res.raw?.data?.user, res.raw?.data?.profile)
 
     return {
@@ -1350,6 +1802,7 @@ const auth = {
 
   async signOut() {
     const res = await apiFetch('/api/auth/logout', { method: 'POST' })
+    invalidateDbSelectCache()
     return { error: res.error }
   },
 
@@ -1486,10 +1939,20 @@ const auth = {
         method: 'POST',
         body: payload
       })
+      if (!res.error) invalidateDbSelectCache()
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
     async deleteUser(userId) {
       const res = await apiFetch(`/api/admin/users/${userId}`, { method: 'DELETE' })
+      if (!res.error) invalidateDbSelectCache()
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async updateUserStatus(userId, payload = {}) {
+      const res = await apiFetch(`/api/admin/users/${userId}/status`, {
+        method: 'PATCH',
+        body: payload
+      })
+      if (!res.error) invalidateDbSelectCache()
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
     async updateTeacherName(userId, nama) {
@@ -1497,20 +1960,108 @@ const auth = {
         method: 'PATCH',
         body: { nama }
       })
+      if (!res.error) invalidateDbSelectCache()
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async dashboardSummary() {
+      const res = await apiFetch('/api/admin/dashboard-summary', {
+        method: 'GET',
+        cacheTtlMs: 60 * 1000,
+        staleKey: 'admin.dashboard-summary',
+        timeoutMs: 15000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async students(params = {}) {
+      const res = await apiFetch(`/api/admin/students${buildQueryString(params)}`, {
+        method: 'GET',
+        cacheTtlMs: 10 * 1000,
+        staleKey: 'admin.students',
+        timeoutMs: 15000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async studentDetail(studentId) {
+      const id = encodeURIComponent(String(studentId || ''))
+      const res = await apiFetch(`/api/admin/students/${id}`, {
+        method: 'GET',
+        cacheTtlMs: 10 * 1000,
+        staleKey: `admin.student-detail.${id}`,
+        timeoutMs: 12000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async academicSummary(params = {}) {
+      const res = await apiFetch(`/api/admin/academic-summary${buildQueryString(params)}`, {
+        method: 'GET',
+        cacheTtlMs: 15 * 1000,
+        staleKey: 'admin.academic-summary',
+        timeoutMs: 15000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async studentOptions(params = {}) {
+      const res = await apiFetch(`/api/admin/student-options${buildQueryString(params)}`, {
+        method: 'GET',
+        cacheTtlMs: 20 * 1000,
+        staleKey: `admin.student-options.${params?.kelas || 'all'}`,
+        timeoutMs: 12000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async teachers(params = {}) {
+      const res = await apiFetch(`/api/admin/teachers${buildQueryString(params)}`, {
+        method: 'GET',
+        cacheTtlMs: 10 * 1000,
+        staleKey: 'admin.teachers',
+        timeoutMs: 15000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async certificates(params = {}) {
+      const res = await apiFetch(`/api/admin/certificates${buildQueryString(params)}`, {
+        method: 'GET',
+        cacheTtlMs: 30 * 1000,
+        staleKey: 'admin.certificates',
+        timeoutMs: 15000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async scanSessionSummary(params = {}) {
+      const res = await apiFetch(`/api/admin/scan-session-summary${buildQueryString(params)}`, {
+        method: 'GET',
+        cacheTtlMs: 10 * 1000,
+        staleKey: 'admin.scan-session-summary',
+        timeoutMs: 12000
+      })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
     async backup(options = {}) {
       const params = new URLSearchParams()
       const mode = String(options?.mode || '').trim()
+      const periodType = String(options?.periodType || options?.period_type || '').trim()
+      const tahunAjaran = String(options?.tahunAjaran || options?.tahun_ajaran || '').trim()
+      const semester = String(options?.semester || '').trim()
+      const startDate = String(options?.startDate || options?.start_date || '').trim()
+      const endDate = String(options?.endDate || options?.end_date || '').trim()
       const monthsRaw = options?.months
 
       if (mode) {
         params.set('mode', mode)
       }
 
+      if (periodType) {
+        params.set('period_type', periodType)
+      }
+
       if (Number.isFinite(Number(monthsRaw)) && Number(monthsRaw) > 0) {
         params.set('months', String(Math.max(1, Math.min(12, Math.trunc(Number(monthsRaw))))))
       }
+
+      if (tahunAjaran) params.set('tahun_ajaran', tahunAjaran)
+      if (semester) params.set('semester', semester)
+      if (startDate) params.set('start_date', startDate)
+      if (endDate) params.set('end_date', endDate)
 
       const query = params.toString() ? `?${params.toString()}` : ''
       const res = await apiFetch(`/api/admin/backup${query}`, { method: 'GET' })
@@ -1518,6 +2069,17 @@ const auth = {
     },
     async monitoring() {
       const res = await apiFetch('/api/admin/monitoring', { method: 'GET' })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async scanSettings() {
+      const res = await apiFetch('/api/admin/scan-settings', { method: 'GET', cacheTtlMs: 0 })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async updateScanSettings(payload = {}) {
+      const res = await apiFetch('/api/admin/scan-settings', {
+        method: 'PATCH',
+        body: payload
+      })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
     async restoreBackup(payload) {
@@ -1581,8 +2143,24 @@ const auth = {
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
-    async googleDrive() {
-      const res = await apiFetch('/api/admin/google-drive', { method: 'GET' })
+    async googleDrive(params = {}) {
+      const query = new URLSearchParams()
+      Object.entries(params || {}).forEach(([key, value]) => {
+        if (value === undefined || value === null || value === '') return
+        query.set(String(key), String(value))
+      })
+      const suffix = query.toString() ? `?${query.toString()}` : ''
+      const res = await apiFetch(`/api/admin/google-drive${suffix}`, { method: 'GET' })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async googleDriveFiles(params = {}) {
+      const query = new URLSearchParams()
+      Object.entries(params || {}).forEach(([key, value]) => {
+        if (value === undefined || value === null || value === '') return
+        query.set(String(key), String(value))
+      })
+      const suffix = query.toString() ? `?${query.toString()}` : ''
+      const res = await apiFetch(`/api/admin/google-drive/files${suffix}`, { method: 'GET' })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
     async googleDriveConnectUrl(payload = {}) {
@@ -1592,8 +2170,14 @@ const auth = {
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
-    async syncGoogleDrive() {
-      const res = await apiFetch('/api/admin/google-drive/sync', {
+    async syncGoogleDrive(params = {}) {
+      const query = new URLSearchParams()
+      Object.entries(params || {}).forEach(([key, value]) => {
+        if (value === undefined || value === null || value === '') return
+        query.set(String(key), String(value))
+      })
+      const suffix = query.toString() ? `?${query.toString()}` : ''
+      const res = await apiFetch(`/api/admin/google-drive/sync${suffix}`, {
         method: 'POST',
         body: {}
       })
@@ -1763,6 +2347,25 @@ const auth = {
     }
   },
   quiz: {
+    async dashboard(params = {}) {
+      const res = await apiFetch(`/api/quiz/dashboard${buildQueryString(params)}`, {
+        method: 'GET',
+        cacheTtlMs: 0,
+        staleKey: `quiz.dashboard.${JSON.stringify(params || {})}`,
+        timeoutMs: 15000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async detail(quizId, params = {}) {
+      const id = encodeURIComponent(String(quizId || ''))
+      const res = await apiFetch(`/api/quiz/${id}/detail${buildQueryString(params)}`, {
+        method: 'GET',
+        cacheTtlMs: 0,
+        staleKey: `quiz.detail.${id}`,
+        timeoutMs: 15000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
     async start(payload) {
       const res = await apiFetch('/api/quiz/start', { method: 'POST', body: payload })
       return { data: res.raw?.data ?? res.data, error: res.error }
@@ -1777,6 +2380,10 @@ const auth = {
     },
     async logViolation(payload) {
       const res = await apiFetch('/api/quiz/violation', { method: 'POST', body: payload })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async schedule(payload) {
+      const res = await apiFetch('/api/quiz/schedule', { method: 'POST', body: payload })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
     async publish(payload) {
@@ -1811,6 +2418,18 @@ const auth = {
   }
 }
 
+const reports = {
+  async teacherSummary(params = {}) {
+    const res = await apiFetch(`/api/reports/teacher-summary${buildQueryString(params)}`, {
+      method: 'GET',
+      cacheTtlMs: 30 * 1000,
+      staleKey: `reports.teacher-summary.${params?.type || 'default'}`,
+      timeoutMs: 20000
+    })
+    return { data: res.raw?.data ?? res.data, error: res.error }
+  }
+}
+
 const attendanceQr = {
   async session(payload = {}) {
     const res = await apiFetch('/api/attendance-qr/session', {
@@ -1841,6 +2460,18 @@ const attendanceQr = {
 
 /* ===================== STORAGE HELPERS ===================== */
 const isHttpUrl = (v) => typeof v === 'string' && /^https?:\/\//i.test(v)
+
+const resolveApiAssetUrl = (value = '') => {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  if (isHttpUrl(raw) || raw.startsWith('data:') || raw.startsWith('blob:')) return raw
+
+  try {
+    return new URL(raw, `${API_URL}/`).toString()
+  } catch {
+    return raw
+  }
+}
 
 export const extractObjectPath = (bucket, urlOrPath) => {
   if (!urlOrPath || typeof urlOrPath !== 'string') return ''
@@ -1912,7 +2543,7 @@ export const createSignedUrl = async (bucket, objectPath, expiresInSec = 60 * 15
 
   if (error) throw error
   if (!data?.signedUrl) throw new Error('Signed URL tidak tersedia')
-  return data.signedUrl
+  return resolveApiAssetUrl(data.signedUrl)
 }
 
 export const getSignedUrlForValue = async (bucket, urlOrPath, expiresInSec = 60 * 15) => {
@@ -2198,7 +2829,8 @@ class RealtimePollingManager {
 
     const res = await apiFetch('/api/db', {
       method: 'POST',
-      body
+      body,
+      cacheTtlMs: 0
     })
 
     if (res.error) {
@@ -2348,10 +2980,13 @@ class RealtimeChannel {
 /* ===================== MAIN CLIENT ===================== */
 export const supabase = {
   from: (table) => new QueryBuilder(table),
+  batch: dbBatch,
+  invalidateCache: invalidateDbSelectCache,
   auth,
   admin: auth.admin,
   super: auth.super,
   quiz: auth.quiz,
+  reports,
   attendanceQr,
   students: {
     async updateAdditionalInfo(studentId, payload = {}) {

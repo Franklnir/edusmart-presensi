@@ -2,9 +2,15 @@
 import React, { useEffect, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import Navbar from './components/Navbar'
+import ConfirmDialog from './components/ConfirmDialog'
 import AppRoutes from './router'
 import { useAuthStore } from './store/useAuthStore'
 import { SESSION_EXPIRED_EVENT, supabase } from './lib/supabase'
+import {
+  DEFAULT_USER_THEME,
+  canUseUserTheme,
+  normalizeUserTheme
+} from './theme/userThemes'
 
 const AUTH_PATHS = ['/login', '/register', '/forgot-password', '/reset-password']
 const SESSION_REVALIDATE_INTERVAL_MS = 60 * 1000
@@ -19,13 +25,54 @@ const buildLoginRedirectPath = ({ reason = '', next = '' } = {}) => {
 const App = () => {
   const location = useLocation()
   const navigate = useNavigate()
-  const { user, initialized, init, expireSession } = useAuthStore()
+  const { user, profile, initialized, init, expireSession, isSuperAdmin } = useAuthStore()
   const deviceIdRef = useRef('')
   const lastPathRef = useRef('')
   const lastSessionRevalidateRef = useRef(0)
 
   const isAuthPage = AUTH_PATHS.some((p) => location.pathname.startsWith(p))
   const isQuizSessionPage = location.pathname.startsWith('/siswa/quiz/session/')
+  const role = profile?.role || ''
+  const canTrackPresence = Boolean(user?.id && profile?.id && !isSuperAdmin)
+  const canApplyUserTheme = canUseUserTheme(role)
+  const activeTheme = canApplyUserTheme
+    ? normalizeUserTheme(profile?.theme_preference)
+    : DEFAULT_USER_THEME
+  const appShellClassName = [
+    'app-shell',
+    canApplyUserTheme ? 'app-shell--user-themed' : '',
+    canApplyUserTheme ? `edu-theme--${activeTheme}` : ''
+  ]
+    .filter(Boolean)
+    .join(' ')
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+
+    const { documentElement, body } = document
+
+    documentElement.dataset.userTheme = activeTheme
+    documentElement.dataset.userRole = role || 'guest'
+    body.dataset.userTheme = activeTheme
+    body.dataset.userRole = role || 'guest'
+
+    if (canApplyUserTheme) {
+      documentElement.classList.add('app-theme-active')
+      body.classList.add('app-theme-active')
+    } else {
+      documentElement.classList.remove('app-theme-active')
+      body.classList.remove('app-theme-active')
+    }
+
+    return () => {
+      documentElement.classList.remove('app-theme-active')
+      body.classList.remove('app-theme-active')
+      delete documentElement.dataset.userTheme
+      delete documentElement.dataset.userRole
+      delete body.dataset.userTheme
+      delete body.dataset.userRole
+    }
+  }, [activeTheme, canApplyUserTheme, role])
 
   useEffect(() => {
     if (!initialized) {
@@ -84,7 +131,7 @@ const App = () => {
   }, [])
 
   useEffect(() => {
-    if (!user?.id) return
+    if (!canTrackPresence) return
     const deviceId = deviceIdRef.current
     if (!deviceId) return
 
@@ -107,17 +154,17 @@ const App = () => {
       stopped = true
       clearInterval(interval)
     }
-  }, [user?.id])
+  }, [canTrackPresence])
 
   useEffect(() => {
-    if (!user?.id) return
+    if (!canTrackPresence) return
     const deviceId = deviceIdRef.current
     if (!deviceId) return
     if (lastPathRef.current === location.pathname) return
     lastPathRef.current = location.pathname
 
     supabase.presence.ping({ deviceId, activity: true }).catch(() => { })
-  }, [location.pathname, user?.id])
+  }, [canTrackPresence, location.pathname])
 
   useEffect(() => {
     if (!user?.id) return undefined
@@ -149,27 +196,29 @@ const App = () => {
   // Layout untuk halaman auth (login, register, dll)
   if (isAuthPage || !user) {
     return (
-      <div className="min-h-screen bg-slate-50">
+      <div className={appShellClassName}>
         <main className="w-full min-h-screen">
           <AppRoutes />
         </main>
+        <ConfirmDialog />
       </div>
     )
   }
 
   if (isQuizSessionPage) {
     return (
-      <div className="min-h-screen bg-slate-100">
+      <div className={appShellClassName}>
         <main className="w-full min-h-screen">
           <AppRoutes />
         </main>
+        <ConfirmDialog />
       </div>
     )
   }
 
   // Layout setelah login (ada navbar)
   return (
-    <div className="h-screen bg-slate-50 overflow-hidden">
+    <div className={`${appShellClassName} h-screen overflow-hidden`}>
       <div className="flex h-full flex-col md:flex-row overflow-hidden">
         <Navbar />
         {/* pb-20 untuk mobile bottom nav, tidak mempengaruhi desktop */}
@@ -177,6 +226,7 @@ const App = () => {
           <AppRoutes />
         </main>
       </div>
+      <ConfirmDialog />
     </div>
   )
 }

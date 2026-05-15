@@ -1,11 +1,34 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import {
+  Building2,
+  CheckCircle2,
+  Database,
+  Filter,
+  Globe2,
+  HardDrive,
+  Loader2,
+  PlusCircle,
+  RefreshCw,
+  School,
+  Search,
+  ShieldCheck,
+  UserCog,
+  XCircle
+} from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import { formatDateTime } from '../../lib/time'
 import PasswordInput from '../../components/PasswordInput'
 import { loadExcelJsBrowser } from '../../utils/excelBrowser'
+import { validatePassword } from '../../utils/passwordPolicy'
+import { buildRestoreStatusToast } from '../../utils/restoreStatus'
 import rfidArduinoTemplateSource from '../../../docs/esp8266-rfid-mosquitto-tenant.ino?raw'
+
+const ADMIN_SUBDOMAIN = String(import.meta.env.VITE_ADMIN_SUBDOMAIN || 'admin26')
+  .trim()
+  .toLowerCase()
+const RESERVED_TENANT_SLUGS = new Set(['www', 'app', 'api', 'admin', ADMIN_SUBDOMAIN].filter(Boolean))
 
 const slugify = (value = '') =>
   value
@@ -16,6 +39,15 @@ const slugify = (value = '') =>
     .replace(/-+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 63)
+
+const isValidTenantSlug = (value = '') => {
+  const slug = String(value || '').trim()
+  return /^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])?$/.test(slug) && !slug.includes('--')
+}
+
+const isReservedTenantSlug = (value = '') => RESERVED_TENANT_SLUGS.has(String(value || '').trim().toLowerCase())
+
+const isValidEmail = (value = '') => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim())
 
 const getRootDomain = () => {
   const configured = import.meta.env.VITE_ROOT_DOMAIN
@@ -51,6 +83,15 @@ const BACKUP_PERIOD_OPTIONS = [
   { value: '6', label: '6 Bulan Terakhir' },
   { value: '12', label: '12 Bulan Terakhir' },
   { value: '24', label: '24 Bulan Terakhir' }
+]
+
+const TENANT_DETAIL_TABS = [
+  { value: 'overview', label: 'Ringkasan', icon: School },
+  { value: 'admins', label: 'Admin', icon: UserCog },
+  { value: 'domains', label: 'Domain', icon: Globe2 },
+  { value: 'backup', label: 'Backup & Restore', icon: Database },
+  { value: 'devices', label: 'RFID & MQTT', icon: ShieldCheck },
+  { value: 'storage', label: 'Storage', icon: HardDrive }
 ]
 
 const STANDARD_RFID_MQTT_TOPICS = {
@@ -375,6 +416,21 @@ const buildBackupFileName = (tenant = {}, mode = 'full') => {
   return `backup-${slug || 'tenant'}-${modeSafe || 'full'}-${stamp}.xlsx`
 }
 
+const summarizeBackupPayload = (payload) => {
+  const tables = Array.isArray(payload?.tables) ? payload.tables : []
+  const totalRows = tables.reduce((sum, table) => {
+    const rowCount = Number(table?.row_count)
+    if (Number.isFinite(rowCount)) return sum + rowCount
+    return sum + (Array.isArray(table?.rows) ? table.rows.length : 0)
+  }, 0)
+
+  return {
+    tables,
+    tableCount: Number(payload?.summary?.table_count || tables.length),
+    totalRows: Number(payload?.summary?.total_rows || totalRows)
+  }
+}
+
 const createWorkbookBufferFromBackupPayload = async (payload) => {
   const ExcelJS = await loadExcelJsBrowser()
   const workbook = new ExcelJS.Workbook()
@@ -470,10 +526,7 @@ const createWorkbookBufferFromBackupPayload = async (payload) => {
   return workbook.xlsx.writeBuffer()
 }
 
-const triggerExcelDownload = (buffer, filename) => {
-  const blob = new Blob([buffer], {
-    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-  })
+const triggerBlobDownload = (blob, filename) => {
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = url
@@ -482,6 +535,24 @@ const triggerExcelDownload = (buffer, filename) => {
   anchor.click()
   anchor.remove()
   URL.revokeObjectURL(url)
+}
+
+const triggerExcelDownload = (buffer, filename) => {
+  triggerBlobDownload(
+    new Blob([buffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    }),
+    filename
+  )
+}
+
+const triggerJsonDownload = (payload, filename) => {
+  triggerBlobDownload(
+    new Blob([JSON.stringify(payload, null, 2)], {
+      type: 'application/json;charset=utf-8'
+    }),
+    filename
+  )
 }
 
 const statCardsFrom = (stats = {}) => [
@@ -494,6 +565,46 @@ const statCardsFrom = (stats = {}) => [
   { key: 'online_users', label: 'Online (2 menit)', value: toNumber(stats.online_users) }
 ]
 
+const tenantFieldClass =
+  'h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100'
+
+const tenantMetricToneClass = {
+  blue: 'border-blue-200 bg-blue-50/70 text-blue-700',
+  emerald: 'border-emerald-200 bg-emerald-50/70 text-emerald-700',
+  amber: 'border-amber-200 bg-amber-50/70 text-amber-700',
+  indigo: 'border-indigo-200 bg-indigo-50/70 text-indigo-700',
+  slate: 'border-slate-200 bg-white text-slate-700'
+}
+
+function TenantMetricCard({ icon: Icon, label, value, description, tone = 'slate' }) {
+  return (
+    <div className={`rounded-2xl border p-4 shadow-sm ${tenantMetricToneClass[tone] || tenantMetricToneClass.slate}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+          <p className="mt-2 text-2xl font-bold text-slate-900">{value}</p>
+          {description && <p className="mt-1 text-xs text-slate-500">{description}</p>}
+        </div>
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white shadow-sm">
+          <Icon className="h-5 w-5" />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function TenantEmptyState({ title, description }) {
+  return (
+    <div className="px-5 py-12 text-center">
+      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
+        <School className="h-7 w-7" />
+      </div>
+      <p className="mt-4 text-sm font-bold text-slate-700">{title}</p>
+      <p className="mt-1 text-sm text-slate-500">{description}</p>
+    </div>
+  )
+}
+
 const Tenants = () => {
   const { isSuperAdmin, superAdminChecked } = useAuthStore()
   const { pushToast } = useUIStore()
@@ -504,6 +615,7 @@ const Tenants = () => {
   const [slugTouched, setSlugTouched] = useState(false)
 
   const [selectedTenantId, setSelectedTenantId] = useState('')
+  const [detailTab, setDetailTab] = useState('overview')
   const [tenantDetail, setTenantDetail] = useState(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailRefreshing, setDetailRefreshing] = useState(false)
@@ -551,9 +663,13 @@ const Tenants = () => {
     adminEmail: '',
     adminPassword: ''
   })
+  const [tenantSearch, setTenantSearch] = useState('')
+  const [tenantStatusFilter, setTenantStatusFilter] = useState('all')
+  const [tenantDriveFilter, setTenantDriveFilter] = useState('all')
 
   const rootDomain = useMemo(() => getRootDomain(), [])
-  const previewDomain = form.slug && rootDomain ? `${form.slug}.${rootDomain}` : ''
+  const platformRootDomain = platformDomains?.platform?.root_domain || rootDomain
+  const previewDomain = form.slug && platformRootDomain ? `${form.slug}.${platformRootDomain}` : ''
 
   const loadTenants = async () => {
     setLoading(true)
@@ -731,36 +847,64 @@ const Tenants = () => {
     e.preventDefault()
     if (saving) return
 
-    if (!form.name || !form.slug || !form.adminName || !form.adminEmail || !form.adminPassword) {
+    const schoolName = form.name.trim()
+    const tenantSlug = slugify(form.slug)
+    const adminName = form.adminName.trim()
+    const adminEmail = form.adminEmail.trim().toLowerCase()
+    const adminPassword = form.adminPassword
+
+    if (!schoolName || !tenantSlug || !adminName || !adminEmail || !adminPassword) {
       pushToast('error', 'Lengkapi semua field terlebih dahulu')
+      return
+    }
+    if (!isValidTenantSlug(tenantSlug)) {
+      pushToast('error', 'Subdomain hanya boleh huruf kecil, angka, dan tanda hubung. Panjang 3-63 karakter.')
+      return
+    }
+    if (isReservedTenantSlug(tenantSlug)) {
+      pushToast('error', `Subdomain ${tenantSlug} dipakai oleh platform dan tidak bisa digunakan sekolah.`)
+      return
+    }
+    if (!isValidEmail(adminEmail)) {
+      pushToast('error', 'Email admin sekolah tidak valid.')
+      return
+    }
+    const passwordCheck = validatePassword(adminPassword)
+    if (!passwordCheck.valid) {
+      pushToast('error', `Password admin sekolah belum sesuai: ${passwordCheck.errors.join(', ')}.`)
       return
     }
 
     setSaving(true)
     try {
       const payload = {
-        name: form.name.trim(),
-        slug: form.slug.trim(),
-        admin_name: form.adminName.trim(),
-        admin_email: form.adminEmail.trim(),
-        admin_password: form.adminPassword
+        name: schoolName,
+        slug: tenantSlug,
+        admin_name: adminName,
+        admin_email: adminEmail,
+        admin_password: adminPassword
       }
       const { data, error } = await supabase.super.createTenant(payload)
       if (error) throw error
 
-      pushToast('success', 'Sekolah berhasil dibuat')
+      pushToast('success', `${schoolName} berhasil dibuat di ${previewDomain || `${tenantSlug}.${platformRootDomain}` || tenantSlug}.`, {
+        title: 'Tenant sekolah aktif'
+      })
       resetForm()
       await loadTenants()
 
       const newTenantId = data?.tenant?.id
       if (newTenantId) {
         setSelectedTenantId(newTenantId)
+        setDetailTab('overview')
         setTemporaryPasswords({})
         await loadTenantDetail(newTenantId)
       }
 
       if (data?.admin?.email) {
-        pushToast('info', `Admin sekolah: ${data.admin.email}`)
+        pushToast('info', `Admin sekolah: ${data.admin.email}`, {
+          title: 'Akun admin dibuat'
+        })
       }
     } catch (err) {
       pushToast('error', err?.message || 'Gagal membuat sekolah')
@@ -772,6 +916,7 @@ const Tenants = () => {
   const handleSelectTenant = async (tenantId) => {
     if (!tenantId) return
     setSelectedTenantId(tenantId)
+    setDetailTab('overview')
     setTemporaryPasswords({})
     setPrimaryAdminSavingByUser({})
     resetTenantDomainForm()
@@ -1019,7 +1164,7 @@ const Tenants = () => {
     }
   }
 
-  const handleBackupTenant = async () => {
+  const handleBackupTenant = async (format = 'xlsx') => {
     const tenantId = tenantDetail?.tenant?.id || selectedTenantId
     if (!tenantId || backupLoading) return
 
@@ -1038,12 +1183,23 @@ const Tenants = () => {
         throw new Error('Data backup tenant tidak valid')
       }
 
-      const buffer = await createWorkbookBufferFromBackupPayload(data)
-      const filename = buildBackupFileName(data?.tenant, data?.mode || selectedMode)
-      triggerExcelDownload(buffer, filename)
+      const baseFilename = buildBackupFileName(data?.tenant, data?.mode || selectedMode)
+      const normalizedFormat = format === 'json' ? 'json' : 'xlsx'
+      const filename = normalizedFormat === 'json'
+        ? baseFilename.replace(/\.xlsx$/i, '.json')
+        : baseFilename
+
+      if (normalizedFormat === 'json') {
+        triggerJsonDownload(data, filename)
+      } else {
+        const buffer = await createWorkbookBufferFromBackupPayload(data)
+        triggerExcelDownload(buffer, filename)
+      }
+
       const modeLabel = data?.mode_label || getBackupModeLabel(data?.mode || selectedMode)
       const periodLabel = data?.period?.label ? ` (${data.period.label})` : ''
-      pushToast('success', `${modeLabel}${periodLabel} berhasil diunduh: ${filename}`)
+      const formatLabel = normalizedFormat === 'json' ? 'JSON siap restore' : 'Excel'
+      pushToast('success', `${modeLabel}${periodLabel} ${formatLabel} berhasil diunduh: ${filename}`)
     } catch (err) {
       pushToast('error', err?.message || 'Gagal membuat backup tenant')
     } finally {
@@ -1123,9 +1279,8 @@ const Tenants = () => {
       setRestorePayload(null)
       setRestoreFileName('')
       setRestorePreview(null)
-      pushToast('error', err?.message || 'Gagal membaca file backup JSON')
-    } finally {
       event.target.value = ''
+      pushToast('error', err?.message || 'Gagal membaca file backup JSON')
     }
   }
 
@@ -1142,8 +1297,10 @@ const Tenants = () => {
         include_tables: includeTables.length ? includeTables : undefined
       })
       if (error) throw error
-      setRestorePreview(data?.result || null)
-      pushToast('success', 'Dry-run restore selesai. Cek hasil preview sebelum apply.')
+      const result = data?.result || null
+      setRestorePreview(result)
+      const toast = buildRestoreStatusToast(result, { fallbackAction: 'Dry-run restore tenant' })
+      pushToast(toast.type, toast.message, { title: toast.title, duration: toast.duration })
     } catch (err) {
       pushToast('error', err?.message || 'Gagal menjalankan dry-run restore')
     } finally {
@@ -1156,7 +1313,7 @@ const Tenants = () => {
     if (!tenantId || !restorePayload || restoreApplying) return
 
     const confirmed = window.confirm(
-      'Jalankan restore nyata sekarang? Data tenant akan ditimpa sesuai payload backup.'
+      'Jalankan restore nyata sekarang? Sistem akan upsert data yang cocok dan melewati konflik tenant agar tidak ganda.'
     )
     if (!confirmed) return
 
@@ -1171,8 +1328,10 @@ const Tenants = () => {
       })
       if (error) throw error
 
-      setRestorePreview(data?.result || null)
-      pushToast('success', 'Restore selesai diterapkan ke tenant.')
+      const result = data?.result || null
+      setRestorePreview(result)
+      const toast = buildRestoreStatusToast(result, { fallbackAction: 'Restore tenant' })
+      pushToast(toast.type, toast.message, { title: toast.title, duration: toast.duration })
       await loadTenantDetail(tenantId, { silent: true, suppressToast: true })
     } catch (err) {
       pushToast('error', err?.message || 'Gagal apply restore tenant')
@@ -1381,7 +1540,8 @@ const Tenants = () => {
   const builtinTenantExample = rootDomain ? `${sampleTenantSlug}.${rootDomain}` : `${sampleTenantSlug}.example.com`
   const customTenantExample = isLocalRootDomain ? 'smabali.localhost' : 'portal.smabali.sch.id'
   const adminHostExample =
-    platformOverview.default_admin_host || (rootDomain ? `admin.${rootDomain}` : 'admin.example.com')
+    platformOverview.default_admin_host ||
+    (rootDomain ? `${ADMIN_SUBDOMAIN}.${rootDomain}` : `${ADMIN_SUBDOMAIN}.example.com`)
   const onboardingSteps = [
     'Saat sekolah baru berlangganan, buat tenant dulu dengan nama sekolah, slug unik, dan akun admin sekolah.',
     `Tenant langsung aktif di subdomain bawaan seperti ${builtinTenantExample}. Ini paling cepat untuk go-live.`,
@@ -1417,80 +1577,210 @@ const Tenants = () => {
   )
   const selectedTenantRow = tenants.find((tenant) => tenant.id === selectedTenantId)
   const readyAdminDomains = adminDomains.filter((domain) => domain?.status === 'ready').length
+  const normalizedTenantSearch = tenantSearch.trim().toLowerCase()
+  const filteredTenants = tenants.filter((tenant) => {
+    const status = String(tenant?.status || '').toLowerCase()
+    const driveReady = Boolean(tenant?.google_drive?.ready)
+    const matchesSearch = !normalizedTenantSearch || [
+      tenant?.name,
+      tenant?.slug,
+      tenant?.id,
+      tenant?.google_drive?.account_email
+    ].some((value) => String(value || '').toLowerCase().includes(normalizedTenantSearch))
+    const matchesStatus = tenantStatusFilter === 'all' || status === tenantStatusFilter
+    const matchesDrive =
+      tenantDriveFilter === 'all' ||
+      (tenantDriveFilter === 'ready' && driveReady) ||
+      (tenantDriveFilter === 'not-ready' && !driveReady)
+
+    return matchesSearch && matchesStatus && matchesDrive
+  })
+  const formSlug = slugify(form.slug)
+  const formSlugReserved = formSlug ? isReservedTenantSlug(formSlug) : false
+  const formSlugValid = formSlug ? isValidTenantSlug(formSlug) && !formSlugReserved : false
+  const tenantPreviewHost = formSlug && platformRootDomain ? `${formSlug}.${platformRootDomain}` : builtinTenantExample
+  const selectedTenantHost = selectedTenantRow?.slug
+    ? `${selectedTenantRow.slug}.${platformRootDomain || rootDomain || 'domain'}`
+    : ''
+  const restorePayloadSummary = summarizeBackupPayload(restorePayload)
+  const restorePayloadPreviewTables = restorePayloadSummary.tables.slice(0, 8)
+  const restorePreviewSummary = restorePreview?.summary || {}
+  const restorePreviewIsApply = restorePreview && restorePreviewSummary?.dry_run === false
+  const restoreInsertLabel = restorePreviewIsApply ? 'Inserted' : 'Would Insert'
+  const restoreUpdateLabel = restorePreviewIsApply ? 'Updated' : 'Would Update'
+  const restoreInsertCount = restorePreviewIsApply
+    ? toNumber(restorePreviewSummary?.inserted || restorePreviewSummary?.would_insert)
+    : toNumber(restorePreviewSummary?.would_insert || restorePreviewSummary?.inserted)
+  const restoreUpdateCount = restorePreviewIsApply
+    ? toNumber(restorePreviewSummary?.updated || restorePreviewSummary?.would_update)
+    : toNumber(restorePreviewSummary?.would_update || restorePreviewSummary?.updated)
+  const detailTabBadges = {
+    admins: detailAdmins.length ? numberFormatter.format(detailAdmins.length) : '',
+    domains: detailDomains.length ? numberFormatter.format(detailDomains.length) : '',
+    backup: restoreFileName ? 'file siap' : '',
+    devices: detailRfidMqttConfig?.available ? 'aktif' : '',
+    storage: detailGoogleDrive?.ready ? 'siap' : ''
+  }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="w-full space-y-6 px-4 pb-8 pt-2 sm:px-6 lg:px-8">
       <div className="page-title-card">
-        <div className="flex items-center gap-4">
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-100 text-sm font-bold text-blue-700">
-            TN
-          </div>
-          <div>
-            <h1 className="page-title-heading">Panel Super Admin</h1>
-            <p className="page-title-description">
-              Buat sekolah baru, lihat ringkasan tenant, dan kelola admin sekolah.
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-xs font-semibold text-slate-500">Total Sekolah</p>
-          <p className="mt-2 text-2xl font-bold text-slate-900">{numberFormatter.format(tenantSummary.total)}</p>
-        </div>
-        <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 shadow-sm">
-          <p className="text-xs font-semibold text-emerald-700">Aktif</p>
-          <p className="mt-2 text-2xl font-bold text-emerald-800">{numberFormatter.format(tenantSummary.active)}</p>
-        </div>
-        <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 shadow-sm">
-          <p className="text-xs font-semibold text-amber-700">Suspended</p>
-          <p className="mt-2 text-2xl font-bold text-amber-800">{numberFormatter.format(tenantSummary.suspended)}</p>
-        </div>
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-xs font-semibold text-slate-500">Drive Siap</p>
-          <p className="mt-2 text-2xl font-bold text-slate-900">{numberFormatter.format(tenantSummary.driveReady)}</p>
-        </div>
-        <div className="rounded-2xl border border-indigo-200 bg-indigo-50/70 p-4 shadow-sm">
-          <p className="text-xs font-semibold text-indigo-700">Host Admin Ready</p>
-          <p className="mt-2 text-2xl font-bold text-indigo-800">{numberFormatter.format(readyAdminDomains)}</p>
-        </div>
-      </div>
-
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_390px]">
-        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="flex flex-col gap-3 border-b border-slate-100 p-5 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center gap-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-100 text-blue-700">
+              <Building2 className="h-6 w-6" />
+            </div>
             <div>
-              <h2 className="text-lg font-semibold text-slate-900">Daftar Sekolah</h2>
-              <p className="mt-1 text-sm text-slate-600">
-                Pilih sekolah untuk melihat admin, domain, storage, backup, dan konfigurasi perangkat.
+              <h1 className="page-title-heading">Manajemen Sekolah</h1>
+              <p className="page-title-description">
+                Buat tenant sekolah, pantau status domain, dan kelola akses admin dari satu halaman.
               </p>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600">
+              <Globe2 className="h-3.5 w-3.5" />
+              {platformRootDomain || rootDomain || 'Root domain belum diatur'}
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                loadTenants()
+                loadPlatformDomains()
+              }}
+              disabled={loading || platformLoading}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <RefreshCw className={`h-4 w-4 ${loading || platformLoading ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <TenantMetricCard
+          icon={School}
+          label="Total sekolah"
+          value={numberFormatter.format(tenantSummary.total)}
+          description={`${numberFormatter.format(filteredTenants.length)} tampil sesuai filter`}
+          tone="blue"
+        />
+        <TenantMetricCard
+          icon={CheckCircle2}
+          label="Aktif"
+          value={numberFormatter.format(tenantSummary.active)}
+          description="Tenant siap digunakan"
+          tone="emerald"
+        />
+        <TenantMetricCard
+          icon={XCircle}
+          label="Suspended"
+          value={numberFormatter.format(tenantSummary.suspended)}
+          description={`${numberFormatter.format(tenantSummary.archived)} archived`}
+          tone="amber"
+        />
+        <TenantMetricCard
+          icon={HardDrive}
+          label="Drive siap"
+          value={numberFormatter.format(tenantSummary.driveReady)}
+          description="Google Drive tenant aktif"
+          tone="slate"
+        />
+        <TenantMetricCard
+          icon={ShieldCheck}
+          label="Host admin"
+          value={numberFormatter.format(readyAdminDomains)}
+          description={`${numberFormatter.format(adminDomains.length)} custom host`}
+          tone="indigo"
+        />
+      </div>
+
+      <div className="grid gap-6 2xl:grid-cols-[minmax(0,1fr)_420px]">
+        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-100 p-5">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">Daftar Sekolah</h2>
+                <p className="mt-1 text-sm text-slate-600">
+                  Pilih sekolah untuk membuka detail admin, domain, storage, backup, dan konfigurasi perangkat.
+                </p>
+              </div>
               {selectedTenantId && (
-                <span className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700">
-                  Dipilih: {selectedTenantRow?.name || detailTenant?.name || 'Sekolah'}
-                </span>
+                <div className="rounded-2xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm">
+                  <p className="font-semibold text-indigo-800">
+                    {selectedTenantRow?.name || detailTenant?.name || 'Sekolah dipilih'}
+                  </p>
+                  <p className="mt-1 text-xs text-indigo-700">{selectedTenantHost || 'Memuat host tenant...'}</p>
+                </div>
               )}
+            </div>
+
+            <div className="mt-5 grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_180px_180px_auto]">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="search"
+                  value={tenantSearch}
+                  onChange={(event) => setTenantSearch(event.target.value)}
+                  placeholder="Cari nama sekolah, slug, tenant ID, atau akun Drive"
+                  className="h-11 w-full rounded-xl border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+                />
+              </div>
+              <select
+                value={tenantStatusFilter}
+                onChange={(event) => setTenantStatusFilter(event.target.value)}
+                className={tenantFieldClass}
+              >
+                <option value="all">Semua status</option>
+                {TENANT_STATUS_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+              <select
+                value={tenantDriveFilter}
+                onChange={(event) => setTenantDriveFilter(event.target.value)}
+                className={tenantFieldClass}
+              >
+                <option value="all">Semua Drive</option>
+                <option value="ready">Drive siap</option>
+                <option value="not-ready">Drive belum siap</option>
+              </select>
               <button
                 type="button"
-                onClick={loadTenants}
-                className="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                onClick={() => {
+                  setTenantSearch('')
+                  setTenantStatusFilter('all')
+                  setTenantDriveFilter('all')
+                }}
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
               >
-                Refresh
+                <Filter className="h-4 w-4" />
+                Reset
               </button>
             </div>
           </div>
 
           {loading ? (
-            <div className="p-5 text-sm text-slate-500">Memuat data sekolah...</div>
+            <div className="flex items-center justify-center gap-3 px-5 py-12 text-sm font-semibold text-slate-500">
+              <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+              Memuat data sekolah...
+            </div>
           ) : tenants.length === 0 ? (
-            <div className="p-5 text-sm text-slate-500">Belum ada sekolah.</div>
+            <TenantEmptyState
+              title="Belum ada sekolah"
+              description="Buat tenant sekolah pertama dari panel di sisi kanan."
+            />
+          ) : filteredTenants.length === 0 ? (
+            <TenantEmptyState
+              title="Tidak ada sekolah yang cocok"
+              description="Ubah kata kunci atau filter status untuk melihat sekolah lain."
+            />
           ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-sm">
                 <thead>
-                  <tr className="border-b border-slate-100 bg-slate-50/70 text-left text-xs uppercase tracking-wide text-slate-500">
+                  <tr className="border-b border-slate-100 bg-slate-50/80 text-left text-xs uppercase tracking-wide text-slate-500">
                     <th className="px-5 py-3">Sekolah</th>
                     <th className="px-5 py-3">Subdomain</th>
                     <th className="px-5 py-3">Status</th>
@@ -1500,58 +1790,66 @@ const Tenants = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-slate-700">
-                  {tenants.map((tenant) => (
-                    <tr
-                      key={tenant.id}
-                      className={`cursor-pointer transition hover:bg-slate-50 ${
-                        selectedTenantId === tenant.id ? 'bg-indigo-50/80' : 'bg-white'
-                      }`}
-                      onClick={() => handleSelectTenant(tenant.id)}
-                    >
-                      <td className="px-5 py-4">
-                        <p className="font-semibold text-slate-900">{tenant.name || '-'}</p>
-                        <p className="mt-1 text-xs text-slate-500">{tenant.id}</p>
-                      </td>
-                      <td className="px-5 py-4">
-                        <p className="font-medium text-slate-900">
-                          {tenant.slug ? `${tenant.slug}.${rootDomain}` : '-'}
-                        </p>
-                        <p className="mt-1 text-xs text-slate-500">Slug: {tenant.slug || '-'}</p>
-                      </td>
-                      <td className="px-5 py-4">
-                        <span
-                          className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${tenantStatusBadgeClass(
-                            tenant.status
-                          )}`}
-                        >
-                          {tenant.status || 'unknown'}
-                        </span>
-                      </td>
-                      <td className="px-5 py-4">
-                        <div className="flex flex-col gap-1">
-                          <span className={`w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${driveStatusBadgeClass(tenant.google_drive)}`}>
-                            {tenant.google_drive?.ready ? 'Siap' : tenant.google_drive?.status_label || 'Belum'}
+                  {filteredTenants.map((tenant) => {
+                    const tenantHost = tenant.slug ? `${tenant.slug}.${platformRootDomain || rootDomain}` : '-'
+                    return (
+                      <tr
+                        key={tenant.id}
+                        className={`cursor-pointer transition hover:bg-slate-50 ${
+                          selectedTenantId === tenant.id ? 'bg-blue-50/80' : 'bg-white'
+                        }`}
+                        onClick={() => handleSelectTenant(tenant.id)}
+                      >
+                        <td className="px-5 py-4">
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-slate-600">
+                              <School className="h-5 w-5" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="truncate font-semibold text-slate-900">{tenant.name || '-'}</p>
+                              <p className="mt-1 truncate text-xs text-slate-500">{tenant.id}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-5 py-4">
+                          <p className="font-medium text-slate-900">{tenantHost}</p>
+                          <p className="mt-1 text-xs text-slate-500">Slug: {tenant.slug || '-'}</p>
+                        </td>
+                        <td className="px-5 py-4">
+                          <span
+                            className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${tenantStatusBadgeClass(
+                              tenant.status
+                            )}`}
+                          >
+                            {tenant.status || 'unknown'}
                           </span>
-                          <span className="text-[11px] text-slate-500">
-                            {tenant.google_drive?.quota?.used_label || '0 B'}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-5 py-4 text-slate-500">{formatDateTime(tenant.created_at)}</td>
-                      <td className="px-5 py-4 text-right">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleSelectTenant(tenant.id)
-                          }}
-                          className="rounded-full border border-indigo-200 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50"
-                        >
-                          Kelola
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="px-5 py-4">
+                          <div className="flex flex-col gap-1">
+                            <span className={`w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${driveStatusBadgeClass(tenant.google_drive)}`}>
+                              {tenant.google_drive?.ready ? 'Siap' : tenant.google_drive?.status_label || 'Belum'}
+                            </span>
+                            <span className="text-[11px] text-slate-500">
+                              {tenant.google_drive?.quota?.used_label || '0 B'}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-5 py-4 text-slate-500">{formatDateTime(tenant.created_at)}</td>
+                        <td className="px-5 py-4 text-right">
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              handleSelectTenant(tenant.id)
+                            }}
+                            className="rounded-xl border border-blue-200 px-3 py-1.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-50"
+                          >
+                            Kelola
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1559,15 +1857,22 @@ const Tenants = () => {
         </section>
 
         <aside className="space-y-6">
-          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-900">Buat Sekolah</h2>
-              <p className="mt-1 text-sm text-slate-600">
-                Buat tenant, subdomain bawaan, dan akun admin sekolah dalam satu langkah.
-              </p>
+          <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-slate-100 px-5 py-4">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-blue-100 text-blue-700">
+                  <PlusCircle className="h-5 w-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900">Buat Sekolah</h2>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Tenant, subdomain, dan akun admin sekolah dibuat dalam satu proses.
+                  </p>
+                </div>
+              </div>
             </div>
 
-            <form onSubmit={handleSubmit} className="mt-5 space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-4 p-5">
               <div className="space-y-1.5">
                 <label className="text-sm font-semibold text-slate-700">Nama Sekolah</label>
                 <input
@@ -1575,7 +1880,7 @@ const Tenants = () => {
                   value={form.name}
                   onChange={handleChange('name')}
                   placeholder="Contoh: SMA Negeri 1"
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className={tenantFieldClass}
                 />
               </div>
               <div className="space-y-1.5">
@@ -1585,53 +1890,72 @@ const Tenants = () => {
                   value={form.slug}
                   onChange={handleChange('slug')}
                   placeholder="contoh: sma1"
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className={`${tenantFieldClass} ${formSlug && !formSlugValid ? 'border-amber-300 focus:border-amber-500 focus:ring-amber-100' : ''}`}
                 />
-                <p className="text-xs text-slate-500">
-                  URL: <span className="font-semibold">{previewDomain || builtinTenantExample}</span>
-                </p>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                  <p className="font-semibold text-slate-700">Preview URL</p>
+                  <p className="mt-1 break-all">{tenantPreviewHost}</p>
+                  {formSlug && !formSlugValid && (
+                    <p className="mt-1 text-amber-700">
+                      Subdomain belum valid atau termasuk reserved platform.
+                    </p>
+                  )}
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <label className="text-sm font-semibold text-slate-700">Nama Admin</label>
-                <input
-                  type="text"
-                  value={form.adminName}
-                  onChange={handleChange('adminName')}
-                  placeholder="Nama admin"
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-sm font-semibold text-slate-700">Email Admin</label>
-                <input
-                  type="email"
-                  value={form.adminEmail}
-                  onChange={handleChange('adminEmail')}
-                  placeholder="admin@sekolah.com"
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <label className="text-sm font-semibold text-slate-700">Nama Admin</label>
+                  <input
+                    type="text"
+                    value={form.adminName}
+                    onChange={handleChange('adminName')}
+                    placeholder="Nama admin"
+                    className={tenantFieldClass}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-semibold text-slate-700">Email Admin</label>
+                  <input
+                    type="email"
+                    value={form.adminEmail}
+                    onChange={handleChange('adminEmail')}
+                    placeholder="admin@sekolah.com"
+                    className={tenantFieldClass}
+                  />
+                </div>
               </div>
               <div className="space-y-1.5">
                 <label className="text-sm font-semibold text-slate-700">Password Admin</label>
                 <PasswordInput
                   value={form.adminPassword}
                   onChange={handleChange('adminPassword')}
-                  placeholder="Minimal 6 karakter"
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="Minimal 12 karakter + kompleks"
+                  className={tenantFieldClass}
                 />
               </div>
               <button
                 type="submit"
                 disabled={saving}
-                className="w-full rounded-lg bg-indigo-600 px-5 py-2.5 font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
+                className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlusCircle className="h-4 w-4" />}
                 {saving ? 'Menyimpan...' : 'Buat Sekolah'}
               </button>
             </form>
           </section>
 
           <section className="rounded-2xl border border-slate-200 bg-slate-900 p-5 text-white shadow-sm">
-            <h2 className="text-base font-semibold">Panduan Onboarding</h2>
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white/10 text-white">
+                <UserCog className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-base font-semibold">Panduan Onboarding</h2>
+                <p className="mt-1 text-xs leading-5 text-slate-300">
+                  Alur operasional saat sekolah baru mulai memakai platform.
+                </p>
+              </div>
+            </div>
             <div className="mt-4 space-y-3">
               {onboardingSteps.map((step, index) => (
                 <div key={step} className="flex gap-3 rounded-xl border border-white/10 bg-white/5 p-3">
@@ -1882,189 +2206,283 @@ const Tenants = () => {
       </section>
 
       {selectedTenantId && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-900">
-                {detailTenant?.name || 'Detail Sekolah'}
-              </h2>
-              <p className="text-xs text-slate-500 mt-1">
-                {detailTenant?.slug ? `${detailTenant.slug}.${rootDomain}` : '-'}
-              </p>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <span
-                  className={`text-xs px-2 py-0.5 rounded-full ${tenantStatusBadgeClass(
-                    detailTenant?.status
-                  )}`}
+        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-100 bg-slate-50/70 px-5 py-5">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-lg font-bold text-slate-900">
+                    {detailTenant?.name || 'Detail Sekolah'}
+                  </h2>
+                  <span
+                    className={`rounded-full px-2.5 py-1 text-xs font-semibold ${tenantStatusBadgeClass(
+                      detailTenant?.status
+                    )}`}
+                  >
+                    {detailTenant?.status || 'unknown'}
+                  </span>
+                </div>
+                <p className="mt-1 break-all text-sm text-slate-600">
+                  {detailTenant?.slug ? `${detailTenant.slug}.${platformRootDomain || rootDomain}` : '-'}
+                </p>
+                <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2 xl:grid-cols-3">
+                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                    <p className="font-semibold text-slate-500">Admin utama</p>
+                    <p className="mt-1 truncate text-slate-800">
+                      {primaryAdminInfo?.name ||
+                        primaryAdminInfo?.email ||
+                        detailTenant?.primary_admin_name ||
+                        'Belum ditetapkan'}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                    <p className="font-semibold text-slate-500">Update status</p>
+                    <p className="mt-1 text-slate-800">{formatDateTime(detailTenant?.status_changed_at)}</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 sm:col-span-2 xl:col-span-1">
+                    <p className="font-semibold text-slate-500">Alasan status</p>
+                    <p className="mt-1 truncate text-slate-800">{detailTenant?.status_reason || '-'}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleRefreshDetail}
+                  disabled={detailRefreshing || detailLoading}
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
                 >
-                  {detailTenant?.status || 'unknown'}
-                </span>
-                {detailTenant?.status_reason && (
-                  <span className="text-xs text-slate-500">
-                    Alasan: {detailTenant.status_reason}
-                  </span>
-                )}
-                {detailTenant?.status_changed_at && (
-                  <span className="text-xs text-slate-400">
-                    Update: {formatDateTime(detailTenant.status_changed_at)}
-                  </span>
-                )}
-                <span className="text-xs text-indigo-700 bg-indigo-100 border border-indigo-200 px-2 py-0.5 rounded-full">
-                  Admin Utama:{' '}
-                  {primaryAdminInfo?.name ||
-                    primaryAdminInfo?.email ||
-                    detailTenant?.primary_admin_name ||
-                    'Belum ditetapkan'}
-                </span>
+                  <RefreshCw className={`h-4 w-4 ${detailRefreshing ? 'animate-spin' : ''}`} />
+                  {detailRefreshing ? 'Refresh...' : 'Refresh Detail'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedTenantId('')
+                    setDetailTab('overview')
+                    setTenantDetail(null)
+                    setDetailError('')
+                    setTemporaryPasswords({})
+                    setPrimaryAdminSavingByUser({})
+                    resetTenantDomainForm()
+                    setMqttForm(RFID_MQTT_FORM_DEFAULTS)
+                    setRfidWifiForm({ ssid: '', password: '' })
+                    setRestorePayload(null)
+                    setRestoreFileName('')
+                    setRestorePreview(null)
+                    setRestoreIncludeTables('')
+                  }}
+                  className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                >
+                  Tutup
+                </button>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="hidden lg:flex items-center gap-1">
-                {TENANT_STATUS_OPTIONS.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    onClick={() => handleTenantStatusUpdate(option.value)}
-                    disabled={statusSaving || detailLoading || detailTenant?.status === option.value}
-                    className={`text-xs px-3 py-1.5 rounded-full border disabled:opacity-60 ${
-                      option.value === 'active'
-                        ? 'border-emerald-200 text-emerald-700 hover:bg-emerald-50'
-                        : option.value === 'suspended'
-                          ? 'border-amber-200 text-amber-700 hover:bg-amber-50'
-                          : 'border-rose-200 text-rose-700 hover:bg-rose-50'
-                    }`}
-                  >
-                    {statusSaving && detailTenant?.status !== option.value
-                      ? 'Menyimpan...'
-                      : option.label}
-                  </button>
-                ))}
-              </div>
-              <div className="lg:hidden">
-                <select
-                  value={detailTenant?.status || ''}
-                  onChange={(e) => handleTenantStatusUpdate(e.target.value)}
-                  disabled={statusSaving || detailLoading}
-                  className="text-xs px-2.5 py-1.5 rounded-full border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-60"
-                >
-                  {TENANT_STATUS_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex items-center gap-2">
-                <label htmlFor="tenant-backup-mode" className="text-xs font-semibold text-slate-600">
-                  Mode Backup
-                </label>
-                <select
-                  id="tenant-backup-mode"
-                  value={backupMode}
-                  onChange={(e) => {
-                    const nextMode = e.target.value
-                    setBackupMode(nextMode)
-                    if (nextMode !== 'students') {
-                      setBackupMonths('all')
-                    }
-                  }}
-                  disabled={backupLoading || detailLoading}
-                  className="text-xs px-2.5 py-1.5 rounded-full border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-60"
-                >
-                  {BACKUP_MODE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              {backupMode === 'students' && (
-                <div className="flex items-center gap-2">
-                  <label htmlFor="tenant-backup-period" className="text-xs font-semibold text-slate-600">
-                    Periode
-                  </label>
-                  <select
-                    id="tenant-backup-period"
-                    value={backupMonths}
-                    onChange={(e) => setBackupMonths(e.target.value)}
-                    disabled={backupLoading || detailLoading}
-                    className="text-xs px-2.5 py-1.5 rounded-full border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-60"
-                  >
-                    {BACKUP_PERIOD_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
+
+            <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(340px,0.65fr)]">
+              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-bold text-slate-900">Status Tenant</p>
+                    <p className="mt-1 text-xs text-slate-500">Aktifkan, suspend, atau arsipkan sekolah.</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {TENANT_STATUS_OPTIONS.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => handleTenantStatusUpdate(option.value)}
+                        disabled={statusSaving || detailLoading || detailTenant?.status === option.value}
+                        className={`h-9 rounded-xl border px-3 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                          option.value === 'active'
+                            ? 'border-emerald-200 text-emerald-700 hover:bg-emerald-50'
+                            : option.value === 'suspended'
+                              ? 'border-amber-200 text-amber-700 hover:bg-amber-50'
+                              : 'border-rose-200 text-rose-700 hover:bg-rose-50'
+                        }`}
+                      >
+                        {statusSaving && detailTenant?.status !== option.value ? 'Menyimpan...' : option.label}
+                      </button>
                     ))}
-                  </select>
+                  </div>
                 </div>
-              )}
-              <button
-                type="button"
-                onClick={handleBackupTenant}
-                disabled={backupLoading || detailLoading}
-                className="text-xs px-3 py-1.5 rounded-full border border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
-              >
-                {backupLoading ? 'Menyiapkan Backup...' : 'Backup Data (Excel)'}
-              </button>
-              <button
-                type="button"
-                onClick={handleRefreshDetail}
-                disabled={detailRefreshing || detailLoading}
-                className="text-xs px-3 py-1.5 rounded-full border border-slate-200 hover:bg-slate-50 disabled:opacity-60"
-              >
-                {detailRefreshing ? 'Refresh...' : 'Refresh Detail'}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedTenantId('')
-                  setTenantDetail(null)
-                  setDetailError('')
-                  setTemporaryPasswords({})
-                  setPrimaryAdminSavingByUser({})
-                  resetTenantDomainForm()
-                  setMqttForm(RFID_MQTT_FORM_DEFAULTS)
-                  setRfidWifiForm({ ssid: '', password: '' })
-                  setRestorePayload(null)
-                  setRestoreFileName('')
-                  setRestorePreview(null)
-                  setRestoreIncludeTables('')
-                }}
-                className="text-xs px-3 py-1.5 rounded-full border border-slate-200 hover:bg-slate-50"
-              >
-                Tutup
-              </button>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-700">
+                    <Database className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-bold text-slate-900">Backup Data Tenant</p>
+                    <div className="mt-3 grid gap-2">
+                      <select
+                        id="tenant-backup-mode"
+                        value={backupMode}
+                        onChange={(event) => {
+                          const nextMode = event.target.value
+                          setBackupMode(nextMode)
+                          if (nextMode !== 'students') {
+                            setBackupMonths('all')
+                          }
+                        }}
+                        disabled={backupLoading || detailLoading}
+                        className={tenantFieldClass}
+                      >
+                        {BACKUP_MODE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      {backupMode === 'students' && (
+                        <select
+                          id="tenant-backup-period"
+                          value={backupMonths}
+                          onChange={(event) => setBackupMonths(event.target.value)}
+                          disabled={backupLoading || detailLoading}
+                          className={tenantFieldClass}
+                        >
+                          {BACKUP_PERIOD_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <button
+                          type="button"
+                          onClick={() => handleBackupTenant('xlsx')}
+                          disabled={backupLoading || detailLoading}
+                          className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 text-sm font-bold text-white transition hover:bg-emerald-700 disabled:opacity-60"
+                        >
+                          {backupLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Database className="h-4 w-4" />}
+                          {backupLoading ? 'Menyiapkan...' : 'Excel'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleBackupTenant('json')}
+                          disabled={backupLoading || detailLoading}
+                          className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-white px-4 text-sm font-bold text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-60"
+                        >
+                          {backupLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Database className="h-4 w-4" />}
+                          JSON Restore
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
           {detailLoading ? (
-            <div className="text-sm text-slate-500">Memuat detail sekolah...</div>
+            <div className="flex items-center justify-center gap-3 px-5 py-12 text-sm font-semibold text-slate-500">
+              <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+              Memuat detail sekolah...
+            </div>
           ) : detailError ? (
-            <div className="text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-xl p-3">
+            <div className="m-5 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-600">
               {detailError}
             </div>
           ) : !tenantDetail ? (
-            <div className="text-sm text-slate-500">Data detail belum tersedia.</div>
+            <div className="px-5 py-8 text-sm text-slate-500">Data detail belum tersedia.</div>
           ) : (
-            <>
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                {statCardsFrom(detailStats).map((item) => (
-                  <div key={item.key} className="rounded-xl border border-slate-200 p-4">
-                    <p className="text-xs text-slate-500">{item.label}</p>
-                    <p className="text-2xl font-bold text-slate-900 mt-1">
-                      {numberFormatter.format(item.value)}
-                    </p>
-                  </div>
-                ))}
-                <div className="rounded-xl border border-slate-200 p-4 col-span-2 lg:col-span-1">
-                  <p className="text-xs text-slate-500">Aktivitas Terakhir</p>
-                  <p className="text-sm font-semibold text-slate-900 mt-1">
-                    {formatDateTime(detailStats.last_activity_at)}
-                  </p>
+            <div className="space-y-4 p-5">
+              <div className="rounded-2xl border border-slate-200 bg-white p-2">
+                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-6">
+                  {TENANT_DETAIL_TABS.map((tab) => {
+                    const Icon = tab.icon
+                    const isActive = detailTab === tab.value
+                    const badge = detailTabBadges[tab.value]
+                    return (
+                      <button
+                        key={tab.value}
+                        type="button"
+                        onClick={() => setDetailTab(tab.value)}
+                        className={`flex min-h-[3.25rem] items-center justify-between gap-3 rounded-xl border px-3 py-2 text-left text-sm font-semibold transition ${
+                          isActive
+                            ? 'border-blue-200 bg-blue-50 text-blue-800 shadow-sm'
+                            : 'border-transparent text-slate-600 hover:border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        <span className="flex min-w-0 items-center gap-2">
+                          <Icon className="h-4 w-4 shrink-0" />
+                          <span className="truncate">{tab.label}</span>
+                        </span>
+                        {badge ? (
+                          <span className="shrink-0 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-600">
+                            {badge}
+                          </span>
+                        ) : null}
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
 
-              <form onSubmit={handleSaveRfidMqtt} className="rounded-2xl border border-slate-200 p-4 space-y-4">
+              {detailTab === 'overview' && (
+                <>
+                  <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                    {statCardsFrom(detailStats).map((item) => (
+                      <div key={item.key} className="rounded-xl border border-slate-200 p-4">
+                        <p className="text-xs text-slate-500">{item.label}</p>
+                        <p className="mt-1 text-2xl font-bold text-slate-900">
+                          {numberFormatter.format(item.value)}
+                        </p>
+                      </div>
+                    ))}
+                    <div className="col-span-2 rounded-xl border border-slate-200 p-4 lg:col-span-1">
+                      <p className="text-xs text-slate-500">Aktivitas Terakhir</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-900">
+                        {formatDateTime(detailStats.last_activity_at)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 lg:grid-cols-3">
+                    <button
+                      type="button"
+                      onClick={() => setDetailTab('admins')}
+                      className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 text-left transition hover:border-indigo-200 hover:bg-indigo-50"
+                    >
+                      <p className="text-xs font-semibold uppercase text-slate-500">Akses</p>
+                      <p className="mt-1 text-sm font-bold text-slate-900">Kelola admin sekolah</p>
+                      <p className="mt-1 text-xs text-slate-600">
+                        {detailAdmins.length} admin, utama: {primaryAdminInfo?.email || 'belum ditetapkan'}.
+                      </p>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDetailTab('domains')}
+                      className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 text-left transition hover:border-blue-200 hover:bg-blue-50"
+                    >
+                      <p className="text-xs font-semibold uppercase text-slate-500">Domain</p>
+                      <p className="mt-1 text-sm font-bold text-slate-900">Pantau DNS tenant</p>
+                      <p className="mt-1 text-xs text-slate-600">
+                        {detailDomains.length} custom domain, host bawaan tetap aktif.
+                      </p>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDetailTab('backup')}
+                      className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 text-left transition hover:border-emerald-200 hover:bg-emerald-50"
+                    >
+                      <p className="text-xs font-semibold uppercase text-slate-500">Keamanan Data</p>
+                      <p className="mt-1 text-sm font-bold text-slate-900">Backup dan restore tenant</p>
+                      <p className="mt-1 text-xs text-slate-600">
+                        {restoreFileName ? `File restore siap: ${restoreFileName}` : 'Upload JSON untuk dry-run restore.'}
+                      </p>
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {detailTab === 'devices' && (
+                <>
+                  <form onSubmit={handleSaveRfidMqtt} className="rounded-2xl border border-slate-200 p-4 space-y-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <h3 className="text-sm font-semibold text-slate-900">Konfigurasi MQTT RFID Sekolah</h3>
@@ -2499,7 +2917,11 @@ const Tenants = () => {
                 )}
               </div>
 
-              <div className="rounded-2xl border border-slate-200 p-4 space-y-4">
+                </>
+              )}
+
+              {detailTab === 'domains' && (
+                <div className="rounded-2xl border border-slate-200 p-4 space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <h3 className="text-sm font-semibold text-slate-900">Domain & DNS Tenant</h3>
@@ -2642,7 +3064,11 @@ const Tenants = () => {
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-emerald-200 bg-emerald-50/40 p-4 space-y-4">
+              )}
+
+              {detailTab === 'storage' && (
+                <>
+                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50/40 p-4 space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h3 className="text-sm font-semibold text-slate-900">Google Drive Sekolah</h3>
                   <span className={`text-xs px-2 py-1 rounded-full ${driveStatusBadgeClass(detailGoogleDrive)}`}>
@@ -2765,7 +3191,11 @@ const Tenants = () => {
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-indigo-200 bg-indigo-50/40 p-4 space-y-3">
+                </>
+              )}
+
+              {detailTab === 'backup' && (
+                <div className="rounded-2xl border border-indigo-200 bg-indigo-50/40 p-4 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h3 className="text-sm font-semibold text-slate-900">
                     Restore Backup Tenant (JSON + Dry-Run)
@@ -2819,31 +3249,83 @@ const Tenants = () => {
                   </div>
                 </div>
 
+                {restorePayload ? (
+                  <div className="rounded-xl border border-indigo-200 bg-white p-3">
+                    <div className="grid gap-3 text-xs md:grid-cols-4">
+                      <div>
+                        <p className="text-slate-500">Tenant Asal</p>
+                        <p className="mt-1 font-semibold text-slate-900">
+                          {restorePayload?.tenant?.name || restorePayload?.tenant?.slug || restorePayload?.tenant?.id || '-'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-slate-500">Mode Backup</p>
+                        <p className="mt-1 font-semibold text-slate-900">
+                          {restorePayload?.mode_label || restorePayload?.mode || '-'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-slate-500">Jumlah Tabel</p>
+                        <p className="mt-1 font-semibold text-slate-900">
+                          {numberFormatter.format(restorePayloadSummary.tableCount)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-slate-500">Total Baris</p>
+                        <p className="mt-1 font-semibold text-slate-900">
+                          {numberFormatter.format(restorePayloadSummary.totalRows)}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {restorePayloadPreviewTables.map((table, index) => (
+                        <span
+                          key={`${table?.name || table?.table || 'table'}-${index}`}
+                          className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600"
+                        >
+                          {table?.name || table?.table || '-'}
+                        </span>
+                      ))}
+                      {restorePayloadSummary.tables.length > restorePayloadPreviewTables.length ? (
+                        <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] text-slate-500">
+                          +{restorePayloadSummary.tables.length - restorePayloadPreviewTables.length} tabel
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+
                 {restorePreview ? (
                   <div className="rounded-xl border border-indigo-200 bg-white p-3 space-y-2">
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
                       <div className="rounded-lg border border-slate-200 p-2">
                         <p className="text-slate-500">Incoming Rows</p>
                         <p className="font-semibold text-slate-900">
-                          {numberFormatter.format(toNumber(restorePreview.summary?.incoming_rows))}
+                          {numberFormatter.format(toNumber(restorePreviewSummary?.incoming_rows))}
                         </p>
                       </div>
                       <div className="rounded-lg border border-slate-200 p-2">
-                        <p className="text-slate-500">Would Insert</p>
+                        <p className="text-slate-500">{restoreInsertLabel}</p>
                         <p className="font-semibold text-indigo-700">
-                          {numberFormatter.format(toNumber(restorePreview.summary?.would_insert))}
+                          {numberFormatter.format(restoreInsertCount)}
                         </p>
                       </div>
                       <div className="rounded-lg border border-slate-200 p-2">
-                        <p className="text-slate-500">Would Update</p>
+                        <p className="text-slate-500">{restoreUpdateLabel}</p>
                         <p className="font-semibold text-indigo-700">
-                          {numberFormatter.format(toNumber(restorePreview.summary?.would_update))}
+                          {numberFormatter.format(restoreUpdateCount)}
+                        </p>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 p-2">
+                        <p className="text-slate-500">Konflik</p>
+                        <p className="font-semibold text-amber-700">
+                          {numberFormatter.format(toNumber(restorePreviewSummary?.conflicts))}
                         </p>
                       </div>
                       <div className="rounded-lg border border-slate-200 p-2">
                         <p className="text-slate-500">Errors</p>
                         <p className="font-semibold text-rose-700">
-                          {numberFormatter.format(toNumber(restorePreview.summary?.errors))}
+                          {numberFormatter.format(toNumber(restorePreviewSummary?.errors))}
                         </p>
                       </div>
                     </div>
@@ -2854,8 +3336,9 @@ const Tenants = () => {
                           <tr className="text-left text-slate-500">
                             <th className="py-2 pr-3">Tabel</th>
                             <th className="py-2 pr-3">Incoming</th>
-                            <th className="py-2 pr-3">Would Insert</th>
-                            <th className="py-2 pr-3">Would Update</th>
+                            <th className="py-2 pr-3">{restoreInsertLabel}</th>
+                            <th className="py-2 pr-3">{restoreUpdateLabel}</th>
+                            <th className="py-2 pr-3">Konflik</th>
                             <th className="py-2 pr-3">Errors</th>
                           </tr>
                         </thead>
@@ -2864,8 +3347,13 @@ const Tenants = () => {
                             <tr key={item.table} className="border-t border-slate-100">
                               <td className="py-2 pr-3 font-medium text-slate-900">{item.table}</td>
                               <td className="py-2 pr-3">{numberFormatter.format(toNumber(item.incoming_rows))}</td>
-                              <td className="py-2 pr-3">{numberFormatter.format(toNumber(item.would_insert || item.inserted))}</td>
-                              <td className="py-2 pr-3">{numberFormatter.format(toNumber(item.would_update || item.updated))}</td>
+                              <td className="py-2 pr-3">
+                                {numberFormatter.format(toNumber(restorePreviewIsApply ? item.inserted || item.would_insert : item.would_insert || item.inserted))}
+                              </td>
+                              <td className="py-2 pr-3">
+                                {numberFormatter.format(toNumber(restorePreviewIsApply ? item.updated || item.would_update : item.would_update || item.updated))}
+                              </td>
+                              <td className="py-2 pr-3 text-amber-700">{numberFormatter.format(toNumber(item.conflicts))}</td>
                               <td className="py-2 pr-3 text-rose-700">{numberFormatter.format(toNumber(item.errors))}</td>
                             </tr>
                           ))}
@@ -2880,12 +3368,16 @@ const Tenants = () => {
                 )}
               </div>
 
-              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-                Password lama admin tidak bisa ditampilkan karena tersimpan hash. Gunakan tombol reset untuk
-                menghasilkan password baru, lalu lihat dengan ikon mata.
-              </div>
+              )}
 
-              <div className="overflow-x-auto">
+              {detailTab === 'admins' && (
+                <>
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                    Password lama admin tidak bisa ditampilkan karena tersimpan hash. Gunakan tombol reset untuk
+                    menghasilkan password baru, lalu lihat dengan ikon mata.
+                  </div>
+
+                  <div className="overflow-x-auto">
                 <table className="min-w-full text-sm">
                   <thead>
                     <tr className="text-left text-slate-500">
@@ -2982,11 +3474,13 @@ const Tenants = () => {
                       ))
                     )}
                   </tbody>
-                </table>
-              </div>
-            </>
+                    </table>
+                  </div>
+                </>
+              )}
+            </div>
           )}
-        </div>
+        </section>
       )}
     </div>
   )

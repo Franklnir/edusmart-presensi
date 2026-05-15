@@ -96,7 +96,7 @@ export const buildDefaultPassword = (tanggalLahir, nis) => {
   const buildStrongPassword = (digitsSource) => {
     const digits = String(digitsSource || '').replace(/\D+/g, '')
     const normalized = digits ? digits.padEnd(6, '0') : '123456'
-    return `Aa${normalized}!`
+    return `Aa${normalized}!Edu`.padEnd(12, '9')
   }
 
   if (iso) {

@@ -24,14 +24,13 @@ class AdminBackupController extends ApiController
         }
 
         $mode = $this->normalizeBackupMode($request->query('mode'));
-        $months = $this->normalizeBackupMonths($request->query('months'));
-        $periodStart = $months !== null ? now()->subMonths($months)->startOfDay() : null;
+        $periodScope = $this->normalizeBackupPeriodScope((string) $tenantId, $request->query());
 
         $tables = match ($mode) {
-            'students' => $this->buildStudentBackupTables($tenantId, $months),
-            'teachers' => $this->buildTeacherBackupTables($tenantId, $months),
-            'classes' => $this->buildClassBackupTables($tenantId, $months),
-            default => $this->buildFullBackupTables($tenantId, $months),
+            'students' => $this->buildStudentBackupTables($tenantId, $periodScope),
+            'teachers' => $this->buildTeacherBackupTables($tenantId, $periodScope),
+            'classes' => $this->buildClassBackupTables($tenantId, $periodScope),
+            default => $this->buildFullBackupTables($tenantId, $periodScope),
         };
 
         $totalRows = 0;
@@ -60,15 +59,22 @@ class AdminBackupController extends ApiController
                 'exported_at' => now()->toIso8601String(),
                 'mode' => $mode,
                 'mode_label' => $this->backupModeLabel($mode),
-                'period' => [
-                    'months' => $months,
-                    'label' => $this->backupPeriodLabel($months),
-                    'start_at' => $periodStart ? $periodStart->toIso8601String() : null,
-                    'end_at' => now()->toIso8601String(),
-                ],
+                'period' => $this->backupPeriodPayload($periodScope),
                 'summary' => [
                     'table_count' => count($tables),
                     'total_rows' => $totalRows,
+                ],
+                'manifest' => [
+                    'version' => 2,
+                    'backup_type' => 'tenant_database',
+                    'tenant_scoped' => true,
+                    'contains_storage_files' => false,
+                    'contains_linked_users' => true,
+                    'restore_strategy' => 'id_or_unique_key_upsert',
+                    'notes' => [
+                        'Backup berisi data database tenant dan metadata file, bukan isi file storage.',
+                        'Restore mengarah ke tenant aktif admin, bukan tenant asal di file JSON.',
+                    ],
                 ],
                 'tables' => $tables,
                 'formats_supported' => ['xlsx', 'json', 'csv', 'html'],

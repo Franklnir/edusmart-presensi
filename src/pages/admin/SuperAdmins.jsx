@@ -4,6 +4,7 @@ import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import { formatDateTime } from '../../lib/time'
 import PasswordInput from '../../components/PasswordInput'
+import { validatePassword } from '../../utils/passwordPolicy'
 
 const isValidEmail = (value = '') => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value).trim())
 const isValidSlug = (value = '') => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(String(value).trim())
@@ -98,9 +99,12 @@ const SuperAdmins = () => {
       pushToast('error', 'Format email tidak valid')
       return
     }
-    if (form.password && form.password.length < 6) {
-      pushToast('error', 'Password minimal 6 karakter')
-      return
+    if (form.password) {
+      const passwordCheck = validatePassword(form.password)
+      if (!passwordCheck.valid) {
+        pushToast('error', `Password belum sesuai: ${passwordCheck.errors.join(', ')}.`)
+        return
+      }
     }
     if (tenantSlug && !isValidSlug(tenantSlug)) {
       pushToast('error', 'Subdomain tidak valid')
@@ -214,7 +218,7 @@ const SuperAdmins = () => {
             <PasswordInput
               value={form.password}
               onChange={handleChange('password')}
-              placeholder="Wajib untuk user baru"
+              placeholder="Wajib untuk user baru; minimal 12 + kompleks"
               className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
             <p className="text-xs text-slate-500">Kosongkan jika user sudah ada.</p>

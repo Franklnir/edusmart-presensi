@@ -20,6 +20,12 @@ class ResolveTenant
 
         if ($slug === '') {
             if ($this->tenantDomainService->isAdminHost($host) || $this->isLocalHost($host)) {
+                if ($request->is('api/health')) {
+                    $request->attributes->set('tenant_slug', (string) config('tenancy.default_slug', 'default'));
+
+                    return $next($request);
+                }
+
                 $slug = (string) config('tenancy.default_slug', 'default');
             } else {
                 $tenant = $this->tenantDomainService->resolveTenantForHost($host);

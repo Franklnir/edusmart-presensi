@@ -1,16 +1,62 @@
 <?php
 
-$pdo = new PDO('sqlite:'.__DIR__.'/../database/database.sqlite');
-$pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-$pdo->exec('PRAGMA foreign_keys = ON');
+declare(strict_types=1);
 
-$kelasRows = $pdo->query('select id from kelas')->fetchAll(PDO::FETCH_COLUMN);
-$kelasList = $kelasRows ?: [];
+use Illuminate\Contracts\Console\Kernel;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 
-$existingNisRows = $pdo->query("select nis from profiles where role='siswa' and nis is not null")->fetchAll(PDO::FETCH_COLUMN);
-$existingNis = array_flip(array_filter($existingNisRows, function ($v) {
-    return $v !== null && $v !== '';
-}));
+require __DIR__.'/../vendor/autoload.php';
+
+$app = require __DIR__.'/../bootstrap/app.php';
+$app->make(Kernel::class)->bootstrap();
+
+function fail(string $message, int $code = 1): never
+{
+    fwrite(STDERR, $message.PHP_EOL);
+    exit($code);
+}
+
+function randomDate(int $startYear, int $endYear): string
+{
+    $year = random_int($startYear, $endYear);
+    $month = random_int(1, 12);
+    $day = random_int(1, 28);
+
+    return sprintf('%04d-%02d-%02d', $year, $month, $day);
+}
+
+function profilePayload(array $data): array
+{
+    return array_filter(
+        $data,
+        static fn (string $column): bool => Schema::hasColumn('profiles', $column),
+        ARRAY_FILTER_USE_KEY
+    );
+}
+
+$tenantSlug = strtolower(trim((string) ($argv[1] ?? config('tenancy.default_slug', 'default'))));
+$tenant = DB::table('tenants')->where('slug', $tenantSlug)->first(['id', 'slug']);
+if (! $tenant) {
+    fail("Tenant '{$tenantSlug}' tidak ditemukan. Jalankan migrasi dan bootstrap tenant terlebih dahulu.");
+}
+
+$classQuery = DB::table('kelas')->select('id');
+if (Schema::hasColumn('kelas', 'tenant_id')) {
+    $classQuery->where('tenant_id', $tenant->id);
+}
+$kelasList = $classQuery->pluck('id')->filter()->values()->all();
+
+$profileQuery = DB::table('profiles')
+    ->where('role', 'siswa')
+    ->whereNotNull('nis');
+if (Schema::hasColumn('profiles', 'tenant_id')) {
+    $profileQuery->where('tenant_id', $tenant->id);
+}
+$existingNis = array_flip($profileQuery->pluck('nis')->filter()->map(fn ($value) => (string) $value)->all());
+
 $maxNis = 0;
 foreach (array_keys($existingNis) as $nis) {
     if (ctype_digit((string) $nis)) {
@@ -19,12 +65,18 @@ foreach (array_keys($existingNis) as $nis) {
 }
 $base = max(2600001, $maxNis + 1);
 
-$currentDummy = (int) $pdo->query("select count(*) from profiles where role='siswa' and email like '%@dummy.local'")->fetchColumn();
+$dummyQuery = DB::table('profiles')
+    ->where('role', 'siswa')
+    ->where('email', 'like', '%@dummy.local');
+if (Schema::hasColumn('profiles', 'tenant_id')) {
+    $dummyQuery->where('tenant_id', $tenant->id);
+}
+$currentDummy = (int) $dummyQuery->count();
 $targetDummy = 150;
 $toCreate = max(0, $targetDummy - $currentDummy);
 
 if ($toCreate === 0) {
-    echo "Dummy siswa sudah ada $currentDummy. Tidak menambah data.\n";
+    echo "Dummy siswa sudah ada {$currentDummy}. Tidak menambah data.".PHP_EOL;
     exit;
 }
 
@@ -34,31 +86,10 @@ $agamaList = ['Islam', 'Kristen', 'Katolik', 'Hindu', 'Buddha', 'Konghucu'];
 $street = ['Mawar', 'Melati', 'Kenanga', 'Anggrek', 'Cempaka', 'Flamboyan', 'Dahlia', 'Teratai', 'Kamboja', 'Cendana'];
 $district = ['Sukamaju', 'Sukasari', 'Mekarjaya', 'Ciputat', 'Ciledug', 'Cimahi', 'Cikarang', 'Cibinong', 'Cibiru', 'Cibitung'];
 
-function uuidv4()
-{
-    $data = random_bytes(16);
-    $data[6] = chr((ord($data[6]) & 0x0F) | 0x40);
-    $data[8] = chr((ord($data[8]) & 0x3F) | 0x80);
-
-    return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($data), 4));
-}
-
-function randomDate($startYear, $endYear)
-{
-    $year = rand($startYear, $endYear);
-    $month = rand(1, 12);
-    $day = rand(1, 28);
-
-    return sprintf('%04d-%02d-%02d', $year, $month, $day);
-}
-
-$insertUser = $pdo->prepare('insert into users (id, name, email, password, created_at, updated_at) values (?,?,?,?,?,?)');
-$insertProfile = $pdo->prepare('insert into profiles (id, email, nama, role, kelas, jk, usia, telp, created_at, nis, agama, jabatan, alamat, status, alasan_nonaktif, disabled_at, tanggal_lahir, updated_at, rfid_uid, kelas_change_used, no_hp_siswa, no_hp_wali, deleted_at, photo_path, photo_updated_at, must_change_password) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
-
-$now = (new DateTime('now', new DateTimeZone('UTC')))->format('Y-m-d H:i:s');
+$now = now();
 $created = 0;
 $nis = $base;
-$passwordHash = password_hash('123456', PASSWORD_BCRYPT);
+$passwordHash = Hash::make('123456');
 
 while ($created < $toCreate) {
     $nisStr = (string) $nis;
@@ -70,60 +101,56 @@ while ($created < $toCreate) {
 
     $first = $firstNames[array_rand($firstNames)];
     $last = $lastNames[array_rand($lastNames)];
-    $nama = $first.' '.$last;
-    $jk = rand(0, 1) ? 'L' : 'P';
-    $tanggal = randomDate(2008, 2012);
-    $usia = (int) date('Y') - (int) substr($tanggal, 0, 4);
-    $agama = $agamaList[array_rand($agamaList)];
-    $alamat = 'Jl. '.$street[array_rand($street)].' No. '.rand(1, 200).', '.$district[array_rand($district)];
-    $kelas = $kelasList ? $kelasList[array_rand($kelasList)] : '';
-    $telp = '08'.rand(1000000000, 9999999999);
-    $noHpSiswa = '08'.rand(1000000000, 9999999999);
-    $noHpWali = '08'.rand(1000000000, 9999999999);
+    $name = $first.' '.$last;
+    $birthDate = randomDate(2008, 2012);
     $email = 'siswa'.$nisStr.'@dummy.local';
+    $userId = (string) Str::uuid();
 
-    $id = uuidv4();
-
-    $pdo->beginTransaction();
-    try {
-        $insertUser->execute([$id, $nama, $email, $passwordHash, $now, $now]);
-        $insertProfile->execute([
-            $id,
-            $email,
-            $nama,
-            'siswa',
-            $kelas,
-            $jk,
-            $usia,
-            $telp,
-            $now,
-            $nisStr,
-            $agama,
-            null,
-            $alamat,
-            'active',
-            null,
-            null,
-            $tanggal,
-            $now,
-            null,
-            0,
-            $noHpSiswa,
-            $noHpWali,
-            null,
-            null,
-            null,
-            0,
+    DB::transaction(function () use ($userId, $name, $email, $passwordHash, $now, $tenant, $kelasList, $nisStr, $agamaList, $street, $district, $birthDate): void {
+        DB::table('users')->insert([
+            'id' => $userId,
+            'name' => $name,
+            'email' => $email,
+            'email_verified_at' => $now,
+            'password' => $passwordHash,
+            'created_at' => $now,
+            'updated_at' => $now,
         ]);
-        $pdo->commit();
-    } catch (Exception $e) {
-        $pdo->rollBack();
-        throw $e;
-    }
+
+        DB::table('profiles')->insert(profilePayload([
+            'id' => $userId,
+            'tenant_id' => (string) $tenant->id,
+            'email' => $email,
+            'nama' => $name,
+            'role' => 'siswa',
+            'kelas' => $kelasList ? $kelasList[array_rand($kelasList)] : null,
+            'jk' => random_int(0, 1) ? 'L' : 'P',
+            'usia' => (int) date('Y') - (int) substr($birthDate, 0, 4),
+            'telp' => '08'.random_int(1000000000, 9999999999),
+            'created_at' => $now,
+            'nis' => $nisStr,
+            'agama' => $agamaList[array_rand($agamaList)],
+            'jabatan' => null,
+            'alamat' => 'Jl. '.$street[array_rand($street)].' No. '.random_int(1, 200).', '.$district[array_rand($district)],
+            'status' => 'active',
+            'alasan_nonaktif' => null,
+            'disabled_at' => null,
+            'tanggal_lahir' => $birthDate,
+            'updated_at' => $now,
+            'rfid_uid' => null,
+            'kelas_change_used' => false,
+            'no_hp_siswa' => '08'.random_int(1000000000, 9999999999),
+            'no_hp_wali' => '08'.random_int(1000000000, 9999999999),
+            'deleted_at' => null,
+            'photo_path' => null,
+            'photo_updated_at' => null,
+            'must_change_password' => false,
+        ]));
+    });
 
     $existingNis[$nisStr] = true;
     $created++;
     $nis++;
 }
 
-echo "Inserted $created dummy siswa. Total dummy sekarang: ".($currentDummy + $created).PHP_EOL;
+echo "Inserted {$created} dummy siswa untuk tenant {$tenantSlug}. Total dummy sekarang: ".($currentDummy + $created).PHP_EOL;

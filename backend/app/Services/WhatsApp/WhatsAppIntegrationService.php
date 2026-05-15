@@ -105,9 +105,9 @@ class WhatsAppIntegrationService
             'is_enabled' => (bool) ($payload['is_enabled'] ?? $settings->is_enabled),
             'send_attendance' => (bool) ($payload['send_attendance'] ?? $settings->send_attendance),
             'send_profile_updates' => (bool) ($payload['send_profile_updates'] ?? $settings->send_profile_updates),
-            'send_assignment_updates' => (bool) ($payload['send_assignment_updates'] ?? $settings->send_assignment_updates),
+            'send_assignment_updates' => false,
             'send_extracurricular_updates' => (bool) ($payload['send_extracurricular_updates'] ?? $settings->send_extracurricular_updates),
-            'send_grade_updates' => (bool) ($payload['send_grade_updates'] ?? $settings->send_grade_updates),
+            'send_grade_updates' => false,
             'recipient_mode' => $this->normalizeRecipientMode($payload['recipient_mode'] ?? $settings->recipient_mode),
         ]);
         $settings->save();

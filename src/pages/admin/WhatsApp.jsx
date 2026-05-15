@@ -42,19 +42,9 @@ const CATEGORY_OPTIONS = [
     description: 'Kirim ringkasan perubahan identitas atau data penting siswa.'
   },
   {
-    key: 'send_assignment_updates',
-    title: 'Upload Tugas',
-    description: 'Kirim saat siswa mengumpulkan tugas ke sistem.'
-  },
-  {
     key: 'send_extracurricular_updates',
     title: 'Ekstrakurikuler',
     description: 'Kirim update keikutsertaan atau absensi kegiatan ekskul.'
-  },
-  {
-    key: 'send_grade_updates',
-    title: 'Nilai',
-    description: 'Kirim saat nilai tugas atau quiz diperbarui.'
   }
 ]
 
@@ -71,9 +61,7 @@ const categoryLabel = (value = '') => {
   if (normalized === 'attendance_problem') return 'Peringatan Presensi'
   if (normalized === 'attendance') return 'Absensi'
   if (normalized === 'profile_update') return 'Perubahan Data'
-  if (normalized === 'assignment') return 'Upload Tugas'
   if (normalized === 'extracurricular') return 'Ekstrakurikuler'
-  if (normalized === 'grade') return 'Nilai'
   if (normalized === 'test') return 'Tes'
   return value || 'Log'
 }
@@ -114,9 +102,7 @@ export default function WhatsApp() {
     is_enabled: true,
     send_attendance: true,
     send_profile_updates: true,
-    send_assignment_updates: false,
     send_extracurricular_updates: false,
-    send_grade_updates: false,
     recipient_mode: 'wali'
   })
   const [testForm, setTestForm] = useState({ number: '', message: '' })
@@ -159,9 +145,7 @@ export default function WhatsApp() {
         is_enabled: Boolean(nextSettings.is_enabled),
         send_attendance: Boolean(nextSettings.send_attendance),
         send_profile_updates: Boolean(nextSettings.send_profile_updates),
-        send_assignment_updates: Boolean(nextSettings.send_assignment_updates),
         send_extracurricular_updates: Boolean(nextSettings.send_extracurricular_updates),
-        send_grade_updates: Boolean(nextSettings.send_grade_updates),
         recipient_mode: nextSettings.recipient_mode || 'wali'
       })
     }
@@ -330,7 +314,11 @@ export default function WhatsApp() {
 
   const handleSaveSettings = async () => {
     setSaving(true)
-    const { data, error } = await supabase.admin.updateWhatsAppSettings(settingsForm)
+    const { data, error } = await supabase.admin.updateWhatsAppSettings({
+      ...settingsForm,
+      send_assignment_updates: false,
+      send_grade_updates: false
+    })
     setSaving(false)
 
     if (error) {

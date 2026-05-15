@@ -176,6 +176,134 @@ class DbSecurityTest extends TestCase
         $badOrder->assertJsonPath('error', 'Kolom order tidak diizinkan');
     }
 
+    public function test_db_batch_runs_selects_with_existing_policy(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        [$admin] = $this->createUserWithProfile($tenantId, 'admin', 'X-1');
+        [$student] = $this->createUserWithProfile($tenantId, 'siswa', 'X-1');
+
+        DB::table('settings')->insert([
+            'tenant_id' => $tenantId,
+            'nama_sekolah' => 'Batch School',
+            'tahun_ajaran' => '2026/2027',
+            'semester_aktif' => 'ganjil',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $response = $this->actingAs($admin)->postJson('/api/db/batch', [
+            'requests' => [
+                [
+                    'key' => 'settings',
+                    'table' => 'settings',
+                    'action' => 'select',
+                    'columns' => 'nama_sekolah,tahun_ajaran',
+                    'limit' => 1,
+                ],
+                [
+                    'key' => 'students',
+                    'table' => 'profiles',
+                    'action' => 'select',
+                    'columns' => 'id,role,kelas',
+                    'filters' => [
+                        'eq' => ['role' => 'siswa'],
+                    ],
+                    'count' => 'exact',
+                ],
+            ],
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('errors', []);
+        $this->assertSame('Batch School', $response->json('data.settings.data.0.nama_sekolah'));
+        $this->assertSame($student->id, $response->json('data.students.data.0.id'));
+        $this->assertSame(1, $response->json('data.students.count'));
+    }
+
+    public function test_db_batch_rejects_mutations(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        [$admin] = $this->createUserWithProfile($tenantId, 'admin', 'X-1');
+
+        $settingsId = DB::table('settings')->insertGetId([
+            'tenant_id' => $tenantId,
+            'nama_sekolah' => 'Tidak Berubah',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $response = $this->actingAs($admin)->postJson('/api/db/batch', [
+            'requests' => [
+                [
+                    'key' => 'mutation',
+                    'table' => 'settings',
+                    'action' => 'update',
+                    'filters' => [
+                        'eq' => ['id' => $settingsId],
+                    ],
+                    'payload' => [
+                        'nama_sekolah' => 'Harus Ditolak',
+                    ],
+                ],
+            ],
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('errors.mutation.message', 'Batch hanya mendukung aksi select');
+        $this->assertSame(
+            'Tidak Berubah',
+            DB::table('settings')->where('id', $settingsId)->value('nama_sekolah')
+        );
+    }
+
+    public function test_relation_select_hydrates_safe_profile_fields(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        [$admin] = $this->createUserWithProfile($tenantId, 'admin', 'X-1');
+        [$student] = $this->createUserWithProfile($tenantId, 'siswa', 'X-1');
+
+        DB::table('profiles')->where('id', $student->id)->update([
+            'nama' => 'Siswa Relasi',
+            'photo_url' => 'profiles/siswa-relasi.jpg',
+            'no_hp_siswa' => '081234567890',
+            'updated_at' => now(),
+        ]);
+
+        $tugasId = DB::table('tugas')->insertGetId([
+            'kelas' => 'X-1',
+            'judul' => 'Tugas Relasi',
+            'mapel' => 'Matematika',
+            'created_by' => $admin->id,
+            'created_at' => now(),
+            'updated_at' => now(),
+            'tenant_id' => $tenantId,
+        ]);
+
+        $jawabanId = DB::table('tugas_jawaban')->insertGetId([
+            'tugas_id' => $tugasId,
+            'user_id' => $student->id,
+            'status' => 'submitted',
+            'nilai' => 90,
+            'tenant_id' => $tenantId,
+        ]);
+
+        $response = $this->actingAs($admin)->postJson('/api/db', [
+            'table' => 'tugas_jawaban',
+            'action' => 'select',
+            'columns' => 'id,user_id,nilai,profiles(nama,photo_url,no_hp_siswa)',
+            'filters' => [
+                'eq' => ['id' => $jawabanId],
+            ],
+        ]);
+
+        $response->assertOk();
+        $row = $response->json('data.0');
+        $this->assertSame($student->id, $row['user_id'] ?? null);
+        $this->assertSame('Siswa Relasi', $row['profiles']['nama'] ?? null);
+        $this->assertSame('profiles/siswa-relasi.jpg', $row['profiles']['photo_url'] ?? null);
+        $this->assertArrayNotHasKey('no_hp_siswa', $row['profiles'] ?? []);
+    }
+
     public function test_kelas_insert_normalizes_full_suffix_and_avoids_cross_tenant_slug_collision(): void
     {
         config(['tenancy.allow_header_override' => true]);
@@ -542,6 +670,59 @@ class DbSecurityTest extends TestCase
 
         $delete->assertStatus(422);
         $delete->assertJsonPath('error', 'Jawaban yang sudah dinilai tidak boleh diubah');
+    }
+
+    public function test_siswa_can_select_absensi_settings_for_own_class(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        [$user] = $this->createUserWithProfile($tenantId, 'siswa', 'X-1');
+        $period = AcademicPeriod::current();
+        $today = now()->toDateString();
+
+        DB::table('absensi_settings')->insert([
+            [
+                'id' => (string) Str::uuid(),
+                'tenant_id' => $tenantId,
+                'kelas' => 'X-1',
+                'tanggal' => $today,
+                'mapel' => 'Matematika',
+                'mode' => 'manual',
+                'tahun_ajaran' => $period['tahun_ajaran'],
+                'semester' => $period['semester'],
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'id' => (string) Str::uuid(),
+                'tenant_id' => $tenantId,
+                'kelas' => 'X-2',
+                'tanggal' => $today,
+                'mapel' => 'Fisika',
+                'mode' => 'manual',
+                'tahun_ajaran' => $period['tahun_ajaran'],
+                'semester' => $period['semester'],
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ]);
+
+        $response = $this->actingAs($user)->postJson('/api/db', [
+            'table' => 'absensi_settings',
+            'action' => 'select',
+            'columns' => 'id,kelas,tanggal,mapel,mode,tahun_ajaran,semester',
+            'filters' => [
+                'eq' => [
+                    'kelas' => 'X-1',
+                    'tanggal' => $today,
+                ],
+            ],
+        ]);
+
+        $response->assertOk();
+        $rows = $response->json('data');
+        $this->assertCount(1, $rows);
+        $this->assertSame('X-1', $rows[0]['kelas'] ?? null);
+        $this->assertSame('Matematika', $rows[0]['mapel'] ?? null);
     }
 
     public function test_guru_cannot_create_tugas_with_past_mulai(): void

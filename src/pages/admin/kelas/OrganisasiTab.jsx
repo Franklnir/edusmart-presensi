@@ -1,9 +1,15 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../../../lib/supabase'
+import { queryClient, queryKeys } from '../../../lib/queryClient'
 
 const confirmDelete = (msg = 'Yakin mau dihapus?') => window.confirm(msg)
 
-export default function OrganisasiTab({ guruList, siswaList, pushToast }) {
+export default function OrganisasiTab({
+  guruList,
+  siswaList,
+  pushToast,
+  showHeader = true
+}) {
   const [orgList, setOrgList] = useState([])
   const [orgSel, setOrgSel] = useState('')
   const [orgForm, setOrgForm] = useState({ nama: '', visi: '', misi: '', pembinaGuruId: '' })
@@ -13,15 +19,61 @@ export default function OrganisasiTab({ guruList, siswaList, pushToast }) {
   const [editAnggotaId, setEditAnggotaId] = useState(null)
   const [editAnggotaData, setEditAnggotaData] = useState({})
   const [loading, setLoading] = useState(false)
+  const [memberSearch, setMemberSearch] = useState('')
+  const [memberOptions, setMemberOptions] = useState(() => siswaList || [])
+  const [memberOptionsLoading, setMemberOptionsLoading] = useState(false)
+  const [memberOptionsHasMore, setMemberOptionsHasMore] = useState(false)
 
   const JABATAN_OPTS = ['Ketua', 'Wakil Ketua', 'Sekretaris', 'Bendahara', 'Koordinator', 'Anggota']
   const FORBIDDEN = /[.#$[\]]/
   const slug = (s = '') => s.toString().trim().toLowerCase()
     .replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-').slice(0, 80)
 
+  const mapStudentOptions = useCallback((rows = []) => (rows || []).map((siswa) => ({
+    ...siswa,
+    uid: siswa.uid || siswa.id,
+    nama: siswa.nama || siswa.email || siswa.id
+  })), [])
+
+  const loadMemberOptions = useCallback(async (query = '') => {
+    setMemberOptionsLoading(true)
+    try {
+      const params = {
+        q: query,
+        status: 'active',
+        per_page: 50
+      }
+
+      const data = await queryClient.fetchQuery({
+        queryKey: queryKeys.admin.studentOptions(params),
+        queryFn: async () => {
+          const { data, error } = await supabase.admin.studentOptions(params)
+          if (error) throw error
+          return data
+        },
+        staleTime: 60 * 1000,
+      })
+
+      setMemberOptions(mapStudentOptions(data?.rows || []))
+      setMemberOptionsHasMore(Boolean(data?.meta?.has_more))
+    } catch (error) {
+      console.error('Error loading student options:', error)
+      pushToast('error', error?.message || 'Gagal memuat opsi siswa')
+    } finally {
+      setMemberOptionsLoading(false)
+    }
+  }, [mapStudentOptions, pushToast])
+
   useEffect(() => {
     loadOrgList()
   }, [])
+
+  useEffect(() => {
+    if (Array.isArray(siswaList) && siswaList.length) {
+      setMemberOptions(mapStudentOptions(siswaList))
+      setMemberOptionsHasMore(false)
+    }
+  }, [mapStudentOptions, siswaList])
 
   useEffect(() => {
     if (orgSel) {
@@ -30,8 +82,20 @@ export default function OrganisasiTab({ guruList, siswaList, pushToast }) {
     } else {
       setOrgForm({ nama: '', visi: '', misi: '', pembinaGuruId: '' })
       setOrgAnggota([])
+      setMemberSearch('')
+      setAddMemberUid('')
     }
   }, [orgSel])
+
+  useEffect(() => {
+    if (!orgSel) return undefined
+
+    const timer = window.setTimeout(() => {
+      loadMemberOptions(memberSearch)
+    }, memberSearch ? 300 : 0)
+
+    return () => window.clearTimeout(timer)
+  }, [loadMemberOptions, memberSearch, orgSel])
 
   const loadOrgList = async () => {
     try {
@@ -250,7 +314,7 @@ export default function OrganisasiTab({ guruList, siswaList, pushToast }) {
 
     try {
       setLoading(true)
-      const siswa = siswaList.find(s => s.uid === addMemberUid)
+      const siswa = memberOptions.find(s => s.uid === addMemberUid) || siswaList.find(s => s.uid === addMemberUid)
       const namaSiswa = siswa?.nama || ''
 
       const { error } = await supabase
@@ -347,7 +411,7 @@ export default function OrganisasiTab({ guruList, siswaList, pushToast }) {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {showHeader && (
       <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-200">
         <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
           <div>
@@ -361,6 +425,7 @@ export default function OrganisasiTab({ guruList, siswaList, pushToast }) {
           </div>
         </div>
       </div>
+      )}
 
       {/* Statistik */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -402,8 +467,8 @@ export default function OrganisasiTab({ guruList, siswaList, pushToast }) {
         <div className="bg-white rounded-xl p-4 shadow border border-yellow-200">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-500">Siswa Tersedia</p>
-              <p className="text-2xl font-bold text-gray-900">{siswaList.length}</p>
+              <p className="text-sm text-gray-500">Opsi Siswa</p>
+              <p className="text-2xl font-bold text-gray-900">{memberOptionsLoading ? '...' : memberOptions.length}</p>
             </div>
             <div className="p-3 bg-yellow-100 rounded-lg">
               <span className="text-xl">📋</span>
@@ -465,6 +530,8 @@ export default function OrganisasiTab({ guruList, siswaList, pushToast }) {
                 setOrgSel('')
                 setOrgForm({ nama: '', visi: '', misi: '', pembinaGuruId: '' })
                 setOrgAnggota([])
+                setMemberSearch('')
+                setAddMemberUid('')
               }}
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -611,18 +678,33 @@ export default function OrganisasiTab({ guruList, siswaList, pushToast }) {
                 <label className="block text-xs font-medium text-blue-800 mb-1">
                   Siswa <span className="text-red-500">*</span>
                 </label>
+                <input
+                  className="mb-2 block w-full px-3 py-2 text-sm border border-blue-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
+                  value={memberSearch}
+                  onChange={(event) => {
+                    setMemberSearch(event.target.value)
+                    setAddMemberUid('')
+                  }}
+                  placeholder="Cari nama, NIS, email, atau kelas"
+                />
                 <select
                   className="block w-full px-3 py-2 text-sm border border-blue-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
                   value={addMemberUid}
                   onChange={e => setAddMemberUid(e.target.value)}
+                  disabled={memberOptionsLoading}
                 >
-                  <option value="">Pilih siswa</option>
-                  {siswaList.map(s => (
+                  <option value="">{memberOptionsLoading ? 'Memuat siswa...' : 'Pilih siswa'}</option>
+                  {memberOptions.map(s => (
                     <option key={s.uid} value={s.uid}>
                       {s.nama} {s.kelas ? `(${s.kelas})` : ''}
                     </option>
                   ))}
                 </select>
+                {memberOptionsHasMore && (
+                  <p className="mt-1 text-[11px] text-blue-700">
+                    Hasil dibatasi 50 siswa. Ketik kata kunci lebih spesifik.
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-xs font-medium text-blue-800 mb-1">Jabatan</label>
@@ -642,7 +724,7 @@ export default function OrganisasiTab({ guruList, siswaList, pushToast }) {
                   type="button"
                   className="w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white py-2.5 px-4 rounded-lg hover:from-blue-700 hover:to-blue-800 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 text-sm font-medium flex items-center justify-center space-x-2 disabled:opacity-50"
                   onClick={tambahAnggota}
-                  disabled={loading || !addMemberUid}
+                  disabled={loading || memberOptionsLoading || !addMemberUid}
                 >
                   {loading ? (
                     <>

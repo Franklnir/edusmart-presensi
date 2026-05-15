@@ -174,6 +174,7 @@ Isi minimal:
 - `TENANT_ROOT_DOMAIN`
 - `TENANT_ADMIN_SUBDOMAIN`
 - `SUPER_ADMIN_EMAILS`
+- `SUPER_ADMIN_BOOTSTRAP_PASSWORD` jika database fresh dan ingin akun super admin dibuat otomatis saat first deploy
 - `MAIL_*`
 - `EVOLUTION_*` jika WhatsApp dipakai
 - `RFID_*` dan `RFID_MOSQUITTO_*` jika RFID/MQTT dipakai
@@ -188,6 +189,8 @@ printf 'APP_KEY=base64:%s\n' "$(openssl rand -base64 32)"
 Salin hasilnya ke `APP_KEY=` di `.env.production`.
 
 Jika ini migrasi data dari VPS lama dan kamu ingin session/encrypted data tetap kompatibel, pakai `APP_KEY` lama. Karena secret lama pernah tampil di chat, rotasi secret tetap direkomendasikan setelah migrasi stabil.
+
+Untuk install fresh tanpa restore database, isi `SUPER_ADMIN_EMAILS` dan `SUPER_ADMIN_BOOTSTRAP_PASSWORD` sebelum first deploy. Container backend akan membuat akun super admin otomatis di tenant default, lalu password bootstrap bisa dikosongkan setelah login berhasil.
 
 ## 7. Arahkan DNS
 

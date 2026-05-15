@@ -3,11 +3,17 @@
 import React, { useCallback } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { prefetchRoute } from '../../lib/routePrefetch'
+import { isActiveMenuPath } from '../../navigation/menu.utils'
 import { Icon } from './icons'
 
-const NavItem = React.memo(({ link, collapsed, indent = false }) => {
+const NavItem = React.memo(({ link, collapsed, indent = false, level = 0 }) => {
   const location = useLocation()
-  const isActive = location.pathname === link.to || location.pathname.startsWith(link.to + '/')
+  const isActive = isActiveMenuPath(location.pathname, link.to, location.search)
+  const nestedLevel = indent ? Math.max(1, level) : level
+  const expandedPadding = nestedLevel > 0 ? 'pr-2.5 py-2' : 'px-2.5 py-2.5'
+  const expandedStyle = nestedLevel > 0
+    ? { paddingLeft: `${Math.min(2.25 + (nestedLevel - 1) * 0.9, 4.5)}rem` }
+    : undefined
 
   const handlePrefetch = useCallback(() => {
     void prefetchRoute(link.to)
@@ -23,13 +29,14 @@ const NavItem = React.memo(({ link, collapsed, indent = false }) => {
       className={`
         group relative flex items-center gap-2.5 rounded-xl text-[14px] font-semibold
         transition-all duration-200 select-none
-        ${indent && !collapsed ? 'pl-9 pr-2.5 py-2' : 'px-2.5 py-2.5'}
+        ${!collapsed ? expandedPadding : 'px-2.5 py-2.5'}
         ${isActive
           ? 'bg-brand-600 text-white shadow-brand-sm'
           : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
         }
         ${collapsed ? 'justify-center' : ''}
       `}
+      style={!collapsed ? expandedStyle : undefined}
     >
       <span className={`flex-shrink-0 transition-transform duration-200 group-hover:scale-110 ${isActive ? 'text-white' : 'text-slate-500 group-hover:text-brand-600'}`}>
         <Icon name={link.icon} className="w-[18px] h-[18px]" />

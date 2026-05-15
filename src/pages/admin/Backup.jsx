@@ -1,13 +1,21 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import { AlertTriangle, Database, ShieldCheck } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useUIStore } from '../../store/useUIStore'
 import { loadExcelJsBrowser } from '../../utils/excelBrowser'
+import { buildRestoreStatusToast } from '../../utils/restoreStatus'
+import {
+  SEMESTER_GANJIL,
+  SEMESTER_GENAP,
+  generateAcademicYearOptions,
+  resolveAcademicPeriod
+} from '../../utils/academicPeriod'
 
 const MODE_OPTIONS = [
   {
     value: 'full',
     label: 'Semua Data Sekolah',
-    description: 'Backup lengkap semua tabel tenant.'
+    description: 'Backup lengkap semua tabel database tenant, tanpa isi file storage.'
   },
   {
     value: 'students',
@@ -31,6 +39,15 @@ const FORMAT_OPTIONS = [
   { value: 'json', label: 'JSON (.json)' },
   { value: 'csv', label: 'CSV Ringkas (.csv)' },
   { value: 'html', label: 'Laporan HTML (.html)' }
+]
+
+const PERIOD_OPTIONS = [
+  { value: 'all', label: 'Semua Data' },
+  { value: 'semester', label: 'Per Semester' },
+  { value: 'academic_year', label: 'Per Tahun Ajaran' },
+  { value: 'this_month', label: 'Bulan Ini' },
+  { value: 'last_months', label: 'Bulan Terakhir' },
+  { value: 'date_range', label: 'Rentang Tanggal' }
 ]
 
 const MONTH_OPTIONS = Array.from({ length: 12 }, (_, idx) => idx + 1)
@@ -103,6 +120,21 @@ const buildBaseFileName = (payload, mode) => {
   const tenantSafe = normalizeFilePart(tenantName, 'sekolah')
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')
   return `backup-${tenantSafe}-${modeSafe}-${stamp}`
+}
+
+const summarizeBackupPayload = (payload) => {
+  const tables = Array.isArray(payload?.tables) ? payload.tables : []
+  const totalRows = tables.reduce((sum, table) => {
+    const fromCount = Number(table?.row_count)
+    if (Number.isFinite(fromCount)) return sum + fromCount
+    return sum + (Array.isArray(table?.rows) ? table.rows.length : 0)
+  }, 0)
+
+  return {
+    tables,
+    tableCount: Number(payload?.summary?.table_count || tables.length),
+    totalRows: Number(payload?.summary?.total_rows || totalRows)
+  }
 }
 
 const downloadBlob = (blob, fileName) => {
@@ -393,10 +425,16 @@ const createHtmlContent = (payload) => {
 
 export default function BackupAdmin() {
   const { pushToast } = useUIStore()
+  const activePeriod = useMemo(() => resolveAcademicPeriod(), [])
+  const academicYearOptions = useMemo(() => generateAcademicYearOptions({ back: 6, forward: 2 }), [])
 
   const [mode, setMode] = useState('full')
   const [periodType, setPeriodType] = useState('all')
   const [months, setMonths] = useState(12)
+  const [tahunAjaran, setTahunAjaran] = useState(activePeriod.tahunAjaran)
+  const [semester, setSemester] = useState(activePeriod.semester)
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
   const [format, setFormat] = useState('xlsx')
   const [loading, setLoading] = useState(false)
   const [downloading, setDownloading] = useState(false)
@@ -414,20 +452,38 @@ export default function BackupAdmin() {
   const resolvedMonths = useMemo(() => {
     if (periodType === 'all') return null
     if (periodType === 'this_month') return 1
+    if (periodType !== 'last_months') return null
     return Math.max(1, Math.min(12, Number(months) || 1))
   }, [periodType, months])
 
   const queryKey = useMemo(
-    () => `${mode}|${resolvedMonths === null ? 'all' : resolvedMonths}`,
-    [mode, resolvedMonths]
+    () => [
+      mode,
+      periodType,
+      resolvedMonths === null ? 'all' : resolvedMonths,
+      tahunAjaran,
+      semester,
+      startDate,
+      endDate
+    ].join('|'),
+    [mode, periodType, resolvedMonths, tahunAjaran, semester, startDate, endDate]
   )
 
   const loadBackupPayload = async ({ silent = false } = {}) => {
     setLoading(true)
     try {
+      if (periodType === 'date_range' && (!startDate || !endDate)) {
+        throw new Error('Isi tanggal mulai dan tanggal selesai untuk backup rentang tanggal')
+      }
+
       const { data, error } = await supabase.admin.backup({
         mode,
-        months: resolvedMonths || undefined
+        periodType,
+        months: periodType === 'last_months' ? resolvedMonths || undefined : undefined,
+        tahunAjaran: ['semester', 'academic_year'].includes(periodType) ? tahunAjaran : undefined,
+        semester: periodType === 'semester' ? semester : undefined,
+        startDate: periodType === 'date_range' ? startDate : undefined,
+        endDate: periodType === 'date_range' ? endDate : undefined
       })
 
       if (error) throw error
@@ -517,9 +573,8 @@ export default function BackupAdmin() {
       setRestorePayload(null)
       setRestoreFileName('')
       setRestoreResult(null)
-      pushToast('error', err?.message || 'Gagal membaca file restore')
-    } finally {
       event.target.value = ''
+      pushToast('error', err?.message || 'Gagal membaca file restore')
     }
   }
 
@@ -535,8 +590,10 @@ export default function BackupAdmin() {
         include_tables: includeTables.length ? includeTables : undefined
       })
       if (error) throw error
-      setRestoreResult(data?.result || null)
-      pushToast('success', 'Dry-run restore selesai. Silakan cek hasil preview.')
+      const result = data?.result || null
+      setRestoreResult(result)
+      const toast = buildRestoreStatusToast(result, { fallbackAction: 'Dry-run restore' })
+      pushToast(toast.type, toast.message, { title: toast.title, duration: toast.duration })
     } catch (err) {
       pushToast('error', err?.message || 'Gagal menjalankan dry-run restore')
     } finally {
@@ -547,7 +604,7 @@ export default function BackupAdmin() {
   const handleRestoreApply = async () => {
     if (!restorePayload || restoreApplyLoading || restorePreviewLoading) return
     const confirmed = window.confirm(
-      'Apply restore ke tenant ini sekarang? Data akan diproses sesuai payload backup.'
+      'Apply restore ke tenant ini sekarang? Sistem akan upsert data yang cocok dan melewati konflik tenant agar tidak ganda.'
     )
     if (!confirmed) return
 
@@ -561,8 +618,10 @@ export default function BackupAdmin() {
         include_tables: includeTables.length ? includeTables : undefined
       })
       if (error) throw error
-      setRestoreResult(data?.result || null)
-      pushToast('success', 'Restore berhasil diterapkan.')
+      const result = data?.result || null
+      setRestoreResult(result)
+      const toast = buildRestoreStatusToast(result, { fallbackAction: 'Restore' })
+      pushToast(toast.type, toast.message, { title: toast.title, duration: toast.duration })
     } catch (err) {
       pushToast('error', err?.message || 'Gagal apply restore')
     } finally {
@@ -606,6 +665,16 @@ export default function BackupAdmin() {
   const previewRows = selectedRows.slice(0, ROW_PREVIEW_LIMIT)
   const isPreviewStale = Boolean(payload && payloadQueryKey !== queryKey)
   const selectedFormatLabel = FORMAT_OPTIONS.find((item) => item.value === format)?.label || format
+  const restoreTables = Array.isArray(restoreResult?.tables) ? restoreResult.tables : []
+  const restoreSummary = restoreResult?.summary || {}
+  const restoreIsDryRun = Boolean(restoreSummary?.dry_run)
+  const restoreInsertCount = restoreIsDryRun ? restoreSummary?.would_insert : restoreSummary?.inserted
+  const restoreUpdateCount = restoreIsDryRun ? restoreSummary?.would_update : restoreSummary?.updated
+  const restorePayloadSummary = useMemo(
+    () => summarizeBackupPayload(restorePayload),
+    [restorePayload]
+  )
+  const restorePayloadPreviewTables = restorePayloadSummary.tables.slice(0, 8)
 
   const formatPreview = useMemo(() => {
     if (!payload) {
@@ -634,12 +703,12 @@ export default function BackupAdmin() {
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
             <div className="flex items-center gap-4">
               <div className="p-3 bg-blue-100 rounded-lg">
-                <span className="text-2xl text-blue-600">🗄️</span>
+                <Database className="h-7 w-7 text-blue-600" />
               </div>
               <div>
                 <h1 className="page-title-heading">Backup Data Sekolah</h1>
                 <p className="page-title-description">
-                  Pilih jenis data yang ingin dibackup, tentukan periode bulan, lalu unduh dalam format yang dibutuhkan.
+                  Backup database tenant sekolah per semua data, semester, tahun ajaran, bulan, atau rentang tanggal.
                 </p>
               </div>
             </div>
@@ -674,6 +743,31 @@ export default function BackupAdmin() {
             </div>
           </div>
 
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+              <div className="flex items-start gap-2">
+                <ShieldCheck className="mt-0.5 h-4 w-4 text-emerald-700" />
+                <div>
+                  <p className="text-sm font-semibold text-emerald-900">Restore aman untuk data parsial</p>
+                  <p className="mt-1 text-xs text-emerald-800">
+                    JSON restore diproses dengan upsert ID/unique key, dry-run, dan pengaman tenant agar data yang masih ada tidak digandakan.
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="mt-0.5 h-4 w-4 text-amber-700" />
+                <div>
+                  <p className="text-sm font-semibold text-amber-900">Database saja, tanpa file storage</p>
+                  <p className="mt-1 text-xs text-amber-800">
+                    Backup dapat berisi metadata/link file di database, tetapi isi file storage tidak ikut disalin.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-1">Periode Backup</label>
@@ -682,27 +776,92 @@ export default function BackupAdmin() {
                 onChange={(e) => setPeriodType(e.target.value)}
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
               >
-                <option value="all">Semua Data</option>
-                <option value="this_month">Bulan Ini</option>
-                <option value="custom">1-12 Bulan Terakhir</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1">Jumlah Bulan</label>
-              <select
-                value={months}
-                onChange={(e) => setMonths(Number(e.target.value))}
-                disabled={periodType !== 'custom'}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-slate-100 disabled:text-slate-400"
-              >
-                {MONTH_OPTIONS.map((monthValue) => (
-                  <option key={monthValue} value={monthValue}>
-                    {monthValue} bulan
+                {PERIOD_OPTIONS.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
                   </option>
                 ))}
               </select>
             </div>
+
+            {periodType === 'semester' ? (
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">Semester</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <select
+                    value={tahunAjaran}
+                    onChange={(e) => setTahunAjaran(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  >
+                    {academicYearOptions.map((item) => (
+                      <option key={item.value} value={item.value}>{item.label}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={semester}
+                    onChange={(e) => setSemester(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  >
+                    {[SEMESTER_GANJIL, SEMESTER_GENAP].map((item) => (
+                      <option key={item} value={item}>{item}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            ) : periodType === 'academic_year' ? (
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">Tahun Ajaran</label>
+                <select
+                  value={tahunAjaran}
+                  onChange={(e) => setTahunAjaran(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                >
+                  {academicYearOptions.map((item) => (
+                    <option key={item.value} value={item.value}>{item.label}</option>
+                  ))}
+                </select>
+              </div>
+            ) : periodType === 'last_months' ? (
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">Jumlah Bulan</label>
+                <select
+                  value={months}
+                  onChange={(e) => setMonths(Number(e.target.value))}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                >
+                  {MONTH_OPTIONS.map((monthValue) => (
+                    <option key={monthValue} value={monthValue}>
+                      {monthValue} bulan
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : periodType === 'date_range' ? (
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">Rentang Tanggal</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                  <input
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+            ) : (
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">Cakupan</label>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                  {periodType === 'this_month' ? 'Data bulan berjalan' : 'Seluruh riwayat database tenant'}
+                </div>
+              </div>
+            )}
 
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-1">Format Export</label>
@@ -791,26 +950,143 @@ export default function BackupAdmin() {
               </div>
             </div>
 
+            {restorePayload ? (
+              <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-3">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">File restore sudah dibaca</p>
+                    <p className="text-xs text-slate-500">
+                      Klik Preview Dry-Run untuk simulasi insert/update/konflik sebelum apply.
+                    </p>
+                  </div>
+                  <span className="text-xs font-semibold text-indigo-700">
+                    {restorePayload?.manifest?.backup_type || 'tenant_database'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
+                  <div className="rounded-md border border-slate-200 p-2">
+                    <p className="text-slate-500">Tenant Asal</p>
+                    <p className="font-semibold text-slate-900 truncate">{restorePayload?.tenant?.name || '-'}</p>
+                  </div>
+                  <div className="rounded-md border border-slate-200 p-2">
+                    <p className="text-slate-500">Mode</p>
+                    <p className="font-semibold text-slate-900 truncate">{restorePayload?.mode_label || restorePayload?.mode || '-'}</p>
+                  </div>
+                  <div className="rounded-md border border-slate-200 p-2">
+                    <p className="text-slate-500">Periode</p>
+                    <p className="font-semibold text-slate-900 truncate">{restorePayload?.period?.label || '-'}</p>
+                  </div>
+                  <div className="rounded-md border border-slate-200 p-2">
+                    <p className="text-slate-500">Jumlah Tabel</p>
+                    <p className="font-semibold text-slate-900">{toNumber(restorePayloadSummary.tableCount)}</p>
+                  </div>
+                  <div className="rounded-md border border-slate-200 p-2">
+                    <p className="text-slate-500">Total Baris</p>
+                    <p className="font-semibold text-slate-900">{toNumber(restorePayloadSummary.totalRows)}</p>
+                  </div>
+                </div>
+
+                {restorePayloadPreviewTables.length ? (
+                  <div className="overflow-x-auto rounded-lg border border-slate-200">
+                    <table className="min-w-full text-xs">
+                      <thead className="bg-slate-50 text-slate-500">
+                        <tr>
+                          <th className="px-3 py-2 text-left">Tabel di JSON</th>
+                          <th className="px-3 py-2 text-right">Baris</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-slate-700">
+                        {restorePayloadPreviewTables.map((table, index) => (
+                          <tr key={`${table?.name || 'table'}-${index}`}>
+                            <td className="px-3 py-2 font-medium text-slate-900">{table?.name || '-'}</td>
+                            <td className="px-3 py-2 text-right">
+                              {toNumber(table?.row_count || (Array.isArray(table?.rows) ? table.rows.length : 0))}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {restorePayloadSummary.tables.length > restorePayloadPreviewTables.length ? (
+                      <p className="border-t border-slate-100 px-3 py-2 text-xs text-slate-500">
+                        Menampilkan {restorePayloadPreviewTables.length} dari {restorePayloadSummary.tables.length} tabel.
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
             {restoreResult ? (
-              <div className="rounded-lg border border-indigo-200 bg-white p-3">
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+              <div className="rounded-lg border border-indigo-200 bg-white p-3 space-y-3">
+                <div className="grid grid-cols-2 md:grid-cols-6 gap-2 text-xs">
                   <div className="rounded-md border border-slate-200 p-2">
                     <p className="text-slate-500">Incoming</p>
-                    <p className="font-semibold text-slate-900">{toNumber(restoreResult?.summary?.incoming_rows)}</p>
+                    <p className="font-semibold text-slate-900">{toNumber(restoreSummary?.incoming_rows)}</p>
                   </div>
                   <div className="rounded-md border border-slate-200 p-2">
-                    <p className="text-slate-500">Would Insert</p>
-                    <p className="font-semibold text-indigo-700">{toNumber(restoreResult?.summary?.would_insert)}</p>
+                    <p className="text-slate-500">{restoreIsDryRun ? 'Akan Insert' : 'Inserted'}</p>
+                    <p className="font-semibold text-indigo-700">{toNumber(restoreInsertCount)}</p>
                   </div>
                   <div className="rounded-md border border-slate-200 p-2">
-                    <p className="text-slate-500">Would Update</p>
-                    <p className="font-semibold text-indigo-700">{toNumber(restoreResult?.summary?.would_update)}</p>
+                    <p className="text-slate-500">{restoreIsDryRun ? 'Akan Update' : 'Updated'}</p>
+                    <p className="font-semibold text-indigo-700">{toNumber(restoreUpdateCount)}</p>
+                  </div>
+                  <div className="rounded-md border border-slate-200 p-2">
+                    <p className="text-slate-500">Skipped</p>
+                    <p className="font-semibold text-slate-700">{toNumber(restoreSummary?.skipped)}</p>
+                  </div>
+                  <div className="rounded-md border border-slate-200 p-2">
+                    <p className="text-slate-500">Konflik</p>
+                    <p className="font-semibold text-amber-700">{toNumber(restoreSummary?.conflicts)}</p>
                   </div>
                   <div className="rounded-md border border-slate-200 p-2">
                     <p className="text-slate-500">Errors</p>
-                    <p className="font-semibold text-rose-700">{toNumber(restoreResult?.summary?.errors)}</p>
+                    <p className="font-semibold text-rose-700">{toNumber(restoreSummary?.errors)}</p>
                   </div>
                 </div>
+
+                {restoreTables.length ? (
+                  <div className="overflow-x-auto rounded-lg border border-slate-200">
+                    <table className="min-w-full text-xs">
+                      <thead className="bg-slate-50 text-slate-500">
+                        <tr>
+                          <th className="px-3 py-2 text-left">Tabel</th>
+                          <th className="px-3 py-2 text-right">Incoming</th>
+                          <th className="px-3 py-2 text-right">{restoreIsDryRun ? 'Akan Insert' : 'Inserted'}</th>
+                          <th className="px-3 py-2 text-right">{restoreIsDryRun ? 'Akan Update' : 'Updated'}</th>
+                          <th className="px-3 py-2 text-right">Skipped</th>
+                          <th className="px-3 py-2 text-right">Konflik</th>
+                          <th className="px-3 py-2 text-right">Errors</th>
+                          <th className="px-3 py-2 text-left">Catatan</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-slate-700">
+                        {restoreTables.map((item, index) => {
+                          const messages = Array.isArray(item?.messages) ? item.messages : []
+                          return (
+                            <tr key={`${item?.table || 'table'}-${index}`}>
+                              <td className="px-3 py-2 font-medium text-slate-900">{item?.table || '-'}</td>
+                              <td className="px-3 py-2 text-right">{toNumber(item?.incoming_rows)}</td>
+                              <td className="px-3 py-2 text-right text-indigo-700">
+                                {toNumber(restoreIsDryRun ? item?.would_insert : item?.inserted)}
+                              </td>
+                              <td className="px-3 py-2 text-right text-indigo-700">
+                                {toNumber(restoreIsDryRun ? item?.would_update : item?.updated)}
+                              </td>
+                              <td className="px-3 py-2 text-right">{toNumber(item?.skipped)}</td>
+                              <td className="px-3 py-2 text-right text-amber-700">{toNumber(item?.conflicts)}</td>
+                              <td className="px-3 py-2 text-right text-rose-700">{toNumber(item?.errors)}</td>
+                              <td className="px-3 py-2 min-w-64">
+                                {messages.length ? messages.join(' | ') : '-'}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : null}
               </div>
             ) : (
               <p className="text-xs text-slate-500">

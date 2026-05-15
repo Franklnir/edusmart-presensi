@@ -59,14 +59,175 @@ export const getSemesterMonths = (tahunAjaran, semester) => {
   })
 }
 
-export const buildAcademicPeriod = (tahunAjaran, semester) => {
+const sortAndUniqueMonths = (months = []) => {
+  const byValue = new Map()
+  months.forEach((month) => {
+    if (!month?.value) return
+    byValue.set(month.value, month)
+  })
+
+  return Array.from(byValue.values()).sort((a, b) => {
+    const aKey = `${a.year || 0}-${String(a.month || 0).padStart(2, '0')}`
+    const bKey = `${b.year || 0}-${String(b.month || 0).padStart(2, '0')}`
+    return aKey.localeCompare(bKey)
+  })
+}
+
+export const getAcademicYearMonths = (tahunAjaran, options = {}) => {
+  const normalizedYear = normalizeAcademicYear(tahunAjaran)
+  if (!normalizedYear) return []
+
+  const ganjilCustom = getCustomPeriodMonths(
+    normalizedYear,
+    options.periodeGanjilMulai || options.periode_ganjil_mulai,
+    options.periodeGanjilSelesai || options.periode_ganjil_selesai
+  )
+  const genapCustom = getCustomPeriodMonths(
+    normalizedYear,
+    options.periodeGenapMulai || options.periode_genap_mulai,
+    options.periodeGenapSelesai || options.periode_genap_selesai
+  )
+
+  const ganjilMonths = ganjilCustom.length
+    ? ganjilCustom
+    : getSemesterMonths(normalizedYear, SEMESTER_GANJIL)
+  const genapMonths = genapCustom.length
+    ? genapCustom
+    : getSemesterMonths(normalizedYear, SEMESTER_GENAP)
+
+  return sortAndUniqueMonths([...ganjilMonths, ...genapMonths])
+}
+
+export const normalizePeriodDate = (value) => {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  const dateValue = /^\d{4}-\d{2}$/.test(raw) ? `${raw}-01` : raw
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) return ''
+  const date = new Date(`${dateValue}T00:00:00`)
+  if (Number.isNaN(date.getTime())) return ''
+  return toDateString(date)
+}
+
+export const toMonthInputValue = (value) => {
+  const normalized = normalizePeriodDate(value)
+  return normalized ? normalized.slice(0, 7) : ''
+}
+
+export const semesterRangeFields = (semester) => {
+  const normalizedSemester = normalizeSemester(semester)
+  if (normalizedSemester === SEMESTER_GANJIL) {
+    return {
+      start: 'periode_ganjil_mulai',
+      end: 'periode_ganjil_selesai',
+      camelStart: 'periodeGanjilMulai',
+      camelEnd: 'periodeGanjilSelesai'
+    }
+  }
+  if (normalizedSemester === SEMESTER_GENAP) {
+    return {
+      start: 'periode_genap_mulai',
+      end: 'periode_genap_selesai',
+      camelStart: 'periodeGenapMulai',
+      camelEnd: 'periodeGenapSelesai'
+    }
+  }
+  return null
+}
+
+export const getSemesterRangeFromSettings = (settings = {}, semester) => {
+  const fields = semesterRangeFields(semester)
+  if (!fields) {
+    return {
+      startsAt: settings?.periode_mulai || settings?.periodeMulai || settings?.startsAt,
+      endsAt: settings?.periode_selesai || settings?.periodeSelesai || settings?.endsAt
+    }
+  }
+
+  const startsAt =
+    settings?.[fields.start] ||
+    settings?.[fields.camelStart] ||
+    settings?.periode_mulai ||
+    settings?.periodeMulai ||
+    settings?.startsAt
+  const endsAt =
+    settings?.[fields.end] ||
+    settings?.[fields.camelEnd] ||
+    settings?.periode_selesai ||
+    settings?.periodeSelesai ||
+    settings?.endsAt
+
+  return { startsAt, endsAt }
+}
+
+export const getCustomPeriodMonths = (tahunAjaran, startsAt, endsAt) => {
+  const normalizedYear = normalizeAcademicYear(tahunAjaran)
+  const startDate = normalizePeriodDate(startsAt)
+  const endDate = normalizePeriodDate(endsAt)
+  if (!normalizedYear || !startDate || !endDate) return []
+
+  const academicStartYear = Number(normalizedYear.slice(0, 4))
+  const academicStart = new Date(academicStartYear, 6, 1)
+  const academicEnd = new Date(academicStartYear + 1, 5, 30)
+  const start = new Date(`${startDate}T00:00:00`)
+  const end = endOfMonth(
+    Number(endDate.slice(0, 4)),
+    Number(endDate.slice(5, 7))
+  )
+
+  if (start > end || start < academicStart || end > academicEnd) return []
+
+  const diffMonths =
+    (end.getFullYear() - start.getFullYear()) * 12 +
+    (end.getMonth() - start.getMonth())
+  if (diffMonths > 11) return []
+
+  const months = []
+  const cursor = new Date(start.getFullYear(), start.getMonth(), 1)
+  while (cursor <= end) {
+    const month = cursor.getMonth() + 1
+    const year = cursor.getFullYear()
+    const name = MONTH_NAMES_ID[month]
+    const monthStart = new Date(year, month - 1, 1)
+    const monthEnd = endOfMonth(year, month)
+    months.push({
+      month,
+      year,
+      value: `${year}-${String(month).padStart(2, '0')}`,
+      name,
+      label: `${name} ${year}`,
+      shortLabel: `${name.slice(0, 3)} ${year}`,
+      startDate: toDateString(monthStart),
+      endDate: toDateString(monthEnd)
+    })
+    cursor.setMonth(cursor.getMonth() + 1)
+  }
+
+  return months
+}
+
+export const buildAcademicPeriod = (tahunAjaran, semester, options = {}) => {
   const current = getCurrentAcademicPeriodBase()
   const normalizedYear = normalizeAcademicYear(tahunAjaran) || current.tahunAjaran
   const normalizedSemester = normalizeSemester(semester) || current.semester
   const startYear = Number(normalizedYear.slice(0, 4)) || current.startYear
-  const months = getSemesterMonths(normalizedYear, normalizedSemester)
+  const customMonths = getCustomPeriodMonths(
+    normalizedYear,
+    options.periodeMulai || options.periode_mulai || options.startsAt,
+    options.periodeSelesai || options.periode_selesai || options.endsAt
+  )
+  const months = customMonths.length
+    ? customMonths
+    : getSemesterMonths(normalizedYear, normalizedSemester)
+  const academicYearMonths = getAcademicYearMonths(normalizedYear, {
+    periodeGanjilMulai: options.periodeGanjilMulai || options.periode_ganjil_mulai,
+    periodeGanjilSelesai: options.periodeGanjilSelesai || options.periode_ganjil_selesai,
+    periodeGenapMulai: options.periodeGenapMulai || options.periode_genap_mulai,
+    periodeGenapSelesai: options.periodeGenapSelesai || options.periode_genap_selesai
+  })
   const firstMonth = months[0] || null
   const lastMonth = months[months.length - 1] || null
+  const firstAcademicMonth = academicYearMonths[0] || null
+  const lastAcademicMonth = academicYearMonths[academicYearMonths.length - 1] || null
 
   return {
     tahunAjaran: normalizedYear,
@@ -74,11 +235,20 @@ export const buildAcademicPeriod = (tahunAjaran, semester) => {
     startYear,
     endYear: startYear + 1,
     months,
+    academicYearMonths,
     monthNumbers: months.map((item) => item.month),
     monthLabels: months.map((item) => item.label),
+    academicYearMonthNumbers: academicYearMonths.map((item) => item.month),
+    academicYearMonthLabels: academicYearMonths.map((item) => item.label),
     startsAt: firstMonth?.startDate || '',
     endsAt: lastMonth?.endDate || '',
+    academicYearStartsAt: firstAcademicMonth?.startDate || '',
+    academicYearEndsAt: lastAcademicMonth?.endDate || '',
+    periodeMulai: firstMonth?.startDate || '',
+    periodeSelesai: lastMonth?.endDate || '',
+    customRange: customMonths.length > 0,
     rangeLabel: firstMonth && lastMonth ? `${firstMonth.label} - ${lastMonth.label}` : '',
+    academicYearRangeLabel: firstAcademicMonth && lastAcademicMonth ? `${firstAcademicMonth.label} - ${lastAcademicMonth.label}` : '',
     label: `${normalizedYear} - Semester ${normalizedSemester}`
   }
 }
@@ -130,9 +300,25 @@ export const normalizeSemester = (value) => {
 
 export const resolveAcademicPeriod = (settings = {}) => {
   const current = getCurrentAcademicPeriod()
-  const tahunAjaran = normalizeAcademicYear(settings?.tahun_ajaran) || current.tahunAjaran
-  const semester = normalizeSemester(settings?.semester_aktif || settings?.semester) || current.semester
-  return buildAcademicPeriod(tahunAjaran, semester)
+  const tahunAjaran = normalizeAcademicYear(settings?.tahun_ajaran || settings?.tahunAjaran) || current.tahunAjaran
+  const semester = normalizeSemester(settings?.semester_aktif || settings?.semesterAktif || settings?.semester) || current.semester
+  const semesterRange = getSemesterRangeFromSettings(settings, semester)
+  const period = buildAcademicPeriod(tahunAjaran, semester, {
+    periode_mulai: semesterRange.startsAt,
+    periode_selesai: semesterRange.endsAt,
+    periode_ganjil_mulai: settings?.periode_ganjil_mulai || settings?.periodeGanjilMulai,
+    periode_ganjil_selesai: settings?.periode_ganjil_selesai || settings?.periodeGanjilSelesai,
+    periode_genap_mulai: settings?.periode_genap_mulai || settings?.periodeGenapMulai,
+    periode_genap_selesai: settings?.periode_genap_selesai || settings?.periodeGenapSelesai
+  })
+
+  return {
+    ...period,
+    periodeGanjilMulai: normalizePeriodDate(settings?.periode_ganjil_mulai || settings?.periodeGanjilMulai),
+    periodeGanjilSelesai: normalizePeriodDate(settings?.periode_ganjil_selesai || settings?.periodeGanjilSelesai),
+    periodeGenapMulai: normalizePeriodDate(settings?.periode_genap_mulai || settings?.periodeGenapMulai),
+    periodeGenapSelesai: normalizePeriodDate(settings?.periode_genap_selesai || settings?.periodeGenapSelesai)
+  }
 }
 
 export const getNextAcademicPeriod = ({ tahunAjaran, semester } = {}) => {

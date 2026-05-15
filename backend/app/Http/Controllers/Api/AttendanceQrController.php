@@ -294,7 +294,11 @@ class AttendanceQrController extends ApiController
             if ($tenantId && Schema::hasColumn('settings', 'tenant_id')) {
                 $query->where('tenant_id', $tenantId);
             }
-            $settings = $query->first(['tahun_ajaran', 'semester_aktif']);
+            $columns = array_values(array_filter(
+                ['tahun_ajaran', 'semester_aktif', 'periode_mulai', 'periode_selesai'],
+                fn ($column) => Schema::hasColumn('settings', $column)
+            ));
+            $settings = $query->first($columns ?: ['tahun_ajaran', 'semester_aktif']);
         }
 
         return AcademicPeriod::fromSettings($settings);

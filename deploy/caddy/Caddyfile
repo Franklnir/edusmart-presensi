@@ -8,7 +8,7 @@
 	}
 }
 
-localhost, admin.localhost, demo.localhost, bali.localhost {
+localhost, admin.localhost, admin26.localhost, demo.localhost, bali.localhost {
 	tls internal
 
 	encode zstd gzip

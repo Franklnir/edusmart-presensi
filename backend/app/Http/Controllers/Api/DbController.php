@@ -2,11 +2,19 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Services\Db\DbDeleteExecutor;
+use App\Services\Db\DbRequestShapeValidator;
+use App\Services\Db\DbInsertExecutor;
+use App\Services\Db\DbSelectExecutor;
+use App\Services\Db\DbTableRegistry;
+use App\Services\Db\DbUpdateExecutor;
+use App\Services\Db\DbUpsertExecutor;
 use App\Services\WhatsApp\WhatsAppNotificationService;
 use App\Support\AcademicPeriod;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -38,13 +46,24 @@ class DbController extends ApiController
         'nilai_freeze_updated_at',
     ];
 
-    private const MAX_DB_FILTER_FIELDS = 40;
-
-    private const MAX_DB_ORDER_FIELDS = 8;
-
-    private const MAX_DB_PAYLOAD_ROWS = 500;
-
-    private const MAX_DB_STRING_VALUE_LENGTH = 20000;
+    private const RELATION_SELECTS = [
+        'tugas_jawaban' => [
+            'profiles' => [
+                'table' => 'profiles',
+                'local_key' => 'user_id',
+                'foreign_key' => 'id',
+                'columns' => ['id', 'nama', 'photo_url', 'photo_path'],
+            ],
+        ],
+        'jam_kosong' => [
+            'profiles' => [
+                'table' => 'profiles',
+                'local_key' => 'created_by',
+                'foreign_key' => 'id',
+                'columns' => ['id', 'nama', 'photo_url', 'photo_path'],
+            ],
+        ],
+    ];
 
     private const ACADEMIC_PERIOD_TABLES = [
         'kelas',
@@ -88,98 +107,15 @@ class DbController extends ApiController
     ];
 
     public function __construct(
-        private readonly WhatsAppNotificationService $whatsAppNotificationService
+        private readonly WhatsAppNotificationService $whatsAppNotificationService,
+        private readonly DbDeleteExecutor $dbDeleteExecutor,
+        private readonly DbRequestShapeValidator $dbRequestShapeValidator,
+        private readonly DbInsertExecutor $dbInsertExecutor,
+        private readonly DbSelectExecutor $dbSelectExecutor,
+        private readonly DbTableRegistry $dbTableRegistry,
+        private readonly DbUpdateExecutor $dbUpdateExecutor,
+        private readonly DbUpsertExecutor $dbUpsertExecutor
     ) {}
-
-    private array $allowedTables = [
-        'settings',
-        'profiles',
-        'kelas',
-        'mata_pelajaran',
-        'guru_mapel_bobot',
-        'struktur_sekolah',
-        'kelas_struktur',
-        'jadwal',
-        'pengumuman',
-        'ekskul',
-        'ekskul_anggota',
-        'organisasi',
-        'organisasi_anggota',
-        'osis_anggota',
-        'absensi',
-        'absensi_ajuan',
-        'absensi_settings',
-        'absensi_rfid_settings',
-        'absensi_eskul',
-        'absensi_scan_temp',
-        'rfid_scans',
-        'jam_kosong',
-        'tugas',
-        'tugas_jawaban',
-        'certificates',
-        'templat_sertifikat_publik',
-        'printed_cards',
-        'allowed_registrations',
-        'registration_otps',
-        'admin_users',
-        'audit_log',
-        'anggota_eksku1',
-        'anggota_ekskul',
-        'quizzes',
-        'quiz_questions',
-        'quiz_options',
-        'quiz_submissions',
-        'quiz_answers',
-        'quiz_violation_logs',
-        'user_presence',
-        'import_siswa_histories',
-        'import_siswa_history_items',
-    ];
-
-    private array $tenantScopedTables = [
-        'settings',
-        'profiles',
-        'kelas',
-        'mata_pelajaran',
-        'guru_mapel_bobot',
-        'struktur_sekolah',
-        'kelas_struktur',
-        'jadwal',
-        'pengumuman',
-        'ekskul',
-        'ekskul_anggota',
-        'organisasi',
-        'organisasi_anggota',
-        'osis_anggota',
-        'absensi',
-        'absensi_ajuan',
-        'absensi_settings',
-        'absensi_rfid_settings',
-        'absensi_eskul',
-        'absensi_scan_temp',
-        'rfid_scans',
-        'jam_kosong',
-        'tugas',
-        'tugas_jawaban',
-        'certificates',
-        'templat_sertifikat_publik',
-        'printed_cards',
-        'allowed_registrations',
-        'registration_otps',
-        'admin_users',
-        'audit_log',
-        'anggota_eksku1',
-        'anggota_ekskul',
-        'quizzes',
-        'quiz_questions',
-        'quiz_options',
-        'quiz_submissions',
-        'quiz_answers',
-        'quiz_violation_logs',
-        'user_presence',
-        'import_siswa_histories',
-        'import_siswa_history_items',
-    ];
 
     private ?string $currentTenantId = null;
 
@@ -219,7 +155,7 @@ class DbController extends ApiController
         $table = $request->input('table');
         $action = $request->input('action', 'select');
 
-        if (! in_array($table, $this->allowedTables, true)) {
+        if (! $this->dbTableRegistry->isAllowed($table)) {
             return $this->deny('Table tidak diizinkan', 400);
         }
 
@@ -236,7 +172,7 @@ class DbController extends ApiController
         $profile = $this->profile($request);
         $this->currentTenantId = $this->tenantId($request);
         $tenantId = $this->currentTenantId;
-        $tenantScoped = in_array($table, $this->tenantScopedTables, true);
+        $tenantScoped = $this->dbTableRegistry->isTenantScoped($table);
 
         if (! $user && ! ($action === 'select' && $table === 'settings')) {
             return response()->json(['error' => 'Unauthenticated'], 401);
@@ -304,474 +240,250 @@ class DbController extends ApiController
         }
 
         if ($action === 'select') {
-            $countRequested = $request->input('count');
-            $head = (bool) $request->input('head', false);
-            $count = null;
-
-            if ($countRequested) {
-                $countQuery = clone $query;
-                $count = $countQuery->count();
-            }
-
-            if ($limit !== null) {
-                $query->limit((int) $limit);
-            }
-            if ($offset !== null) {
-                $query->offset((int) $offset);
-            }
-
-            $columns = $request->input('columns', '*');
-            if ($columns && $columns !== '*') {
-                $parsed = $this->parseColumns($table, $columns);
-                if (! empty($parsed)) {
-                    $query->select($parsed);
-                }
-            }
-
-            $data = $head ? [] : $query->get();
-
-            if (! $head && $table === 'settings' && ! $this->isAdmin($request)) {
-                $data = $this->sanitizePublicSettingsRows($data);
-            }
-
-            if (! $head && $table === 'profiles' && ! $this->isAdmin($request)) {
-                $viewerRole = strtolower((string) ($profile?->role ?? ''));
-                $waliKelas = [];
-                if ($viewerRole === 'guru' && $user?->id) {
-                    $waliKelas = $this->guruWaliKelasIds((string) $user->id);
-                }
-                $data = $this->sanitizeProfilesForNonAdmin(
-                    $data,
-                    (string) ($user?->id ?? ''),
-                    $viewerRole,
-                    $waliKelas
-                );
-            }
-
-            if (! $head && $table === 'quizzes') {
-                $data = $this->sanitizeQuizRows($data);
-            }
-
-            return response()->json(['data' => $data, 'count' => $count]);
+            return $this->dbSelectExecutor->execute(
+                $request,
+                $query,
+                [
+                    'table' => $table,
+                    'tenant_id' => $tenantId,
+                    'user' => $user,
+                    'profile' => $profile,
+                    'is_admin' => $this->isAdmin($request),
+                    'limit' => $limit,
+                    'offset' => $offset,
+                ],
+                [
+                    'parse_relation_selects' => fn (string $table, string $columns): array => $this->parseRelationSelects($table, $columns),
+                    'parse_columns' => fn (string $table, string $columns): array => $this->parseColumns($table, $columns),
+                    'is_selectable_column' => fn (string $table, string $column): bool => $this->isSelectableColumn($table, $column),
+                    'sanitize_public_settings_rows' => fn ($rows): array => $this->sanitizePublicSettingsRows($rows),
+                    'guru_wali_kelas_ids' => fn (string $userId): array => $this->guruWaliKelasIds($userId),
+                    'sanitize_profiles_for_non_admin' => fn ($rows, string $viewerId, string $viewerRole, array $waliKelas): array => $this->sanitizeProfilesForNonAdmin($rows, $viewerId, $viewerRole, $waliKelas),
+                    'sanitize_quiz_rows' => fn ($rows): array => $this->sanitizeQuizRows($rows),
+                    'hydrate_relation_selects' => fn ($rows, array $relations, ?string $tenantId) => $this->hydrateRelationSelects($rows, $relations, $tenantId),
+                ]
+            );
         }
 
         if ($action === 'insert') {
-            $rows = $this->normalizeRows($payload);
-            if (empty($rows)) {
-                return $this->deny('Payload kosong', 422);
-            }
-            if ($tenantScoped && $tenantId) {
-                $rows = $this->attachTenantRows($rows, $tenantId);
-            }
-            $rows = $this->attachAcademicPeriodRows($table, $rows, $tenantId);
-            try {
-                $rows = $this->normalizeJsonRowsForTable($table, $rows);
-            } catch (\InvalidArgumentException $e) {
-                return $this->deny($e->getMessage(), 422);
-            }
-            $rows = $this->filterRowsToExistingColumns($table, $rows);
-            if (empty($rows)) {
-                return $this->deny('Payload tidak memiliki kolom yang valid', 422);
-            }
-            if ($table === 'kelas') {
-                $kelasError = $this->prepareKelasRowsForInsert($rows, $tenantId);
-                if ($kelasError !== null) {
-                    return $this->deny($kelasError['message'], $kelasError['status']);
-                }
-            }
-            if ($table === 'settings') {
-                $saved = $this->saveSettingsSingletonRows($rows, $tenantId, $tenantScoped);
-
-                return response()->json(['data' => $saved]);
-            }
-            if ($table === 'absensi_rfid_settings') {
-                $singletonTenantId = $tenantId ?: (string) ($rows[0]['tenant_id'] ?? '');
-                if ($singletonTenantId === '') {
-                    return $this->deny('Tenant tidak valid', 400);
-                }
-                $saved = $this->saveTenantSingletonRows($table, $rows, $singletonTenantId);
-
-                return response()->json(['data' => $saved]);
-            }
-
-            $beforeRows = [];
-            $shouldAuditNilai = $table === 'tugas_jawaban' && $this->isNilaiAuditActor($request);
-            if ($shouldAuditNilai) {
-                $beforeRows = $this->fetchTugasJawabanRowsForPayload($rows, $tenantId);
-            }
-
-            try {
-                DB::table($table)->insert($rows);
-            } catch (QueryException $e) {
-                if ($this->isUniqueConstraintException($e)) {
-                    return $this->deny('Data sudah ada atau bentrok dengan data yang sudah tersimpan', 409);
-                }
-                throw $e;
-            }
-
-            $this->notifyWhatsAppMutation($tenantId, $table, 'insert', [], $rows);
-
-            if ($shouldAuditNilai) {
-                $afterRows = $this->fetchTugasJawabanRowsForPayload($rows, $tenantId);
-                $this->logAudit(
-                    $request,
-                    'tugas_jawaban',
-                    'bulk',
-                    'INSERT',
-                    $beforeRows,
-                    $afterRows,
-                    $tenantId
-                );
-            }
-
-            return response()->json(['data' => $rows]);
+            return $this->dbInsertExecutor->execute(
+                $request,
+                [
+                    'table' => $table,
+                    'payload' => $payload,
+                    'tenant_scoped' => $tenantScoped,
+                    'tenant_id' => $tenantId,
+                    'is_admin' => $this->isAdmin($request),
+                ],
+                $this->dbInsertCallbacks()
+            );
         }
 
         if ($action === 'update') {
-            if (! is_array($payload) || empty($payload)) {
-                return $this->deny('Payload tidak valid', 422);
-            }
-
-            $beforeMutationRows = $this->shouldNotifyWhatsAppForTable($table)
-                ? $this->queryRowsToArray(clone $query)
-                : [];
-            $beforeRows = [];
-            $shouldAuditNilai = $table === 'tugas_jawaban' && $this->isNilaiAuditActor($request);
-            if ($shouldAuditNilai) {
-                $beforeRows = $this->queryRowsToArray(clone $query);
-            }
-
-            if ($table === 'profiles' && array_key_exists('tanggal_lahir', $payload)) {
-                $payload['usia'] = $this->calculateAgeFromBirthDate($payload['tanggal_lahir']);
-            }
-
-            if ($tenantScoped) {
-                unset($payload['tenant_id']);
-            }
-
-            try {
-                $payload = $this->normalizeJsonRowForTable($table, $payload);
-            } catch (\InvalidArgumentException $e) {
-                return $this->deny($e->getMessage(), 422);
-            }
-            $payload = $this->filterPayloadToExistingColumns($table, $payload);
-            if (empty($payload)) {
-                return $this->deny('Payload tidak memiliki kolom yang valid', 422);
-            }
-
-            $profileIdForIdentitySync = null;
-            if ($table === 'profiles' && $this->isAdmin($request)) {
-                if (array_key_exists('email', $payload)) {
-                    $candidateEmail = strtolower(trim((string) $payload['email']));
-                    if (! filter_var($candidateEmail, FILTER_VALIDATE_EMAIL)) {
-                        return $this->deny('Email tidak valid', 422);
-                    }
-                    $payload['email'] = $candidateEmail;
-                }
-
-                if (array_key_exists('email', $payload) || array_key_exists('nama', $payload)) {
-                    $profileIdFromFilter = $filters['eq']['id'] ?? null;
-                    if (is_string($profileIdFromFilter) && $profileIdFromFilter !== '') {
-                        $profileIdForIdentitySync = $profileIdFromFilter;
-                    }
-                }
-            }
-
-            try {
-                $updated = DB::transaction(function () use (
-                    $query,
-                    $payload,
-                    $profileIdForIdentitySync,
-                    $tenantId
-                ) {
-                    $updatedCount = $query->update($payload);
-
-                    if ($updatedCount && $profileIdForIdentitySync) {
-                        $freshProfileQuery = DB::table('profiles')
-                            ->where('id', $profileIdForIdentitySync);
-                        if ($tenantId) {
-                            $freshProfileQuery->where('tenant_id', $tenantId);
-                        }
-                        $freshProfile = $freshProfileQuery->first(['id', 'role', 'nama', 'email']);
-
-                        if ($freshProfile) {
-                            $now = now();
-                            $userPayload = ['updated_at' => $now];
-
-                            if (array_key_exists('email', $payload)) {
-                                $userPayload['email'] = strtolower(trim((string) ($freshProfile->email ?? $payload['email'])));
-                            }
-
-                            if (array_key_exists('nama', $payload)) {
-                                $userPayload['name'] = preg_replace('/\s+/', ' ', trim((string) ($freshProfile->nama ?? $payload['nama']))) ?? '';
-                            }
-
-                            if (count($userPayload) > 1) {
-                                DB::table('users')
-                                    ->where('id', $profileIdForIdentitySync)
-                                    ->update($userPayload);
-                            }
-
-                            $role = strtolower((string) ($freshProfile->role ?? ''));
-                            if (array_key_exists('email', $payload) || array_key_exists('nama', $payload)) {
-                                if (in_array($role, ['guru', 'teacher'], true)) {
-                                    $this->syncTeacherDisplayNameSnapshots(
-                                        (string) $tenantId,
-                                        $profileIdForIdentitySync,
-                                        (string) ($freshProfile->nama ?? ''),
-                                        $now
-                                    );
-                                } elseif ($role === 'siswa' && array_key_exists('nama', $payload)) {
-                                    $this->syncStudentDisplayNameSnapshots(
-                                        (string) $tenantId,
-                                        $profileIdForIdentitySync,
-                                        (string) ($freshProfile->nama ?? ''),
-                                        $now
-                                    );
-                                }
-                            }
-                        }
-                    }
-
-                    return $updatedCount;
-                });
-            } catch (QueryException $e) {
-                $message = strtolower($e->getMessage());
-                if (str_contains($message, 'duplicate') || str_contains($message, 'unique')) {
-                    return $this->deny('Email sudah digunakan akun lain', 409);
-                }
-                throw $e;
-            }
-
-            if ($updated > 0) {
-                $afterMutationRows = $this->shouldNotifyWhatsAppForTable($table)
-                    ? $this->queryRowsToArray(clone $query)
-                    : [];
-                $this->notifyWhatsAppMutation($tenantId, $table, 'update', $beforeMutationRows, $afterMutationRows);
-            }
-
-            if ($shouldAuditNilai && $updated > 0) {
-                $afterRows = $this->queryRowsToArray(clone $query);
-                $this->logAudit(
-                    $request,
-                    'tugas_jawaban',
-                    'bulk',
-                    'UPDATE',
-                    $beforeRows,
-                    $afterRows,
-                    $tenantId
-                );
-            }
-
-            return response()->json(['data' => $updated]);
+            return $this->dbUpdateExecutor->execute(
+                $request,
+                $query,
+                [
+                    'table' => $table,
+                    'payload' => $payload,
+                    'tenant_scoped' => $tenantScoped,
+                    'tenant_id' => $tenantId,
+                    'filters' => $filters,
+                    'is_admin' => $this->isAdmin($request),
+                ],
+                $this->dbUpdateCallbacks()
+            );
         }
 
         if ($action === 'delete') {
-            $beforeMutationRows = $this->shouldNotifyWhatsAppForTable($table)
-                ? $this->queryRowsToArray(clone $query)
-                : [];
-            $beforeRows = [];
-            $shouldAuditNilai = $table === 'tugas_jawaban' && $this->isNilaiAuditActor($request);
-            if ($shouldAuditNilai) {
-                $beforeRows = $this->queryRowsToArray(clone $query);
-            }
-
-            if ($table === 'profiles' && $this->isAdmin($request)) {
-                $updated = $query->update([
-                    'status' => 'nonaktif',
-                    'alasan_nonaktif' => 'Dinonaktifkan oleh admin',
-                    'disabled_at' => now(),
-                    'deleted_at' => now(),
-                    'updated_at' => now(),
-                ]);
-
-                if ($shouldAuditNilai && $updated > 0) {
-                    $this->logAudit(
-                        $request,
-                        'tugas_jawaban',
-                        'bulk',
-                        'DELETE',
-                        $beforeRows,
-                        [],
-                        $tenantId
-                    );
-                }
-
-                if ($updated > 0) {
-                    $afterMutationRows = $this->queryRowsToArray(clone $query);
-                    $this->notifyWhatsAppMutation($tenantId, $table, 'delete', $beforeMutationRows, $afterMutationRows);
-                }
-
-                return response()->json(['data' => $updated]);
-            }
-
-            $deleted = $query->delete();
-
-            if ($deleted > 0) {
-                $this->notifyWhatsAppMutation($tenantId, $table, 'delete', $beforeMutationRows, []);
-            }
-
-            if ($shouldAuditNilai && $deleted > 0) {
-                $this->logAudit(
-                    $request,
-                    'tugas_jawaban',
-                    'bulk',
-                    'DELETE',
-                    $beforeRows,
-                    [],
-                    $tenantId
-                );
-            }
-
-            return response()->json(['data' => $deleted]);
+            return $this->dbDeleteExecutor->execute(
+                $request,
+                $query,
+                [
+                    'table' => $table,
+                    'tenant_id' => $tenantId,
+                    'is_admin' => $this->isAdmin($request),
+                ],
+                $this->dbDeleteCallbacks()
+            );
         }
 
         if ($action === 'upsert') {
-            $rows = $this->normalizeRows($payload);
-            if (empty($rows)) {
-                return $this->deny('Payload kosong', 422);
-            }
-            if ($tenantScoped && $tenantId) {
-                $rows = $this->attachTenantRows($rows, $tenantId);
-            }
-            $rows = $this->attachAcademicPeriodRows($table, $rows, $tenantId);
-            try {
-                $rows = $this->normalizeJsonRowsForTable($table, $rows);
-            } catch (\InvalidArgumentException $e) {
-                return $this->deny($e->getMessage(), 422);
-            }
-            $rows = $this->filterRowsToExistingColumns($table, $rows);
-            if (empty($rows)) {
-                return $this->deny('Payload tidak memiliki kolom yang valid', 422);
-            }
-
-            $beforeRows = [];
-            $shouldAuditNilai = $table === 'tugas_jawaban' && $this->isNilaiAuditActor($request);
-            if ($shouldAuditNilai) {
-                $beforeRows = $this->fetchTugasJawabanRowsForPayload($rows, $tenantId);
-            }
-
-            if ($table === 'settings') {
-                $saved = $this->saveSettingsSingletonRows($rows, $tenantId, $tenantScoped);
-
-                return response()->json(['data' => $saved]);
-            }
-            if ($table === 'absensi_rfid_settings') {
-                $singletonTenantId = $tenantId ?: (string) ($rows[0]['tenant_id'] ?? '');
-                if ($singletonTenantId === '') {
-                    return $this->deny('Tenant tidak valid', 400);
-                }
-                $saved = $this->saveTenantSingletonRows($table, $rows, $singletonTenantId);
-
-                return response()->json(['data' => $saved]);
-            }
-
-            $onConflict = $request->input('onConflict');
-            if (is_string($onConflict) && $onConflict !== '') {
-                $uniqueBy = array_values(array_filter(array_map('trim', explode(',', $onConflict))));
-            } else {
-                $uniqueBy = [];
-            }
-            if (! empty($uniqueBy)) {
-                $uniqueBy = array_values(array_filter(
-                    $uniqueBy,
-                    fn ($column) => $this->isSelectableColumn($table, (string) $column)
-                ));
-            }
-
-            if (
-                in_array($table, ['absensi', 'absensi_settings', 'absensi_scan_temp'], true) &&
-                $tenantId &&
-                $this->isSelectableColumn($table, 'tenant_id')
-            ) {
-                $uniqueBy = array_values(array_unique(array_merge(['tenant_id'], $uniqueBy)));
-            }
-
-            if ($table === 'settings' && empty($uniqueBy)) {
-                $existingQuery = DB::table('settings')->orderBy('id');
-                if ($tenantScoped && $tenantId) {
-                    $existingQuery->where('tenant_id', $tenantId);
-                }
-                $existing = $existingQuery->first();
-                if ($existing && isset($rows[0]['id'])) {
-                    $updateQuery = DB::table('settings')->where('id', $rows[0]['id']);
-                    if ($tenantScoped && $tenantId) {
-                        $updateQuery->where('tenant_id', $tenantId);
-                    }
-                    $updateQuery->update($rows[0]);
-
-                    return response()->json(['data' => $rows]);
-                }
-            }
-
-            if (empty($uniqueBy)) {
-                // Fallback: try to use id if present
-                if (isset($rows[0]['id'])) {
-                    $uniqueBy = ['id'];
-                } else {
-                    DB::table($table)->insert($rows);
-
-                    $this->notifyWhatsAppMutation($tenantId, $table, 'upsert', [], $rows);
-
-                    if ($shouldAuditNilai) {
-                        $afterRows = $this->fetchTugasJawabanRowsForPayload($rows, $tenantId);
-                        $this->logAudit(
-                            $request,
-                            'tugas_jawaban',
-                            'bulk',
-                            'UPDATE',
-                            $beforeRows,
-                            $afterRows,
-                            $tenantId
-                        );
-                    }
-
-                    return response()->json(['data' => $rows]);
-                }
-            }
-
-            $updateColumns = array_keys($rows[0]);
-            if (in_array($table, ['absensi', 'absensi_settings', 'absensi_scan_temp'], true) && ! empty($uniqueBy)) {
-                $resolved = [];
-                try {
-                    DB::table($table)->upsert($rows, $uniqueBy, $updateColumns);
-                    $resolved = $this->fetchRowsByKeys($table, $rows, $uniqueBy, $tenantId);
-                } catch (\Throwable $e) {
-                    $message = strtolower($e->getMessage() ?? '');
-                    if (str_contains($message, 'on conflict') || str_contains($message, 'unique')) {
-                        // Fallback manual upsert jika unique index belum ada.
-                        $resolved = $this->manualUpsertByKeys($table, $rows, $uniqueBy, $tenantId);
-                    } else {
-                        throw $e;
-                    }
-                }
-
-                $this->notifyWhatsAppMutation($tenantId, $table, 'upsert', [], $resolved);
-
-                return response()->json(['data' => $resolved]);
-            }
-
-            DB::table($table)->upsert($rows, $uniqueBy, $updateColumns);
-
-            $this->notifyWhatsAppMutation($tenantId, $table, 'upsert', [], $rows);
-
-            if ($shouldAuditNilai) {
-                $afterRows = $this->fetchTugasJawabanRowsForPayload($rows, $tenantId);
-                $this->logAudit(
-                    $request,
-                    'tugas_jawaban',
-                    'bulk',
-                    'UPDATE',
-                    $beforeRows,
-                    $afterRows,
-                    $tenantId
-                );
-            }
-
-            return response()->json(['data' => $rows]);
+            return $this->dbUpsertExecutor->execute(
+                $request,
+                [
+                    'table' => $table,
+                    'payload' => $payload,
+                    'tenant_scoped' => $tenantScoped,
+                    'tenant_id' => $tenantId,
+                ],
+                $this->dbUpsertCallbacks()
+            );
         }
 
         return $this->deny('Aksi tidak dikenali', 400);
+    }
+
+    public function batch(Request $request)
+    {
+        $requests = $request->input('requests', []);
+        if (! is_array($requests)) {
+            return $this->deny('Daftar request batch tidak valid', 422);
+        }
+
+        $maxBatchItems = (int) env('DB_BATCH_MAX_ITEMS', 25);
+        $maxBatchItems = max(1, min(50, $maxBatchItems));
+        if (count($requests) > $maxBatchItems) {
+            return $this->deny("Maksimal {$maxBatchItems} request per batch", 422);
+        }
+
+        $data = [];
+        $errors = [];
+
+        foreach (array_values($requests) as $index => $item) {
+            if (! is_array($item)) {
+                $errors[(string) $index] = [
+                    'message' => 'Item batch tidak valid',
+                    'status' => 422,
+                ];
+                continue;
+            }
+
+            $key = trim((string) ($item['key'] ?? $index));
+            if ($key === '') {
+                $key = (string) $index;
+            }
+
+            $action = (string) ($item['action'] ?? 'select');
+            if ($action !== 'select') {
+                $errors[$key] = [
+                    'message' => 'Batch hanya mendukung aksi select',
+                    'status' => 422,
+                ];
+                continue;
+            }
+
+            $dbRequest = Request::create('/api/db', 'POST', [
+                'table' => $item['table'] ?? null,
+                'action' => 'select',
+                'columns' => $item['columns'] ?? '*',
+                'filters' => $item['filters'] ?? [],
+                'order' => $item['order'] ?? [],
+                'limit' => $item['limit'] ?? null,
+                'offset' => $item['offset'] ?? null,
+                'count' => $item['count'] ?? null,
+                'head' => (bool) ($item['head'] ?? false),
+            ]);
+
+            $dbRequest->setUserResolver(fn () => $request->user());
+            $dbRequest->attributes->set('tenant_id', $request->attributes->get('tenant_id'));
+            $dbRequest->attributes->set('tenant_slug', $request->attributes->get('tenant_slug'));
+
+            $response = $this->handle($dbRequest);
+            $payload = json_decode((string) $response->getContent(), true);
+            if (! is_array($payload)) {
+                $payload = [];
+            }
+
+            if ($response->getStatusCode() >= 400) {
+                $errors[$key] = [
+                    'message' => $payload['error'] ?? $payload['message'] ?? 'Request batch gagal',
+                    'code' => $payload['code'] ?? null,
+                    'status' => $response->getStatusCode(),
+                ];
+                continue;
+            }
+
+            $data[$key] = [
+                'data' => $payload['data'] ?? null,
+                'count' => $payload['count'] ?? null,
+            ];
+        }
+
+        return response()->json([
+            'data' => $data,
+            'errors' => $errors,
+        ]);
+    }
+
+    private function dbInsertCallbacks(): array
+    {
+        return [
+            'deny' => fn (string $message, int $code = 403) => $this->deny($message, $code),
+            'normalize_rows' => fn ($payload): array => $this->normalizeRows($payload),
+            'attach_tenant_rows' => fn (array $rows, string $tenantId): array => $this->attachTenantRows($rows, $tenantId),
+            'attach_academic_period_rows' => fn (string $table, array $rows, ?string $tenantId): array => $this->attachAcademicPeriodRows($table, $rows, $tenantId),
+            'normalize_json_rows_for_table' => fn (string $table, array $rows): array => $this->normalizeJsonRowsForTable($table, $rows),
+            'filter_rows_to_existing_columns' => fn (string $table, array $rows): array => $this->filterRowsToExistingColumns($table, $rows),
+            'attach_profile_cohort_rows' => fn (array $rows, ?string $tenantId): array => $this->attachProfileCohortRows($rows, $tenantId),
+            'prepare_kelas_rows_for_insert' => function (array &$rows, ?string $tenantId): ?array {
+                return $this->prepareKelasRowsForInsert($rows, $tenantId);
+            },
+            'validate_ekskul_registration_deadline_rows' => fn (array $rows, ?string $tenantId, bool $requireDeadline = false): ?array => $this->validateEskulRegistrationDeadlineRows($rows, $tenantId, $requireDeadline),
+            'save_settings_singleton_rows' => fn (array $rows, ?string $tenantId, bool $tenantScoped): array => $this->saveSettingsSingletonRows($rows, $tenantId, $tenantScoped),
+            'validate_profile_rows_for_tenant_insert' => function (array &$rows, ?string $tenantId): ?array {
+                return $this->validateProfileRowsForTenantInsert($rows, $tenantId);
+            },
+            'save_tenant_singleton_rows' => fn (string $table, array $rows, string $tenantId): array => $this->saveTenantSingletonRows($table, $rows, $tenantId),
+            'is_nilai_audit_actor' => fn (Request $request): bool => $this->isNilaiAuditActor($request),
+            'fetch_tugas_jawaban_rows_for_payload' => fn (array $rows, ?string $tenantId): array => $this->fetchTugasJawabanRowsForPayload($rows, $tenantId),
+            'is_unique_constraint_exception' => fn (QueryException $e): bool => $this->isUniqueConstraintException($e),
+            'notify_whatsapp_mutation' => fn (?string $tenantId, string $table, string $action, array $beforeRows = [], array $afterRows = []) => $this->notifyWhatsAppMutation($tenantId, $table, $action, $beforeRows, $afterRows),
+            'log_audit' => fn (Request $request, string $table, string $recordId, string $action, $oldData = null, $newData = null, ?string $tenantId = null) => $this->logAudit($request, $table, $recordId, $action, $oldData, $newData, $tenantId),
+        ];
+    }
+
+    private function dbUpdateCallbacks(): array
+    {
+        return [
+            'deny' => fn (string $message, int $code = 403) => $this->deny($message, $code),
+            'should_notify_whatsapp_for_table' => fn (string $table): bool => $this->shouldNotifyWhatsAppForTable($table),
+            'query_rows_to_array' => fn ($query): array => $this->queryRowsToArray($query),
+            'is_nilai_audit_actor' => fn (Request $request): bool => $this->isNilaiAuditActor($request),
+            'calculate_age_from_birth_date' => fn ($rawDate): ?int => $this->calculateAgeFromBirthDate($rawDate),
+            'normalize_json_row_for_table' => fn (string $table, array $payload): array => $this->normalizeJsonRowForTable($table, $payload),
+            'filter_payload_to_existing_columns' => fn (string $table, array $payload): array => $this->filterPayloadToExistingColumns($table, $payload),
+            'normalize_profile_cohort_payload' => fn (array $payload, ?string $tenantId): array => $this->normalizeProfileCohortPayload($payload, $tenantId),
+            'validate_ekskul_registration_deadline_rows' => fn (array $rows, ?string $tenantId, bool $requireDeadline = false): ?array => $this->validateEskulRegistrationDeadlineRows($rows, $tenantId, $requireDeadline),
+            'is_selectable_column' => fn (string $table, string $column): bool => $this->isSelectableColumn($table, $column),
+            'sync_teacher_display_name_snapshots' => fn (string $tenantId, string $teacherId, string $displayName, Carbon $now): array => $this->syncTeacherDisplayNameSnapshots($tenantId, $teacherId, $displayName, $now),
+            'sync_student_display_name_snapshots' => fn (string $tenantId, string $studentId, string $displayName, Carbon $now): array => $this->syncStudentDisplayNameSnapshots($tenantId, $studentId, $displayName, $now),
+            'notify_whatsapp_mutation' => fn (?string $tenantId, string $table, string $action, array $beforeRows = [], array $afterRows = []) => $this->notifyWhatsAppMutation($tenantId, $table, $action, $beforeRows, $afterRows),
+            'log_audit' => fn (Request $request, string $table, string $recordId, string $action, $oldData = null, $newData = null, ?string $tenantId = null) => $this->logAudit($request, $table, $recordId, $action, $oldData, $newData, $tenantId),
+        ];
+    }
+
+    private function dbDeleteCallbacks(): array
+    {
+        return [
+            'should_notify_whatsapp_for_table' => fn (string $table): bool => $this->shouldNotifyWhatsAppForTable($table),
+            'query_rows_to_array' => fn ($query): array => $this->queryRowsToArray($query),
+            'is_nilai_audit_actor' => fn (Request $request): bool => $this->isNilaiAuditActor($request),
+            'notify_whatsapp_mutation' => fn (?string $tenantId, string $table, string $action, array $beforeRows = [], array $afterRows = []) => $this->notifyWhatsAppMutation($tenantId, $table, $action, $beforeRows, $afterRows),
+            'log_audit' => fn (Request $request, string $table, string $recordId, string $action, $oldData = null, $newData = null, ?string $tenantId = null) => $this->logAudit($request, $table, $recordId, $action, $oldData, $newData, $tenantId),
+        ];
+    }
+
+    private function dbUpsertCallbacks(): array
+    {
+        return [
+            'deny' => fn (string $message, int $code = 403) => $this->deny($message, $code),
+            'normalize_rows' => fn ($payload): array => $this->normalizeRows($payload),
+            'attach_tenant_rows' => fn (array $rows, string $tenantId): array => $this->attachTenantRows($rows, $tenantId),
+            'attach_academic_period_rows' => fn (string $table, array $rows, ?string $tenantId): array => $this->attachAcademicPeriodRows($table, $rows, $tenantId),
+            'normalize_json_rows_for_table' => fn (string $table, array $rows): array => $this->normalizeJsonRowsForTable($table, $rows),
+            'filter_rows_to_existing_columns' => fn (string $table, array $rows): array => $this->filterRowsToExistingColumns($table, $rows),
+            'validate_ekskul_registration_deadline_rows' => fn (array $rows, ?string $tenantId, bool $requireDeadline = false): ?array => $this->validateEskulRegistrationDeadlineRows($rows, $tenantId, $requireDeadline),
+            'is_nilai_audit_actor' => fn (Request $request): bool => $this->isNilaiAuditActor($request),
+            'fetch_tugas_jawaban_rows_for_payload' => fn (array $rows, ?string $tenantId): array => $this->fetchTugasJawabanRowsForPayload($rows, $tenantId),
+            'save_settings_singleton_rows' => fn (array $rows, ?string $tenantId, bool $tenantScoped): array => $this->saveSettingsSingletonRows($rows, $tenantId, $tenantScoped),
+            'save_tenant_singleton_rows' => fn (string $table, array $rows, string $tenantId): array => $this->saveTenantSingletonRows($table, $rows, $tenantId),
+            'is_selectable_column' => fn (string $table, string $column): bool => $this->isSelectableColumn($table, $column),
+            'fetch_rows_by_keys' => fn (string $table, array $rows, array $uniqueBy, ?string $tenantId): array => $this->fetchRowsByKeys($table, $rows, $uniqueBy, $tenantId),
+            'manual_upsert_by_keys' => fn (string $table, array $rows, array $uniqueBy, ?string $tenantId): array => $this->manualUpsertByKeys($table, $rows, $uniqueBy, $tenantId),
+            'notify_whatsapp_mutation' => fn (?string $tenantId, string $table, string $action, array $beforeRows = [], array $afterRows = []) => $this->notifyWhatsAppMutation($tenantId, $table, $action, $beforeRows, $afterRows),
+            'log_audit' => fn (Request $request, string $table, string $recordId, string $action, $oldData = null, $newData = null, ?string $tenantId = null) => $this->logAudit($request, $table, $recordId, $action, $oldData, $newData, $tenantId),
+        ];
     }
 
     private function applyPolicy(string $table, string $action, $query, &$payload, Request $request, $profile)
@@ -834,6 +546,7 @@ class DbController extends ApiController
                                             ->from('ekskul_anggota')
                                             ->whereIn('ekskul_id', $ekskulIds);
                                         $this->applyTenantFilter($sub);
+                                        $this->applyCurrentAcademicPeriodToQuery($sub, 'ekskul_anggota');
                                     });
                             });
                         }
@@ -1459,6 +1172,9 @@ class DbController extends ApiController
                     if ($this->payloadHasInvalidQuiz($payload, $quizIds)) {
                         return $this->deny('Quiz tidak diizinkan');
                     }
+                    if ($this->quizIdsHaveOngoingSubmissions($this->quizIdsFromPayload($payload))) {
+                        return $this->deny('Soal quiz tidak bisa diubah saat masih ada siswa yang mengerjakan quiz.', 409);
+                    }
 
                     return true;
                 }
@@ -1484,6 +1200,10 @@ class DbController extends ApiController
                             $payload['question_type'] = $this->normalizeQuestionType($payload['question_type']);
                         }
                         $payload['updated_at'] = now();
+                    }
+                    $targetQuizIds = $this->quizIdsForTargetQuestionMutation($query, $request->input('filters', []));
+                    if ($this->quizIdsHaveOngoingSubmissions($targetQuizIds)) {
+                        return $this->deny('Soal quiz tidak bisa diubah saat masih ada siswa yang mengerjakan quiz.', 409);
                     }
 
                     return true;
@@ -1551,6 +1271,10 @@ class DbController extends ApiController
                     if ($this->payloadHasInvalidQuestion($payload, $questionIds)) {
                         return $this->deny('Soal tidak diizinkan');
                     }
+                    $targetQuizIds = $this->quizIdsByQuestionIds($this->questionIdsFromPayload($payload));
+                    if ($this->quizIdsHaveOngoingSubmissions($targetQuizIds)) {
+                        return $this->deny('Opsi jawaban tidak bisa diubah saat masih ada siswa yang mengerjakan quiz.', 409);
+                    }
 
                     return true;
                 }
@@ -1574,6 +1298,10 @@ class DbController extends ApiController
                             'label', 'text', 'image_path', 'is_correct', 'updated_at',
                         ]);
                         $payload['updated_at'] = now();
+                    }
+                    $targetQuizIds = $this->quizIdsForTargetOptionMutation($query, $request->input('filters', []));
+                    if ($this->quizIdsHaveOngoingSubmissions($targetQuizIds)) {
+                        return $this->deny('Opsi jawaban tidak bisa diubah saat masih ada siswa yang mengerjakan quiz.', 409);
                     }
 
                     return true;
@@ -1926,23 +1654,11 @@ class DbController extends ApiController
                 }
                 if ($this->isSiswa($request)) {
                     $kelas = $profile?->kelas;
-                    $tenantId = $this->currentTenantId;
-                    $query->where(function ($q) use ($kelas, $userId, $tenantId) {
-                        if ($kelas) {
-                            $q->where('kelas', $kelas);
-                        } else {
-                            $q->whereRaw('1 = 0');
-                        }
-
-                        $q->orWhereIn('id', function ($sub) use ($userId, $tenantId) {
-                            $sub->select('tugas_id')
-                                ->from('tugas_jawaban')
-                                ->where('user_id', $userId);
-                            if ($tenantId && $this->isSelectableColumn('tugas_jawaban', 'tenant_id')) {
-                                $sub->where('tenant_id', $tenantId);
-                            }
-                        });
-                    });
+                    if ($kelas) {
+                        $query->where('kelas', $kelas);
+                    } else {
+                        $query->whereRaw('1 = 0');
+                    }
 
                     return true;
                 }
@@ -2484,136 +2200,11 @@ class DbController extends ApiController
 
     private function validateDbRequestShape(Request $request): ?string
     {
-        $table = (string) $request->input('table', '');
-        $columns = $request->input('columns');
-        if ($columns !== null && ! is_string($columns)) {
-            return 'Format columns tidak valid';
-        }
-        if (is_string($columns) && strlen($columns) > 4000) {
-            return 'Panjang columns melebihi batas';
-        }
-
-        $filters = $request->input('filters', []);
-        if (! is_array($filters)) {
-            return 'Format filters tidak valid';
-        }
-
-        foreach (['eq', 'neq', 'is', 'gt', 'gte', 'lt', 'lte', 'in', 'ilike'] as $op) {
-            if (! isset($filters[$op])) {
-                continue;
-            }
-            if (! is_array($filters[$op])) {
-                return "Format filters.{$op} tidak valid";
-            }
-            if (count($filters[$op]) > self::MAX_DB_FILTER_FIELDS) {
-                return "Jumlah filters.{$op} melebihi batas";
-            }
-
-            foreach ($filters[$op] as $field => $value) {
-                $column = is_string($field) ? $this->sanitizeIdentifier($field) : null;
-                if ($column === null) {
-                    return 'Nama kolom filter tidak valid';
-                }
-                if (! $this->isSelectableColumn($table, $column)) {
-                    return 'Kolom filter tidak diizinkan';
-                }
-                if (! $this->isReasonableDbValue($value, 0)) {
-                    return 'Nilai filter tidak valid';
-                }
-            }
-        }
-
-        $order = $request->input('order', []);
-        if ($order !== null && ! is_array($order)) {
-            return 'Format order tidak valid';
-        }
-        $orderItems = is_array($order) && isset($order['field']) ? [$order] : (is_array($order) ? $order : []);
-        if (count($orderItems) > self::MAX_DB_ORDER_FIELDS) {
-            return 'Jumlah order melebihi batas';
-        }
-
-        foreach ($orderItems as $item) {
-            if (! is_array($item)) {
-                return 'Format item order tidak valid';
-            }
-            $field = (string) ($item['field'] ?? '');
-            $column = $this->sanitizeIdentifier($field);
-            if ($field === '' || $column === null) {
-                return 'Kolom order tidak valid';
-            }
-            if (! $this->isSelectableColumn($table, $column)) {
-                return 'Kolom order tidak diizinkan';
-            }
-        }
-
-        $limit = $request->input('limit');
-        if ($limit !== null && (! is_numeric($limit) || (int) $limit < 0)) {
-            return 'Nilai limit tidak valid';
-        }
-
-        $offset = $request->input('offset');
-        if ($offset !== null && (! is_numeric($offset) || (int) $offset < 0)) {
-            return 'Nilai offset tidak valid';
-        }
-
-        $action = strtolower((string) $request->input('action', 'select'));
-        if (in_array($action, ['insert', 'upsert'], true)) {
-            $payload = $request->input('payload');
-            if ($payload === null) {
-                return null;
-            }
-
-            if (is_array($payload) && array_is_list($payload) && count($payload) > self::MAX_DB_PAYLOAD_ROWS) {
-                return 'Jumlah payload melebihi batas';
-            }
-
-            if (! $this->isReasonableDbValue($payload, 0)) {
-                return 'Payload tidak valid';
-            }
-        }
-
-        if ($action === 'update') {
-            $payload = $request->input('payload');
-            if ($payload !== null && (! is_array($payload) || ! $this->isReasonableDbValue($payload, 0))) {
-                return 'Payload update tidak valid';
-            }
-        }
-
-        return null;
-    }
-
-    private function isReasonableDbValue($value, int $depth): bool
-    {
-        if ($depth > 4) {
-            return false;
-        }
-
-        if ($value === null || is_bool($value) || is_int($value) || is_float($value)) {
-            return true;
-        }
-
-        if (is_string($value)) {
-            return strlen($value) <= self::MAX_DB_STRING_VALUE_LENGTH;
-        }
-
-        if (is_array($value)) {
-            if (count($value) > 500) {
-                return false;
-            }
-
-            foreach ($value as $key => $item) {
-                if (is_string($key) && strlen($key) > 120) {
-                    return false;
-                }
-                if (! $this->isReasonableDbValue($item, $depth + 1)) {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-
-        return false;
+        return $this->dbRequestShapeValidator->validate(
+            $request,
+            fn (string $name): ?string => $this->sanitizeIdentifier($name),
+            fn (string $table, string $column): bool => $this->isSelectableColumn($table, $column)
+        );
     }
 
     private function applyOrder($query, $orders): void
@@ -2697,6 +2288,187 @@ class DbController extends ApiController
         }
 
         return array_values(array_unique($out));
+    }
+
+    private function parseRelationSelects(string $table, string $columns): array
+    {
+        $relationConfig = self::RELATION_SELECTS[$table] ?? [];
+        if (empty($relationConfig)) {
+            return [];
+        }
+
+        $relations = [];
+        foreach ($this->splitTopLevelColumns($columns) as $part) {
+            $token = trim((string) $part);
+            if ($token === '' || ! str_contains($token, '(') || ! str_contains($token, ')')) {
+                continue;
+            }
+
+            if (! preg_match('/^(?:(?<alias>[A-Za-z_][A-Za-z0-9_]*):)?(?<relation>[A-Za-z_][A-Za-z0-9_]*)(?:![A-Za-z0-9_]+)?\s*\((?<columns>.*)\)$/', $token, $matches)) {
+                continue;
+            }
+
+            $relationName = (string) ($matches['relation'] ?? '');
+            $config = $relationConfig[$relationName] ?? null;
+            if (! is_array($config)) {
+                continue;
+            }
+
+            $allowedColumns = array_values(array_filter(
+                $config['columns'] ?? [],
+                fn ($column) => is_string($column) && $this->isSelectableColumn((string) $config['table'], $column)
+            ));
+            if (empty($allowedColumns)) {
+                continue;
+            }
+
+            $requestedColumns = [];
+            foreach ($this->splitTopLevelColumns((string) ($matches['columns'] ?? '')) as $columnPart) {
+                $columnToken = trim((string) $columnPart);
+                if ($columnToken === '*') {
+                    $requestedColumns = $allowedColumns;
+
+                    break;
+                }
+
+                if (str_contains($columnToken, ':')) {
+                    [, $columnToken] = array_pad(explode(':', $columnToken, 2), 2, '');
+                    $columnToken = trim($columnToken);
+                }
+
+                $column = $this->sanitizeIdentifier($columnToken);
+                if ($column && in_array($column, $allowedColumns, true)) {
+                    $requestedColumns[] = $column;
+                }
+            }
+
+            $requestedColumns = array_values(array_unique($requestedColumns));
+            if (empty($requestedColumns)) {
+                continue;
+            }
+
+            $localKey = (string) ($config['local_key'] ?? '');
+            $foreignKey = (string) ($config['foreign_key'] ?? 'id');
+            $targetTable = (string) ($config['table'] ?? '');
+            if (
+                ! $this->isSelectableColumn($table, $localKey)
+                || ! $this->isSelectableColumn($targetTable, $foreignKey)
+            ) {
+                continue;
+            }
+
+            $alias = trim((string) ($matches['alias'] ?? '')) ?: $relationName;
+            $relations[] = [
+                'alias' => $alias,
+                'table' => $targetTable,
+                'local_key' => $localKey,
+                'foreign_key' => $foreignKey,
+                'columns' => $requestedColumns,
+            ];
+        }
+
+        return $relations;
+    }
+
+    private function hydrateRelationSelects($rows, array $relations, ?string $tenantId)
+    {
+        if (empty($relations)) {
+            return $rows;
+        }
+
+        $rowList = $rows instanceof Collection ? $rows->all() : (is_array($rows) ? $rows : []);
+        if (empty($rowList)) {
+            return $rows;
+        }
+
+        foreach ($relations as $relation) {
+            $localKey = (string) ($relation['local_key'] ?? '');
+            $foreignKey = (string) ($relation['foreign_key'] ?? '');
+            $targetTable = (string) ($relation['table'] ?? '');
+            $alias = (string) ($relation['alias'] ?? '');
+            $columns = array_values(array_filter($relation['columns'] ?? [], 'is_string'));
+
+            if ($localKey === '' || $foreignKey === '' || $targetTable === '' || $alias === '' || empty($columns)) {
+                continue;
+            }
+
+            $ids = [];
+            foreach ($rowList as $row) {
+                $value = $this->readRowValue($row, $localKey);
+                if ($value !== null && $value !== '') {
+                    $ids[] = (string) $value;
+                }
+            }
+
+            $ids = array_values(array_unique($ids));
+            if (empty($ids)) {
+                continue;
+            }
+
+            $queryColumns = array_values(array_unique(array_merge([$foreignKey], $columns)));
+            try {
+                $relatedQuery = DB::table($targetTable)
+                    ->whereIn($foreignKey, $ids)
+                    ->select($queryColumns);
+
+                if (
+                    $tenantId
+                    && $this->isSelectableColumn($targetTable, 'tenant_id')
+                ) {
+                    $relatedQuery->where('tenant_id', $tenantId);
+                }
+
+                $relatedMap = [];
+                foreach ($relatedQuery->get() as $relatedRow) {
+                    $key = (string) $this->readRowValue($relatedRow, $foreignKey);
+                    if ($key !== '') {
+                        $relatedMap[$key] = $relatedRow;
+                    }
+                }
+
+                foreach ($rowList as $row) {
+                    $value = $this->readRowValue($row, $localKey);
+                    $relatedRow = $value !== null ? ($relatedMap[(string) $value] ?? null) : null;
+                    $this->writeRowValue(
+                        $row,
+                        $alias,
+                        $relatedRow ? (object) array_intersect_key((array) $relatedRow, array_flip($columns)) : null
+                    );
+                }
+            } catch (\Throwable $e) {
+                foreach ($rowList as $row) {
+                    $this->writeRowValue($row, $alias, null);
+                }
+            }
+        }
+
+        return $rows;
+    }
+
+    private function readRowValue($row, string $key)
+    {
+        if (is_array($row)) {
+            return $row[$key] ?? null;
+        }
+
+        if (is_object($row)) {
+            return $row->{$key} ?? null;
+        }
+
+        return null;
+    }
+
+    private function writeRowValue(&$row, string $key, $value): void
+    {
+        if (is_array($row)) {
+            $row[$key] = $value;
+
+            return;
+        }
+
+        if (is_object($row)) {
+            $row->{$key} = $value;
+        }
     }
 
     private function columnWhitelist(string $table): array
@@ -2905,6 +2677,79 @@ class DbController extends ApiController
         }
 
         return null;
+    }
+
+    private function validateEskulRegistrationDeadlineRows(array $rows, ?string $tenantId, bool $requireDeadline = false): ?array
+    {
+        if (! $this->isSelectableColumn('ekskul', 'registration_deadline_at')) {
+            return null;
+        }
+
+        $periodEnd = $this->currentAcademicPeriodEndForTenant($tenantId);
+        $now = Carbon::now('Asia/Jakarta');
+
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            if (! array_key_exists('registration_deadline_at', $row)) {
+                if ($requireDeadline) {
+                    return [
+                        'message' => 'Batas pendaftaran ekstrakurikuler wajib diisi',
+                        'status' => 422,
+                    ];
+                }
+                continue;
+            }
+
+            $raw = trim((string) ($row['registration_deadline_at'] ?? ''));
+            if ($raw === '') {
+                return [
+                    'message' => 'Batas pendaftaran ekstrakurikuler wajib diisi',
+                    'status' => 422,
+                ];
+            }
+
+            try {
+                $deadline = Carbon::parse($raw, 'Asia/Jakarta');
+            } catch (\Throwable $e) {
+                return [
+                    'message' => 'Batas pendaftaran ekstrakurikuler tidak valid',
+                    'status' => 422,
+                ];
+            }
+
+            if ($deadline->lessThanOrEqualTo($now)) {
+                return [
+                    'message' => 'Batas pendaftaran ekstrakurikuler harus di masa depan',
+                    'status' => 422,
+                ];
+            }
+
+            if ($periodEnd && $deadline->greaterThan($periodEnd)) {
+                return [
+                    'message' => 'Batas pendaftaran ekstrakurikuler tidak boleh melewati akhir periode aktif',
+                    'status' => 422,
+                ];
+            }
+        }
+
+        return null;
+    }
+
+    private function currentAcademicPeriodEndForTenant(?string $tenantId): ?Carbon
+    {
+        $period = $this->currentAcademicPeriodForTenant($tenantId ?: $this->currentTenantId);
+        $periodEndRaw = $period['ends_at'] ?? $period['periode_selesai'] ?? null;
+        if (! $periodEndRaw) {
+            return null;
+        }
+
+        try {
+            return Carbon::parse((string) $periodEndRaw, 'Asia/Jakarta')->endOfDay();
+        } catch (\Throwable $e) {
+            return null;
+        }
     }
 
     private function normalizeKelasRow(array $row): ?array
@@ -3460,7 +3305,11 @@ class DbController extends ApiController
             if ($tenantId && $this->isSelectableColumn('settings', 'tenant_id')) {
                 $settingsQuery->where('tenant_id', $tenantId);
             }
-            $settings = $settingsQuery->first(['tahun_ajaran', 'semester_aktif']);
+            $settingsColumns = array_values(array_filter(
+                ['tahun_ajaran', 'semester_aktif', 'periode_mulai', 'periode_selesai'],
+                fn ($column) => $this->isSelectableColumn('settings', $column)
+            ));
+            $settings = $settingsQuery->first($settingsColumns ?: ['tahun_ajaran', 'semester_aktif']);
         }
 
         $this->academicPeriodCache[$cacheKey] = AcademicPeriod::fromSettings($settings);
@@ -3526,8 +3375,10 @@ class DbController extends ApiController
         }
 
         $period = $this->currentAcademicPeriodForTenant($tenantId);
-        $query->where('tahun_ajaran', $period['tahun_ajaran'])
-            ->where('semester', $period['semester']);
+        $query->where('tahun_ajaran', $period['tahun_ajaran']);
+        if ($this->isSelectableColumn($table, 'semester')) {
+            $query->where('semester', $period['semester']);
+        }
     }
 
     private function applyCurrentAcademicPeriodToQuery($query, string $table, ?string $tenantId = null): void
@@ -3637,6 +3488,98 @@ class DbController extends ApiController
 
             return $row;
         }, $rows);
+    }
+
+    private function validateProfileRowsForTenantInsert(array &$rows, ?string $tenantId): ?array
+    {
+        if (! Schema::hasTable('profiles') || ! $this->isSelectableColumn('profiles', 'email')) {
+            return null;
+        }
+
+        $normalizedTenantId = trim((string) ($tenantId ?? ''));
+        $seen = [];
+        $emails = [];
+
+        foreach ($rows as $index => $row) {
+            if (! is_array($row) || ! array_key_exists('email', $row)) {
+                continue;
+            }
+
+            $email = strtolower(trim((string) $row['email']));
+            if ($email === '') {
+                continue;
+            }
+            if (! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                return ['message' => 'Email tidak valid', 'status' => 422];
+            }
+            if (isset($seen[$email])) {
+                return ['message' => 'Email duplikat dalam payload untuk sekolah ini', 'status' => 409];
+            }
+
+            $seen[$email] = true;
+            $emails[] = $email;
+            $rows[$index]['email'] = $email;
+        }
+
+        if (empty($emails)) {
+            return null;
+        }
+
+        $duplicateQuery = DB::table('profiles')
+            ->whereIn(DB::raw('lower(email)'), $emails);
+        if ($normalizedTenantId !== '' && $this->isSelectableColumn('profiles', 'tenant_id')) {
+            $duplicateQuery->where('tenant_id', $normalizedTenantId);
+        }
+
+        if ($duplicateQuery->exists()) {
+            return ['message' => 'Email sudah terdaftar di sekolah ini', 'status' => 409];
+        }
+
+        return null;
+    }
+
+    private function attachProfileCohortRows(array $rows, ?string $tenantId): array
+    {
+        if (! Schema::hasTable('profiles') || ! $this->isSelectableColumn('profiles', 'angkatan')) {
+            return $rows;
+        }
+
+        return array_map(function ($row) use ($tenantId) {
+            if (! is_array($row)) {
+                return $row;
+            }
+
+            $classId = trim((string) ($row['kelas'] ?? ''));
+            if ($classId === '') {
+                unset($row['angkatan']);
+
+                return $row;
+            }
+
+            $row['angkatan'] = $this->cohortForClass($classId, $tenantId);
+
+            return $row;
+        }, $rows);
+    }
+
+    private function normalizeProfileCohortPayload(array $payload, ?string $tenantId): array
+    {
+        if (! $this->isSelectableColumn('profiles', 'angkatan')) {
+            return $payload;
+        }
+
+        if (! array_key_exists('kelas', $payload)) {
+            unset($payload['angkatan']);
+
+            return $payload;
+        }
+
+        $classId = trim((string) ($payload['kelas'] ?? ''));
+        $payload['angkatan'] = $classId !== ''
+            ? $this->cohortForClass($classId, $tenantId)
+            : null;
+
+        return $payload;
     }
 
     private function cohortFromRow(string $table, array $row, ?string $tenantId): ?string
@@ -3976,6 +3919,9 @@ class DbController extends ApiController
             return 'Ekstrakurikuler tidak valid';
         }
 
+        if (count($ekskulIds) !== count(array_unique($ekskulIds))) {
+            return 'Ekstrakurikuler duplikat dalam pendaftaran';
+        }
         $ekskulIds = array_values(array_unique($ekskulIds));
         $hasDeadlineColumn = $this->isSelectableColumn('ekskul', 'registration_deadline_at');
 
@@ -3991,18 +3937,23 @@ class DbController extends ApiController
             $ekskulMap[(string) ($row->id ?? '')] = $row;
         }
 
-        $now = now();
+        $now = Carbon::now('Asia/Jakarta');
+        $periodEnd = $this->currentAcademicPeriodEndForTenant($this->currentTenantId);
         foreach ($ekskulIds as $ekskulId) {
             $ekskul = $ekskulMap[$ekskulId] ?? null;
             if (! $ekskul) {
                 return 'Ekstrakurikuler tidak ditemukan';
             }
 
+            $effectiveDeadline = $periodEnd ? $periodEnd->copy() : null;
             if ($hasDeadlineColumn) {
                 $deadline = $this->parseEskulDateTime($ekskul->registration_deadline_at ?? null);
-                if ($deadline && $now->gt($deadline)) {
-                    return 'Pendaftaran ekstrakurikuler sudah ditutup';
+                if ($deadline && (! $effectiveDeadline || $deadline->lt($effectiveDeadline))) {
+                    $effectiveDeadline = $deadline;
                 }
+            }
+            if ($effectiveDeadline && $now->gt($effectiveDeadline)) {
+                return 'Pendaftaran ekstrakurikuler sudah ditutup';
             }
         }
 
@@ -4013,6 +3964,10 @@ class DbController extends ApiController
             fn ($id) => (string) $id,
             $existingMembershipQuery->pluck('ekskul_id')->filter()->values()->all()
         );
+        if (! empty(array_intersect($existingIds, $ekskulIds))) {
+            return 'Anda sudah terdaftar pada ekstrakurikuler ini di periode aktif';
+        }
+
         $totalIds = array_values(array_unique(array_merge($existingIds, $ekskulIds)));
 
         if (count($totalIds) > 3) {
@@ -4038,9 +3993,7 @@ class DbController extends ApiController
             return null;
         }
 
-        if (! $this->isSelectableColumn('ekskul', 'registration_deadline_at')) {
-            return null;
-        }
+        $hasDeadlineColumn = $this->isSelectableColumn('ekskul', 'registration_deadline_at');
 
         $ekskulIds = $targets
             ->pluck('ekskul_id')
@@ -4057,21 +4010,31 @@ class DbController extends ApiController
         $ekskulQuery = DB::table('ekskul')
             ->whereIn('id', $ekskulIds);
         $this->applyTenantFilter($ekskulQuery);
-        $ekskulRows = $ekskulQuery->get(['id', 'registration_deadline_at']);
+        $columns = $hasDeadlineColumn
+            ? ['id', 'registration_deadline_at']
+            : ['id'];
+        $ekskulRows = $ekskulQuery->get($columns);
         $ekskulMap = [];
         foreach ($ekskulRows as $row) {
             $ekskulMap[(string) ($row->id ?? '')] = $row;
         }
 
-        $now = now();
+        $now = Carbon::now('Asia/Jakarta');
+        $periodEnd = $this->currentAcademicPeriodEndForTenant($this->currentTenantId);
         foreach ($ekskulIds as $ekskulId) {
             $ekskul = $ekskulMap[$ekskulId] ?? null;
             if (! $ekskul) {
                 return 'Ekstrakurikuler tidak ditemukan';
             }
 
-            $deadline = $this->parseEskulDateTime($ekskul->registration_deadline_at ?? null);
-            if ($deadline && $now->gt($deadline)) {
+            $effectiveDeadline = $periodEnd ? $periodEnd->copy() : null;
+            if ($hasDeadlineColumn) {
+                $deadline = $this->parseEskulDateTime($ekskul->registration_deadline_at ?? null);
+                if ($deadline && (! $effectiveDeadline || $deadline->lt($effectiveDeadline))) {
+                    $effectiveDeadline = $deadline;
+                }
+            }
+            if ($effectiveDeadline && $now->gt($effectiveDeadline)) {
                 return 'Pendaftaran ekstrakurikuler sudah ditutup, tidak bisa membatalkan';
             }
         }
@@ -4678,6 +4641,169 @@ class DbController extends ApiController
         return false;
     }
 
+    private function quizIdsHaveOngoingSubmissions(array $quizIds): bool
+    {
+        $ids = array_values(array_unique(array_filter(array_map(
+            fn ($id) => trim((string) $id),
+            $quizIds
+        ))));
+        if (empty($ids)) {
+            return false;
+        }
+
+        $query = DB::table('quiz_submissions')
+            ->whereIn('quiz_id', $ids)
+            ->where('status', 'ongoing');
+        $this->applyTenantFilter($query);
+
+        return $query->exists();
+    }
+
+    private function quizIdsFromPayload($payload): array
+    {
+        if (! is_array($payload)) {
+            return [];
+        }
+
+        $rows = $this->isAssoc($payload) ? [$payload] : $payload;
+        $ids = [];
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $quizId = trim((string) ($row['quiz_id'] ?? ''));
+            if ($quizId !== '') {
+                $ids[] = $quizId;
+            }
+        }
+
+        return array_values(array_unique($ids));
+    }
+
+    private function questionIdsFromPayload($payload): array
+    {
+        if (! is_array($payload)) {
+            return [];
+        }
+
+        $rows = $this->isAssoc($payload) ? [$payload] : $payload;
+        $ids = [];
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $questionId = trim((string) ($row['question_id'] ?? ''));
+            if ($questionId !== '') {
+                $ids[] = $questionId;
+            }
+        }
+
+        return array_values(array_unique($ids));
+    }
+
+    private function quizIdsByQuestionIds(array $questionIds): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map(
+            fn ($id) => trim((string) $id),
+            $questionIds
+        ))));
+        if (empty($ids)) {
+            return [];
+        }
+
+        $query = DB::table('quiz_questions')->whereIn('id', $ids);
+        $this->applyTenantFilter($query);
+
+        return $query
+            ->pluck('quiz_id')
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private function quizIdsForTargetQuestionMutation($baseQuery, $filters): array
+    {
+        $targetQuery = clone $baseQuery;
+        $this->applyFilters($targetQuery, $filters);
+
+        return $targetQuery
+            ->pluck('quiz_id')
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private function quizIdsForTargetOptionMutation($baseQuery, $filters): array
+    {
+        $targetQuery = clone $baseQuery;
+        $this->applyFilters($targetQuery, $filters);
+        $questionIds = $targetQuery
+            ->pluck('question_id')
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        return $this->quizIdsByQuestionIds($questionIds);
+    }
+
+    private function boolValue($value): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+        if (is_int($value)) {
+            return $value === 1;
+        }
+
+        return filter_var($value, FILTER_VALIDATE_BOOLEAN);
+    }
+
+    private function academicYearBounds(?string $academicYear): ?array
+    {
+        $year = AcademicPeriod::normalizeAcademicYear($academicYear);
+        if (! $year) {
+            return null;
+        }
+
+        $startYear = (int) substr($year, 0, 4);
+        if ($startYear <= 0) {
+            return null;
+        }
+
+        return [
+            Carbon::create($startYear, 7, 1, 0, 0, 0, 'Asia/Jakarta')->startOfDay(),
+            Carbon::create($startYear + 1, 6, 30, 23, 59, 59, 'Asia/Jakarta')->endOfDay(),
+        ];
+    }
+
+    private function validateQuizTimelineWithinAcademicYear(?Carbon $startsAt, ?Carbon $endsAt, ?string $academicYear): ?string
+    {
+        $year = AcademicPeriod::normalizeAcademicYear($academicYear);
+        $bounds = $this->academicYearBounds($year);
+        if (! $year || ! $bounds) {
+            return null;
+        }
+
+        [$periodStart, $periodEnd] = $bounds;
+        foreach ([
+            'Tanggal mulai' => $startsAt,
+            'Waktu selesai' => $endsAt,
+        ] as $label => $date) {
+            if (! $date instanceof Carbon) {
+                continue;
+            }
+            $localDate = $date->copy()->setTimezone('Asia/Jakarta');
+            if ($localDate->lt($periodStart) || $localDate->gt($periodEnd)) {
+                return "{$label} quiz harus berada dalam tahun periode {$year} ({$periodStart->toDateString()} sampai {$periodEnd->toDateString()})";
+            }
+        }
+
+        return null;
+    }
+
     private function validateGuruQuizCreatePayload(&$payload, string $userId): ?string
     {
         if (! is_array($payload)) {
@@ -4763,6 +4889,8 @@ class DbController extends ApiController
             if ($startsAt->lt($now)) {
                 return 'Tanggal mulai quiz tidak boleh di masa lalu';
             }
+            $academicYear = AcademicPeriod::normalizeAcademicYear($row['tahun_ajaran'] ?? null)
+                ?: $this->currentAcademicPeriodForTenant($this->currentTenantId)['tahun_ajaran'];
 
             if ($mode === 'regular') {
                 $deadline = $this->parseQuizDateTime($row['deadline_at'] ?? null);
@@ -4775,6 +4903,10 @@ class DbController extends ApiController
                 if ($deadline->lt($now)) {
                     return 'Tanggal selesai quiz tidak boleh di masa lalu';
                 }
+                $periodError = $this->validateQuizTimelineWithinAcademicYear($startsAt, $deadline, $academicYear);
+                if ($periodError !== null) {
+                    return $periodError;
+                }
 
                 $normalized['deadline_at'] = $deadline;
                 $normalized['is_live'] = false;
@@ -4786,12 +4918,20 @@ class DbController extends ApiController
                 if ($duration < 10) {
                     return 'Durasi quiz ujian minimal 10 menit';
                 }
+                $endAt = $startsAt->copy()->addMinutes($duration);
+                if ($endAt->lt($now)) {
+                    return 'Waktu selesai quiz tidak boleh di masa lalu';
+                }
+                $periodError = $this->validateQuizTimelineWithinAcademicYear($startsAt, $endAt, $academicYear);
+                if ($periodError !== null) {
+                    return $periodError;
+                }
 
                 $normalized['is_live'] = true;
                 $normalized['is_active'] = true;
                 $normalized['live_started_at'] = $startsAt;
                 $normalized['duration_minutes'] = $duration;
-                $normalized['deadline_at'] = $startsAt->copy()->addMinutes($duration);
+                $normalized['deadline_at'] = $endAt;
             }
 
             $normalizedRows[] = $normalized;
@@ -4810,6 +4950,17 @@ class DbController extends ApiController
 
     private function validateGuruQuizUpdatePayload(array &$payload, Request $request, string $userId): ?string
     {
+        $timeMutationFields = [
+            'starts_at',
+            'deadline_at',
+            'is_live',
+            'is_active',
+            'live_started_at',
+            'duration_minutes',
+            'updated_at',
+        ];
+        $payloadKeys = array_keys($payload);
+        $hasNonTimeMutation = ! empty(array_diff($payloadKeys, $timeMutationFields));
         $touchScoring = array_key_exists('penilaian', $payload);
         $touchOwnedTarget = array_key_exists('kelas_id', $payload) || array_key_exists('mapel', $payload);
         $touchTimeline = array_key_exists('starts_at', $payload)
@@ -4828,7 +4979,7 @@ class DbController extends ApiController
             $payload['penilaian'] = $penilaian;
         }
 
-        if (! $touchOwnedTarget && ! $touchTimeline) {
+        if (! $touchOwnedTarget && ! $touchTimeline && ! $hasNonTimeMutation) {
             return null;
         }
 
@@ -4837,7 +4988,7 @@ class DbController extends ApiController
         $this->applyTenantFilter($targetQuery);
         $this->applyFilters($targetQuery, $request->input('filters', []));
 
-        $targets = $targetQuery->get([
+        $targetColumns = array_values(array_filter([
             'id',
             'kelas_id',
             'mapel',
@@ -4845,8 +4996,13 @@ class DbController extends ApiController
             'deadline_at',
             'mode',
             'is_live',
+            'is_active',
+            'live_started_at',
             'duration_minutes',
-        ]);
+            'tahun_ajaran',
+            'semester',
+        ], fn ($column) => $this->isSelectableColumn('quizzes', $column)));
+        $targets = $targetQuery->get($targetColumns);
 
         if ($targets->isEmpty()) {
             return null;
@@ -4857,6 +5013,28 @@ class DbController extends ApiController
         }
 
         $target = $targets->first();
+        $hasOngoingSubmission = $this->quizIdsHaveOngoingSubmissions([(string) $target->id]);
+        if ($hasOngoingSubmission && $hasNonTimeMutation) {
+            return 'Quiz sedang dikerjakan siswa. Hanya deadline atau durasi yang boleh diubah.';
+        }
+        if (
+            $hasOngoingSubmission
+            && array_key_exists('is_active', $payload)
+            && ! $this->boolValue($payload['is_active'])
+        ) {
+            return 'Quiz sedang dikerjakan siswa. Gunakan Tutup Quiz jika ingin mengakhiri attempt.';
+        }
+        if (
+            $hasOngoingSubmission
+            && array_key_exists('is_live', $payload)
+            && $this->boolValue($payload['is_live']) !== $this->boolValue($target->is_live ?? false)
+        ) {
+            return 'Mode quiz tidak boleh diubah saat ada siswa sedang mengerjakan quiz.';
+        }
+        if (! $touchOwnedTarget && ! $touchTimeline) {
+            return null;
+        }
+
         $now = now()->startOfMinute();
 
         $kelasId = trim((string) ($payload['kelas_id'] ?? $target->kelas_id ?? ''));
@@ -4866,14 +5044,6 @@ class DbController extends ApiController
         }
         if (! $this->guruCanTeachMapelInKelas($userId, $kelasId, $mapel)) {
             return 'Kelas dan mapel quiz harus sesuai yang diampu guru';
-        }
-
-        $startsAt = $this->parseQuizDateTime($payload['starts_at'] ?? $target->starts_at);
-        if (! $startsAt) {
-            return 'Tanggal mulai quiz tidak valid';
-        }
-        if (array_key_exists('starts_at', $payload) && $startsAt->lt($now)) {
-            return 'Tanggal mulai quiz tidak boleh di masa lalu';
         }
 
         $mode = null;
@@ -4889,10 +5059,55 @@ class DbController extends ApiController
             $mode = $this->normalizeQuizMode($target->mode ?? null, $fallbackLive);
         }
 
+        $startsAtInput = array_key_exists('starts_at', $payload)
+            ? $payload['starts_at']
+            : ($target->starts_at ?? null);
+        $startsAt = $this->parseQuizDateTime($startsAtInput);
+        if (! $startsAt) {
+            if ($startsAtInput !== null && $startsAtInput !== '') {
+                return 'Tanggal mulai quiz tidak valid';
+            }
+            if (array_key_exists('is_active', $payload) && $this->boolValue($payload['is_active'])) {
+                return 'Tanggal mulai quiz wajib diisi sebelum quiz dimulai';
+            }
+
+            $payload['kelas_id'] = $kelasId;
+            $payload['mapel'] = $mapel;
+            $payload['mode'] = $mode;
+            if ($mode === 'regular') {
+                $payload['is_live'] = false;
+                $payload['deadline_at'] = null;
+                $payload['live_started_at'] = null;
+                $payload['duration_minutes'] = null;
+            } else {
+                $duration = (int) ($payload['duration_minutes'] ?? $target->duration_minutes ?? 60);
+                if ($duration < 10) {
+                    return 'Durasi quiz ujian minimal 10 menit';
+                }
+                $payload['is_live'] = true;
+                $payload['deadline_at'] = null;
+                $payload['live_started_at'] = null;
+                $payload['duration_minutes'] = $duration;
+            }
+
+            return null;
+        }
+        if ($hasOngoingSubmission && array_key_exists('starts_at', $payload)) {
+            $targetStartsAt = $this->parseQuizDateTime($target->starts_at ?? null);
+            if (! $targetStartsAt || ! $targetStartsAt->equalTo($startsAt)) {
+                return 'Tanggal mulai tidak boleh diubah saat ada siswa sedang mengerjakan quiz';
+            }
+        }
+        if (array_key_exists('starts_at', $payload) && $startsAt->lt($now)) {
+            return 'Tanggal mulai quiz tidak boleh di masa lalu';
+        }
+
         $payload['kelas_id'] = $kelasId;
         $payload['mapel'] = $mapel;
         $payload['starts_at'] = $startsAt;
         $payload['mode'] = $mode;
+        $academicYear = AcademicPeriod::normalizeAcademicYear($target->tahun_ajaran ?? null)
+            ?: $this->currentAcademicPeriodForTenant($this->currentTenantId)['tahun_ajaran'];
 
         if ($mode === 'regular') {
             $deadline = $this->parseQuizDateTime($payload['deadline_at'] ?? $target->deadline_at);
@@ -4904,6 +5119,10 @@ class DbController extends ApiController
             }
             if (array_key_exists('deadline_at', $payload) && $deadline->lt($now)) {
                 return 'Tanggal selesai quiz tidak boleh di masa lalu';
+            }
+            $periodError = $this->validateQuizTimelineWithinAcademicYear($startsAt, $deadline, $academicYear);
+            if ($periodError !== null) {
+                return $periodError;
             }
 
             $payload['deadline_at'] = $deadline;
@@ -4920,11 +5139,20 @@ class DbController extends ApiController
             return 'Durasi quiz ujian minimal 10 menit';
         }
 
+        $endAt = $startsAt->copy()->addMinutes($duration);
+        if ($endAt->lt($now)) {
+            return 'Waktu selesai quiz tidak boleh di masa lalu';
+        }
+        $periodError = $this->validateQuizTimelineWithinAcademicYear($startsAt, $endAt, $academicYear);
+        if ($periodError !== null) {
+            return $periodError;
+        }
+
         $payload['duration_minutes'] = $duration;
         $payload['is_live'] = true;
         $payload['is_active'] = true;
         $payload['live_started_at'] = $startsAt;
-        $payload['deadline_at'] = $startsAt->copy()->addMinutes($duration);
+        $payload['deadline_at'] = $endAt;
 
         return null;
     }
@@ -5294,6 +5522,8 @@ class DbController extends ApiController
             'link_tiktok',
             'tahun_ajaran',
             'semester_aktif',
+            'periode_mulai',
+            'periode_selesai',
             'registrasi_siswa_aktif',
             'registrasi_guru_aktif',
         ];
@@ -5816,6 +6046,32 @@ class DbController extends ApiController
                     return $row;
                 }
                 $row['semester_aktif'] = $semester;
+            }
+
+            if (array_key_exists('periode_mulai', $row) || array_key_exists('periode_selesai', $row)) {
+                if (! array_key_exists('periode_mulai', $row) || ! array_key_exists('periode_selesai', $row)) {
+                    $error = 'Tanggal mulai dan selesai periode harus dikirim bersama.';
+
+                    return $row;
+                }
+
+                $currentPeriod = $this->currentAcademicPeriodForTenant($this->currentTenantId);
+                $year = AcademicPeriod::normalizeAcademicYear($row['tahun_ajaran'] ?? null)
+                    ?: ($currentPeriod['tahun_ajaran'] ?? null);
+                $semester = AcademicPeriod::normalizeSemester($row['semester_aktif'] ?? null)
+                    ?: ($currentPeriod['semester'] ?? null);
+                $startsAt = AcademicPeriod::normalizeDate($row['periode_mulai'] ?? null);
+                $endsAt = AcademicPeriod::normalizeDate($row['periode_selesai'] ?? null);
+
+                if (! $year || ! $startsAt || ! $endsAt || empty(AcademicPeriod::customMonths($year, $startsAt, $endsAt))) {
+                    $error = 'Rentang bulan periode harus berada dalam tahun ajaran aktif dan tanggal mulai tidak boleh melewati tanggal selesai.';
+
+                    return $row;
+                }
+
+                $period = AcademicPeriod::make($year, $semester, $startsAt, $endsAt);
+                $row['periode_mulai'] = $period['starts_at'];
+                $row['periode_selesai'] = $period['ends_at'];
             }
 
             foreach ([

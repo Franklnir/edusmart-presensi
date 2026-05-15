@@ -1,10 +1,12 @@
-import React, { useEffect, useState, useMemo } from 'react'
+import React, { startTransition, useEffect, useState, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
+import { queryClient, queryKeys } from '../../lib/queryClient'
 import { formatDate } from '../../lib/time'
 import { useUIStore } from '../../store/useUIStore'
 import ProfileAvatar from '../../components/ProfileAvatar'
 import PasswordInput from '../../components/PasswordInput'
 import { exportRowsToExcel } from '../../utils/spreadsheet'
+import { formatPresenceText, isPresenceOnline, presenceBadgeClassName } from '../../utils/presence'
 import {
   buildAliasMap,
   mapRowByAliases,
@@ -17,6 +19,11 @@ import {
   buildGoogleSheetCsvUrl
 } from '../../utils/importUtils'
 import { isEmailFormat } from '../../utils/accountSetup'
+import { getProfileSourceMeta } from '../../utils/profileSource'
+
+const STRONG_PASSWORD_MESSAGE = 'Password minimal 12 karakter dan wajib ada huruf besar, huruf kecil, angka, serta simbol'
+const isStrongPassword = (value = '') =>
+  /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{12,}$/.test(value)
 
 /* ===== Password Modal Component ===== */
 function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Password", loading = false }) {
@@ -201,6 +208,17 @@ const normalizeStatusValue = (value) => {
   return ''
 }
 
+const getGuruStatusMeta = (value) => {
+  const status = normalizeStatusValue(value) || String(value || 'active').toLowerCase() || 'active'
+  if (status === 'active') return { label: 'Aktif', icon: '✅', className: 'bg-green-100 text-green-700 border border-green-200' }
+  if (status === 'nonaktif') return { label: 'Nonaktif', icon: '⏸️', className: 'bg-red-100 text-red-700 border border-red-200' }
+  if (status === 'mutasi') return { label: 'Mutasi', icon: '📤', className: 'bg-indigo-100 text-indigo-700 border border-indigo-200' }
+  if (status === 'alumni') return { label: 'Alumni', icon: '🎓', className: 'bg-blue-100 text-blue-700 border border-blue-200' }
+  return { label: status || '—', icon: '•', className: 'bg-slate-100 text-slate-700 border border-slate-200' }
+}
+
+const isGuruExitStatus = (status) => ['mutasi', 'alumni'].includes(normalizeStatusValue(status) || String(status || '').toLowerCase())
+
 // Komponen Stat Card
 const GuruStatCard = ({ label, value, icon, color = 'blue', description }) => {
   const colorClasses = {
@@ -382,6 +400,16 @@ export default function AGuru() {
   const [jadwalAll, setJadwalAll] = useState({})
   const [strukturKelasAll, setStrukturKelasAll] = useState({})
   const [strukturSekolah, setStrukturSekolah] = useState({})
+  const [guruMeta, setGuruMeta] = useState({
+    page: 1,
+    per_page: 25,
+    total: 0,
+    page_count: 1,
+    from: 0,
+    to: 0
+  })
+  const [guruServerStats, setGuruServerStats] = useState(null)
+  const [guruFilterOptions, setGuruFilterOptions] = useState({ mapel: [], jabatan: [] })
 
   // Pencarian
   const [qNama, setQNama] = useState('')
@@ -414,10 +442,11 @@ export default function AGuru() {
   })
   const [showAddForm, setShowAddForm] = useState(false)
 
-  // Hapus guru
-  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
-  const [guruToDelete, setGuruToDelete] = useState(null)
-  const [deletingGuru, setDeletingGuru] = useState(false)
+  // Mutasi guru
+  const [mutasiGuruOpen, setMutasiGuruOpen] = useState(false)
+  const [guruToMutasi, setGuruToMutasi] = useState(null)
+  const [alasanMutasiGuru, setAlasanMutasiGuru] = useState('')
+  const [mutatingGuru, setMutatingGuru] = useState(false)
 
   // Import / Export
   const [importModalOpen, setImportModalOpen] = useState(false)
@@ -592,33 +621,82 @@ export default function AGuru() {
     loadAllData()
   }, [])
 
-  const loadAllData = async () => {
+  const loadAllData = async (page = guruMeta.page || 1, overrides = {}) => {
+    const isInitialLoad = !guruRaw.length && !guruMeta.total
     try {
-      setLoadingInit(true)
-      await Promise.all([
-        loadGuruRaw(),
-        loadKelasList(),
-        loadJadwalAll(),
-        loadStrukturKelasAll(),
-        loadStrukturSekolah()
+      if (isInitialLoad) setLoadingInit(true)
+      const teacherParams = {
+        page,
+        per_page: 25,
+        q: overrides.qNama ?? qNama,
+        mapel: overrides.qMapel ?? qMapel,
+        jabatan: overrides.qJabatan ?? qJabatan
+      }
+
+      const [teachersRes, kelasRes] = await Promise.all([
+        queryClient.fetchQuery({
+          queryKey: queryKeys.admin.teachers(teacherParams),
+          queryFn: async () => {
+            const { data, error } = await supabase.admin.teachers(teacherParams)
+            if (error?.code === 'REQUEST_ABORTED') {
+              const aborted = new Error('Request aborted')
+              aborted.code = 'REQUEST_ABORTED'
+              throw aborted
+            }
+            if (error) throw error
+            return data
+          },
+          staleTime: 10 * 1000,
+        }),
+        queryClient.fetchQuery({
+          queryKey: ['admin', 'teacher-page', 'classes'],
+          queryFn: async () => {
+            const { data, error } = await supabase
+              .from('kelas')
+              .select('id, nama, grade, suffix')
+              .order('grade', { ascending: true })
+              .order('suffix', { ascending: true })
+            if (error?.code === 'REQUEST_ABORTED') {
+              const aborted = new Error('Request aborted')
+              aborted.code = 'REQUEST_ABORTED'
+              throw aborted
+            }
+            if (error) throw error
+            return data || []
+          },
+          staleTime: 5 * 60 * 1000,
+        })
       ])
+
+      startTransition(() => {
+        setGuruRaw(teachersRes?.rows || [])
+        setKelasList(kelasRes || [])
+        setJadwalAll({})
+        setStrukturKelasAll({})
+        setStrukturSekolah({})
+        setGuruMeta(teachersRes?.meta || {
+          page: 1,
+          per_page: 25,
+          total: teachersRes?.rows?.length || 0,
+          page_count: 1,
+          from: teachersRes?.rows?.length ? 1 : 0,
+          to: teachersRes?.rows?.length || 0
+        })
+        setGuruServerStats(teachersRes?.stats || null)
+        setGuruFilterOptions(teachersRes?.filter_options || { mapel: [], jabatan: [] })
+      })
     } catch (error) {
+      if (error?.code === 'REQUEST_ABORTED') return
       console.error('Error loading data:', error)
       pushToast('error', 'Gagal memuat data')
     } finally {
-      setLoadingInit(false)
+      if (isInitialLoad) setLoadingInit(false)
     }
   }
 
   const loadGuruRaw = async () => {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('role', 'guru')
-      .order('nama')
-
-    if (error) throw error
-    setGuruRaw(data || [])
+    queryClient.invalidateQueries({ queryKey: ['admin', 'teachers'] })
+    await loadAllData()
   }
 
   const loadKelasList = async () => {
@@ -678,9 +756,9 @@ export default function AGuru() {
   // Process guru data
   const guruProcessed = useMemo(() => {
     return guruRaw.map(g => {
-      const mapelSet = new Set()
-      const kelasSet = new Set()
-      const jabatanSet = new Set()
+      const mapelSet = new Set(g.mapelList || [])
+      const kelasSet = new Set(g.kelasList || [])
+      const jabatanSet = new Set(g.jabatanList || [])
 
       // Tambahkan jabatan dari profil jika ada
       if (g.jabatan) {
@@ -729,6 +807,10 @@ export default function AGuru() {
 
   // Jabatan list untuk filter
   const jabatanList = useMemo(() => {
+    if (guruFilterOptions.jabatan?.length) {
+      return [...guruFilterOptions.jabatan].sort()
+    }
+
     const jabatanSet = new Set()
 
     Object.values(strukturSekolah || {}).forEach(posisi => {
@@ -748,16 +830,20 @@ export default function AGuru() {
     })
 
     return Array.from(jabatanSet).sort()
-  }, [strukturSekolah, strukturKelasAll, guruRaw])
+  }, [strukturSekolah, strukturKelasAll, guruRaw, guruFilterOptions.jabatan])
 
   // Mapel list untuk filter
   const allMapelList = useMemo(() => {
+    if (guruFilterOptions.mapel?.length) {
+      return [...guruFilterOptions.mapel].sort()
+    }
+
     const mapelSet = new Set()
     guruProcessed.forEach(g => {
       g.mapelList.forEach(mapel => mapelSet.add(mapel))
     })
     return Array.from(mapelSet).sort()
-  }, [guruProcessed])
+  }, [guruProcessed, guruFilterOptions.mapel])
 
   // Kelas list untuk filter
   const allKelasList = useMemo(() => {
@@ -970,7 +1056,7 @@ export default function AGuru() {
 
     let { data: existing, error: exError } = await supabase
       .from('profiles')
-      .select('id, role, email, nis')
+      .select('id, role, email, nis, created_via')
       .eq('nis', nis)
       .maybeSingle()
 
@@ -979,7 +1065,7 @@ export default function AGuru() {
     if (!existing) {
       const { data: byEmail } = await supabase
         .from('profiles')
-        .select('id, role, email, nis')
+        .select('id, role, email, nis, created_via')
         .eq('email', emailLower)
         .maybeSingle()
       existing = byEmail || null
@@ -1001,7 +1087,7 @@ export default function AGuru() {
     if (row.status) payload.status = row.status
 
     if (existing?.id) {
-      if (existing.role && existing.role !== 'guru') {
+      if (existing.role && !['guru', 'teacher'].includes(existing.role)) {
         throw new Error('NIS/NIP sudah digunakan untuk role lain')
       }
 
@@ -1011,12 +1097,28 @@ export default function AGuru() {
       }
 
       const updateKeys = Object.keys(payload).filter((k) => k !== 'updated_at')
-      if (!updateKeys.length) return 'skipped'
+      if (!updateKeys.length && existing.created_via) return 'skipped'
 
-      const { error } = await supabase
-        .from('profiles')
-        .update(payload)
-        .eq('id', existing.id)
+      const provisionPayload = {
+        id: existing.id,
+        nama,
+        email: emailForAuth,
+        password,
+        role: 'guru',
+        sync_existing: true,
+        created_via: 'import'
+      }
+      if (row.nis) provisionPayload.nis = row.nis
+      if (row.kelas) provisionPayload.kelas = row.kelas
+      if (row.jk) provisionPayload.jk = row.jk
+      if (row.tanggal_lahir) provisionPayload.tanggal_lahir = row.tanggal_lahir
+      if (row.agama) provisionPayload.agama = row.agama
+      if (row.alamat) provisionPayload.alamat = row.alamat
+      if (row.telp) provisionPayload.telp = row.telp
+      if (row.jabatan) provisionPayload.jabatan = row.jabatan
+      if (payload.status) provisionPayload.status = payload.status
+
+      const { error } = await supabase.admin.provisionUser(provisionPayload)
 
       if (error) throw error
       return 'updated'
@@ -1036,7 +1138,8 @@ export default function AGuru() {
       telp: row.telp || '',
       jabatan: row.jabatan || '',
       status: payload.status || 'active',
-      must_change_password: true
+      must_change_password: true,
+      created_via: 'import'
     })
 
     if (provisionError) throw provisionError
@@ -1098,13 +1201,34 @@ export default function AGuru() {
     }
 
     setImportSummary(summary)
+    pushToast('success', `Import guru selesai: ${summary.created} baru, ${summary.updated} update, ${summary.skipped} lewati, ${summary.failed} gagal.`)
     setImportLoading(false)
     await loadGuruRaw()
   }
 
   const exportGuruToExcel = async () => {
     try {
-      const rows = guru.map((item, idx) => ({
+      const params = {
+        page: 1,
+        per_page: 10000,
+        all: true,
+        q: qNama,
+        mapel: qMapel,
+        jabatan: qJabatan
+      }
+
+      const data = await queryClient.fetchQuery({
+        queryKey: queryKeys.admin.teachers(params),
+        queryFn: async () => {
+          const { data, error } = await supabase.admin.teachers(params)
+          if (error) throw error
+          return data
+        },
+        staleTime: 30 * 1000,
+      })
+
+      const exportRows = data?.rows || guru
+      const rows = exportRows.map((item, idx) => ({
         No: idx + 1,
         NIS: item.nis || '',
         Nama: item.nama || '',
@@ -1113,7 +1237,8 @@ export default function AGuru() {
         Jabatan: item.jabatan || item.jabatanUtama || '',
         Mapel: (item.mapelList || []).join(', '),
         Kelas: (item.kelasList || []).join(', '),
-        Status: item.status || 'active'
+        Status: item.status || 'active',
+        'Asal Data': getProfileSourceMeta(item.created_via).label
       }))
 
       const stamp = new Date().toISOString().slice(0, 10)
@@ -1130,18 +1255,30 @@ export default function AGuru() {
 
   // Statistik untuk dashboard
   const stats = useMemo(() => {
+    if (guruServerStats) {
+      return {
+        totalGuru: guruServerStats.totalGuru || 0,
+        aktifGuru: guruServerStats.aktifGuru || 0,
+        nonaktifGuru: guruServerStats.nonaktifGuru || 0,
+        mutasiGuru: guruServerStats.mutasiGuru || 0,
+        totalJabatan: guruServerStats.jabatanCount || 0
+      }
+    }
+
     const totalGuru = guruProcessed.length
     const aktifGuru = guruProcessed.filter(g => g.status === 'active').length
     const nonaktifGuru = guruProcessed.filter(g => g.status === 'nonaktif').length
+    const mutasiGuru = guruProcessed.filter(g => g.status === 'mutasi').length
     const totalJabatan = jabatanList.length
 
     return {
       totalGuru,
       aktifGuru,
       nonaktifGuru,
+      mutasiGuru,
       totalJabatan
     }
-  }, [guruProcessed, jabatanList])
+  }, [guruProcessed, jabatanList, guruServerStats])
 
   // Update state guru ketika data diproses
   useEffect(() => {
@@ -1151,34 +1288,15 @@ export default function AGuru() {
   /* ===== Filter ===== */
   function applyFilter() {
     setIsSearching(true)
-    setTimeout(() => {
-      const nama = qNama.trim().toLowerCase()
-      const mapel = qMapel.trim()
-      const jab = qJabatan.trim()
-
-      const res = guruProcessed.filter(g => {
-        const namaOk = nama
-          ? (String(g.nama || '').toLowerCase().includes(nama) || String(g.email || '').toLowerCase().includes(nama))
-          : true
-        const mapelOk = mapel
-          ? g.mapelList.some(m => m === mapel)
-          : true
-        const jabatanOk = jab
-          ? g.jabatanList.some(j => j === jab)
-          : true
-        return namaOk && mapelOk && jabatanOk
-      })
-
-      setGuru(res)
-      setIsSearching(false)
-    }, 200)
+    loadAllData(1, { qNama, qMapel, qJabatan })
+      .finally(() => setIsSearching(false))
   }
 
   function resetFilter() {
     setQNama('')
     setQMapel('')
     setQJabatan('')
-    setGuru(guruProcessed)
+    loadAllData(1, { qNama: '', qMapel: '', qJabatan: '' })
   }
 
   /* ===== Form Handler ===== */
@@ -1200,37 +1318,25 @@ export default function AGuru() {
       return pushToast('error', 'Password dan konfirmasi password tidak sama')
     }
 
-    if (form.password.length < 6) {
-      return pushToast('error', 'Password minimal 6 karakter')
+    if (!isStrongPassword(form.password)) {
+      return pushToast('error', STRONG_PASSWORD_MESSAGE)
     }
 
     try {
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: form.email,
+      const { error } = await supabase.admin.provisionUser({
+        email: form.email.trim().toLowerCase(),
+        nama: form.nama.trim(),
+        telp: form.telp.trim(),
         password: form.password,
-        options: {
-          data: {
-            nama: form.nama,
-            role: 'guru'
-          }
-        }
-      })
-
-      if (authError) throw authError
-
-      const { error } = await supabase.from('profiles').insert({
-        id: authData.user.id,
-        email: form.email,
-        nama: form.nama,
-        telp: form.telp,
         role: 'guru',
         status: 'active',
-        created_at: new Date().toISOString()
+        must_change_password: true,
+        created_via: 'admin_created'
       })
 
       if (error) throw error
 
-      pushToast('success', 'Guru berhasil didaftarkan')
+      pushToast('success', 'Guru berhasil ditambahkan. Data akun dan profil sudah sinkron.')
       setForm({
         email: '',
         nama: '',
@@ -1269,17 +1375,22 @@ export default function AGuru() {
       'Konfirmasi Akhir Nonaktifkan Guru',
       async () => {
         try {
-          await supabase
-            .from('profiles')
-            .update({
-              status: 'nonaktif',
-              alasan_nonaktif: alasanNonaktif || '-',
-              disabled_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', disableUID)
+          const reason = alasanNonaktif.trim()
+          const { data, error } = await supabase.admin.updateUserStatus(disableUID, {
+            role: 'guru',
+            status: 'nonaktif',
+            reason
+          })
+          if (error) throw error
 
           pushToast('success', 'Guru berhasil dinonaktifkan')
+          setSelectedGuru(prev => prev?.id === disableUID ? ({
+            ...prev,
+            ...(data?.profile || {}),
+            status: 'nonaktif',
+            alasan_nonaktif: reason,
+            disabled_at: data?.profile?.disabled_at || new Date().toISOString()
+          }) : prev)
           setDisableUID(null)
           setAlasanNonaktif('')
           loadGuruRaw()
@@ -1301,17 +1412,20 @@ export default function AGuru() {
       'Konfirmasi Aktifkan Guru',
       async () => {
         try {
-          await supabase
-            .from('profiles')
-            .update({
-              status: 'active',
-              alasan_nonaktif: null,
-              disabled_at: null,
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', u.id)
+          const { data, error } = await supabase.admin.updateUserStatus(u.id, {
+            role: 'guru',
+            status: 'active'
+          })
+          if (error) throw error
 
           pushToast('success', 'Guru berhasil diaktifkan')
+          setSelectedGuru(prev => prev?.id === u.id ? ({
+            ...prev,
+            ...(data?.profile || {}),
+            status: 'active',
+            alasan_nonaktif: null,
+            disabled_at: null
+          }) : prev)
           loadGuruRaw()
         } catch (error) {
           console.error('Error activating guru:', error)
@@ -1321,35 +1435,61 @@ export default function AGuru() {
     )
   }
 
-  /* ===== Hapus Akun Guru ===== */
-  function openDeleteConfirm(guru) {
-    setGuruToDelete(guru)
-    setDeleteConfirmOpen(true)
+  /* ===== Mutasi Guru ===== */
+  function openMutasiGuru(guru) {
+    openPasswordModal(
+      'Konfirmasi Mutasi Guru',
+      () => {
+        setGuruToMutasi(guru)
+        setAlasanMutasiGuru('')
+        setMutasiGuruOpen(true)
+      }
+    )
   }
 
-  function closeDeleteConfirm() {
-    setDeleteConfirmOpen(false)
-    setGuruToDelete(null)
+  function closeMutasiGuru() {
+    setMutasiGuruOpen(false)
+    setGuruToMutasi(null)
+    setAlasanMutasiGuru('')
   }
 
-  const hapusAkunGuru = async () => {
-    if (!guruToDelete) return
-
-    try {
-      setDeletingGuru(true)
-      const { error } = await supabase.admin.deleteUser(guruToDelete.id)
-      if (error) throw error
-
-      pushToast('success', 'Akun guru berhasil dihapus')
-      closeDeleteConfirm()
-      if (detailModalOpen) closeDetailModal()
-      loadAllData()
-    } catch (error) {
-      console.error('Error deleting guru:', error)
-      pushToast('error', 'Gagal menghapus akun guru: ' + (error.message || 'Unknown error'))
-    } finally {
-      setDeletingGuru(false)
+  const simpanMutasiGuru = () => {
+    if (!guruToMutasi) return
+    if (!alasanMutasiGuru.trim()) {
+      pushToast('error', 'Harap masukkan alasan mutasi')
+      return
     }
+
+    openPasswordModal(
+      'Konfirmasi Akhir Mutasi Guru',
+      async () => {
+        try {
+          setMutatingGuru(true)
+          const reason = `Mutasi/Pindah sekolah. ${alasanMutasiGuru.trim()}`
+          const { data, error } = await supabase.admin.updateUserStatus(guruToMutasi.id, {
+            role: 'guru',
+            status: 'mutasi',
+            reason
+          })
+          if (error) throw error
+
+          pushToast('success', 'Guru berhasil dimutasi. Data tetap tersimpan dan relasi aktif sudah disinkronkan.')
+          setSelectedGuru(prev => prev?.id === guruToMutasi.id ? ({
+            ...prev,
+            ...(data?.profile || {}),
+            status: 'mutasi',
+            alasan_nonaktif: reason
+          }) : prev)
+          closeMutasiGuru()
+          await loadGuruRaw()
+        } catch (error) {
+          console.error('Error mutasi guru:', error)
+          pushToast('error', 'Gagal memutasi guru: ' + (error.message || 'Unknown error'))
+        } finally {
+          setMutatingGuru(false)
+        }
+      }
+    )
   }
 
   /* ===== Modal Detail Guru ===== */
@@ -1446,12 +1586,7 @@ export default function AGuru() {
           closeEditNameModal()
           pushToast('success', 'Nama guru berhasil diperbarui')
 
-          await Promise.all([
-            loadGuruRaw(),
-            loadJadwalAll(),
-            loadStrukturKelasAll(),
-            loadStrukturSekolah()
-          ])
+          await loadAllData()
         } finally {
           setSavingTeacherName(false)
         }
@@ -1481,6 +1616,10 @@ export default function AGuru() {
   }
 
   /* ===== Render ===== */
+  const selectedGuruSourceMeta = getProfileSourceMeta(selectedGuru?.created_via)
+  const selectedGuruStatusMeta = getGuruStatusMeta(selectedGuru?.status)
+  const selectedGuruCanMutasi = selectedGuru ? !isGuruExitStatus(selectedGuru.status) : false
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 py-6">
       <div className="w-full space-y-8 px-4 sm:px-6 lg:px-8">
@@ -1808,7 +1947,7 @@ export default function AGuru() {
             value={stats.totalGuru}
             icon="👨‍🏫"
             color="blue"
-            description="Semua guru terdaftar"
+            description={`${stats.totalJabatan} posisi/jabatan`}
           />
           <GuruStatCard
             label="Guru Aktif"
@@ -1825,11 +1964,11 @@ export default function AGuru() {
             description="Tidak aktif sementara"
           />
           <GuruStatCard
-            label="Jabatan"
-            value={stats.totalJabatan}
-            icon="💼"
-            color="teal"
-            description="Posisi/jabatan"
+            label="Guru Mutasi"
+            value={stats.mutasiGuru}
+            icon="📤"
+            color="indigo"
+            description="Pindah sekolah"
           />
         </div>
 
@@ -1847,7 +1986,7 @@ export default function AGuru() {
                 <Input label="Email *" name="email" value={form.email} onChange={handleChange} placeholder="Email guru" type="email" required />
                 <Input label="Nama Lengkap *" name="nama" value={form.nama} onChange={handleChange} placeholder="Nama lengkap" required />
                 <Input label="Telepon" name="telp" value={form.telp} onChange={handleChange} placeholder="Nomor telepon" />
-                <Input label="Password *" name="password" value={form.password} onChange={handleChange} placeholder="Password minimal 6 karakter" type="password" required />
+                <Input label="Password *" name="password" value={form.password} onChange={handleChange} placeholder="Min. 12 karakter, Aa, angka, simbol" type="password" required />
                 <div className="md:col-span-2">
                   <Input label="Konfirmasi Password *" name="confirmPassword" value={form.confirmPassword} onChange={handleChange} placeholder="Ulangi password" type="password" required />
                 </div>
@@ -1890,7 +2029,7 @@ export default function AGuru() {
                 Daftar Guru
               </h3>
               <span className="text-sm text-slate-500 bg-white border border-slate-200 px-3 py-1 rounded-full">
-                {guru.length} dari {guruProcessed.length} guru
+                {guru.length} dari {guruMeta.total || guruProcessed.length} guru
               </span>
             </div>
           </div>
@@ -1918,11 +2057,15 @@ export default function AGuru() {
                     const foto = g.photo_path || g.photo_url || g.foto_url || g.foto || ''
                     const mapelPreview = listPreview(g.mapelList)
                     const kelasPreview = listPreview(g.kelasList)
+                    const sourceMeta = getProfileSourceMeta(g.created_via)
+                    const statusMeta = getGuruStatusMeta(g.status)
+                    const canMutasiGuru = !isGuruExitStatus(g.status)
+                    const guruOnline = isPresenceOnline(g.online) || Number(g.active_devices || 0) > 0
 
                     return (
                       <tr key={g.id} className="hover:bg-slate-50/60 transition-colors">
                         <td className="px-4 py-4 whitespace-nowrap text-sm text-slate-400 text-center">
-                          {index + 1}
+                          {(guruMeta.from || 1) + index}
                         </td>
                         <td className="px-4 py-4 whitespace-nowrap">
                           <div className="flex items-center">
@@ -1938,6 +2081,15 @@ export default function AGuru() {
                             <div className="ml-3">
                               <div className="text-sm font-semibold text-slate-900">{g.nama || '—'}</div>
                               <div className="text-xs text-slate-500">{g.email || '—'}</div>
+                              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${sourceMeta.className}`}>
+                                  {sourceMeta.label}
+                                </span>
+                                <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${presenceBadgeClassName(g)}`}>
+                                  <span className={`h-1.5 w-1.5 rounded-full ${guruOnline ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                                  {formatPresenceText(g)}
+                                </span>
+                              </div>
                               {g.telp && <div className="text-xs text-slate-400 flex items-center gap-1 mt-0.5"><span>📞</span><span>{g.telp}</span></div>}
                             </div>
                           </div>
@@ -1952,21 +2104,21 @@ export default function AGuru() {
                           <JabatanBadge jabatanList={g.jabatanList} />
                         </td>
                         <td className="px-4 py-4 whitespace-nowrap">
-                          {g.status === 'nonaktif' ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700 border border-red-200">⏸️ Nonaktif</span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700 border border-green-200">✅ Aktif</span>
-                          )}
+                          <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold ${statusMeta.className}`}>
+                            {statusMeta.icon} {statusMeta.label}
+                          </span>
                         </td>
                         <td className="px-4 py-4 whitespace-nowrap text-right">
                           <div className="flex items-center justify-end gap-1">
                             <button onClick={() => openDetailModal(g)} className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-all">Detail</button>
                             <button onClick={() => openEditNameModal(g)} className="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-800 text-white text-xs font-semibold transition-all">Edit Nama</button>
-                            <button onClick={() => openDeleteConfirm(g)} disabled={deletingGuru} className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-semibold transition-all disabled:opacity-50">Hapus</button>
-                            {g.status === 'nonaktif' ? (
-                              <button onClick={() => aktif(g)} className="px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-semibold transition-all">Aktifkan</button>
-                            ) : (
+                            {g.status === 'active' ? (
                               <button onClick={() => openNonaktif(g)} className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold transition-all">Nonaktif</button>
+                            ) : (
+                              <button onClick={() => aktif(g)} className="px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-semibold transition-all">Aktifkan</button>
+                            )}
+                            {canMutasiGuru && (
+                              <button onClick={() => openMutasiGuru(g)} disabled={mutatingGuru} className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold transition-all disabled:opacity-50">Mutasi</button>
                             )}
                           </div>
                         </td>
@@ -1986,6 +2138,32 @@ export default function AGuru() {
                   )}
                 </tbody>
               </table>
+              {guruMeta.total > 0 && (
+                <div className="flex flex-col gap-3 border-t border-slate-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-sm text-slate-500">
+                    Menampilkan {guruMeta.from || 0}-{guruMeta.to || guru.length} dari {guruMeta.total} guru
+                  </p>
+                  <div className="flex items-center justify-end gap-2">
+                    <button
+                      onClick={() => loadAllData(Math.max(1, (guruMeta.page || 1) - 1))}
+                      disabled={(guruMeta.page || 1) <= 1}
+                      className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 text-sm font-semibold disabled:opacity-50"
+                    >
+                      Sebelumnya
+                    </button>
+                    <span className="text-sm font-medium text-slate-600">
+                      Halaman {guruMeta.page || 1} / {guruMeta.page_count || 1}
+                    </span>
+                    <button
+                      onClick={() => loadAllData(Math.min(guruMeta.page_count || 1, (guruMeta.page || 1) + 1))}
+                      disabled={(guruMeta.page || 1) >= (guruMeta.page_count || 1)}
+                      className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 text-sm font-semibold disabled:opacity-50"
+                    >
+                      Berikutnya
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -2073,31 +2251,39 @@ export default function AGuru() {
           </div>
         )}
 
-        {/* Modal Konfirmasi Hapus Akun */}
-        {deleteConfirmOpen && (
+        {/* Modal Mutasi Guru */}
+        {mutasiGuruOpen && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md border border-slate-200">
-              <div className="flex items-center gap-3 p-6 border-b border-red-100 bg-red-50/50 rounded-t-2xl">
-                <div className="w-10 h-10 bg-red-100 rounded-xl flex items-center justify-center"><span className="text-xl">🗑️</span></div>
+              <div className="flex items-center gap-3 p-6 border-b border-indigo-100 bg-indigo-50/50 rounded-t-2xl">
+                <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center"><span className="text-xl">📤</span></div>
                 <div>
-                  <h3 className="text-lg font-bold text-slate-900">Hapus Akun Guru</h3>
-                  <p className="text-slate-500 text-sm">Tindakan ini tidak dapat dibatalkan</p>
+                  <h3 className="text-lg font-bold text-slate-900">Mutasi Guru</h3>
+                  <p className="text-slate-500 text-sm">Tandai guru pindah sekolah tanpa menghapus data</p>
                 </div>
               </div>
-              <div className="p-6">
-                <div className="bg-red-50 border border-red-200 rounded-xl p-4">
-                  <p className="text-red-800 text-sm font-semibold mb-2">Apakah Anda yakin ingin menghapus akun guru ini?</p>
-                  <p className="text-red-700 text-sm font-medium">{guruToDelete?.nama} <span className="font-normal text-red-500">({guruToDelete?.email})</span></p>
-                  <div className="mt-3 text-red-600 text-xs space-y-1">
-                    <p>• Akun akan dihapus dari database dan authentication</p>
-                    <p>• Semua data terkait (jadwal, struktur) akan dihapus</p>
-                    <p>• Tindakan ini <strong>PERMANEN</strong> dan tidak dapat dikembalikan</p>
-                  </div>
+              <div className="p-6 space-y-4">
+                <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
+                  <p className="text-indigo-800 text-sm font-semibold mb-2">Guru yang akan dimutasi:</p>
+                  <p className="text-indigo-700 text-sm font-medium">{guruToMutasi?.nama} <span className="font-normal text-indigo-500">({guruToMutasi?.email})</span></p>
+                  <p className="mt-3 text-indigo-600 text-xs">
+                    Akun dan riwayat tetap tersimpan. Relasi aktif seperti jadwal, wali kelas, struktur sekolah, dan pembina akan dilepas.
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Alasan/Catatan Mutasi *</label>
+                  <textarea
+                    className="block w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 min-h-[100px] text-sm"
+                    placeholder="Contoh: Pindah tugas ke sekolah lain..."
+                    value={alasanMutasiGuru}
+                    onChange={event => setAlasanMutasiGuru(event.target.value)}
+                    disabled={mutatingGuru}
+                  />
                 </div>
               </div>
               <div className="flex justify-end gap-3 px-6 pb-6">
-                <button onClick={closeDeleteConfirm} className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-semibold text-sm hover:bg-slate-50 transition-all">✕ Batal</button>
-                <button onClick={hapusAkunGuru} disabled={deletingGuru} className="px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-semibold text-sm disabled:opacity-50 transition-all">{deletingGuru ? 'Menghapus...' : '🗑️ Ya, Hapus'}</button>
+                <button onClick={closeMutasiGuru} disabled={mutatingGuru} className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-semibold text-sm hover:bg-slate-50 disabled:opacity-50 transition-all">✕ Batal</button>
+                <button onClick={simpanMutasiGuru} disabled={mutatingGuru || !alasanMutasiGuru.trim()} className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm disabled:opacity-50 transition-all">{mutatingGuru ? 'Memproses...' : 'Mutasikan'}</button>
               </div>
             </div>
           </div>
@@ -2122,8 +2308,11 @@ export default function AGuru() {
                     <p className="text-slate-500 text-sm">{selectedGuru.email}</p>
                     {selectedGuru.telp && <p className="text-slate-400 text-xs flex items-center gap-1 mt-0.5"><span>📞</span><span>{selectedGuru.telp}</span></p>}
                     <div className="mt-2">
-                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${selectedGuru.status === 'active' ? 'bg-green-100 text-green-700 border border-green-200' : 'bg-red-100 text-red-700 border border-red-200'}`}>
-                        {selectedGuru.status === 'active' ? '✅ Aktif' : '⏸️ Nonaktif'}
+                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${selectedGuruStatusMeta.className}`}>
+                        {selectedGuruStatusMeta.icon} {selectedGuruStatusMeta.label}
+                      </span>
+                      <span className={`ml-2 inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${selectedGuruSourceMeta.className}`}>
+                        {selectedGuruSourceMeta.label}
                       </span>
                     </div>
                   </div>
@@ -2138,7 +2327,7 @@ export default function AGuru() {
                 <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5">
                   <h4 className="text-sm font-bold text-slate-700 mb-4 flex items-center gap-2"><span>👤</span> Informasi Profil</h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {[['Email', selectedGuru.email], ['Telepon', selectedGuru.telp || '—'], ['NIS', selectedGuru.nis || '—'], ['Tanggal Lahir', formatDate(selectedGuru.tanggal_lahir)], ['Jenis Kelamin', selectedGuru.jk || '—'], ['Agama', selectedGuru.agama || '—'], ['Jabatan', selectedGuru.jabatan || '—']].map(([label, value]) => (
+                    {[['Email', selectedGuru.email], ['Telepon', selectedGuru.telp || '—'], ['NIS', selectedGuru.nis || '—'], ['Tanggal Lahir', formatDate(selectedGuru.tanggal_lahir)], ['Jenis Kelamin', selectedGuru.jk || '—'], ['Agama', selectedGuru.agama || '—'], ['Jabatan', selectedGuru.jabatan || '—'], ['Asal Data', selectedGuruSourceMeta.label]].map(([label, value]) => (
                       <div key={label}>
                         <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{label}</p>
                         <p className="text-sm text-slate-800 mt-0.5">{value}</p>
@@ -2173,7 +2362,14 @@ export default function AGuru() {
               <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-3">
                 <button onClick={closeDetailModal} className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-semibold text-sm hover:bg-slate-100 transition-all">✕ Tutup</button>
                 <button onClick={() => openEditNameModal(selectedGuru)} className="px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-800 text-white font-semibold text-sm transition-all">Edit Nama</button>
-                <button onClick={() => openDeleteConfirm(selectedGuru)} className="px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-semibold text-sm transition-all">🗑️ Hapus Akun</button>
+                {selectedGuru.status === 'active' ? (
+                  <button onClick={() => openNonaktif(selectedGuru)} className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-semibold text-sm transition-all">Nonaktif</button>
+                ) : (
+                  <button onClick={() => aktif(selectedGuru)} className="px-4 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 text-white font-semibold text-sm transition-all">Aktifkan</button>
+                )}
+                {selectedGuruCanMutasi && (
+                  <button onClick={() => openMutasiGuru(selectedGuru)} className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm transition-all">Mutasi</button>
+                )}
               </div>
             </div>
           </div>

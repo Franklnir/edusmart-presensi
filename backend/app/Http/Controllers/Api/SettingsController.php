@@ -6,6 +6,7 @@ use App\Support\AcademicPeriod;
 use App\Traits\HasTenantBackupLogic;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class SettingsController extends ApiController
 {
@@ -80,6 +81,105 @@ class SettingsController extends ApiController
         return response()->json(['data' => $row]);
     }
 
+    public function scanShow(Request $request)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->resolveOwnedTenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        return $this->ok($this->scanSettingsForTenant((string) $tenantId));
+    }
+
+    public function scanUpdate(Request $request)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->resolveOwnedTenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        $existing = DB::table('settings')
+            ->where('tenant_id', $tenantId)
+            ->orderBy('id')
+            ->first();
+
+        $payload = $request->all();
+        $update = [];
+        $supportsAlwaysActive = Schema::hasColumn('settings', 'scan_always_active');
+
+        foreach (['scan_manual_enabled', 'auto_alpha_enabled'] as $field) {
+            if (array_key_exists($field, $payload) && Schema::hasColumn('settings', $field)) {
+                $update[$field] = $this->booleanValue($payload[$field]);
+            }
+        }
+
+        if (array_key_exists('scan_always_active', $payload)) {
+            $alwaysActive = $this->booleanValue($payload['scan_always_active']);
+            if ($supportsAlwaysActive) {
+                $update['scan_always_active'] = $alwaysActive;
+            }
+
+            // Database lama belum punya kolom scan_always_active. Pakai toggle manual
+            // sebagai fallback supaya simpan dari UI tidak gagal dan scanner tetap aktif.
+            if (! $supportsAlwaysActive || $alwaysActive) {
+                $update['scan_manual_enabled'] = $alwaysActive;
+            }
+        }
+
+        foreach ([
+            'manual_jam_masuk_mulai',
+            'manual_jam_masuk_selesai',
+            'manual_jam_pulang_mulai',
+            'manual_jam_pulang_selesai',
+        ] as $field) {
+            if (! array_key_exists($field, $payload) || ! Schema::hasColumn('settings', $field)) {
+                continue;
+            }
+
+            $time = $this->normalizeScanTime($payload[$field]);
+            if ($time === false) {
+                return $this->deny('Format jam scan harus HH:MM.', 422);
+            }
+
+            $update[$field] = $time;
+        }
+
+        if (empty($update)) {
+            return $this->ok($this->scanSettingsForTenant((string) $tenantId));
+        }
+
+        $merged = array_merge((array) ($existing ?? []), $update);
+        $rangeError = $this->validateScanTimeRanges($merged);
+        if ($rangeError) {
+            return $this->deny($rangeError, 422);
+        }
+
+        $update['updated_at'] = now();
+
+        if ($existing) {
+            DB::table('settings')
+                ->where('id', $existing->id)
+                ->where('tenant_id', $tenantId)
+                ->update($update);
+        } else {
+            $update['tenant_id'] = $tenantId;
+            if (Schema::hasColumn('settings', 'created_at')) {
+                $update['created_at'] = now();
+            }
+            DB::table('settings')->insert($update);
+        }
+
+        return $this->ok($this->scanSettingsForTenant((string) $tenantId));
+    }
+
     public function update(Request $request)
     {
         if (! $this->isAdmin($request)) {
@@ -90,12 +190,13 @@ class SettingsController extends ApiController
             return $this->deny('Tenant tidak valid', 400);
         }
 
+        $existing = DB::table('settings')->where('tenant_id', $tenantId)->orderBy('id')->first();
         $payload = $request->all();
         $allowed = [
             'nama_sekolah', 'logo_url', 'logo_path', 'alamat', 'telepon', 'email',
-            'tahun_ajaran', 'semester_aktif',
+            'tahun_ajaran', 'semester_aktif', 'periode_mulai', 'periode_selesai',
             'registrasi_siswa_aktif', 'registrasi_guru_aktif', 'registrasi_admin_aktif',
-            'scan_manual_enabled', 'manual_jam_masuk_mulai', 'manual_jam_masuk_selesai',
+            'scan_manual_enabled', 'scan_always_active', 'manual_jam_masuk_mulai', 'manual_jam_masuk_selesai',
             'manual_jam_pulang_mulai', 'manual_jam_pulang_selesai',
             'visi', 'misi', 'link_instagram', 'link_facebook', 'link_youtube', 'link_tiktok',
             'auto_alpha_enabled',
@@ -120,9 +221,23 @@ class SettingsController extends ApiController
             $update['semester_aktif'] = $semester;
         }
 
+        if (array_key_exists('periode_mulai', $update) || array_key_exists('periode_selesai', $update)) {
+            $periodPayload = array_merge((array) ($existing ?? []), $update);
+            $year = AcademicPeriod::normalizeAcademicYear($periodPayload['tahun_ajaran'] ?? null);
+            $startsAt = AcademicPeriod::normalizeDate($periodPayload['periode_mulai'] ?? null);
+            $endsAt = AcademicPeriod::normalizeDate($periodPayload['periode_selesai'] ?? null);
+
+            if (! $year || ! $startsAt || ! $endsAt || empty(AcademicPeriod::customMonths($year, $startsAt, $endsAt))) {
+                return $this->deny('Rentang bulan periode harus berada dalam tahun ajaran aktif dan tanggal mulai tidak boleh melewati tanggal selesai.', 422);
+            }
+
+            $period = AcademicPeriod::make($year, $periodPayload['semester_aktif'] ?? null, $startsAt, $endsAt);
+            $update['periode_mulai'] = $period['starts_at'];
+            $update['periode_selesai'] = $period['ends_at'];
+        }
+
         $update['updated_at'] = now();
 
-        $existing = DB::table('settings')->where('tenant_id', $tenantId)->orderBy('id')->first();
         if ($existing) {
             DB::table('settings')->where('id', $existing->id)->where('tenant_id', $tenantId)->update($update);
             $row = DB::table('settings')->where('id', $existing->id)->where('tenant_id', $tenantId)->first();
@@ -133,5 +248,99 @@ class SettingsController extends ApiController
         }
 
         return response()->json(['data' => $row]);
+    }
+
+    private function scanSettingsForTenant(string $tenantId): array
+    {
+        $columns = array_values(array_filter([
+            Schema::hasColumn('settings', 'id') ? 'id' : null,
+            Schema::hasColumn('settings', 'tenant_id') ? 'tenant_id' : null,
+            Schema::hasColumn('settings', 'scan_manual_enabled') ? 'scan_manual_enabled' : null,
+            Schema::hasColumn('settings', 'scan_always_active') ? 'scan_always_active' : null,
+            Schema::hasColumn('settings', 'manual_jam_masuk_mulai') ? 'manual_jam_masuk_mulai' : null,
+            Schema::hasColumn('settings', 'manual_jam_masuk_selesai') ? 'manual_jam_masuk_selesai' : null,
+            Schema::hasColumn('settings', 'manual_jam_pulang_mulai') ? 'manual_jam_pulang_mulai' : null,
+            Schema::hasColumn('settings', 'manual_jam_pulang_selesai') ? 'manual_jam_pulang_selesai' : null,
+            Schema::hasColumn('settings', 'auto_alpha_enabled') ? 'auto_alpha_enabled' : null,
+            Schema::hasColumn('settings', 'updated_at') ? 'updated_at' : null,
+        ]));
+
+        $row = DB::table('settings')
+            ->where('tenant_id', $tenantId)
+            ->orderBy('id')
+            ->first($columns ?: ['*']);
+
+        $data = $row ? (array) $row : [];
+        $supportsAlwaysActive = Schema::hasColumn('settings', 'scan_always_active');
+
+        return [
+            'id' => $data['id'] ?? null,
+            'scan_manual_enabled' => (bool) ($data['scan_manual_enabled'] ?? false),
+            'scan_always_active' => $supportsAlwaysActive
+                ? (bool) ($data['scan_always_active'] ?? true)
+                : (bool) ($data['scan_manual_enabled'] ?? true),
+            'manual_jam_masuk_mulai' => $this->formatTimeForInput($data['manual_jam_masuk_mulai'] ?? null, '06:00'),
+            'manual_jam_masuk_selesai' => $this->formatTimeForInput($data['manual_jam_masuk_selesai'] ?? null, '08:00'),
+            'manual_jam_pulang_mulai' => $this->formatTimeForInput($data['manual_jam_pulang_mulai'] ?? null, '14:00'),
+            'manual_jam_pulang_selesai' => $this->formatTimeForInput($data['manual_jam_pulang_selesai'] ?? null, '16:00'),
+            'auto_alpha_enabled' => (bool) ($data['auto_alpha_enabled'] ?? true),
+            'schema_supports_scan_always_active' => $supportsAlwaysActive,
+            'updated_at' => $data['updated_at'] ?? null,
+        ];
+    }
+
+    private function booleanValue($value): bool
+    {
+        return filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? false;
+    }
+
+    private function normalizeScanTime($value): string|false|null
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        $time = trim((string) $value);
+        if (! preg_match('/^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/', $time)) {
+            return false;
+        }
+
+        return substr($time, 0, 5);
+    }
+
+    private function validateScanTimeRanges(array $settings): ?string
+    {
+        $masukMulai = $this->formatTimeForInput($settings['manual_jam_masuk_mulai'] ?? null, null);
+        $masukSelesai = $this->formatTimeForInput($settings['manual_jam_masuk_selesai'] ?? null, null);
+        $pulangMulai = $this->formatTimeForInput($settings['manual_jam_pulang_mulai'] ?? null, null);
+        $pulangSelesai = $this->formatTimeForInput($settings['manual_jam_pulang_selesai'] ?? null, null);
+
+        if (! $masukMulai || ! $masukSelesai || ! $pulangMulai || ! $pulangSelesai) {
+            return null;
+        }
+
+        if ($masukMulai >= $masukSelesai) {
+            return 'Jam mulai scan MASUK harus lebih kecil dari jam selesai.';
+        }
+
+        if ($pulangMulai >= $pulangSelesai) {
+            return 'Jam mulai scan PULANG harus lebih kecil dari jam selesai.';
+        }
+
+        if ($masukSelesai > $pulangMulai) {
+            return 'Rentang scan MASUK dan PULANG tidak boleh bertumpukan.';
+        }
+
+        return null;
+    }
+
+    private function formatTimeForInput($value, ?string $fallback): ?string
+    {
+        $raw = trim((string) ($value ?? ''));
+        if ($raw === '') {
+            return $fallback;
+        }
+
+        return preg_match('/^(\d{2}:\d{2})/', $raw, $match) ? $match[1] : $fallback;
     }
 }

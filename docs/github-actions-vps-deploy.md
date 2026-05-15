@@ -13,10 +13,8 @@ Isi di `Repository > Settings > Secrets and variables > Actions`:
 - `VPS_USER`: user SSH di VPS.
 - `VPS_SSH_PRIVATE_KEY`: private key SSH yang boleh login ke VPS.
 - `VPS_APP_DIR`: path project di VPS, contoh `/opt/edusmart-presensi`.
-- `GHCR_USERNAME`: username GitHub untuk `docker login ghcr.io` dari VPS.
-- `GHCR_TOKEN`: Personal Access Token GitHub dengan permission `read:packages`.
 
-`GHCR_USERNAME` dan `GHCR_TOKEN` boleh dikosongkan hanya jika package GHCR dibuat public atau VPS sudah login manual ke `ghcr.io`.
+Workflow login ke GHCR memakai `GITHUB_TOKEN` job yang sedang berjalan, lalu mengirim login sementara ke VPS saat deploy. Jika package GHCR dibuat private lintas repo/org, pastikan permission package mengizinkan repo ini menarik image.
 
 ## GitHub Variables Opsional
 
@@ -40,6 +38,7 @@ Jika Google Client ID perlu masuk ke frontend, simpan sebagai secret:
 
 - Project sudah ada di `VPS_APP_DIR`.
 - `.env.production` sudah dibuat dan diisi di VPS.
+- Untuk database fresh, isi `SUPER_ADMIN_EMAILS` dan `SUPER_ADMIN_BOOTSTRAP_PASSWORD` agar akun super admin pertama dibuat otomatis.
 - Docker dan Docker Compose plugin sudah terpasang.
 - User `VPS_USER` bisa menjalankan `docker compose` tanpa password sudo.
 - Working tree bersih saat deploy: `git status --porcelain` tidak mengeluarkan apa pun.

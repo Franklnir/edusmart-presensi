@@ -1,17 +1,14 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { QUIZ_MEDIA_BUCKET, supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
-import { formatDateTime } from '../../lib/time'
+import { formatDateTime, parseDateTime } from '../../lib/time'
 import FilePreviewModal from '../../components/FilePreviewModal'
 import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 
 const safeDate = (value) => {
-  if (!value) return null
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return null
-  return d
+  return parseDateTime(value)
 }
 
 const getLiveEndAt = (quiz) => {
@@ -125,11 +122,30 @@ const applyQuizOrder = (questionRows = [], groupedOptions = {}, rawOrder = null)
   }
 }
 
-const FULLSCREEN_REQUIRED_MESSAGE = 'Quiz wajib mode fullscreen. Klik Izinkan Fullscreen di browser untuk mulai.'
-const FULLSCREEN_FAILED_MESSAGE = 'Gagal masuk fullscreen. Aktifkan izin fullscreen pada browser lalu coba lagi.'
+const FULLSCREEN_REQUIRED_MESSAGE = 'Quiz mode ketat wajib fullscreen. Klik tombol Izinkan Fullscreen & Mulai, lalu pilih Izinkan pada browser.'
+const FULLSCREEN_FAILED_MESSAGE = 'Browser menolak fullscreen. Klik ulang tombol mulai dan pilih Izinkan pada popup browser.'
 const MONTH_FILTER_ALL = ''
 const MONTH_FILTER_THIS = '__this_month'
-const MONTH_FILTER_LAST_12 = '__last_12_months'
+
+const normalizeAccessDevice = (value) => {
+  const raw = String(value || '').trim().toLowerCase()
+  if (raw === 'web') return 'web'
+  if (raw === 'mobile' || raw === 'mobile_app' || raw === 'app') return 'mobile'
+  return 'both'
+}
+
+const getAccessDeviceLabel = (value) => {
+  const mode = normalizeAccessDevice(value)
+  if (mode === 'web') return 'Web saja'
+  if (mode === 'mobile') return 'Mobile saja'
+  return 'Web & Mobile'
+}
+
+const getWebAccessBlockMessage = (quiz) => (
+  normalizeAccessDevice(quiz?.access_device) === 'mobile'
+    ? 'Quiz ini hanya dapat dikerjakan melalui aplikasi mobile. Buka aplikasi EduSmart Mobile untuk mengerjakan.'
+    : ''
+)
 
 const getQuizStatus = (quiz, submission, now = new Date()) => {
   const startsAt = safeDate(quiz?.starts_at)
@@ -286,17 +302,6 @@ const getMonthKeyFromDate = (dateValue) => {
   return `${year}-${month}`
 }
 
-const getLastNMonthKeys = (nowValue = new Date(), count = 12) => {
-  const now = safeDate(nowValue) || new Date()
-  const set = new Set()
-  const base = new Date(now.getFullYear(), now.getMonth(), 1)
-  for (let i = 0; i < count; i += 1) {
-    const d = new Date(base.getFullYear(), base.getMonth() - i, 1)
-    set.add(getMonthKeyFromDate(d))
-  }
-  return set
-}
-
 const formatQuizMonthLabel = (monthKey) => {
   const [yearText, monthText] = String(monthKey || '').split('-')
   const year = Number(yearText)
@@ -368,10 +373,18 @@ export default function SiswaQuiz() {
   const [previewMediaUrl, setPreviewMediaUrl] = useState('')
   const [isTaking, setIsTaking] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [submitConfirmOpen, setSubmitConfirmOpen] = useState(false)
   const [remainingSeconds, setRemainingSeconds] = useState(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [sessionPrepared, setSessionPrepared] = useState(false)
   const [sessionNeedsManualStart, setSessionNeedsManualStart] = useState(false)
+  const [sessionQuizFallback, setSessionQuizFallback] = useState(null)
+  const [fullscreenGuideOpen, setFullscreenGuideOpen] = useState(false)
+  const [privacyShield, setPrivacyShield] = useState({
+    open: false,
+    message: '',
+    reason: ''
+  })
   const [startCountdown, setStartCountdown] = useState({
     open: false,
     seconds: 3,
@@ -391,6 +404,8 @@ export default function SiswaQuiz() {
   const violationTriggeredRef = useRef(false)
   const violationCountRef = useRef(0)
   const violationLogRef = useRef({ key: '', at: 0 })
+  const strictSecurityLockRef = useRef({ key: '', at: 0 })
+  const strictSecurityIncidentRef = useRef({ active: false, id: '', at: 0, reason: '' })
   const sessionInitRef = useRef('')
   const sessionBootAttemptRef = useRef('')
   const selectedQuizIdRef = useRef('')
@@ -410,44 +425,31 @@ export default function SiswaQuiz() {
     return orderedQuizList.filter((q) => q.mapel === selectedMapel)
   }, [orderedQuizList, selectedMapel])
 
-  const monthOptions = useMemo(() => {
-    const values = new Set()
-    ;(mapelFilteredQuizzes || []).forEach((quiz) => {
-      const monthKey = getQuizMonthKey(quiz)
-      if (monthKey) values.add(monthKey)
-    })
-    return Array.from(values).sort((a, b) => b.localeCompare(a, 'id'))
-  }, [mapelFilteredQuizzes])
+  const monthOptions = useMemo(() => (
+    (period.months || []).map((month) => month.value)
+  ), [period.months])
 
   const currentMonthKey = useMemo(() => (
     getMonthKeyFromDate(nowTick)
-  ), [nowTick])
-
-  const last12MonthKeySet = useMemo(() => (
-    getLastNMonthKeys(nowTick, 12)
   ), [nowTick])
 
   const filteredQuizzes = useMemo(() => {
     if (selectedMonth === MONTH_FILTER_THIS) {
       return mapelFilteredQuizzes.filter((q) => getQuizMonthKey(q) === currentMonthKey)
     }
-    if (selectedMonth === MONTH_FILTER_LAST_12) {
-      return mapelFilteredQuizzes.filter((q) => last12MonthKeySet.has(getQuizMonthKey(q)))
-    }
     if (!selectedMonth) return mapelFilteredQuizzes
     return mapelFilteredQuizzes.filter((q) => getQuizMonthKey(q) === selectedMonth)
-  }, [mapelFilteredQuizzes, selectedMonth, currentMonthKey, last12MonthKeySet])
+  }, [mapelFilteredQuizzes, selectedMonth, currentMonthKey])
 
   const selectedMonthLabel = useMemo(() => {
     if (selectedMonth === MONTH_FILTER_THIS) return `Bulan ini (${formatQuizMonthLabel(currentMonthKey)})`
-    if (selectedMonth === MONTH_FILTER_LAST_12) return '12 bulan terakhir'
-    if (!selectedMonth) return 'Semua bulan'
+    if (!selectedMonth) return 'Semua bulan periode'
     return formatQuizMonthLabel(selectedMonth)
   }, [selectedMonth, currentMonthKey])
 
   useEffect(() => {
     if (!selectedMonth) return
-    if (selectedMonth === MONTH_FILTER_THIS || selectedMonth === MONTH_FILTER_LAST_12) return
+    if (selectedMonth === MONTH_FILTER_THIS) return
     if (!monthOptions.includes(selectedMonth)) {
       setSelectedMonth('')
     }
@@ -455,9 +457,24 @@ export default function SiswaQuiz() {
 
   const selectedQuizPool = isSessionPage ? orderedQuizList : filteredQuizzes
 
-  const selectedQuiz = useMemo(() => (
-    selectedQuizPool.find((q) => q.id === selectedQuizId) || null
-  ), [selectedQuizPool, selectedQuizId])
+  const selectedQuiz = useMemo(() => {
+    const listedQuiz = selectedQuizPool.find((q) => q.id === selectedQuizId)
+    if (listedQuiz) return listedQuiz
+    if (isSessionPage && sessionQuizFallback?.id === selectedQuizId) {
+      return sessionQuizFallback
+    }
+    return null
+  }, [selectedQuizPool, selectedQuizId, isSessionPage, sessionQuizFallback])
+
+  useEffect(() => {
+    if (!isSessionPage) {
+      setSessionQuizFallback(null)
+      return
+    }
+    if (sessionQuizFallback && sessionQuizFallback.id !== selectedQuizId) {
+      setSessionQuizFallback(null)
+    }
+  }, [isSessionPage, selectedQuizId, sessionQuizFallback])
 
   useEffect(() => {
     selectedQuizIdRef.current = selectedQuizId || ''
@@ -613,15 +630,23 @@ export default function SiswaQuiz() {
   const fullscreenActive = typeof document !== 'undefined'
     ? Boolean(document.fullscreenElement)
     : isFullscreen
-  const answerInteractionLocked = (
-    !isTaking
-    || isSubmitting
+  const isStrictSecurity = selectedQuiz?.security_mode === 'strict'
+  const strictSecurityLocked = isTaking && isStrictSecurity && (
+    privacyShield.open
     || violationPrompt.open
     || !fullscreenActive
   )
-  const strictAnswerBlock = isTaking && (violationPrompt.open || !fullscreenActive)
+  const answerInteractionLocked = (
+    !isTaking
+    || isSubmitting
+    || strictSecurityLocked
+  )
+  const strictAnswerBlock = strictSecurityLocked
 
   const isStartCountdownActive = startCountdown.open && startCountdown.quizId === selectedQuiz?.id
+  const selectedWebAccessBlockMessage = getWebAccessBlockMessage(selectedQuiz)
+  const selectedWebAccessBlocked = Boolean(selectedWebAccessBlockMessage)
+  const selectedCanStartInWeb = Boolean(selectedStatus?.canStart && !selectedWebAccessBlocked)
 
   const sparkleItems = useMemo(
     () =>
@@ -794,23 +819,87 @@ export default function SiswaQuiz() {
     })
   }
 
+  const releaseStrictIncident = useCallback(() => {
+    strictSecurityLockRef.current = { key: '', at: 0 }
+    strictSecurityIncidentRef.current = { active: false, id: '', at: 0, reason: '' }
+  }, [])
+
+  const lockStrictSession = useCallback((message, eventType = 'warning', meta = {}) => {
+    if (!isTaking || !isStrictSecurity || autoSubmitLockRef.current) return
+
+    const normalizedType = String(eventType || 'warning').trim() || 'warning'
+    const nowMs = Date.now()
+    const key = `${normalizedType}|${String(message || '').trim()}`
+    if (strictSecurityIncidentRef.current.active) {
+      return
+    }
+    if (
+      strictSecurityLockRef.current.key === key
+      && nowMs - Number(strictSecurityLockRef.current.at || 0) < 4000
+    ) {
+      return
+    }
+
+    const nextCount = violationCountRef.current + 1
+    const incidentId = `${selectedQuiz?.id || 'quiz'}:${activeSubmissionId || 'submission'}:${nowMs}:${nextCount}`
+    strictSecurityLockRef.current = { key, at: nowMs }
+    strictSecurityIncidentRef.current = {
+      active: true,
+      id: incidentId,
+      at: nowMs,
+      reason: normalizedType
+    }
+    violationCountRef.current = nextCount
+    setViolationCount(nextCount)
+    setViolationMessage(message)
+    setPrivacyShield({
+      open: true,
+      message,
+      reason: normalizedType
+    })
+    void logViolationEvent(normalizedType, message, {
+      warning_count: nextCount,
+      incident_id: incidentId,
+      incident_reason: normalizedType,
+      shield: true,
+      ...(meta && typeof meta === 'object' ? meta : {})
+    })
+  }, [isTaking, isStrictSecurity, selectedQuiz?.id, activeSubmissionId, logViolationEvent])
+
   const markSessionStarted = (bootKey) => {
     sessionInitRef.current = bootKey
     setIsTaking(true)
     setSessionNeedsManualStart(false)
+    releaseStrictIncident()
+    setPrivacyShield({ open: false, message: '', reason: '' })
     violationTriggeredRef.current = false
+    violationCountRef.current = 0
     setViolationCount(0)
     setViolationMessage('')
     setViolationPrompt({ open: false, message: '', stage: 1 })
+    setSubmitConfirmOpen(false)
   }
 
   const startSessionWithFullscreen = async (bootKey, showErrorToast = true) => {
+    if (!isStrictSecurity) {
+      const sub = await ensureSubmission()
+      if (!sub) return false
+      if (sub.status === 'finished') {
+        navigate('/siswa/quiz', { replace: true })
+        return false
+      }
+
+      markSessionStarted(bootKey)
+      return true
+    }
+
     const fullscreenGranted = document.fullscreenElement
       ? true
       : await requestQuizFullscreen()
 
     if (!fullscreenGranted) {
       setSessionNeedsManualStart(true)
+      setFullscreenGuideOpen(true)
       if (showErrorToast) {
         pushToast('error', FULLSCREEN_REQUIRED_MESSAGE)
       }
@@ -833,8 +922,13 @@ export default function SiswaQuiz() {
     violationTriggeredRef.current = false
     const ok = await requestQuizFullscreen()
     if (!ok) {
-      triggerViolationPrompt('Fullscreen wajib aktif saat quiz berlangsung.', 'fullscreen_required')
+      lockStrictSession(
+        'Fullscreen wajib aktif saat quiz berlangsung.',
+        'fullscreen_required'
+      )
     } else {
+      releaseStrictIncident()
+      setPrivacyShield({ open: false, message: '', reason: '' })
       setViolationMessage('Peringatan diterima. Tetap fokus di quiz.')
     }
   }
@@ -871,46 +965,68 @@ export default function SiswaQuiz() {
     return () => clearTimeout(timer)
   }, [celebration.open])
 
+  const loadScheduleMapels = useCallback(async () => {
+    if (!kelasId) return []
+
+    try {
+      let query = supabase
+        .from('jadwal')
+        .select('mapel')
+        .eq('kelas_id', kelasId)
+        .order('mapel', { ascending: true })
+      query = applyPeriodFilters(query)
+
+      const { data, error } = await query
+      if (error) throw error
+
+      return [...new Set(
+        (data || [])
+          .map((row) => String(row?.mapel || '').trim())
+          .filter(Boolean)
+      )].sort((a, b) => a.localeCompare(b, 'id'))
+    } catch (err) {
+      console.warn('Gagal memuat mapel jadwal quiz siswa:', err)
+      return []
+    }
+  }, [applyPeriodFilters, kelasId])
+
   const loadQuizzes = async () => {
     if (!kelasId) return
     try {
       setQuizLoadDone(false)
       setLoading(true)
-      let quizQuery = supabase
-        .from('quizzes')
-        .select('*')
-        .eq('kelas_id', kelasId)
-        .order('created_at', { ascending: false })
-      quizQuery = applyPeriodFilters(quizQuery)
-      const { data: quizRows, error } = await quizQuery
+      const { data, error } = await supabase.quiz.dashboard({
+        page: 1,
+        per_page: 100,
+        kelas: kelasId,
+        tahun_ajaran: period.tahunAjaran,
+        semester: period.semester
+      })
+      if (error?.code === 'REQUEST_ABORTED') return
       if (error) throw error
 
-      let submissionQuery = supabase
-        .from('quiz_submissions')
-        .select('*')
-        .eq('siswa_id', user.id)
-      submissionQuery = applyPeriodFilters(submissionQuery)
-      const { data: submissionRows } = await submissionQuery
+      const merged = data?.rows || []
 
-      const submissionMap = new Map()
-      ;(submissionRows || []).forEach((row) => {
-        submissionMap.set(row.quiz_id, row)
+      const scheduleMapels = await loadScheduleMapels()
+      const quizMapels = merged
+        .map((q) => String(q?.mapel || '').trim())
+        .filter(Boolean)
+      const mapels = [...new Set([...scheduleMapels, ...quizMapels])].sort((a, b) => a.localeCompare(b, 'id'))
+      startTransition(() => {
+        setMapelList(mapels)
+        setQuizList(merged)
+        const sortedMerged = sortQuizzesByPriority(merged, new Date())
+        if (sortedMerged.length && !selectedQuizId) {
+          setSelectedQuizId(sortedMerged[0].id)
+        }
       })
-
-      const merged = (quizRows || []).map((q) => ({
-        ...q,
-        submission: submissionMap.get(q.id) || null
-      }))
-
-      const mapels = [...new Set(merged.map((q) => q.mapel).filter(Boolean))].sort()
-      setMapelList(mapels)
-
-      setQuizList(merged)
-      const sortedMerged = sortQuizzesByPriority(merged, new Date())
-      if (sortedMerged.length && !selectedQuizId) {
-        setSelectedQuizId(sortedMerged[0].id)
-      }
     } catch (err) {
+      if (err?.code === 'REQUEST_ABORTED') return
+      const scheduleMapels = await loadScheduleMapels()
+      startTransition(() => {
+        setMapelList(scheduleMapels)
+        setQuizList([])
+      })
       pushToast('error', err?.message || 'Gagal memuat quiz')
     } finally {
       setQuizLoadDone(true)
@@ -1023,17 +1139,9 @@ export default function SiswaQuiz() {
     }
   }, [selectedQuizId, user?.id, queueQuizDetailReload])
 
-  useEffect(() => {
-    if (!isSessionPage || !sessionQuizIdParam || !quizLoadDone) return
-    const found = quizList.some((q) => q.id === sessionQuizIdParam)
-    if (!found) {
-      pushToast('error', 'Quiz tidak ditemukan atau tidak termasuk kelas Anda.')
-      navigate('/siswa/quiz', { replace: true })
-    }
-  }, [isSessionPage, sessionQuizIdParam, quizLoadDone, quizList, pushToast, navigate])
-
   const loadQuizDetails = async () => {
-    if (!selectedQuiz) {
+    const targetQuizId = selectedQuiz?.id || (isSessionPage ? sessionQuizIdParam : '')
+    if (!targetQuizId) {
       setQuizDetailsLoading(false)
       setQuizDetailsLoadedForId('')
       setQuizDetailsError('')
@@ -1046,66 +1154,35 @@ export default function SiswaQuiz() {
       return
     }
 
-    const targetQuizId = selectedQuiz.id
-
     try {
       setQuizDetailsLoading(true)
       setQuizDetailsLoadedForId('')
       setQuizDetailsError('')
       setLoading(true)
-      const { data: questionRows, error: questionError } = await supabase
-        .from('quiz_questions')
-        .select('*')
-        .eq('quiz_id', targetQuizId)
-        .order('nomor', { ascending: true })
-      if (questionError) throw questionError
-
-      const questionIds = (questionRows || []).map((q) => q.id)
-
-      let optionRows = []
-      if (questionIds.length) {
-        const { data: optData, error: optError } = await supabase
-          .from('quiz_options')
-          .select('*')
-          .in('question_id', questionIds)
-        if (optError) throw optError
-        optionRows = optData || []
-      }
-
-      const grouped = {}
-      optionRows.forEach((opt) => {
-        if (!grouped[opt.question_id]) grouped[opt.question_id] = []
-        grouped[opt.question_id].push(opt)
+      const { data, error } = await supabase.quiz.detail(targetQuizId, {
+        tahun_ajaran: period.tahunAjaran,
+        semester: period.semester
       })
+      if (error?.code === 'REQUEST_ABORTED') return
+      if (error) throw error
+
+      const questionRows = data?.questions || []
+      const grouped = data?.options_by_question || {}
       const questionTypeById = {}
       ;(questionRows || []).forEach((question) => {
         questionTypeById[question.id] = normalizeQuestionType(question?.question_type)
       })
 
-      let submissionRow = selectedQuiz.submission
-      if (!submissionRow) {
-        let submissionQuery = supabase
-          .from('quiz_submissions')
-          .select('*')
-          .eq('quiz_id', targetQuizId)
-          .eq('siswa_id', user.id)
-        submissionQuery = applyPeriodFilters(submissionQuery)
-        const { data: sub, error: subError } = await submissionQuery.maybeSingle()
-        if (subError) throw subError
-        submissionRow = sub || null
-      }
+      const submissionRow = data?.submission || selectedQuiz?.submission || null
+      const quizPayload = data?.quiz
+        ? { ...data.quiz, submission: submissionRow || data.quiz.submission || null }
+        : null
 
       let answerMap = {}
       let answerIdMap = {}
       let answerRowMap = {}
       if (submissionRow?.id) {
-        const { data: answerRows, error: answerError } = await supabase
-          .from('quiz_answers')
-          .select('*')
-          .eq('submission_id', submissionRow.id)
-        if (answerError) throw answerError
-
-        ;(answerRows || []).forEach((row) => {
+        ;(data?.answers || []).forEach((row) => {
           const questionType = questionTypeById[row.question_id] || 'mcq'
           answerMap[row.question_id] = questionType === 'essay'
             ? String(row.essay_answer || '')
@@ -1116,14 +1193,27 @@ export default function SiswaQuiz() {
       }
 
       const orderedDetail = applyQuizOrder(questionRows || [], grouped, submissionRow?.answer_order)
-      setQuestions(orderedDetail.questions)
-      setOptionsByQuestion(orderedDetail.optionsByQuestion)
-      setAnswers(answerMap)
-      setAnswerIds(answerIdMap)
-      setAnswerRowsByQuestion(answerRowMap)
-      setSubmission(submissionRow || null)
-      setQuizDetailsLoadedForId(targetQuizId)
+      startTransition(() => {
+        if (quizPayload) {
+          setSessionQuizFallback(quizPayload)
+          setQuizList((prev) => {
+            const exists = prev.some((q) => q.id === quizPayload.id)
+            if (exists) {
+              return prev.map((q) => (q.id === quizPayload.id ? { ...q, ...quizPayload } : q))
+            }
+            return [quizPayload, ...prev]
+          })
+        }
+        setQuestions(orderedDetail.questions)
+        setOptionsByQuestion(orderedDetail.optionsByQuestion)
+        setAnswers(answerMap)
+        setAnswerIds(answerIdMap)
+        setAnswerRowsByQuestion(answerRowMap)
+        setSubmission(submissionRow || null)
+        setQuizDetailsLoadedForId(targetQuizId)
+      })
     } catch (err) {
+      if (err?.code === 'REQUEST_ABORTED') return
       setQuizDetailsLoadedForId('')
       setQuizDetailsError(err?.message || 'Gagal memuat detail quiz')
       pushToast('error', err?.message || 'Gagal memuat detail quiz')
@@ -1168,6 +1258,8 @@ export default function SiswaQuiz() {
       quiz_id: selectedQuiz.id,
       access_code: accessCodeInput.trim() || undefined,
       client_meta: {
+        client: 'web',
+        device: 'web',
         fullscreen: Boolean(document.fullscreenElement),
         user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
         viewport: typeof window !== 'undefined'
@@ -1196,16 +1288,24 @@ export default function SiswaQuiz() {
   const handleStartQuiz = async () => {
     if (!selectedQuiz) return
     if (startCountdown.open) return
+    if (selectedWebAccessBlocked) {
+      pushToast('error', selectedWebAccessBlockMessage)
+      return
+    }
     if (!selectedStatus?.canStart) {
       pushToast('error', 'Quiz belum bisa dimulai')
       return
     }
-    const fullscreenGranted = document.fullscreenElement
-      ? true
-      : await requestQuizFullscreen()
-    if (!fullscreenGranted) {
-      pushToast('error', FULLSCREEN_REQUIRED_MESSAGE)
-      return
+    if (isStrictSecurity) {
+      const fullscreenGranted = document.fullscreenElement
+        ? true
+        : await requestQuizFullscreen()
+      if (!fullscreenGranted) {
+        setSessionNeedsManualStart(true)
+        setFullscreenGuideOpen(true)
+        pushToast('error', FULLSCREEN_REQUIRED_MESSAGE)
+        return
+      }
     }
     setStartCountdown({
       open: true,
@@ -1302,18 +1402,20 @@ export default function SiswaQuiz() {
     })
   )
 
-  const handleSubmitQuiz = async (auto = false) => {
+  const handleSubmitQuiz = async (auto = false, options = {}) => {
     const sub = submission?.quiz_id === selectedQuiz?.id ? submission : activeSubmission
     if (!selectedQuiz || !sub?.id || isSubmitting || autoSubmitLockRef.current) return
 
-    if (!auto) {
-      const ok = window.confirm('Apakah yakin Anda menyelesaikan quiz sekarang? Jawaban tidak bisa diubah lagi.')
-      if (!ok) return
+    const confirmed = Boolean(options?.confirmed)
+    if (!auto && !confirmed) {
+      setSubmitConfirmOpen(true)
+      return
     }
 
     try {
       autoSubmitLockRef.current = true
       setIsSubmitting(true)
+      setSubmitConfirmOpen(false)
       Object.values(essaySaveTimersRef.current).forEach((timerId) => clearTimeout(timerId))
       essaySaveTimersRef.current = {}
       const { data, error } = await supabase.quiz.submit({
@@ -1339,6 +1441,7 @@ export default function SiswaQuiz() {
       setIsTaking(false)
       setViolationMessage('')
       setViolationPrompt({ open: false, message: '', stage: 1 })
+      setPrivacyShield({ open: false, message: '', reason: '' })
       setCelebration({ open: true, score: canShowScoreNow ? score : null })
       if (document.fullscreenElement) {
         try {
@@ -1360,8 +1463,11 @@ export default function SiswaQuiz() {
   useEffect(() => {
     if (isTaking) return
     violationTriggeredRef.current = false
+    releaseStrictIncident()
+    setPrivacyShield({ open: false, message: '', reason: '' })
     setViolationPrompt({ open: false, message: '', stage: 1 })
-  }, [isTaking])
+    setSubmitConfirmOpen(false)
+  }, [isTaking, releaseStrictIncident])
 
   useEffect(() => {
     if (!isTaking || !selectedQuiz) {
@@ -1392,11 +1498,14 @@ export default function SiswaQuiz() {
   }, [isTaking, selectedQuiz?.id, selectedQuiz?.is_live, selectedQuiz?.live_started_at, selectedQuiz?.duration_minutes, selectedQuiz?.deadline_at, submission?.id, activeSubmission?.id])
 
   useEffect(() => {
-    if (!isTaking) return
+    if (!isTaking || !isStrictSecurity) return
 
     const markScreenshotViolation = async () => {
-      setViolationMessage('Percobaan screenshot terdeteksi saat quiz berjalan.')
-      triggerViolationPrompt('Percobaan screenshot terdeteksi saat quiz berjalan.', 'screenshot_attempt')
+      lockStrictSession(
+        'Percobaan screenshot terdeteksi. Tampilan quiz dikunci untuk menjaga keamanan.',
+        'screenshot_attempt',
+        { capture_surface: 'keyboard' }
+      )
       if (!navigator?.clipboard?.writeText) return
       try {
         await navigator.clipboard.writeText('')
@@ -1421,13 +1530,28 @@ export default function SiswaQuiz() {
 
     const handleVisibility = () => {
       if (document.hidden) {
-        triggerViolationPrompt('Anda keluar dari halaman quiz.', 'page_hidden')
+        lockStrictSession(
+          'Halaman quiz tidak aktif. Tampilan quiz dikunci dan digelapkan.',
+          'page_hidden',
+          { hidden: true }
+        )
       }
+    }
+
+    const handlePageLeaving = () => {
+      lockStrictSession(
+        'Halaman quiz ditinggalkan. Tampilan quiz dikunci dan digelapkan.',
+        'page_hidden',
+        { lifecycle: 'pagehide' }
+      )
     }
 
     const handleBlur = () => {
       if (document.hidden) return
-      triggerViolationPrompt('Anda berpindah aplikasi/tab saat quiz berjalan.', 'window_blur')
+      lockStrictSession(
+        'Fokus keluar dari halaman quiz. Tampilan dikunci sampai Anda kembali fullscreen.',
+        'window_blur'
+      )
     }
 
     const handleFullscreenChange = () => {
@@ -1436,7 +1560,10 @@ export default function SiswaQuiz() {
       if (active) {
         lockKeyboardShortcuts()
       } else {
-        triggerViolationPrompt('Fullscreen ditutup saat quiz berjalan.', 'fullscreen_exit')
+        lockStrictSession(
+          'Fullscreen ditutup. Quiz dikunci sampai Anda masuk fullscreen lagi.',
+          'fullscreen_exit'
+        )
       }
     }
 
@@ -1454,8 +1581,11 @@ export default function SiswaQuiz() {
         event.preventDefault()
         event.stopPropagation()
         const message = `Tombol "${event.key}" dinonaktifkan saat quiz berlangsung.`
-        setViolationMessage(message)
-        void logViolationEvent('blocked_key', message, { key: event.key })
+        if (key === 'tab' || key === 'escape') {
+          lockStrictSession(message, 'blocked_key', { key: event.key })
+        } else {
+          setViolationMessage(message)
+        }
         return
       }
 
@@ -1466,7 +1596,11 @@ export default function SiswaQuiz() {
       if (isBlockedCombo || isBlockedSingle) {
         event.preventDefault()
         event.stopPropagation()
-        triggerViolationPrompt('Percobaan membuka fitur browser terdeteksi.', 'blocked_shortcut')
+        lockStrictSession(
+          'Percobaan membuka fitur browser terdeteksi. Quiz dikunci sementara.',
+          'blocked_shortcut',
+          { key: event.key }
+        )
       }
     }
 
@@ -1482,9 +1616,18 @@ export default function SiswaQuiz() {
     const blockClipboardAndContext = (event) => {
       event.preventDefault()
       event.stopPropagation()
-      const message = 'Copy/cut/klik kanan dinonaktifkan saat quiz berlangsung.'
-      setViolationMessage(message)
-      void logViolationEvent('clipboard_or_context', message, { action: event.type })
+      if (event.type === 'selectstart') {
+        clearTextSelection()
+        return
+      }
+      const message = 'Copy/cut/paste/klik kanan dinonaktifkan saat quiz berlangsung.'
+      lockStrictSession(message, 'clipboard_or_context', { action: event.type })
+    }
+
+    const clearTextSelection = () => {
+      try {
+        window.getSelection()?.removeAllRanges()
+      } catch {}
     }
 
     const handleBeforeUnload = (event) => {
@@ -1494,37 +1637,54 @@ export default function SiswaQuiz() {
 
     const focusGuard = setInterval(() => {
       if (!document.hasFocus()) {
-        triggerViolationPrompt('Fokus browser hilang saat quiz berjalan.', 'focus_lost')
+        lockStrictSession(
+          'Fokus browser hilang. Tampilan quiz dikunci untuk mencegah kecurangan.',
+          'focus_lost'
+        )
       }
     }, 800)
 
+    document.documentElement.classList.add('quiz-strict-active')
+    document.body.classList.add('quiz-strict-active')
     document.addEventListener('visibilitychange', handleVisibility)
     window.addEventListener('blur', handleBlur)
+    window.addEventListener('pagehide', handlePageLeaving)
+    document.addEventListener('freeze', handlePageLeaving)
     document.addEventListener('fullscreenchange', handleFullscreenChange)
     document.addEventListener('keydown', handleKeydownCapture, true)
     document.addEventListener('keyup', handleKeyupCapture, true)
     document.addEventListener('copy', blockClipboardAndContext, true)
     document.addEventListener('cut', blockClipboardAndContext, true)
+    document.addEventListener('paste', blockClipboardAndContext, true)
     document.addEventListener('contextmenu', blockClipboardAndContext, true)
     document.addEventListener('dragstart', blockClipboardAndContext, true)
+    document.addEventListener('selectstart', blockClipboardAndContext, true)
+    document.addEventListener('selectionchange', clearTextSelection, true)
     window.addEventListener('beforeunload', handleBeforeUnload)
     lockKeyboardShortcuts()
 
     return () => {
       clearInterval(focusGuard)
+      document.documentElement.classList.remove('quiz-strict-active')
+      document.body.classList.remove('quiz-strict-active')
       document.removeEventListener('visibilitychange', handleVisibility)
       window.removeEventListener('blur', handleBlur)
+      window.removeEventListener('pagehide', handlePageLeaving)
+      document.removeEventListener('freeze', handlePageLeaving)
       document.removeEventListener('fullscreenchange', handleFullscreenChange)
       document.removeEventListener('keydown', handleKeydownCapture, true)
       document.removeEventListener('keyup', handleKeyupCapture, true)
       document.removeEventListener('copy', blockClipboardAndContext, true)
       document.removeEventListener('cut', blockClipboardAndContext, true)
+      document.removeEventListener('paste', blockClipboardAndContext, true)
       document.removeEventListener('contextmenu', blockClipboardAndContext, true)
       document.removeEventListener('dragstart', blockClipboardAndContext, true)
+      document.removeEventListener('selectstart', blockClipboardAndContext, true)
+      document.removeEventListener('selectionchange', clearTextSelection, true)
       window.removeEventListener('beforeunload', handleBeforeUnload)
       unlockKeyboardShortcuts()
     }
-  }, [isTaking, selectedQuiz?.id, submission?.id, activeSubmission?.id, logViolationEvent])
+  }, [isTaking, isStrictSecurity, selectedQuiz?.id, submission?.id, activeSubmission?.id, logViolationEvent, lockStrictSession])
 
   useEffect(() => {
     if (isTaking) {
@@ -1576,7 +1736,9 @@ export default function SiswaQuiz() {
           setSessionNeedsManualStart(false)
         }
         sessionBootAttemptRef.current = bootKey
-        const shouldAutoStart = typeof document !== 'undefined' && Boolean(document.fullscreenElement)
+        const shouldAutoStart = !isStrictSecurity || (
+          typeof document !== 'undefined' && Boolean(document.fullscreenElement)
+        )
         if (!shouldAutoStart) {
           if (!canceled) setSessionNeedsManualStart(true)
           return
@@ -1609,7 +1771,8 @@ export default function SiswaQuiz() {
     quizDetailsLoading,
     quizDetailsLoadedForId,
     questions.length,
-    isTaking
+    isTaking,
+    isStrictSecurity
   ])
 
   useEffect(() => {
@@ -1638,7 +1801,9 @@ export default function SiswaQuiz() {
     }
 
     const goTimer = setTimeout(() => {
-      const stillFullscreen = typeof document !== 'undefined' && Boolean(document.fullscreenElement)
+      const stillFullscreen = !isStrictSecurity || (
+        typeof document !== 'undefined' && Boolean(document.fullscreenElement)
+      )
       const targetQuizId = startCountdown.quizId
       setStartCountdown({ open: false, seconds: 3, quizId: '' })
       if (!stillFullscreen) {
@@ -1648,12 +1813,18 @@ export default function SiswaQuiz() {
       redirectToSessionPage(targetQuizId)
     }, 700)
     return () => clearTimeout(goTimer)
-  }, [startCountdown.open, startCountdown.seconds, startCountdown.quizId, pushToast, redirectToSessionPage])
+  }, [startCountdown.open, startCountdown.seconds, startCountdown.quizId, isStrictSecurity, pushToast, redirectToSessionPage])
 
   const handleForceFullscreen = async () => {
     const ok = await requestQuizFullscreen()
     if (!ok) {
+      setFullscreenGuideOpen(true)
       pushToast('error', FULLSCREEN_FAILED_MESSAGE)
+    } else {
+      releaseStrictIncident()
+      setPrivacyShield({ open: false, message: '', reason: '' })
+      setViolationPrompt({ open: false, message: '', stage: 1 })
+      violationTriggeredRef.current = false
     }
   }
 
@@ -1668,6 +1839,34 @@ export default function SiswaQuiz() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleFullscreenGuideStart = async () => {
+    setFullscreenGuideOpen(false)
+    if (isSessionPage && sessionPrepared) {
+      await handleManualStartSession()
+      return
+    }
+    await handleStartQuiz()
+  }
+
+  const handleResumeStrictSession = async () => {
+    const ok = await requestQuizFullscreen()
+    if (!ok) {
+      setFullscreenGuideOpen(true)
+      pushToast('error', FULLSCREEN_FAILED_MESSAGE)
+      return
+    }
+    releaseStrictIncident()
+    setPrivacyShield({ open: false, message: '', reason: '' })
+    setViolationPrompt({ open: false, message: '', stage: 1 })
+    violationTriggeredRef.current = false
+    setViolationMessage('Fullscreen aktif. Lanjutkan quiz dengan tetap fokus.')
+  }
+
+  const handleOpenSubmitConfirm = () => {
+    if (!isTaking || isSubmitting) return
+    setSubmitConfirmOpen(true)
   }
 
   const handleCloseCelebration = () => {
@@ -1769,14 +1968,152 @@ export default function SiswaQuiz() {
     </div>
   )
 
+  const fullscreenGuideModal = fullscreenGuideOpen && isStrictSecurity && (
+    <div className="fixed inset-0 z-[1400] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center px-4">
+      <div className="w-full max-w-lg rounded-3xl border border-sky-200 bg-white p-5 sm:p-6 shadow-2xl">
+        <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-bold uppercase tracking-wide text-sky-700">
+          Mode Ketat
+        </div>
+        <h3 className="mt-4 text-2xl font-black text-slate-900">
+          Aktifkan Fullscreen untuk Mulai Quiz
+        </h3>
+        <p className="mt-2 text-sm leading-6 text-slate-600">
+          Browser hanya mengizinkan fullscreen dari klik langsung siswa. Klik tombol di bawah,
+          lalu pilih Izinkan pada popup browser agar sesi quiz bisa dimulai.
+        </p>
+        <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Jika popup tidak muncul, pastikan tab ini sedang aktif dan izin fullscreen browser tidak diblokir.
+        </div>
+        <div className="mt-5 flex flex-col sm:flex-row gap-2 sm:justify-end">
+          <button
+            type="button"
+            onClick={() => setFullscreenGuideOpen(false)}
+            className="px-4 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-700 text-sm font-semibold"
+          >
+            Tutup
+          </button>
+          <button
+            type="button"
+            onClick={handleFullscreenGuideStart}
+            className="px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-sm font-semibold shadow-sm"
+          >
+            Izinkan Fullscreen & Mulai
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+
+  const strictPrivacyShieldOverlay = strictSecurityLocked && (
+    <div className="fixed inset-0 z-[1350] bg-black text-white flex items-center justify-center px-4 select-none">
+      <div className="w-full max-w-xl text-center">
+        <div className="inline-flex items-center rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-bold uppercase tracking-wide text-white/80">
+          Mode Strict Aktif
+        </div>
+        <h3 className="mt-5 text-2xl sm:text-3xl font-black">
+          Tampilan Quiz Dikunci
+        </h3>
+        <p className="mt-3 text-sm sm:text-base leading-7 text-white/75">
+          {privacyShield.message || 'Quiz wajib tetap fullscreen dan aktif. Masuk kembali ke fullscreen untuk melanjutkan.'}
+        </p>
+        <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-xs sm:text-sm text-white/70">
+          Soal dan jawaban sengaja digelapkan ketika fullscreen keluar, tab berpindah,
+          halaman tidak fokus, atau ada percobaan screenshot/copy.
+        </div>
+        <div className="mt-6 flex flex-col sm:flex-row gap-2 justify-center">
+          <button
+            type="button"
+            onClick={handleResumeStrictSession}
+            className="px-5 py-3 rounded-xl bg-sky-500 hover:bg-sky-400 text-white text-sm font-bold shadow-sm"
+          >
+            Kembali Fullscreen
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (window.confirm('Akhiri quiz sekarang? Jawaban akan langsung dikirim.')) {
+                void handleSubmitQuiz(true)
+              }
+            }}
+            className="px-5 py-3 rounded-xl border border-white/20 bg-white/10 text-white text-sm font-semibold hover:bg-white/15"
+          >
+            Akhiri Quiz
+          </button>
+        </div>
+        <div className="mt-4 text-[11px] text-white/45">
+          Peringatan tercatat: {violationCount}
+        </div>
+      </div>
+    </div>
+  )
+
+  const submitConfirmModal = submitConfirmOpen && isTaking && (
+    <div className="fixed inset-0 z-[1320] bg-slate-950/65 backdrop-blur-sm flex items-center justify-center px-4 select-none">
+      <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-5 sm:p-6 shadow-2xl">
+        <div className="text-lg font-black text-slate-900">
+          Selesaikan Quiz?
+        </div>
+        <p className="mt-2 text-sm leading-6 text-slate-600">
+          Jawaban akan dikirim dan tidak bisa diubah lagi. Konfirmasi ini tetap berada di dalam layar fullscreen.
+        </p>
+        <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs text-emerald-800">
+          Ini adalah aksi normal siswa, jadi tidak dihitung sebagai peringatan.
+        </div>
+        <div className="mt-5 flex flex-col sm:flex-row gap-2 sm:justify-end">
+          <button
+            type="button"
+            onClick={() => setSubmitConfirmOpen(false)}
+            className="px-4 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-700 text-sm font-semibold hover:bg-slate-50"
+            disabled={isSubmitting}
+          >
+            Batal
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleSubmitQuiz(false, { confirmed: true })}
+            className="px-5 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 text-white text-sm font-bold shadow-sm disabled:opacity-60"
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? 'Mengirim...' : 'Kirim Jawaban'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+
   if (isSessionPage) {
     return (
       <div className="fixed inset-0 z-[999] bg-slate-100 overflow-hidden">
         {!selectedQuiz ? (
           <div className="h-full w-full flex items-center justify-center px-6">
-            <div className="text-center text-slate-600 text-sm sm:text-base font-medium">
-              Menyiapkan sesi quiz...
-            </div>
+            {quizDetailsError ? (
+              <div className="w-full max-w-md rounded-2xl border border-red-200 bg-white p-5 text-center shadow-sm">
+                <div className="text-base font-bold text-red-700">Quiz belum bisa dibuka</div>
+                <p className="mt-2 text-sm text-slate-600">
+                  {quizDetailsError}
+                </p>
+                <div className="mt-4 flex flex-col sm:flex-row gap-2 justify-center">
+                  <button
+                    type="button"
+                    onClick={retryQuizDetails}
+                    className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-sm font-semibold"
+                  >
+                    Coba Lagi
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/siswa/quiz', { replace: true })}
+                    className="px-4 py-2 rounded-xl border border-slate-300 bg-white text-slate-700 text-sm font-semibold"
+                  >
+                    Kembali
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="text-center text-slate-600 text-sm sm:text-base font-medium">
+                Menyiapkan sesi quiz...
+              </div>
+            )}
           </div>
         ) : (
           <div className="h-full w-full flex flex-col">
@@ -1800,7 +2137,7 @@ export default function SiswaQuiz() {
                       </div>
                     </div>
                   )}
-                  {!isFullscreen && isTaking && (
+                  {isStrictSecurity && !isFullscreen && isTaking && (
                     <button
                       type="button"
                       onClick={handleForceFullscreen}
@@ -1811,7 +2148,7 @@ export default function SiswaQuiz() {
                   )}
                   <button
                     type="button"
-                    onClick={() => handleSubmitQuiz(false)}
+                    onClick={handleOpenSubmitConfirm}
                     className="px-4 py-2 rounded-2xl bg-green-600 hover:bg-green-700 text-white text-sm font-semibold transition-colors disabled:opacity-60"
                     disabled={!isTaking || isSubmitting}
                   >
@@ -1819,8 +2156,14 @@ export default function SiswaQuiz() {
                   </button>
                 </div>
               </div>
-              <div className="px-4 sm:px-6 py-2 bg-amber-50 border-t border-amber-100 text-xs text-amber-800">
-                Mode ketat aktif: quiz wajib fullscreen, tidak boleh pindah tab/aplikasi, dan screenshot dibatasi.
+              <div className={`px-4 sm:px-6 py-2 border-t text-xs ${
+                isStrictSecurity
+                  ? 'bg-amber-50 border-amber-100 text-amber-800'
+                  : 'bg-slate-50 border-slate-100 text-slate-600'
+              }`}>
+                {isStrictSecurity
+                  ? 'Mode ketat aktif: quiz wajib fullscreen, tidak boleh pindah tab/aplikasi, dan screenshot dibatasi.'
+                  : 'Mode standard aktif: jawaban tetap divalidasi server dan timer mengikuti jadwal guru.'}
               </div>
             </div>
 
@@ -1847,9 +2190,11 @@ export default function SiswaQuiz() {
                       <div>
                         <div className="text-sm font-semibold text-sky-900">Sesi siap dimulai</div>
                         <div className="text-xs text-sky-700 mt-1">
-                          {sessionNeedsManualStart
-                            ? 'Izin fullscreen ditolak browser. Klik tombol mulai agar sistem mencoba lagi.'
-                            : 'Klik mulai untuk masuk fullscreen, lalu kerjakan quiz tanpa pindah tab.'}
+                          {isStrictSecurity
+                            ? sessionNeedsManualStart
+                              ? 'Browser belum memberi izin fullscreen. Klik tombol mulai, lalu pilih Izinkan pada popup browser.'
+                              : 'Klik tombol mulai untuk mengaktifkan fullscreen, lalu kerjakan quiz tanpa pindah tab.'
+                            : 'Klik mulai untuk mengerjakan quiz sesuai jadwal guru.'}
                         </div>
                       </div>
                       <div className="w-full sm:max-w-xs">
@@ -1868,7 +2213,7 @@ export default function SiswaQuiz() {
                           onClick={handleManualStartSession}
                           className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold"
                         >
-                          Mulai Sesi Aman
+                          {isStrictSecurity ? 'Izinkan Fullscreen & Mulai' : 'Mulai Sesi'}
                         </button>
                       )}
                     </div>
@@ -1907,7 +2252,7 @@ export default function SiswaQuiz() {
                   </div>
                 )}
 
-                {quizDetailsLoadedForId === selectedQuiz.id && !quizDetailsLoading && (
+                {isTaking && quizDetailsLoadedForId === selectedQuiz.id && !quizDetailsLoading && (
                   <div className="relative">
                     {strictAnswerBlock && (
                       <div className="absolute inset-0 z-20 rounded-2xl bg-slate-200/40 backdrop-blur-[1px] cursor-not-allowed" />
@@ -2093,6 +2438,9 @@ export default function SiswaQuiz() {
             onClose={() => setPreviewMediaUrl('')}
           />
         )}
+        {submitConfirmModal}
+        {strictPrivacyShieldOverlay}
+        {fullscreenGuideModal}
       </div>
     )
   }
@@ -2142,9 +2490,7 @@ export default function SiswaQuiz() {
                 value={selectedMonth}
                 onChange={(e) => setSelectedMonth(e.target.value)}
               >
-                <option value={MONTH_FILTER_ALL}>Semua bulan</option>
-                <option value={MONTH_FILTER_THIS}>Bulan ini</option>
-                <option value={MONTH_FILTER_LAST_12}>12 bulan terakhir</option>
+                <option value={MONTH_FILTER_ALL}>Semua bulan periode</option>
                 {monthOptions.map((monthKey) => (
                   <option key={monthKey} value={monthKey}>
                     {formatQuizMonthLabel(monthKey)}
@@ -2203,6 +2549,8 @@ export default function SiswaQuiz() {
                 const mutationMeta = getQuizMutationMeta(q)
                 const canViewResult = Boolean(q.result_visible_to_students)
                 const countdownMeta = getQuizCountdownMeta(q, status, nowTick)
+                const quizEndAt = getQuizEndAt(q)
+                const quizEndLabel = normalizeMode(q) === 'regular' ? 'Deadline' : 'Selesai'
                 const durationText = q.submission?.started_at
                   ? formatDurationText(q.submission.started_at, q.submission.finished_at || nowTick)
                   : null
@@ -2234,6 +2582,13 @@ export default function SiswaQuiz() {
                           <span className="text-[11px] px-2 py-0.5 rounded-full bg-white/80 border border-slate-200 text-slate-700">
                             Mode {getModeLabel(q)}
                           </span>
+                          <span className={`text-[11px] px-2 py-0.5 rounded-full border ${
+                            normalizeAccessDevice(q.access_device) === 'mobile'
+                              ? 'bg-amber-100 text-amber-700 border-amber-200'
+                              : 'bg-white/80 text-slate-700 border-slate-200'
+                          }`}>
+                            Akses {getAccessDeviceLabel(q.access_device)}
+                          </span>
                           {isNewestCard && (
                             <span className="text-[11px] px-2 py-0.5 rounded-full bg-indigo-100 border border-indigo-200 text-indigo-700 font-semibold">
                               Terbaru dibuat
@@ -2254,8 +2609,8 @@ export default function SiswaQuiz() {
                         <div className="mt-0.5">{q.starts_at ? formatDateTime(q.starts_at) : '-'}</div>
                       </div>
                       <div className="text-[11px] rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-rose-800">
-                        <span className="font-semibold">Deadline</span>
-                        <div className="mt-0.5">{q.deadline_at ? formatDateTime(q.deadline_at) : '-'}</div>
+                        <span className="font-semibold">{quizEndLabel}</span>
+                        <div className="mt-0.5">{quizEndAt ? formatDateTime(quizEndAt) : '-'}</div>
                       </div>
                     </div>
                     {countdownMeta && (
@@ -2321,6 +2676,8 @@ export default function SiswaQuiz() {
                         <span>{selectedQuiz.mapel}</span>
                         <span>•</span>
                         <span>Mode {getModeLabel(selectedQuiz)}</span>
+                        <span>•</span>
+                        <span>Akses {getAccessDeviceLabel(selectedQuiz.access_device)}</span>
                         <span className={`text-[11px] px-2 py-0.5 rounded-full border ${getQuizMutationMeta(selectedQuiz).tone}`}>
                           {getQuizMutationMeta(selectedQuiz).label}
                         </span>
@@ -2362,9 +2719,11 @@ export default function SiswaQuiz() {
                       </div>
                     </div>
                     <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3">
-                      <div className="text-xs text-rose-700 font-semibold">Deadline</div>
+                      <div className="text-xs text-rose-700 font-semibold">
+                        {normalizeMode(selectedQuiz) === 'regular' ? 'Deadline' : 'Selesai'}
+                      </div>
                       <div className="text-sm text-slate-800 mt-1 font-semibold">
-                        {selectedQuiz.deadline_at ? formatDateTime(selectedQuiz.deadline_at) : 'Tidak ada'}
+                        {getQuizEndAt(selectedQuiz) ? formatDateTime(getQuizEndAt(selectedQuiz)) : 'Tidak ada'}
                       </div>
                     </div>
                   </div>
@@ -2397,7 +2756,7 @@ export default function SiswaQuiz() {
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <span className="text-[11px] px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
-                          Fullscreen wajib aktif
+                          {isStrictSecurity ? 'Fullscreen wajib aktif' : 'Mode standard aktif'}
                         </span>
                         <span className="text-[11px] px-2.5 py-1 rounded-full bg-sky-100 text-sky-700 border border-sky-200">
                           Auto simpan jawaban esai
@@ -2405,7 +2764,19 @@ export default function SiswaQuiz() {
                         <span className="text-[11px] px-2.5 py-1 rounded-full bg-amber-100 text-amber-700 border border-amber-200">
                           Hindari pindah tab/aplikasi
                         </span>
+                        <span className={`text-[11px] px-2.5 py-1 rounded-full border ${
+                          selectedWebAccessBlocked
+                            ? 'bg-rose-50 text-rose-700 border-rose-200'
+                            : 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                        }`}>
+                          Akses {getAccessDeviceLabel(selectedQuiz.access_device)}
+                        </span>
                       </div>
+                      {selectedWebAccessBlocked && (
+                        <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+                          {selectedWebAccessBlockMessage}
+                        </div>
+                      )}
                       <div className="mt-3 max-w-sm">
                         <label className="text-xs font-semibold text-slate-600">Kode Akses</label>
                         <input
@@ -2419,7 +2790,7 @@ export default function SiswaQuiz() {
                     </div>
 
                     <div className="flex flex-col sm:flex-row xl:flex-col gap-2 xl:min-w-[220px]">
-                      {selectedStatus?.canStart && (
+                      {selectedCanStartInWeb && (
                         <button
                           type="button"
                           onClick={handleStartQuiz}
@@ -2433,17 +2804,17 @@ export default function SiswaQuiz() {
                           {isStartCountdownActive
                             ? `Mulai dalam ${Math.max(startCountdown.seconds, 0)}`
                             : activeSubmission?.status === 'ongoing'
-                              ? 'Lanjutkan Quiz'
-                              : 'Mulai Quiz'}
+                              ? (isStrictSecurity ? 'Izinkan Fullscreen & Lanjutkan' : 'Lanjutkan Quiz')
+                              : (isStrictSecurity ? 'Izinkan Fullscreen & Mulai' : 'Mulai Quiz')}
                         </button>
                       )}
-                      {!selectedStatus?.canStart && (
+                      {!selectedCanStartInWeb && (
                         <button
                           type="button"
                           disabled
                           className="px-5 py-2.5 rounded-2xl bg-slate-100 text-slate-400 font-semibold cursor-not-allowed"
                         >
-                          Quiz belum tersedia
+                          {selectedWebAccessBlocked ? 'Akses Mobile Saja' : 'Quiz belum tersedia'}
                         </button>
                       )}
                       {activeSubmission?.score != null && (
@@ -2621,6 +2992,7 @@ export default function SiswaQuiz() {
         )}
 
         {celebrationOverlay}
+        {fullscreenGuideModal}
 
         {startCountdown.open && (
           <div className="fixed inset-0 z-[1200] bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-6">

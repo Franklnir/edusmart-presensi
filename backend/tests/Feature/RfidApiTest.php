@@ -48,6 +48,49 @@ class RfidApiTest extends TestCase
             ->assertJsonPath('rfid_aktif', true);
     }
 
+    public function test_admin_can_update_scan_settings_through_backend_endpoint(): void
+    {
+        $tenantId = (string) DB::table('tenants')->where('slug', 'default')->value('id');
+        $admin = $this->createUserWithProfile($tenantId, 'admin', 'scan-settings-admin@example.com');
+
+        DB::table('settings')->insert([
+            'tenant_id' => $tenantId,
+            'scan_manual_enabled' => false,
+            'scan_always_active' => false,
+            'manual_jam_masuk_mulai' => '06:00:00',
+            'manual_jam_masuk_selesai' => '08:00:00',
+            'manual_jam_pulang_mulai' => '14:00:00',
+            'manual_jam_pulang_selesai' => '16:00:00',
+            'auto_alpha_enabled' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $response = $this->actingAs($admin)->patchJson('/api/admin/scan-settings', [
+            'scan_always_active' => true,
+            'scan_manual_enabled' => true,
+            'manual_jam_masuk_mulai' => '06:30',
+            'manual_jam_masuk_selesai' => '08:15',
+            'manual_jam_pulang_mulai' => '14:10',
+            'manual_jam_pulang_selesai' => '16:05',
+            'auto_alpha_enabled' => false,
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('data.scan_always_active', true)
+            ->assertJsonPath('data.scan_manual_enabled', true)
+            ->assertJsonPath('data.manual_jam_masuk_mulai', '06:30')
+            ->assertJsonPath('data.auto_alpha_enabled', false);
+
+        $this->assertDatabaseHas('settings', [
+            'tenant_id' => $tenantId,
+            'scan_always_active' => true,
+            'scan_manual_enabled' => true,
+            'manual_jam_masuk_mulai' => '06:30',
+            'auto_alpha_enabled' => false,
+        ]);
+    }
+
     public function test_rfid_http_rejects_open_access_when_shared_key_is_required(): void
     {
         config()->set('rfid.shared_key', '');

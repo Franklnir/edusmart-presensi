@@ -173,6 +173,7 @@ class ApprovalController extends ApiController
         }
 
         $actorId = (string) ($request->user()?->id ?? '');
+        $reviewerProfileId = $this->reviewerProfileId($request);
         if ($this->requiresSecondApprover((string) $approval->tenant_id) && $actorId !== '' && $actorId === (string) ($approval->requested_by ?? '')) {
             return $this->deny('Maker tidak boleh approve request miliknya sendiri', 409);
         }
@@ -215,7 +216,7 @@ class ApprovalController extends ApiController
             ->where('id', $approval->id)
             ->update([
                 'status' => 'approved',
-                'approved_by' => $actorId !== '' ? $actorId : null,
+                'approved_by' => $reviewerProfileId,
                 'approved_at' => now(),
                 'review_note' => $reviewNote !== '' ? $reviewNote : null,
                 'updated_at' => now(),
@@ -258,14 +259,14 @@ class ApprovalController extends ApiController
         }
 
         $oldData = (array) $approval;
-        $actorId = (string) ($request->user()?->id ?? '');
+        $reviewerProfileId = $this->reviewerProfileId($request);
         $reviewNote = trim((string) $request->input('note', ''));
 
         DB::table('approval_requests')
             ->where('id', $approval->id)
             ->update([
                 'status' => 'rejected',
-                'rejected_by' => $actorId !== '' ? $actorId : null,
+                'rejected_by' => $reviewerProfileId,
                 'rejected_at' => now(),
                 'review_note' => $reviewNote !== '' ? $reviewNote : null,
                 'updated_at' => now(),
@@ -332,6 +333,13 @@ class ApprovalController extends ApiController
         } catch (\Throwable $e) {
             return true;
         }
+    }
+
+    private function reviewerProfileId(Request $request): ?string
+    {
+        $profileId = $this->profile($request)?->id;
+
+        return $profileId ? (string) $profileId : null;
     }
 
     private function decodeJsonValue($value)

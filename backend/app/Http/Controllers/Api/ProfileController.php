@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 
 class ProfileController extends ApiController
@@ -128,6 +129,15 @@ class ProfileController extends ApiController
 
         $payload['created_at'] = now();
         $payload['updated_at'] = now();
+        if (Schema::hasColumn('profiles', 'created_via') && empty($payload['created_via'])) {
+            $payload['created_via'] = 'admin_created';
+        }
+        if (Schema::hasColumn('profiles', 'created_by') && empty($payload['created_by'])) {
+            $actorId = (string) ($request->user()?->id ?? '');
+            if ($actorId !== '') {
+                $payload['created_by'] = $actorId;
+            }
+        }
 
         $payload['tenant_id'] = $tenantId;
         DB::table('profiles')->insert($payload);

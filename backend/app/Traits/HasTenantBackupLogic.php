@@ -2,6 +2,7 @@
 
 namespace App\Traits;
 
+use App\Support\AcademicPeriod;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -15,18 +16,84 @@ trait HasTenantBackupLogic
     private function getBackupTableOrder(): array
     {
         return [
+            'users',
             'settings', 'profiles', 'admin_users', 'kelas', 'mata_pelajaran', 'guru_mapel_bobot',
             'struktur_sekolah', 'kelas_struktur', 'jadwal', 'pengumuman',
             'ekskul', 'ekskul_anggota', 'organisasi', 'organisasi_anggota', 'osis_anggota',
             'absensi_settings', 'absensi_rfid_settings', 'absensi', 'absensi_ajuan',
             'absensi_eskul', 'absensi_scan_temp', 'rfid_scans', 'jam_kosong',
             'tugas', 'tugas_jawaban', 'quizzes', 'quiz_questions', 'quiz_options',
-            'quiz_submissions', 'quiz_answers', 'quiz_retake_logs',
+            'quiz_submissions', 'quiz_answers', 'quiz_retake_logs', 'quiz_violation_logs',
             'certificates', 'templat_sertifikat_publik', 'printed_cards',
             'allowed_registrations', 'registration_otps', 'audit_log',
             'approval_requests',
             'anggota_eksku1', 'anggota_ekskul', 'import_siswa_histories', 'import_siswa_history_items',
+            'kelas_deleted_histories',
+            'user_presence',
+            'tenant_domains',
+            'tenant_google_drive_configs', 'tenant_google_drive_files',
+            'tenant_mqtt_configs',
+            'rfid_devices', 'rfid_device_events',
+            'whatsapp_integrations', 'whatsapp_notification_settings', 'whatsapp_message_logs',
+            'password_change_verifications', 'email_verifications',
         ];
+    }
+
+    private function excludedTenantBackupTables(): array
+    {
+        return [
+            '_policy_backup',
+            'cache',
+            'cache_locks',
+            'failed_jobs',
+            'job_batches',
+            'jobs',
+            'migrations',
+            'password_reset_tokens',
+            'personal_access_tokens',
+            'plugin_upload_drafts',
+            'sessions',
+            'super_admins',
+            'system_plugins',
+            'tenants',
+        ];
+    }
+
+    private function backupTablesForTenant(): array
+    {
+        $availableTables = [];
+        try {
+            $availableTables = Schema::getTableListing();
+        } catch (\Throwable $e) {
+            $availableTables = $this->getBackupTableOrder();
+        }
+
+        $availableMap = array_fill_keys(array_map('strval', $availableTables), true);
+        $excluded = array_fill_keys($this->excludedTenantBackupTables(), true);
+        $tables = [];
+
+        foreach ($this->getBackupTableOrder() as $tableName) {
+            if (! isset($availableMap[$tableName]) || isset($excluded[$tableName])) {
+                continue;
+            }
+
+            if ($tableName === 'users' || $this->tableHasColumn($tableName, 'tenant_id')) {
+                $tables[] = $tableName;
+            }
+        }
+
+        foreach ($availableTables as $tableName) {
+            $tableName = (string) $tableName;
+            if (isset($excluded[$tableName]) || in_array($tableName, $tables, true)) {
+                continue;
+            }
+
+            if ($this->tableHasColumn($tableName, 'tenant_id')) {
+                $tables[] = $tableName;
+            }
+        }
+
+        return $tables;
     }
 
     private function masterTablesWithoutDateFilter(): array
@@ -73,13 +140,138 @@ trait HasTenantBackupLogic
         return $months > 0 ? min(12, $months) : null;
     }
 
+    private function normalizeBackupPeriodScope(string $tenantId, array $input = []): array
+    {
+        $rawType = strtolower(trim((string) ($input['period_type'] ?? $input['period'] ?? '')));
+        $months = $this->normalizeBackupMonths($input['months'] ?? null);
+        $type = $rawType !== '' ? $rawType : ($months !== null ? 'last_months' : 'all');
+        $now = now('Asia/Jakarta');
+
+        if (in_array($type, ['month', 'this_month', 'bulan_ini'], true)) {
+            $start = $now->copy()->startOfMonth()->startOfDay();
+            $end = $now->copy()->endOfMonth();
+
+            return $this->makeBackupPeriodScope('this_month', 'Bulan ini', 1, $start, $end);
+        }
+
+        if (in_array($type, ['last_months', 'months', 'bulan'], true) && $months !== null) {
+            $start = $now->copy()->subMonths($months)->startOfDay();
+
+            return $this->makeBackupPeriodScope(
+                'last_months',
+                $this->backupPeriodLabel($months),
+                $months,
+                $start,
+                $now->copy()
+            );
+        }
+
+        if (in_array($type, ['semester', 'current_semester', 'semester_aktif'], true)) {
+            $activePeriod = $this->tenantActiveAcademicPeriod($tenantId);
+            $academicYear = AcademicPeriod::normalizeAcademicYear($input['tahun_ajaran'] ?? $input['academic_year'] ?? null)
+                ?: (string) ($activePeriod['tahun_ajaran'] ?? '');
+            $semester = AcademicPeriod::normalizeSemester($input['semester'] ?? null)
+                ?: (string) ($activePeriod['semester'] ?? '');
+            $period = AcademicPeriod::make($academicYear, $semester);
+            $start = $this->carbonFromBackupDate($period['starts_at'] ?? null, false);
+            $end = $this->carbonFromBackupDate($period['ends_at'] ?? null, true);
+
+            return $this->makeBackupPeriodScope(
+                'semester',
+                'Semester '.($period['semester'] ?? $semester).' '.$period['tahun_ajaran'],
+                null,
+                $start,
+                $end,
+                (string) ($period['tahun_ajaran'] ?? $academicYear),
+                (string) ($period['semester'] ?? $semester),
+                $period
+            );
+        }
+
+        if (in_array($type, ['academic_year', 'tahun_ajaran', 'year'], true)) {
+            $activePeriod = $this->tenantActiveAcademicPeriod($tenantId);
+            $academicYear = AcademicPeriod::normalizeAcademicYear($input['tahun_ajaran'] ?? $input['academic_year'] ?? null)
+                ?: (string) ($activePeriod['tahun_ajaran'] ?? AcademicPeriod::current()['tahun_ajaran']);
+            $startYear = (int) substr($academicYear, 0, 4);
+            $start = Carbon::create($startYear, 7, 1, 0, 0, 0, 'Asia/Jakarta')->startOfDay();
+            $end = Carbon::create($startYear + 1, 6, 30, 23, 59, 59, 'Asia/Jakarta');
+
+            return $this->makeBackupPeriodScope(
+                'academic_year',
+                'Tahun ajaran '.$academicYear,
+                null,
+                $start,
+                $end,
+                $academicYear,
+                null
+            );
+        }
+
+        if (in_array($type, ['custom', 'range', 'date_range', 'rentang'], true)) {
+            $start = $this->carbonFromBackupDate($input['start_date'] ?? $input['from'] ?? null, false);
+            $end = $this->carbonFromBackupDate($input['end_date'] ?? $input['to'] ?? null, true);
+
+            if ($start && $end && $start->lessThanOrEqualTo($end)) {
+                return $this->makeBackupPeriodScope(
+                    'date_range',
+                    'Rentang '.$start->toDateString().' s/d '.$end->toDateString(),
+                    null,
+                    $start,
+                    $end
+                );
+            }
+        }
+
+        return $this->makeBackupPeriodScope('all', 'Semua data');
+    }
+
+    private function makeBackupPeriodScope(
+        string $type,
+        string $label,
+        ?int $months = null,
+        ?Carbon $startAt = null,
+        ?Carbon $endAt = null,
+        ?string $academicYear = null,
+        ?string $semester = null,
+        ?array $academicPeriod = null
+    ): array {
+        return [
+            'type' => $type,
+            'months' => $months,
+            'label' => $label,
+            'start_at' => $startAt,
+            'end_at' => $endAt,
+            'tahun_ajaran' => $academicYear,
+            'semester' => $semester,
+            'academic_period' => $academicPeriod,
+        ];
+    }
+
+    private function backupPeriodPayload(array $scope): array
+    {
+        return [
+            'type' => (string) ($scope['type'] ?? 'all'),
+            'months' => $scope['months'] ?? null,
+            'label' => (string) ($scope['label'] ?? 'Semua data'),
+            'start_at' => isset($scope['start_at']) && $scope['start_at'] instanceof Carbon
+                ? $scope['start_at']->toIso8601String()
+                : null,
+            'end_at' => isset($scope['end_at']) && $scope['end_at'] instanceof Carbon
+                ? $scope['end_at']->toIso8601String()
+                : null,
+            'tahun_ajaran' => $scope['tahun_ajaran'] ?? null,
+            'semester' => $scope['semester'] ?? null,
+            'academic_period' => $scope['academic_period'] ?? null,
+        ];
+    }
+
     private function backupModeLabel(string $mode): string
     {
         return match ($mode) {
             'students' => 'Backup Siswa (profil, kelas, absensi, tugas, quiz, sertifikat, dan data terkait siswa)',
             'teachers' => 'Backup Guru (profil, jadwal, wali kelas, tugas, quiz, jam kosong, dan data terkait guru)',
             'classes' => 'Backup Kelas (master kelas, struktur, siswa, jadwal, absensi, tugas, quiz, dan data kelas terkait)',
-            default => 'Backup Lengkap Sekolah (seluruh tabel tenant)',
+            default => 'Backup Lengkap Sekolah (seluruh tabel database tenant, tanpa file storage)',
         };
     }
 
@@ -94,6 +286,54 @@ trait HasTenantBackupLogic
         }
 
         return $months.' bulan terakhir';
+    }
+
+    private function tenantActiveAcademicPeriod(string $tenantId): array
+    {
+        $current = AcademicPeriod::current();
+        if (! $this->hasTable('settings') || ! $this->tableHasColumn('settings', 'tenant_id')) {
+            return $current;
+        }
+
+        try {
+            $columns = array_values(array_filter(
+                [
+                    'tahun_ajaran',
+                    'semester_aktif',
+                    'periode_mulai',
+                    'periode_selesai',
+                    'periode_ganjil_mulai',
+                    'periode_ganjil_selesai',
+                    'periode_genap_mulai',
+                    'periode_genap_selesai',
+                ],
+                fn (string $column) => $this->tableHasColumn('settings', $column)
+            ));
+            $settings = DB::table('settings')
+                ->where('tenant_id', $tenantId)
+                ->orderBy('id')
+                ->first($columns ?: ['id']);
+
+            return $settings ? AcademicPeriod::fromSettings($settings) : $current;
+        } catch (\Throwable $e) {
+            return $current;
+        }
+    }
+
+    private function carbonFromBackupDate($value, bool $endOfDay = false): ?Carbon
+    {
+        $date = AcademicPeriod::normalizeDate($value);
+        if (! $date) {
+            return null;
+        }
+
+        try {
+            $carbon = Carbon::parse($date, 'Asia/Jakarta');
+
+            return $endOfDay ? $carbon->endOfDay() : $carbon->startOfDay();
+        } catch (\Throwable $e) {
+            return null;
+        }
     }
 
     private function hasTable(string $table): bool
@@ -185,15 +425,88 @@ trait HasTenantBackupLogic
         return now()->subMonths($months)->startOfDay();
     }
 
-    private function applyDateLimit($query, string $table, ?Carbon $dateLimit, array $preferredColumns = []): void
+    private function coerceBackupPeriodScope($periodScope): array
     {
-        if (! $dateLimit) {
+        if ($periodScope instanceof Carbon) {
+            return $this->makeBackupPeriodScope('date_range', 'Periode terbatas', null, $periodScope);
+        }
+
+        if (is_array($periodScope)) {
+            $scope = $periodScope;
+            foreach (['start_at', 'end_at'] as $key) {
+                if (isset($scope[$key]) && is_string($scope[$key])) {
+                    $scope[$key] = $this->carbonFromBackupDate($scope[$key], $key === 'end_at');
+                }
+            }
+
+            return $scope;
+        }
+
+        if (is_numeric($periodScope)) {
+            $months = $this->normalizeBackupMonths($periodScope);
+            if ($months !== null) {
+                return $this->makeBackupPeriodScope(
+                    'last_months',
+                    $this->backupPeriodLabel($months),
+                    $months,
+                    $this->buildDateLimit($months),
+                    now('Asia/Jakarta')
+                );
+            }
+        }
+
+        return $this->makeBackupPeriodScope('all', 'Semua data');
+    }
+
+    private function applyDateLimit($query, string $table, $periodScope, array $preferredColumns = []): void
+    {
+        $scope = $this->coerceBackupPeriodScope($periodScope);
+        if (($scope['type'] ?? 'all') === 'all') {
+            return;
+        }
+
+        $academicApplied = false;
+        $academicYear = trim((string) ($scope['tahun_ajaran'] ?? ''));
+        $semester = trim((string) ($scope['semester'] ?? ''));
+
+        if ($academicYear !== '' && $this->tableHasColumn($table, 'tahun_ajaran')) {
+            $query->where('tahun_ajaran', $academicYear);
+            $academicApplied = true;
+        }
+
+        if (
+            ($scope['type'] ?? '') === 'semester'
+            && $semester !== ''
+            && $this->tableHasColumn($table, 'semester')
+        ) {
+            $query->where('semester', $semester);
+            $academicApplied = true;
+        }
+
+        if (
+            $academicApplied
+            && (
+                ($scope['type'] ?? '') === 'academic_year'
+                || (($scope['type'] ?? '') === 'semester' && $this->tableHasColumn($table, 'semester'))
+            )
+        ) {
+            return;
+        }
+
+        $startAt = $scope['start_at'] ?? null;
+        $endAt = $scope['end_at'] ?? null;
+        if (! $startAt instanceof Carbon && ! $endAt instanceof Carbon) {
             return;
         }
 
         $candidates = array_values(array_unique(array_merge(
             $preferredColumns,
-            ['created_at', 'waktu_submit', 'issued_at', 'started_at', 'finished_at', 'updated_at', 'timestamp', 'tanggal']
+            [
+                'tanggal', 'scan_at', 'scanned_at', 'uploaded_at', 'queued_at', 'sent_at', 'failed_at',
+                'requested_at', 'approved_at', 'rejected_at', 'printed_at', 'issued_at',
+                'waktu_submit', 'started_at', 'finished_at', 'live_started_at',
+                'created_at', 'updated_at', 'timestamp',
+            ]
         )));
 
         $dateColumn = $this->firstExistingColumn($table, $candidates);
@@ -201,11 +514,19 @@ trait HasTenantBackupLogic
             return;
         }
 
-        $dateValue = $dateColumn === 'tanggal'
-            ? $dateLimit->toDateString()
-            : $dateLimit->toDateTimeString();
+        if ($startAt instanceof Carbon) {
+            $startValue = $dateColumn === 'tanggal'
+                ? $startAt->toDateString()
+                : $startAt->toDateTimeString();
+            $query->where($dateColumn, '>=', $startValue);
+        }
 
-        $query->where($dateColumn, '>=', $dateValue);
+        if ($endAt instanceof Carbon) {
+            $endValue = $dateColumn === 'tanggal'
+                ? $endAt->toDateString()
+                : $endAt->toDateTimeString();
+            $query->where($dateColumn, '<=', $endValue);
+        }
     }
 
     private function applyDefaultOrder($query, string $table): void
@@ -225,7 +546,7 @@ trait HasTenantBackupLogic
     private function queryTenantTable(
         string $table,
         string $tenantId,
-        ?Carbon $dateLimit = null,
+        $periodScope = null,
         ?callable $scope = null,
         array $preferredDateColumns = []
     ): array {
@@ -239,7 +560,7 @@ trait HasTenantBackupLogic
                 $scope($query);
             }
 
-            $this->applyDateLimit($query, $table, $dateLimit, $preferredDateColumns);
+            $this->applyDateLimit($query, $table, $periodScope, $preferredDateColumns);
             $this->applyDefaultOrder($query, $table);
 
             return $query->get()->all();
@@ -292,13 +613,77 @@ trait HasTenantBackupLogic
         ];
     }
 
-    private function buildFullBackupTables(string $tenantId, ?int $months = null): array
+    private function buildLinkedUsersBackupTable(string $tenantId): ?array
+    {
+        if (! $this->hasTable('users')) {
+            return null;
+        }
+
+        $userIds = [];
+
+        if ($this->hasTable('profiles') && $this->allTableColumnsExist('profiles', ['id', 'tenant_id'])) {
+            try {
+                $userIds = array_merge(
+                    $userIds,
+                    DB::table('profiles')
+                        ->where('tenant_id', $tenantId)
+                        ->pluck('id')
+                        ->filter()
+                        ->map(fn ($value) => (string) $value)
+                        ->all()
+                );
+            } catch (\Throwable $e) {
+                // Backup tenant tetap lanjut walau tabel users tambahan gagal dibaca.
+            }
+        }
+
+        if ($this->hasTable('admin_users') && $this->allTableColumnsExist('admin_users', ['id', 'tenant_id'])) {
+            try {
+                $userIds = array_merge(
+                    $userIds,
+                    DB::table('admin_users')
+                        ->where('tenant_id', $tenantId)
+                        ->pluck('id')
+                        ->filter()
+                        ->map(fn ($value) => (string) $value)
+                        ->all()
+                );
+            } catch (\Throwable $e) {
+                // Backup tenant tetap lanjut walau tabel admin_users tambahan gagal dibaca.
+            }
+        }
+
+        $userIds = $this->normalizeIdList($userIds);
+        if (empty($userIds)) {
+            return $this->makeBackupTable('users', []);
+        }
+
+        try {
+            $query = DB::table('users')->whereIn('id', $userIds);
+            $this->applyDefaultOrder($query, 'users');
+
+            return $this->makeBackupTable('users', $query->get()->all());
+        } catch (\Throwable $e) {
+            return $this->makeBackupTable('users', []);
+        }
+    }
+
+    private function buildFullBackupTables(string $tenantId, $periodScope = null): array
     {
         $tables = [];
-        $dateLimit = $this->buildDateLimit($months);
+        $resolvedScope = $this->coerceBackupPeriodScope($periodScope);
         $masterTables = $this->masterTablesWithoutDateFilter();
 
-        foreach ($this->getBackupTableOrder() as $tableName) {
+        $linkedUsers = $this->buildLinkedUsersBackupTable($tenantId);
+        if ($linkedUsers !== null) {
+            $tables[] = $linkedUsers;
+        }
+
+        foreach ($this->backupTablesForTenant() as $tableName) {
+            if ($tableName === 'users') {
+                continue;
+            }
+
             if (! $this->hasTable($tableName) || ! $this->tableHasColumn($tableName, 'tenant_id')) {
                 continue;
             }
@@ -306,7 +691,7 @@ trait HasTenantBackupLogic
             $rows = $this->queryTenantTable(
                 $tableName,
                 $tenantId,
-                in_array($tableName, $masterTables, true) ? null : $dateLimit
+                in_array($tableName, $masterTables, true) ? null : $resolvedScope
             );
 
             $tables[] = $this->makeBackupTable($tableName, $rows);
@@ -315,9 +700,9 @@ trait HasTenantBackupLogic
         return $tables;
     }
 
-    private function buildStudentBackupTables(string $tenantId, ?int $months = null): array
+    private function buildStudentBackupTables(string $tenantId, $periodScope = null): array
     {
-        $dateLimit = $this->buildDateLimit($months);
+        $dateLimit = $this->coerceBackupPeriodScope($periodScope);
         $tables = [];
 
         $students = $this->queryTenantTable('profiles', $tenantId, null, function ($query) {
@@ -556,9 +941,9 @@ trait HasTenantBackupLogic
         return $tables;
     }
 
-    private function buildTeacherBackupTables(string $tenantId, ?int $months = null): array
+    private function buildTeacherBackupTables(string $tenantId, $periodScope = null): array
     {
-        $dateLimit = $this->buildDateLimit($months);
+        $dateLimit = $this->coerceBackupPeriodScope($periodScope);
         $tables = [];
 
         $teachers = $this->queryTenantTable('profiles', $tenantId, null, function ($query) {
@@ -771,9 +1156,9 @@ trait HasTenantBackupLogic
         return $tables;
     }
 
-    private function buildClassBackupTables(string $tenantId, ?int $months = null): array
+    private function buildClassBackupTables(string $tenantId, $periodScope = null): array
     {
-        $dateLimit = $this->buildDateLimit($months);
+        $dateLimit = $this->coerceBackupPeriodScope($periodScope);
         $tables = [];
 
         $classRows = $this->queryTenantTable('kelas', $tenantId, null, function ($query) {

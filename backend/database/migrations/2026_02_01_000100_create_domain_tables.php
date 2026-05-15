@@ -145,6 +145,7 @@ return new class extends Migration
             $table->boolean('registrasi_admin_aktif')->default(false);
             $table->timestampTz('updated_at')->useCurrent();
             $table->boolean('scan_manual_enabled')->default(false);
+            $table->boolean('scan_always_active')->default(true);
             $table->time('manual_jam_masuk_mulai')->nullable();
             $table->time('manual_jam_masuk_selesai')->nullable();
             $table->time('manual_jam_pulang_mulai')->nullable();

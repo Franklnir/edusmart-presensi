@@ -738,7 +738,7 @@ class TenantDomainService
         }
 
         $root = $this->normalizedRootDomain();
-        $adminSubdomain = strtolower(trim((string) config('tenancy.admin_subdomain', 'admin')));
+        $adminSubdomain = strtolower(trim((string) config('tenancy.admin_subdomain', 'admin26')));
         $allowRoot = (bool) config('tenancy.allow_root_for_super_admin', false);
 
         if ($root !== '') {
@@ -761,7 +761,7 @@ class TenantDomainService
     private function defaultAdminHost(): string
     {
         $root = $this->normalizedRootDomain();
-        $adminSubdomain = strtolower(trim((string) config('tenancy.admin_subdomain', 'admin')));
+        $adminSubdomain = strtolower(trim((string) config('tenancy.admin_subdomain', 'admin26')));
 
         if ($root === '') {
             return '';
@@ -781,6 +781,10 @@ class TenantDomainService
     private function isReservedSlug(string $slug): bool
     {
         $reserved = array_map('strtolower', (array) config('tenancy.reserved_subdomains', []));
+        $adminSubdomain = strtolower(trim((string) config('tenancy.admin_subdomain', 'admin26')));
+        if ($adminSubdomain !== '') {
+            $reserved[] = $adminSubdomain;
+        }
 
         return in_array(strtolower(trim($slug)), $reserved, true);
     }

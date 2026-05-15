@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { PROFILE_BUCKET, getSignedUrlForValue, supabase } from '../../lib/supabase'
-import menuConfig, { superAdminGroup, waliKelasItem } from '../../config/menuConfig'
+import { buildNavigationMenu } from '../../navigation/menu.utils'
 
 const isHttpUrl = (value = '') => /^https?:\/\//i.test(String(value || ''))
 
@@ -151,22 +151,10 @@ export const useWaliKelasFlag = (role, userId) => {
 }
 
 export const useNavigationMenu = ({ effectiveRole, isSuperAdmin, isWaliKelas, role }) => (
-  useMemo(() => {
-    let items = [...(menuConfig[effectiveRole] || [])]
-
-    if (role === 'guru' && isWaliKelas) {
-      const profileIndex = items.findIndex((item) => item.to === '/guru/profile')
-      items = profileIndex >= 0
-        ? [...items.slice(0, profileIndex), waliKelasItem, ...items.slice(profileIndex)]
-        : [...items, waliKelasItem]
-    }
-
-    if (isSuperAdmin) {
-      items = [...items, superAdminGroup]
-    }
-
-    return items
-  }, [effectiveRole, isSuperAdmin, isWaliKelas, role])
+  useMemo(
+    () => buildNavigationMenu({ effectiveRole, isSuperAdmin, isWaliKelas, role }),
+    [effectiveRole, isSuperAdmin, isWaliKelas, role]
+  )
 )
 
 export const useMonitoring = (effectiveRole) => {

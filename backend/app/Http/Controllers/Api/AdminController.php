@@ -6,7 +6,9 @@ use App\Models\Profile;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password as PasswordRule;
@@ -25,10 +27,16 @@ class AdminController extends ApiController
         }
 
         $payload = $request->all();
+        $createdVia = $this->normalizeProfileCreatedVia($payload['created_via'] ?? $payload['source'] ?? null, 'admin_created');
+        if ($createdVia === 'import' && array_key_exists('password', $payload)) {
+            $payload['password'] = $this->normalizeProvisionPassword((string) ($payload['password'] ?? ''));
+        }
+
         $validator = Validator::make($payload, [
+            'id' => 'nullable|string|max:191',
             'nama' => 'required|string|max:120',
             'email' => 'nullable|email|max:255',
-            'password' => ['required', 'string', PasswordRule::defaults()],
+            'password' => ['nullable', 'string', PasswordRule::defaults()],
             'role' => 'required|in:siswa,guru,admin',
             'nis' => 'nullable|string|max:64',
             'kelas' => 'nullable|string|max:120',
@@ -43,6 +51,9 @@ class AdminController extends ApiController
             'no_hp_siswa' => 'nullable|string|max:32',
             'no_hp_wali' => 'nullable|string|max:32',
             'must_change_password' => 'nullable|boolean',
+            'sync_existing' => 'nullable|boolean',
+            'created_via' => 'nullable|string|max:40',
+            'source' => 'nullable|string|max:40',
         ]);
         if ($validator->fails()) {
             return response()->json(['error' => $validator->errors()->first()], 422);
@@ -52,6 +63,9 @@ class AdminController extends ApiController
         $nama = trim((string) ($payload['nama'] ?? ''));
         $nis = trim((string) ($payload['nis'] ?? ''));
         $email = strtolower(trim((string) ($payload['email'] ?? '')));
+        $requestedId = trim((string) ($payload['id'] ?? ''));
+        $syncExisting = filter_var($payload['sync_existing'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        $allowExistingUpdate = $syncExisting || $requestedId !== '';
 
         if ($email === '') {
             if ($role !== 'siswa') {
@@ -66,63 +80,204 @@ class AdminController extends ApiController
             $email = $this->buildImportPlaceholderEmail((string) $seed, $tenantId);
         }
 
-        $existingUser = User::query()
-            ->whereRaw('lower(email) = ?', [$email])
-            ->first();
-        if ($existingUser) {
-            return response()->json(['error' => 'Email sudah terdaftar'], 409);
+        $existingProfile = null;
+        if ($requestedId !== '') {
+            $existingProfile = Profile::query()
+                ->where('tenant_id', $tenantId)
+                ->where('id', $requestedId)
+                ->first();
         }
 
-        if ($nis !== '') {
-            $existingNis = Profile::query()
+        if (! $existingProfile && $allowExistingUpdate && $nis !== '') {
+            $existingProfile = Profile::query()
                 ->where('tenant_id', $tenantId)
                 ->where('nis', $nis)
                 ->first();
-            if ($existingNis) {
+        }
+
+        if (! $existingProfile && $allowExistingUpdate && $email !== '') {
+            $existingProfile = Profile::query()
+                ->where('tenant_id', $tenantId)
+                ->whereRaw('lower(email) = ?', [$email])
+                ->first();
+        }
+
+        if ($existingProfile) {
+            $existingRole = strtolower(trim((string) ($existingProfile->role ?? '')));
+            $existingRole = $existingRole === 'teacher' ? 'guru' : $existingRole;
+            if ($existingRole !== $role) {
+                return response()->json(['error' => 'Data ditemukan, tapi role akun berbeda'], 409);
+            }
+
+            if (
+                Profile::query()
+                    ->where('tenant_id', $tenantId)
+                    ->whereRaw('lower(email) = ?', [$email])
+                    ->where('id', '!=', $existingProfile->id)
+                    ->exists()
+            ) {
+                return response()->json(['error' => 'Email sudah terdaftar di sekolah ini'], 409);
+            }
+
+            if ($nis !== '' && Profile::query()
+                ->where('tenant_id', $tenantId)
+                ->where('nis', $nis)
+                ->where('id', '!=', $existingProfile->id)
+                ->exists()
+            ) {
                 return response()->json(['error' => 'NIS/NIP sudah terdaftar di sekolah ini'], 409);
+            }
+        } else {
+            $existingUser = Profile::query()
+                ->where('tenant_id', $tenantId)
+                ->whereRaw('lower(email) = ?', [$email])
+                ->first();
+            if ($existingUser) {
+                return response()->json(['error' => 'Email sudah terdaftar di sekolah ini'], 409);
+            }
+
+            if ($nis !== '') {
+                $existingNis = Profile::query()
+                    ->where('tenant_id', $tenantId)
+                    ->where('nis', $nis)
+                    ->first();
+                if ($existingNis) {
+                    return response()->json(['error' => 'NIS/NIP sudah terdaftar di sekolah ini'], 409);
+                }
+            }
+
+            if (trim((string) ($payload['password'] ?? '')) === '') {
+                return response()->json(['error' => 'Password wajib diisi'], 422);
             }
         }
 
-        $userId = (string) Str::uuid();
-        $status = trim((string) ($payload['status'] ?? 'active')) ?: 'active';
+        $userId = $existingProfile ? (string) $existingProfile->id : (string) Str::uuid();
+        $statusInput = array_key_exists('status', $payload)
+            ? trim((string) ($payload['status'] ?? ''))
+            : trim((string) ($existingProfile->status ?? 'active'));
+        $status = $statusInput !== '' ? $statusInput : 'active';
+        $angkatan = $this->resolveCohortForClass($tenantId, $payload['kelas'] ?? null);
         $now = now();
+        $password = trim((string) ($payload['password'] ?? ''));
+        $actorId = (string) ($request->user()?->id ?? '');
+        $isUpdate = (bool) $existingProfile;
+        $oldData = $existingProfile ? (array) $existingProfile->getAttributes() : null;
+        $syncedSnapshots = [];
 
         $user = null;
         $profile = null;
 
-        DB::transaction(function () use ($payload, $tenantId, $userId, $nama, $email, $role, $nis, $status, $now, &$user, &$profile) {
-            $user = User::query()->create([
-                'id' => $userId,
-                'name' => $nama,
-                'email' => $email,
-                'password' => (string) ($payload['password'] ?? ''),
-            ]);
-
-            $profile = Profile::query()->create([
-                'id' => $userId,
-                'tenant_id' => $tenantId,
+        DB::transaction(function () use (
+            $payload,
+            $tenantId,
+            $userId,
+            $nama,
+            $email,
+            $role,
+            $nis,
+            $status,
+            $angkatan,
+            $now,
+            $password,
+            $actorId,
+            $createdVia,
+            $existingProfile,
+            $isUpdate,
+            &$user,
+            &$profile,
+            &$syncedSnapshots
+        ) {
+            $profilePayload = [
                 'email' => $email,
                 'nama' => $nama,
                 'role' => $role,
-                'nis' => $nis !== '' ? $nis : null,
-                'kelas' => $this->nullableString($payload['kelas'] ?? null),
-                'jk' => $this->nullableString($payload['jk'] ?? null),
-                'usia' => isset($payload['usia']) ? (int) $payload['usia'] : null,
-                'telp' => $this->nullableString($payload['telp'] ?? null),
-                'agama' => $this->nullableString($payload['agama'] ?? null),
-                'jabatan' => $this->nullableString($payload['jabatan'] ?? null),
-                'alamat' => $this->nullableString($payload['alamat'] ?? null),
                 'status' => $status,
-                'must_change_password' => (bool) ($payload['must_change_password'] ?? false),
-                'tanggal_lahir' => $this->nullableString($payload['tanggal_lahir'] ?? null),
-                'no_hp_siswa' => $this->nullableString($payload['no_hp_siswa'] ?? null),
-                'no_hp_wali' => $this->nullableString($payload['no_hp_wali'] ?? null),
-                'created_at' => $now,
                 'updated_at' => $now,
-            ]);
+            ];
+
+            if (! $isUpdate || $nis !== '') {
+                $profilePayload['nis'] = $nis !== '' ? $nis : null;
+            }
+
+            foreach (['kelas', 'jk', 'telp', 'agama', 'jabatan', 'alamat', 'tanggal_lahir', 'no_hp_siswa', 'no_hp_wali'] as $key) {
+                if (! $isUpdate || array_key_exists($key, $payload)) {
+                    $profilePayload[$key] = $this->nullableString($payload[$key] ?? null);
+                }
+            }
+
+            if (array_key_exists('tanggal_lahir', $profilePayload)) {
+                $profilePayload['usia'] = $profilePayload['tanggal_lahir']
+                    ? $this->calculateAgeFromBirthDate((string) $profilePayload['tanggal_lahir'])
+                    : null;
+            } elseif (! $isUpdate || array_key_exists('usia', $payload)) {
+                $rawUsia = $payload['usia'] ?? null;
+                $profilePayload['usia'] = $rawUsia === null || $rawUsia === ''
+                    ? null
+                    : (int) $rawUsia;
+            }
+
+            if (Schema::hasColumn('profiles', 'angkatan') && (! $isUpdate || array_key_exists('kelas', $payload))) {
+                $profilePayload['angkatan'] = $angkatan;
+            }
+
+            if (Schema::hasColumn('profiles', 'created_via') && (! $isUpdate || trim((string) ($existingProfile?->created_via ?? '')) === '')) {
+                $profilePayload['created_via'] = $createdVia;
+            }
+            if (Schema::hasColumn('profiles', 'created_by') && $actorId !== '' && (! $isUpdate || trim((string) ($existingProfile?->created_by ?? '')) === '')) {
+                $profilePayload['created_by'] = $actorId;
+            }
+
+            if ($isUpdate) {
+                Profile::query()
+                    ->where('id', $userId)
+                    ->where('tenant_id', $tenantId)
+                    ->update($profilePayload);
+
+                $user = User::query()->where('id', $userId)->first();
+                if ($user) {
+                    $user->forceFill([
+                        'name' => $nama,
+                        'email' => $email,
+                    ])->save();
+                } else {
+                    $user = User::query()->create([
+                        'id' => $userId,
+                        'name' => $nama,
+                        'email' => $email,
+                        'password' => $password !== '' ? $password : $this->temporaryStrongPassword(),
+                    ]);
+                }
+
+                $profile = Profile::query()
+                    ->where('id', $userId)
+                    ->where('tenant_id', $tenantId)
+                    ->first();
+            } else {
+                $user = User::query()->create([
+                    'id' => $userId,
+                    'name' => $nama,
+                    'email' => $email,
+                    'password' => $password,
+                ]);
+
+                $profilePayload['id'] = $userId;
+                $profilePayload['tenant_id'] = $tenantId;
+                $profilePayload['must_change_password'] = (bool) ($payload['must_change_password'] ?? false);
+                $profilePayload['created_at'] = $now;
+
+                $profile = Profile::query()->create($profilePayload);
+            }
+
+            if ($isUpdate) {
+                if ($role === 'guru') {
+                    $syncedSnapshots = $this->syncTeacherDisplayNameSnapshots($tenantId, $userId, $nama, $now);
+                } elseif ($role === 'siswa') {
+                    $syncedSnapshots = $this->syncStudentDisplayNameSnapshots($tenantId, $userId, $nama, $now);
+                }
+            }
         });
 
-        $this->logAudit($request, 'profiles', $userId, 'INSERT', null, [
+        $newData = [
             'id' => $userId,
             'tenant_id' => $tenantId,
             'email' => $email,
@@ -130,15 +285,24 @@ class AdminController extends ApiController
             'role' => $role,
             'nis' => $nis !== '' ? $nis : null,
             'status' => $status,
-            'must_change_password' => (bool) ($payload['must_change_password'] ?? false),
-        ], $tenantId);
+            'angkatan' => $angkatan,
+            'must_change_password' => (bool) ($profile?->must_change_password ?? ($payload['must_change_password'] ?? false)),
+            'created_via' => $profile?->created_via ?? null,
+            'created_by' => $profile?->created_by ?? null,
+        ];
+        if ($isUpdate) {
+            $newData['synced_snapshots'] = $syncedSnapshots;
+        }
+
+        $this->logAudit($request, 'profiles', $userId, $isUpdate ? 'UPDATE' : 'INSERT', $oldData, $newData, $tenantId);
 
         return response()->json([
             'data' => [
                 'user' => $user,
                 'profile' => $profile,
+                'status' => $isUpdate ? 'updated' : 'created',
             ],
-        ], 201);
+        ], $isUpdate ? 200 : 201);
     }
 
     public function monitoring(Request $request)
@@ -160,16 +324,7 @@ class AdminController extends ApiController
         }
 
         $activeCutoff = now()->subSeconds($activeSeconds)->toDateTimeString();
-
-        $presenceAgg = DB::table('user_presence')
-            ->select(
-                'user_id',
-                DB::raw('max(last_seen_at) as last_seen_at')
-            )
-            ->selectRaw('sum(case when last_seen_at >= ? then 1 else 0 end) as active_devices', [$activeCutoff])
-            ->selectRaw('sum(case when last_seen_at >= ? then activity_count else 0 end) as activity_count', [$activeCutoff])
-            ->where('tenant_id', $tenantId)
-            ->groupBy('user_id');
+        $presenceAgg = $this->presenceAggregateQuery($tenantId, $activeCutoff);
 
         $rows = DB::table('profiles as p')
             ->leftJoinSub($presenceAgg, 'pr', 'p.id', '=', 'pr.user_id')
@@ -251,6 +406,696 @@ class AdminController extends ApiController
         ]);
     }
 
+    public function dashboardSummary(Request $request)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        $cacheKey = "tenant:{$tenantId}:admin-dashboard-summary:v2";
+        $payload = Cache::remember($cacheKey, now()->addSeconds(60), function () use ($tenantId) {
+            $profileCounts = DB::table('profiles')
+                ->select('role', DB::raw('count(*) as aggregate'))
+                ->where('tenant_id', $tenantId)
+                ->whereIn('role', ['siswa', 'guru', 'admin'])
+                ->groupBy('role')
+                ->pluck('aggregate', 'role');
+
+            $settings = $this->firstTenantRow('settings', $tenantId);
+            $periodStart = $settings?->periode_mulai ?? null;
+            $periodEnd = $settings?->periode_selesai ?? null;
+
+            $attendanceQuery = $this->tenantQuery('absensi', $tenantId);
+            if ($periodStart && $periodEnd && Schema::hasColumn('absensi', 'tanggal')) {
+                $attendanceQuery->whereBetween('tanggal', [$periodStart, $periodEnd]);
+            }
+
+            return [
+                'siswa' => (int) ($profileCounts['siswa'] ?? 0),
+                'guru' => (int) ($profileCounts['guru'] ?? 0),
+                'admin' => (int) ($profileCounts['admin'] ?? 0),
+                'kelas' => $this->tenantTableCount('kelas', $tenantId),
+                'absensi' => Schema::hasTable('absensi') ? (int) $attendanceQuery->count() : 0,
+                'pengumuman' => $this->tenantTableCount('pengumuman', $tenantId),
+                'eskul' => $this->tenantTableCount('ekskul', $tenantId),
+                'generated_at' => now()->toISOString(),
+            ];
+        });
+
+        return response()->json(['data' => $payload]);
+    }
+
+    public function students(Request $request)
+    {
+        if (! $this->isAdmin($request) && ! $this->isGuru($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        $isAdmin = $this->isAdmin($request);
+        $teacherClassIds = null;
+        if (! $isAdmin) {
+            $teacherClassIds = $this->teacherClassIds($tenantId, (string) ($request->user()?->id ?? ''));
+            if (empty($teacherClassIds)) {
+                return response()->json([
+                    'data' => [
+                        'rows' => [],
+                        'meta' => $this->paginationMeta(1, $this->perPage($request), 0),
+                        'stats' => $this->emptyStudentStats(),
+                        'kelas' => [],
+                        'struktur' => [],
+                        'wali_kelas_ids' => [],
+                    ],
+                ]);
+            }
+        }
+
+        $page = max(1, (int) $request->query('page', 1));
+        $allRows = filter_var($request->query('all', false), FILTER_VALIDATE_BOOLEAN);
+        $perPage = $allRows ? min(10000, max(1, (int) $request->query('per_page', 10000))) : $this->perPage($request);
+
+        $presenceAgg = $this->presenceAggregateQuery($tenantId);
+        $query = $this->studentBaseQuery($tenantId, $teacherClassIds)
+            ->leftJoinSub($presenceAgg, 'pr', 'profiles.id', '=', 'pr.user_id');
+        $this->applyStudentFilters($query, $request);
+
+        $total = (clone $query)->count('profiles.id');
+        $studentColumns = $this->prefixedExistingColumns('profiles', [
+            'id', 'email', 'nama', 'role', 'kelas', 'jk', 'usia', 'telp', 'photo_url',
+            'created_at', 'nis', 'agama', 'jabatan', 'alamat', 'status',
+            'alasan_nonaktif', 'disabled_at', 'tanggal_lahir', 'updated_at',
+            'rfid_uid', 'kelas_change_used', 'no_hp_siswa', 'no_hp_wali',
+            'deleted_at', 'photo_path', 'photo_updated_at', 'angkatan',
+            'created_via', 'created_by',
+        ]);
+        $rows = $query
+            ->select($studentColumns)
+            ->selectRaw('pr.last_seen_at as last_seen_at')
+            ->selectRaw('coalesce(pr.active_devices, 0) as active_devices')
+            ->selectRaw('coalesce(pr.activity_count, 0) as activity_count')
+            ->selectRaw('case when coalesce(pr.active_devices, 0) > 0 then 1 else 0 end as online')
+            ->orderByRaw('case when coalesce(pr.active_devices, 0) > 0 then 0 else 1 end')
+            ->orderByRaw('case when pr.last_seen_at is null then 1 else 0 end')
+            ->orderByDesc('pr.last_seen_at')
+            ->orderBy('profiles.kelas')
+            ->orderBy('profiles.nama')
+            ->when(! $allRows, fn ($builder) => $builder->offset(($page - 1) * $perPage)->limit($perPage))
+            ->when($allRows, fn ($builder) => $builder->limit($perPage))
+            ->get()
+            ->map(fn ($row) => (array) $row)
+            ->values();
+
+        $kelas = $this->tenantQuery('kelas', $tenantId)
+            ->select($this->existingColumns('kelas', ['id', 'nama', 'tingkat', 'jurusan', 'wali_kelas', 'angkatan', 'created_at', 'updated_at']))
+            ->when($teacherClassIds !== null, fn ($builder) => $builder->whereIn('id', $teacherClassIds))
+            ->orderBy('id')
+            ->get()
+            ->map(fn ($row) => (array) $row)
+            ->values();
+
+        $struktur = $this->tenantQuery('kelas_struktur', $tenantId)
+            ->select($this->existingColumns('kelas_struktur', ['kelas_id', 'wali_guru_id', 'wali_guru_nama', 'ketua_siswa_id', 'ketua_siswa_nama', 'created_at', 'updated_at']))
+            ->when($teacherClassIds !== null, fn ($builder) => $builder->whereIn('kelas_id', $teacherClassIds))
+            ->get()
+            ->map(fn ($row) => (array) $row)
+            ->values();
+
+        return response()->json([
+            'data' => [
+                'rows' => $rows,
+                'meta' => $this->paginationMeta($page, $perPage, $total, $allRows),
+                'stats' => $this->studentStats($tenantId, $teacherClassIds),
+                'kelas' => $kelas,
+                'struktur' => $struktur,
+                'wali_kelas_ids' => $teacherClassIds ?? [],
+            ],
+        ]);
+    }
+
+    public function studentDetail(Request $request, string $id)
+    {
+        if (! $this->isAdmin($request) && ! $this->isGuru($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        $query = $this->studentBaseQuery($tenantId);
+        if (! $this->isAdmin($request)) {
+            $teacherClassIds = $this->teacherClassIds($tenantId, (string) ($request->user()?->id ?? ''));
+            if (empty($teacherClassIds)) {
+                return $this->deny('Siswa tidak ditemukan', 404);
+            }
+            $query->whereIn('kelas', $teacherClassIds);
+        }
+
+        $profile = $query
+            ->where('id', $id)
+            ->select($this->existingColumns('profiles', [
+                'id', 'email', 'nama', 'role', 'kelas', 'jk', 'usia', 'telp', 'photo_url',
+                'created_at', 'nis', 'agama', 'jabatan', 'alamat', 'status',
+                'alasan_nonaktif', 'disabled_at', 'tanggal_lahir', 'updated_at',
+                'rfid_uid', 'kelas_change_used', 'no_hp_siswa', 'no_hp_wali',
+                'deleted_at', 'photo_path', 'photo_updated_at', 'angkatan',
+                'created_via', 'created_by',
+            ]))
+            ->first();
+
+        if (! $profile) {
+            return $this->deny('Siswa tidak ditemukan', 404);
+        }
+
+        return response()->json([
+            'data' => [
+                'profile' => (array) $profile,
+                'org_member' => $this->studentOrganizationMemberships($tenantId, $id),
+                'osis' => $this->studentOsisMembership($tenantId, $id),
+            ],
+        ]);
+    }
+
+    public function academicSummary(Request $request)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        $includeStudents = filter_var($request->query('include_students', true), FILTER_VALIDATE_BOOLEAN);
+        $includeSchedule = filter_var($request->query('include_schedule', false), FILTER_VALIDATE_BOOLEAN);
+        $includeMapel = filter_var($request->query('include_mapel', false), FILTER_VALIDATE_BOOLEAN);
+        $requestedClassId = $this->queryText($request, 'class_id');
+        $studentStatus = strtolower($this->queryText($request, 'student_status'));
+        $tahunAjaran = $this->queryText($request, 'tahun_ajaran');
+        $semester = $this->queryText($request, 'semester');
+
+        $settings = $this->firstTenantRow('settings', $tenantId);
+        if ($tahunAjaran === '') {
+            $tahunAjaran = (string) ($settings?->tahun_ajaran ?? '');
+        }
+        if ($semester === '') {
+            $semester = (string) ($settings?->semester_aktif ?? '');
+        }
+
+        $classes = $this->tenantQuery('kelas', $tenantId)
+            ->select($this->existingColumns('kelas', [
+                'id', 'nama', 'grade', 'suffix', 'tingkat', 'jurusan',
+                'angkatan', 'tahun_ajaran', 'semester', 'is_active',
+                'created_at', 'updated_at',
+            ]))
+            ->orderBy(Schema::hasColumn('kelas', 'grade') ? 'grade' : 'id')
+            ->when(Schema::hasColumn('kelas', 'suffix'), fn ($builder) => $builder->orderBy('suffix'))
+            ->get()
+            ->map(fn ($row) => (array) $row)
+            ->values();
+
+        $selectedClassId = $requestedClassId;
+        if ($selectedClassId === '' || ! $classes->contains(fn ($row) => (string) ($row['id'] ?? '') === $selectedClassId)) {
+            $selectedClassId = (string) ($classes->first()['id'] ?? '');
+        }
+
+        $teacherRows = DB::table('profiles')
+            ->where('tenant_id', $tenantId)
+            ->whereIn('role', ['guru', 'teacher'])
+            ->select($this->existingColumns('profiles', ['id', 'nama', 'email', 'role', 'jabatan', 'status', 'updated_at', 'created_via', 'created_by']))
+            ->orderBy('nama')
+            ->limit(1000)
+            ->get()
+            ->map(fn ($row) => (array) $row)
+            ->values();
+
+        $selectedStructure = $selectedClassId !== '' && Schema::hasTable('kelas_struktur')
+            ? $this->tenantQuery('kelas_struktur', $tenantId)
+                ->select($this->existingColumns('kelas_struktur', [
+                    'kelas_id', 'wali_guru_id', 'wali_guru_nama',
+                    'ketua_siswa_id', 'ketua_siswa_nama', 'created_at', 'updated_at',
+                ]))
+                ->where('kelas_id', $selectedClassId)
+                ->first()
+            : null;
+
+        $students = collect();
+        if ($includeStudents && $selectedClassId !== '') {
+            $studentLimit = max(1, min(1000, (int) $request->query('students_limit', 250)));
+            $studentQuery = DB::table('profiles')
+                ->where('tenant_id', $tenantId)
+                ->where('role', 'siswa')
+                ->where('kelas', $selectedClassId);
+
+            if ($studentStatus !== '') {
+                $studentQuery->whereRaw('lower(coalesce(status, \'active\')) = ?', [$studentStatus]);
+            }
+
+            $students = $studentQuery
+                ->select($this->existingColumns('profiles', [
+                    'id', 'nama', 'email', 'kelas', 'role', 'status', 'nis', 'angkatan',
+                    'created_via', 'created_by',
+                ]))
+                ->orderBy('nama')
+                ->limit($studentLimit)
+                ->get()
+                ->map(fn ($row) => (array) $row)
+                ->values();
+        }
+
+        $schedule = collect();
+        if ($includeSchedule && $selectedClassId !== '' && Schema::hasTable('jadwal')) {
+            $scheduleQuery = $this->tenantQuery('jadwal', $tenantId)
+                ->select($this->existingColumns('jadwal', [
+                    'id', 'kelas_id', 'hari', 'mapel', 'guru_id', 'guru_nama',
+                    'jam_mulai', 'jam_selesai', 'tahun_ajaran', 'semester',
+                    'created_at', 'updated_at',
+                ]))
+                ->where('kelas_id', $selectedClassId);
+
+            if ($tahunAjaran !== '' && Schema::hasColumn('jadwal', 'tahun_ajaran')) {
+                $scheduleQuery->where('tahun_ajaran', $tahunAjaran);
+            }
+            if ($semester !== '' && Schema::hasColumn('jadwal', 'semester')) {
+                $scheduleQuery->where('semester', $semester);
+            }
+
+            $schedule = $scheduleQuery
+                ->orderBy('hari')
+                ->orderBy('jam_mulai')
+                ->get()
+                ->map(fn ($row) => (array) $row)
+                ->values();
+        }
+
+        $mapel = collect();
+        if ($includeMapel && Schema::hasTable('mata_pelajaran')) {
+            $mapel = $this->tenantQuery('mata_pelajaran', $tenantId)
+                ->select($this->existingColumns('mata_pelajaran', ['id', 'nama', 'created_at', 'updated_at']))
+                ->orderBy('nama')
+                ->limit(1000)
+                ->get()
+                ->map(fn ($row) => (array) $row)
+                ->values();
+        }
+
+        return response()->json([
+            'data' => [
+                'settings' => $settings ? (array) $settings : null,
+                'guru' => $teacherRows,
+                'kelas' => $classes,
+                'selected_class_id' => $selectedClassId,
+                'selected_structure' => $selectedStructure ? (array) $selectedStructure : null,
+                'selected_students' => $students,
+                'schedule' => $schedule,
+                'mapel' => $mapel,
+                'statistics' => [
+                    'teachers' => $teacherRows->count(),
+                    'classes' => $classes->count(),
+                    'selected_students' => $students->count(),
+                    'schedule_rows' => $schedule->count(),
+                    'mapel' => $mapel->count(),
+                ],
+                'generated_at' => now()->toISOString(),
+            ],
+        ]);
+    }
+
+    public function studentOptions(Request $request)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        $allRows = filter_var($request->query('all', false), FILTER_VALIDATE_BOOLEAN);
+        $perPage = $allRows
+            ? max(1, min(10000, (int) $request->query('per_page', 10000)))
+            : max(1, min(100, (int) $request->query('per_page', 50)));
+        $search = strtolower($this->queryText($request, 'q'));
+        $kelas = $this->queryText($request, 'kelas');
+        $status = strtolower($this->queryText($request, 'status') ?: 'active');
+
+        $query = DB::table('profiles')
+            ->where('tenant_id', $tenantId)
+            ->where('role', 'siswa');
+
+        if ($status !== '') {
+            $query->whereRaw('lower(coalesce(status, \'active\')) = ?', [$status]);
+        }
+        if ($kelas !== '') {
+            $query->where('kelas', $kelas);
+        }
+        if ($search !== '') {
+            $like = '%'.$search.'%';
+            $query->where(function ($builder) use ($like) {
+                $builder->whereRaw('lower(coalesce(nama, \'\')) like ?', [$like])
+                    ->orWhereRaw('lower(coalesce(email, \'\')) like ?', [$like])
+                    ->orWhereRaw('lower(coalesce(nis, \'\')) like ?', [$like])
+                    ->orWhereRaw('lower(coalesce(kelas, \'\')) like ?', [$like]);
+            });
+        }
+
+        $rows = $query
+            ->select($this->existingColumns('profiles', ['id', 'nama', 'email', 'kelas', 'nis', 'status', 'angkatan', 'created_via', 'created_by']))
+            ->orderBy('kelas')
+            ->orderBy('nama')
+            ->limit($perPage + 1)
+            ->get()
+            ->map(fn ($row) => (array) $row)
+            ->values();
+
+        $hasMore = $rows->count() > $perPage;
+
+        return response()->json([
+            'data' => [
+                'rows' => $rows->take($perPage)->values(),
+                'meta' => [
+                    'per_page' => $perPage,
+                    'has_more' => $hasMore,
+                    'all' => $allRows,
+                ],
+            ],
+        ]);
+    }
+
+    public function teachers(Request $request)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        $page = max(1, (int) $request->query('page', 1));
+        $allRows = filter_var($request->query('all', false), FILTER_VALIDATE_BOOLEAN);
+        $perPage = $allRows ? min(10000, max(1, (int) $request->query('per_page', 10000))) : $this->perPage($request);
+
+        $presenceAgg = $this->presenceAggregateQuery($tenantId);
+        $teacherColumns = $this->prefixedExistingColumns('profiles', [
+            'id', 'email', 'nama', 'role', 'kelas', 'jk', 'usia', 'telp', 'photo_url',
+            'created_at', 'nis', 'agama', 'jabatan', 'alamat', 'status',
+            'alasan_nonaktif', 'disabled_at', 'tanggal_lahir', 'updated_at',
+            'photo_path', 'photo_updated_at', 'created_via', 'created_by',
+        ]);
+        $baseTeachers = DB::table('profiles')
+            ->leftJoinSub($presenceAgg, 'pr', 'profiles.id', '=', 'pr.user_id')
+            ->where('profiles.tenant_id', $tenantId)
+            ->where('profiles.role', 'guru')
+            ->select($teacherColumns)
+            ->selectRaw('pr.last_seen_at as last_seen_at')
+            ->selectRaw('coalesce(pr.active_devices, 0) as active_devices')
+            ->selectRaw('coalesce(pr.activity_count, 0) as activity_count')
+            ->selectRaw('case when coalesce(pr.active_devices, 0) > 0 then 1 else 0 end as online')
+            ->orderByRaw('case when coalesce(pr.active_devices, 0) > 0 then 0 else 1 end')
+            ->orderByRaw('case when pr.last_seen_at is null then 1 else 0 end')
+            ->orderByDesc('pr.last_seen_at')
+            ->orderBy('profiles.nama')
+            ->get()
+            ->map(fn ($row) => (array) $row);
+
+        $teacherIds = $baseTeachers->pluck('id')->filter()->values()->all();
+        $jadwalRows = empty($teacherIds)
+            ? collect()
+            : $this->tenantQuery('jadwal', $tenantId)
+                ->select($this->existingColumns('jadwal', ['id', 'kelas_id', 'hari', 'mapel', 'guru_id', 'guru_nama', 'jam_mulai', 'jam_selesai', 'created_at', 'updated_at']))
+                ->whereIn('guru_id', $teacherIds)
+                ->get();
+        $waliRows = empty($teacherIds)
+            ? collect()
+            : $this->tenantQuery('kelas_struktur', $tenantId)
+                ->select($this->existingColumns('kelas_struktur', ['kelas_id', 'wali_guru_id', 'wali_guru_nama']))
+                ->whereIn('wali_guru_id', $teacherIds)
+                ->get();
+        $strukturRows = empty($teacherIds)
+            ? collect()
+            : $this->tenantQuery('struktur_sekolah', $tenantId)
+                ->select($this->existingColumns('struktur_sekolah', ['id', 'jabatan', 'guru_id', 'guru_nama']))
+                ->whereIn('guru_id', $teacherIds)
+                ->get();
+
+        $jadwalByTeacher = $jadwalRows->groupBy('guru_id');
+        $waliByTeacher = $waliRows->groupBy('wali_guru_id');
+        $strukturByTeacher = $strukturRows->groupBy('guru_id');
+        $allMapel = [];
+        $allJabatan = [];
+
+        $teachers = $baseTeachers->map(function (array $teacher) use ($jadwalByTeacher, $waliByTeacher, $strukturByTeacher, &$allMapel, &$allJabatan) {
+            $teacherId = (string) ($teacher['id'] ?? '');
+            $mapel = $jadwalByTeacher->get($teacherId, collect())
+                ->pluck('mapel')
+                ->filter()
+                ->unique()
+                ->values()
+                ->all();
+            $kelas = $jadwalByTeacher->get($teacherId, collect())
+                ->pluck('kelas_id')
+                ->merge($waliByTeacher->get($teacherId, collect())->pluck('kelas_id'))
+                ->filter()
+                ->unique()
+                ->values()
+                ->all();
+            $jabatan = [];
+            if (! empty($teacher['jabatan'])) {
+                $jabatan[] = (string) $teacher['jabatan'];
+            }
+            $jabatan = collect($jabatan)
+                ->merge($strukturByTeacher->get($teacherId, collect())->pluck('jabatan'))
+                ->filter()
+                ->unique()
+                ->values()
+                ->all();
+
+            $allMapel = array_merge($allMapel, $mapel);
+            $allJabatan = array_merge($allJabatan, $jabatan);
+
+            $teacher['mapelList'] = $mapel;
+            $teacher['kelasList'] = $kelas;
+            $teacher['jabatanList'] = $jabatan;
+            $teacher['jabatanUtama'] = $jabatan[0] ?? ($teacher['jabatan'] ?? '-');
+
+            return $teacher;
+        })->values();
+
+        $filtered = $this->sortRowsByPresence($this->filterTeacherRows($teachers, $request))->values();
+        $total = $filtered->count();
+        $rows = $allRows
+            ? $filtered->take($perPage)->values()
+            : $filtered->slice(($page - 1) * $perPage, $perPage)->values();
+
+        $statusCounts = $teachers->groupBy(fn ($row) => strtolower(trim((string) ($row['status'] ?? 'active'))) ?: 'active')
+            ->map(fn ($items) => $items->count());
+
+        return response()->json([
+            'data' => [
+                'rows' => $rows,
+                'meta' => $this->paginationMeta($page, $perPage, $total, $allRows),
+                'stats' => [
+                    'totalGuru' => $teachers->count(),
+                    'aktifGuru' => (int) ($statusCounts['active'] ?? 0),
+                    'nonaktifGuru' => (int) ($statusCounts['nonaktif'] ?? 0),
+                    'mutasiGuru' => (int) ($statusCounts['mutasi'] ?? 0),
+                    'inactiveGuru' => max(0, $teachers->count() - (int) ($statusCounts['active'] ?? 0)),
+                    'mapelCount' => count(array_unique(array_filter($allMapel))),
+                    'jabatanCount' => count(array_unique(array_filter($allJabatan))),
+                ],
+                'filter_options' => [
+                    'mapel' => array_values(array_unique(array_filter($allMapel))),
+                    'jabatan' => array_values(array_unique(array_filter($allJabatan))),
+                ],
+            ],
+        ]);
+    }
+
+    public function certificates(Request $request)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        $page = max(1, (int) $request->query('page', 1));
+        $perPage = $this->perPage($request, 50);
+
+        $query = DB::table('certificates as c')
+            ->leftJoin('profiles as p', 'c.user_id', '=', 'p.id');
+        if (Schema::hasColumn('certificates', 'tenant_id')) {
+            $query->where('c.tenant_id', $tenantId);
+        } else {
+            $query->where(function ($builder) use ($tenantId) {
+                $builder->where('p.tenant_id', $tenantId)
+                    ->orWhereNull('c.user_id');
+            });
+        }
+
+        $search = $this->queryText($request, 'q');
+        if ($search !== '') {
+            $like = '%'.strtolower($search).'%';
+            $query->where(function ($builder) use ($like) {
+                $builder->whereRaw('lower(c.nama_penerima) like ?', [$like])
+                    ->orWhereRaw('lower(c.email) like ?', [$like])
+                    ->orWhereRaw('lower(c.event) like ?', [$like])
+                    ->orWhereRaw('lower(coalesce(c.kelas, p.kelas, \'\')) like ?', [$like]);
+            });
+        }
+        $kelas = $this->queryText($request, 'kelas');
+        if ($kelas !== '') {
+            $query->where(function ($builder) use ($kelas) {
+                $builder->where('c.kelas', $kelas)->orWhere('p.kelas', $kelas);
+            });
+        }
+        $sent = $this->queryText($request, 'sent');
+        if ($sent !== '') {
+            $query->where('c.sent', filter_var($sent, FILTER_VALIDATE_BOOLEAN));
+        }
+
+        $total = (clone $query)->count('c.id');
+        $rows = $query
+            ->select([
+                'c.*',
+                'p.nama as profile_nama',
+                'p.kelas as profile_kelas',
+                'p.email as profile_email',
+            ])
+            ->orderByDesc('c.issued_at')
+            ->offset(($page - 1) * $perPage)
+            ->limit($perPage)
+            ->get()
+            ->map(fn ($row) => (array) $row)
+            ->values();
+
+        return response()->json([
+            'data' => [
+                'rows' => $rows,
+                'meta' => $this->paginationMeta($page, $perPage, $total),
+            ],
+        ]);
+    }
+
+    public function scanSessionSummary(Request $request)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        $date = $this->queryText($request, 'date') ?: now('Asia/Jakarta')->toDateString();
+        $dayName = $this->indonesianDayName(Carbon::parse($date, 'Asia/Jakarta'));
+
+        $settings = $this->firstTenantRow('settings', $tenantId);
+        $classes = $this->tenantQuery('kelas', $tenantId)
+            ->select($this->existingColumns('kelas', ['id', 'nama', 'tingkat', 'jurusan', 'angkatan']))
+            ->orderBy('id')
+            ->get();
+
+        $todaySchedule = $this->tenantQuery('jadwal', $tenantId)
+            ->select($this->existingColumns('jadwal', ['id', 'kelas_id', 'hari', 'mapel', 'guru_id', 'guru_nama', 'jam_mulai', 'jam_selesai']))
+            ->whereRaw('lower(hari) = ?', [strtolower($dayName)])
+            ->orderBy('kelas_id')
+            ->orderBy('jam_mulai')
+            ->get();
+
+        $studentCountByClass = DB::table('profiles')
+            ->select('kelas', DB::raw('count(*) as aggregate'))
+            ->where('tenant_id', $tenantId)
+            ->where('role', 'siswa')
+            ->groupBy('kelas')
+            ->pluck('aggregate', 'kelas');
+        $scheduleCountByClass = $todaySchedule->groupBy('kelas_id')->map(fn ($rows) => $rows->count());
+
+        $recentScans = Schema::hasTable('absensi_scan_temp')
+            ? $this->tenantQuery('absensi_scan_temp', $tenantId, 't')
+                ->leftJoin('profiles as p', function ($join) use ($tenantId) {
+                    $join->on('p.id', '=', 't.siswa_id')
+                        ->where('p.tenant_id', '=', $tenantId);
+                })
+                ->select([
+                    't.id',
+                    't.tanggal',
+                    't.siswa_id',
+                    't.kelas',
+                    't.sesi',
+                    't.scan_at',
+                    't.source',
+                    't.card_uid',
+                    't.mapel_count',
+                    't.created_at',
+                    'p.nama as siswa_nama',
+                    'p.nis as siswa_nis',
+                    'p.photo_url as siswa_photo_url',
+                    'p.rfid_uid as siswa_rfid_uid',
+                ])
+                ->where('t.tanggal', $date)
+                ->orderByDesc('t.scan_at')
+                ->limit(50)
+                ->get()
+            : collect();
+        $scannedCountByClass = $recentScans
+            ->groupBy('kelas')
+            ->map(fn ($rows) => $rows->pluck('siswa_id')->unique()->count());
+
+        $classes = $classes->map(function ($row) use ($studentCountByClass, $scheduleCountByClass, $scannedCountByClass) {
+            $item = (array) $row;
+            $classId = (string) ($item['id'] ?? '');
+            $item['total_siswa'] = (int) ($studentCountByClass[$classId] ?? 0);
+            $item['total_mapel'] = (int) ($scheduleCountByClass[$classId] ?? 0);
+            $item['scanned_count'] = (int) ($scannedCountByClass[$classId] ?? 0);
+
+            return $item;
+        })->values();
+
+        $studentsWithRfid = DB::table('profiles')
+            ->where('tenant_id', $tenantId)
+            ->where('role', 'siswa')
+            ->whereNotNull('rfid_uid')
+            ->where('rfid_uid', '<>', '')
+            ->count('id');
+
+        return response()->json([
+            'data' => [
+                'settings' => $settings ? (array) $settings : null,
+                'date' => $date,
+                'day' => $dayName,
+                'classes' => $classes,
+                'today_schedule' => $todaySchedule,
+                'recent_scans' => $recentScans,
+                'statistics' => [
+                    'classes' => $classes->count(),
+                    'schedule_rows' => $todaySchedule->count(),
+                    'recent_scans' => $recentScans->count(),
+                    'students_with_rfid' => (int) $studentsWithRfid,
+                ],
+                'generated_at' => now()->toISOString(),
+            ],
+        ]);
+    }
+
     public function deleteUser(Request $request, string $id)
     {
         if (! $this->isAdmin($request)) {
@@ -276,24 +1121,154 @@ class AdminController extends ApiController
             return $this->deny('Tidak bisa menghapus akun sendiri', 409);
         }
 
-        $oldData = (array) $profile;
+        return $this->deny(
+            'Hapus permanen akun guru/siswa sudah dinonaktifkan. Gunakan Mutasi atau Nonaktif agar data tetap aman.',
+            409
+        );
+    }
 
-        try {
-            DB::transaction(function () use ($id, $role) {
-                $this->cleanupBeforeHardDelete($id, $role);
-
-                $deleted = DB::table('users')->where('id', $id)->delete();
-                if ($deleted === 0) {
-                    DB::table('profiles')->where('id', $id)->delete();
-                }
-            });
-        } catch (\Throwable $e) {
-            return $this->deny('Gagal menghapus user, masih ada data yang terkait.', 409);
+    public function updateUserStatus(Request $request, string $id)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
         }
 
-        $this->logAudit($request, 'profiles', $id, 'DELETE', $oldData, null, $tenantId);
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
 
-        return response()->json(['data' => 'deleted']);
+        $validator = Validator::make($request->all(), [
+            'status' => ['required', 'string', 'in:active,nonaktif,mutasi,alumni'],
+            'reason' => ['nullable', 'string', 'max:1000'],
+            'role' => ['nullable', 'string', 'in:siswa,guru,teacher'],
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['error' => $validator->errors()->first()], 422);
+        }
+
+        $profile = DB::table('profiles')
+            ->where('id', $id)
+            ->where('tenant_id', $tenantId)
+            ->first();
+        if (! $profile) {
+            return $this->deny('User tidak ditemukan', 404);
+        }
+
+        $role = strtolower((string) ($profile->role ?? ''));
+        $normalizedRole = $role === 'teacher' ? 'guru' : $role;
+        if (! in_array($normalizedRole, ['guru', 'siswa'], true)) {
+            return $this->deny('Status hanya bisa diubah untuk guru atau siswa', 409);
+        }
+
+        $expectedRole = strtolower(trim((string) $request->input('role', '')));
+        $expectedRole = $expectedRole === 'teacher' ? 'guru' : $expectedRole;
+        if ($expectedRole !== '' && $expectedRole !== $normalizedRole) {
+            return $this->deny('Role user tidak sesuai dengan data yang dikirim', 409);
+        }
+
+        $status = strtolower(trim((string) $request->input('status')));
+        if ($normalizedRole === 'guru' && $status === 'alumni') {
+            return $this->deny('Status alumni hanya tersedia untuk siswa', 422);
+        }
+
+        $reason = preg_replace('/\s+/', ' ', trim((string) $request->input('reason', ''))) ?? '';
+        if (in_array($status, ['nonaktif', 'mutasi', 'alumni'], true) && $reason === '') {
+            return $this->deny('Alasan wajib diisi', 422);
+        }
+
+        $now = now();
+        $oldData = (array) $profile;
+        $profilePayload = [
+            'status' => $status,
+            'updated_at' => $now,
+        ];
+
+        if ($status === 'active') {
+            $profilePayload['alasan_nonaktif'] = null;
+            $profilePayload['disabled_at'] = null;
+        } else {
+            $profilePayload['alasan_nonaktif'] = $reason;
+            $profilePayload['disabled_at'] = $now;
+        }
+
+        if ($normalizedRole === 'siswa' && in_array($status, ['mutasi', 'alumni'], true)) {
+            if (Schema::hasColumn('profiles', 'rfid_uid')) {
+                $profilePayload['rfid_uid'] = null;
+            }
+            if (Schema::hasColumn('profiles', 'kelas')) {
+                $profilePayload['kelas'] = '';
+            }
+        }
+
+        $syncedAssignments = [];
+        DB::transaction(function () use (
+            $id,
+            $tenantId,
+            $normalizedRole,
+            $status,
+            $profilePayload,
+            $now,
+            &$syncedAssignments
+        ) {
+            DB::table('profiles')
+                ->where('id', $id)
+                ->where('tenant_id', $tenantId)
+                ->update($profilePayload);
+
+            if (Schema::hasColumn('users', 'updated_at')) {
+                DB::table('users')
+                    ->where('id', $id)
+                    ->update(['updated_at' => $now]);
+            }
+
+            if (in_array($status, ['mutasi', 'alumni'], true)) {
+                $syncedAssignments = $normalizedRole === 'guru'
+                    ? $this->clearTeacherActiveAssignments($tenantId, $id, $now)
+                    : $this->clearStudentActiveAssignments($tenantId, $id, $now);
+            }
+        });
+
+        $fresh = Profile::query()
+            ->where('id', $id)
+            ->where('tenant_id', $tenantId)
+            ->first();
+
+        $this->logAudit(
+            $request,
+            'profiles',
+            $id,
+            'UPDATE',
+            [
+                'id' => $id,
+                'tenant_id' => $tenantId,
+                'role' => $role,
+                'status' => $oldData['status'] ?? null,
+                'alasan_nonaktif' => $oldData['alasan_nonaktif'] ?? null,
+                'disabled_at' => $oldData['disabled_at'] ?? null,
+                'kelas' => $oldData['kelas'] ?? null,
+                'rfid_uid' => $oldData['rfid_uid'] ?? null,
+            ],
+            [
+                'id' => $id,
+                'tenant_id' => $tenantId,
+                'role' => $normalizedRole,
+                'status' => $fresh?->status,
+                'alasan_nonaktif' => $fresh?->alasan_nonaktif,
+                'disabled_at' => $fresh?->disabled_at,
+                'kelas' => $fresh?->kelas,
+                'rfid_uid' => $fresh?->rfid_uid,
+                'synced_assignments' => $syncedAssignments,
+            ],
+            $tenantId
+        );
+
+        return response()->json([
+            'data' => [
+                'profile' => $fresh,
+                'synced_assignments' => $syncedAssignments,
+            ],
+        ]);
     }
 
     public function updateTeacherName(Request $request, string $id)
@@ -445,7 +1420,6 @@ class AdminController extends ApiController
         $validator = Validator::make($payload, [
             'nama' => ['sometimes', 'string', 'max:120'],
             'jk' => ['sometimes', 'nullable', 'string', 'max:20'],
-            'usia' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:150'],
             'tanggal_lahir' => ['sometimes', 'nullable', 'date'],
             'agama' => ['sometimes', 'nullable', 'string', 'max:50'],
             'alamat' => ['sometimes', 'nullable', 'string', 'max:1000'],
@@ -454,7 +1428,7 @@ class AdminController extends ApiController
             return response()->json(['error' => $validator->errors()->first()], 422);
         }
 
-        $allowedKeys = ['nama', 'jk', 'usia', 'tanggal_lahir', 'agama', 'alamat'];
+        $allowedKeys = ['nama', 'jk', 'tanggal_lahir', 'agama', 'alamat'];
         $hasAnyField = false;
         foreach ($allowedKeys as $key) {
             if (array_key_exists($key, $payload)) {
@@ -485,9 +1459,6 @@ class AdminController extends ApiController
             $tanggalLahir = $this->nullableString($payload['tanggal_lahir'] ?? null);
             $data['tanggal_lahir'] = $tanggalLahir;
             $data['usia'] = $tanggalLahir ? $this->calculateAgeFromBirthDate($tanggalLahir) : null;
-        } elseif (array_key_exists('usia', $payload)) {
-            $usia = $payload['usia'];
-            $data['usia'] = ($usia === null || $usia === '') ? null : (int) $usia;
         }
 
         if (array_key_exists('agama', $payload)) {
@@ -555,6 +1526,77 @@ class AdminController extends ApiController
                 'profile' => $fresh,
             ],
         ]);
+    }
+
+    private function clearStudentActiveAssignments(string $tenantId, string $studentId, Carbon $now): array
+    {
+        return [
+            'kelas_struktur' => $this->updateTenantSnapshotTable(
+                'kelas_struktur',
+                ['ketua_siswa_id' => $studentId],
+                [
+                    'ketua_siswa_id' => null,
+                    'ketua_siswa_nama' => null,
+                    'updated_at' => $now,
+                ],
+                $tenantId
+            ),
+        ];
+    }
+
+    private function clearTeacherActiveAssignments(string $tenantId, string $teacherId, Carbon $now): array
+    {
+        return [
+            'jadwal' => $this->updateTenantSnapshotTable(
+                'jadwal',
+                ['guru_id' => $teacherId],
+                [
+                    'guru_id' => null,
+                    'guru_nama' => null,
+                    'updated_at' => $now,
+                ],
+                $tenantId
+            ),
+            'kelas_struktur' => $this->updateTenantSnapshotTable(
+                'kelas_struktur',
+                ['wali_guru_id' => $teacherId],
+                [
+                    'wali_guru_id' => null,
+                    'wali_guru_nama' => null,
+                    'updated_at' => $now,
+                ],
+                $tenantId
+            ),
+            'struktur_sekolah' => $this->updateTenantSnapshotTable(
+                'struktur_sekolah',
+                ['guru_id' => $teacherId],
+                [
+                    'guru_id' => null,
+                    'guru_nama' => null,
+                    'updated_at' => $now,
+                ],
+                $tenantId
+            ),
+            'organisasi' => $this->updateTenantSnapshotTable(
+                'organisasi',
+                ['pembina_guru_id' => $teacherId],
+                [
+                    'pembina_guru_id' => null,
+                    'pembina_guru_nama' => null,
+                    'updated_at' => $now,
+                ],
+                $tenantId
+            ),
+            'ekskul' => $this->updateTenantSnapshotTable(
+                'ekskul',
+                ['pembina_guru_id' => $teacherId],
+                [
+                    'pembina_guru_id' => null,
+                    'updated_at' => $now,
+                ],
+                $tenantId
+            ),
+        ];
     }
 
     private function cleanupBeforeHardDelete(string $userId, string $role): void
@@ -638,6 +1680,84 @@ class AdminController extends ApiController
         return $normalized === '' ? null : $normalized;
     }
 
+    private function normalizeProfileCreatedVia(mixed $value, string $default): string
+    {
+        $normalized = strtolower(trim((string) ($value ?? '')));
+        $normalized = str_replace(['-', ' '], '_', $normalized);
+
+        return match ($normalized) {
+            'import', 'file', 'excel', 'spreadsheet', 'sheet', 'google_sheet', 'google_sheets' => 'import',
+            'manual', 'manual_registration', 'pendaftaran_manual', 'registrasi_manual' => 'manual_registration',
+            'admin', 'admin_created', 'created_by_admin', 'buatan_admin' => 'admin_created',
+            default => $default,
+        };
+    }
+
+    private function normalizeProvisionPassword(string $password): string
+    {
+        $raw = trim($password);
+        if ($this->looksLikeStrongProvisionPassword($raw)) {
+            return $raw;
+        }
+
+        $digits = preg_replace('/\D+/', '', $raw) ?? '';
+        $digits = $digits !== '' ? $digits : '123456';
+        if (strlen($digits) < 6) {
+            $digits = str_pad($digits, 6, '0');
+        }
+
+        $generated = 'Aa'.$digits.'!Edu';
+        while (strlen($generated) < $this->provisionPasswordMinLength()) {
+            $generated .= '9';
+        }
+
+        return $generated;
+    }
+
+    private function looksLikeStrongProvisionPassword(string $password): bool
+    {
+        if (strlen($password) < $this->provisionPasswordMinLength()) {
+            return false;
+        }
+
+        return preg_match('/[a-z]/', $password)
+            && preg_match('/[A-Z]/', $password)
+            && preg_match('/\d/', $password)
+            && preg_match('/[^a-zA-Z0-9]/', $password);
+    }
+
+    private function provisionPasswordMinLength(): int
+    {
+        return max(12, (int) env('PASSWORD_MIN_LENGTH', 12));
+    }
+
+    private function temporaryStrongPassword(): string
+    {
+        return $this->normalizeProvisionPassword(Str::random(24).'9!');
+    }
+
+    private function resolveCohortForClass(string $tenantId, mixed $classId): ?string
+    {
+        $normalizedClassId = trim((string) ($classId ?? ''));
+        if ($normalizedClassId === '' || ! Schema::hasTable('kelas') || ! Schema::hasColumn('kelas', 'angkatan')) {
+            return null;
+        }
+
+        $query = DB::table('kelas')->where(function ($inner) use ($normalizedClassId) {
+            $inner->where('id', $normalizedClassId);
+            if (Schema::hasColumn('kelas', 'nama')) {
+                $inner->orWhere('nama', $normalizedClassId);
+            }
+        });
+        if (Schema::hasColumn('kelas', 'tenant_id')) {
+            $query->where('tenant_id', $tenantId);
+        }
+
+        $cohort = trim((string) ($query->orderBy('id')->value('angkatan') ?? ''));
+
+        return $cohort !== '' ? $cohort : null;
+    }
+
     private function canEditStudentAdditionalInfo(Request $request, Profile $student, string $tenantId): bool
     {
         if ($this->isAdmin($request)) {
@@ -712,5 +1832,384 @@ class AdminController extends ApiController
         }
 
         return "{$local}.{$tenantPart}@import.local";
+    }
+
+    private function firstTenantRow(string $table, string $tenantId): ?object
+    {
+        if (! Schema::hasTable($table)) {
+            return null;
+        }
+
+        $query = DB::table($table);
+        if (Schema::hasColumn($table, 'tenant_id')) {
+            $query->where('tenant_id', $tenantId);
+        }
+
+        return $query->orderBy(Schema::hasColumn($table, 'id') ? 'id' : 'created_at')->first();
+    }
+
+    private function tenantQuery(string $table, string $tenantId, ?string $alias = null)
+    {
+        $query = DB::table($alias ? "{$table} as {$alias}" : $table);
+        if (Schema::hasColumn($table, 'tenant_id')) {
+            $query->where(($alias ? "{$alias}." : '').'tenant_id', $tenantId);
+        }
+
+        return $query;
+    }
+
+    private function tenantTableCount(string $table, string $tenantId): int
+    {
+        if (! Schema::hasTable($table)) {
+            return 0;
+        }
+
+        return (int) $this->tenantQuery($table, $tenantId)->count();
+    }
+
+    private function perPage(Request $request, int $default = 25): int
+    {
+        return max(1, min(100, (int) $request->query('per_page', $default)));
+    }
+
+    private function paginationMeta(int $page, int $perPage, int $total, bool $allRows = false): array
+    {
+        $pageCount = $allRows ? 1 : max(1, (int) ceil($total / max(1, $perPage)));
+        $safePage = $allRows ? 1 : min(max(1, $page), $pageCount);
+        $from = $total === 0 ? 0 : (($safePage - 1) * $perPage) + 1;
+        $to = $total === 0 ? 0 : min($total, $from + $perPage - 1);
+
+        return [
+            'page' => $safePage,
+            'per_page' => $perPage,
+            'total' => $total,
+            'page_count' => $pageCount,
+            'from' => $from,
+            'to' => $to,
+            'all' => $allRows,
+        ];
+    }
+
+    private function existingColumns(string $table, array $columns): array
+    {
+        if (! Schema::hasTable($table)) {
+            return $columns;
+        }
+
+        $available = array_values(array_filter($columns, fn ($column) => Schema::hasColumn($table, $column)));
+
+        return ! empty($available) ? $available : ['*'];
+    }
+
+    private function prefixedExistingColumns(string $table, array $columns, ?string $prefix = null): array
+    {
+        $prefix = $prefix ?: $table;
+
+        return array_map(
+            fn ($column) => $column === '*' ? "{$prefix}.*" : "{$prefix}.{$column}",
+            $this->existingColumns($table, $columns)
+        );
+    }
+
+    private function presenceAggregateQuery(string $tenantId, $activeCutoff = null)
+    {
+        $activeCutoff = $activeCutoff ?: now()->subSeconds(120)->toDateTimeString();
+        $query = DB::table('user_presence')
+            ->select('user_id', DB::raw('max(last_seen_at) as last_seen_at'))
+            ->selectRaw('sum(case when last_seen_at >= ? then 1 else 0 end) as active_devices', [$activeCutoff])
+            ->selectRaw('sum(case when last_seen_at >= ? then activity_count else 0 end) as activity_count', [$activeCutoff])
+            ->groupBy('user_id');
+
+        if (Schema::hasColumn('user_presence', 'tenant_id')) {
+            $query->where('tenant_id', $tenantId);
+        }
+
+        return $query;
+    }
+
+    private function sortRowsByPresence($rows)
+    {
+        return $rows->sort(function (array $a, array $b) {
+            $aOnline = (int) ($a['online'] ?? 0) > 0 || (int) ($a['active_devices'] ?? 0) > 0;
+            $bOnline = (int) ($b['online'] ?? 0) > 0 || (int) ($b['active_devices'] ?? 0) > 0;
+
+            if ($aOnline !== $bOnline) {
+                return $aOnline ? -1 : 1;
+            }
+
+            $aSeen = (string) ($a['last_seen_at'] ?? '');
+            $bSeen = (string) ($b['last_seen_at'] ?? '');
+            if ($aSeen !== $bSeen) {
+                return strcmp($bSeen, $aSeen);
+            }
+
+            return strcasecmp((string) ($a['nama'] ?? ''), (string) ($b['nama'] ?? ''));
+        });
+    }
+
+    private function queryText(Request $request, string $key): string
+    {
+        return trim((string) $request->query($key, ''));
+    }
+
+    private function teacherClassIds(string $tenantId, string $teacherId): array
+    {
+        if ($teacherId === '' || ! Schema::hasTable('kelas_struktur')) {
+            return [];
+        }
+
+        return $this->tenantQuery('kelas_struktur', $tenantId)
+            ->where('wali_guru_id', $teacherId)
+            ->pluck('kelas_id')
+            ->filter()
+            ->map(fn ($value) => (string) $value)
+            ->values()
+            ->all();
+    }
+
+    private function studentBaseQuery(string $tenantId, ?array $classIds = null)
+    {
+        $query = DB::table('profiles')
+            ->where('tenant_id', $tenantId)
+            ->where('role', 'siswa');
+
+        if ($classIds !== null) {
+            $query->whereIn('kelas', $classIds);
+        }
+
+        return $query;
+    }
+
+    private function applyStudentFilters($query, Request $request): void
+    {
+        $search = $this->queryText($request, 'q') ?: $this->queryText($request, 'nama');
+        if ($search !== '') {
+            $like = '%'.strtolower($search).'%';
+            $query->where(function ($builder) use ($like) {
+                $builder->whereRaw('lower(nama) like ?', [$like])
+                    ->orWhereRaw('lower(email) like ?', [$like]);
+            });
+        }
+
+        $nis = $this->queryText($request, 'nis');
+        if ($nis !== '') {
+            $query->whereRaw('lower(coalesce(nis, \'\')) like ?', ['%'.strtolower($nis).'%']);
+        }
+
+        $kelas = $this->queryText($request, 'kelas');
+        if ($kelas !== '') {
+            $query->where('kelas', $kelas);
+        }
+
+        $status = $this->queryText($request, 'status');
+        if ($status !== '') {
+            $query->whereRaw('lower(coalesce(status, \'active\')) = ?', [strtolower($status)]);
+        }
+
+        $hasRfid = $this->queryText($request, 'has_rfid');
+        if ($hasRfid !== '') {
+            $truthy = in_array(strtolower($hasRfid), ['1', 'true', 'yes', 'ada', 'rfid'], true);
+            if ($truthy) {
+                $query->whereNotNull('rfid_uid')->where('rfid_uid', '<>', '');
+            } else {
+                $query->where(function ($builder) {
+                    $builder->whereNull('rfid_uid')->orWhere('rfid_uid', '');
+                });
+            }
+        }
+    }
+
+    private function studentOrganizationMemberships(string $tenantId, string $studentId): array
+    {
+        if (! Schema::hasTable('organisasi_anggota') || ! Schema::hasColumn('organisasi_anggota', 'siswa_id')) {
+            return [];
+        }
+
+        $query = $this->tenantQuery('organisasi_anggota', $tenantId, 'oa')
+            ->where('oa.siswa_id', $studentId);
+
+        $hasOrganizationJoin =
+            Schema::hasTable('organisasi') &&
+            Schema::hasColumn('organisasi_anggota', 'organisasi_id') &&
+            Schema::hasColumn('organisasi', 'id');
+
+        if ($hasOrganizationJoin) {
+            $query->leftJoin('organisasi as o', function ($join) {
+                $join->on('o.id', '=', 'oa.organisasi_id');
+                if (Schema::hasColumn('organisasi', 'tenant_id') && Schema::hasColumn('organisasi_anggota', 'tenant_id')) {
+                    $join->on('o.tenant_id', '=', 'oa.tenant_id');
+                }
+            });
+        }
+
+        $selects = [];
+        $selects[] = Schema::hasColumn('organisasi_anggota', 'organisasi_id')
+            ? 'oa.organisasi_id'
+            : DB::raw('null as organisasi_id');
+        $selects[] = Schema::hasColumn('organisasi_anggota', 'status')
+            ? 'oa.status'
+            : DB::raw("'aktif' as status");
+        $selects[] = Schema::hasColumn('organisasi_anggota', 'bagian')
+            ? 'oa.bagian'
+            : DB::raw("'' as bagian");
+        $selects[] = Schema::hasColumn('organisasi_anggota', 'jabatan')
+            ? 'oa.jabatan'
+            : DB::raw("'Anggota' as jabatan");
+        $selects[] = $hasOrganizationJoin && Schema::hasColumn('organisasi', 'nama')
+            ? DB::raw('o.nama as org_nama')
+            : DB::raw('null as org_nama');
+
+        if (Schema::hasColumn('organisasi_anggota', 'organisasi_id')) {
+            $query->orderBy('oa.organisasi_id');
+        }
+
+        return $query
+            ->select($selects)
+            ->get()
+            ->map(fn ($member) => [
+                'orgId' => $member->organisasi_id ?? null,
+                'orgNama' => $member->org_nama ?: ($member->organisasi_id ?? 'Organisasi'),
+                'status' => $member->status ?: 'aktif',
+                'bagian' => $member->bagian ?: '',
+                'jabatan' => $member->jabatan ?: 'Anggota',
+            ])
+            ->values()
+            ->all();
+    }
+
+    private function studentOsisMembership(string $tenantId, string $studentId): ?array
+    {
+        if (! Schema::hasTable('osis_anggota') || ! Schema::hasColumn('osis_anggota', 'siswa_id')) {
+            return null;
+        }
+
+        $query = $this->tenantQuery('osis_anggota', $tenantId)
+            ->where('siswa_id', $studentId);
+
+        $selects = [];
+        $selects[] = Schema::hasColumn('osis_anggota', 'status')
+            ? 'status'
+            : DB::raw("'aktif' as status");
+        $selects[] = Schema::hasColumn('osis_anggota', 'bagian')
+            ? 'bagian'
+            : DB::raw("'' as bagian");
+        $selects[] = Schema::hasColumn('osis_anggota', 'jabatan')
+            ? 'jabatan'
+            : DB::raw("'Anggota' as jabatan");
+
+        $row = $query->select($selects)->first();
+        if (! $row) {
+            return null;
+        }
+
+        return [
+            'status' => $row->status ?: 'aktif',
+            'bagian' => $row->bagian ?: '',
+            'jabatan' => $row->jabatan ?: 'Anggota',
+        ];
+    }
+
+    private function studentStats(string $tenantId, ?array $classIds = null): array
+    {
+        $base = $this->studentBaseQuery($tenantId, $classIds);
+        $statusCounts = (clone $base)
+            ->selectRaw("coalesce(status, 'active') as status_key, count(*) as aggregate")
+            ->groupBy('status_key')
+            ->pluck('aggregate', 'status_key');
+
+        $total = (int) $statusCounts->sum();
+        $active = (int) ($statusCounts['active'] ?? 0);
+        $struktur = $this->tenantQuery('kelas_struktur', $tenantId)
+            ->when($classIds !== null, fn ($builder) => $builder->whereIn('kelas_id', $classIds))
+            ->whereNotNull('ketua_siswa_id')
+            ->where('ketua_siswa_id', '<>', '');
+
+        return [
+            'totalSiswa' => $total,
+            'aktifSiswa' => $active,
+            'nonaktifSiswa' => max(0, $total - $active),
+            'nonaktifOnly' => (int) ($statusCounts['nonaktif'] ?? 0),
+            'mutasiSiswa' => (int) ($statusCounts['mutasi'] ?? 0),
+            'alumniSiswa' => (int) ($statusCounts['alumni'] ?? 0),
+            'ketuaKelas' => Schema::hasTable('kelas_struktur') ? (int) $struktur->count() : 0,
+        ];
+    }
+
+    private function emptyStudentStats(): array
+    {
+        return [
+            'totalSiswa' => 0,
+            'aktifSiswa' => 0,
+            'nonaktifSiswa' => 0,
+            'nonaktifOnly' => 0,
+            'mutasiSiswa' => 0,
+            'alumniSiswa' => 0,
+            'ketuaKelas' => 0,
+        ];
+    }
+
+    private function filterTeacherRows($teachers, Request $request)
+    {
+        $search = strtolower($this->queryText($request, 'q'));
+        $mapel = strtolower($this->queryText($request, 'mapel'));
+        $jabatan = strtolower($this->queryText($request, 'jabatan'));
+        $status = strtolower($this->queryText($request, 'status'));
+
+        return $teachers->filter(function (array $teacher) use ($search, $mapel, $jabatan, $status) {
+            if ($search !== '') {
+                $haystack = strtolower(implode(' ', array_filter([
+                    $teacher['nama'] ?? '',
+                    $teacher['email'] ?? '',
+                    $teacher['nis'] ?? '',
+                    implode(' ', $teacher['mapelList'] ?? []),
+                    implode(' ', $teacher['kelasList'] ?? []),
+                    implode(' ', $teacher['jabatanList'] ?? []),
+                ])));
+                if (! str_contains($haystack, $search)) {
+                    return false;
+                }
+            }
+
+            if ($mapel !== '' && ! $this->arrayContainsText($teacher['mapelList'] ?? [], $mapel)) {
+                return false;
+            }
+
+            if ($jabatan !== '' && ! $this->arrayContainsText($teacher['jabatanList'] ?? [], $jabatan)) {
+                return false;
+            }
+
+            if ($status !== '') {
+                $teacherStatus = strtolower(trim((string) ($teacher['status'] ?? 'active'))) ?: 'active';
+                if ($teacherStatus !== $status) {
+                    return false;
+                }
+            }
+
+            return true;
+        });
+    }
+
+    private function arrayContainsText(array $values, string $needle): bool
+    {
+        foreach ($values as $value) {
+            if (strtolower(trim((string) $value)) === $needle) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function indonesianDayName(Carbon $date): string
+    {
+        return match ((int) $date->dayOfWeekIso) {
+            1 => 'Senin',
+            2 => 'Selasa',
+            3 => 'Rabu',
+            4 => 'Kamis',
+            5 => 'Jumat',
+            6 => 'Sabtu',
+            default => 'Minggu',
+        };
     }
 }

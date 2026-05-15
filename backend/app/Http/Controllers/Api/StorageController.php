@@ -21,7 +21,7 @@ class StorageController extends ApiController
 
     private const PROFILE_IMAGE_MAX_BYTES = 50 * 1024;
 
-    private const ASSIGNMENT_IMAGE_MAX_BYTES = 150 * 1024;
+    private const ASSIGNMENT_IMAGE_MAX_BYTES = 680 * 1024;
 
     private const ASSIGNMENT_DOCUMENT_MAX_BYTES = 3 * 1024 * 1024;
 
@@ -95,13 +95,13 @@ class StorageController extends ApiController
         ],
         'certificate-templates' => [
             'max_bytes' => 8 * 1024 * 1024,
-            'extensions' => ['jpg', 'jpeg', 'png', 'webp'],
-            'mimes' => ['image/jpeg', 'image/png', 'image/webp'],
+            'extensions' => ['pdf', 'jpg', 'jpeg', 'png'],
+            'mimes' => ['application/pdf', 'image/jpeg', 'image/png'],
         ],
         'sertifikat-templates' => [
             'max_bytes' => 8 * 1024 * 1024,
-            'extensions' => ['jpg', 'jpeg', 'png', 'webp'],
-            'mimes' => ['image/jpeg', 'image/png', 'image/webp'],
+            'extensions' => ['pdf', 'jpg', 'jpeg', 'png'],
+            'mimes' => ['application/pdf', 'image/jpeg', 'image/png'],
         ],
     ];
 
@@ -154,12 +154,12 @@ class StorageController extends ApiController
             return $uploadPolicyError;
         }
 
-        $assignmentUsesDrive = ! $fastLocal && $this->googleDriveService->canUploadAssignmentDocument(
+        $usesDrive = ! $fastLocal && $this->googleDriveService->canUploadStorageFile(
             $request,
             $bucket,
             $file
         );
-        $assignmentFileSizeError = $this->validateAssignmentFileSizePolicy($bucket, $file, $assignmentUsesDrive);
+        $assignmentFileSizeError = $this->validateAssignmentFileSizePolicy($bucket, $file, $usesDrive);
         if ($assignmentFileSizeError) {
             return $assignmentFileSizeError;
         }
@@ -171,7 +171,7 @@ class StorageController extends ApiController
 
         if (! $fastLocal) {
             try {
-                $driveUpload = $this->googleDriveService->uploadAssignmentDocumentIfAvailable(
+                $driveUpload = $this->googleDriveService->uploadStorageFileIfAvailable(
                     $request,
                     $bucket,
                     $path,
@@ -240,7 +240,7 @@ class StorageController extends ApiController
             return $this->deny('Bucket tidak diizinkan', 400);
         }
 
-        $usesDrive = $this->googleDriveService->canUploadAssignmentDocumentMetadata(
+        $usesDrive = $this->googleDriveService->canUploadStorageFileMetadata(
             $request,
             $bucket,
             $fileName,
@@ -276,7 +276,7 @@ class StorageController extends ApiController
         $storage = Storage::disk('local');
         foreach ($paths as $path) {
             $rawPath = trim((string) $path);
-            if ($bucket === 'assignments' && $this->googleDriveService->isGoogleDriveUrl($rawPath)) {
+            if ($this->isDriveBackedBucket($bucket) && $this->googleDriveService->isGoogleDriveUrl($rawPath)) {
                 if (! $this->canWriteGoogleDriveUrl($request, $rawPath)) {
                     return $this->deny('Akses hapus Google Drive ditolak');
                 }
@@ -371,6 +371,11 @@ class StorageController extends ApiController
             return $this->deny('Bucket tidak diizinkan', 400);
         }
 
+        $rawPath = trim((string) $path);
+        if ($this->isDriveBackedBucket((string) $bucket) && $this->googleDriveService->isGoogleDriveUrl($rawPath)) {
+            return $this->googleDriveObject($request, (string) $bucket, $rawPath, $expires, $signature);
+        }
+
         $path = $this->sanitizePath($path);
         if (! $path) {
             return $this->deny('Path tidak valid', 422);
@@ -395,25 +400,91 @@ class StorageController extends ApiController
         }
 
         $mime = $storage->mimeType($fullPath) ?: 'application/octet-stream';
-        $contents = $storage->get($fullPath);
+        $stream = $storage->readStream($fullPath);
+        if (! is_resource($stream)) {
+            return $this->deny('Gagal membaca file', 500);
+        }
+
         $filename = str_replace('"', '', basename($path));
         $dispositionType = $this->isInlineRenderableMime($mime) ? 'inline' : 'attachment';
         $cacheControl = $request->user()
             ? 'no-store, private'
             : 'public, max-age=300, stale-while-revalidate=60';
 
-        return response($contents, 200, [
+        $headers = [
             'Content-Type' => $mime,
             'Content-Disposition' => $dispositionType.'; filename="'.$filename.'"',
             'X-Content-Type-Options' => 'nosniff',
             'Cache-Control' => $cacheControl,
             'X-Frame-Options' => 'SAMEORIGIN',
-        ]);
+        ];
+        $size = $storage->size($fullPath);
+        if ($size !== false && $size !== null) {
+            $headers['Content-Length'] = (string) $size;
+        }
+
+        return response()->stream(function () use ($stream) {
+            try {
+                fpassthru($stream);
+            } finally {
+                if (is_resource($stream)) {
+                    fclose($stream);
+                }
+            }
+        }, 200, $headers);
     }
 
     private function buildStoragePath(string $bucket, string $path): string
     {
         return 'private/'.$bucket.'/'.ltrim($path, '/');
+    }
+
+    private function isDriveBackedBucket(string $bucket): bool
+    {
+        return in_array($bucket, ['assignments', 'quiz-media'], true);
+    }
+
+    private function googleDriveObject(Request $request, string $bucket, string $url, $expires, string $signature)
+    {
+        $userId = (string) ($request->user()?->id ?? '');
+        $tenantId = (string) ($this->tenantId($request) ?? '');
+        if ($userId === '') {
+            if (! $this->hasValidObjectSignature($bucket, $url, $expires, $signature, $tenantId, '')) {
+                return $this->deny('URL file tidak valid atau sudah kedaluwarsa', 403);
+            }
+        }
+
+        if (! $this->canReadGoogleDriveUrl($request, $bucket, $url)) {
+            return $this->deny('Akses baca ditolak');
+        }
+
+        try {
+            $file = $this->googleDriveService->downloadStoredFile($tenantId, $bucket, $url);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'error' => 'Gagal membaca file Google Drive: '.$e->getMessage(),
+            ], 422);
+        }
+
+        if (! is_array($file)) {
+            return $this->deny('File tidak ditemukan', 404);
+        }
+
+        $mime = (string) ($file['mime_type'] ?? 'application/octet-stream');
+        $contents = (string) ($file['contents'] ?? '');
+        $filename = str_replace('"', '', (string) ($file['filename'] ?? 'file'));
+        $dispositionType = $this->isInlineRenderableMime($mime) ? 'inline' : 'attachment';
+        $cacheControl = $request->user()
+            ? 'no-store, private'
+            : 'public, max-age=300, stale-while-revalidate=60';
+
+        return response($contents, 200, [
+            'Content-Type' => $mime ?: 'application/octet-stream',
+            'Content-Disposition' => $dispositionType.'; filename="'.$filename.'"',
+            'X-Content-Type-Options' => 'nosniff',
+            'Cache-Control' => $cacheControl,
+            'X-Frame-Options' => 'SAMEORIGIN',
+        ]);
     }
 
     private function sanitizePath(string $path): ?string
@@ -597,6 +668,55 @@ class StorageController extends ApiController
                     return true;
                 }
             }
+        }
+
+        return false;
+    }
+
+    private function canReadGoogleDriveUrl(Request $request, string $bucket, string $url): bool
+    {
+        $user = $request->user();
+        $userId = $user?->id;
+        $tenantId = $this->tenantId($request);
+
+        if (! $user || ! $userId || ! $tenantId) {
+            return false;
+        }
+
+        $fileId = $this->googleDriveService->fileIdFromUrl($url);
+        if ($fileId === '') {
+            return false;
+        }
+
+        if (! Schema::hasTable('tenant_google_drive_files')) {
+            return false;
+        }
+
+        $record = DB::table('tenant_google_drive_files')
+            ->where('tenant_id', $tenantId)
+            ->where('bucket', $bucket)
+            ->where('drive_file_id', $fileId)
+            ->first(['uploaded_by_user_id', 'source_path']);
+
+        if (! $record) {
+            return false;
+        }
+
+        if ($this->isAdmin($request)) {
+            return true;
+        }
+
+        if ($bucket === 'quiz-media') {
+            return true;
+        }
+
+        if ((string) ($record->uploaded_by_user_id ?? '') === (string) $userId) {
+            return true;
+        }
+
+        $sourcePath = trim((string) ($record->source_path ?? ''));
+        if ($sourcePath !== '' && ! $this->googleDriveService->isGoogleDriveUrl($sourcePath)) {
+            return $this->canRead($request, $bucket, $sourcePath);
         }
 
         return false;

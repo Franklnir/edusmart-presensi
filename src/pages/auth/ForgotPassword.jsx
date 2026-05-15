@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 
 const ForgotPassword = () => {
-  const adminSubdomain = String(import.meta.env.VITE_ADMIN_SUBDOMAIN || 'admin')
+  const adminSubdomain = String(import.meta.env.VITE_ADMIN_SUBDOMAIN || 'admin26')
     .trim()
     .toLowerCase()
   const runtimeHost =

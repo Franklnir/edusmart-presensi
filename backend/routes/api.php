@@ -5,12 +5,15 @@ use App\Http\Controllers\Api\AdminController;
 use App\Http\Controllers\Api\ApprovalController;
 use App\Http\Controllers\Api\AttendanceQrController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\ClassHistoryController;
 use App\Http\Controllers\Api\DbController;
 use App\Http\Controllers\Api\GoogleDriveController;
 use App\Http\Controllers\Api\InfrastructureController;
 use App\Http\Controllers\Api\PresenceController;
 use App\Http\Controllers\Api\QuizController;
+use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\RfidController;
+use App\Http\Controllers\Api\SettingsController;
 use App\Http\Controllers\Api\StorageController;
 use App\Http\Controllers\Api\SuperAdminController;
 use App\Http\Controllers\Api\SuperPluginController;
@@ -31,8 +34,12 @@ Route::get('/internal/tls/authorize', [InfrastructureController::class, 'authori
         EnsureTenantMatchesProfile::class,
     ]);
 
-Route::post('/auth/register', [AuthController::class, 'register'])->middleware('throttle:auth');
-Route::post('/auth/login', [AuthController::class, 'login'])->middleware('throttle:auth');
+Route::post('/auth/register', [AuthController::class, 'register'])
+    ->middleware('throttle:auth')
+    ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
+Route::post('/auth/login', [AuthController::class, 'login'])
+    ->middleware('throttle:auth')
+    ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
 Route::get('/auth/google/redirect', [AuthController::class, 'googleRedirect'])
     ->middleware(['web', 'throttle:auth'])
     ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
@@ -42,8 +49,12 @@ Route::get('/auth/google/popup-context', [AuthController::class, 'googlePopupCon
         ResolveTenant::class,
         EnsureTenantMatchesProfile::class,
     ]);
-Route::post('/auth/google/code-login', [AuthController::class, 'googleCodeLogin'])->middleware('throttle:auth');
-Route::post('/auth/google/credential-login', [AuthController::class, 'googleCredentialLogin'])->middleware('throttle:auth');
+Route::post('/auth/google/code-login', [AuthController::class, 'googleCodeLogin'])
+    ->middleware('throttle:auth')
+    ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
+Route::post('/auth/google/credential-login', [AuthController::class, 'googleCredentialLogin'])
+    ->middleware('throttle:auth')
+    ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
 Route::get('/auth/google/callback', [AuthController::class, 'googleCallback'])
     ->middleware(['web', 'throttle:auth'])
     ->withoutMiddleware([
@@ -53,26 +64,36 @@ Route::get('/auth/google/callback', [AuthController::class, 'googleCallback'])
 Route::get('/auth/google/finalize-login', [AuthController::class, 'googleFinalizeLogin'])
     ->middleware(['web', 'throttle:auth'])
     ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
-Route::post('/auth/forgot-password', [AuthController::class, 'forgotPassword'])->middleware('throttle:auth');
-Route::post('/auth/reset-password', [AuthController::class, 'resetPassword'])->middleware('throttle:auth');
+Route::post('/auth/forgot-password', [AuthController::class, 'forgotPassword'])
+    ->middleware('throttle:auth')
+    ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
+Route::post('/auth/reset-password', [AuthController::class, 'resetPassword'])
+    ->middleware('throttle:auth')
+    ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
 Route::get('/auth/verify-email/{id}/{hash}', [AuthController::class, 'verifyEmail'])
     ->name('verification.verify')
     ->middleware('throttle:6,1');
-Route::middleware(['auth:sanctum', 'throttle:api'])->post('/auth/logout', [AuthController::class, 'logout']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->get('/auth/me', [AuthController::class, 'me']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->post('/auth/update-password', [AuthController::class, 'updatePassword']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->post('/auth/update-account', [AuthController::class, 'updateAccount']);
-Route::middleware(['auth:sanctum', 'throttle:auth'])->post('/auth/password-change/send-code', [AuthController::class, 'sendPasswordChangeCode']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->post('/auth/verify-email/resend', [AuthController::class, 'resendVerificationEmail']);
-Route::middleware(['auth:sanctum', 'throttle:auth'])->post('/auth/email-verification/send-code', [AuthController::class, 'sendEmailVerificationCode']);
-Route::middleware(['auth:sanctum', 'throttle:auth'])->post('/auth/email-verification/verify-code', [AuthController::class, 'verifyEmailCode']);
+Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
+    Route::post('/auth/logout', [AuthController::class, 'logout']);
+    Route::get('/auth/me', [AuthController::class, 'me']);
+    Route::post('/auth/update-password', [AuthController::class, 'updatePassword']);
+    Route::post('/auth/update-account', [AuthController::class, 'updateAccount']);
+    Route::post('/auth/verify-email/resend', [AuthController::class, 'resendVerificationEmail']);
+    Route::post('/auth/google/credential-link', [AuthController::class, 'googleCredentialLink']);
+    Route::post('/auth/google/unlink', [AuthController::class, 'googleUnlink']);
+    Route::post('/presence/ping', [PresenceController::class, 'ping']);
+    Route::post('/attendance-qr/session', [AttendanceQrController::class, 'session']);
+    Route::post('/attendance-qr/scan', [AttendanceQrController::class, 'scan']);
+    Route::patch('/students/{id}/additional-info', [AdminController::class, 'updateStudentAdditionalInfo']);
+});
+
+Route::middleware(['auth:sanctum', 'throttle:auth'])->group(function () {
+    Route::post('/auth/password-change/send-code', [AuthController::class, 'sendPasswordChangeCode']);
+    Route::post('/auth/email-verification/send-code', [AuthController::class, 'sendEmailVerificationCode']);
+    Route::post('/auth/email-verification/verify-code', [AuthController::class, 'verifyEmailCode']);
+});
+
 Route::middleware(['web', 'auth:sanctum', 'throttle:api'])->get('/auth/google/link', [AuthController::class, 'googleLinkRedirect']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->post('/auth/google/credential-link', [AuthController::class, 'googleCredentialLink']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->post('/auth/google/unlink', [AuthController::class, 'googleUnlink']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->post('/presence/ping', [PresenceController::class, 'ping']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->post('/attendance-qr/session', [AttendanceQrController::class, 'session']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->post('/attendance-qr/scan', [AttendanceQrController::class, 'scan']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->patch('/students/{id}/additional-info', [AdminController::class, 'updateStudentAdditionalInfo']);
 Route::post('/rfid/scan', [RfidController::class, 'scan'])
     ->middleware('throttle:rfid')
     ->withoutMiddleware([
@@ -99,45 +120,75 @@ Route::post('/rfid/heartbeat', [RfidController::class, 'heartbeat'])
     ]);
 Route::post('/rfid/set-mode', [RfidController::class, 'setMode'])
     ->middleware(['auth:sanctum', 'throttle:api']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->post('/quiz/submit', [QuizController::class, 'submit']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->post('/quiz/start', [QuizController::class, 'startAttempt']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->post('/quiz/answer', [QuizController::class, 'saveAnswer']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->post('/quiz/violation', [QuizController::class, 'logViolation']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->post('/quiz/publish', [QuizController::class, 'publish']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->post('/quiz/close', [QuizController::class, 'close']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->post('/quiz/retake', [QuizController::class, 'retake']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->get('/quiz/retake-history', [QuizController::class, 'retakeHistory']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->post('/quiz/restore-retake-score', [QuizController::class, 'restoreRetakeScore']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->post('/quiz/grade-essay', [QuizController::class, 'gradeEssay']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->post('/quiz/complete-essay-review', [QuizController::class, 'completeEssayReview']);
+
+Route::prefix('quiz')->middleware(['auth:sanctum', 'throttle:api'])->group(function () {
+    Route::get('/dashboard', [QuizController::class, 'dashboard']);
+    Route::get('/{quizId}/detail', [QuizController::class, 'detail']);
+    Route::post('/submit', [QuizController::class, 'submit']);
+    Route::post('/start', [QuizController::class, 'startAttempt']);
+    Route::post('/answer', [QuizController::class, 'saveAnswer']);
+    Route::post('/violation', [QuizController::class, 'logViolation']);
+    Route::post('/schedule', [QuizController::class, 'schedule']);
+    Route::post('/publish', [QuizController::class, 'publish']);
+    Route::post('/close', [QuizController::class, 'close']);
+    Route::post('/retake', [QuizController::class, 'retake']);
+    Route::get('/retake-history', [QuizController::class, 'retakeHistory']);
+    Route::post('/restore-retake-score', [QuizController::class, 'restoreRetakeScore']);
+    Route::post('/grade-essay', [QuizController::class, 'gradeEssay']);
+    Route::post('/complete-essay-review', [QuizController::class, 'completeEssayReview']);
+});
 
 Route::post('/db', [DbController::class, 'handle'])->middleware('throttle:db');
+Route::post('/db/batch', [DbController::class, 'batch'])->middleware('throttle:db');
 
-Route::post('/storage/upload', [StorageController::class, 'upload'])->middleware(['auth:sanctum', 'throttle:storage']);
-Route::post('/storage/upload-destination', [StorageController::class, 'uploadDestination'])->middleware(['auth:sanctum', 'throttle:storage']);
-Route::post('/storage/remove', [StorageController::class, 'remove'])->middleware(['auth:sanctum', 'throttle:storage']);
+Route::prefix('storage')->middleware(['auth:sanctum', 'throttle:storage'])->group(function () {
+    Route::post('/upload', [StorageController::class, 'upload']);
+    Route::post('/upload-destination', [StorageController::class, 'uploadDestination']);
+    Route::post('/remove', [StorageController::class, 'remove']);
+});
 Route::get('/storage/signed', [StorageController::class, 'signed'])->middleware('throttle:storage');
 Route::get('/storage/object', [StorageController::class, 'object'])->middleware('throttle:storage');
 
-Route::middleware(['auth:sanctum', 'throttle:api'])->delete('/admin/users/{id}', [AdminController::class, 'deleteUser']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->post('/admin/users/provision', [AdminController::class, 'provisionUser']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->patch('/admin/teachers/{id}/name', [AdminController::class, 'updateTeacherName']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->get('/admin/monitoring', [AdminController::class, 'monitoring']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->get('/admin/backup', [AdminBackupController::class, 'backup']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->post('/admin/backup/restore', [AdminBackupController::class, 'restore']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->get('/admin/approvals', [ApprovalController::class, 'index']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->post('/admin/approvals/{id}/approve', [ApprovalController::class, 'approve']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->post('/admin/approvals/{id}/reject', [ApprovalController::class, 'reject']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->get('/admin/whatsapp', [WhatsAppController::class, 'show']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->post('/admin/whatsapp/connect', [WhatsAppController::class, 'connect']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->post('/admin/whatsapp/sync', [WhatsAppController::class, 'sync']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->post('/admin/whatsapp/logout', [WhatsAppController::class, 'logout']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->patch('/admin/whatsapp/settings', [WhatsAppController::class, 'updateSettings']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->post('/admin/whatsapp/test', [WhatsAppController::class, 'sendTest']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->get('/admin/google-drive', [GoogleDriveController::class, 'show']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->post('/admin/google-drive/connect-url', [GoogleDriveController::class, 'connectUrl']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->post('/admin/google-drive/sync', [GoogleDriveController::class, 'sync']);
-Route::middleware(['auth:sanctum', 'throttle:api'])->post('/admin/google-drive/disconnect', [GoogleDriveController::class, 'disconnect']);
+Route::prefix('reports')->middleware(['auth:sanctum', 'throttle:api'])->group(function () {
+    Route::get('/teacher-summary', [ReportController::class, 'teacherSummary']);
+});
+
+Route::prefix('admin')->middleware(['auth:sanctum', 'throttle:api'])->group(function () {
+    Route::delete('/users/{id}', [AdminController::class, 'deleteUser']);
+    Route::patch('/users/{id}/status', [AdminController::class, 'updateUserStatus']);
+    Route::get('/dashboard-summary', [AdminController::class, 'dashboardSummary']);
+    Route::get('/students', [AdminController::class, 'students']);
+    Route::get('/students/{id}', [AdminController::class, 'studentDetail']);
+    Route::get('/academic-summary', [AdminController::class, 'academicSummary']);
+    Route::get('/student-options', [AdminController::class, 'studentOptions']);
+    Route::get('/teachers', [AdminController::class, 'teachers']);
+    Route::get('/certificates', [AdminController::class, 'certificates']);
+    Route::get('/scan-session-summary', [AdminController::class, 'scanSessionSummary']);
+    Route::get('/classes/deleted-history', [ClassHistoryController::class, 'index']);
+    Route::delete('/classes/{id}', [ClassHistoryController::class, 'destroyClass']);
+    Route::post('/classes/deleted-history/{id}/restore', [ClassHistoryController::class, 'restore']);
+    Route::post('/users/provision', [AdminController::class, 'provisionUser']);
+    Route::patch('/teachers/{id}/name', [AdminController::class, 'updateTeacherName']);
+    Route::get('/monitoring', [AdminController::class, 'monitoring']);
+    Route::get('/scan-settings', [SettingsController::class, 'scanShow']);
+    Route::patch('/scan-settings', [SettingsController::class, 'scanUpdate']);
+    Route::get('/backup', [AdminBackupController::class, 'backup']);
+    Route::post('/backup/restore', [AdminBackupController::class, 'restore']);
+    Route::get('/approvals', [ApprovalController::class, 'index']);
+    Route::post('/approvals/{id}/approve', [ApprovalController::class, 'approve']);
+    Route::post('/approvals/{id}/reject', [ApprovalController::class, 'reject']);
+    Route::get('/whatsapp', [WhatsAppController::class, 'show']);
+    Route::post('/whatsapp/connect', [WhatsAppController::class, 'connect']);
+    Route::post('/whatsapp/sync', [WhatsAppController::class, 'sync']);
+    Route::post('/whatsapp/logout', [WhatsAppController::class, 'logout']);
+    Route::patch('/whatsapp/settings', [WhatsAppController::class, 'updateSettings']);
+    Route::post('/whatsapp/test', [WhatsAppController::class, 'sendTest']);
+    Route::get('/google-drive', [GoogleDriveController::class, 'show']);
+    Route::get('/google-drive/files', [GoogleDriveController::class, 'files']);
+    Route::post('/google-drive/connect-url', [GoogleDriveController::class, 'connectUrl']);
+    Route::post('/google-drive/sync', [GoogleDriveController::class, 'sync']);
+    Route::post('/google-drive/disconnect', [GoogleDriveController::class, 'disconnect']);
+});
 Route::get('/admin/google-drive/callback', [GoogleDriveController::class, 'callback'])
     ->middleware(['web', 'throttle:auth'])
     ->withoutMiddleware([

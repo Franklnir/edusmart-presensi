@@ -122,7 +122,8 @@ BEGIN
   ORDER BY id
   LIMIT 1;
 
-  v_manual_enabled := coalesce(v_settings.scan_manual_enabled, false);
+  v_manual_enabled := coalesce(v_settings.scan_always_active, false)
+    OR coalesce(v_settings.scan_manual_enabled, false);
 
   SELECT *
     INTO v_profile

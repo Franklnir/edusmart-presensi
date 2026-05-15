@@ -1,11 +1,12 @@
 // src/pages/guru/profile.jsx
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { supabase, PROFILE_BUCKET } from '../../lib/supabase'
+import { supabase, PROFILE_BUCKET, getSignedUrlForValue } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import GoogleCredentialButton from '../../components/GoogleCredentialButton'
 import PasswordInput from '../../components/PasswordInput'
 import VerificationCodeModal from '../../components/VerificationCodeModal'
+import UserThemeSettings from '../../components/UserThemeSettings'
 import {
   hasRealLoginEmail,
   isEmailFormat,
@@ -34,7 +35,8 @@ function addCacheBuster(url) {
 
 /* ========= Helper: kompres gambar ke <= 100KB ========= */
 async function compressImageTo100KB(file, maxBytes = MAX_COMPRESSED_BYTES) {
-  if (!file || file.size <= maxBytes) return file
+  if (!file) throw new Error('File gambar tidak tersedia')
+  if (file.size <= maxBytes && /^image\/jpe?g$/i.test(file.type || '')) return file
 
   // pakai objectURL lalu revoke setelah selesai
   const objectUrl = URL.createObjectURL(file)
@@ -110,14 +112,7 @@ async function compressImageTo100KB(file, maxBytes = MAX_COMPRESSED_BYTES) {
 }
 
 async function createSignedUrlOrThrow(path) {
-  const { data, error } = await supabase.storage
-    .from(PROFILE_BUCKET)
-    .createSignedUrl(path, SIGNED_URL_EXPIRES_IN)
-
-  if (error) throw error
-  const signedUrl = data?.signedUrl
-  if (!signedUrl) throw new Error('Gagal membuat signed URL')
-  return signedUrl
+  return getSignedUrlForValue(PROFILE_BUCKET, path, SIGNED_URL_EXPIRES_IN)
 }
 
 /**
@@ -461,7 +456,7 @@ export default function ProfileGuru() {
       setPreviewUrl(addCacheBuster(signed))
 
       await refreshProfile()
-      pushToast('success', 'Foto profil berhasil diperbarui (disimpan sebagai path + signed URL)')
+      pushToast('success', 'Foto profil berhasil diperbarui.')
 
     } catch (error) {
       pushToast('error', error?.message || 'Gagal mengupload foto')
@@ -885,6 +880,8 @@ export default function ProfileGuru() {
                 </button>
               </div>
             </div>
+
+            <UserThemeSettings />
           </div>
 
           {/* ========== FORM EDIT PROFIL ========== */}

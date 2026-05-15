@@ -35,6 +35,11 @@ class GoogleDriveService
         'jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'tif', 'tiff', 'heic', 'heif', 'avif',
     ];
 
+    private const DRIVE_UPLOAD_BUCKETS = [
+        'assignments',
+        'quiz-media',
+    ];
+
     public function providerConfigured(): bool
     {
         return (bool) $this->driveConfig('enabled', false)
@@ -99,15 +104,25 @@ class GoogleDriveService
 
     public function canUploadAssignmentDocument(Request $request, string $bucket, UploadedFile $file): bool
     {
+        return $this->canUploadStorageFile($request, $bucket, $file);
+    }
+
+    public function canUploadStorageFile(Request $request, string $bucket, UploadedFile $file): bool
+    {
         $fileName = (string) ($file->getClientOriginalName() ?: '');
         $mime = (string) ($file->getMimeType() ?: $file->getClientMimeType() ?: '');
 
-        return $this->canUploadAssignmentDocumentMetadata($request, $bucket, $fileName, $mime);
+        return $this->canUploadStorageFileMetadata($request, $bucket, $fileName, $mime);
     }
 
     public function canUploadAssignmentDocumentMetadata(Request $request, string $bucket, string $fileName, string $mime = ''): bool
     {
-        if ($bucket !== 'assignments' || ! $this->shouldSendFileMetadataToDrive($fileName, $mime)) {
+        return $this->canUploadStorageFileMetadata($request, $bucket, $fileName, $mime);
+    }
+
+    public function canUploadStorageFileMetadata(Request $request, string $bucket, string $fileName, string $mime = ''): bool
+    {
+        if (! $this->canRouteBucketFileToDrive($bucket, $fileName, $mime)) {
             return false;
         }
         if (! $this->providerConfigured() || ! $this->tablesReady()) {
@@ -208,11 +223,11 @@ class GoogleDriveService
         ];
     }
 
-    public function statusForTenant(string $tenantId, bool $refresh = false): array
+    public function statusForTenant(string $tenantId, bool $refresh = false, array $usageFilters = []): array
     {
         $tenantId = trim($tenantId);
         if (! $this->tablesReady()) {
-            return $this->publicStatus($tenantId, null);
+            return $this->publicStatus($tenantId, null, false, $usageFilters);
         }
         $config = $tenantId !== ''
             ? TenantGoogleDriveConfig::query()->where('tenant_id', $tenantId)->first()
@@ -234,7 +249,7 @@ class GoogleDriveService
             }
         }
 
-        return $this->publicStatus($tenantId, $config);
+        return $this->publicStatus($tenantId, $config, false, $usageFilters);
     }
 
     public function summaryForTenant(string $tenantId): array
@@ -275,13 +290,136 @@ class GoogleDriveService
         return $this->publicStatus($tenantId, $config->fresh());
     }
 
+    public function filesForTenant(string $tenantId, array $filters = []): array
+    {
+        $tenantId = trim($tenantId);
+        if ($tenantId === '' || ! $this->tablesReady()) {
+            return [
+                'rows' => [],
+                'total' => 0,
+                'limit' => 0,
+            ];
+        }
+
+        $limit = max(1, min(100, (int) ($filters['limit'] ?? 50)));
+        $bucket = trim((string) ($filters['bucket'] ?? ''));
+        $tahunAjaran = AcademicPeriod::normalizeAcademicYear($filters['tahun_ajaran'] ?? null);
+        $semester = AcademicPeriod::normalizeSemester($filters['semester'] ?? null);
+        $kelas = trim((string) ($filters['kelas'] ?? ''));
+        $angkatan = trim((string) ($filters['angkatan'] ?? ''));
+        $search = trim((string) ($filters['q'] ?? ''));
+
+        $hasTahunAjaran = Schema::hasColumn('tenant_google_drive_files', 'tahun_ajaran');
+        $hasSemester = Schema::hasColumn('tenant_google_drive_files', 'semester');
+        $hasKelas = Schema::hasColumn('tenant_google_drive_files', 'kelas');
+        $hasAngkatan = Schema::hasColumn('tenant_google_drive_files', 'angkatan');
+        $hasTaskId = Schema::hasColumn('tenant_google_drive_files', 'task_id');
+
+        $query = TenantGoogleDriveFile::query()
+            ->where('tenant_id', $tenantId);
+
+        if ($bucket !== '' && $bucket !== 'all') {
+            $query->where('bucket', $bucket);
+        }
+        if ($tahunAjaran && $hasTahunAjaran) {
+            $query->where('tahun_ajaran', $tahunAjaran);
+        }
+        if ($semester && $hasSemester) {
+            $query->where('semester', $semester);
+        }
+        if ($kelas !== '' && $hasKelas) {
+            $query->where('kelas', $kelas);
+        }
+        if ($angkatan !== '' && $hasAngkatan) {
+            $query->where('angkatan', $angkatan);
+        }
+        if ($search !== '') {
+            $like = '%'.str_replace(['%', '_'], ['\%', '\_'], $search).'%';
+            $query->where(function ($subQuery) use ($like, $hasKelas, $hasAngkatan, $hasTaskId) {
+                $subQuery
+                    ->where('drive_file_name', 'like', $like)
+                    ->orWhere('source_path', 'like', $like)
+                    ->orWhere('extension', 'like', $like);
+
+                if ($hasKelas) {
+                    $subQuery->orWhere('kelas', 'like', $like);
+                }
+                if ($hasAngkatan) {
+                    $subQuery->orWhere('angkatan', 'like', $like);
+                }
+                if ($hasTaskId) {
+                    $subQuery->orWhere('task_id', 'like', $like);
+                }
+            });
+        }
+
+        $total = (clone $query)->count();
+        $rows = $query
+            ->orderByDesc('uploaded_at')
+            ->limit($limit)
+            ->get()
+            ->map(function (TenantGoogleDriveFile $file) {
+                $bucket = (string) ($file->bucket ?? '');
+                $moduleLabel = match ($bucket) {
+                    'quiz-media' => 'Quiz',
+                    'assignments' => 'Tugas',
+                    default => $bucket !== '' ? $bucket : 'File',
+                };
+
+                return [
+                    'id' => (string) $file->id,
+                    'bucket' => $bucket,
+                    'module_label' => $moduleLabel,
+                    'drive_file_name' => (string) ($file->drive_file_name ?? ''),
+                    'drive_web_view_link' => (string) ($file->drive_web_view_link ?? ''),
+                    'drive_web_content_link' => (string) ($file->drive_web_content_link ?? ''),
+                    'mime_type' => (string) ($file->mime_type ?? ''),
+                    'extension' => (string) ($file->extension ?? ''),
+                    'size_bytes' => (int) ($file->size_bytes ?? 0),
+                    'size_label' => $this->formatBytes((int) ($file->size_bytes ?? 0)),
+                    'uploaded_at' => $file->uploaded_at?->toIso8601String(),
+                    'tahun_ajaran' => (string) ($file->tahun_ajaran ?? ''),
+                    'semester' => (string) ($file->semester ?? ''),
+                    'angkatan' => (string) ($file->angkatan ?? ''),
+                    'kelas' => (string) ($file->kelas ?? ''),
+                    'task_id' => (string) ($file->task_id ?? ''),
+                    'source_path' => (string) ($file->source_path ?? ''),
+                ];
+            })
+            ->values()
+            ->all();
+
+        return [
+            'rows' => $rows,
+            'total' => $total,
+            'limit' => $limit,
+            'filters' => [
+                'bucket' => $bucket,
+                'tahun_ajaran' => $tahunAjaran,
+                'semester' => $semester,
+                'kelas' => $kelas,
+                'angkatan' => $angkatan,
+                'q' => $search,
+            ],
+        ];
+    }
+
     public function uploadAssignmentDocumentIfAvailable(
         Request $request,
         string $bucket,
         string $sourcePath,
         UploadedFile $file
     ): ?array {
-        if ($bucket !== 'assignments' || ! $this->shouldSendFileToDrive($file)) {
+        return $this->uploadStorageFileIfAvailable($request, $bucket, $sourcePath, $file);
+    }
+
+    public function uploadStorageFileIfAvailable(
+        Request $request,
+        string $bucket,
+        string $sourcePath,
+        UploadedFile $file
+    ): ?array {
+        if (! $this->shouldSendBucketFileToDrive($bucket, $file)) {
             return null;
         }
 
@@ -312,9 +450,10 @@ class GoogleDriveService
         if ($schoolFolderId === '') {
             throw new RuntimeException('Folder Google Drive sekolah belum siap.');
         }
-        $targetFolder = $this->ensureAssignmentUploadFolder($accessToken, $schoolFolderId, $sourcePath, $tenantId);
+        $targetFolder = $this->ensureStorageUploadFolder($accessToken, $schoolFolderId, $bucket, $sourcePath, $tenantId);
         $folderId = (string) ($targetFolder['id'] ?? $schoolFolderId);
         $folderPath = (string) ($targetFolder['path'] ?? '');
+        $usageSnapshot = $this->storageUsageSnapshot($bucket, $sourcePath, $tenantId);
 
         $safeName = $this->safeFilename($file->getClientOriginalName() ?: basename($sourcePath));
         $mime = (string) ($file->getMimeType() ?: $file->getClientMimeType() ?: 'application/octet-stream');
@@ -328,7 +467,13 @@ class GoogleDriveService
                 'tenant_id' => $tenantId,
                 'source_path' => $sourcePath,
                 'bucket' => $bucket,
+                'module' => $bucket === 'quiz-media' ? 'quiz' : 'assignment',
                 'folder_path' => $folderPath,
+                'tahun_ajaran' => (string) ($usageSnapshot['tahun_ajaran'] ?? ''),
+                'semester' => (string) ($usageSnapshot['semester'] ?? ''),
+                'kelas' => (string) ($usageSnapshot['kelas'] ?? ''),
+                'angkatan' => (string) ($usageSnapshot['angkatan'] ?? ''),
+                'task_id' => (string) ($usageSnapshot['task_id'] ?? ''),
             ],
         ];
 
@@ -360,7 +505,7 @@ class GoogleDriveService
         if (! $record->exists) {
             $record->id = (string) Str::uuid();
         }
-        $record->fill([
+        $recordPayload = [
             'config_id' => $config->id,
             'uploaded_by_user_id' => $request->user()?->id,
             'bucket' => $bucket,
@@ -373,7 +518,15 @@ class GoogleDriveService
             'extension' => $this->fileExtension($safeName),
             'size_bytes' => $sizeBytes,
             'uploaded_at' => now(),
-        ]);
+        ];
+
+        foreach (['tahun_ajaran', 'semester', 'angkatan', 'kelas', 'task_id'] as $column) {
+            if (Schema::hasColumn('tenant_google_drive_files', $column)) {
+                $recordPayload[$column] = $usageSnapshot[$column] ?? null;
+            }
+        }
+
+        $record->fill($recordPayload);
         $record->save();
 
         try {
@@ -398,6 +551,7 @@ class GoogleDriveService
             'driveFileId' => $fileId,
             'driveFileName' => $record->drive_file_name,
             'driveWebViewLink' => $webViewLink,
+            'driveWebContentLink' => (string) ($fileInfo['webContentLink'] ?? ''),
             'driveFolderId' => $folderId,
             'driveFolderPath' => $folderPath,
             'uploadedSizeBytes' => $sizeBytes,
@@ -486,9 +640,67 @@ class GoogleDriveService
         return true;
     }
 
-    private function publicStatus(string $tenantId, ?TenantGoogleDriveConfig $config, bool $summaryOnly = false): array
+    public function downloadStoredFile(string $tenantId, string $bucket, string $storageValue): ?array
     {
-        $stats = $this->driveUploadStats($tenantId);
+        $record = $this->storedFileRecord($tenantId, $bucket, $storageValue);
+        if (! $record) {
+            return null;
+        }
+
+        $config = TenantGoogleDriveConfig::query()
+            ->where('tenant_id', trim($tenantId))
+            ->first();
+        if (! $config || ! $config->refresh_token) {
+            throw new RuntimeException('Google Drive sekolah belum tersambung.');
+        }
+
+        $token = $this->validAccessToken($config);
+        $response = Http::withToken($token)
+            ->timeout(30)
+            ->get('https://www.googleapis.com/drive/v3/files/'.rawurlencode((string) $record->drive_file_id), [
+                'alt' => 'media',
+            ]);
+
+        if (! $response->successful()) {
+            throw new RuntimeException($this->googleErrorMessage($response->json(), 'Gagal mengunduh file Google Drive.'));
+        }
+
+        $mime = trim((string) ($record->mime_type ?? ''));
+        if ($mime === '') {
+            $mime = trim((string) ($response->header('Content-Type') ?: 'application/octet-stream'));
+        }
+
+        return [
+            'contents' => $response->body(),
+            'mime_type' => $mime ?: 'application/octet-stream',
+            'filename' => (string) ($record->drive_file_name ?? 'file'),
+            'size_bytes' => (int) ($record->size_bytes ?? 0),
+        ];
+    }
+
+    private function storedFileRecord(string $tenantId, string $bucket, string $storageValue): ?TenantGoogleDriveFile
+    {
+        $tenantId = trim($tenantId);
+        $bucket = trim($bucket);
+        $fileId = $this->fileIdFromUrl($storageValue);
+        if ($tenantId === '' || $bucket === '' || $fileId === '' || ! $this->tablesReady()) {
+            return null;
+        }
+
+        return TenantGoogleDriveFile::query()
+            ->where('tenant_id', $tenantId)
+            ->where('bucket', $bucket)
+            ->where('drive_file_id', $fileId)
+            ->first();
+    }
+
+    private function publicStatus(
+        string $tenantId,
+        ?TenantGoogleDriveConfig $config,
+        bool $summaryOnly = false,
+        array $usageFilters = []
+    ): array {
+        $stats = $this->driveUploadStats($tenantId, $usageFilters);
         $configured = $config !== null
             && $config->is_enabled
             && $config->status === self::STATUS_CONNECTED
@@ -530,6 +742,14 @@ class GoogleDriveService
                 'uploaded_label' => $this->formatBytes((int) $stats['total_bytes']),
                 'files' => (int) $stats['total_files'],
             ],
+            'app_storage_all' => [
+                'uploaded_bytes' => (int) $stats['all_bytes'],
+                'uploaded_label' => $this->formatBytes((int) $stats['all_bytes']),
+                'files' => (int) $stats['all_files'],
+            ],
+            'usage_filter' => $stats['filter'],
+            'usage_by_semester' => $stats['by_semester'],
+            'usage_by_class' => $stats['by_class'],
         ];
 
         if (! $summaryOnly) {
@@ -654,7 +874,21 @@ class GoogleDriveService
 
     private function ensureAssignmentUploadFolder(string $accessToken, string $schoolFolderId, string $sourcePath, string $tenantId): array
     {
+        return $this->ensureStorageUploadFolder($accessToken, $schoolFolderId, 'assignments', $sourcePath, $tenantId);
+    }
+
+    private function ensureStorageUploadFolder(
+        string $accessToken,
+        string $schoolFolderId,
+        string $bucket,
+        string $sourcePath,
+        string $tenantId
+    ): array
+    {
         $segments = $this->assignmentFolderSegments($sourcePath, $tenantId);
+        if ($bucket === 'quiz-media') {
+            $segments = $this->quizFolderSegments($sourcePath, $tenantId);
+        }
         $parentId = $schoolFolderId;
         $path = [];
 
@@ -718,33 +952,48 @@ class GoogleDriveService
         return array_merge($segments, ['Jawaban Siswa', $taskId, $this->folderLabel('Siswa', $studentId)]);
     }
 
+    private function quizFolderSegments(string $sourcePath, string $tenantId): array
+    {
+        $path = $this->quizMediaPathParts($sourcePath);
+        $quizId = (string) ($path['quiz_id'] ?? '');
+        $teacherId = (string) ($path['teacher_id'] ?? 'tanpa-user');
+        $filename = (string) ($path['filename'] ?? '');
+        $quiz = $this->quizSnapshot($quizId, $tenantId);
+
+        $period = $this->periodFolderSegments($tenantId);
+        $quizYear = AcademicPeriod::normalizeAcademicYear($quiz['tahun_ajaran'] ?? null);
+        $quizSemester = AcademicPeriod::normalizeSemester($quiz['semester'] ?? null);
+        if ($quizYear || $quizSemester) {
+            $period = $this->formatPeriodFolderSegments(
+                $quizYear ?: 'Aktif',
+                $quizSemester ?: 'Aktif'
+            );
+        }
+
+        $segments = array_merge(['Quiz'], $period);
+        $cohort = trim((string) ($quiz['angkatan'] ?? ''));
+        $class = trim((string) ($quiz['kelas_id'] ?? ''));
+        $subject = trim((string) ($quiz['mapel'] ?? ''));
+        if ($cohort !== '') {
+            $segments[] = $this->folderLabel('Angkatan', $cohort);
+        }
+        if ($class !== '') {
+            $segments[] = $this->folderLabel('Kelas', $class);
+        }
+        if ($subject !== '') {
+            $segments[] = $this->folderLabel('Mapel', $subject);
+        }
+
+        $segments[] = $this->folderLabel('Quiz', $quizId !== '' ? $quizId : 'tanpa-id');
+        $segments[] = $this->folderLabel('Guru', $teacherId);
+        $segments[] = str_starts_with(strtolower($filename), 'option-') ? 'Gambar Opsi' : 'Gambar Soal';
+
+        return $segments;
+    }
+
     private function periodFolderSegments(string $tenantId): array
     {
-        $period = AcademicPeriod::current();
-
-        if (
-            $tenantId !== ''
-            && Schema::hasTable('settings')
-            && Schema::hasColumn('settings', 'tahun_ajaran')
-            && Schema::hasColumn('settings', 'semester_aktif')
-        ) {
-            $query = DB::table('settings');
-            if (Schema::hasColumn('settings', 'tenant_id')) {
-                $query->where('tenant_id', $tenantId);
-            }
-
-            $settings = $query->orderBy('id')->first(['tahun_ajaran', 'semester_aktif']);
-            if ($settings) {
-                $year = AcademicPeriod::normalizeAcademicYear($settings->tahun_ajaran ?? null);
-                $semester = AcademicPeriod::normalizeSemester($settings->semester_aktif ?? null);
-                if ($year) {
-                    $period['tahun_ajaran'] = $year;
-                }
-                if ($semester) {
-                    $period['semester'] = $semester;
-                }
-            }
-        }
+        $period = $this->tenantActivePeriod($tenantId);
 
         return $this->formatPeriodFolderSegments(
             (string) ($period['tahun_ajaran'] ?? 'Aktif'),
@@ -758,6 +1007,113 @@ class GoogleDriveService
             'Tahun Ajaran '.str_replace('/', '-', $tahunAjaran ?: 'Aktif'),
             'Semester '.($semester ?: 'Aktif'),
         ];
+    }
+
+    private function assignmentUsageSnapshot(string $sourcePath, string $tenantId): array
+    {
+        $parts = array_values(array_filter(explode('/', trim($sourcePath, '/')), static fn ($part) => trim($part) !== ''));
+        $first = (string) ($parts[0] ?? '');
+        $taskId = $first !== 'tugas_lampiran' ? $first : '';
+        $task = $taskId !== '' ? $this->assignmentTaskSnapshot($taskId, $tenantId) : [];
+
+        $period = [];
+        if (! empty($task['tahun_ajaran']) || ! empty($task['semester'])) {
+            $period = AcademicPeriod::make($task['tahun_ajaran'] ?? null, $task['semester'] ?? null);
+        } else {
+            $period = $this->tenantActivePeriod($tenantId);
+        }
+
+        return [
+            'task_id' => $taskId ?: null,
+            'tahun_ajaran' => $period['tahun_ajaran'] ?? null,
+            'semester' => $period['semester'] ?? null,
+            'angkatan' => $task['angkatan'] ?? null,
+            'kelas' => $task['kelas'] ?? null,
+        ];
+    }
+
+    private function storageUsageSnapshot(string $bucket, string $sourcePath, string $tenantId): array
+    {
+        if ($bucket === 'quiz-media') {
+            return $this->quizUsageSnapshot($sourcePath, $tenantId);
+        }
+
+        return $this->assignmentUsageSnapshot($sourcePath, $tenantId);
+    }
+
+    private function quizUsageSnapshot(string $sourcePath, string $tenantId): array
+    {
+        $path = $this->quizMediaPathParts($sourcePath);
+        $quizId = (string) ($path['quiz_id'] ?? '');
+        $quiz = $this->quizSnapshot($quizId, $tenantId);
+
+        $period = [];
+        if (! empty($quiz['tahun_ajaran']) || ! empty($quiz['semester'])) {
+            $period = AcademicPeriod::make($quiz['tahun_ajaran'] ?? null, $quiz['semester'] ?? null);
+        } else {
+            $period = $this->tenantActivePeriod($tenantId);
+        }
+
+        return [
+            'task_id' => null,
+            'tahun_ajaran' => $period['tahun_ajaran'] ?? null,
+            'semester' => $period['semester'] ?? null,
+            'angkatan' => $quiz['angkatan'] ?? null,
+            'kelas' => $quiz['kelas_id'] ?? null,
+        ];
+    }
+
+    private function quizMediaPathParts(string $sourcePath): array
+    {
+        $parts = array_values(array_filter(explode('/', trim($sourcePath, '/')), static fn ($part) => trim($part) !== ''));
+        if (($parts[0] ?? '') === 'quiz-media') {
+            return [
+                'teacher_id' => (string) ($parts[1] ?? ''),
+                'quiz_id' => (string) ($parts[2] ?? ''),
+                'filename' => (string) ($parts[3] ?? ''),
+            ];
+        }
+
+        return [
+            'teacher_id' => (string) ($parts[0] ?? ''),
+            'quiz_id' => (string) ($parts[1] ?? ''),
+            'filename' => (string) ($parts[2] ?? ''),
+        ];
+    }
+
+    private function tenantActivePeriod(string $tenantId): array
+    {
+        $period = AcademicPeriod::current();
+        if (
+            $tenantId === ''
+            || ! Schema::hasTable('settings')
+            || ! Schema::hasColumn('settings', 'tahun_ajaran')
+            || ! Schema::hasColumn('settings', 'semester_aktif')
+        ) {
+            return $period;
+        }
+
+        $query = DB::table('settings');
+        if (Schema::hasColumn('settings', 'tenant_id')) {
+            $query->where('tenant_id', $tenantId);
+        }
+
+        $columns = array_values(array_filter(
+            [
+                'tahun_ajaran',
+                'semester_aktif',
+                'periode_mulai',
+                'periode_selesai',
+                'periode_ganjil_mulai',
+                'periode_ganjil_selesai',
+                'periode_genap_mulai',
+                'periode_genap_selesai',
+            ],
+            fn ($column) => Schema::hasColumn('settings', $column)
+        ));
+        $settings = $query->orderBy('id')->first($columns ?: ['tahun_ajaran', 'semester_aktif']);
+
+        return $settings ? AcademicPeriod::fromSettings($settings) : $period;
     }
 
     private function assignmentTaskSnapshot(string $taskId, string $tenantId): array
@@ -777,6 +1133,34 @@ class GoogleDriveService
 
         $query = DB::table('tugas')->where('id', $taskId);
         if ($tenantId !== '' && Schema::hasColumn('tugas', 'tenant_id')) {
+            $query->where('tenant_id', $tenantId);
+        }
+
+        $row = $query->first($columns);
+        if (! $row) {
+            return [];
+        }
+
+        return (array) $row;
+    }
+
+    private function quizSnapshot(string $quizId, string $tenantId): array
+    {
+        $quizId = trim($quizId);
+        if ($quizId === '' || ! Schema::hasTable('quizzes')) {
+            return [];
+        }
+
+        $columns = array_values(array_filter(
+            ['nama', 'mapel', 'kelas_id', 'tahun_ajaran', 'semester', 'angkatan'],
+            fn ($column) => Schema::hasColumn('quizzes', $column)
+        ));
+        if (empty($columns)) {
+            return [];
+        }
+
+        $query = DB::table('quizzes')->where('id', $quizId);
+        if ($tenantId !== '' && Schema::hasColumn('quizzes', 'tenant_id')) {
             $query->where('tenant_id', $tenantId);
         }
 
@@ -1014,6 +1398,28 @@ class GoogleDriveService
         );
     }
 
+    private function shouldSendBucketFileToDrive(string $bucket, UploadedFile $file): bool
+    {
+        return $this->canRouteBucketFileToDrive(
+            $bucket,
+            (string) $file->getClientOriginalName(),
+            (string) ($file->getMimeType() ?: $file->getClientMimeType() ?: '')
+        );
+    }
+
+    private function canRouteBucketFileToDrive(string $bucket, string $fileName, string $mime = ''): bool
+    {
+        if (! in_array($bucket, self::DRIVE_UPLOAD_BUCKETS, true)) {
+            return false;
+        }
+
+        if ($bucket === 'quiz-media') {
+            return $this->isImageFileMetadata($fileName, $mime);
+        }
+
+        return $this->shouldSendFileMetadataToDrive($fileName, $mime);
+    }
+
     private function shouldSendFileMetadataToDrive(string $fileName, string $mime = ''): bool
     {
         $extension = $this->fileExtension($fileName);
@@ -1026,7 +1432,19 @@ class GoogleDriveService
         return in_array($extension, array_merge(self::DOCUMENT_EXTENSIONS, self::IMAGE_EXTENSIONS), true);
     }
 
-    private function driveUploadStats(string $tenantId): array
+    private function isImageFileMetadata(string $fileName, string $mime = ''): bool
+    {
+        $extension = $this->fileExtension($fileName);
+        $mime = strtolower(trim($mime));
+
+        if ($mime !== '' && str_starts_with($mime, 'image/')) {
+            return true;
+        }
+
+        return in_array($extension, self::IMAGE_EXTENSIONS, true);
+    }
+
+    private function driveUploadStats(string $tenantId, array $filters = []): array
     {
         if ($tenantId === '' || ! Schema::hasTable('tenant_google_drive_files')) {
             return [
@@ -1034,29 +1452,116 @@ class GoogleDriveService
                 'today_files' => 0,
                 'total_bytes' => 0,
                 'total_files' => 0,
+                'all_bytes' => 0,
+                'all_files' => 0,
+                'filter' => [
+                    'tahun_ajaran' => '',
+                    'semester' => '',
+                ],
+                'by_semester' => [],
+                'by_class' => [],
             ];
         }
 
         $timezone = (string) $this->driveConfig('usage_timezone', 'Asia/Jakarta');
         $startOfDay = Carbon::now($timezone)->startOfDay()->utc();
+        $year = AcademicPeriod::normalizeAcademicYear($filters['tahun_ajaran'] ?? null) ?: '';
+        $semester = AcademicPeriod::normalizeSemester($filters['semester'] ?? null) ?: '';
 
-        $total = DB::table('tenant_google_drive_files')
+        $baseQuery = DB::table('tenant_google_drive_files')
+            ->where('tenant_id', $tenantId);
+        $this->applyDriveUsageFilters($baseQuery, $year, $semester);
+
+        $total = (clone $baseQuery)
+            ->selectRaw('coalesce(sum(size_bytes), 0) as bytes, count(*) as files')
+            ->first();
+
+        $allTotal = DB::table('tenant_google_drive_files')
             ->where('tenant_id', $tenantId)
             ->selectRaw('coalesce(sum(size_bytes), 0) as bytes, count(*) as files')
             ->first();
 
-        $today = DB::table('tenant_google_drive_files')
-            ->where('tenant_id', $tenantId)
+        $today = (clone $baseQuery)
             ->where('uploaded_at', '>=', $startOfDay)
             ->selectRaw('coalesce(sum(size_bytes), 0) as bytes, count(*) as files')
             ->first();
+
+        $bySemester = [];
+        if (
+            Schema::hasColumn('tenant_google_drive_files', 'tahun_ajaran')
+            && Schema::hasColumn('tenant_google_drive_files', 'semester')
+        ) {
+            $semesterRows = DB::table('tenant_google_drive_files')
+                ->where('tenant_id', $tenantId)
+                ->when($year !== '', fn ($query) => $query->where('tahun_ajaran', $year))
+                ->select('tahun_ajaran', 'semester')
+                ->selectRaw('coalesce(sum(size_bytes), 0) as bytes, count(*) as files')
+                ->groupBy('tahun_ajaran', 'semester')
+                ->orderBy('tahun_ajaran', 'desc')
+                ->orderBy('semester')
+                ->get();
+
+            $bySemester = $semesterRows->map(fn ($row) => [
+                'tahun_ajaran' => (string) ($row->tahun_ajaran ?? ''),
+                'semester' => (string) ($row->semester ?? ''),
+                'uploaded_bytes' => (int) ($row->bytes ?? 0),
+                'uploaded_label' => $this->formatBytes((int) ($row->bytes ?? 0)),
+                'files' => (int) ($row->files ?? 0),
+            ])->values()->all();
+        }
+
+        $byClass = [];
+        if (
+            Schema::hasColumn('tenant_google_drive_files', 'kelas')
+            && Schema::hasColumn('tenant_google_drive_files', 'tahun_ajaran')
+            && Schema::hasColumn('tenant_google_drive_files', 'semester')
+        ) {
+            $classQuery = DB::table('tenant_google_drive_files')
+                ->where('tenant_id', $tenantId);
+            $this->applyDriveUsageFilters($classQuery, $year, $semester);
+
+            $classRows = $classQuery
+                ->select('tahun_ajaran', 'semester', 'kelas', 'angkatan')
+                ->selectRaw('coalesce(sum(size_bytes), 0) as bytes, count(*) as files')
+                ->groupBy('tahun_ajaran', 'semester', 'kelas', 'angkatan')
+                ->orderBy('kelas')
+                ->get();
+
+            $byClass = $classRows->map(fn ($row) => [
+                'tahun_ajaran' => (string) ($row->tahun_ajaran ?? ''),
+                'semester' => (string) ($row->semester ?? ''),
+                'kelas' => (string) ($row->kelas ?? ''),
+                'angkatan' => (string) ($row->angkatan ?? ''),
+                'uploaded_bytes' => (int) ($row->bytes ?? 0),
+                'uploaded_label' => $this->formatBytes((int) ($row->bytes ?? 0)),
+                'files' => (int) ($row->files ?? 0),
+            ])->values()->all();
+        }
 
         return [
             'today_bytes' => (int) ($today->bytes ?? 0),
             'today_files' => (int) ($today->files ?? 0),
             'total_bytes' => (int) ($total->bytes ?? 0),
             'total_files' => (int) ($total->files ?? 0),
+            'all_bytes' => (int) ($allTotal->bytes ?? 0),
+            'all_files' => (int) ($allTotal->files ?? 0),
+            'filter' => [
+                'tahun_ajaran' => $year,
+                'semester' => $semester,
+            ],
+            'by_semester' => $bySemester,
+            'by_class' => $byClass,
         ];
+    }
+
+    private function applyDriveUsageFilters($query, string $year, string $semester): void
+    {
+        if ($year !== '' && Schema::hasColumn('tenant_google_drive_files', 'tahun_ajaran')) {
+            $query->where('tahun_ajaran', $year);
+        }
+        if ($semester !== '' && Schema::hasColumn('tenant_google_drive_files', 'semester')) {
+            $query->where('semester', $semester);
+        }
     }
 
     private function redirectUri(Request $request): string

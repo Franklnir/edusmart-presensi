@@ -45,4 +45,22 @@ class AcademicPeriodTest extends TestCase
         $this->assertSame('Ganjil', $july['semester']);
         $this->assertSame('2026-07-01', $july['starts_at']);
     }
+
+    public function test_custom_school_month_range_overrides_default_semester_months(): void
+    {
+        $settings = (object) [
+            'tahun_ajaran' => '2026/2027',
+            'semester_aktif' => 'Ganjil',
+            'periode_mulai' => '2026-08-01',
+            'periode_selesai' => '2026-11-30',
+        ];
+
+        $period = AcademicPeriod::fromSettings($settings);
+
+        $this->assertSame('2026-08-01', $period['starts_at']);
+        $this->assertSame('2026-11-30', $period['ends_at']);
+        $this->assertTrue($period['custom_range']);
+        $this->assertSame([8, 9, 10, 11], $period['month_numbers']);
+        $this->assertSame('Agustus 2026 - November 2026', $period['range_label']);
+    }
 }

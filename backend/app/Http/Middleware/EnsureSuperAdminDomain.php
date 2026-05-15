@@ -16,12 +16,17 @@ class EnsureSuperAdminDomain
     public function handle(Request $request, Closure $next): Response
     {
         $host = strtolower(trim((string) $request->getHost()));
-        if ($this->tenantDomainService->isAdminHost($host)) {
+        if ($this->tenantDomainService->isAdminHost($host) || $this->isAllowedLocalSuperAdminHost($host)) {
             return $next($request);
         }
 
         return response()->json([
             'error' => $this->tenantDomainService->adminHostMessage(),
         ], 403);
+    }
+
+    private function isAllowedLocalSuperAdminHost(string $host): bool
+    {
+        return app()->environment('local') && in_array($host, ['localhost', '127.0.0.1'], true);
     }
 }

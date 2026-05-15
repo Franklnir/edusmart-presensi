@@ -1,14 +1,19 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useMemo, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
+import {
+  flattenMenuItems,
+  hasActiveMenuChild,
+  hasMenuChildren,
+  isActiveMenuPath,
+  menuItemKey,
+} from '../../navigation/menu.utils'
 import { prefetchRoute } from '../../lib/routePrefetch'
 import Avatar from './Avatar'
 import { Icon } from './icons'
 
-const isActivePath = (pathname, to) => pathname === to || pathname.startsWith(`${to}/`)
-
 const MobileNavLink = React.memo(({ item, onNavigate }) => {
   const location = useLocation()
-  const isActive = isActivePath(location.pathname, item.to)
+  const isActive = isActiveMenuPath(location.pathname, item.to, location.search)
 
   const handlePrefetch = useCallback(() => {
     void prefetchRoute(item.to)
@@ -33,23 +38,25 @@ const MobileNavLink = React.memo(({ item, onNavigate }) => {
 
 MobileNavLink.displayName = 'MobileNavLink'
 
-const MobileNavGroup = React.memo(({ group, onNavigate }) => {
+const MobileNavGroup = React.memo(({ group, onNavigate, level = 0, menuExpansion }) => {
   const location = useLocation()
-  const hasActiveChild = group.items.some((item) => isActivePath(location.pathname, item.to))
-  const [open, setOpen] = useState(hasActiveChild)
+  const hasActiveChild = hasActiveMenuChild(group, location.pathname, location.search)
+  const groupId = menuItemKey(group)
+  const open = menuExpansion?.isExpanded?.(groupId) ?? hasActiveChild
 
-  useEffect(() => {
-    if (hasActiveChild) setOpen(true)
-  }, [hasActiveChild])
+  const handleToggle = useCallback(() => {
+    menuExpansion?.toggle?.(groupId)
+  }, [groupId, menuExpansion])
 
   return (
     <div>
       <button
         type="button"
-        onClick={() => setOpen((value) => !value)}
+        onClick={handleToggle}
         className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-bold transition-all duration-200 ${
           hasActiveChild ? 'text-brand-700 bg-brand-50' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'
         }`}
+        style={level > 0 ? { paddingLeft: `${Math.min(0.75 + level * 0.75, 3)}rem` } : undefined}
       >
         <Icon name={group.icon} className="w-4 h-4 flex-shrink-0" />
         <span className="flex-1 text-left">{group.group}</span>
@@ -57,9 +64,19 @@ const MobileNavGroup = React.memo(({ group, onNavigate }) => {
       </button>
 
       {open && (
-        <div className="mt-1 ml-4 pl-3 border-l border-slate-100 space-y-1">
-          {group.items.map((item) => (
-            <MobileNavLink key={item.to} item={item} onNavigate={onNavigate} />
+        <div className={`mt-1 border-l border-slate-100 space-y-1 ${level > 0 ? 'ml-3 pl-2' : 'ml-4 pl-3'}`}>
+          {group.items.map((item, index) => (
+            hasMenuChildren(item)
+              ? (
+                <MobileNavGroup
+                  key={menuItemKey(item, index)}
+                  group={item}
+                  level={level + 1}
+                  menuExpansion={menuExpansion}
+                  onNavigate={onNavigate}
+                />
+              )
+              : <MobileNavLink key={menuItemKey(item, index)} item={item} onNavigate={onNavigate} />
           ))}
         </div>
       )}
@@ -71,7 +88,7 @@ MobileNavGroup.displayName = 'MobileNavGroup'
 
 const MobileBottomLink = React.memo(({ item }) => {
   const location = useLocation()
-  const isActive = isActivePath(location.pathname, item.to)
+  const isActive = isActiveMenuPath(location.pathname, item.to, location.search)
 
   const handlePrefetch = useCallback(() => {
     void prefetchRoute(item.to)
@@ -101,8 +118,10 @@ MobileBottomLink.displayName = 'MobileBottomLink'
 const MobileNav = React.memo(({
   avatarUrl,
   effectiveRole,
+  menuExpansion,
   navItems,
   onAvatarError,
+  onLogout,
   onOpenMonitoring,
   onlineCount,
   roleBadge,
@@ -112,12 +131,7 @@ const MobileNav = React.memo(({
   const [menuOpen, setMenuOpen] = useState(false)
 
   const mobileLinks = useMemo(() => {
-    const flat = []
-    for (const item of navItems) {
-      if (item.to) flat.push(item)
-      else if (item.items) flat.push(...item.items)
-    }
-    return flat.slice(0, 5)
+    return flattenMenuItems(navItems).slice(0, 5)
   }, [navItems])
 
   const closeMenu = useCallback(() => {
@@ -126,7 +140,7 @@ const MobileNav = React.memo(({
 
   return (
     <>
-      <div className="md:hidden sticky top-0 z-30 glass border-b border-slate-100 shadow-navbar">
+      <div className="theme-mobile-bar md:hidden sticky top-0 z-30 glass border-b border-slate-100 shadow-navbar">
         <div className="flex items-center justify-between px-4 h-14">
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center flex-shrink-0">
@@ -161,7 +175,7 @@ const MobileNav = React.memo(({
         </div>
       </div>
 
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 glass border-t border-slate-100 shadow-navbar">
+      <nav className="theme-mobile-bar md:hidden fixed bottom-0 left-0 right-0 z-30 glass border-t border-slate-100 shadow-navbar">
         <div className="flex items-center justify-around px-1 py-1.5 safe-area-inset-bottom">
           {mobileLinks.map((item) => (
             <MobileBottomLink key={item.to} item={item} />
@@ -177,7 +191,7 @@ const MobileNav = React.memo(({
             className="absolute inset-0 bg-black/40"
             onClick={closeMenu}
           />
-          <aside className="absolute right-0 top-0 h-full w-[min(88vw,360px)] bg-white shadow-2xl border-l border-slate-100 flex flex-col">
+          <aside className="theme-mobile-drawer absolute right-0 top-0 h-full w-[min(88vw,360px)] bg-white shadow-2xl border-l border-slate-100 flex flex-col">
             <div className="flex items-center justify-between px-4 py-4 border-b border-slate-100">
               <div className="min-w-0">
                 <p className="text-sm font-extrabold text-slate-900 truncate">{schoolName}</p>
@@ -196,12 +210,33 @@ const MobileNav = React.memo(({
             </div>
 
             <nav className="flex-1 overflow-y-auto p-3 space-y-1">
-              {navItems.map((item, idx) => (
-                item.group && item.items
-                  ? <MobileNavGroup key={`${item.group}-${idx}`} group={item} onNavigate={closeMenu} />
-                  : <MobileNavLink key={item.to} item={item} onNavigate={closeMenu} />
+              {navItems.map((item, index) => (
+                hasMenuChildren(item)
+                  ? (
+                    <MobileNavGroup
+                      key={menuItemKey(item, index)}
+                      group={item}
+                      menuExpansion={menuExpansion}
+                      onNavigate={closeMenu}
+                    />
+                  )
+                  : <MobileNavLink key={menuItemKey(item, index)} item={item} onNavigate={closeMenu} />
               ))}
             </nav>
+
+            <div className="border-t border-slate-100 p-4">
+              <button
+                type="button"
+                onClick={() => {
+                  closeMenu()
+                  onLogout?.()
+                }}
+                className="w-full inline-flex items-center justify-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-600 transition-colors hover:bg-red-100"
+              >
+                <Icon name="logout" className="w-4 h-4" />
+                <span>Keluar</span>
+              </button>
+            </div>
           </aside>
         </div>
       )}

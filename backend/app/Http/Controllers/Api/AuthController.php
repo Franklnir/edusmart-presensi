@@ -51,6 +51,8 @@ class AuthController extends ApiController
         'admin_lock_enabled',
         'tahun_ajaran',
         'semester_aktif',
+        'periode_mulai',
+        'periode_selesai',
         'updated_at',
     ];
 
@@ -66,6 +68,17 @@ class AuthController extends ApiController
         }
 
         $profile = $this->profile($request);
+
+        if ($this->isSuperAdminIdentity($request) && ! $profile) {
+            $profile = new Profile([
+                'id' => $user->id,
+                'tenant_id' => $this->tenantId($request),
+                'role' => 'admin',
+                'nama' => 'Super Admin',
+                'email' => $user->email,
+                'status' => 'active',
+            ]);
+        }
 
         return response()->json([
             'data' => [
@@ -245,7 +258,7 @@ class AuthController extends ApiController
                 'host' => $this->currentHost($request),
             ], $googleUser);
         } catch (\Throwable $e) {
-            report($e);
+            $this->reportUnexpectedGoogleDomainException($e);
 
             return response()->json([
                 'error' => $this->safeGoogleErrorMessage($e->getMessage()),
@@ -296,7 +309,7 @@ class AuthController extends ApiController
                 'host' => $this->currentHost($request),
             ], $googleUser);
         } catch (\Throwable $e) {
-            report($e);
+            $this->reportUnexpectedGoogleDomainException($e);
 
             return response()->json([
                 'error' => $this->safeGoogleErrorMessage($e->getMessage()),
@@ -352,7 +365,7 @@ class AuthController extends ApiController
                 'link_user_id' => (string) $user->id,
             ], $googleUser);
         } catch (\Throwable $e) {
-            report($e);
+            $this->reportUnexpectedGoogleDomainException($e);
 
             return response()->json([
                 'error' => $this->safeGoogleErrorMessage($e->getMessage()),
@@ -504,7 +517,7 @@ class AuthController extends ApiController
                 'google' => 'success',
             ]));
         } catch (\Throwable $e) {
-            report($e);
+            $this->reportUnexpectedGoogleDomainException($e);
 
             if ($popupResponse = $this->googlePopupErrorResponse($statePayload, $this->safeGoogleErrorMessage($e->getMessage()))) {
                 return $popupResponse;
@@ -568,19 +581,17 @@ class AuthController extends ApiController
         }
         $email = $resolved['email'];
 
-        $credentials = [
-            'email' => $email,
-            'password' => $password,
-        ];
-
-        $identityUserId = User::query()
-            ->where('email', $email)
-            ->value('id');
+        $loginUser = $this->resolveLoginUserForTenantEmail(
+            $tenantId,
+            $email,
+            is_string($resolved['user_id'] ?? null) ? $resolved['user_id'] : null
+        );
+        $identityUserId = $loginUser?->id;
         $isSuperAdminIdentity = $this->isSuperAdminByIdentity(
             $identityUserId ? (string) $identityUserId : null,
             $email
         );
-        if ($isSuperAdminIdentity && ! $this->isAdminHost($host)) {
+        if ($isSuperAdminIdentity && ! $this->isAllowedSuperAdminLoginHost($host)) {
             $this->registerFailedLoginAttempt($throttleKey);
             $this->logAuthEvent($request, 'login_denied_super_admin_wrong_host', [
                 'email' => $email,
@@ -611,13 +622,10 @@ class AuthController extends ApiController
         );
         $usedInitialPasswordAlias = false;
 
-        if (! Auth::attempt($credentials)) {
+        if (! $loginUser || ! Hash::check($password, (string) $loginUser->password)) {
             $initialAliasPassword = $this->resolveInitialPasswordAliasForLogin($profileForLogin, $password);
 
-            if ($initialAliasPassword !== null && Auth::attempt([
-                'email' => $email,
-                'password' => $initialAliasPassword,
-            ])) {
+            if ($loginUser && $initialAliasPassword !== null && Hash::check($initialAliasPassword, (string) $loginUser->password)) {
                 $usedInitialPasswordAlias = true;
             } else {
                 $this->registerFailedLoginAttempt($throttleKey);
@@ -631,6 +639,9 @@ class AuthController extends ApiController
             }
         }
 
+        Auth::login($loginUser);
+        $loginUser->unsetRelation('profile');
+        $request->setUserResolver(fn () => $loginUser);
         if ($request->hasSession()) {
             $request->session()->regenerate();
         }
@@ -638,7 +649,7 @@ class AuthController extends ApiController
         $user = $request->user();
         $profile = $this->profile($request);
 
-        if (! $profile || $profile->tenant_id !== $tenantId) {
+        if (! $isSuperAdminIdentity && (! $profile || $profile->tenant_id !== $tenantId)) {
             $this->logoutWebSession($request);
             $this->registerFailedLoginAttempt($throttleKey);
             $this->logAuthEvent($request, 'login_failed_tenant_mismatch', [
@@ -677,10 +688,22 @@ class AuthController extends ApiController
             'used_initial_password_alias' => $usedInitialPasswordAlias,
         ], $user->id ?? null, $profile->role ?? null);
 
+        if ($isSuperAdminIdentity && ! $profile) {
+            $profile = new Profile([
+                'id' => $user->id,
+                'tenant_id' => $tenantId,
+                'role' => 'admin',
+                'nama' => 'Super Admin',
+                'email' => $user->email,
+                'status' => 'active',
+            ]);
+        }
+
         return response()->json([
             'data' => [
                 'user' => $user,
                 'profile' => $profile,
+                'is_super_admin' => $isSuperAdminIdentity,
             ],
         ]);
     }
@@ -692,7 +715,13 @@ class AuthController extends ApiController
                 return ['error' => 'Format email tidak valid', 'code' => 422];
             }
 
-            return ['email' => strtolower($identifier)];
+            $email = strtolower($identifier);
+            $profile = $this->profileForTenantEmail($tenantId, $email);
+
+            return [
+                'email' => $email,
+                'user_id' => $profile?->id ? (string) $profile->id : null,
+            ];
         }
 
         // NIS Logic
@@ -728,7 +757,42 @@ class AuthController extends ApiController
             return ['error' => 'Gunakan email untuk login', 'code' => 403];
         }
 
-        return ['email' => $email];
+        return ['email' => $email, 'user_id' => (string) $profile->id];
+    }
+
+    private function profileForTenantEmail(string $tenantId, string $email): ?Profile
+    {
+        $normalizedEmail = strtolower(trim($email));
+        if ($tenantId === '' || $normalizedEmail === '') {
+            return null;
+        }
+
+        return Profile::query()
+            ->where('tenant_id', $tenantId)
+            ->whereRaw('lower(email) = ?', [$normalizedEmail])
+            ->first();
+    }
+
+    private function resolveLoginUserForTenantEmail(string $tenantId, string $email, ?string $preferredUserId = null): ?User
+    {
+        if ($preferredUserId) {
+            $user = User::query()->where('id', $preferredUserId)->first();
+            if ($user) {
+                return $user;
+            }
+        }
+
+        $profile = $this->profileForTenantEmail($tenantId, $email);
+        if ($profile?->id) {
+            $user = User::query()->where('id', $profile->id)->first();
+            if ($user) {
+                return $user;
+            }
+        }
+
+        return User::query()
+            ->whereRaw('lower(email) = ?', [strtolower(trim($email))])
+            ->first();
     }
 
     private function loginThrottleKey(Request $request, string $tenantId, string $identifier): string
@@ -764,6 +828,15 @@ class AuthController extends ApiController
     private function isAdminHost(string $host): bool
     {
         return $this->tenantDomainService->isAdminHost($host);
+    }
+
+    private function isAllowedSuperAdminLoginHost(string $host): bool
+    {
+        if ($this->isAdminHost($host)) {
+            return true;
+        }
+
+        return app()->environment('local') && in_array($host, ['localhost', '127.0.0.1'], true);
     }
 
     private function superAdminHostMessage(): string
@@ -1233,20 +1306,30 @@ class AuthController extends ApiController
             );
         }
 
-        $existingByGoogleId = User::query()
+        $existingGoogleUserIds = User::query()
             ->where('google_id', $googleUser['sub'])
             ->where('id', '!=', $user->id)
-            ->exists();
+            ->limit(20)
+            ->pluck('id')
+            ->filter()
+            ->values();
+
+        $existingByGoogleId = $existingGoogleUserIds->isNotEmpty()
+            && Profile::query()
+                ->where('tenant_id', $tenantId)
+                ->whereIn('id', $existingGoogleUserIds->all())
+                ->exists();
         if ($existingByGoogleId) {
-            throw new \RuntimeException('Akun Google sudah tertaut pada pengguna lain.');
+            throw new \RuntimeException('Akun Google sudah tertaut pada pengguna lain di sekolah ini.');
         }
 
-        $existingByEmail = User::query()
+        $existingByEmail = Profile::query()
+            ->where('tenant_id', $tenantId)
             ->whereRaw('lower(email) = ?', [$googleEmail])
             ->where('id', '!=', $user->id)
             ->exists();
         if ($existingByEmail) {
-            throw new \RuntimeException('Email Google sudah digunakan akun lain.');
+            throw new \RuntimeException('Email Google sudah digunakan akun lain di sekolah ini.');
         }
 
         DB::transaction(function () use ($user, $profile, $googleUser, $currentEmail) {
@@ -1358,6 +1441,8 @@ class AuthController extends ApiController
         }
 
         Auth::login($user);
+        $user->unsetRelation('profile');
+        $request->setUserResolver(fn () => $user);
         if ($request->hasSession()) {
             $request->session()->regenerate();
         }
@@ -1388,14 +1473,48 @@ class AuthController extends ApiController
             $host = $this->currentHost($request);
         }
 
-        $user = User::query()
-            ->where('google_id', $googleUser['sub'])
-            ->first();
+        $googleEmail = strtolower(trim((string) ($googleUser['email'] ?? '')));
+        $profile = $this->profileForTenantEmail($tenantId, $googleEmail);
+        $user = $profile?->id
+            ? User::query()->where('id', $profile->id)->first()
+            : null;
 
-        if (! $user) {
-            $user = User::query()
-                ->whereRaw('lower(email) = ?', [$googleUser['email']])
-                ->first();
+        if (! $user && $googleEmail !== '') {
+            $candidateUsers = User::query()
+                ->whereRaw('lower(email) = ?', [$googleEmail])
+                ->limit(20)
+                ->get();
+
+            foreach ($candidateUsers as $candidateUser) {
+                $candidateProfile = Profile::query()
+                    ->where('id', $candidateUser->id)
+                    ->where('tenant_id', $tenantId)
+                    ->first();
+                if ($candidateProfile) {
+                    $user = $candidateUser;
+                    $profile = $candidateProfile;
+                    break;
+                }
+            }
+        }
+
+        if (! $user && $googleUser['sub']) {
+            $candidateUsers = User::query()
+                ->where('google_id', $googleUser['sub'])
+                ->limit(20)
+                ->get();
+
+            foreach ($candidateUsers as $candidateUser) {
+                $candidateProfile = Profile::query()
+                    ->where('id', $candidateUser->id)
+                    ->where('tenant_id', $tenantId)
+                    ->first();
+                if ($candidateProfile) {
+                    $user = $candidateUser;
+                    $profile = $candidateProfile;
+                    break;
+                }
+            }
         }
 
         if (! $user) {
@@ -1403,7 +1522,6 @@ class AuthController extends ApiController
         }
 
         $currentEmail = strtolower(trim((string) ($user->email ?? '')));
-        $googleEmail = strtolower(trim((string) ($googleUser['email'] ?? '')));
         if ($currentEmail === '' || Str::endsWith($currentEmail, '@import.local')) {
             throw new \RuntimeException(
                 'Email akun belum valid. Perbarui email akun terlebih dahulu sebelum login Google.'
@@ -1423,7 +1541,7 @@ class AuthController extends ApiController
             (string) $user->id,
             (string) ($user->email ?? '')
         );
-        if ($isSuperAdminIdentity && ! $this->isAdminHost($host)) {
+        if ($isSuperAdminIdentity && ! $this->isAllowedSuperAdminLoginHost($host)) {
             throw new \RuntimeException($this->superAdminHostMessage());
         }
         if (! $isSuperAdminIdentity && $this->isAdminHost($host)) {
@@ -1432,10 +1550,6 @@ class AuthController extends ApiController
             );
         }
 
-        $profile = Profile::query()
-            ->where('id', $user->id)
-            ->where('tenant_id', $tenantId)
-            ->first();
         if (! $profile && ! $isSuperAdminIdentity) {
             throw new \RuntimeException('Akun Google tidak terdaftar di tenant ini.');
         }
@@ -1469,6 +1583,8 @@ class AuthController extends ApiController
         });
 
         Auth::login($user);
+        $user->unsetRelation('profile');
+        $request->setUserResolver(fn () => $user);
         if ($request->hasSession()) {
             $request->session()->regenerate();
         }
@@ -1672,6 +1788,15 @@ class AuthController extends ApiController
         return Str::limit($value, 140, '...');
     }
 
+    private function reportUnexpectedGoogleDomainException(\Throwable $e): void
+    {
+        if ($e instanceof \RuntimeException) {
+            return;
+        }
+
+        report($e);
+    }
+
     private function googlePopupSuccessResponse(array $statePayload, string $status): ?\Illuminate\Http\Response
     {
         return $this->googlePopupResponse($statePayload, [
@@ -1790,14 +1915,15 @@ class AuthController extends ApiController
             }
         }
 
-        if (User::query()->where('email', $email)->exists()) {
-            return response()->json(['error' => 'Email sudah terdaftar'], 409);
+        if ($this->profileForTenantEmail($tenantId, $email)) {
+            return response()->json(['error' => 'Email sudah terdaftar di sekolah ini'], 409);
         }
 
         $userId = (string) Str::uuid();
+        $actorId = (string) ($request->user()?->id ?? '');
 
         $result = null;
-        DB::transaction(function () use ($userId, $email, $payload, $role, $tenantId, $allowAdminCreate, &$result) {
+        DB::transaction(function () use ($userId, $email, $payload, $role, $tenantId, $allowAdminCreate, $actorId, &$result) {
             $user = User::query()->create([
                 'id' => $userId,
                 'name' => $payload['nama'],
@@ -1805,7 +1931,7 @@ class AuthController extends ApiController
                 'password' => Hash::make($payload['password']),
             ]);
 
-            $profile = Profile::query()->create([
+            $profilePayload = [
                 'id' => $userId,
                 'tenant_id' => $tenantId,
                 'email' => $email,
@@ -1815,7 +1941,16 @@ class AuthController extends ApiController
                 'must_change_password' => $allowAdminCreate && in_array($role, ['siswa', 'guru'], true),
                 'created_at' => now(),
                 'updated_at' => now(),
-            ]);
+            ];
+
+            if (Schema::hasColumn('profiles', 'created_via')) {
+                $profilePayload['created_via'] = $allowAdminCreate ? 'admin_created' : 'manual_registration';
+            }
+            if ($allowAdminCreate && $actorId !== '' && Schema::hasColumn('profiles', 'created_by')) {
+                $profilePayload['created_by'] = $actorId;
+            }
+
+            $profile = Profile::query()->create($profilePayload);
 
             $result = ['user' => $user, 'profile' => $profile];
         });
@@ -2006,7 +2141,7 @@ class AuthController extends ApiController
         RateLimiter::hit($throttleKey, 300); // Decay 5 menit
 
         $email = strtolower(trim($payload['email']));
-        $eligibility = $this->passwordResetEligibility($email);
+        $eligibility = $this->passwordResetEligibility($email, $this->tenantId($request));
         if ($eligibility['allowed']) {
             try {
                 Password::sendResetLink(['email' => $email]);
@@ -2042,7 +2177,7 @@ class AuthController extends ApiController
         RateLimiter::hit($throttleKey, 300); // Decay 5 menit
 
         $email = strtolower(trim($payload['email']));
-        $eligibility = $this->passwordResetEligibility($email);
+        $eligibility = $this->passwordResetEligibility($email, $this->tenantId($request));
         if (! $eligibility['allowed']) {
             return response()->json(['error' => $this->passwordResetFailureMessage()], 400);
         }
@@ -2303,8 +2438,14 @@ class AuthController extends ApiController
             ], 422);
         }
 
-        if (User::query()->where('email', $email)->where('id', '!=', $user->id)->exists()) {
-            return response()->json(['error' => 'Email sudah terdaftar'], 409);
+        if (
+            Profile::query()
+                ->where('tenant_id', $tenantId)
+                ->whereRaw('lower(email) = ?', [$email])
+                ->where('id', '!=', $user->id)
+                ->exists()
+        ) {
+            return response()->json(['error' => 'Email sudah terdaftar di sekolah ini'], 409);
         }
 
         $requiresVerification = $this->requiresPasswordChangeVerification($request)
@@ -2845,7 +2986,7 @@ class AuthController extends ApiController
         return null;
     }
 
-    private function passwordResetEligibility(string $email): array
+    private function passwordResetEligibility(string $email, ?string $tenantId = null): array
     {
         $normalizedEmail = strtolower(trim($email));
 
@@ -2856,17 +2997,41 @@ class AuthController extends ApiController
             ];
         }
 
-        $userId = (string) User::query()
+        $users = User::query()
             ->whereRaw('lower(email) = ?', [$normalizedEmail])
-            ->value('id');
+            ->limit(2)
+            ->get(['id', 'email']);
 
-        if ($userId === '') {
+        if ($users->isEmpty()) {
             return ['allowed' => true];
         }
 
-        $role = (string) Profile::query()
+        if ($users->count() > 1) {
+            return [
+                'allowed' => false,
+                'message' => 'Reset password mandiri untuk email yang dipakai di lebih dari satu sekolah dinonaktifkan. Hubungi admin sekolah.',
+            ];
+        }
+
+        $user = $users->first();
+        $userId = (string) ($user->id ?? '');
+        $profileQuery = Profile::query()->where('id', $userId);
+        $normalizedTenantId = trim((string) ($tenantId ?? ''));
+        if ($normalizedTenantId !== '') {
+            $profileQuery->where('tenant_id', $normalizedTenantId);
+        }
+
+        $profile = $profileQuery->first();
+        if ($normalizedTenantId !== '' && ! $profile && ! $this->isSuperAdminByIdentity($userId, $normalizedEmail)) {
+            return [
+                'allowed' => false,
+                'message' => 'Akun tidak terdaftar di sekolah ini.',
+            ];
+        }
+
+        $role = (string) ($profile?->role ?? Profile::query()
             ->where('id', $userId)
-            ->value('role');
+            ->value('role'));
 
         if (strtolower($role) === 'admin') {
             return [

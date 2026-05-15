@@ -2,7 +2,8 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/useAuthStore'
 import { scheduleRoutePrefetch } from '../../lib/routePrefetch'
-import { getAllRoutePaths } from '../../config/menuConfig'
+import { getAllRoutePaths } from '../../navigation/menu.utils'
+import { useMenuExpansion } from '../../navigation/useMenuExpansion'
 import DesktopSidebar from './DesktopSidebar'
 import MobileNav from './MobileNav'
 import MonitoringModal from './MonitoringModal'
@@ -23,7 +24,13 @@ const ROLE_BADGE = {
 const Navbar = () => {
   const navigate = useNavigate()
   const location = useLocation()
-  const { user, profile, settings: authSettings, logout, isSuperAdmin } = useAuthStore()
+  const {
+    user,
+    profile,
+    settings: authSettings,
+    logout,
+    isSuperAdmin
+  } = useAuthStore()
 
   const [isCollapsed, setIsCollapsed] = useState(false)
   const { settings, isLoading } = useNavbarSettings(authSettings)
@@ -33,6 +40,7 @@ const Navbar = () => {
   const effectiveRole = isSuperAdmin ? 'admin' : role
   const isWaliKelas = useWaliKelasFlag(role, user?.id)
   const navItems = useNavigationMenu({ effectiveRole, isSuperAdmin, isWaliKelas, role })
+  const menuExpansion = useMenuExpansion(navItems, location.pathname, location.search)
   const {
     loadMonitoring,
     monitorData,
@@ -95,6 +103,7 @@ const Navbar = () => {
         avatarUrl={avatarUrl}
         collapsed={isCollapsed}
         effectiveRole={effectiveRole}
+        menuExpansion={menuExpansion}
         navItems={navItems}
         onAvatarError={clearAvatarUrl}
         onLogout={handleLogout}
@@ -110,8 +119,10 @@ const Navbar = () => {
       <MobileNav
         avatarUrl={avatarUrl}
         effectiveRole={effectiveRole}
+        menuExpansion={menuExpansion}
         navItems={navItems}
         onAvatarError={clearAvatarUrl}
+        onLogout={handleLogout}
         onOpenMonitoring={handleOpenMonitoring}
         onlineCount={onlineCount}
         roleBadge={roleBadge}

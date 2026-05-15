@@ -1,5 +1,9 @@
 # Dependencies
 node_modules/
+vendor/
+
+# Local runtime tools/data
+.local/
 
 # Build outputs
 dist/

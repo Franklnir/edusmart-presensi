@@ -51,30 +51,9 @@ VPS_PORT              = port SSH, biasanya 22
 VPS_USER              = user SSH, contoh root
 VPS_APP_DIR           = /opt/edusmart-presensi
 VPS_SSH_PRIVATE_KEY   = private key SSH untuk login ke VPS
-GHCR_USERNAME         = username GitHub, contoh Franklnir
-GHCR_TOKEN            = GitHub personal access token untuk pull image GHCR
 ```
 
-`GHCR_TOKEN` dibuat dari GitHub:
-
-```text
-GitHub profile > Settings > Developer settings > Personal access tokens > Tokens (classic)
-```
-
-Permission minimal:
-
-```text
-read:packages
-```
-
-Jika package GHCR private dan pull image masih ditolak, buat token baru dengan:
-
-```text
-read:packages
-repo
-```
-
-Jangan commit atau kirim token ke chat.
+Workflow login ke GHCR memakai `GITHUB_TOKEN` bawaan GitHub Actions, lalu mengirim login sementara ke VPS saat deploy. `GHCR_USERNAME` dan `GHCR_TOKEN` personal tidak perlu dibuat sebagai repository secret untuk flow deploy otomatis ini.
 
 ## Setup VPS Baru
 
@@ -146,7 +125,9 @@ SANCTUM_STATEFUL_DOMAINS
 CORS_ALLOWED_ORIGINS
 TENANT_ROOT_DOMAIN
 TENANT_ADMIN_SUBDOMAIN
+TENANT_RESERVED
 SUPER_ADMIN_EMAILS
+SUPER_ADMIN_BOOTSTRAP_PASSWORD
 CADDY_ACME_EMAIL
 CADDY_ASK_SECRET
 RFID_SCAN_SHARED_KEY
@@ -160,9 +141,11 @@ printf 'APP_KEY=base64:%s\n' "$(openssl rand -base64 32)"
 
 Untuk migrasi dari VPS lama, gunakan `APP_KEY` lama agar data terenkripsi/session lama tetap kompatibel.
 
+Untuk fresh install tanpa restore database, isi `SUPER_ADMIN_BOOTSTRAP_PASSWORD` sementara agar akun super admin pertama dibuat otomatis setelah migrasi. Setelah berhasil login, variabel ini boleh dikosongkan lagi.
+
 ## Login GHCR Di VPS Baru
 
-Login agar VPS bisa pull image private dari `ghcr.io`:
+Deploy otomatis dari GitHub Actions akan login GHCR di VPS memakai token sementara dari job. Langkah login manual ini hanya diperlukan kalau kamu melakukan pull image langsung dari terminal VPS di luar workflow Actions, atau jika package GHCR private dan akses manual ditolak:
 
 ```bash
 echo "GHCR_TOKEN_KAMU" | docker login ghcr.io -u Franklnir --password-stdin
@@ -365,4 +348,4 @@ docker logout ghcr.io
 echo "GHCR_TOKEN_KAMU" | docker login ghcr.io -u Franklnir --password-stdin
 ```
 
-Jika Actions gagal saat deploy, cek job `Deploy To VPS` di tab GitHub Actions.
+Troubleshooting ini untuk pull manual dari VPS. Jika Actions gagal saat deploy, cek job `Deploy To VPS` di tab GitHub Actions karena workflow normal tidak membutuhkan `GHCR_TOKEN` personal sebagai secret repo.

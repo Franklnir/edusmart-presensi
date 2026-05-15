@@ -1,7 +1,7 @@
 // src/pages/siswa/TugasSiswa.jsx
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { ImagePlus, Images } from 'lucide-react'
+import { CheckCircle2, ImagePlus, Images } from 'lucide-react'
 import {
   supabase,
   ASSIGNMENT_BUCKET,
@@ -18,6 +18,7 @@ import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 import { parseSupabaseError } from '../../utils/supabaseError'
 import {
   ASSIGNMENT_PHOTO_MAX_BYTES,
+  ASSIGNMENT_PHOTOS_MAX_TOTAL_BYTES,
   MAX_ASSIGNMENT_PHOTOS,
   isImageLikeFile,
   normalizePhotoFiles,
@@ -36,7 +37,7 @@ const STATUS_FILTER_VALUES = new Set(['all', 'belum', 'menunggu', 'dinilai'])
 const TIME_RANGE_VALUES = new Set(['week', 'all', 'custom_months'])
 const TUGAS_LIST_COLUMNS = 'id, kelas, judul, mapel, mulai, deadline, keterangan, file_url, link, created_at, updated_at'
 const TUGAS_MAPEL_COLUMNS = 'mapel'
-const TUGAS_JAWABAN_LIST_COLUMNS = 'tugas_id, user_id, nilai, status, file_url, file_urls, link_url, waktu_submit'
+const TUGAS_JAWABAN_LIST_COLUMNS = 'tugas_id, user_id, nilai, status, file_url, file_urls, link_url, komentar_siswa, waktu_submit'
 const MAPEL_CACHE_TTL_MS = 5 * 60 * 1000
 
 const normalizeStatusFilter = (value) => (
@@ -468,12 +469,14 @@ export default function TugasSiswa() {
   const [jawabanPhotoValues, setJawabanPhotoValues] = useState([])
   const [jawabanPhotoSizes, setJawabanPhotoSizes] = useState([])
   const [jawabanLink, setJawabanLink] = useState('')
+  const [jawabanKomentar, setJawabanKomentar] = useState('')
 
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(null)
   const [answerUploadProvider, setAnswerUploadProvider] = useState(null)
   const [pendingJawabanFile, setPendingJawabanFile] = useState(null)
   const [pendingJawabanPhotos, setPendingJawabanPhotos] = useState([])
+  const [uploadSuccessNotice, setUploadSuccessNotice] = useState(null)
 
   const [previewFile, setPreviewFile] = useState(null)
   const [photoGallery, setPhotoGallery] = useState(null)
@@ -482,12 +485,37 @@ export default function TugasSiswa() {
   const galleryInputRef = useRef(null)
   const listRequestSeqRef = useRef(0)
   const mapelRequestSeqRef = useRef(0)
+  const successNoticeTimerRef = useRef(null)
 
   /* ---------- Derived ---------- */
-  const monthOptions = useMemo(() => buildLast12Months(), [])
+  const monthOptions = useMemo(() => (
+    (period.months || []).map((month) => ({
+      value: month.value,
+      label: month.label
+    }))
+  ), [period.months])
 
   const kelasSiswa = useMemo(() => profile?.kelas || profile?.kelas_id || '', [profile])
   const selectedKelas = kelasSiswa
+
+  const showUploadSuccessNotice = useCallback((title, detailText = '') => {
+    if (successNoticeTimerRef.current) clearTimeout(successNoticeTimerRef.current)
+    setUploadSuccessNotice({
+      id: Date.now(),
+      title,
+      detail: detailText
+    })
+    successNoticeTimerRef.current = setTimeout(() => {
+      setUploadSuccessNotice(null)
+      successNoticeTimerRef.current = null
+    }, 3200)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (successNoticeTimerRef.current) clearTimeout(successNoticeTimerRef.current)
+    }
+  }, [])
 
   useEffect(() => {
     const nextStatus = normalizeStatusFilter(searchParams.get('status'))
@@ -520,18 +548,32 @@ export default function TugasSiswa() {
 
     try {
       setIsMapelLoading(true)
-      let query = supabase
+      let tugasQuery = supabase
         .from('tugas')
         .select(TUGAS_MAPEL_COLUMNS)
         .eq('kelas', kelas)
         .order('mapel', { ascending: true })
-      query = applyPeriodFilters(query)
-      const { data, error } = await query
+      tugasQuery = applyPeriodFilters(tugasQuery)
+
+      let jadwalQuery = supabase
+        .from('jadwal')
+        .select('mapel')
+        .eq('kelas_id', kelas)
+        .order('mapel', { ascending: true })
+      jadwalQuery = applyPeriodFilters(jadwalQuery)
+
+      const [
+        { data: tugasMapelData, error },
+        { data: jadwalMapelData, error: jadwalError }
+      ] = await Promise.all([tugasQuery, jadwalQuery])
 
       if (error) throw error
+      if (jadwalError) {
+        console.warn('Gagal memuat mapel jadwal tugas siswa:', jadwalError)
+      }
       if (requestId !== mapelRequestSeqRef.current) return
 
-      const mapels = normalizeMapelOptions(data || [])
+      const mapels = normalizeMapelOptions([...(jadwalMapelData || []), ...(tugasMapelData || [])])
       setMapelOptions(mapels)
       writeMapelOptionsCache(user.id, kelas, mapels)
     } catch (error) {
@@ -565,8 +607,12 @@ export default function TugasSiswa() {
         weekAgo.setDate(now.getDate() - 7)
         query = query.gte('created_at', weekAgo.toISOString())
       } else if (timeRange === 'all') {
-        const yearAgo = new Date(now.getFullYear(), now.getMonth() - 11, 1)
-        query = query.gte('created_at', yearAgo.toISOString())
+        if (period.startsAt && period.endsAt) {
+          const start = new Date(`${period.startsAt}T00:00:00`)
+          const end = new Date(`${period.endsAt}T00:00:00`)
+          end.setDate(end.getDate() + 1)
+          query = query.gte('created_at', start.toISOString()).lt('created_at', end.toISOString())
+        }
       } else if (timeRange === 'custom_months') {
         if (selectedMonths.length > 0) {
           let minYear = Infinity
@@ -595,9 +641,6 @@ export default function TugasSiswa() {
             const end = new Date(maxYear, maxMonth, 1)
             query = query.gte('created_at', start.toISOString()).lt('created_at', end.toISOString())
           }
-        } else {
-          const yearAgo = new Date(now.getFullYear(), now.getMonth() - 11, 1)
-          query = query.gte('created_at', yearAgo.toISOString())
         }
       }
 
@@ -682,6 +725,8 @@ export default function TugasSiswa() {
     selectedMapel,
     timeRange,
     selectedMonths,
+    period.endsAt,
+    period.startsAt,
     statusFilter,
     pushToast
   ])
@@ -729,6 +774,7 @@ export default function TugasSiswa() {
     )
     setJawabanPhotoSizes([])
     setJawabanLink(tugas?.myJawaban?.link_url || '')
+    setJawabanKomentar(tugas?.myJawaban?.komentar_siswa || '')
     setUploadProgress(null)
     setAnswerUploadProvider(null)
     setPendingJawabanFile(null)
@@ -751,7 +797,7 @@ export default function TugasSiswa() {
       // ambil jawaban milik siswa untuk tugas ini
       let jawabanQuery = supabase
         .from('tugas_jawaban')
-        .select('id, tugas_id, user_id, file_url, file_urls, link_url, nilai, status, waktu_submit')
+        .select('id, tugas_id, user_id, file_url, file_urls, link_url, komentar_siswa, nilai, status, waktu_submit')
         .eq('tugas_id', tugas.id)
         .eq('user_id', user.id)
         .maybeSingle()
@@ -779,7 +825,8 @@ export default function TugasSiswa() {
       // set current file key
       const existingPhotos = parseAssignmentFileList(jawabanData?.file_urls, jawabanData?.file_url).filter(isImageLikeFile)
       setJawabanPhotoValues(existingPhotos)
-      setJawabanPhotoSizes(existingPhotos.map(() => 'maks 150KB'))
+      setJawabanPhotoSizes(existingPhotos.map(() => `maks ${formatFileSize(ASSIGNMENT_PHOTO_MAX_BYTES)}`))
+      setJawabanKomentar(jawabanData?.komentar_siswa || '')
 
       if (jawabanData?.file_url) setJawabanFileKey(jawabanData.file_url)
 
@@ -888,7 +935,7 @@ export default function TugasSiswa() {
 
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from(ASSIGNMENT_BUCKET)
-        .upload(filePath, compressed, { upsert: false, cacheControl: '3600', fastLocal: true })
+        .upload(filePath, compressed, { upsert: false, cacheControl: '3600' })
 
       if (uploadError) throw new Error(uploadError.message)
 
@@ -923,6 +970,7 @@ export default function TugasSiswa() {
       setUploadProgress(null)
 
       pushToast('success', `File jawaban berhasil diupload (${sizeLabel})`)
+      showUploadSuccessNotice('File jawaban siap', 'Tambahkan komentar bila perlu, lalu klik Kirim Jawaban.')
     } catch (error) {
       console.error('Upload jawaban error:', error)
       setUploadProgress(null)
@@ -975,7 +1023,7 @@ export default function TugasSiswa() {
 
         const { data: uploadData, error: uploadError } = await supabase.storage
           .from(ASSIGNMENT_BUCKET)
-          .upload(filePath, compressed, { upsert: false, cacheControl: '3600', fastLocal: true })
+          .upload(filePath, compressed, { upsert: false, cacheControl: '3600' })
 
         if (uploadError) throw new Error(uploadError.message)
 
@@ -1006,6 +1054,7 @@ export default function TugasSiswa() {
       setUploadProgress(null)
 
       pushToast('success', `${values.length} foto berhasil diupload. Klik Kirim Jawaban untuk menyimpan.`)
+      showUploadSuccessNotice(`${values.length} foto siap`, 'Tambahkan komentar bila perlu, lalu klik Kirim Jawaban.')
     } catch (error) {
       console.error('Upload foto jawaban error:', error)
       setUploadProgress(null)
@@ -1114,6 +1163,7 @@ export default function TugasSiswa() {
       setJawabanFileSize('')
       setJawabanPhotoValues([])
       setJawabanPhotoSizes([])
+      if (!currentLink) setJawabanKomentar('')
       await loadTugasList()
 
       if (storageError) {
@@ -1146,9 +1196,15 @@ export default function TugasSiswa() {
     const hasFile = Boolean(jawabanFileKey || detail?.myJawaban?.file_url || photoValues.length > 0)
     const link = (jawabanLink || '').trim()
     const hasLink = Boolean(link)
+    const komentar = (jawabanKomentar || '').trim()
 
     if (!hasFile && !hasLink) {
       pushToast('error', 'Upload file jawaban atau isi link jawaban')
+      return
+    }
+
+    if (komentar.length > 500) {
+      pushToast('error', 'Komentar maksimal 500 karakter')
       return
     }
 
@@ -1186,6 +1242,7 @@ export default function TugasSiswa() {
         file_url: nextFileValue,
         file_urls: photoValues.length > 0 ? photoValues : null,
         link_url: safeLink || null,
+        komentar_siswa: komentar || null,
         status: existing?.nilai != null ? 'dinilai' : 'menunggu',
         waktu_submit: new Date().toISOString(),
         ...academicPeriodPayload
@@ -1220,6 +1277,7 @@ export default function TugasSiswa() {
       setPendingJawabanFile(null)
       setPendingJawabanPhotos([])
       pushToast('success', 'Jawaban berhasil dikirim')
+      showUploadSuccessNotice('Jawaban berhasil dikirim', 'Guru dapat melihat file, link, dan komentar Anda.')
 
       // refresh detail & list
       await loadTugasList()
@@ -1368,6 +1426,28 @@ export default function TugasSiswa() {
 ========================= */
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-purple-50/30 p-4 sm:p-6">
+      {uploadSuccessNotice && (
+        <div className="fixed left-1/2 top-6 z-[80] w-[calc(100%-2rem)] max-w-md -translate-x-1/2">
+          <div
+            key={uploadSuccessNotice.id}
+            className="relative overflow-hidden rounded-2xl border border-emerald-200 bg-white px-4 py-3 shadow-2xl shadow-emerald-900/10"
+          >
+            <div className="absolute left-0 top-0 h-1 w-full bg-emerald-500" />
+            <div className="flex items-center gap-3">
+              <div className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-300 opacity-30" />
+                <CheckCircle2 className="relative h-6 w-6 animate-bounce" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-sm font-extrabold text-emerald-900">{uploadSuccessNotice.title}</div>
+                {uploadSuccessNotice.detail && (
+                  <div className="mt-0.5 text-xs text-emerald-700">{uploadSuccessNotice.detail}</div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="max-w-full mx-auto space-y-6">
         {/* HEADER */}
         <div className="page-title-card">
@@ -1485,7 +1565,7 @@ export default function TugasSiswa() {
                 onChange={(e) => setTimeRange(e.target.value)}
               >
                 <option value="week">7 hari terakhir</option>
-                <option value="all">12 bulan terakhir</option>
+                <option value="all">Semua bulan periode</option>
                 <option value="custom_months">Pilih bulan</option>
               </select>
             </div>
@@ -1860,6 +1940,23 @@ export default function TugasSiswa() {
                             </div>
                           </div>
 
+                          <div className="mb-4">
+                            <label className="block text-sm font-semibold text-slate-700 mb-2">Komentar untuk guru (opsional)</label>
+                            <textarea
+                              rows={3}
+                              className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white text-sm resize-none"
+                              value={jawabanKomentar}
+                              onChange={(e) => setJawabanKomentar(e.target.value.slice(0, 500))}
+                              placeholder="contoh: Jawaban utama ada di foto 1-3, perhitungan lanjutan di foto 4."
+                              disabled={isSubmissionLocked}
+                              maxLength={500}
+                            />
+                            <div className="mt-1 flex flex-col gap-1 text-[11px] text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+                              <span>Hanya guru yang mengajar tugas ini yang dapat melihat komentar.</span>
+                              <span>{jawabanKomentar.length}/500</span>
+                            </div>
+                          </div>
+
                           <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4">
                             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                               <div>
@@ -1868,7 +1965,7 @@ export default function TugasSiswa() {
                                   Foto dari galeri perangkat
                                 </div>
                                 <div className="mt-1 text-xs text-slate-500">
-                                  Maksimal {MAX_ASSIGNMENT_PHOTOS} foto, masing-masing otomatis dikompresi sampai 150KB.
+                                  Maksimal {MAX_ASSIGNMENT_PHOTOS} foto, total sekitar {formatFileSize(ASSIGNMENT_PHOTOS_MAX_TOTAL_BYTES)}. Tiap foto otomatis dikompresi sampai {formatFileSize(ASSIGNMENT_PHOTO_MAX_BYTES)}.
                                 </div>
                               </div>
                               <div className="flex flex-wrap gap-2">
@@ -1994,7 +2091,7 @@ export default function TugasSiswa() {
                             <div className="mt-3 p-3 bg-white rounded-xl border border-slate-200">
                               <p className="text-xs font-semibold text-slate-700 mb-2">📋 Batas Ukuran File:</p>
                               <ul className="text-xs text-slate-600 space-y-1">
-                                <li>🖼️ Gambar: maks 150KB (otomatis dikompresi)</li>
+                                <li>🖼️ Gambar: maks {formatFileSize(ASSIGNMENT_PHOTO_MAX_BYTES)}/foto, total sekitar {formatFileSize(ASSIGNMENT_PHOTOS_MAX_TOTAL_BYTES)}</li>
                                 <li>📄 PDF/Dokumen: Drive siap maks 3MB, VPS maks 2MB</li>
                                 <li>📊 PPT: Drive siap maks 5MB, VPS maks 2MB</li>
                               </ul>

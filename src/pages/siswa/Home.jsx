@@ -35,11 +35,36 @@ const formatDateTimeLabel = (value) => {
   })
 }
 
-const isEskulRegistrationClosed = (deadlineAt) => {
-  if (!deadlineAt) return false
-  const deadline = new Date(deadlineAt)
-  if (Number.isNaN(deadline.getTime())) return false
-  return Date.now() > deadline.getTime()
+const getPeriodEndTime = (period) => {
+  const raw = period?.endsAt || period?.periodeSelesai || ''
+  if (!raw) return Number.POSITIVE_INFINITY
+  const date = new Date(`${raw}T23:59:59`)
+  return Number.isNaN(date.getTime()) ? Number.POSITIVE_INFINITY : date.getTime()
+}
+
+const getEffectiveRegistrationDeadlineTime = (deadlineAt, period) => {
+  const deadline = deadlineAt ? new Date(deadlineAt) : null
+  const deadlineTime = deadline && !Number.isNaN(deadline.getTime())
+    ? deadline.getTime()
+    : Number.POSITIVE_INFINITY
+  return Math.min(deadlineTime, getPeriodEndTime(period))
+}
+
+const getEffectiveRegistrationDeadlineIso = (deadlineAt, period) => {
+  const time = getEffectiveRegistrationDeadlineTime(deadlineAt, period)
+  if (!Number.isFinite(time)) return ''
+  return new Date(time).toISOString()
+}
+
+const isEskulRegistrationClosed = (deadlineAt, period) => (
+  Date.now() > getEffectiveRegistrationDeadlineTime(deadlineAt, period)
+)
+
+const applySemesterPeriodFilters = (query, period) => {
+  let next = query
+  if (period?.tahunAjaran) next = next.eq('tahun_ajaran', period.tahunAjaran)
+  if (period?.semester) next = next.eq('semester', period.semester)
+  return next
 }
 
 // Komponen Modal untuk Detail Organisasi
@@ -559,7 +584,7 @@ export default function SHome() {
 
     const { data } = await supabase
       .from('settings')
-      .select('tahun_ajaran, semester_aktif')
+      .select('tahun_ajaran, semester_aktif, periode_mulai, periode_selesai, periode_ganjil_mulai, periode_ganjil_selesai, periode_genap_mulai, periode_genap_selesai')
       .order('id')
       .limit(1)
       .maybeSingle()
@@ -781,7 +806,6 @@ export default function SHome() {
           .select(DASHBOARD_TASK_COLUMNS)
           .eq('kelas', profile.kelas)
           .eq('tahun_ajaran', period.tahunAjaran)
-          .eq('semester', period.semester)
           .lt('deadline', nowIso)
           .order('deadline', { ascending: false })
           .limit(DASHBOARD_TASK_QUERY_LIMIT),
@@ -790,7 +814,6 @@ export default function SHome() {
           .select(DASHBOARD_TASK_COLUMNS)
           .eq('kelas', profile.kelas)
           .eq('tahun_ajaran', period.tahunAjaran)
-          .eq('semester', period.semester)
           .gte('deadline', nowIso)
           .order('deadline', { ascending: true })
           .limit(DASHBOARD_TASK_QUERY_LIMIT),
@@ -887,18 +910,23 @@ export default function SHome() {
   const loadEskul = async () => {
     if (!userId) return
     try {
-      const [
-        { data: eskulData, error: eskulError },
-        { data: anggotaData, error: anggotaError },
-      ] = await Promise.all([
-        supabase
-          .from('ekskul')
-          .select('id, nama, keterangan, hari, jam_mulai, jam_selesai, pembina_guru_id, registration_deadline_at')
-          .order('nama'),
-        supabase
+      const period = await loadActiveAcademicPeriod()
+      const { data: eskulData, error: eskulError } = await supabase
+        .from('ekskul')
+        .select('id, nama, keterangan, hari, jam_mulai, jam_selesai, pembina_guru_id, registration_deadline_at')
+        .order('nama')
+
+      let anggotaQuery = supabase
+        .from('ekskul_anggota')
+        .select('id, ekskul_id, user_id')
+      anggotaQuery = applySemesterPeriodFilters(anggotaQuery, period)
+
+      let { data: anggotaData, error: anggotaError } = await anggotaQuery
+      if (anggotaError && /tahun_ajaran|semester/i.test(anggotaError.message || '')) {
+        ; ({ data: anggotaData, error: anggotaError } = await supabase
           .from('ekskul_anggota')
-          .select('id, ekskul_id, user_id'),
-      ])
+          .select('id, ekskul_id, user_id'))
+      }
 
       if (eskulError) throw eskulError
       if (anggotaError) throw anggotaError
@@ -940,6 +968,11 @@ export default function SHome() {
         jam_mulai: e.jam_mulai || '',
         jam_selesai: e.jam_selesai || '',
         registration_deadline_at: e.registration_deadline_at || null,
+        academic_period: {
+          tahunAjaran: period.tahunAjaran,
+          semester: period.semester,
+          endsAt: period.endsAt || period.periodeSelesai || ''
+        },
         pembina_nama: pembinaMap[e.pembina_guru_id] || '',
         jumlah_anggota: anggotaByEkskul[e.id] || 0,
       }))
@@ -993,12 +1026,13 @@ export default function SHome() {
   const toggleEskul = async (item) => {
     if (!userId) return
     const joined = myEskul.has(item.id)
-    const registrationClosed = isEskulRegistrationClosed(item.registration_deadline_at)
+    const period = await loadActiveAcademicPeriod()
+    const registrationClosed = isEskulRegistrationClosed(item.registration_deadline_at, period)
 
     if (registrationClosed) {
       pushToast(
         'warning',
-        'Pendaftaran ekskul sudah ditutup. Anda tidak bisa daftar atau membatalkan lagi.'
+        'Pendaftaran ekskul sudah ditutup atau periode aktif sudah berakhir. Anda tidak bisa daftar atau membatalkan lagi.'
       )
       return
     }
@@ -1010,22 +1044,40 @@ export default function SHome() {
 
     try {
       if (joined) {
-        const { error } = await supabase
+        let deleteQuery = supabase
           .from('ekskul_anggota')
           .delete()
           .eq('ekskul_id', item.id)
           .eq('user_id', userId)
+        deleteQuery = applySemesterPeriodFilters(deleteQuery, period)
+
+        let { error } = await deleteQuery
+        if (error && /tahun_ajaran|semester/i.test(error.message || '')) {
+          ; ({ error } = await supabase
+            .from('ekskul_anggota')
+            .delete()
+            .eq('ekskul_id', item.id)
+            .eq('user_id', userId))
+        }
 
         if (error) throw error
         pushToast('success', 'Berhasil membatalkan ekskul')
       } else {
-        const { error } = await supabase
+        const insertPayload = {
+          ekskul_id: item.id,
+          user_id: userId,
+          tahun_ajaran: period.tahunAjaran,
+          semester: period.semester,
+          angkatan: profile?.angkatan || null,
+          created_at: new Date().toISOString(),
+        }
+        let { error } = await supabase
           .from('ekskul_anggota')
-          .insert({
-            ekskul_id: item.id,
-            user_id: userId,
-            created_at: new Date().toISOString(),
-          })
+          .insert(insertPayload)
+        if (error && /tahun_ajaran|semester|angkatan/i.test(error.message || '')) {
+          const { tahun_ajaran, semester, angkatan, ...legacyPayload } = insertPayload
+          ; ({ error } = await supabase.from('ekskul_anggota').insert(legacyPayload))
+        }
 
         if (error) throw error
         pushToast('success', 'Berhasil bergabung ekskul!')
@@ -1264,8 +1316,9 @@ export default function SHome() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {ekskul.map((x) => {
                     const isJoined = myEskul.has(x.id)
-                    const registrationClosed = isEskulRegistrationClosed(x.registration_deadline_at)
-                    const registrationDeadlineLabel = formatDateTimeLabel(x.registration_deadline_at)
+                    const registrationClosed = isEskulRegistrationClosed(x.registration_deadline_at, x.academic_period)
+                    const effectiveDeadlineIso = getEffectiveRegistrationDeadlineIso(x.registration_deadline_at, x.academic_period)
+                    const registrationDeadlineLabel = formatDateTimeLabel(effectiveDeadlineIso || x.registration_deadline_at)
                     return (
                       <div key={x.id} className={`rounded-xl border-2 p-4 transition-all duration-200 group ${registrationClosed ? 'border-rose-200 bg-rose-50/50' : isJoined ? 'border-orange-300 bg-orange-50/50' : 'border-slate-200 hover:border-orange-300 bg-white hover:shadow-card'}`}>
                         <div className="flex items-start justify-between mb-3">

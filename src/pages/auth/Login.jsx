@@ -351,7 +351,7 @@ const Login = () => {
   const phone = settings?.telepon || '';
   const emailSekolah = settings?.email || '';
   const isSessionExpiredNotice = info.toLowerCase().includes('sesi anda telah berakhir');
-  const adminSubdomain = String(import.meta.env.VITE_ADMIN_SUBDOMAIN || 'admin')
+  const adminSubdomain = String(import.meta.env.VITE_ADMIN_SUBDOMAIN || 'admin26')
     .trim()
     .toLowerCase();
   const runtimeHost = typeof window !== 'undefined' ? String(window.location.hostname || '').toLowerCase() : '';
@@ -486,16 +486,16 @@ const Login = () => {
 
             <div className="login__features">
               <div className="login__feature-item">
-                <AuthIcon className="ri-shield-check-fill" />
-                <span>Terpercaya</span>
+                <AuthIcon className="ri-graduation-cap-fill" />
+                <span>Kelola Akademik Digital</span>
               </div>
               <div className="login__feature-item">
-                <AuthIcon className="ri-time-fill" />
-                <span>Real-time</span>
+                <AuthIcon className="ri-file-list-3-fill" />
+                <span>Manajemen Tugas & Nilai</span>
               </div>
               <div className="login__feature-item">
-                <AuthIcon className="ri-smartphone-fill" />
-                <span>Responsive</span>
+                <AuthIcon className="ri-calendar-check-fill" />
+                <span>Solusi Absensi Sekolah</span>
               </div>
             </div>
 

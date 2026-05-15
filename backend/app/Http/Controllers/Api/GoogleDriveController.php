@@ -23,7 +23,33 @@ class GoogleDriveController extends ApiController
             return response()->json(['error' => 'Tenant tidak valid'], 400);
         }
 
-        return $this->ok($this->googleDriveService->statusForTenant((string) $tenantId));
+        return $this->ok($this->googleDriveService->statusForTenant(
+            (string) $tenantId,
+            false,
+            $this->usageFilters($request)
+        ));
+    }
+
+    public function files(Request $request)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->resolveOwnedTenantId($request);
+        if (! $tenantId) {
+            return response()->json(['error' => 'Tenant tidak valid'], 400);
+        }
+
+        return $this->ok($this->googleDriveService->filesForTenant((string) $tenantId, [
+            'tahun_ajaran' => (string) $request->query('tahun_ajaran', $request->query('tahunAjaran', '')),
+            'semester' => (string) $request->query('semester', ''),
+            'bucket' => (string) $request->query('bucket', ''),
+            'kelas' => (string) $request->query('kelas', ''),
+            'angkatan' => (string) $request->query('angkatan', ''),
+            'q' => (string) $request->query('q', ''),
+            'limit' => (int) $request->query('limit', 50),
+        ]));
     }
 
     public function connectUrl(Request $request)
@@ -82,7 +108,11 @@ class GoogleDriveController extends ApiController
             return response()->json(['error' => 'Tenant tidak valid'], 400);
         }
 
-        return $this->ok($this->googleDriveService->statusForTenant((string) $tenantId, true));
+        return $this->ok($this->googleDriveService->statusForTenant(
+            (string) $tenantId,
+            true,
+            $this->usageFilters($request)
+        ));
     }
 
     public function disconnect(Request $request)
@@ -104,5 +134,13 @@ class GoogleDriveController extends ApiController
         $separator = str_contains($url, '?') ? '&' : '?';
 
         return $url.$separator.http_build_query($params, '', '&', PHP_QUERY_RFC3986);
+    }
+
+    private function usageFilters(Request $request): array
+    {
+        return [
+            'tahun_ajaran' => (string) $request->query('tahun_ajaran', $request->query('tahunAjaran', '')),
+            'semester' => (string) $request->query('semester', ''),
+        ];
     }
 }

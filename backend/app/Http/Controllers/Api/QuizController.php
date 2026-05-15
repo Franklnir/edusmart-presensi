@@ -19,6 +19,311 @@ class QuizController extends ApiController
         private readonly QuizScoringService $scoringService
     ) {}
 
+    public function dashboard(Request $request)
+    {
+        if (! $this->isGuru($request) && ! $this->isSiswa($request) && ! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return response()->json(['error' => 'Tenant tidak valid'], 400);
+        }
+
+        $page = max(1, (int) $request->query('page', 1));
+        $perPage = $this->dashboardPerPage($request);
+        $kelas = trim((string) $request->query('kelas', ''));
+        $mapel = trim((string) $request->query('mapel', ''));
+        $search = trim((string) $request->query('q', ''));
+
+        $query = $this->quizTenantQuery($tenantId)
+            ->select($this->selectExistingQuizColumns('quizzes', [
+                'id', 'guru_id', 'kelas_id', 'mapel', 'nama', 'starts_at', 'deadline_at', 'penilaian',
+                'mode', 'is_live', 'is_active', 'live_started_at', 'duration_minutes',
+                'result_visible_to_students', 'shuffle_questions', 'shuffle_options',
+                'max_attempts', 'security_mode', 'access_device', 'timezone', 'published_at', 'closed_at',
+                'access_code_hash', 'tahun_ajaran', 'semester', 'created_at', 'updated_at',
+            ]));
+
+        if ($this->isGuru($request) && ! $this->isAdmin($request)) {
+            $query->where('guru_id', $request->user()?->id);
+        } elseif ($this->isSiswa($request)) {
+            $query->where('kelas_id', $this->studentClassId($request));
+        }
+
+        if ($kelas !== '') {
+            $query->where('kelas_id', $kelas);
+        }
+        if ($mapel !== '') {
+            $query->where('mapel', $mapel);
+        }
+        if ($search !== '') {
+            $like = '%'.strtolower($search).'%';
+            $query->where(function ($builder) use ($like) {
+                $builder->whereRaw('lower(nama) like ?', [$like])
+                    ->orWhereRaw('lower(mapel) like ?', [$like])
+                    ->orWhereRaw('lower(kelas_id) like ?', [$like]);
+            });
+        }
+        $this->applyQuizAcademicQueryFilters($query, 'quizzes', $request);
+
+        $total = (clone $query)->count('id');
+        $rows = $query
+            ->orderByDesc('created_at')
+            ->offset(($page - 1) * $perPage)
+            ->limit($perPage)
+            ->get();
+
+        $quizIds = $rows->pluck('id')->filter()->values()->all();
+        $questionRows = empty($quizIds) ? collect() : DB::table('quiz_questions')
+            ->select($this->selectExistingQuizColumns('quiz_questions', ['id', 'quiz_id', 'question_type']))
+            ->whereIn('quiz_id', $quizIds)
+            ->get();
+        $questionCounts = $questionRows->groupBy('quiz_id')->map(fn ($items) => $items->count());
+        $essayQuestionRows = $questionRows->filter(fn ($row) => $this->normalizeQuestionType($row->question_type ?? null) === 'essay');
+        $essayQuestionToQuiz = $essayQuestionRows->mapWithKeys(fn ($row) => [(string) $row->id => (string) $row->quiz_id]);
+
+        $submissionRows = empty($quizIds) ? collect() : $this->quizTenantTable('quiz_submissions', $tenantId)
+            ->select($this->selectExistingQuizColumns('quiz_submissions', ['id', 'quiz_id', 'siswa_id', 'status', 'essay_review_completed_at']))
+            ->whereIn('quiz_id', $quizIds)
+            ->get();
+        $submissionsByQuiz = $submissionRows->groupBy('quiz_id');
+        $submissionById = $submissionRows->keyBy('id');
+
+        $classIds = $rows->pluck('kelas_id')->filter()->unique()->values()->all();
+        $studentCountsByClass = empty($classIds) ? collect() : DB::table('profiles')
+            ->select('kelas', DB::raw('count(*) as aggregate'))
+            ->where('tenant_id', $tenantId)
+            ->where('role', 'siswa')
+            ->whereIn('kelas', $classIds)
+            ->groupBy('kelas')
+            ->pluck('aggregate', 'kelas');
+
+        $essayAnswerStatsByQuiz = [];
+        $essayQuestionIds = $essayQuestionToQuiz->keys()->all();
+        if (! empty($essayQuestionIds)) {
+            $this->quizTenantTable('quiz_answers', $tenantId)
+                ->select($this->selectExistingQuizColumns('quiz_answers', ['submission_id', 'question_id', 'essay_answer', 'essay_score']))
+                ->whereIn('question_id', $essayQuestionIds)
+                ->orderBy('submission_id')
+                ->get()
+                ->each(function ($answer) use (&$essayAnswerStatsByQuiz, $essayQuestionToQuiz, $submissionById) {
+                    $submission = $submissionById->get($answer->submission_id);
+                    if (! $submission || (string) ($submission->status ?? '') !== 'finished') {
+                        return;
+                    }
+
+                    $quizId = $essayQuestionToQuiz[(string) $answer->question_id] ?? null;
+                    if (! $quizId) {
+                        return;
+                    }
+
+                    $essayText = trim((string) ($answer->essay_answer ?? ''));
+                    if ($essayText === '') {
+                        return;
+                    }
+
+                    $essayAnswerStatsByQuiz[$quizId] ??= [
+                        'essay_answered_count' => 0,
+                        'essay_graded_count' => 0,
+                        'essay_pending_count' => 0,
+                    ];
+                    $essayAnswerStatsByQuiz[$quizId]['essay_answered_count']++;
+                    if (($answer->essay_score ?? null) === null) {
+                        $essayAnswerStatsByQuiz[$quizId]['essay_pending_count']++;
+                    } else {
+                        $essayAnswerStatsByQuiz[$quizId]['essay_graded_count']++;
+                    }
+                });
+        }
+
+        $studentSubmissions = collect();
+        if ($this->isSiswa($request) && ! empty($quizIds)) {
+            $studentSubmissions = $this->quizTenantTable('quiz_submissions', $tenantId)
+                ->select($this->selectExistingQuizColumns('quiz_submissions', ['id', 'quiz_id', 'siswa_id', 'started_at', 'finished_at', 'score', 'total_points', 'status', 'created_at', 'updated_at']))
+                ->whereIn('quiz_id', $quizIds)
+                ->where('siswa_id', $request->user()?->id)
+                ->get()
+                ->keyBy('quiz_id');
+        }
+
+        $dataRows = $rows->map(function ($quiz) use (
+            $questionCounts,
+            $submissionsByQuiz,
+            $studentCountsByClass,
+            $essayQuestionRows,
+            $essayAnswerStatsByQuiz,
+            $studentSubmissions
+        ) {
+            $quizSubmissions = $submissionsByQuiz->get($quiz->id, collect());
+            $startedCount = $quizSubmissions->pluck('siswa_id')->filter()->unique()->count();
+            $finishedCount = $quizSubmissions->filter(fn ($row) => (string) ($row->status ?? '') === 'finished')->count();
+            $ongoingCount = max(0, $quizSubmissions->count() - $finishedCount);
+            $totalStudents = (int) ($studentCountsByClass[$quiz->kelas_id] ?? 0);
+            $essayQuestionCount = $essayQuestionRows->where('quiz_id', $quiz->id)->count();
+            $essayAnswerStats = $essayAnswerStatsByQuiz[(string) $quiz->id] ?? [];
+            $finishedEssaySubmissions = $essayQuestionCount > 0
+                ? $quizSubmissions->filter(fn ($row) => (string) ($row->status ?? '') === 'finished')
+                : collect();
+            $essayStudentGraded = $finishedEssaySubmissions
+                ->filter(fn ($row) => ! empty($row->essay_review_completed_at))
+                ->count();
+            $essayStudentPending = max(0, $finishedEssaySubmissions->count() - $essayStudentGraded);
+            $row = $this->quizPayload($quiz);
+            $row['question_count'] = (int) ($questionCounts[$quiz->id] ?? 0);
+            $row['submission_summary'] = [
+                'total' => $quizSubmissions->count(),
+                'finished' => $finishedCount,
+                'ongoing' => $ongoingCount,
+            ];
+            $row['stats'] = [
+                'total_students' => $totalStudents,
+                'started_count' => $startedCount,
+                'ongoing_count' => $ongoingCount,
+                'finished_count' => $finishedCount,
+                'not_started_count' => max(0, $totalStudents - $startedCount),
+                'essay_question_count' => $essayQuestionCount,
+                'essay_answered_count' => (int) ($essayAnswerStats['essay_answered_count'] ?? 0),
+                'essay_graded_count' => (int) ($essayAnswerStats['essay_graded_count'] ?? 0),
+                'essay_pending_count' => (int) ($essayAnswerStats['essay_pending_count'] ?? 0),
+                'essay_student_graded_count' => $essayStudentGraded,
+                'essay_student_pending_count' => $essayStudentPending,
+            ];
+            if ($studentSubmissions->has($quiz->id)) {
+                $row['submission'] = (array) $studentSubmissions->get($quiz->id);
+            }
+
+            return $row;
+        })->values();
+
+        return response()->json([
+            'data' => [
+                'rows' => $dataRows,
+                'meta' => $this->dashboardPagination($page, $perPage, $total),
+            ],
+        ]);
+    }
+
+    public function detail(Request $request, string $quizId)
+    {
+        if (! $this->isGuru($request) && ! $this->isSiswa($request) && ! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return response()->json(['error' => 'Tenant tidak valid'], 400);
+        }
+
+        $quiz = $this->quizTenantQuery($tenantId)
+            ->where('id', $quizId)
+            ->first();
+        if (! $quiz) {
+            return response()->json(['error' => 'Quiz tidak ditemukan'], 404);
+        }
+
+        if ($this->isGuru($request) && ! $this->isAdmin($request) && (string) $quiz->guru_id !== (string) $request->user()?->id) {
+            return $this->deny('Anda tidak memiliki akses quiz ini.', 403);
+        }
+        if ($this->isSiswa($request)) {
+            if (! $this->sameClassId($this->studentClassId($request), $quiz->kelas_id ?? '')) {
+                return $this->deny('Quiz tidak tersedia untuk kelas Anda.', 403);
+            }
+            $deviceResponse = $this->denyIfQuizDeviceNotAllowed($quiz, $this->requestClientDevice($request));
+            if ($deviceResponse !== null) {
+                return $deviceResponse;
+            }
+        }
+
+        $questions = DB::table('quiz_questions')
+            ->select($this->selectExistingQuizColumns('quiz_questions', ['id', 'quiz_id', 'nomor', 'soal', 'type', 'poin', 'media_url', 'created_at', 'updated_at']))
+            ->where('quiz_id', $quizId)
+            ->orderBy('nomor')
+            ->get();
+        $questionIds = $questions->pluck('id')->filter()->values()->all();
+        $optionsByQuestion = empty($questionIds) ? collect() : DB::table('quiz_options')
+            ->select($this->selectExistingQuizColumns('quiz_options', ['id', 'question_id', 'label', 'text', 'is_correct', 'created_at', 'updated_at']))
+            ->whereIn('question_id', $questionIds)
+            ->orderBy('label')
+            ->get()
+            ->groupBy('question_id');
+
+        if ($this->isSiswa($request)) {
+            $submission = $this->quizTenantTable('quiz_submissions', $tenantId)
+                ->where('quiz_id', $quizId)
+                ->where('siswa_id', $request->user()?->id)
+                ->first();
+            $answers = $submission
+                ? DB::table('quiz_answers')
+                    ->select($this->selectExistingQuizColumns('quiz_answers', ['id', 'submission_id', 'question_id', 'option_id', 'essay_answer', 'essay_score', 'is_correct', 'poin', 'created_at', 'updated_at']))
+                    ->where('submission_id', $submission->id)
+                    ->get()
+                : collect();
+            $canSeeAnswers = $submission
+                && (string) ($submission->status ?? '') === 'finished'
+                && $this->boolValue($quiz->result_visible_to_students ?? false);
+            $studentOptionsByQuestion = $optionsByQuestion->map(function ($items) use ($canSeeAnswers) {
+                return collect($items)->map(function ($option) use ($canSeeAnswers) {
+                    $payload = (array) $option;
+                    unset($payload['tenant_id']);
+                    if (! $canSeeAnswers) {
+                        unset($payload['is_correct']);
+                    }
+
+                    return $payload;
+                })->values();
+            });
+            $studentAnswers = $answers->map(function ($answer) use ($canSeeAnswers) {
+                $payload = (array) $answer;
+                unset($payload['tenant_id']);
+                if (! $canSeeAnswers) {
+                    unset($payload['is_correct'], $payload['poin'], $payload['essay_score']);
+                }
+
+                return $payload;
+            })->values();
+
+            return response()->json([
+                'data' => [
+                    'quiz' => $this->quizPayload($quiz),
+                    'questions' => $questions,
+                    'options_by_question' => $studentOptionsByQuestion,
+                    'submission' => $submission ? (array) $submission : null,
+                    'answers' => $studentAnswers,
+                    'timing' => $this->quizTimingPayload($quiz, $this->quizNow($quiz)),
+                ],
+            ]);
+        }
+
+        $submissions = $this->quizTenantTable('quiz_submissions', $tenantId)
+            ->leftJoin('profiles as p', 'quiz_submissions.siswa_id', '=', 'p.id')
+            ->where('quiz_submissions.quiz_id', $quizId)
+            ->select([
+                'quiz_submissions.*',
+                'p.nama as siswa_nama',
+                'p.nis as siswa_nis',
+                'p.kelas as siswa_kelas',
+            ])
+            ->orderBy('p.nama')
+            ->get();
+        $submissionIds = $submissions->pluck('id')->filter()->values()->all();
+        $answersBySubmission = empty($submissionIds) ? collect() : DB::table('quiz_answers')
+            ->select($this->selectExistingQuizColumns('quiz_answers', ['id', 'submission_id', 'question_id', 'option_id', 'essay_answer', 'is_correct', 'poin', 'created_at', 'updated_at']))
+            ->whereIn('submission_id', $submissionIds)
+            ->get()
+            ->groupBy('submission_id');
+
+        return response()->json([
+            'data' => [
+                'quiz' => $this->quizPayload($quiz),
+                'questions' => $questions,
+                'options_by_question' => $optionsByQuestion,
+                'submissions' => $submissions,
+                'answers_by_submission' => $answersBySubmission,
+            ],
+        ]);
+    }
+
     public function submit(Request $request)
     {
         if (! $this->isSiswa($request)) {
@@ -40,7 +345,7 @@ class QuizController extends ApiController
         }
 
         $user = $request->user();
-        $resolved = $this->resolveStudentQuiz($request, $tenantId, $quizId);
+        $resolved = $this->resolveStudentQuiz($request, $tenantId, $quizId, $request->input('client_meta'));
         if ($resolved['response'] !== null) {
             return $resolved['response'];
         }
@@ -170,7 +475,7 @@ class QuizController extends ApiController
             return response()->json(['error' => 'quiz_id wajib diisi'], 422);
         }
 
-        $resolved = $this->resolveStudentQuiz($request, $tenantId, $quizId);
+        $resolved = $this->resolveStudentQuiz($request, $tenantId, $quizId, $request->input('client_meta'));
         if ($resolved['response'] !== null) {
             return $resolved['response'];
         }
@@ -180,6 +485,10 @@ class QuizController extends ApiController
         $availability = $this->quizAvailabilityForStudent($quiz, $now);
         if (! $availability['ok']) {
             return response()->json(['error' => $availability['message']], $availability['code']);
+        }
+        $strictSecurityResponse = $this->denyIfStrictFullscreenMissing($quiz, $request->input('client_meta'));
+        if ($strictSecurityResponse !== null) {
+            return $strictSecurityResponse;
         }
 
         $user = $request->user();
@@ -233,7 +542,7 @@ class QuizController extends ApiController
             return response()->json(['error' => 'quiz_id, submission_id, dan question_id wajib diisi'], 422);
         }
 
-        $resolved = $this->resolveStudentQuiz($request, $tenantId, $quizId);
+        $resolved = $this->resolveStudentQuiz($request, $tenantId, $quizId, $request->input('client_meta'));
         if ($resolved['response'] !== null) {
             return $resolved['response'];
         }
@@ -332,6 +641,30 @@ class QuizController extends ApiController
         }
 
         $meta = $request->input('event_meta', $request->input('meta'));
+        $eventTypeForStorage = Str::limit($eventType, 80, '');
+        $incidentId = $this->metaStringValue($meta, 'incident_id');
+        if ($incidentId !== '') {
+            $recentLogs = DB::table('quiz_violation_logs')
+                ->where('tenant_id', $tenantId)
+                ->where('quiz_id', $quizId)
+                ->where('submission_id', $submissionId)
+                ->where('siswa_id', $request->user()?->id)
+                ->where('event_type', $eventTypeForStorage)
+                ->orderByDesc('created_at')
+                ->limit(30)
+                ->get(['id', 'event_meta']);
+
+            foreach ($recentLogs as $recentLog) {
+                if ($this->metaStringValue($recentLog->event_meta ?? null, 'incident_id') === $incidentId) {
+                    return response()->json(['data' => [
+                        'id' => $recentLog->id,
+                        'skipped' => true,
+                        'duplicate_incident' => true,
+                    ]]);
+                }
+            }
+        }
+
         $logId = (string) Str::uuid();
         DB::table('quiz_violation_logs')->insert([
             'id' => $logId,
@@ -339,7 +672,7 @@ class QuizController extends ApiController
             'quiz_id' => $quizId,
             'submission_id' => $submissionId,
             'siswa_id' => $request->user()?->id,
-            'event_type' => Str::limit($eventType, 80, ''),
+            'event_type' => $eventTypeForStorage,
             'event_message' => $request->input('event_message'),
             'event_meta' => $this->encodeJsonOrNull($meta),
             'created_at' => $this->quizNow()->toISOString(),
@@ -371,6 +704,36 @@ class QuizController extends ApiController
 
         $now = $this->quizNow($quiz);
         $activate = $request->has('activate') ? $request->boolean('activate') : true;
+        $hasOngoingSubmission = $this->quizHasOngoingSubmissions($tenantId, $quizId);
+        if ($hasOngoingSubmission) {
+            $restrictedKeys = [
+                'shuffle_questions',
+                'shuffle_options',
+                'max_attempts',
+                'security_mode',
+                'access_device',
+                'timezone',
+                'access_code',
+            ];
+            foreach ($restrictedKeys as $key) {
+                if ($request->has($key)) {
+                    return response()->json([
+                        'error' => 'Quiz sedang dikerjakan siswa. Keamanan dan pengaturan non-waktu tidak bisa diubah.',
+                    ], 409);
+                }
+            }
+            if ($request->has('activate') && ! $activate) {
+                return response()->json([
+                    'error' => 'Quiz sedang dikerjakan siswa. Gunakan Tutup Quiz jika ingin mengakhiri attempt.',
+                ], 409);
+            }
+        }
+        if ($activate && ! $this->boolValue($quiz->is_active ?? false)) {
+            $activationError = $this->validateQuizCanBeActivated($tenantId, $quiz, $now);
+            if ($activationError !== null) {
+                return response()->json(['error' => $activationError], 422);
+            }
+        }
         $updates = [
             'is_active' => $activate,
             'updated_at' => $now,
@@ -404,6 +767,13 @@ class QuizController extends ApiController
             }
             $updates['security_mode'] = $mode;
         }
+        if (Schema::hasColumn('quizzes', 'access_device') && $request->has('access_device')) {
+            $accessDevice = $this->normalizeQuizAccessDevice($request->input('access_device'));
+            if ($accessDevice === null) {
+                return response()->json(['error' => 'Akses perangkat quiz tidak valid'], 422);
+            }
+            $updates['access_device'] = $accessDevice;
+        }
         if (Schema::hasColumn('quizzes', 'timezone') && $request->has('timezone')) {
             $timezone = trim((string) $request->input('timezone', self::DEFAULT_QUIZ_TIMEZONE));
             if (! $this->isValidTimezone($timezone)) {
@@ -425,12 +795,136 @@ class QuizController extends ApiController
             ->where('id', $quizId)
             ->where('tenant_id', $tenantId)
             ->first();
-        $freshPayload = $fresh ? (array) $fresh : null;
-        if (is_array($freshPayload)) {
-            unset($freshPayload['access_code_hash']);
+
+        return response()->json(['data' => ['quiz' => $this->quizPayload($fresh)]]);
+    }
+
+    public function schedule(Request $request)
+    {
+        if (! $this->isGuru($request) && ! $this->isAdmin($request)) {
+            return $this->deny();
         }
 
-        return response()->json(['data' => ['quiz' => $freshPayload]]);
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return response()->json(['error' => 'Tenant tidak valid'], 400);
+        }
+
+        $quizId = trim((string) $request->input('quiz_id', ''));
+        if ($quizId === '') {
+            return response()->json(['error' => 'quiz_id wajib diisi'], 422);
+        }
+
+        $quiz = $this->resolveQuizForTeacherAction($request, $tenantId, $quizId);
+        if (! $quiz) {
+            return $this->deny('Quiz tidak diizinkan');
+        }
+
+        $questionCount = DB::table('quiz_questions')
+            ->where('quiz_id', $quizId)
+            ->when(Schema::hasColumn('quiz_questions', 'tenant_id'), fn ($query) => $query->where('tenant_id', $tenantId))
+            ->count();
+        if ($questionCount < 1) {
+            return response()->json(['error' => 'Tambahkan minimal 1 soal sebelum mengatur jadwal'], 422);
+        }
+
+        $settingsError = $this->validateQuizRequiredSettingsForSchedule($quiz);
+        if ($settingsError !== null) {
+            return response()->json(['error' => $settingsError], 422);
+        }
+
+        $timezone = trim((string) $request->input('timezone', $this->quizTimezone($quiz)));
+        if (! $this->isValidTimezone($timezone)) {
+            return response()->json(['error' => 'Timezone quiz tidak valid'], 422);
+        }
+        $quizForDates = clone $quiz;
+        $quizForDates->timezone = $timezone;
+        $now = $this->quizNow($quizForDates);
+        $nowMinute = $now->copy()->startOfMinute();
+
+        $startsAt = $this->parseQuizDate($request->input('starts_at'), $quizForDates);
+        if (! $startsAt) {
+            return response()->json(['error' => 'Tanggal mulai wajib diisi'], 422);
+        }
+
+        $existingStart = $this->parseQuizDate($quiz->starts_at ?? null, $quizForDates);
+        $hasStartChanged = ! $existingStart || $existingStart->getTimestamp() !== $startsAt->getTimestamp();
+        if ($this->quizHasOngoingSubmissions($tenantId, $quizId) && $hasStartChanged) {
+            return response()->json([
+                'error' => 'Saat ada siswa mengerjakan, tanggal mulai tidak boleh diubah. Ubah tanggal selesai saja.',
+            ], 409);
+        }
+        if ((! $this->boolValue($quiz->is_active ?? false) || $hasStartChanged) && $startsAt->lt($nowMinute)) {
+            return response()->json(['error' => 'Tanggal mulai quiz tidak boleh di masa lalu'], 422);
+        }
+
+        $deadlineAt = $this->parseQuizDate($request->input('deadline_at'), $quizForDates);
+        if (! $deadlineAt) {
+            return response()->json(['error' => 'Tanggal selesai wajib diisi'], 422);
+        }
+        if (! $deadlineAt->gt($startsAt)) {
+            return response()->json(['error' => 'Tanggal selesai harus setelah tanggal mulai'], 422);
+        }
+        if ($deadlineAt->lt($nowMinute)) {
+            return response()->json(['error' => 'Tanggal selesai quiz tidak boleh di masa lalu'], 422);
+        }
+
+        $periodError = $this->validateQuizTimelineWithinActivePeriod($tenantId, $startsAt, $deadlineAt, $quiz);
+        if ($periodError !== null) {
+            return response()->json(['error' => $periodError], 422);
+        }
+
+        $mode = $this->quizMode($quiz);
+        $durationMinutes = (int) ceil(($deadlineAt->getTimestamp() - $startsAt->getTimestamp()) / 60);
+        if ($mode !== 'regular' && $durationMinutes < 10) {
+            return response()->json(['error' => 'Durasi quiz ujian minimal 10 menit'], 422);
+        }
+
+        $updates = [
+            'starts_at' => $startsAt->toISOString(),
+            'deadline_at' => $deadlineAt->toISOString(),
+            'is_active' => true,
+            'updated_at' => $now,
+        ];
+        if (Schema::hasColumn('quizzes', 'timezone')) {
+            $updates['timezone'] = $timezone;
+        }
+        if (Schema::hasColumn('quizzes', 'closed_at')) {
+            $updates['closed_at'] = null;
+        }
+        if (Schema::hasColumn('quizzes', 'published_at')) {
+            $updates['published_at'] = $now;
+        }
+        if ($mode === 'regular') {
+            $updates['is_live'] = false;
+            $updates['live_started_at'] = null;
+            $updates['duration_minutes'] = null;
+        } else {
+            $updates['is_live'] = true;
+            $updates['live_started_at'] = $startsAt->toISOString();
+            $updates['duration_minutes'] = $durationMinutes;
+        }
+
+        $updates = array_filter(
+            $updates,
+            fn ($value, $column) => Schema::hasColumn('quizzes', $column),
+            ARRAY_FILTER_USE_BOTH
+        );
+
+        DB::table('quizzes')
+            ->where('id', $quizId)
+            ->where('tenant_id', $tenantId)
+            ->update($updates);
+
+        $fresh = DB::table('quizzes')
+            ->where('id', $quizId)
+            ->where('tenant_id', $tenantId)
+            ->first();
+
+        return response()->json(['data' => [
+            'quiz' => $this->quizPayload($fresh),
+            'duration_minutes' => $durationMinutes,
+        ]]);
     }
 
     public function close(Request $request)
@@ -1224,7 +1718,71 @@ class QuizController extends ApiController
         ]);
     }
 
-    private function resolveStudentQuiz(Request $request, string $tenantId, string $quizId): array
+    private function dashboardPerPage(Request $request): int
+    {
+        return max(1, min(100, (int) $request->query('per_page', 25)));
+    }
+
+    private function dashboardPagination(int $page, int $perPage, int $total): array
+    {
+        $pageCount = max(1, (int) ceil($total / max(1, $perPage)));
+        $safePage = min(max(1, $page), $pageCount);
+
+        return [
+            'page' => $safePage,
+            'per_page' => $perPage,
+            'total' => $total,
+            'page_count' => $pageCount,
+            'from' => $total === 0 ? 0 : (($safePage - 1) * $perPage) + 1,
+            'to' => $total === 0 ? 0 : min($total, (($safePage - 1) * $perPage) + $perPage),
+        ];
+    }
+
+    private function quizTenantQuery(string $tenantId)
+    {
+        $query = DB::table('quizzes');
+        if (Schema::hasColumn('quizzes', 'tenant_id')) {
+            $query->where('tenant_id', $tenantId);
+        }
+
+        return $query;
+    }
+
+    private function quizTenantTable(string $table, string $tenantId)
+    {
+        $query = DB::table($table);
+        if (Schema::hasColumn($table, 'tenant_id')) {
+            $query->where("{$table}.tenant_id", $tenantId);
+        }
+
+        return $query;
+    }
+
+    private function selectExistingQuizColumns(string $table, array $columns): array
+    {
+        if (! Schema::hasTable($table)) {
+            return $columns;
+        }
+
+        $available = array_values(array_filter($columns, fn ($column) => Schema::hasColumn($table, $column)));
+
+        return ! empty($available) ? $available : ['*'];
+    }
+
+    private function applyQuizAcademicQueryFilters($query, string $table, Request $request): void
+    {
+        $academicYear = AcademicPeriod::normalizeAcademicYear($request->query('tahun_ajaran'));
+        $semester = AcademicPeriod::normalizeSemester($request->query('semester'));
+
+        if ($academicYear && Schema::hasColumn($table, 'tahun_ajaran')) {
+            $query->where('tahun_ajaran', $academicYear);
+        }
+        if ($semester && Schema::hasColumn($table, 'semester')) {
+            $query->where('semester', $semester);
+        }
+    }
+
+    private function resolveStudentQuiz(Request $request, string $tenantId, string $quizId, $clientMeta = null): array
     {
         $quiz = DB::table('quizzes')
             ->where('id', $quizId)
@@ -1245,11 +1803,18 @@ class QuizController extends ApiController
             ];
         }
 
-        $kelas = $this->profile($request)?->kelas;
-        if ((string) ($quiz->kelas_id ?? '') !== (string) ($kelas ?? '')) {
+        if (! $this->sameClassId($quiz->kelas_id ?? '', $this->studentClassId($request))) {
             return [
                 'quiz' => null,
                 'response' => $this->deny('Quiz bukan untuk kelas ini'),
+            ];
+        }
+
+        $deviceResponse = $this->denyIfQuizDeviceNotAllowed($quiz, $this->requestClientDevice($request, $clientMeta));
+        if ($deviceResponse !== null) {
+            return [
+                'quiz' => null,
+                'response' => $deviceResponse,
             ];
         }
 
@@ -1257,6 +1822,16 @@ class QuizController extends ApiController
             'quiz' => $quiz,
             'response' => null,
         ];
+    }
+
+    private function studentClassId(Request $request): string
+    {
+        return trim((string) ($this->profile($request)?->kelas ?? ''));
+    }
+
+    private function sameClassId($left, $right): bool
+    {
+        return trim((string) $left) === trim((string) $right);
     }
 
     private function currentAcademicPeriodForTenant(string $tenantId): array
@@ -1267,7 +1842,11 @@ class QuizController extends ApiController
             if (Schema::hasColumn('settings', 'tenant_id')) {
                 $settingsQuery->where('tenant_id', $tenantId);
             }
-            $settings = $settingsQuery->first(['tahun_ajaran', 'semester_aktif']);
+            $columns = array_values(array_filter(
+                ['tahun_ajaran', 'semester_aktif', 'periode_mulai', 'periode_selesai'],
+                fn ($column) => Schema::hasColumn('settings', $column)
+            ));
+            $settings = $settingsQuery->first($columns ?: ['tahun_ajaran', 'semester_aktif']);
         }
 
         return AcademicPeriod::fromSettings($settings);
@@ -1333,6 +1912,253 @@ class QuizController extends ApiController
         $row = $query->first(['angkatan']);
 
         return trim((string) ($row->angkatan ?? '')) ?: null;
+    }
+
+    private function quizHasOngoingSubmissions(string $tenantId, string $quizId): bool
+    {
+        return DB::table('quiz_submissions')
+            ->where('tenant_id', $tenantId)
+            ->where('quiz_id', $quizId)
+            ->where('status', 'ongoing')
+            ->exists();
+    }
+
+    private function validateQuizCanBeActivated(string $tenantId, object $quiz, Carbon $now): ?string
+    {
+        $startsAt = $this->parseQuizDate($quiz->starts_at ?? null, $quiz);
+        if (! $startsAt) {
+            return 'Tanggal mulai quiz wajib diisi sebelum quiz dimulai';
+        }
+        if ($startsAt->lt($now->copy()->startOfMinute())) {
+            return 'Tanggal mulai quiz tidak boleh di masa lalu';
+        }
+
+        if ($this->quizMode($quiz) !== 'regular') {
+            $duration = (int) ($quiz->duration_minutes ?? 0);
+            if ($duration < 10) {
+                return 'Durasi quiz ujian minimal 10 menit';
+            }
+            $endsAt = $startsAt->copy()->addMinutes($duration);
+        } else {
+            $endsAt = $this->parseQuizDate($quiz->deadline_at ?? null, $quiz);
+            if (! $endsAt) {
+                return 'Tanggal selesai quiz wajib diisi sebelum quiz dimulai';
+            }
+            if (! $endsAt->gt($startsAt)) {
+                return 'Tanggal selesai quiz harus setelah tanggal mulai';
+            }
+        }
+
+        if ($endsAt->lt($now->copy()->startOfMinute())) {
+            return 'Waktu selesai quiz tidak boleh di masa lalu';
+        }
+
+        $periodError = $this->validateQuizTimelineWithinActivePeriod($tenantId, $startsAt, $endsAt, $quiz);
+        if ($periodError !== null) {
+            return $periodError;
+        }
+
+        $academicYear = AcademicPeriod::normalizeAcademicYear($quiz->tahun_ajaran ?? null)
+            ?: $this->currentAcademicPeriodForTenant($tenantId)['tahun_ajaran'];
+
+        return $this->validateQuizTimelineWithinAcademicYear($startsAt, $endsAt, $academicYear);
+    }
+
+    private function academicYearBounds(?string $academicYear): ?array
+    {
+        $year = AcademicPeriod::normalizeAcademicYear($academicYear);
+        if (! $year) {
+            return null;
+        }
+
+        $startYear = (int) substr($year, 0, 4);
+        if ($startYear <= 0) {
+            return null;
+        }
+
+        return [
+            Carbon::create($startYear, 7, 1, 0, 0, 0, 'Asia/Jakarta')->startOfDay(),
+            Carbon::create($startYear + 1, 6, 30, 23, 59, 59, 'Asia/Jakarta')->endOfDay(),
+        ];
+    }
+
+    private function validateQuizTimelineWithinAcademicYear(?Carbon $startsAt, ?Carbon $endsAt, ?string $academicYear): ?string
+    {
+        $year = AcademicPeriod::normalizeAcademicYear($academicYear);
+        $bounds = $this->academicYearBounds($year);
+        if (! $year || ! $bounds) {
+            return null;
+        }
+
+        [$periodStart, $periodEnd] = $bounds;
+        foreach ([
+            'Tanggal mulai' => $startsAt,
+            'Waktu selesai' => $endsAt,
+        ] as $label => $date) {
+            if (! $date instanceof Carbon) {
+                continue;
+            }
+            $localDate = $date->copy()->setTimezone('Asia/Jakarta');
+            if ($localDate->lt($periodStart) || $localDate->gt($periodEnd)) {
+                return "{$label} quiz harus berada dalam tahun periode {$year} ({$periodStart->toDateString()} sampai {$periodEnd->toDateString()})";
+            }
+        }
+
+        return null;
+    }
+
+    private function validateQuizTimelineWithinActivePeriod(string $tenantId, ?Carbon $startsAt, ?Carbon $endsAt, ?object $quiz = null): ?string
+    {
+        $period = $this->currentAcademicPeriodForTenant($tenantId);
+        $startDate = $period['starts_at'] ?? $period['periode_mulai'] ?? null;
+        $endDate = $period['ends_at'] ?? $period['periode_selesai'] ?? null;
+        if (! $startDate || ! $endDate) {
+            return null;
+        }
+
+        $timezone = $this->quizTimezone($quiz);
+        $periodStart = Carbon::parse($startDate, $timezone)->startOfDay();
+        $periodEnd = Carbon::parse($endDate, $timezone)->endOfDay();
+        $periodLabel = ($period['tahun_ajaran'] ?? '').' - Semester '.($period['semester'] ?? '');
+
+        foreach ([
+            'Tanggal mulai' => $startsAt,
+            'Waktu selesai' => $endsAt,
+        ] as $label => $date) {
+            if (! $date instanceof Carbon) {
+                continue;
+            }
+            $localDate = $date->copy()->setTimezone($timezone);
+            if ($localDate->lt($periodStart) || $localDate->gt($periodEnd)) {
+                return "{$label} quiz harus berada dalam periode aktif {$periodLabel} ({$periodStart->toDateString()} sampai {$periodEnd->toDateString()})";
+            }
+        }
+
+        return null;
+    }
+
+    private function quizMode(object $quiz): string
+    {
+        $mode = strtolower(trim((string) ($quiz->mode ?? '')));
+        if (in_array($mode, ['regular', 'uts', 'uas'], true)) {
+            return $mode;
+        }
+
+        return $this->boolValue($quiz->is_live ?? false) ? 'uts' : 'regular';
+    }
+
+    private function validateQuizRequiredSettingsForSchedule(object $quiz): ?string
+    {
+        if (Schema::hasColumn('quizzes', 'security_mode')) {
+            $securityMode = strtolower(trim((string) ($quiz->security_mode ?? '')));
+            if (! in_array($securityMode, ['standard', 'strict'], true)) {
+                return 'Atur dan simpan mode keamanan quiz terlebih dahulu';
+            }
+        }
+
+        if (Schema::hasColumn('quizzes', 'access_device')) {
+            if ($this->normalizeQuizAccessDevice($quiz->access_device ?? null) === null) {
+                return 'Pilih dan simpan akses perangkat quiz terlebih dahulu';
+            }
+        }
+
+        return null;
+    }
+
+    private function normalizeQuizAccessDevice($value): ?string
+    {
+        $raw = strtolower(trim((string) ($value ?? '')));
+        if ($raw === '') {
+            return 'both';
+        }
+        if (in_array($raw, ['both', 'all', 'any', 'semua', 'keduanya'], true)) {
+            return 'both';
+        }
+        if (in_array($raw, ['web', 'browser', 'desktop'], true)) {
+            return 'web';
+        }
+        if (in_array($raw, ['mobile', 'app', 'mobile_app', 'aplikasi', 'android', 'ios'], true)) {
+            return 'mobile';
+        }
+
+        return null;
+    }
+
+    private function quizAccessDevice(object $quiz): string
+    {
+        return $this->normalizeQuizAccessDevice($quiz->access_device ?? null) ?: 'both';
+    }
+
+    private function clientDeviceFromMeta($clientMeta): ?string
+    {
+        if (is_string($clientMeta)) {
+            $decoded = json_decode($clientMeta, true);
+            $clientMeta = is_array($decoded) ? $decoded : null;
+        }
+
+        $values = [];
+        if (is_array($clientMeta)) {
+            foreach (['device', 'client_device', 'client', 'source', 'platform'] as $key) {
+                $values[] = strtolower(trim((string) ($clientMeta[$key] ?? '')));
+            }
+        } elseif (is_object($clientMeta)) {
+            foreach (['device', 'client_device', 'client', 'source', 'platform'] as $key) {
+                $values[] = strtolower(trim((string) ($clientMeta->{$key} ?? '')));
+            }
+        }
+
+        foreach ($values as $value) {
+            if (in_array($value, ['mobile', 'mobile_app', 'app', 'android', 'ios', 'react_native'], true)) {
+                return 'mobile';
+            }
+            if (in_array($value, ['web', 'browser', 'desktop'], true)) {
+                return 'web';
+            }
+        }
+
+        return null;
+    }
+
+    private function requestClientDevice(Request $request, $clientMeta = null): string
+    {
+        $metaDevice = $this->clientDeviceFromMeta($clientMeta);
+        if ($metaDevice) {
+            return $metaDevice;
+        }
+
+        $header = strtolower(trim((string) $request->header('X-EduSmart-Client', '')));
+        if (in_array($header, ['mobile', 'mobile_app', 'app', 'android', 'ios', 'react_native'], true)) {
+            return 'mobile';
+        }
+        if (in_array($header, ['web', 'browser', 'desktop'], true)) {
+            return 'web';
+        }
+
+        $queryClient = strtolower(trim((string) $request->query('client', '')));
+        if (in_array($queryClient, ['mobile', 'mobile_app', 'app', 'android', 'ios'], true)) {
+            return 'mobile';
+        }
+
+        return 'web';
+    }
+
+    private function denyIfQuizDeviceNotAllowed(object $quiz, string $clientDevice)
+    {
+        $allowed = $this->quizAccessDevice($quiz);
+        if ($allowed === 'both' || $allowed === $clientDevice) {
+            return null;
+        }
+
+        $message = $allowed === 'mobile'
+            ? 'Quiz ini hanya dapat dikerjakan melalui aplikasi mobile.'
+            : 'Quiz ini hanya dapat dikerjakan melalui web/browser.';
+
+        return response()->json([
+            'error' => $message,
+            'code' => 'quiz_device_not_allowed',
+            'allowed_device' => $allowed,
+            'client_device' => $clientDevice,
+        ], 403);
     }
 
     private function quizNow(?object $quiz = null): Carbon
@@ -1514,6 +2340,47 @@ class QuizController extends ApiController
         return null;
     }
 
+    private function denyIfStrictFullscreenMissing(object $quiz, $clientMeta)
+    {
+        $securityMode = strtolower(trim((string) ($quiz->security_mode ?? 'standard')));
+        if ($securityMode !== 'strict') {
+            return null;
+        }
+
+        $clientDevice = $this->clientDeviceFromMeta($clientMeta) ?: 'web';
+        if ($clientDevice === 'mobile') {
+            $secureScreen = false;
+            if (is_array($clientMeta)) {
+                $secureScreen = $this->boolValue($clientMeta['secure_screen'] ?? $clientMeta['screen_capture_protected'] ?? false);
+            } elseif (is_object($clientMeta)) {
+                $secureScreen = $this->boolValue($clientMeta->secure_screen ?? $clientMeta->screen_capture_protected ?? false);
+            }
+
+            if (! $secureScreen) {
+                return response()->json([
+                    'error' => 'Mode strict di aplikasi mobile wajib mengaktifkan proteksi layar sebelum quiz dimulai.',
+                ], 403);
+            }
+
+            return null;
+        }
+
+        $fullscreen = false;
+        if (is_array($clientMeta)) {
+            $fullscreen = $this->boolValue($clientMeta['fullscreen'] ?? false);
+        } elseif (is_object($clientMeta)) {
+            $fullscreen = $this->boolValue($clientMeta->fullscreen ?? false);
+        }
+
+        if (! $fullscreen) {
+            return response()->json([
+                'error' => 'Mode strict wajib fullscreen sebelum quiz dimulai.',
+            ], 403);
+        }
+
+        return null;
+    }
+
     private function createQuizSubmission(string $tenantId, object $quiz, string $siswaId, Carbon $now, $clientMeta = null): array
     {
         $attemptNo = $this->nextAttemptNumber($tenantId, (string) $quiz->id, $siswaId);
@@ -1522,6 +2389,13 @@ class QuizController extends ApiController
             return [
                 'submission' => null,
                 'response' => response()->json(['error' => 'Batas percobaan quiz sudah habis'], 403),
+            ];
+        }
+        $strictSecurityResponse = $this->denyIfStrictFullscreenMissing($quiz, $clientMeta);
+        if ($strictSecurityResponse !== null) {
+            return [
+                'submission' => null,
+                'response' => $strictSecurityResponse,
             ];
         }
 
@@ -1545,6 +2419,9 @@ class QuizController extends ApiController
         }
         if (Schema::hasColumn('quiz_submissions', 'client_meta')) {
             $payload['client_meta'] = $this->encodeJsonOrNull($clientMeta);
+        }
+        if (Schema::hasColumn('quiz_submissions', 'client_device')) {
+            $payload['client_device'] = $this->clientDeviceFromMeta($clientMeta) ?: 'web';
         }
 
         try {
@@ -1973,6 +2850,42 @@ class QuizController extends ApiController
         $json = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 
         return $json === false ? null : $json;
+    }
+
+    private function metaStringValue($meta, string $key): string
+    {
+        if (is_string($meta)) {
+            $decoded = json_decode($meta, true);
+            $meta = is_array($decoded) ? $decoded : null;
+        }
+
+        if (is_array($meta)) {
+            return trim((string) ($meta[$key] ?? ''));
+        }
+
+        if (is_object($meta)) {
+            return trim((string) ($meta->{$key} ?? ''));
+        }
+
+        return '';
+    }
+
+    private function quizPayload(?object $quiz): ?array
+    {
+        if (! $quiz) {
+            return null;
+        }
+
+        $payload = (array) $quiz;
+        if (array_key_exists('access_device', $payload)) {
+            $payload['access_device'] = $this->normalizeQuizAccessDevice($payload['access_device'] ?? null) ?: 'both';
+        } else {
+            $payload['access_device'] = 'both';
+        }
+        $payload['has_access_code'] = trim((string) ($payload['access_code_hash'] ?? '')) !== '';
+        unset($payload['access_code_hash']);
+
+        return $payload;
     }
 
     private function resolveQuizForTeacherAction(Request $request, string $tenantId, string $quizId): ?object

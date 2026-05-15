@@ -44,6 +44,43 @@ class TransportSecurityTest extends TestCase
         $response->assertHeader('Expires', '0');
     }
 
+    public function test_cors_preflight_allows_frontend_csrf_header(): void
+    {
+        $response = $this
+            ->withHeaders([
+                'Origin' => 'http://localhost:5173',
+                'Access-Control-Request-Method' => 'POST',
+                'Access-Control-Request-Headers' => 'content-type,x-xsrf-token,x-tenant',
+            ])
+            ->options('/api/db');
+
+        $this->assertTrue(
+            in_array($response->getStatusCode(), [200, 204], true),
+            'CORS preflight harus sukses.'
+        );
+
+        $allowedHeaders = strtolower((string) $response->headers->get('Access-Control-Allow-Headers'));
+        $this->assertStringContainsString('x-xsrf-token', $allowedHeaders);
+        $this->assertStringContainsString('x-tenant', $allowedHeaders);
+    }
+
+    public function test_local_loopback_frontend_can_fetch_csrf_cookie(): void
+    {
+        $response = $this
+            ->withHeaders([
+                'Origin' => 'http://127.0.0.1:5173',
+            ])
+            ->get('/sanctum/csrf-cookie');
+
+        $this->assertTrue(
+            in_array($response->getStatusCode(), [200, 204], true),
+            'CSRF cookie endpoint harus bisa dipanggil dari frontend loopback lokal.'
+        );
+
+        $response->assertHeader('Access-Control-Allow-Origin', 'http://127.0.0.1:5173');
+        $response->assertHeader('Access-Control-Allow-Credentials', 'true');
+    }
+
     private function defaultTenantId(): string
     {
         $tenantId = (string) DB::table('tenants')

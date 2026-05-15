@@ -900,8 +900,8 @@ class SuperAdminController extends ApiController
         }
 
         $adminEmail = strtolower(trim($payload['admin_email']));
-        if (User::query()->where('email', $adminEmail)->exists()) {
-            return response()->json(['error' => 'Email admin sudah terdaftar'], 409);
+        if ($this->isReservedSuperAdminEmail($adminEmail)) {
+            return response()->json(['error' => 'Email ini tidak bisa digunakan sebagai admin sekolah'], 403);
         }
 
         $tenantId = (string) Str::uuid();
@@ -930,17 +930,6 @@ class SuperAdminController extends ApiController
                 'updated_at' => now(),
             ]);
 
-            DB::table('settings')->insert([
-                'tenant_id' => $tenantId,
-                'nama_sekolah' => $tenantName,
-                'email' => $adminEmail,
-                'registrasi_siswa_aktif' => true,
-                'registrasi_guru_aktif' => false,
-                'registrasi_admin_aktif' => false,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
-
             User::query()->create([
                 'id' => $userId,
                 'name' => $adminName,
@@ -965,6 +954,22 @@ class SuperAdminController extends ApiController
                 'created_at' => now(),
             ]);
 
+            $settingsPayload = [
+                'tenant_id' => $tenantId,
+                'nama_sekolah' => $tenantName,
+                'email' => $adminEmail,
+                'registrasi_siswa_aktif' => true,
+                'registrasi_guru_aktif' => false,
+                'registrasi_admin_aktif' => false,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ];
+            if ($this->tableHasColumn('settings', 'approval_primary_admin_id')) {
+                $settingsPayload['approval_primary_admin_id'] = $userId;
+            }
+
+            DB::table('settings')->insert($settingsPayload);
+
             $result = [
                 'tenant' => [
                     'id' => $tenantId,
@@ -976,6 +981,7 @@ class SuperAdminController extends ApiController
                     'name' => $adminName,
                     'email' => $adminEmail,
                 ],
+                'primary_admin_user_id' => $userId,
             ];
         });
 
@@ -1049,7 +1055,13 @@ class SuperAdminController extends ApiController
             return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
         }
 
-        $existingUser = User::query()->where('email', $email)->first();
+        $existingProfileInTenant = Profile::query()
+            ->where('tenant_id', $tenant->id)
+            ->whereRaw('lower(email) = ?', [$email])
+            ->first();
+        $existingUser = $existingProfileInTenant?->id
+            ? User::query()->where('id', $existingProfileInTenant->id)->first()
+            : null;
         if (! $existingUser && empty($payload['password'])) {
             return response()->json(['error' => 'Password wajib diisi untuk user baru'], 422);
         }
@@ -1061,7 +1073,7 @@ class SuperAdminController extends ApiController
         $createdSuper = false;
         $superAdminId = null;
 
-        DB::transaction(function () use ($email, $name, $payload, $tenant, $existingUser, &$result, &$createdSuper, &$superAdminId) {
+        DB::transaction(function () use ($email, $name, $payload, $tenant, $existingUser, $existingProfileInTenant, &$result, &$createdSuper, &$superAdminId) {
             $user = $existingUser;
             if (! $user) {
                 $user = User::query()->create([
@@ -1084,10 +1096,10 @@ class SuperAdminController extends ApiController
                 }
             }
 
-            $existingProfile = Profile::query()->where('id', $user->id)->first();
-            if ($existingProfile && $existingProfile->tenant_id !== $tenant->id) {
-                throw new \RuntimeException('User ini terdaftar di tenant lain.');
-            }
+            $existingProfile = $existingProfileInTenant ?: Profile::query()
+                ->where('id', $user->id)
+                ->where('tenant_id', $tenant->id)
+                ->first();
 
             if ($existingProfile && $existingProfile->role !== 'admin') {
                 throw new \RuntimeException('User ini sudah terdaftar sebagai non-admin.');
@@ -1391,24 +1403,51 @@ class SuperAdminController extends ApiController
     {
         $reserved = config('tenancy.reserved_subdomains', []);
         $reserved = array_map('strtolower', $reserved);
+        $adminSubdomain = strtolower(trim((string) config('tenancy.admin_subdomain', 'admin26')));
+        if ($adminSubdomain !== '') {
+            $reserved[] = $adminSubdomain;
+        }
 
         return in_array(strtolower($slug), $reserved, true);
     }
 
-    private function generateStrongPassword(int $length = 12): string
+    private function isReservedSuperAdminEmail(string $email): bool
     {
-        $letters = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+        $normalizedEmail = strtolower(trim($email));
+        if ($normalizedEmail === '') {
+            return false;
+        }
+
+        $envEmails = array_map('strtolower', config('superadmin.emails', []));
+        if (in_array($normalizedEmail, $envEmails, true)) {
+            return true;
+        }
+
+        try {
+            return DB::table('super_admins as s')
+                ->join('users as u', 'u.id', '=', 's.user_id')
+                ->whereRaw('lower(u.email) = ?', [$normalizedEmail])
+                ->exists();
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
+    private function generateStrongPassword(int $length = 16): string
+    {
+        $lower = 'abcdefghijkmnopqrstuvwxyz';
+        $upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
         $digits = '23456789';
         $symbols = '@#$%&*-_';
 
         $seed = [
-            $letters[random_int(0, strlen($letters) - 1)],
-            $letters[random_int(0, strlen($letters) - 1)],
+            $lower[random_int(0, strlen($lower) - 1)],
+            $upper[random_int(0, strlen($upper) - 1)],
             $digits[random_int(0, strlen($digits) - 1)],
             $symbols[random_int(0, strlen($symbols) - 1)],
         ];
 
-        $all = $letters.$digits.$symbols;
+        $all = $lower.$upper.$digits.$symbols;
         while (count($seed) < $length) {
             $seed[] = $all[random_int(0, strlen($all) - 1)];
         }

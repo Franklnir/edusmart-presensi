@@ -1,6 +1,29 @@
-// src/pages/admin/APengaturan.jsx
 import React, { useEffect, useState, useRef } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import {
+  AlertTriangle,
+  CalendarDays,
+  CheckCircle2,
+  Cloud,
+  Database,
+  ExternalLink,
+  FileText,
+  FolderOpen,
+  HardDrive,
+  Link2,
+  RefreshCw,
+  Search,
+  Server,
+  Share2,
+  ShieldCheck,
+  School,
+  Unplug,
+  UserCog,
+  Users,
+  XCircle
+} from 'lucide-react'
 import { supabase, PROFILE_BUCKET, getSignedUrlForValue } from '../../lib/supabase'
+import { queryClient } from '../../lib/queryClient'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import FileDropzone from '../../components/FileDropzone'
@@ -9,12 +32,12 @@ import { sanitizeText, sanitizeUrl } from '../../utils/sanitize'
 import {
   getCurrentAcademicPeriod,
   generateAcademicYearOptions,
-  inferCohortYear,
   normalizeAcademicYear,
   normalizeSemester,
   resolveAcademicPeriod,
   SEMESTER_GENAP,
-  SEMESTER_GANJIL
+  SEMESTER_GANJIL,
+  toMonthInputValue
 } from '../../utils/academicPeriod'
 
 const SUPABASE_BUCKET = 'profile-photos'
@@ -36,8 +59,68 @@ const SETTINGS_SELECT_COLUMNS = [
   'registrasi_guru_aktif',
   'registrasi_admin_aktif',
   'tahun_ajaran',
-  'semester_aktif'
+  'semester_aktif',
+  'periode_mulai',
+  'periode_selesai',
+  'periode_ganjil_mulai',
+  'periode_ganjil_selesai',
+  'periode_genap_mulai',
+  'periode_genap_selesai'
 ].join(',')
+const SETTINGS_QUERY_KEY = ['admin', 'settings', 'system']
+const SETTINGS_STALE_TIME = 5 * 60 * 1000
+const SETTINGS_SESSION_CACHE_KEY = 'edusmart_settings_cache:system'
+
+function getSettingsStorage() {
+  if (typeof window === 'undefined') return null
+  try {
+    return window.sessionStorage || null
+  } catch {
+    return null
+  }
+}
+
+function readCachedSettingsRow() {
+  const storage = getSettingsStorage()
+  if (!storage) return null
+
+  try {
+    const parsed = JSON.parse(storage.getItem(SETTINGS_SESSION_CACHE_KEY) || 'null')
+    if (!parsed?.data || Number(parsed.expiresAt || 0) <= Date.now()) {
+      storage.removeItem(SETTINGS_SESSION_CACHE_KEY)
+      return null
+    }
+    return parsed.data
+  } catch {
+    storage.removeItem(SETTINGS_SESSION_CACHE_KEY)
+    return null
+  }
+}
+
+function writeCachedSettingsRow(data) {
+  const storage = getSettingsStorage()
+  if (!storage || !data) return
+
+  try {
+    storage.setItem(SETTINGS_SESSION_CACHE_KEY, JSON.stringify({
+      data,
+      expiresAt: Date.now() + SETTINGS_STALE_TIME
+    }))
+  } catch {
+    // ignore storage quota/private mode failures
+  }
+}
+
+function clearCachedSettingsRow() {
+  const storage = getSettingsStorage()
+  if (!storage) return
+
+  try {
+    storage.removeItem(SETTINGS_SESSION_CACHE_KEY)
+  } catch {
+    // ignore
+  }
+}
 
 // ✅ Signed URL expire (detik). Bisa kamu naikkan/turunkan sesuai kebutuhan.
 // Catatan: karena DB sekarang menyimpan PATH saja, signed URL dibuat saat runtime.
@@ -58,6 +141,36 @@ const formatBytesLabel = (bytes) => {
   return `${Number(size.toFixed(precision)).toLocaleString('id-ID')} ${units[idx]}`
 }
 
+const formatDateTimeLabel = (value) => {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '-'
+  return new Intl.DateTimeFormat('id-ID', {
+    dateStyle: 'medium',
+    timeStyle: 'short'
+  }).format(date)
+}
+
+const DRIVE_FILE_BUCKET_OPTIONS = [
+  { value: 'all', label: 'Semua modul' },
+  { value: 'assignments', label: 'Tugas' },
+  { value: 'quiz-media', label: 'Quiz' }
+]
+
+const SETTINGS_MENU_IDS = new Set([
+  'identity',
+  'academic',
+  'drive',
+  'admin',
+  'registration'
+])
+
+const resolveSettingsMenuFromSearch = (search = '') => {
+  const params = new URLSearchParams(search || '')
+  const menu = String(params.get('menu') || '').trim()
+  return SETTINGS_MENU_IDS.has(menu) ? menu : 'identity'
+}
+
 const DRIVE_STATUS_DEFAULT = {
   provider_configured: false,
   configured: false,
@@ -71,18 +184,84 @@ const DRIVE_STATUS_DEFAULT = {
 
 const resolvePeriodForm = (row = {}) => {
   const resolved = resolveAcademicPeriod(row)
+  const ganjilDefault = resolveAcademicPeriod({
+    tahun_ajaran: resolved.tahunAjaran,
+    semester_aktif: SEMESTER_GANJIL
+  })
+  const genapDefault = resolveAcademicPeriod({
+    tahun_ajaran: resolved.tahunAjaran,
+    semester_aktif: SEMESTER_GENAP
+  })
+
+  const activeStart = resolved.periodeMulai || resolved.startsAt
+  const activeEnd = resolved.periodeSelesai || resolved.endsAt
+  const periodeGanjilMulai =
+    resolved.periodeGanjilMulai ||
+    (resolved.semester === SEMESTER_GANJIL ? activeStart : ganjilDefault.startsAt)
+  const periodeGanjilSelesai =
+    resolved.periodeGanjilSelesai ||
+    (resolved.semester === SEMESTER_GANJIL ? activeEnd : ganjilDefault.endsAt)
+  const periodeGenapMulai =
+    resolved.periodeGenapMulai ||
+    (resolved.semester === SEMESTER_GENAP ? activeStart : genapDefault.startsAt)
+  const periodeGenapSelesai =
+    resolved.periodeGenapSelesai ||
+    (resolved.semester === SEMESTER_GENAP ? activeEnd : genapDefault.endsAt)
+
   return {
     tahunAjaran: resolved.tahunAjaran,
-    semester: resolved.semester
+    semester: resolved.semester,
+    periodeMulai: resolved.semester === SEMESTER_GANJIL ? periodeGanjilMulai : periodeGenapMulai,
+    periodeSelesai: resolved.semester === SEMESTER_GANJIL ? periodeGanjilSelesai : periodeGenapSelesai,
+    periodeGanjilMulai,
+    periodeGanjilSelesai,
+    periodeGenapMulai,
+    periodeGenapSelesai
   }
 }
 
-function normalizeTimeString(timeValue) {
-  if (!timeValue) return ''
-  if (typeof timeValue !== 'string') return ''
-  if (timeValue.length >= 5) return timeValue.slice(0, 5)
-  return timeValue
+const getActiveRangeFromPeriodForm = (form = {}) => {
+  const semester = normalizeSemester(form.semester) || SEMESTER_GANJIL
+  if (semester === SEMESTER_GENAP) {
+    return {
+      startsAt: form.periodeGenapMulai || '',
+      endsAt: form.periodeGenapSelesai || ''
+    }
+  }
+
+  return {
+    startsAt: form.periodeGanjilMulai || '',
+    endsAt: form.periodeGanjilSelesai || ''
+  }
 }
+
+const buildPeriodPayloadFromForm = (form = {}) => {
+  const tahunAjaran = normalizeAcademicYear(form.tahunAjaran)
+  const semester = normalizeSemester(form.semester)
+  const activeRange = getActiveRangeFromPeriodForm({ ...form, semester })
+
+  return {
+    tahun_ajaran: tahunAjaran,
+    semester_aktif: semester,
+    periode_mulai: activeRange.startsAt,
+    periode_selesai: activeRange.endsAt,
+    periode_ganjil_mulai: form.periodeGanjilMulai || '',
+    periode_ganjil_selesai: form.periodeGanjilSelesai || '',
+    periode_genap_mulai: form.periodeGenapMulai || '',
+    periode_genap_selesai: form.periodeGenapSelesai || ''
+  }
+}
+
+const periodPayloadChanged = (nextPayload, previousPayload) => [
+  'tahun_ajaran',
+  'semester_aktif',
+  'periode_mulai',
+  'periode_selesai',
+  'periode_ganjil_mulai',
+  'periode_ganjil_selesai',
+  'periode_genap_mulai',
+  'periode_genap_selesai'
+].some((key) => String(nextPayload?.[key] || '') !== String(previousPayload?.[key] || ''))
 
 /**
  * ✅ DB hanya simpan objectKey/path.
@@ -144,13 +323,10 @@ function makeRandomId() {
 
 async function createSignedUrlSafe(bucket, objectKey, expiresIn = SIGNED_URL_EXPIRES_IN) {
   if (!bucket || !objectKey) return ''
-
-  const { data, error } = await supabase.storage
-    .from(bucket)
-    .createSignedUrl(objectKey, expiresIn)
-
-  if (error) throw error
-  return data?.signedUrl || ''
+  const signedUrl = await getSignedUrlForValue(bucket, objectKey, expiresIn)
+  if (!signedUrl) return ''
+  const joiner = signedUrl.includes('?') ? '&' : '?'
+  return `${signedUrl}${joiner}t=${Date.now()}`
 }
 
 function PasswordModal({ isOpen, onClose, onConfirm, title = 'Konfirmasi Password', loading = false }) {
@@ -219,6 +395,31 @@ const verifyPassword = async (password) => {
 
   if (error) throw new Error('Password salah')
   return true
+}
+
+async function fetchSettingsRow() {
+  let { data, error } = await supabase
+    .from('settings')
+    .select(SETTINGS_SELECT_COLUMNS)
+    .order('id', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) throw error
+  if (data) {
+    writeCachedSettingsRow(data)
+    return data
+  }
+
+  const { data: inserted, error: insertError } = await supabase
+    .from('settings')
+    .insert({})
+    .select(SETTINGS_SELECT_COLUMNS)
+    .single()
+
+  if (insertError) throw insertError
+  writeCachedSettingsRow(inserted)
+  return inserted
 }
 
 const compressImage = (file, maxSizeKB = 300) => {
@@ -297,8 +498,10 @@ const compressImage = (file, maxSizeKB = 300) => {
 }
 
 export default function APengaturan() {
-  const { pushToast } = useUIStore()
-  const { user, profile, logout, linkGoogleCredential, refreshAuthSession } = useAuthStore()
+  const location = useLocation()
+  const navigate = useNavigate()
+  const { pushToast, requestConfirmation } = useUIStore()
+  const { user, profile, logout, refreshProfile, linkGoogleCredential, refreshAuthSession } = useAuthStore()
 
   const [isAuthorized, setIsAuthorized] = useState(true)
   const [passwordModalOpen, setPasswordModalOpen] = useState(false)
@@ -322,13 +525,6 @@ export default function APengaturan() {
     registrasi_admin_aktif: false
   })
 
-  const [rfidSettings, setRfidSettings] = useState({
-    rfid_aktif: false,
-    rfid_mulai: '07:00',
-    rfid_selesai: '15:00'
-  })
-  const [rfidSettingsId, setRfidSettingsId] = useState('')
-
   // ✅ Pisahkan PATH vs URL runtime
   const [avatarPath, setAvatarPath] = useState('')       // objectKey
   const [avatarSignedUrl, setAvatarSignedUrl] = useState('') // runtime URL
@@ -346,9 +542,27 @@ export default function APengaturan() {
   const [driveConnecting, setDriveConnecting] = useState(false)
   const [driveSyncing, setDriveSyncing] = useState(false)
   const [driveDisconnecting, setDriveDisconnecting] = useState(false)
+  const [drivePeriodFilter, setDrivePeriodFilter] = useState(() => {
+    const current = resolveAcademicPeriod()
+    return {
+      tahunAjaran: current.tahunAjaran,
+      semester: current.semester
+    }
+  })
+  const [driveFiles, setDriveFiles] = useState([])
+  const [driveFilesMeta, setDriveFilesMeta] = useState({ total: 0, limit: 50 })
+  const [driveFilesLoading, setDriveFilesLoading] = useState(false)
+  const [driveFileBucket, setDriveFileBucket] = useState('all')
+  const [driveFileSearch, setDriveFileSearch] = useState('')
+  const [activeSettingsMenu, setActiveSettingsMenu] = useState(() => (
+    typeof window !== 'undefined'
+      ? resolveSettingsMenuFromSearch(window.location.search)
+      : 'identity'
+  ))
   const [selectedLogoFile, setSelectedLogoFile] = useState(null)
   const [settingsId, setSettingsId] = useState(null)
   const [periodForm, setPeriodForm] = useState(() => resolvePeriodForm())
+  const [persistedPeriodForm, setPersistedPeriodForm] = useState(() => resolvePeriodForm())
   const [savingPeriod, setSavingPeriod] = useState(false)
 
   const autoSaveTimerRef = useRef(null)
@@ -370,6 +584,29 @@ export default function APengaturan() {
 
   const handlePasswordClose = () => {
     setPasswordModalOpen(false)
+  }
+
+  useEffect(() => {
+    const nextMenu = resolveSettingsMenuFromSearch(location.search)
+    setActiveSettingsMenu((current) => (current === nextMenu ? current : nextMenu))
+  }, [location.search])
+
+  const handleSettingsMenuChange = (menuId) => {
+    if (!SETTINGS_MENU_IDS.has(menuId)) return
+
+    setActiveSettingsMenu(menuId)
+
+    const params = new URLSearchParams(location.search)
+    params.set('menu', menuId)
+
+    const nextSearch = params.toString()
+    navigate(
+      {
+        pathname: location.pathname,
+        search: nextSearch ? `?${nextSearch}` : ''
+      },
+      { replace: true }
+    )
   }
 
   useEffect(() => {
@@ -417,7 +654,7 @@ export default function APengaturan() {
 
   // ✅ Buat signed URL avatar on-demand dari PATH
   useEffect(() => {
-    if (!isAuthorized) return
+    if (!isAuthorized || activeSettingsMenu !== 'admin') return
     let cancelled = false
 
     async function refresh() {
@@ -435,11 +672,11 @@ export default function APengaturan() {
 
     refresh()
     return () => { cancelled = true }
-  }, [avatarPath, isAuthorized])
+  }, [activeSettingsMenu, avatarPath, isAuthorized])
 
   // ✅ Buat signed URL logo on-demand dari PATH (form.logo_url)
   useEffect(() => {
-    if (!isAuthorized) return
+    if (!isAuthorized || activeSettingsMenu !== 'identity') return
     let cancelled = false
 
     async function refresh() {
@@ -458,77 +695,61 @@ export default function APengaturan() {
 
     refresh()
     return () => { cancelled = true }
-  }, [form.logo_url, isAuthorized])
+  }, [activeSettingsMenu, form.logo_url, isAuthorized])
 
   useEffect(() => {
     if (!isAuthorized) return
 
     let isCancelled = false
 
-    async function ensureRfidSettings() {
-      try {
-        let { data, error } = await supabase
-          .from('absensi_rfid_settings')
-          .select('*')
-          .order('updated_at', { ascending: false })
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle()
+    const applySettingsRow = (data) => {
+      if (!data) return
 
-        if (error) throw error
+      setSettingsId(data.id)
 
-        if (!data) {
-          const newId = makeRandomId()
-          const { data: inserted, error: insertError } = await supabase
-            .from('absensi_rfid_settings')
-            .insert({
-              id: newId,
-              rfid_aktif: false,
-              rfid_mulai: '07:00',
-              rfid_selesai: '15:00'
-            })
-            .select()
-            .single()
+      const logoPath = extractObjectKeyFromMaybeUrl(data.logo_url || '', SUPABASE_BUCKET)
 
-          if (insertError) throw insertError
-          data = inserted
-        }
+      setForm((prev) => ({
+        ...prev,
+        nama_sekolah: data.nama_sekolah || '',
+        email: data.email || '',
+        telepon: data.telepon || '',
+        alamat: data.alamat || '',
+        logo_url: logoPath || '',
+        visi: data.visi || '',
+        misi: data.misi || '',
+        link_instagram: data.link_instagram || '',
+        link_facebook: data.link_facebook || '',
+        link_youtube: data.link_youtube || '',
+        link_tiktok: data.link_tiktok || '',
+        registrasi_siswa_aktif: data.registrasi_siswa_aktif ?? true,
+        registrasi_guru_aktif: data.registrasi_guru_aktif ?? false,
+        registrasi_admin_aktif: data.registrasi_admin_aktif ?? false
+      }))
 
-        if (!isCancelled && data) {
-          setRfidSettingsId(data.id || '')
-          setRfidSettings({
-            rfid_aktif: data.rfid_aktif || false,
-            rfid_mulai: normalizeTimeString(data.rfid_mulai) || '07:00',
-            rfid_selesai: normalizeTimeString(data.rfid_selesai) || '15:00'
-          })
-        }
-      } catch {
-        if (!isCancelled) pushToast('error', 'Gagal memuat pengaturan RFID')
-      }
+      const nextPeriodForm = resolvePeriodForm(data)
+      setPeriodForm(nextPeriodForm)
+      setPersistedPeriodForm(nextPeriodForm)
+      setDrivePeriodFilter({
+        tahunAjaran: nextPeriodForm.tahunAjaran,
+        semester: nextPeriodForm.semester
+      })
     }
 
     async function loadSettings() {
-      setLoading(true)
+      const cachedSettings = queryClient.getQueryData(SETTINGS_QUERY_KEY) || readCachedSettingsRow()
+      if (cachedSettings && !isCancelled) {
+        queryClient.setQueryData(SETTINGS_QUERY_KEY, cachedSettings)
+        applySettingsRow(cachedSettings)
+      }
+
+      setLoading(!cachedSettings)
       try {
-        let { data, error } = await supabase
-          .from('settings')
-          .select(SETTINGS_SELECT_COLUMNS)
-          .order('id', { ascending: true })
-          .limit(1)
-          .single()
-
-        if (error && error.code === 'PGRST116') {
-          const { data: inserted, error: insertError } = await supabase
-            .from('settings')
-            .insert({})
-            .select(SETTINGS_SELECT_COLUMNS)
-            .single()
-
-          if (insertError) throw insertError
-          data = inserted
-        } else if (error) {
-          throw error
-        }
+        const data = await queryClient.fetchQuery({
+          queryKey: SETTINGS_QUERY_KEY,
+          queryFn: fetchSettingsRow,
+          staleTime: SETTINGS_STALE_TIME,
+        })
 
         if (!isCancelled && data) {
           setSettingsId(data.id)
@@ -553,10 +774,14 @@ export default function APengaturan() {
             registrasi_guru_aktif: data.registrasi_guru_aktif ?? false,
             registrasi_admin_aktif: data.registrasi_admin_aktif ?? false
           }))
-          setPeriodForm(resolvePeriodForm(data))
+          const nextPeriodForm = resolvePeriodForm(data)
+          setPeriodForm(nextPeriodForm)
+          setPersistedPeriodForm(nextPeriodForm)
+          setDrivePeriodFilter({
+            tahunAjaran: nextPeriodForm.tahunAjaran,
+            semester: nextPeriodForm.semester
+          })
         }
-
-        void ensureRfidSettings()
       } catch (err) {
         if (!isCancelled) pushToast('error', 'Gagal memuat pengaturan: ' + err.message)
       } finally {
@@ -574,17 +799,20 @@ export default function APengaturan() {
     return () => {
       isCancelled = true
     }
-  }, [pushToast, isAuthorized])
+  }, [activeSettingsMenu, pushToast, isAuthorized])
 
   useEffect(() => {
-    if (!isAuthorized) return
+    if (!isAuthorized || activeSettingsMenu !== 'drive') return
 
     let isCancelled = false
 
     async function loadDriveStatus() {
       setDriveLoading(true)
       try {
-        const { data, error } = await supabase.admin.googleDrive()
+        const { data, error } = await supabase.admin.googleDrive({
+          tahun_ajaran: drivePeriodFilter.tahunAjaran,
+          semester: drivePeriodFilter.semester
+        })
         if (error) throw error
         if (!isCancelled) {
           setDriveStatus(data || DRIVE_STATUS_DEFAULT)
@@ -604,7 +832,52 @@ export default function APengaturan() {
     return () => {
       isCancelled = true
     }
-  }, [isAuthorized, pushToast])
+  }, [activeSettingsMenu, drivePeriodFilter.semester, drivePeriodFilter.tahunAjaran, isAuthorized, pushToast])
+
+  useEffect(() => {
+    if (!isAuthorized || activeSettingsMenu !== 'drive') return
+
+    let isCancelled = false
+
+    async function loadDriveFiles() {
+      setDriveFilesLoading(true)
+      try {
+        const params = {
+          tahun_ajaran: drivePeriodFilter.tahunAjaran,
+          semester: drivePeriodFilter.semester,
+          limit: 50
+        }
+        if (driveFileBucket !== 'all') {
+          params.bucket = driveFileBucket
+        }
+
+        const { data, error } = await supabase.admin.googleDriveFiles(params)
+        if (error) throw error
+
+        if (!isCancelled) {
+          setDriveFiles(Array.isArray(data?.rows) ? data.rows : [])
+          setDriveFilesMeta({
+            total: Number(data?.total || 0),
+            limit: Number(data?.limit || 50)
+          })
+        }
+      } catch (error) {
+        if (!isCancelled) {
+          setDriveFiles([])
+          setDriveFilesMeta({ total: 0, limit: 50 })
+          pushToast('error', error?.message || 'Gagal memuat inventaris file Google Drive')
+        }
+      } finally {
+        if (!isCancelled) setDriveFilesLoading(false)
+      }
+    }
+
+    loadDriveFiles()
+
+    return () => {
+      isCancelled = true
+    }
+  }, [activeSettingsMenu, driveFileBucket, drivePeriodFilter.semester, drivePeriodFilter.tahunAjaran, isAuthorized, pushToast])
 
   useEffect(() => {
     if (!settingsId || !isAuthorized) return
@@ -642,32 +915,12 @@ export default function APengaturan() {
             registrasi_guru_aktif: row.registrasi_guru_aktif ?? false,
             registrasi_admin_aktif: row.registrasi_admin_aktif ?? false
           }))
-          setPeriodForm(resolvePeriodForm(row))
-        }
-      )
-      .on(
-        'postgres_changes',
-        rfidSettingsId
-          ? {
-            event: '*',
-            schema: 'public',
-            table: 'absensi_rfid_settings',
-            filter: `id=eq.${rfidSettingsId}`
-          }
-          : {
-            event: '*',
-            schema: 'public',
-            table: 'absensi_rfid_settings'
-          },
-        (payload) => {
-          const row = payload.new
-          if (!row) return
-
-          setRfidSettingsId(row.id || '')
-          setRfidSettings({
-            rfid_aktif: row.rfid_aktif || false,
-            rfid_mulai: normalizeTimeString(row.rfid_mulai) || '07:00',
-            rfid_selesai: normalizeTimeString(row.rfid_selesai) || '15:00'
+          const nextPeriodForm = resolvePeriodForm(row)
+          setPeriodForm(nextPeriodForm)
+          setPersistedPeriodForm(nextPeriodForm)
+          setDrivePeriodFilter({
+            tahunAjaran: nextPeriodForm.tahunAjaran,
+            semester: nextPeriodForm.semester
           })
         }
       )
@@ -676,7 +929,7 @@ export default function APengaturan() {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [settingsId, isAuthorized, rfidSettingsId])
+  }, [settingsId, isAuthorized])
 
   function handleChange(e) {
     const { name, value } = e.target
@@ -685,40 +938,180 @@ export default function APengaturan() {
 
   function handlePeriodChange(e) {
     const { name, value } = e.target
-    setPeriodForm((prev) => ({ ...prev, [name]: value }))
+    setPeriodForm((prev) => {
+      if (name === 'tahunAjaran') {
+        const nextYear = normalizeAcademicYear(value) || value
+        const ganjil = resolveAcademicPeriod({
+          tahun_ajaran: nextYear,
+          semester_aktif: SEMESTER_GANJIL
+        })
+        const genap = resolveAcademicPeriod({
+          tahun_ajaran: nextYear,
+          semester_aktif: SEMESTER_GENAP
+        })
+        const activeRange = prev.semester === SEMESTER_GENAP ? genap : ganjil
+
+        return {
+          ...prev,
+          tahunAjaran: nextYear,
+          periodeGanjilMulai: ganjil.startsAt,
+          periodeGanjilSelesai: ganjil.endsAt,
+          periodeGenapMulai: genap.startsAt,
+          periodeGenapSelesai: genap.endsAt,
+          periodeMulai: activeRange.startsAt,
+          periodeSelesai: activeRange.endsAt
+        }
+      }
+
+      if (name === 'semester') {
+        const nextSemester = normalizeSemester(value) || value
+        const next = { ...prev, semester: nextSemester }
+        const activeRange = getActiveRangeFromPeriodForm(next)
+        return {
+          ...next,
+          periodeMulai: activeRange.startsAt,
+          periodeSelesai: activeRange.endsAt
+        }
+      }
+
+      if (
+        name === 'periodeGanjilMulai' ||
+        name === 'periodeGanjilSelesai' ||
+        name === 'periodeGenapMulai' ||
+        name === 'periodeGenapSelesai'
+      ) {
+        const next = { ...prev, [name]: value ? `${value}-01` : '' }
+        const activeRange = getActiveRangeFromPeriodForm(next)
+        return {
+          ...next,
+          periodeMulai: activeRange.startsAt,
+          periodeSelesai: activeRange.endsAt
+        }
+      }
+
+      return { ...prev, [name]: value }
+    })
   }
 
   function handleUseCurrentPeriod() {
     const current = getCurrentAcademicPeriod()
-    setPeriodForm({
-      tahunAjaran: current.tahunAjaran,
-      semester: current.semester
-    })
+    setPeriodForm(resolvePeriodForm({
+      tahun_ajaran: current.tahunAjaran,
+      semester_aktif: current.semester
+    }))
   }
 
   async function saveAcademicPeriod() {
     if (!isAuthorized) return
 
-    const tahunAjaran = normalizeAcademicYear(periodForm.tahunAjaran)
-    const semester = normalizeSemester(periodForm.semester)
+    const nextPayload = buildPeriodPayloadFromForm(periodForm)
+    const previousPayload = buildPeriodPayloadFromForm(persistedPeriodForm)
+    const tahunAjaran = nextPayload.tahun_ajaran
+    const semester = nextPayload.semester_aktif
+    const previewPeriod = resolveAcademicPeriod(nextPayload)
+    const ganjilPreview = resolveAcademicPeriod({
+      ...nextPayload,
+      semester_aktif: SEMESTER_GANJIL
+    })
+    const genapPreview = resolveAcademicPeriod({
+      ...nextPayload,
+      semester_aktif: SEMESTER_GENAP
+    })
+
     if (!tahunAjaran || !semester) {
       pushToast('error', 'Tahun ajaran atau semester belum valid.')
       return
+    }
+    if (!ganjilPreview.startsAt || !ganjilPreview.endsAt || !ganjilPreview.customRange) {
+      pushToast('error', 'Rentang bulan semester Ganjil belum valid.')
+      return
+    }
+    if (!genapPreview.startsAt || !genapPreview.endsAt || !genapPreview.customRange) {
+      pushToast('error', 'Rentang bulan semester Genap belum valid.')
+      return
+    }
+    if (!previewPeriod.startsAt || !previewPeriod.endsAt || !previewPeriod.customRange) {
+      pushToast('error', 'Rentang bulan periode aktif belum valid.')
+      return
+    }
+
+    if (!periodPayloadChanged(nextPayload, previousPayload)) {
+      pushToast('info', 'Belum ada perubahan periode akademik yang perlu disimpan.')
+      return
+    }
+
+    const yearChanged = nextPayload.tahun_ajaran !== previousPayload.tahun_ajaran
+    if (yearChanged) {
+      const confirmedYear = await requestConfirmation({
+        title: 'Ubah tahun ajaran aktif?',
+        message: `Periode tahun ajaran akan berubah dari ${previousPayload.tahun_ajaran || '-'} ke ${nextPayload.tahun_ajaran}.`,
+        confirmText: 'Ya, lanjutkan',
+        cancelText: 'Batal',
+        tone: 'warning',
+        details: [
+          'Filter tugas, absensi, jadwal, laporan, rekap, dan storage akan mengikuti tahun ajaran baru.',
+          'Pastikan proses kenaikan kelas sudah benar sebelum menyimpan perubahan ini.'
+        ]
+      })
+      if (!confirmedYear) return
+
+      const hasRetainedStudents = await requestConfirmation({
+        title: 'Ada siswa yang tidak naik kelas?',
+        message: 'Jika ada siswa yang tetap di kelas asal, pilih siswa tersebut melalui fitur Kenaikan Kelas sebelum tahun ajaran baru diaktifkan.',
+        confirmText: 'Ada, pilih siswa dulu',
+        cancelText: 'Tidak ada',
+        tone: 'info'
+      })
+      if (hasRetainedStudents) {
+        const openPromotion = await requestConfirmation({
+          title: 'Buka Kenaikan Kelas?',
+          message: 'Anda akan diarahkan ke Kelas & Jadwal untuk memilih siswa yang tidak naik kelas.',
+          confirmText: 'Buka Kenaikan Kelas',
+          cancelText: 'Tetap di sini',
+          tone: 'info'
+        })
+        if (openPromotion) {
+          window.location.assign('/admin/kelas?openPromotion=1')
+        }
+        pushToast('warning', 'Pilih siswa melalui fitur Kenaikan Kelas sebelum mengaktifkan tahun ajaran baru.', {
+          title: 'Kenaikan kelas diperlukan',
+          duration: 8000
+        })
+        return
+      }
+    } else {
+      const confirmedPeriod = await requestConfirmation({
+        title: 'Simpan perubahan semester/bulan?',
+        message: 'Perubahan semester aktif atau rentang bulan akan langsung digunakan sebagai periode berjalan.',
+        confirmText: 'Ya, simpan periode',
+        cancelText: 'Batal',
+        tone: 'warning',
+        details: [
+          'Filter tugas, absensi, jadwal, laporan, rekap, dan storage akan mengikuti periode baru.',
+          `Periode aktif setelah disimpan: ${tahunAjaran} - Semester ${semester}.`
+        ]
+      })
+      if (!confirmedPeriod) return
     }
 
     setSavingPeriod(true)
     try {
       const payload = {
-        tahun_ajaran: tahunAjaran,
-        semester_aktif: semester,
+        ...nextPayload,
+        periode_mulai: previewPeriod.startsAt,
+        periode_selesai: previewPeriod.endsAt,
+        periode_ganjil_mulai: ganjilPreview.startsAt,
+        periode_ganjil_selesai: ganjilPreview.endsAt,
+        periode_genap_mulai: genapPreview.startsAt,
+        periode_genap_selesai: genapPreview.endsAt,
         updated_at: new Date().toISOString()
       }
 
       let query = supabase.from('settings')
       if (settingsId) {
-        query = query.update(payload).eq('id', settingsId)
+        query = query.update(payload).eq('id', settingsId).select('id').single()
       } else {
-        query = query.upsert(payload)
+        query = query.upsert(payload).select('id').single()
       }
 
       const { data, error } = await query
@@ -726,8 +1119,15 @@ export default function APengaturan() {
 
       const savedRow = Array.isArray(data) ? data[0] : data
       if (savedRow?.id && !settingsId) setSettingsId(savedRow.id)
-      setPeriodForm(resolvePeriodForm(payload))
-      pushToast('success', `Periode aktif disimpan: ${tahunAjaran} - ${semester}`)
+      const savedPeriodForm = resolvePeriodForm(payload)
+      setPeriodForm(savedPeriodForm)
+      setPersistedPeriodForm(savedPeriodForm)
+      setDrivePeriodFilter({ tahunAjaran, semester })
+      clearCachedSettingsRow()
+      queryClient.invalidateQueries({ queryKey: SETTINGS_QUERY_KEY })
+      pushToast('success', `Periode aktif disimpan: ${tahunAjaran} - ${semester}`, {
+        title: 'Kalender akademik diperbarui'
+      })
     } catch (error) {
       pushToast('error', error?.message || 'Gagal menyimpan periode aktif')
     } finally {
@@ -813,44 +1213,11 @@ export default function APengaturan() {
         .eq('id', settingsId)
 
       if (error) throw error
+      clearCachedSettingsRow()
+      queryClient.invalidateQueries({ queryKey: SETTINGS_QUERY_KEY })
       pushToast('success', 'Pengaturan registrasi berhasil diperbarui.')
     } catch (err) {
       pushToast('error', 'Gagal menyimpan pengaturan: ' + err.message)
-    }
-  }
-
-  async function handleRfidChange(e) {
-    if (!isAuthorized) return
-
-    const { name, value, type, checked } = e.target
-    const newValue = type === 'checkbox' ? checked : value
-
-    const newRfidSettings = {
-      ...rfidSettings,
-      [name]: newValue
-    }
-
-    setRfidSettings(newRfidSettings)
-
-    try {
-      const targetId = rfidSettingsId || makeRandomId()
-      const payload = {
-        id: targetId,
-        rfid_aktif: newRfidSettings.rfid_aktif,
-        rfid_mulai: newRfidSettings.rfid_mulai || null,
-        rfid_selesai: newRfidSettings.rfid_selesai || null,
-        updated_at: new Date().toISOString()
-      }
-
-      const { error } = await supabase
-        .from('absensi_rfid_settings')
-        .upsert(payload)
-
-      if (error) throw error
-      setRfidSettingsId(targetId)
-      pushToast('success', 'Pengaturan RFID berhasil diperbarui.')
-    } catch (err) {
-      pushToast('error', 'Gagal menyimpan pengaturan RFID: ' + err.message)
     }
   }
 
@@ -884,6 +1251,8 @@ export default function APengaturan() {
         .eq('id', settingsId)
 
       if (error) throw error
+      clearCachedSettingsRow()
+      queryClient.invalidateQueries({ queryKey: SETTINGS_QUERY_KEY })
       if (showToast) pushToast('success', 'Pengaturan berhasil disimpan.')
     } catch (err) {
       if (showToast) pushToast('error', 'Gagal menyimpan: ' + err.message)
@@ -924,6 +1293,8 @@ export default function APengaturan() {
           .eq('id', settingsId)
 
         if (error) throw error
+        clearCachedSettingsRow()
+        queryClient.invalidateQueries({ queryKey: SETTINGS_QUERY_KEY })
       }
 
       // ✅ refresh signed URL untuk preview
@@ -959,13 +1330,24 @@ export default function APengaturan() {
       // ✅ DB simpan PATH saja, bukan signed URL
       setAvatarPath(path)
 
-      const { error: updateError } = await supabase
+      let { error: updateError } = await supabase
         .from('profiles')
         .update({
+          photo_path: path,
           photo_url: path,
           updated_at: new Date().toISOString()
         })
         .eq('id', user.id)
+
+      if (updateError && /photo_path/i.test(updateError.message || '')) {
+        ; ({ error: updateError } = await supabase
+          .from('profiles')
+          .update({
+            photo_url: path,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', user.id))
+      }
 
       // ✅ Simpan PATH ke localStorage (fallback)
       if (typeof window !== 'undefined') {
@@ -977,6 +1359,7 @@ export default function APengaturan() {
       // ✅ refresh signed URL untuk UI
       const signed = await createSignedUrlSafe(SUPABASE_BUCKET, path)
       setAvatarSignedUrl(signed)
+      await refreshProfile?.()
 
       pushToast('success', 'Foto profil admin berhasil diperbarui.')
     } catch (err) {
@@ -1058,10 +1441,13 @@ export default function APengaturan() {
   async function handleConnectGoogleDrive() {
     setDriveConnecting(true)
     try {
-      const returnUrl =
-        typeof window !== 'undefined'
-          ? `${window.location.origin}${window.location.pathname}`
-          : '/admin/pengaturan'
+      const returnUrl = (() => {
+        if (typeof window === 'undefined') return '/admin/pengaturan?menu=drive'
+        const url = new URL(window.location.href)
+        url.searchParams.set('menu', 'drive')
+        url.hash = ''
+        return `${url.origin}${url.pathname}${url.search}`
+      })()
       const { data, error } = await supabase.admin.googleDriveConnectUrl({ return_url: returnUrl })
       if (error) throw error
       if (!data?.authorization_url) throw new Error('URL otorisasi Google Drive tidak tersedia')
@@ -1077,7 +1463,10 @@ export default function APengaturan() {
   async function handleSyncGoogleDrive() {
     setDriveSyncing(true)
     try {
-      const { data, error } = await supabase.admin.syncGoogleDrive()
+      const { data, error } = await supabase.admin.syncGoogleDrive({
+        tahun_ajaran: drivePeriodFilter.tahunAjaran,
+        semester: drivePeriodFilter.semester
+      })
       if (error) throw error
       setDriveStatus(data || DRIVE_STATUS_DEFAULT)
       pushToast('success', 'Status Google Drive sekolah berhasil dicek.')
@@ -1118,7 +1507,7 @@ export default function APengaturan() {
 
   // kalau avatarSignedUrl belum kebentuk tapi path ada, coba generate sekali (tanpa bikin loop)
   useEffect(() => {
-    if (!isAuthorized) return
+    if (!isAuthorized || activeSettingsMenu !== 'admin') return
     if (avatarSignedUrl) return
     if (!fallbackAvatarPath) return
 
@@ -1134,7 +1523,7 @@ export default function APengaturan() {
 
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthorized, fallbackAvatarPath, avatarSignedUrl])
+  }, [activeSettingsMenu, isAuthorized, fallbackAvatarPath, avatarSignedUrl])
 
   const finalAvatarUrl = avatarSignedUrl || ''
   const displayName = profile?.nama || user?.email || 'Admin'
@@ -1147,13 +1536,39 @@ export default function APengaturan() {
   const emailVerified = Boolean(user?.email_confirmed_at || user?.emailVerified || providerState.emailVerified)
   const activeAcademicPeriod = resolveAcademicPeriod({
     tahun_ajaran: periodForm.tahunAjaran,
-    semester_aktif: periodForm.semester
+    semester_aktif: periodForm.semester,
+    periode_mulai: periodForm.periodeMulai,
+    periode_selesai: periodForm.periodeSelesai,
+    periode_ganjil_mulai: periodForm.periodeGanjilMulai,
+    periode_ganjil_selesai: periodForm.periodeGanjilSelesai,
+    periode_genap_mulai: periodForm.periodeGenapMulai,
+    periode_genap_selesai: periodForm.periodeGenapSelesai
   })
-  const academicMonthLabels = activeAcademicPeriod.months.map((month) => month.label)
-  const cohortPreview = [
-    { label: 'VII / X', value: inferCohortYear('X', activeAcademicPeriod.startYear) },
-    { label: 'VIII / XI', value: inferCohortYear('XI', activeAcademicPeriod.startYear) },
-    { label: 'IX / XII', value: inferCohortYear('XII', activeAcademicPeriod.startYear) }
+  const academicMonthLabels = (
+    activeAcademicPeriod.academicYearMonths?.length
+      ? activeAcademicPeriod.academicYearMonths
+      : activeAcademicPeriod.months
+  ).map((month) => month.label)
+  const periodYearOptions = generateAcademicYearOptions({ back: 5, forward: 2 })
+  const semesterPeriodCards = [
+    {
+      key: SEMESTER_GANJIL,
+      title: 'Semester Ganjil',
+      startName: 'periodeGanjilMulai',
+      endName: 'periodeGanjilSelesai',
+      min: `${activeAcademicPeriod.startYear}-07`,
+      max: `${activeAcademicPeriod.startYear}-12`,
+      tone: 'emerald'
+    },
+    {
+      key: SEMESTER_GENAP,
+      title: 'Semester Genap',
+      startName: 'periodeGenapMulai',
+      endName: 'periodeGenapSelesai',
+      min: `${activeAcademicPeriod.startYear + 1}-01`,
+      max: `${activeAcademicPeriod.startYear + 1}-06`,
+      tone: 'sky'
+    }
   ]
   const driveReady = Boolean(driveStatus?.ready)
   const driveProviderConfigured = driveStatus?.provider_configured !== false
@@ -1166,6 +1581,114 @@ export default function APengaturan() {
     : driveStatus?.status === 'needs_attention'
       ? 'bg-amber-100 text-amber-700'
       : 'bg-slate-200 text-slate-700'
+  const driveYearOptions = generateAcademicYearOptions({ back: 5, forward: 2 })
+  const driveClassUsageRows = Array.isArray(driveStatus?.usage_by_class) ? driveStatus.usage_by_class : []
+  const driveSemesterUsageRows = Array.isArray(driveStatus?.usage_by_semester) ? driveStatus.usage_by_semester : []
+  const driveFilteredStorage = driveStatus?.app_storage || DRIVE_STATUS_DEFAULT.app_storage
+  const driveAllStorage = driveStatus?.app_storage_all || driveStatus?.app_storage || DRIVE_STATUS_DEFAULT.app_storage
+  const driveQuotaUsedLabel = driveStatus?.quota?.used_label || formatBytesLabel(driveStatus?.quota?.used_bytes)
+  const driveQuotaLimitLabel = driveStatus?.quota?.limit_label || 'Tidak terbatas'
+  const driveQuotaBarWidth = Number.isFinite(driveQuotaPercent) ? Math.max(0, Math.min(100, driveQuotaPercent)) : 0
+  const driveQuotaBarClass = driveQuotaBarWidth >= 90
+    ? 'bg-red-500'
+    : driveQuotaBarWidth >= 75
+      ? 'bg-amber-500'
+      : 'bg-emerald-500'
+  const driveQuotaToneClass = driveQuotaBarWidth >= 90
+    ? 'border-red-200 bg-red-50 text-red-700'
+    : driveQuotaBarWidth >= 75
+      ? 'border-amber-200 bg-amber-50 text-amber-700'
+      : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+  const driveLastCheckedLabel = formatDateTimeLabel(driveStatus?.last_checked_at)
+  const driveFileQuery = driveFileSearch.trim().toLowerCase()
+  const driveVisibleFiles = driveFileQuery
+    ? driveFiles.filter((file) => [
+      file.drive_file_name,
+      file.module_label,
+      file.bucket,
+      file.kelas,
+      file.angkatan,
+      file.tahun_ajaran,
+      file.semester,
+      file.extension,
+      file.source_path
+    ].some((value) => String(value || '').toLowerCase().includes(driveFileQuery)))
+    : driveFiles
+  const driveFileTotal = Number(driveFilesMeta?.total || driveFiles.length || 0)
+  const driveScopeList = Array.isArray(driveStatus?.required_scopes) ? driveStatus.required_scopes : []
+  const driveChecklist = [
+    {
+      label: 'Provider server',
+      detail: driveProviderConfigured ? 'Credential Google Drive tersedia' : 'Credential belum lengkap',
+      ok: driveProviderConfigured
+    },
+    {
+      label: 'Akun sekolah',
+      detail: driveStatus?.account_email || 'Belum tersambung',
+      ok: Boolean(driveStatus?.configured)
+    },
+    {
+      label: 'Folder root',
+      detail: driveStatus?.folder_name || 'Folder belum dibuat',
+      ok: driveReady
+    },
+    {
+      label: 'Link berbagi',
+      detail: driveStatus?.share_uploaded_files ? 'File otomatis bisa dibuka via link' : 'Berbagi link dimatikan',
+      ok: Boolean(driveStatus?.share_uploaded_files)
+    }
+  ]
+  const settingsMenuItems = [
+    {
+      id: 'identity',
+      label: 'Identitas',
+      description: 'Profil sekolah, logo, visi misi, dan media sosial',
+      icon: School
+    },
+    {
+      id: 'academic',
+      label: 'Akademik',
+      description: 'Tahun ajaran, semester aktif, dan rentang bulan',
+      icon: CalendarDays
+    },
+    {
+      id: 'drive',
+      label: 'Google Drive',
+      description: 'Koneksi, quota, storage kelas, dan inventaris file',
+      icon: Cloud
+    },
+    {
+      id: 'admin',
+      label: 'Akun Admin',
+      description: 'Profil, tautan Google, verifikasi email, dan logout',
+      icon: UserCog
+    },
+    {
+      id: 'registration',
+      label: 'Registrasi',
+      description: 'Buka atau tutup registrasi publik per role',
+      icon: Users
+    }
+  ]
+  const settingsVisibleMenuItems = settingsMenuItems.filter((item) => item.id !== 'academic')
+  const activeSettings = settingsMenuItems.find((item) => item.id === activeSettingsMenu) || settingsMenuItems[0]
+  const showSettingsMainColumn = ['identity', 'drive'].includes(activeSettingsMenu)
+  const showSettingsSidebarColumn = ['identity', 'admin', 'registration'].includes(activeSettingsMenu)
+  const settingsContentClass = activeSettingsMenu === 'identity'
+    ? 'grid grid-cols-1 lg:grid-cols-3 gap-6'
+    : 'space-y-6'
+  const settingsMainColumnClass = activeSettingsMenu === 'identity'
+    ? 'lg:col-span-2 space-y-6'
+    : 'space-y-6'
+  const ActiveSettingsIcon = activeSettings.icon
+  const isAcademicStandalone = activeSettingsMenu === 'academic'
+  const isStandaloneSettingsMenu = isAcademicStandalone
+  const pageTitle = isAcademicStandalone
+    ? 'Pengaturan Akademik'
+    : 'Pengaturan Sistem'
+  const pageDescription = isAcademicStandalone
+    ? 'Kelola tahun ajaran, semester aktif, dan rentang bulan.'
+    : 'Kelola identitas sekolah, Google Drive, akun admin, dan registrasi publik.'
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -1174,31 +1697,92 @@ export default function APengaturan() {
           <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
             <div className="flex items-center space-x-4">
               <div className="p-3 bg-blue-100 rounded-2xl">
-                <svg className="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
+                {isAcademicStandalone ? (
+                  <CalendarDays className="w-8 h-8 text-blue-600" />
+                ) : (
+                  <svg className="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                )}
               </div>
               <div>
-                <h1 className="page-title-heading">Pengaturan Sistem</h1>
+                <h1 className="page-title-heading">{pageTitle}</h1>
                 <p className="page-title-description">
-                  Kelola identitas sekolah, pengaturan registrasi, dan absensi RFID
+                  {pageDescription}
                 </p>
               </div>
             </div>
           </div>
         </div>
 
+        {!isStandaloneSettingsMenu && (
+        <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {settingsVisibleMenuItems.map((item) => {
+              const Icon = item.icon
+              const isActive = activeSettingsMenu === item.id
+
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => handleSettingsMenuChange(item.id)}
+                  aria-pressed={isActive}
+                  className={`flex min-w-[190px] items-start gap-3 rounded-xl border px-4 py-3 text-left transition-all ${isActive
+                      ? 'border-blue-200 bg-blue-50 text-blue-700 shadow-sm'
+                      : 'border-transparent bg-white text-slate-600 hover:border-slate-200 hover:bg-slate-50'
+                    }`}
+                >
+                  <span className={`mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${isActive ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'
+                    }`}>
+                    <Icon className="h-4 w-4" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-bold">{item.label}</span>
+                    <span className="mt-0.5 block text-xs leading-4 text-slate-500">{item.description}</span>
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+        )}
+
+        {!isStandaloneSettingsMenu && (
+        <div className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+          <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
+            <ActiveSettingsIcon className="h-5 w-5" />
+          </span>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">Sub Menu Aktif</p>
+            <h2 className="mt-1 text-lg font-bold text-slate-900">{activeSettings.label}</h2>
+            <p className="mt-1 text-sm text-slate-500">{activeSettings.description}</p>
+          </div>
+        </div>
+        )}
+
         <div className="space-y-6">
           {loading && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 backdrop-blur-sm">
-              <div className="bg-white rounded-2xl p-6 flex items-center space-x-3 shadow-2xl">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                <span className="text-gray-700 font-medium">Memuat pengaturan...</span>
+            <div className="rounded-2xl border border-blue-100 bg-white px-5 py-4 shadow-sm">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
+                  <div>
+                    <p className="text-sm font-semibold text-slate-700">Memuat pengaturan terbaru...</p>
+                    <p className="text-xs text-slate-500">Form tetap ditampilkan dengan data cache/default.</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-2 sm:w-56">
+                  <div className="h-2 rounded-full bg-slate-100" />
+                  <div className="h-2 rounded-full bg-slate-100" />
+                  <div className="h-2 rounded-full bg-slate-100" />
+                </div>
               </div>
             </div>
           )}
 
+          {activeSettingsMenu === 'drive' && (
           <div id="google-drive-sekolah" className="rounded-2xl border border-blue-200 bg-white p-6 shadow-lg">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
@@ -1239,8 +1823,76 @@ export default function APengaturan() {
                 Google Drive belum aktif di server. Lengkapi GOOGLE_DRIVE_CLIENT_ID, GOOGLE_DRIVE_CLIENT_SECRET, dan GOOGLE_DRIVE_REDIRECT_URI.
               </div>
             )}
-          </div>
 
+            <div className="mt-5 grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Filter Periode Storage</p>
+                <div className="mt-3 grid gap-2">
+                  <select
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                    value={drivePeriodFilter.tahunAjaran}
+                    onChange={(event) => setDrivePeriodFilter((prev) => ({ ...prev, tahunAjaran: event.target.value }))}
+                  >
+                    {driveYearOptions.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                  <select
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                    value={drivePeriodFilter.semester}
+                    onChange={(event) => setDrivePeriodFilter((prev) => ({ ...prev, semester: event.target.value }))}
+                  >
+                    <option value={SEMESTER_GANJIL}>Ganjil</option>
+                    <option value={SEMESTER_GENAP}>Genap</option>
+                  </select>
+                </div>
+                <div className="mt-4 rounded-lg bg-white p-3 text-sm">
+                  <p className="text-xs font-semibold text-slate-500">Terpakai periode ini</p>
+                  <p className="mt-1 text-lg font-bold text-slate-900">{driveFilteredStorage.uploaded_label || '0 B'}</p>
+                  <p className="text-xs text-slate-500">{Number(driveFilteredStorage.files || 0).toLocaleString('id-ID')} file</p>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+                <div className="border-b border-slate-200 px-4 py-3">
+                  <p className="text-sm font-bold text-slate-900">Detail Storage per Kelas</p>
+                  <p className="text-xs text-slate-500">
+                    {drivePeriodFilter.tahunAjaran} - Semester {drivePeriodFilter.semester}
+                  </p>
+                </div>
+                <div className="max-h-72 overflow-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                      <tr>
+                        <th className="px-4 py-2 text-left">Kelas</th>
+                        <th className="px-4 py-2 text-left">Angkatan</th>
+                        <th className="px-4 py-2 text-right">File</th>
+                        <th className="px-4 py-2 text-right">Terpakai</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {driveClassUsageRows.map((row, index) => (
+                        <tr key={`${row.kelas || 'kelas'}-${row.semester || ''}-${index}`}>
+                          <td className="px-4 py-2 font-semibold text-slate-800">{row.kelas || 'Tanpa kelas'}</td>
+                          <td className="px-4 py-2 text-slate-600">{row.angkatan || '-'}</td>
+                          <td className="px-4 py-2 text-right text-slate-600">{Number(row.files || 0).toLocaleString('id-ID')}</td>
+                          <td className="px-4 py-2 text-right font-semibold text-slate-900">{row.uploaded_label || '0 B'}</td>
+                        </tr>
+                      ))}
+                      {driveClassUsageRows.length === 0 && (
+                        <tr>
+                          <td className="px-4 py-6 text-center text-slate-500" colSpan={4}>Belum ada upload Google Drive pada periode ini.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+          )}
+
+          {activeSettingsMenu === 'academic' && (
           <div className="rounded-2xl border border-emerald-200 bg-white p-6 shadow-lg">
             <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
               <div className="min-w-0">
@@ -1256,47 +1908,126 @@ export default function APengaturan() {
                 </div>
               </div>
 
-              <div className="grid w-full gap-3 sm:grid-cols-[minmax(0,200px)_140px_auto_auto] xl:w-auto">
-                <select
-                  name="tahunAjaran"
-                  value={periodForm.tahunAjaran}
-                  onChange={handlePeriodChange}
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500"
-                >
-                  {generateAcademicYearOptions().map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}{opt.isCurrent ? ' (saat ini)' : ''}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  name="semester"
-                  value={periodForm.semester}
-                  onChange={handlePeriodChange}
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500"
-                >
-                  <option value={SEMESTER_GANJIL}>Ganjil</option>
-                  <option value={SEMESTER_GENAP}>Genap</option>
-                </select>
-                <button
-                  type="button"
-                  onClick={handleUseCurrentPeriod}
-                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                >
-                  Bulan Ini
-                </button>
-                <button
-                  type="button"
-                  onClick={saveAcademicPeriod}
-                  disabled={savingPeriod}
-                  className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {savingPeriod ? 'Menyimpan...' : 'Simpan'}
-                </button>
+              <div className="grid w-full gap-3 sm:grid-cols-3 xl:w-auto">
+                <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3">
+                  <p className="text-xs font-semibold text-emerald-700">Tahun Ajaran</p>
+                  <p className="mt-1 text-sm font-bold text-slate-900">{activeAcademicPeriod.tahunAjaran}</p>
+                </div>
+                <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3">
+                  <p className="text-xs font-semibold text-emerald-700">Semester</p>
+                  <p className="mt-1 text-sm font-bold text-slate-900">{activeAcademicPeriod.semester}</p>
+                </div>
+                <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3">
+                  <p className="text-xs font-semibold text-emerald-700">Bulan</p>
+                  <p className="mt-1 text-sm font-bold text-slate-900">{activeAcademicPeriod.rangeLabel || '-'}</p>
+                </div>
               </div>
             </div>
 
-            <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+            <form onSubmit={(event) => { event.preventDefault(); saveAcademicPeriod() }} className="mt-6 rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-[220px_220px_minmax(0,1fr)]">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Tahun Ajaran</label>
+                  <select
+                    name="tahunAjaran"
+                    value={periodForm.tahunAjaran}
+                    onChange={handlePeriodChange}
+                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                  >
+                    {periodYearOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}{option.isCurrent ? ' (berjalan)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Semester Aktif</label>
+                  <select
+                    name="semester"
+                    value={periodForm.semester}
+                    onChange={handlePeriodChange}
+                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                  >
+                    <option value={SEMESTER_GANJIL}>Ganjil</option>
+                    <option value={SEMESTER_GENAP}>Genap</option>
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  {semesterPeriodCards.map((item) => {
+                    const isActiveSemester = periodForm.semester === item.key
+                    const toneClass = item.tone === 'emerald'
+                      ? 'border-emerald-200 bg-emerald-50/80 text-emerald-800'
+                      : 'border-sky-200 bg-sky-50/80 text-sky-800'
+
+                    return (
+                      <div key={item.key} className={`rounded-xl border p-3 ${isActiveSemester ? toneClass : 'border-slate-200 bg-white text-slate-700'}`}>
+                        <div className="mb-3 flex items-center justify-between gap-2">
+                          <p className="text-sm font-bold">{item.title}</p>
+                          {isActiveSemester && (
+                            <span className="rounded-full bg-white/80 px-2 py-0.5 text-[11px] font-bold">
+                              Aktif
+                            </span>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-500 mb-1">Mulai</label>
+                            <input
+                              type="month"
+                              name={item.startName}
+                              value={toMonthInputValue(periodForm[item.startName])}
+                              min={item.min}
+                              max={item.max}
+                              onChange={handlePeriodChange}
+                              className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm font-semibold text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-500 mb-1">Selesai</label>
+                            <input
+                              type="month"
+                              name={item.endName}
+                              value={toMonthInputValue(periodForm[item.endName])}
+                              min={item.min}
+                              max={item.max}
+                              onChange={handlePeriodChange}
+                              className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm font-semibold text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-xs leading-5 text-slate-600">
+                  Data tugas, eskul, absensi, jadwal, laporan, rekap, dan filter bulan memakai tahun ajaran serta semester aktif ini.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={handleUseCurrentPeriod}
+                    className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                  >
+                    Gunakan Periode Berjalan
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={savingPeriod}
+                    className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {savingPeriod ? 'Menyimpan...' : 'Simpan Periode'}
+                  </button>
+                </div>
+              </div>
+            </form>
+
+            <div className="mt-5">
               <div>
                 <p className="text-sm font-semibold text-gray-700">Bulan Semester</p>
                 <div className="mt-2 flex flex-wrap gap-2">
@@ -1307,26 +2038,19 @@ export default function APengaturan() {
                     >
                       {label}
                     </span>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-gray-700">Angkatan Default</p>
-                <div className="mt-2 grid grid-cols-3 gap-2">
-                  {cohortPreview.map((item) => (
-                    <div key={item.label} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                      <p className="text-[11px] font-semibold text-slate-500">{item.label}</p>
-                      <p className="text-sm font-bold text-slate-900">{item.value}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
             </div>
           </div>
+          )}
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 space-y-6">
+          {(showSettingsMainColumn || showSettingsSidebarColumn) && (
+          <div className={settingsContentClass}>
+            {showSettingsMainColumn && (
+            <div className={settingsMainColumnClass}>
               {/* ====== Identitas Sekolah ====== */}
+              {activeSettingsMenu === 'identity' && (
               <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
                 <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center space-x-2">
                   <span>🏫</span>
@@ -1501,81 +2225,14 @@ export default function APengaturan() {
                   </div>
                 </div>
               </div>
-
-              {/* ====== Pengaturan RFID ====== */}
-              <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
-                <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center space-x-2">
-                  <span>📡</span>
-                  <span>Pengaturan Absensi RFID</span>
-                </h2>
-
-                <div className="space-y-4">
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-                    <div className="text-sm text-blue-700">
-                      <strong>Info:</strong>
-                      <ul className="mt-1 space-y-1">
-                        <li>• Jika fitur RFID aktif, siswa hanya bisa absen menggunakan kartu RFID dalam rentang waktu yang ditentukan</li>
-                        <li>• Jika fitur RFID non-aktif, siswa bisa absen mandiri (sesuai mode sistem)</li>
-                        <li>• Di luar rentang waktu, siswa tidak bisa absen mandiri maupun RFID</li>
-                      </ul>
-                    </div>
-                  </div>
-
-                  <label className="flex items-center space-x-3 p-4 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors duration-200">
-                    <input
-                      type="checkbox"
-                      name="rfid_aktif"
-                      checked={rfidSettings.rfid_aktif}
-                      onChange={handleRfidChange}
-                      className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 transition-all duration-200"
-                    />
-                    <div className="flex-1">
-                      <span className="text-gray-900 font-medium">Aktifkan Fitur RFID Saja</span>
-                      <p className="text-sm text-gray-500 mt-1">
-                        Jika aktif, siswa hanya dapat absen dengan RFID dalam rentang waktu yang ditentukan
-                      </p>
-                    </div>
-                    <div
-                      className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${rfidSettings.rfid_aktif ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                        }`}
-                    >
-                      {rfidSettings.rfid_aktif ? 'AKTIF' : 'NON-AKTIF'}
-                    </div>
-                  </label>
-
-                  {rfidSettings.rfid_aktif && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-gray-50 rounded-lg border border-gray-200 transition-all duration-200">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Mulai Jam</label>
-                        <input
-                          type="time"
-                          name="rfid_mulai"
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
-                          value={normalizeTimeString(rfidSettings.rfid_mulai)}
-                          onChange={handleRfidChange}
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Selesai Jam</label>
-                        <input
-                          type="time"
-                          name="rfid_selesai"
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
-                          value={normalizeTimeString(rfidSettings.rfid_selesai)}
-                          onChange={handleRfidChange}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
+              )}
 
               {/* ====== Google Drive Sekolah ====== */}
+              {activeSettingsMenu === 'drive' && (
               <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
                 <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <h2 className="text-xl font-bold text-gray-900 flex items-center space-x-2">
-                    <span>☁️</span>
+                    <Cloud className="h-6 w-6 text-blue-600" />
                     <span>Google Drive Sekolah</span>
                   </h2>
                   <span className={`inline-flex w-fit rounded-full px-3 py-1 text-xs font-semibold ${driveStatusBadgeClass}`}>
@@ -1585,12 +2242,12 @@ export default function APengaturan() {
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                    <p className="text-xs font-semibold text-slate-500">Storage Saat Ini</p>
+                    <p className="text-xs font-semibold text-slate-500">Storage Periode Dipilih</p>
                     <p className="mt-1 text-xl font-bold text-slate-900">
-                      {driveStatus?.quota?.used_label || formatBytesLabel(driveStatus?.quota?.used_bytes)}
+                      {driveFilteredStorage.uploaded_label || '0 B'}
                     </p>
                     <p className="mt-1 text-xs text-slate-500">
-                      Limit: {driveStatus?.quota?.limit_label || 'Tidak terbatas'}
+                      {drivePeriodFilter.tahunAjaran} - {drivePeriodFilter.semester}
                     </p>
                   </div>
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -1606,16 +2263,242 @@ export default function APengaturan() {
                     <p className="text-xs font-semibold text-slate-500">Pemakaian Quota</p>
                     <p className="mt-1 text-xl font-bold text-slate-900">{driveQuotaPercentLabel}</p>
                     <p className="mt-1 text-xs text-slate-500">
-                      Total EduSmart: {driveStatus?.app_storage?.uploaded_label || '0 B'}
+                      Total EduSmart: {driveStatus?.app_storage_all?.uploaded_label || driveStatus?.app_storage?.uploaded_label || '0 B'}
                     </p>
                   </div>
                 </div>
 
+                <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+                  <div className={`rounded-xl border p-4 ${driveQuotaToneClass}`}>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wide">Kesehatan Quota Drive</p>
+                        <p className="mt-1 text-sm font-semibold text-slate-900">
+                          {driveQuotaUsedLabel} terpakai dari {driveQuotaLimitLabel}
+                        </p>
+                      </div>
+                      <div className="inline-flex items-center gap-2 rounded-full bg-white/80 px-3 py-1 text-xs font-bold">
+                        <HardDrive className="h-3.5 w-3.5" />
+                        {driveQuotaPercentLabel}
+                      </div>
+                    </div>
+                    <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-white/80">
+                      <div
+                        className={`h-full rounded-full ${driveQuotaBarClass}`}
+                        style={{ width: `${driveQuotaBarWidth}%` }}
+                      />
+                    </div>
+                    <div className="mt-3 grid gap-2 text-xs text-slate-600 sm:grid-cols-3">
+                      <span>Total file EduSmart: <strong className="text-slate-900">{Number(driveAllStorage.files || 0).toLocaleString('id-ID')}</strong></span>
+                      <span>Total EduSmart: <strong className="text-slate-900">{driveAllStorage.uploaded_label || '0 B'}</strong></span>
+                      <span>Terakhir dicek: <strong className="text-slate-900">{driveLastCheckedLabel}</strong></span>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Checklist Kesiapan</p>
+                    <div className="mt-3 space-y-2">
+                      {driveChecklist.map((item) => (
+                        <div key={item.label} className="flex items-start gap-2 rounded-lg bg-white p-2">
+                          {item.ok ? (
+                            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                          ) : (
+                            <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+                          )}
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold text-slate-800">{item.label}</p>
+                            <p className="truncate text-xs text-slate-500">{item.detail}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {driveSemesterUsageRows.length > 0 && (
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {driveSemesterUsageRows.map((row, index) => (
+                      <span
+                        key={`${row.tahun_ajaran || 'tahun'}-${row.semester || 'semester'}-${index}`}
+                        className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700"
+                      >
+                        {row.tahun_ajaran || '-'} {row.semester || '-'}: {row.uploaded_label || '0 B'}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
                 <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                      <p className="text-sm font-bold text-slate-900">Kelola Storage Drive</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Pantau pemakaian per kelas, filter periode akademik, dan buka file terbaru yang sudah dipindahkan ke Google Drive.
+                      </p>
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                      <select
+                        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                        value={drivePeriodFilter.tahunAjaran}
+                        onChange={(event) => setDrivePeriodFilter((prev) => ({ ...prev, tahunAjaran: event.target.value }))}
+                      >
+                        {driveYearOptions.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                      <select
+                        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                        value={drivePeriodFilter.semester}
+                        onChange={(event) => setDrivePeriodFilter((prev) => ({ ...prev, semester: event.target.value }))}
+                      >
+                        <option value={SEMESTER_GANJIL}>Ganjil</option>
+                        <option value={SEMESTER_GENAP}>Genap</option>
+                      </select>
+                      <select
+                        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                        value={driveFileBucket}
+                        onChange={(event) => setDriveFileBucket(event.target.value)}
+                      >
+                        {DRIVE_FILE_BUCKET_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                      <label className="relative">
+                        <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                        <input
+                          type="search"
+                          value={driveFileSearch}
+                          onChange={(event) => setDriveFileSearch(event.target.value)}
+                          className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm"
+                          placeholder="Cari file/kelas"
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+                    <div className="overflow-hidden rounded-xl border border-slate-200">
+                      <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
+                        <p className="text-sm font-bold text-slate-900">Pemakaian per Kelas</p>
+                        <p className="text-xs text-slate-500">{drivePeriodFilter.tahunAjaran} - Semester {drivePeriodFilter.semester}</p>
+                      </div>
+                      <div className="max-h-72 overflow-auto">
+                        <table className="min-w-full text-sm">
+                          <thead className="bg-white text-xs uppercase tracking-wide text-slate-500">
+                            <tr>
+                              <th className="px-4 py-2 text-left">Kelas</th>
+                              <th className="px-4 py-2 text-right">File</th>
+                              <th className="px-4 py-2 text-right">Terpakai</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {driveClassUsageRows.map((row, index) => (
+                              <tr key={`${row.kelas || 'kelas'}-${row.semester || ''}-${index}`}>
+                                <td className="px-4 py-2">
+                                  <p className="font-semibold text-slate-800">{row.kelas || 'Tanpa kelas'}</p>
+                                  <p className="text-xs text-slate-500">Angkatan {row.angkatan || '-'}</p>
+                                </td>
+                                <td className="px-4 py-2 text-right text-slate-600">{Number(row.files || 0).toLocaleString('id-ID')}</td>
+                                <td className="px-4 py-2 text-right font-semibold text-slate-900">{row.uploaded_label || '0 B'}</td>
+                              </tr>
+                            ))}
+                            {driveClassUsageRows.length === 0 && (
+                              <tr>
+                                <td className="px-4 py-6 text-center text-slate-500" colSpan={3}>
+                                  Belum ada upload Google Drive pada periode ini.
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    <div className="overflow-hidden rounded-xl border border-slate-200">
+                      <div className="flex flex-col gap-1 border-b border-slate-200 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="text-sm font-bold text-slate-900">Inventaris File Terbaru</p>
+                          <p className="text-xs text-slate-500">
+                            {driveFilesLoading
+                              ? 'Memuat file...'
+                              : `${driveVisibleFiles.length.toLocaleString('id-ID')} tampil dari ${driveFileTotal.toLocaleString('id-ID')} file`}
+                          </p>
+                        </div>
+                        <span className="inline-flex w-fit items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600">
+                          <FileText className="h-3.5 w-3.5" />
+                          Limit {Number(driveFilesMeta?.limit || 50).toLocaleString('id-ID')}
+                        </span>
+                      </div>
+                      <div className="max-h-72 overflow-auto">
+                        <table className="min-w-full text-sm">
+                          <thead className="bg-white text-xs uppercase tracking-wide text-slate-500">
+                            <tr>
+                              <th className="px-4 py-2 text-left">File</th>
+                              <th className="px-4 py-2 text-left">Konteks</th>
+                              <th className="px-4 py-2 text-right">Ukuran</th>
+                              <th className="px-4 py-2 text-right">Aksi</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {driveVisibleFiles.map((file) => (
+                              <tr key={file.id}>
+                                <td className="px-4 py-2">
+                                  <p className="max-w-[240px] truncate font-semibold text-slate-800" title={file.drive_file_name}>
+                                    {file.drive_file_name || 'Tanpa nama'}
+                                  </p>
+                                  <p className="text-xs text-slate-500">
+                                    {file.module_label || 'File'} {file.extension ? `.${file.extension}` : ''}
+                                  </p>
+                                </td>
+                                <td className="px-4 py-2 text-xs text-slate-600">
+                                  <p>{file.tahun_ajaran || '-'} / {file.semester || '-'}</p>
+                                  <p>{file.kelas || 'Tanpa kelas'} - Angkatan {file.angkatan || '-'}</p>
+                                  <p>{formatDateTimeLabel(file.uploaded_at)}</p>
+                                </td>
+                                <td className="px-4 py-2 text-right font-semibold text-slate-900">{file.size_label || '0 B'}</td>
+                                <td className="px-4 py-2 text-right">
+                                  {file.drive_web_view_link ? (
+                                    <a
+                                      href={file.drive_web_view_link}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-100"
+                                    >
+                                      <ExternalLink className="h-3.5 w-3.5" />
+                                      Buka
+                                    </a>
+                                  ) : (
+                                    <span className="text-xs text-slate-400">-</span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                            {!driveFilesLoading && driveVisibleFiles.length === 0 && (
+                              <tr>
+                                <td className="px-4 py-6 text-center text-slate-500" colSpan={4}>
+                                  Belum ada file yang cocok dengan filter ini.
+                                </td>
+                              </tr>
+                            )}
+                            {driveFilesLoading && (
+                              <tr>
+                                <td className="px-4 py-6 text-center text-slate-500" colSpan={4}>
+                                  Memuat inventaris file...
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
+                  <div className="grid grid-cols-1 gap-4 text-sm md:grid-cols-2 xl:grid-cols-4">
                     <div>
                       <p className="text-xs font-semibold text-slate-500">Akun Drive</p>
-                      <p className="mt-1 font-semibold text-slate-900 break-all">
+                      <p className="mt-1 break-all font-semibold text-slate-900">
                         {driveStatus?.account_email || '-'}
                       </p>
                     </div>
@@ -1634,11 +2517,22 @@ export default function APengaturan() {
                         <p className="mt-1 font-semibold text-slate-900">-</p>
                       )}
                     </div>
+                    <div>
+                      <p className="text-xs font-semibold text-slate-500">Terakhir Dicek</p>
+                      <p className="mt-1 font-semibold text-slate-900">{driveLastCheckedLabel}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-slate-500">Mode Upload</p>
+                      <p className="mt-1 font-semibold text-slate-900">
+                        {driveReady ? 'Google Drive aktif' : 'Fallback VPS aktif'}
+                      </p>
+                    </div>
                   </div>
 
                   {driveStatus?.last_error && (
-                    <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                      {driveStatus.last_error}
+                    <div className="mt-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                      <span>{driveStatus.last_error}</span>
                     </div>
                   )}
 
@@ -1653,28 +2547,93 @@ export default function APengaturan() {
                       type="button"
                       onClick={handleConnectGoogleDrive}
                       disabled={!driveProviderConfigured || driveConnecting || driveSyncing}
-                      className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                     >
+                      <Link2 className="h-4 w-4" />
                       {driveConnecting ? 'Menyambungkan...' : driveReady ? 'Sambungkan Ulang' : 'Sambungkan Google Drive'}
                     </button>
                     <button
                       type="button"
                       onClick={handleSyncGoogleDrive}
                       disabled={!driveProviderConfigured || driveSyncing || driveConnecting}
-                      className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                     >
+                      <RefreshCw className={`h-4 w-4 ${driveSyncing ? 'animate-spin' : ''}`} />
                       {driveSyncing ? 'Mengecek...' : 'Cek Kesiapan'}
                     </button>
+                    {driveStatus?.folder_url && (
+                      <a
+                        href={driveStatus.folder_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100"
+                      >
+                        <FolderOpen className="h-4 w-4" />
+                        Buka Folder
+                      </a>
+                    )}
                     {driveStatus?.configured && (
                       <button
                         type="button"
                         onClick={handleDisconnectGoogleDrive}
                         disabled={driveDisconnecting || driveConnecting}
-                        className="rounded-lg border border-red-300 bg-white px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="inline-flex items-center gap-2 rounded-lg border border-red-300 bg-white px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
                       >
+                        <Unplug className="h-4 w-4" />
                         {driveDisconnecting ? 'Memutuskan...' : 'Putuskan'}
                       </button>
                     )}
+                  </div>
+
+                  <div className="mt-4 grid gap-4 lg:grid-cols-3">
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
+                        <Database className="h-4 w-4 text-blue-600" />
+                        Routing Upload
+                      </div>
+                      <div className="mt-3 space-y-2 text-xs text-slate-600">
+                        <div className="flex items-start gap-2">
+                          <Cloud className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-600" />
+                          <span>Dokumen tugas dan media quiz dikirim ke Google Drive saat status siap.</span>
+                        </div>
+                        <div className="flex items-start gap-2">
+                          <Server className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-500" />
+                          <span>Jika Drive penuh, putus, atau error, upload kembali ke VPS sesuai batas file lokal.</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
+                        <FolderOpen className="h-4 w-4 text-emerald-600" />
+                        Struktur Folder
+                      </div>
+                      <div className="mt-3 space-y-1 text-xs text-slate-600">
+                        <p>Root: <strong className="text-slate-900">{driveStatus?.folder_name || 'EduSmart Presensi'}</strong></p>
+                        <p>Tugas / Tahun Ajaran / Semester / Angkatan / Kelas / Jawaban Siswa</p>
+                        <p>Quiz / Tahun Ajaran / Semester / Angkatan / Kelas / Mapel</p>
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
+                        <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                        Akses & Audit
+                      </div>
+                      <div className="mt-3 space-y-2 text-xs text-slate-600">
+                        <div className="flex items-start gap-2">
+                          <Share2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                          <span>{driveStatus?.share_uploaded_files ? 'Link file dibuat otomatis agar bisa dibaca dari aplikasi.' : 'Berbagi link file sedang dimatikan di server.'}</span>
+                        </div>
+                        <div className="flex items-start gap-2">
+                          <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-500" />
+                          <span>Metadata file menyimpan modul, periode, kelas, angkatan, ukuran, dan waktu upload.</span>
+                        </div>
+                        {driveScopeList.length > 0 && (
+                          <p>OAuth scope aktif: <strong className="text-slate-900">{driveScopeList.length.toLocaleString('id-ID')}</strong> izin minimum.</p>
+                        )}
+                      </div>
+                    </div>
                   </div>
 
                   <p className="mt-3 text-xs text-slate-500">
@@ -1682,95 +2641,16 @@ export default function APengaturan() {
                   </p>
                 </div>
               </div>
+              )}
 
-              {/* ====== Pengaturan Registrasi ====== */}
-              <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
-                <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center space-x-2">
-                  <span>👥</span>
-                  <span>Pengaturan Registrasi Publik</span>
-                </h2>
-
-                <div className="space-y-4">
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-                    <div className="text-sm text-blue-700">
-                      <strong>Info:</strong> Pengaturan ini akan langsung tersimpan otomatis ketika diubah. Role yang tidak aktif akan disembunyikan di halaman registrasi publik.
-                    </div>
-                  </div>
-
-                  <label className="flex items-center space-x-3 p-4 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors duration-200">
-                    <input
-                      type="checkbox"
-                      name="registrasi_siswa_aktif"
-                      checked={form.registrasi_siswa_aktif}
-                      onChange={handleCheckboxChange}
-                      className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 transition-all duration-200"
-                    />
-                    <div className="flex-1">
-                      <span className="text-gray-900 font-medium">Aktifkan Registrasi Siswa</span>
-                      <p className="text-sm text-gray-500 mt-1">Siswa dapat membuat akun sendiri melalui halaman registrasi publik</p>
-                    </div>
-                    <div
-                      className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${form.registrasi_siswa_aktif ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                        }`}
-                    >
-                      {form.registrasi_siswa_aktif ? 'AKTIF' : 'NON-AKTIF'}
-                    </div>
-                  </label>
-
-                  <label className="flex items-center space-x-3 p-4 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors duration-200">
-                    <input
-                      type="checkbox"
-                      name="registrasi_guru_aktif"
-                      checked={form.registrasi_guru_aktif}
-                      onChange={handleCheckboxChange}
-                      className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 transition-all duration-200"
-                    />
-                    <div className="flex-1">
-                      <span className="text-gray-900 font-medium">Aktifkan Registrasi Guru</span>
-                      <p className="text-sm text-gray-500 mt-1">Guru dapat membuat akun sendiri melalui halaman registrasi publik</p>
-                    </div>
-                    <div
-                      className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${form.registrasi_guru_aktif ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                        }`}
-                    >
-                      {form.registrasi_guru_aktif ? 'AKTIF' : 'NON-AKTIF'}
-                    </div>
-                  </label>
-
-                  <label className="flex items-center space-x-3 p-4 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors duration-200">
-                    <input
-                      type="checkbox"
-                      name="registrasi_admin_aktif"
-                      checked={form.registrasi_admin_aktif}
-                      onChange={handleCheckboxChange}
-                      className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 transition-all duration-200"
-                    />
-                    <div className="flex-1">
-                      <span className="text-gray-900 font-medium">Aktifkan Registrasi Admin</span>
-                      <p className="text-sm text-gray-500 mt-1">Admin dapat membuat akun sendiri melalui halaman registrasi publik</p>
-                    </div>
-                    <div
-                      className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${form.registrasi_admin_aktif ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                        }`}
-                    >
-                      {form.registrasi_admin_aktif ? 'AKTIF' : 'NON-AKTIF'}
-                    </div>
-                  </label>
-
-                  {form.registrasi_admin_aktif && (
-                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 transition-all duration-200">
-                      <p className="text-sm text-yellow-700 font-medium">
-                        ⚠️ PERINGATAN: Membuka pendaftaran admin untuk publik sangat berisiko. Hanya aktifkan jika benar-benar diperlukan dan dalam lingkungan pengembangan.
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
             </div>
+            )}
 
             {/* ====== Sidebar ====== */}
+            {showSettingsSidebarColumn && (
             <div className="space-y-6">
               {/* Profil Admin */}
+              {activeSettingsMenu === 'admin' && (
               <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
                 <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center space-x-2">
                   <span>👨‍💼</span>
@@ -1888,8 +2768,10 @@ export default function APengaturan() {
                   </button>
                 </div>
               </div>
+              )}
 
               {/* Logo Sekolah */}
+              {activeSettingsMenu === 'identity' && (
               <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
                 <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center space-x-2">
                   <span>🏫</span>
@@ -1946,8 +2828,10 @@ export default function APengaturan() {
                 </button>
                 <p className="text-xs text-gray-500 text-center mt-2">Gambar akan dikompresi maksimal 300KB</p>
               </div>
+              )}
 
               {/* Preview Visi & Misi */}
+              {activeSettingsMenu === 'identity' && (
               <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
                 <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center space-x-2">
                   <span>📋</span>
@@ -1978,8 +2862,10 @@ export default function APengaturan() {
                   </div>
                 </div>
               </div>
+              )}
 
               {/* Save */}
+              {activeSettingsMenu === 'identity' && (
               <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
                 <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4 transition-all duration-200">
                   <p className="text-sm text-green-700 text-center">✅ Semua pengaturan tersimpan otomatis & bisa disinkron realtime</p>
@@ -2005,8 +2891,97 @@ export default function APengaturan() {
 
                 <p className="text-xs text-gray-500 text-center mt-2">Tombol backup untuk memastikan data tersimpan.</p>
               </div>
+              )}
+
+              {/* ====== Pengaturan Registrasi ====== */}
+              {activeSettingsMenu === 'registration' && (
+              <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
+                <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center space-x-2">
+                  <span>👥</span>
+                  <span>Pengaturan Registrasi Publik</span>
+                </h2>
+
+                <div className="space-y-4">
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                    <div className="text-sm text-blue-700">
+                      <strong>Info:</strong> Pengaturan ini akan langsung tersimpan otomatis ketika diubah. Role yang tidak aktif akan disembunyikan di halaman registrasi publik.
+                    </div>
+                  </div>
+
+                  <label className="flex items-center space-x-3 p-4 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors duration-200">
+                    <input
+                      type="checkbox"
+                      name="registrasi_siswa_aktif"
+                      checked={form.registrasi_siswa_aktif}
+                      onChange={handleCheckboxChange}
+                      className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 transition-all duration-200"
+                    />
+                    <div className="flex-1">
+                      <span className="text-gray-900 font-medium">Aktifkan Registrasi Siswa</span>
+                      <p className="text-sm text-gray-500 mt-1">Siswa dapat membuat akun sendiri melalui halaman registrasi publik</p>
+                    </div>
+                    <div
+                      className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${form.registrasi_siswa_aktif ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                        }`}
+                    >
+                      {form.registrasi_siswa_aktif ? 'AKTIF' : 'NON-AKTIF'}
+                    </div>
+                  </label>
+
+                  <label className="flex items-center space-x-3 p-4 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors duration-200">
+                    <input
+                      type="checkbox"
+                      name="registrasi_guru_aktif"
+                      checked={form.registrasi_guru_aktif}
+                      onChange={handleCheckboxChange}
+                      className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 transition-all duration-200"
+                    />
+                    <div className="flex-1">
+                      <span className="text-gray-900 font-medium">Aktifkan Registrasi Guru</span>
+                      <p className="text-sm text-gray-500 mt-1">Guru dapat membuat akun sendiri melalui halaman registrasi publik</p>
+                    </div>
+                    <div
+                      className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${form.registrasi_guru_aktif ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                        }`}
+                    >
+                      {form.registrasi_guru_aktif ? 'AKTIF' : 'NON-AKTIF'}
+                    </div>
+                  </label>
+
+                  <label className="flex items-center space-x-3 p-4 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors duration-200">
+                    <input
+                      type="checkbox"
+                      name="registrasi_admin_aktif"
+                      checked={form.registrasi_admin_aktif}
+                      onChange={handleCheckboxChange}
+                      className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 transition-all duration-200"
+                    />
+                    <div className="flex-1">
+                      <span className="text-gray-900 font-medium">Aktifkan Registrasi Admin</span>
+                      <p className="text-sm text-gray-500 mt-1">Admin dapat membuat akun sendiri melalui halaman registrasi publik</p>
+                    </div>
+                    <div
+                      className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${form.registrasi_admin_aktif ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                        }`}
+                    >
+                      {form.registrasi_admin_aktif ? 'AKTIF' : 'NON-AKTIF'}
+                    </div>
+                  </label>
+
+                  {form.registrasi_admin_aktif && (
+                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 transition-all duration-200">
+                      <p className="text-sm text-yellow-700 font-medium">
+                        ⚠️ PERINGATAN: Membuka pendaftaran admin untuk publik sangat berisiko. Hanya aktifkan jika benar-benar diperlukan dan dalam lingkungan pengembangan.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+              )}
             </div>
+            )}
           </div>
+          )}
         </div>
       </div>
     </div>

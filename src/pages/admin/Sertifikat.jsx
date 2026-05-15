@@ -8,12 +8,32 @@ import {
 } from '../../lib/supabase'
 import { useUIStore } from '../../store/useUIStore'
 import { useAuthStore } from '../../store/useAuthStore'
+import { resolveAcademicPeriod } from '../../utils/academicPeriod'
 
 // ================== KONFIGURASI BUCKET ==================
 const CERT_BUCKET = APP_CERT_BUCKET
 const CERT_TEMPLATE_BUCKET = APP_CERT_TEMPLATE_BUCKET
 const CERT_BUCKET_FALLBACKS = Array.from(new Set([CERT_BUCKET, 'sertifikat-files']))
 const CERT_TEMPLATE_BUCKET_FALLBACKS = Array.from(new Set([CERT_TEMPLATE_BUCKET, 'sertifikat-templates']))
+const SETTINGS_PERIOD_COLUMNS = 'tahun_ajaran, semester_aktif, periode_mulai, periode_selesai, periode_ganjil_mulai, periode_ganjil_selesai, periode_genap_mulai, periode_genap_selesai'
+
+const loadCurrentAcademicPeriod = async () => {
+  const { data } = await supabase
+    .from('settings')
+    .select(SETTINGS_PERIOD_COLUMNS)
+    .order('id')
+    .limit(1)
+    .maybeSingle()
+
+  return resolveAcademicPeriod(data || {})
+}
+
+const applySemesterPeriodFilters = (query, period) => {
+  let next = query
+  if (period?.tahunAjaran) next = next.eq('tahun_ajaran', period.tahunAjaran)
+  if (period?.semester) next = next.eq('semester', period.semester)
+  return next
+}
 
 // A4 landscape size (points)
 const A4_WIDTH = 842
@@ -21,6 +41,15 @@ const A4_HEIGHT = 595
 
 // Signed URL expiry (seconds)
 const SIGNED_EXPIRES = 60 * 60 * 24 * 7 // 7 hari
+
+const TEMPLATE_UPLOAD_ACCEPT = 'application/pdf,image/png,image/jpeg'
+const TEMPLATE_ALLOWED_EXTENSIONS = ['pdf', 'png', 'jpg', 'jpeg']
+const OUTPUT_FORMATS = [
+  { value: 'pdf', label: 'PDF', extension: 'pdf', contentType: 'application/pdf' },
+  { value: 'png', label: 'PNG', extension: 'png', contentType: 'image/png' },
+  { value: 'jpg', label: 'JPG', extension: 'jpg', contentType: 'image/jpeg' }
+]
+const IMAGE_OUTPUT_SCALE = 2
 
 /* ================== jsPDF Lazy Load ================== */
 let jsPDFInstance = null
@@ -31,25 +60,81 @@ const loadJsPDF = async () => {
   return jsPDFInstance
 }
 
+let pdfJsInstance = null
+const loadPdfJs = async () => {
+  if (pdfJsInstance) return pdfJsInstance
+  const [pdfjs, worker] = await Promise.all([
+    import('pdfjs-dist'),
+    import('pdfjs-dist/build/pdf.worker.mjs?url')
+  ])
+  pdfjs.GlobalWorkerOptions.workerSrc = worker.default
+  pdfJsInstance = pdfjs
+  return pdfJsInstance
+}
+
 /* ================== FONT UTILS ================== */
 const FONT_OPTIONS = [
-  { value: 'Helvetica', label: 'Helvetica / Arial' },
-  { value: 'Times', label: 'Times New Roman' },
-  { value: 'Courier', label: 'Courier New' },
-  { value: 'Georgia', label: 'Georgia' },
-  { value: 'Garamond', label: 'Garamond' },
-  { value: 'Roboto', label: 'Roboto' },
-  { value: 'Poppins', label: 'Poppins' }
+  { value: 'Helvetica', label: 'Helvetica / Arial', css: 'Helvetica, Arial, sans-serif', pdf: 'helvetica' },
+  { value: 'Arial', label: 'Arial', css: 'Arial, Helvetica, sans-serif', pdf: 'helvetica' },
+  { value: 'Verdana', label: 'Verdana', css: 'Verdana, Geneva, sans-serif', pdf: 'helvetica' },
+  { value: 'Tahoma', label: 'Tahoma', css: 'Tahoma, Geneva, sans-serif', pdf: 'helvetica' },
+  { value: 'Trebuchet MS', label: 'Trebuchet MS', css: '"Trebuchet MS", Helvetica, sans-serif', pdf: 'helvetica' },
+  { value: 'Segoe UI', label: 'Segoe UI', css: '"Segoe UI", system-ui, sans-serif', pdf: 'helvetica' },
+  { value: 'Roboto', label: 'Roboto', css: 'Roboto, system-ui, -apple-system, "Segoe UI", sans-serif', pdf: 'helvetica' },
+  { value: 'Poppins', label: 'Poppins', css: '"Poppins", system-ui, -apple-system, "Segoe UI", sans-serif', pdf: 'helvetica' },
+  { value: 'Montserrat', label: 'Montserrat', css: 'Montserrat, system-ui, -apple-system, "Segoe UI", sans-serif', pdf: 'helvetica' },
+  { value: 'Lato', label: 'Lato', css: 'Lato, system-ui, -apple-system, "Segoe UI", sans-serif', pdf: 'helvetica' },
+  { value: 'Open Sans', label: 'Open Sans', css: '"Open Sans", system-ui, -apple-system, "Segoe UI", sans-serif', pdf: 'helvetica' },
+  { value: 'Times', label: 'Times New Roman', css: '"Times New Roman", Times, serif', pdf: 'times' },
+  { value: 'Georgia', label: 'Georgia', css: 'Georgia, "Times New Roman", serif', pdf: 'times' },
+  { value: 'Garamond', label: 'Garamond', css: 'Garamond, "Times New Roman", serif', pdf: 'times' },
+  { value: 'Palatino', label: 'Palatino', css: 'Palatino, "Palatino Linotype", Georgia, serif', pdf: 'times' },
+  { value: 'Cambria', label: 'Cambria', css: 'Cambria, Georgia, serif', pdf: 'times' },
+  { value: 'Merriweather', label: 'Merriweather', css: 'Merriweather, Georgia, "Times New Roman", serif', pdf: 'times' },
+  { value: 'Playfair Display', label: 'Playfair Display', css: '"Playfair Display", Georgia, "Times New Roman", serif', pdf: 'times' },
+  { value: 'Courier', label: 'Courier New', css: '"Courier New", Courier, monospace', pdf: 'courier' },
+  { value: 'Consolas', label: 'Consolas', css: 'Consolas, "Courier New", monospace', pdf: 'courier' },
+  { value: 'Lucida Console', label: 'Lucida Console', css: '"Lucida Console", Monaco, monospace', pdf: 'courier' },
+  { value: 'Impact', label: 'Impact', css: 'Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif', pdf: 'helvetica' },
+  { value: 'Comic Sans MS', label: 'Comic Sans MS', css: '"Comic Sans MS", "Comic Sans", cursive', pdf: 'helvetica' },
+  { value: 'Brush Script MT', label: 'Brush Script MT', css: '"Brush Script MT", "Segoe Script", cursive', pdf: 'times' },
+  { value: 'Dancing Script', label: 'Dancing Script', css: '"Dancing Script", "Brush Script MT", cursive', pdf: 'times' },
+  { value: 'Great Vibes', label: 'Great Vibes', css: '"Great Vibes", "Brush Script MT", cursive', pdf: 'times' }
 ]
 
+const FONT_STYLE_OPTIONS = [
+  { value: 'normal', label: 'Normal' },
+  { value: 'bold', label: 'Bold' },
+  { value: 'italic', label: 'Italic' },
+  { value: 'bolditalic', label: 'Bold Italic' }
+]
+
+const TEXT_DECORATION_OPTIONS = [
+  { value: 'none', label: 'Tanpa Garis' },
+  { value: 'underline', label: 'Underline' },
+  { value: 'overline', label: 'Overline' },
+  { value: 'line-through', label: 'Coret Tengah' }
+]
+
+const getFontOption = (fontFamily) => {
+  const normalized = (fontFamily || '').toLowerCase()
+  return FONT_OPTIONS.find((opt) => opt.value.toLowerCase() === normalized) || null
+}
+
 const getPdfFont = (fontFamily) => {
+  const option = getFontOption(fontFamily)
+  if (option?.pdf) return option.pdf
+
   const f = (fontFamily || '').toLowerCase()
-  if (f.includes('courier')) return 'courier'
-  if (f.includes('times') || f.includes('georgia') || f.includes('garamond')) return 'times'
+  if (f.includes('courier') || f.includes('consolas') || f.includes('mono')) return 'courier'
+  if (f.includes('times') || f.includes('georgia') || f.includes('garamond') || f.includes('serif')) return 'times'
   return 'helvetica'
 }
 
 const getCssFontFamily = (fontFamily) => {
+  const option = getFontOption(fontFamily)
+  if (option?.css) return option.css
+
   const f = (fontFamily || '').toLowerCase()
   if (f.includes('courier')) return '"Courier New", Courier, monospace'
   if (f.includes('garamond')) return 'Garamond, "Times New Roman", serif'
@@ -65,6 +150,66 @@ const isHttpUrl = (v) => typeof v === 'string' && /^https?:\/\//i.test(v)
 const clamp = (n, min, max) => Math.min(Math.max(n, min), max)
 const uniqueNonEmpty = (values = []) =>
   Array.from(new Set(values.map((value) => String(value || '').trim()).filter(Boolean)))
+
+const getOutputFormat = (format) =>
+  OUTPUT_FORMATS.find((item) => item.value === format) || OUTPUT_FORMATS[0]
+
+const getPathLikeValue = (value) => {
+  if (!value) return ''
+  const isFileLike =
+    (typeof File !== 'undefined' && value instanceof File) ||
+    (typeof Blob !== 'undefined' && value instanceof Blob)
+  if (isFileLike) return value.name || ''
+
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+
+  try {
+    const base =
+      typeof window !== 'undefined' && window.location?.origin
+        ? window.location.origin
+        : 'http://localhost'
+    const url = new URL(raw, base)
+    return url.searchParams.get('path') || url.pathname || raw
+  } catch {
+    const pathMatch = raw.match(/[?&]path=([^&]+)/i)
+    return pathMatch?.[1] ? decodeURIComponent(pathMatch[1]) : raw
+  }
+}
+
+const getFileExtension = (value) => {
+  const path = getPathLikeValue(value)
+  const clean = String(path || '').split('?')[0].split('#')[0]
+  const ext = clean.split('.').pop()?.toLowerCase() || ''
+  return clean.includes('.') ? ext : ''
+}
+
+const getTemplateBackgroundType = (value) => {
+  const mime = String(value?.type || '').toLowerCase()
+  if (mime === 'application/pdf') return 'pdf'
+  if (mime.startsWith('image/')) return 'image'
+
+  const ext = getFileExtension(value)
+  if (ext === 'pdf') return 'pdf'
+  if (['png', 'jpg', 'jpeg', 'webp'].includes(ext)) return 'image'
+  return 'unknown'
+}
+
+const validateTemplateFile = (file) => {
+  if (!file) return 'File tidak ditemukan'
+  const ext = getFileExtension(file)
+  if (!TEMPLATE_ALLOWED_EXTENSIONS.includes(ext)) {
+    return 'Format template harus PDF, PNG, JPG, atau JPEG'
+  }
+
+  const mime = String(file.type || '').toLowerCase()
+  const allowedMimes = ['application/pdf', 'image/png', 'image/jpeg']
+  if (mime && !allowedMimes.includes(mime)) {
+    return 'Tipe file template tidak sesuai. Gunakan PDF, PNG, JPG, atau JPEG'
+  }
+
+  return ''
+}
 
 const safeSlug = (s) =>
   (s || '')
@@ -102,7 +247,9 @@ const applyTextTransform = (text, transform) => {
 
 const fetchImageAsDataUrl = async (url) => {
   try {
-    const res = await fetch(url + (url.includes('?') ? '&' : '?') + 't=' + Date.now())
+    const res = await fetch(url + (url.includes('?') ? '&' : '?') + 't=' + Date.now(), {
+      credentials: 'include'
+    })
     if (!res.ok) throw new Error('Gagal fetch background')
     const blob = await res.blob()
     return await new Promise((resolve) => {
@@ -115,6 +262,106 @@ const fetchImageAsDataUrl = async (url) => {
     return null
   }
 }
+
+const readBlobAsDataUrl = (blob) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onloadend = () => resolve(reader.result)
+    reader.onerror = () => reject(new Error('Gagal membaca file'))
+    reader.readAsDataURL(blob)
+  })
+
+const sourceToArrayBuffer = async (source) => {
+  if (typeof Blob !== 'undefined' && source instanceof Blob) return source.arrayBuffer()
+
+  const raw = String(source || '')
+  const fetchOptions =
+    /^https?:\/\//i.test(raw) || raw.startsWith('/')
+      ? { credentials: 'include' }
+      : undefined
+  const res = await fetch(raw, fetchOptions)
+  if (!res.ok) throw new Error('Gagal membaca PDF template')
+  return res.arrayBuffer()
+}
+
+const renderPdfFirstPageToDataUrl = async (source) => {
+  if (typeof document === 'undefined') throw new Error('Browser tidak mendukung preview PDF')
+
+  const pdfjs = await loadPdfJs()
+  const arrayBuffer = await sourceToArrayBuffer(source)
+  const loadingTask = pdfjs.getDocument({ data: new Uint8Array(arrayBuffer) })
+  const pdf = await loadingTask.promise
+
+  try {
+    const page = await pdf.getPage(1)
+    const baseViewport = page.getViewport({ scale: 1 })
+    const renderScale = Math.max(
+      (A4_WIDTH * IMAGE_OUTPUT_SCALE) / baseViewport.width,
+      (A4_HEIGHT * IMAGE_OUTPUT_SCALE) / baseViewport.height
+    )
+    const viewport = page.getViewport({ scale: renderScale })
+
+    const pageCanvas = document.createElement('canvas')
+    const pageCtx = pageCanvas.getContext('2d')
+    if (!pageCtx) throw new Error('Canvas browser tidak tersedia')
+
+    pageCanvas.width = Math.round(viewport.width)
+    pageCanvas.height = Math.round(viewport.height)
+
+    await page.render({ canvasContext: pageCtx, viewport }).promise
+    page.cleanup?.()
+
+    const outCanvas = document.createElement('canvas')
+    const outCtx = outCanvas.getContext('2d')
+    if (!outCtx) throw new Error('Canvas browser tidak tersedia')
+
+    outCanvas.width = A4_WIDTH * IMAGE_OUTPUT_SCALE
+    outCanvas.height = A4_HEIGHT * IMAGE_OUTPUT_SCALE
+    outCtx.fillStyle = '#ffffff'
+    outCtx.fillRect(0, 0, outCanvas.width, outCanvas.height)
+    outCtx.drawImage(pageCanvas, 0, 0, outCanvas.width, outCanvas.height)
+
+    return outCanvas.toDataURL('image/png')
+  } finally {
+    await pdf.destroy?.()
+  }
+}
+
+const resolveTemplateBackgroundDataUrl = async (templateOrFile) => {
+  if (!templateOrFile) return null
+
+  const isFileLike =
+    (typeof File !== 'undefined' && templateOrFile instanceof File) ||
+    (typeof Blob !== 'undefined' && templateOrFile instanceof Blob)
+  if (isFileLike) {
+    const type = getTemplateBackgroundType(templateOrFile)
+    if (type === 'pdf') return renderPdfFirstPageToDataUrl(templateOrFile)
+    return readBlobAsDataUrl(templateOrFile)
+  }
+
+  const type = templateOrFile.__bgType || getTemplateBackgroundType(templateOrFile.background_url || templateOrFile.__bgUrl)
+  const bgUrl = templateOrFile.__bgUrl || templateOrFile.background_url || ''
+  if (!bgUrl) return null
+
+  if (type === 'pdf') return renderPdfFirstPageToDataUrl(bgUrl)
+  return fetchImageAsDataUrl(bgUrl)
+}
+
+const loadImageElement = (src) =>
+  new Promise((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => resolve(image)
+    image.onerror = () => reject(new Error('Gagal memuat gambar preview'))
+    image.src = src
+  })
+
+const canvasToBlob = (canvas, type, quality) =>
+  new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob)
+      else reject(new Error('Gagal membuat file gambar'))
+    }, type, quality)
+  })
 
 const createSignedUrl = async (bucket, pathOrUrl) => {
   if (!pathOrUrl) return ''
@@ -183,6 +430,63 @@ const guessImgExtForJsPDF = (dataUrl, rawName = '') => {
   return 'JPEG'
 }
 
+const getCertificateFieldText = (key, data) => {
+  if (key === 'nama') return data.nama || ''
+  if (key === 'event') return data.event || ''
+  if (key === 'tanggal') return data.dateDisplay || ''
+  if (key === 'nomor') return data.nomor || `NO: ${Math.floor(Math.random() * 10000)}/SERT/${new Date().getFullYear()}`
+  return ''
+}
+
+const drawCertificateTextOnCanvas = ({ ctx, data, template, width, height, scale }) => {
+  const fields = template.fields || defaultFields
+
+  Object.keys(fields).forEach((key) => {
+    const field = fields[key]
+    if (!field?.active) return
+
+    let text = getCertificateFieldText(key, data)
+    if (!text) return
+
+    const fontSize = (field.fontSize || 12) * scale
+    const fontWeight = field.fontStyle?.includes('bold') ? '700' : '400'
+    const fontStyle = field.fontStyle?.includes('italic') ? 'italic' : 'normal'
+    const fontFamily = getCssFontFamily(field.fontFamily)
+    const posX = clamp(field.x ?? width / 2, 0, width) * scale
+    const posY = clamp(field.y ?? height / 2, 0, height) * scale
+
+    text = applyTextTransform(text, field.textTransform)
+
+    ctx.save()
+    ctx.font = `${fontStyle} ${fontWeight} ${fontSize}px ${fontFamily}`
+    ctx.fillStyle = field.color || '#000000'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'alphabetic'
+    ctx.fillText(text, posX, posY)
+
+    const decoration = field.textDecoration || 'none'
+    if (decoration !== 'none') {
+      const metrics = ctx.measureText(text)
+      const halfWidth = metrics.width / 2
+      const yOffset =
+        decoration === 'underline'
+          ? fontSize * 0.16
+          : decoration === 'overline'
+            ? -fontSize * 0.82
+            : -fontSize * 0.32
+
+      ctx.beginPath()
+      ctx.lineWidth = Math.max(1, fontSize * 0.045)
+      ctx.strokeStyle = field.color || '#000000'
+      ctx.moveTo(posX - halfWidth, posY + yOffset)
+      ctx.lineTo(posX + halfWidth, posY + yOffset)
+      ctx.stroke()
+    }
+
+    ctx.restore()
+  })
+}
+
 /* ================== DEFAULT CONFIG ================== */
 // x, y = baseline center
 const defaultFields = {
@@ -196,6 +500,7 @@ const defaultFields = {
     color: '#000000',
     fontFamily: 'Helvetica',
     textTransform: 'uppercase',
+    textDecoration: 'none',
     simulationText: 'BUDI SANTOSO, S.KOM'
   },
   event: {
@@ -208,6 +513,7 @@ const defaultFields = {
     color: '#333333',
     fontFamily: 'Helvetica',
     textTransform: 'none',
+    textDecoration: 'none',
     simulationText: 'Workshop Fullstack Development'
   },
   tanggal: {
@@ -220,6 +526,7 @@ const defaultFields = {
     color: '#555555',
     fontFamily: 'Helvetica',
     textTransform: 'none',
+    textDecoration: 'none',
     simulationText: '29 November 2025'
   },
   nomor: {
@@ -232,9 +539,16 @@ const defaultFields = {
     color: '#000000',
     fontFamily: 'Courier',
     textTransform: 'none',
+    textDecoration: 'none',
     simulationText: 'NO: 123/SERT/XI/2025'
   }
 }
+
+const cloneTemplateFields = (fields = defaultFields) =>
+  Object.keys(fields || {}).reduce((acc, key) => {
+    acc[key] = { ...(fields[key] || {}) }
+    return acc
+  }, {})
 
 const buildFieldsFromLegacyTemplate = (t) => {
   // gunakan legacy posisi + font dasar, tetap konsisten dengan defaultFields
@@ -242,7 +556,7 @@ const buildFieldsFromLegacyTemplate = (t) => {
   const baseFamily = t?.font_family || 'Helvetica'
   const baseSize = Number.isFinite(t?.font_size) ? t.font_size : 24
 
-  const merged = { ...defaultFields }
+  const merged = cloneTemplateFields(defaultFields)
   merged.nama = {
     ...merged.nama,
     x: Number.isFinite(t?.nama_x) ? t.nama_x : merged.nama.x,
@@ -270,16 +584,30 @@ const buildFieldsFromLegacyTemplate = (t) => {
   return merged
 }
 
+const parseTemplateFields = (value) => {
+  if (!value) return null
+  if (typeof value === 'object' && !Array.isArray(value)) return value
+  if (typeof value !== 'string') return null
+
+  try {
+    const parsed = JSON.parse(value)
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed
+  } catch {
+    return null
+  }
+
+  return null
+}
+
 const normalizeTemplate = (t) => {
-  const merged = { ...defaultFields }
+  const merged = cloneTemplateFields(defaultFields)
+  const parsedFields = parseTemplateFields(t?.fields)
 
   const hasFields =
-    t?.fields &&
-    typeof t.fields === 'object' &&
-    !Array.isArray(t.fields) &&
-    Object.keys(t.fields).length > 0
+    parsedFields &&
+    Object.keys(parsedFields).length > 0
 
-  const sourceFields = hasFields ? t.fields : buildFieldsFromLegacyTemplate(t)
+  const sourceFields = hasFields ? parsedFields : buildFieldsFromLegacyTemplate(t)
 
   Object.keys(sourceFields || {}).forEach((k) => {
     merged[k] = { ...merged[k], ...(sourceFields[k] || {}) }
@@ -291,13 +619,65 @@ const normalizeTemplate = (t) => {
   }
 }
 
-const defaultForm = {
+const createDefaultForm = () => ({
   nama: '',
   deskripsi: '',
   backgroundPath: '', // kita simpan ke background_url (isi path, bukan public url)
   backgroundFile: null,
+  backgroundType: 'image',
   previewUrl: '',
-  fields: defaultFields
+  fields: cloneTemplateFields(defaultFields)
+})
+
+const CertificateLayoutPreview = ({
+  backgroundUrl,
+  fields,
+  className = '',
+  emptyLabel = 'Background tidak bisa dimuat',
+  showEmptyIcon = false
+}) => {
+  const activeFields = fields || defaultFields
+
+  return (
+    <div className={`relative aspect-[842/595] overflow-hidden bg-white ${className}`}>
+      {backgroundUrl ? (
+        <svg className="absolute inset-0 h-full w-full" viewBox={`0 0 ${A4_WIDTH} ${A4_HEIGHT}`} preserveAspectRatio="none">
+          <image href={backgroundUrl} x="0" y="0" width={A4_WIDTH} height={A4_HEIGHT} preserveAspectRatio="none" />
+
+          {Object.keys(activeFields).map((key) => {
+            const f = activeFields[key]
+            if (!f?.active) return null
+            const content = applyTextTransform(f.simulationText || 'Sample Text', f.textTransform)
+
+            return (
+              <text
+                key={key}
+                x={f.x}
+                y={f.y}
+                textAnchor="middle"
+                style={{
+                  fontSize: f.fontSize,
+                  fontFamily: getCssFontFamily(f.fontFamily),
+                  fontWeight: f.fontStyle?.includes('bold') ? 'bold' : 'normal',
+                  fontStyle: f.fontStyle?.includes('italic') ? 'italic' : 'normal',
+                  textDecoration: f.textDecoration || 'none',
+                  fill: f.color,
+                  pointerEvents: 'none'
+                }}
+              >
+                {content}
+              </text>
+            )
+          })}
+        </svg>
+      ) : (
+        <div className="flex h-full flex-col items-center justify-center text-center text-gray-400">
+          {showEmptyIcon && <span className="text-4xl mb-2">ðŸ–¼ï¸</span>}
+          <span className="px-3 text-sm font-medium">{emptyLabel}</span>
+        </div>
+      )}
+    </div>
+  )
 }
 
 /* ================== MAIN COMPONENT ================== */
@@ -381,6 +761,9 @@ const GeneratorSection = ({ templateVersion }) => {
   // Input
   const [eventName, setEventName] = useState('')
   const [eventDate, setEventDate] = useState(new Date().toISOString().slice(0, 10))
+  const [outputFormat, setOutputFormat] = useState('pdf')
+  const [previewFile, setPreviewFile] = useState(null)
+  const [selectedTemplatePreviewUrl, setSelectedTemplatePreviewUrl] = useState('')
 
   // Peserta
   const [role, setRole] = useState('siswa')
@@ -420,7 +803,16 @@ const GeneratorSection = ({ templateVersion }) => {
             } catch {
               bgUrl = isHttpUrl(rawBg) ? rawBg : ''
             }
-            return { ...t, __bgUrl: bgUrl }
+            const bgType = getTemplateBackgroundType(rawBg)
+            let previewUrl = bgUrl
+            if (bgType === 'pdf' && bgUrl) {
+              try {
+                previewUrl = await renderPdfFirstPageToDataUrl(bgUrl)
+              } catch {
+                previewUrl = ''
+              }
+            }
+            return { ...t, __bgUrl: bgUrl, __bgType: bgType, __previewUrl: previewUrl }
           })
         )
 
@@ -446,6 +838,37 @@ const GeneratorSection = ({ templateVersion }) => {
     [templateList, selectedTemplateId]
   )
 
+  useEffect(() => {
+    let alive = true
+
+    const loadPreview = async () => {
+      setSelectedTemplatePreviewUrl('')
+      if (!selectedTemplate) return
+
+      try {
+        const rendered = selectedTemplate.__previewUrl || await resolveTemplateBackgroundDataUrl(selectedTemplate)
+        if (alive) setSelectedTemplatePreviewUrl(rendered || selectedTemplate.__bgUrl || '')
+      } catch {
+        if (alive) setSelectedTemplatePreviewUrl(selectedTemplate.__bgType === 'image' ? selectedTemplate.__bgUrl || '' : '')
+      }
+    }
+
+    loadPreview()
+
+    return () => {
+      alive = false
+    }
+  }, [selectedTemplate])
+
+  useEffect(() => () => {
+    if (previewFile?.url) URL.revokeObjectURL(previewFile.url)
+  }, [previewFile?.url])
+
+  const closePreview = () => {
+    if (previewFile?.url) URL.revokeObjectURL(previewFile.url)
+    setPreviewFile(null)
+  }
+
   const loadPeserta = async () => {
     setLoading?.(true)
     setPeserta([])
@@ -455,10 +878,20 @@ const GeneratorSection = ({ templateVersion }) => {
       if (role === 'ekskul') {
         if (!ekskulFilter) throw new Error('Pilih eskul terlebih dahulu')
 
-        const { data: memberRows, error: memberErr } = await supabase
+        const period = await loadCurrentAcademicPeriod()
+        let memberQuery = supabase
           .from('ekskul_anggota')
           .select('user_id')
           .eq('ekskul_id', ekskulFilter)
+        memberQuery = applySemesterPeriodFilters(memberQuery, period)
+
+        let { data: memberRows, error: memberErr } = await memberQuery
+        if (memberErr && /tahun_ajaran|semester/i.test(memberErr.message || '')) {
+          ; ({ data: memberRows, error: memberErr } = await supabase
+            .from('ekskul_anggota')
+            .select('user_id')
+            .eq('ekskul_id', ekskulFilter))
+        }
 
         if (memberErr) throw memberErr
 
@@ -516,12 +949,7 @@ const GeneratorSection = ({ templateVersion }) => {
       const field = fields[key]
       if (!field?.active) return
 
-      let text = ''
-      if (key === 'nama') text = data.nama || ''
-      else if (key === 'event') text = data.event || ''
-      else if (key === 'tanggal') text = data.dateDisplay || ''
-      else if (key === 'nomor') text = data.nomor || `NO: ${Math.floor(Math.random() * 10000)}/SERT/${new Date().getFullYear()}`
-
+      let text = getCertificateFieldText(key, data)
       if (!text) return
 
       const fontSize = field.fontSize || 12
@@ -537,7 +965,68 @@ const GeneratorSection = ({ templateVersion }) => {
       const posY = clamp(field.y ?? height / 2, 0, height)
 
       doc.text(text, posX, posY, { align: 'center' })
+
+      const decoration = field.textDecoration || 'none'
+      if (decoration !== 'none') {
+        const textWidth = doc.getTextWidth(text)
+        const yOffset =
+          decoration === 'underline'
+            ? fontSize * 0.16
+            : decoration === 'overline'
+              ? -fontSize * 0.82
+              : -fontSize * 0.32
+
+        doc.setLineWidth(Math.max(0.5, fontSize * 0.045))
+        doc.line(posX - textWidth / 2, posY + yOffset, posX + textWidth / 2, posY + yOffset)
+      }
     })
+  }
+
+  const generateImageBlob = async ({ data, template, bgDataUrl, format }) => {
+    const meta = getOutputFormat(format)
+    const canvas = document.createElement('canvas')
+    const scale = IMAGE_OUTPUT_SCALE
+    canvas.width = A4_WIDTH * scale
+    canvas.height = A4_HEIGHT * scale
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('Canvas browser tidak tersedia')
+
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+    if (bgDataUrl) {
+      const image = await loadImageElement(bgDataUrl)
+      ctx.drawImage(image, 0, 0, canvas.width, canvas.height)
+    }
+
+    drawCertificateTextOnCanvas({
+      ctx,
+      data,
+      template,
+      width: A4_WIDTH,
+      height: A4_HEIGHT,
+      scale
+    })
+
+    return canvasToBlob(canvas, meta.contentType, format === 'jpg' ? 0.92 : undefined)
+  }
+
+  const generateCertificateBlob = async ({ data, template, bgDataUrl, format }) => {
+    const meta = getOutputFormat(format)
+
+    if (meta.value !== 'pdf') {
+      return generateImageBlob({ data, template, bgDataUrl, format: meta.value })
+    }
+
+    const jsPDF = await loadJsPDF()
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' })
+    const w = doc.internal.pageSize.getWidth()
+    const h = doc.internal.pageSize.getHeight()
+
+    await generatePdf({ doc, data, template, bgDataUrl, width: w, height: h })
+
+    return doc.output('blob')
   }
 
   const handleProcess = async (isPreview = false) => {
@@ -550,10 +1039,8 @@ const GeneratorSection = ({ templateVersion }) => {
     setProgressStatus('')
 
     try {
-      const jsPDF = await loadJsPDF()
-
-      const bgUrl = selectedTemplate.__bgUrl || ''
-      const bgDataUrl = bgUrl ? await fetchImageAsDataUrl(bgUrl) : null
+      const selectedOutput = getOutputFormat(outputFormat)
+      const bgDataUrl = await resolveTemplateBackgroundDataUrl(selectedTemplate)
 
       const dateDisplay = new Date(eventDate).toLocaleDateString('id-ID', {
         day: 'numeric',
@@ -589,23 +1076,31 @@ const GeneratorSection = ({ templateVersion }) => {
         const p = targets[i]
         if (!isPreview) setProgressStatus(`Memproses ${i + 1}/${targets.length}: ${p.nama}`)
 
-        const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' })
-        const w = doc.internal.pageSize.getWidth()
-        const h = doc.internal.pageSize.getHeight()
-
-        await generatePdf({ doc, data: p, template: selectedTemplate, bgDataUrl, width: w, height: h })
+        const blob = await generateCertificateBlob({
+          data: p,
+          template: selectedTemplate,
+          bgDataUrl,
+          format: selectedOutput.value
+        })
 
         if (isPreview) {
-          doc.save(`PREVIEW - ${eventName}.pdf`)
+          if (previewFile?.url) URL.revokeObjectURL(previewFile.url)
+          const previewUrl = URL.createObjectURL(blob)
+          setPreviewFile({
+            url: previewUrl,
+            format: selectedOutput.value,
+            filename: `PREVIEW-${safeSlug(eventName)}.${selectedOutput.extension}`
+          })
           break
         }
 
-        const blob = doc.output('blob')
-        const filePath = `${baseFolder}/${nowIsoCompact()}_${p.id}.pdf`
+        const fileName = `${nowIsoCompact()}_${p.id}.${selectedOutput.extension}`
+        const uploadFile = new File([blob], fileName, { type: selectedOutput.contentType })
+        const filePath = `${baseFolder}/${fileName}`
 
-        const { error: upErr } = await supabase.storage.from(CERT_BUCKET).upload(filePath, blob, {
+        const { error: upErr } = await supabase.storage.from(CERT_BUCKET).upload(filePath, uploadFile, {
           cacheControl: '3600',
-          contentType: 'application/pdf',
+          contentType: selectedOutput.contentType,
           upsert: false
         })
         if (upErr) throw upErr
@@ -632,7 +1127,7 @@ const GeneratorSection = ({ templateVersion }) => {
         toast('success', `${success} sertifikat berhasil dibuat`)
         await loadPeserta()
       } else {
-        toast('success', 'Preview PDF berhasil diunduh')
+        toast('success', `Preview ${selectedOutput.label} siap ditampilkan`)
       }
     } catch (err) {
       console.error(err)
@@ -644,6 +1139,7 @@ const GeneratorSection = ({ templateVersion }) => {
   }
 
   return (
+    <>
     <div className="grid lg:grid-cols-3 gap-8">
       {/* Kiri */}
       <div className="space-y-6">
@@ -689,16 +1185,35 @@ const GeneratorSection = ({ templateVersion }) => {
               </select>
             </div>
 
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Format File untuk Peserta</label>
+              <div className="grid grid-cols-3 gap-2">
+                {OUTPUT_FORMATS.map((format) => (
+                  <button
+                    key={format.value}
+                    type="button"
+                    onClick={() => setOutputFormat(format.value)}
+                    className={`py-2 rounded-lg border text-sm font-semibold transition-colors ${
+                      outputFormat === format.value
+                        ? 'border-blue-600 bg-blue-50 text-blue-700'
+                        : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    {format.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <button
               onClick={() => handleProcess(true)}
-              disabled={!eventName?.trim() || !selectedTemplate}
+              disabled={isProcessing || !eventName?.trim() || !selectedTemplate}
               className="w-full py-2.5 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 transition-colors mt-2 flex items-center justify-center gap-2"
-            >
-              👁️ Lihat Preview PDF
+            >              Preview {getOutputFormat(outputFormat).label}
             </button>
 
             <p className="text-xs text-gray-500 leading-relaxed">
-              File disimpan di storage, lalu <span className="font-semibold">file_url</span> di DB berisi path.
+              Template bisa PDF, PNG, atau JPG. File hasil bisa dipilih PDF, PNG, atau JPG sebelum dibuat untuk peserta.
               Download pakai signed URL.
             </p>
           </div>
@@ -707,17 +1222,14 @@ const GeneratorSection = ({ templateVersion }) => {
         {selectedTemplate && (
           <div className="bg-white p-4 rounded-xl border shadow-sm">
             <p className="text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide text-center">
-              Preview Template (background)
+              Preview Template Hasil Edit
             </p>
-            <div className="relative aspect-[842/595] rounded overflow-hidden border bg-gray-100">
-              {selectedTemplate.__bgUrl ? (
-                <img src={selectedTemplate.__bgUrl} alt="bg" className="w-full h-full object-cover" />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center text-gray-400 text-sm">
-                  Background tidak bisa dimuat (cek path/izin storage).
-                </div>
-              )}
-            </div>
+            <CertificateLayoutPreview
+              backgroundUrl={selectedTemplatePreviewUrl}
+              fields={selectedTemplate.fields}
+              className="rounded border bg-gray-100"
+              emptyLabel="Background tidak bisa dimuat (cek path/izin storage)."
+            />
           </div>
         )}
       </div>
@@ -847,9 +1359,91 @@ const GeneratorSection = ({ templateVersion }) => {
                 Sedang Memproses...
               </span>
             ) : (
-              <>🚀 Buat Sertifikat untuk {selectedIds.length} Peserta Terpilih</>
+              <>🚀 Buat {getOutputFormat(outputFormat).label} untuk {selectedIds.length} Peserta Terpilih</>
             )}
           </button>
+        </div>
+      </div>
+    </div>
+    {previewFile && (
+      <CertificatePreviewModal
+        preview={previewFile}
+        onClose={closePreview}
+      />
+    )}
+    </>
+  )
+}
+
+const CertificatePreviewModal = ({ preview, onClose }) => {
+  if (!preview?.url) return null
+
+  const isPdf = preview.format === 'pdf'
+  const isImage = ['png', 'jpg'].includes(preview.format)
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/85 z-50 flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      onClick={() => onClose?.()}
+    >
+      <div
+        className="w-full max-w-6xl h-[92vh] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-4 py-3 border-b flex items-center justify-between bg-white">
+          <div>
+            <h3 className="font-bold text-gray-900">Preview Sertifikat</h3>
+            <p className="text-xs text-gray-500 mt-0.5">{preview.filename}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => onClose?.()}
+            className="w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold"
+            aria-label="Tutup preview"
+          >
+            x
+          </button>
+        </div>
+
+        <div className="flex-1 bg-slate-900 overflow-hidden flex items-center justify-center">
+          {isPdf && (
+            <iframe
+              src={preview.url}
+              title="Preview Sertifikat PDF"
+              className="w-full h-full border-0 bg-white"
+            />
+          )}
+          {isImage && (
+            <img
+              src={preview.url}
+              alt="Preview Sertifikat"
+              className="max-w-full max-h-full object-contain"
+            />
+          )}
+        </div>
+
+        <div className="p-4 border-t bg-white flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <p className="text-sm text-gray-600">
+            Preview ini memakai format yang sama dengan file yang akan dibuat untuk peserta.
+          </p>
+          <div className="flex gap-2 justify-end">
+            <a
+              href={preview.url}
+              download={preview.filename}
+              className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 font-semibold hover:bg-gray-50"
+            >
+              Download Preview
+            </a>
+            <button
+              type="button"
+              onClick={() => onClose?.()}
+              className="px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700"
+            >
+              Tutup
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -863,7 +1457,7 @@ const TemplateManagerSection = ({ onTemplateChanged }) => {
   const toast = (type, message) => pushToast?.(type, message)
 
   const [templates, setTemplates] = useState([])
-  const [form, setForm] = useState(defaultForm)
+  const [form, setForm] = useState(() => createDefaultForm())
   const [editingId, setEditingId] = useState(null)
   const fileInputRef = useRef(null)
 
@@ -892,13 +1486,24 @@ const TemplateManagerSection = ({ onTemplateChanged }) => {
           } catch {
             bgUrl = isHttpUrl(rawBg) ? rawBg : ''
           }
-          return { ...t, __bgUrl: bgUrl }
+          const bgType = getTemplateBackgroundType(rawBg)
+          let previewUrl = bgUrl
+          if (bgType === 'pdf' && bgUrl) {
+            try {
+              previewUrl = await renderPdfFirstPageToDataUrl(bgUrl)
+            } catch {
+              previewUrl = ''
+            }
+          }
+          return { ...t, __bgUrl: bgUrl, __bgType: bgType, __previewUrl: previewUrl }
         })
       )
 
       setTemplates(resolved)
+      return resolved
     } catch (err) {
       toast('error', err.message || 'Gagal memuat template')
+      return []
     }
   }
 
@@ -920,6 +1525,9 @@ const TemplateManagerSection = ({ onTemplateChanged }) => {
       let finalBgPath = form.backgroundPath || ''
 
       if (form.backgroundFile) {
+        const fileError = validateTemplateFile(form.backgroundFile)
+        if (fileError) throw new Error(fileError)
+
         const ext = (form.backgroundFile.name.split('.').pop() || 'png').toLowerCase()
         const fname = `templates/${editingId || 'NEW'}/${nowIsoCompact()}_${Math.random().toString(16).slice(2)}.${ext}`
 
@@ -939,11 +1547,13 @@ const TemplateManagerSection = ({ onTemplateChanged }) => {
       const fEvent = form.fields?.event || defaultFields.event
       const fTanggal = form.fields?.tanggal || defaultFields.tanggal
 
+      const savedFields = cloneTemplateFields(form.fields)
+
       const payload = {
         nama: form.nama,
         deskripsi: form.deskripsi,
         background_url: finalBgPath, // isi PATH
-        fields: form.fields,
+        fields: savedFields,
         is_active: true,
         // legacy columns
         text_color: fNama.color || '#000000',
@@ -969,11 +1579,23 @@ const TemplateManagerSection = ({ onTemplateChanged }) => {
         toast('success', 'Template baru berhasil disimpan')
       }
 
-      setForm(defaultForm)
-      setEditingId(null)
+      const refreshedTemplates = await loadTemplates()
+      const savedTemplate = refreshedTemplates.find((t) =>
+        editingId
+          ? t.id === editingId
+          : t.background_url === finalBgPath && t.nama === form.nama
+      )
+
+      setForm((prev) => ({
+        ...prev,
+        backgroundPath: finalBgPath,
+        backgroundFile: null,
+        backgroundType: getTemplateBackgroundType(finalBgPath),
+        fields: savedFields
+      }))
+      if (savedTemplate?.id) setEditingId(savedTemplate.id)
       if (fileInputRef.current) fileInputRef.current.value = ''
 
-      await loadTemplates()
       onTemplateChanged?.()
     } catch (err) {
       console.error(err)
@@ -989,10 +1611,20 @@ const TemplateManagerSection = ({ onTemplateChanged }) => {
     const nt = normalizeTemplate(t)
     const rawBg = nt.background_url || ''
     let previewUrl = ''
+    const backgroundType = nt.__bgType || getTemplateBackgroundType(rawBg)
     try {
-      previewUrl = await createSignedUrlWithFallbackBuckets(CERT_TEMPLATE_BUCKET_FALLBACKS, rawBg)
+      const signedUrl = await createSignedUrlWithFallbackBuckets(CERT_TEMPLATE_BUCKET_FALLBACKS, rawBg)
+      previewUrl = backgroundType === 'pdf' ? await renderPdfFirstPageToDataUrl(signedUrl) : signedUrl
     } catch {
-      previewUrl = isHttpUrl(rawBg) ? rawBg : ''
+      if (isHttpUrl(rawBg) && backgroundType === 'pdf') {
+        try {
+          previewUrl = await renderPdfFirstPageToDataUrl(rawBg)
+        } catch {
+          previewUrl = ''
+        }
+      } else {
+        previewUrl = isHttpUrl(rawBg) ? rawBg : ''
+      }
     }
 
     setForm({
@@ -1001,6 +1633,7 @@ const TemplateManagerSection = ({ onTemplateChanged }) => {
       backgroundPath: rawBg,
       previewUrl,
       backgroundFile: null,
+      backgroundType,
       fields: nt.fields
     })
   }
@@ -1026,7 +1659,7 @@ const TemplateManagerSection = ({ onTemplateChanged }) => {
           <h2 className="font-bold text-gray-800">{editingId ? '✏️ Edit Template' : '➕ Template Baru'}</h2>
           <button
             onClick={() => {
-              setForm(defaultForm)
+              setForm(createDefaultForm())
               setEditingId(null)
               if (fileInputRef.current) fileInputRef.current.value = ''
             }}
@@ -1063,21 +1696,37 @@ const TemplateManagerSection = ({ onTemplateChanged }) => {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-gray-500 mb-1">Upload Background (A4 Landscape)</label>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">Upload Background (PDF/PNG/JPG - A4 Landscape)</label>
                 <input
                   ref={fileInputRef}
                   type="file"
                   className="block w-full text-xs text-gray-500 file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-                  accept="image/*"
-                  onChange={(e) => {
+                  accept={TEMPLATE_UPLOAD_ACCEPT}
+                  onChange={async (e) => {
                     const f = e.target.files?.[0]
                     if (!f) return
-                    const local = URL.createObjectURL(f)
-                    setForm((prev) => ({
-                      ...prev,
-                      backgroundFile: f,
-                      previewUrl: local
-                    }))
+                    const fileError = validateTemplateFile(f)
+                    if (fileError) {
+                      toast('error', fileError)
+                      e.target.value = ''
+                      return
+                    }
+
+                    setLoading?.(true)
+                    try {
+                      const previewUrl = await resolveTemplateBackgroundDataUrl(f)
+                      setForm((prev) => ({
+                        ...prev,
+                        backgroundFile: f,
+                        backgroundType: getTemplateBackgroundType(f),
+                        previewUrl
+                      }))
+                    } catch (err) {
+                      toast('error', err.message || 'Gagal membuat preview template')
+                      e.target.value = ''
+                    } finally {
+                      setLoading?.(false)
+                    }
                   }}
                 />
                 {form.backgroundPath && !isHttpUrl(form.backgroundPath) && (
@@ -1167,7 +1816,7 @@ const TemplateManagerSection = ({ onTemplateChanged }) => {
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-3 gap-2">
                           <div>
                             <label className="block text-[10px] text-gray-400 mb-0.5">Style</label>
                             <select
@@ -1175,9 +1824,11 @@ const TemplateManagerSection = ({ onTemplateChanged }) => {
                               value={f.fontStyle}
                               onChange={(e) => updateField(key, 'fontStyle', e.target.value)}
                             >
-                              <option value="normal">Normal</option>
-                              <option value="bold">Bold</option>
-                              <option value="italic">Italic</option>
+                              {FONT_STYLE_OPTIONS.map((opt) => (
+                                <option key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </option>
+                              ))}
                             </select>
                           </div>
                           <div>
@@ -1191,6 +1842,20 @@ const TemplateManagerSection = ({ onTemplateChanged }) => {
                               <option value="uppercase">UPPERCASE</option>
                               <option value="capitalize">Capitalize</option>
                               <option value="lowercase">lowercase</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-[10px] text-gray-400 mb-0.5">Garis</label>
+                            <select
+                              className="w-full text-xs border rounded px-1 py-1"
+                              value={f.textDecoration || 'none'}
+                              onChange={(e) => updateField(key, 'textDecoration', e.target.value)}
+                            >
+                              {TEXT_DECORATION_OPTIONS.map((opt) => (
+                                <option key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </option>
+                              ))}
                             </select>
                           </div>
                         </div>
@@ -1290,40 +1955,13 @@ const TemplateManagerSection = ({ onTemplateChanged }) => {
               transformOrigin: 'center center'
             }}
           >
-            {form.previewUrl ? (
-              <svg width={A4_WIDTH} height={A4_HEIGHT} viewBox={`0 0 ${A4_WIDTH} ${A4_HEIGHT}`}>
-                <image href={form.previewUrl} x="0" y="0" width={A4_WIDTH} height={A4_HEIGHT} preserveAspectRatio="none" />
-
-                {Object.keys(form.fields).map((key) => {
-                  const f = form.fields[key]
-                  if (!f.active) return null
-                  const content = applyTextTransform(f.simulationText || 'Sample Text', f.textTransform)
-                  return (
-                    <text
-                      key={key}
-                      x={f.x}
-                      y={f.y}
-                      textAnchor="middle"
-                      style={{
-                        fontSize: f.fontSize,
-                        fontFamily: getCssFontFamily(f.fontFamily),
-                        fontWeight: f.fontStyle?.includes('bold') ? 'bold' : 'normal',
-                        fontStyle: f.fontStyle?.includes('italic') ? 'italic' : 'normal',
-                        fill: f.color,
-                        pointerEvents: 'none'
-                      }}
-                    >
-                      {content}
-                    </text>
-                  )
-                })}
-              </svg>
-            ) : (
-              <div className="flex flex-col items-center justify-center h-full text-gray-400">
-                <span className="text-4xl mb-2">🖼️</span>
-                <span className="font-medium">Upload background untuk memulai desain template</span>
-              </div>
-            )}
+            <CertificateLayoutPreview
+              backgroundUrl={form.previewUrl}
+              fields={form.fields}
+              className="h-full w-full"
+              emptyLabel="Upload background untuk memulai desain template"
+              showEmptyIcon
+            />
           </div>
         </div>
 
@@ -1344,15 +1982,12 @@ const TemplateManagerSection = ({ onTemplateChanged }) => {
                 className="inline-block w-48 group relative border rounded-lg overflow-hidden hover:shadow-md transition-all bg-white"
               >
                 <div className="h-24 bg-gray-100 relative">
-                  {t.__bgUrl ? (
-                    <img
-                      src={t.__bgUrl}
-                      className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity"
-                      alt={t.nama}
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-gray-400 text-xs">BG tidak bisa dimuat</div>
-                  )}
+                  <CertificateLayoutPreview
+                    backgroundUrl={t.__previewUrl || t.__bgUrl}
+                    fields={t.fields}
+                    className="h-full w-full opacity-90 transition-opacity group-hover:opacity-100"
+                    emptyLabel="BG tidak bisa dimuat"
+                  />
                   <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
                 </div>
 
@@ -1387,20 +2022,18 @@ const TemplateManagerSection = ({ onTemplateChanged }) => {
 /* ================== 3. HISTORY SECTION ================== */
 const HistorySection = () => {
   const [data, setData] = useState([])
+  const [meta, setMeta] = useState({ page: 1, per_page: 50, total: 0, page_count: 1, from: 0, to: 0 })
   const [downloadingId, setDownloadingId] = useState(null)
   const [deletingId, setDeletingId] = useState(null)
   const { pushToast } = useUIStore()
   const toast = (type, message) => pushToast?.(type, message)
 
-  const load = async () => {
-    const { data, error } = await supabase
-      .from('certificates')
-      .select('*')
-      .order('issued_at', { ascending: false })
-      .limit(50)
+  const load = async (page = meta.page || 1) => {
+    const { data, error } = await supabase.admin.certificates({ page, per_page: 50 })
 
     if (error) throw error
-    setData(data || [])
+    setData(data?.rows || [])
+    setMeta(data?.meta || { page, per_page: 50, total: data?.rows?.length || 0, page_count: 1, from: 0, to: data?.rows?.length || 0 })
   }
 
   useEffect(() => {
@@ -1466,9 +2099,9 @@ const HistorySection = () => {
   return (
     <div className="bg-white rounded-xl shadow border overflow-hidden">
       <div className="p-4 border-b bg-gray-50">
-        <h3 className="font-bold text-gray-700">Riwayat 50 Sertifikat Terakhir</h3>
+        <h3 className="font-bold text-gray-700">Riwayat Sertifikat</h3>
         <p className="text-xs text-gray-500 mt-1">
-          Kolom <span className="font-mono">file_url</span> menyimpan path storage atau URL. Download selalu via signed URL.
+          Menampilkan {meta.from || 0}-{meta.to || data.length} dari {meta.total || data.length} sertifikat. Download memakai signed URL cache.
         </p>
       </div>
 
@@ -1533,6 +2166,27 @@ const HistorySection = () => {
           </tbody>
         </table>
       </div>
+      {meta.total > 0 && (
+        <div className="flex items-center justify-between gap-3 border-t bg-gray-50 px-4 py-3 text-sm">
+          <span className="text-gray-500">Halaman {meta.page || 1} / {meta.page_count || 1}</span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => load(Math.max(1, (meta.page || 1) - 1))}
+              disabled={(meta.page || 1) <= 1}
+              className="rounded-lg border bg-white px-3 py-1.5 font-medium text-gray-700 disabled:opacity-50"
+            >
+              Sebelumnya
+            </button>
+            <button
+              onClick={() => load(Math.min(meta.page_count || 1, (meta.page || 1) + 1))}
+              disabled={(meta.page || 1) >= (meta.page_count || 1)}
+              className="rounded-lg border bg-white px-3 py-1.5 font-medium text-gray-700 disabled:opacity-50"
+            >
+              Berikutnya
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

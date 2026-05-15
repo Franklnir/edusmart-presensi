@@ -1,564 +1,865 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  AlertCircle,
+  Briefcase,
+  Building2,
+  CheckCircle2,
+  GraduationCap,
+  Loader2,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Save,
+  Search,
+  Trash2,
+  UserCheck,
+  Users,
+  X
+} from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
+
+const DEFAULT_POS = [
+  'Kepala Sekolah',
+  'Wakil Kepala Sekolah',
+  'Kurikulum',
+  'Kesiswaan',
+  'Sarpras',
+  'Humas',
+  'Bendahara',
+  'Tata Usaha'
+]
 
 const GRADE_OPTS = ['VII', 'VIII', 'IX', 'X', 'XI', 'XII']
 const GRADE_ORDER = Object.fromEntries(GRADE_OPTS.map((g, i) => [g, i]))
-const GRADE_REGEX = /^\s*(VII|VIII|IX|X|XI|XII)\b/i
+const GRADE_REGEX = /^\s*(XII|XI|X|IX|VIII|VII)\b/i
+const FORBIDDEN = /[.#$[\]]/
+
+const normalizeSpaces = (value = '') => String(value || '').replace(/\s+/g, ' ').trim()
 
 const parseGrade = (name = '') => {
-  const match = String(name || '').toUpperCase().match(GRADE_REGEX)
+  const match = normalizeSpaces(name).toUpperCase().match(GRADE_REGEX)
   return match ? match[1] : ''
 }
 
 const stripGradePrefix = (name = '') => {
-  const g = parseGrade(name)
-  const value = String(name || '').trim()
-  if (!g) return value
-  return value.toUpperCase().startsWith(g) ? value.slice(g.length).trim() : value
+  const grade = parseGrade(name)
+  const value = normalizeSpaces(name)
+  if (!grade) return value
+  return normalizeSpaces(value.replace(new RegExp(`^${grade}\\b\\s*`, 'i'), ''))
 }
 
-const confirmDelete = (msg = 'Yakin mau dihapus?') => window.confirm(msg)
+const slug = (value = '') => {
+  const normalized = normalizeSpaces(value)
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64)
 
-export default function StrukturSekolahTab({ guruList, pushToast }) {
-  const DEFAULT_POS = ['Kepala Sekolah', 'Wakil Kepala Sekolah', 'Kurikulum', 'Kesiswaan', 'Sarpras', 'Humas', 'Bendahara', 'Tata Usaha']
+  return normalized || 'posisi'
+}
+
+const makePositionId = (jabatan = '') => {
+  const base = slug(jabatan)
+  const suffix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
+  const maxBaseLength = Math.max(1, 80 - suffix.length - 1)
+  const trimmedBase = base.slice(0, maxBaseLength).replace(/-+$/g, '') || 'posisi'
+  return `${trimmedBase}-${suffix}`
+}
+
+const includesQuery = (query, ...values) => {
+  const q = normalizeSpaces(query).toLowerCase()
+  if (!q) return true
+  return values.some((value) => String(value || '').toLowerCase().includes(q))
+}
+
+const confirmDelete = (message = 'Yakin mau dihapus?') => window.confirm(message)
+
+function StatCard({ icon: Icon, label, value, description, tone = 'slate' }) {
+  const toneClass = {
+    slate: 'border-slate-200 bg-white text-slate-700',
+    blue: 'border-blue-200 bg-blue-50/60 text-blue-700',
+    emerald: 'border-emerald-200 bg-emerald-50/60 text-emerald-700',
+    amber: 'border-amber-200 bg-amber-50/60 text-amber-700'
+  }[tone] || 'border-slate-200 bg-white text-slate-700'
+
+  return (
+    <div className={`rounded-2xl border p-4 shadow-sm ${toneClass}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+          <p className="mt-2 text-2xl font-bold text-slate-900">{value}</p>
+          {description && <p className="mt-1 text-xs text-slate-500">{description}</p>}
+        </div>
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white shadow-sm">
+          <Icon className="h-5 w-5" />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SectionCard({ title, description, icon: Icon, meta, action, children }) {
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex flex-col gap-4 border-b border-slate-100 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
+            <Icon className="h-5 w-5" />
+          </div>
+          <div>
+            <h3 className="text-base font-bold text-slate-900">{title}</h3>
+            {description && <p className="mt-1 text-sm text-slate-500">{description}</p>}
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {meta && (
+            <span className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600">
+              {meta}
+            </span>
+          )}
+          {action}
+        </div>
+      </div>
+      <div className="p-5">{children}</div>
+    </section>
+  )
+}
+
+function FieldLabel({ children, required = false }) {
+  return (
+    <label className="mb-2 block text-sm font-semibold text-slate-700">
+      {children}
+      {required && <span className="text-red-500"> *</span>}
+    </label>
+  )
+}
+
+function TeacherSelect({ value, onChange, options, placeholder = 'Pilih guru', disabled = false }) {
+  return (
+    <select
+      className="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
+      value={value || ''}
+      onChange={(event) => onChange(event.target.value)}
+      disabled={disabled}
+    >
+      <option value="">{placeholder}</option>
+      {options.map((guru) => (
+        <option key={guru.id} value={guru.id}>
+          {guru.label}
+        </option>
+      ))}
+    </select>
+  )
+}
+
+function StatusBadge({ active, activeLabel = 'Terisi', inactiveLabel = 'Belum diisi' }) {
+  return active ? (
+    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+      <CheckCircle2 className="h-3.5 w-3.5" />
+      {activeLabel}
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700">
+      <AlertCircle className="h-3.5 w-3.5" />
+      {inactiveLabel}
+    </span>
+  )
+}
+
+function EmptyState({ icon: Icon, title, description }) {
+  return (
+    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center">
+      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-white text-slate-400 shadow-sm">
+        <Icon className="h-7 w-7" />
+      </div>
+      <p className="mt-4 text-sm font-bold text-slate-700">{title}</p>
+      {description && <p className="mt-1 text-sm text-slate-500">{description}</p>}
+    </div>
+  )
+}
+
+export default function StrukturSekolahTab({
+  guruList,
+  pushToast,
+  showHeader = true
+}) {
   const [struktur, setStruktur] = useState([])
   const [waliKelas, setWaliKelas] = useState([])
   const [posBaru, setPosBaru] = useState('')
   const [posGuru, setPosGuru] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [editMode, setEditMode] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [savingKey, setSavingKey] = useState('')
+  const [positionSearch, setPositionSearch] = useState('')
+  const [waliSearch, setWaliSearch] = useState('')
+  const [gradeFilter, setGradeFilter] = useState('')
+  const [editingPosition, setEditingPosition] = useState({ id: '', guruId: '' })
+  const [editingWali, setEditingWali] = useState({ id: '', guruId: '' })
 
-  const FORBIDDEN = /[.#$[\]]/
-  const slug = (s = '') => s.toString().trim().toLowerCase()
-    .replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-').slice(0, 80)
+  const guruOptions = useMemo(() => {
+    return (guruList || [])
+      .filter((guru) => guru?.id)
+      .map((guru) => {
+        const name = guru.name || guru.nama || guru.email || guru.id
+        return {
+          id: guru.id,
+          name,
+          email: guru.email || '',
+          status: guru.status || '',
+          label: guru.label || `${name}${guru.email ? ` (${guru.email})` : ''}`
+        }
+      })
+      .sort((a, b) => a.name.localeCompare(b.name, 'id'))
+  }, [guruList])
 
-  useEffect(() => {
-    loadStruktur()
-    loadWaliKelas()
-  }, [])
+  const teacherById = useMemo(() => {
+    return new Map(guruOptions.map((guru) => [guru.id, guru]))
+  }, [guruOptions])
 
-  const loadStruktur = async () => {
+  const getTeacherName = useCallback((guruId = '') => {
+    if (!guruId) return ''
+    return teacherById.get(guruId)?.name || ''
+  }, [teacherById])
+
+  const loadData = useCallback(async ({ silent = false } = {}) => {
     try {
-      setLoading(true)
-      const { data, error } = await supabase
-        .from('struktur_sekolah')
-        .select('*')
-        .order('jabatan')
+      if (silent) {
+        setRefreshing(true)
+      } else {
+        setLoading(true)
+      }
 
-      if (error) throw error
-      setStruktur(data || [])
-    } catch (error) {
-      console.error('Error loading struktur:', error)
-      pushToast('error', 'Gagal memuat struktur sekolah')
-    } finally {
-      setLoading(false)
-    }
-  }
+      const [strukturResult, kelasResult, kelasStrukturResult] = await Promise.all([
+        supabase
+          .from('struktur_sekolah')
+          .select('*')
+          .order('jabatan'),
+        supabase
+          .from('kelas')
+          .select('*')
+          .order('grade')
+          .order('suffix'),
+        supabase
+          .from('kelas_struktur')
+          .select('kelas_id,wali_guru_id,wali_guru_nama,updated_at')
+      ])
 
-  const loadWaliKelas = async () => {
-    try {
-      setLoading(true)
-      
-      // Ambil data kelas dengan struktur
-      const { data: kelasData, error: kelasError } = await supabase
-        .from('kelas')
-        .select('*')
-        .order('grade')
-        .order('suffix')
+      if (strukturResult.error) throw strukturResult.error
+      if (kelasResult.error) throw kelasResult.error
+      if (kelasStrukturResult.error) throw kelasStrukturResult.error
 
-      if (kelasError) throw kelasError
+      const strukturRows = (strukturResult.data || []).map((row) => ({
+        ...row,
+        jabatan: normalizeSpaces(row.jabatan) || row.id
+      }))
 
-      const { data: strukturData, error: strukturError } = await supabase
-        .from('kelas_struktur')
-        .select('*')
+      const strukturByKelasId = new Map(
+        (kelasStrukturResult.data || []).map((row) => [row.kelas_id, row])
+      )
 
-      if (strukturError) throw strukturError
-
-      // Gabungkan data
-      const waliKelasData = kelasData.map(kelas => {
-        const struktur = strukturData?.find(s => s.kelas_id === kelas.id)
+      const waliRows = (kelasResult.data || []).map((kelas) => {
+        const kelasStruktur = strukturByKelasId.get(kelas.id) || {}
         return {
           id: kelas.id,
           nama_kelas: kelas.nama || kelas.id,
-          grade: kelas.grade || parseGrade(kelas.id),
+          grade: kelas.grade || parseGrade(kelas.nama || kelas.id),
           suffix: kelas.suffix || stripGradePrefix(kelas.nama || kelas.id),
-          wali_guru_id: struktur?.wali_guru_id || '',
-          wali_guru_nama: struktur?.wali_guru_nama || ''
+          wali_guru_id: kelasStruktur.wali_guru_id || '',
+          wali_guru_nama: kelasStruktur.wali_guru_nama || '',
+          updated_at: kelasStruktur.updated_at || ''
         }
       })
 
-      // Urutkan berdasarkan grade
-      waliKelasData.sort((a, b) => {
+      waliRows.sort((a, b) => {
         const ag = GRADE_ORDER[a.grade] ?? 999
         const bg = GRADE_ORDER[b.grade] ?? 999
         if (ag !== bg) return ag - bg
         return (a.suffix || '').localeCompare(b.suffix || '', 'id')
       })
 
-      setWaliKelas(waliKelasData)
+      setStruktur(strukturRows)
+      setWaliKelas(waliRows)
     } catch (error) {
-      console.error('Error loading wali kelas:', error)
-      pushToast('error', 'Gagal memuat data wali kelas')
+      console.error('Error loading struktur sekolah:', error)
+      pushToast('error', error?.message || 'Gagal memuat struktur sekolah')
     } finally {
       setLoading(false)
+      setRefreshing(false)
     }
-  }
+  }, [pushToast])
 
-  function formatNamaKelas(kelas) {
+  useEffect(() => {
+    loadData()
+  }, [loadData])
+
+  const formatNamaKelas = useCallback((kelas) => {
     if (kelas.nama_kelas) return kelas.nama_kelas
     return `${kelas.grade || parseGrade(kelas.id)} ${kelas.suffix || ''}`.trim()
-  }
+  }, [])
 
-  async function addPosisi() {
-    const jab = (posBaru || '').trim()
-    if (!jab) {
+  const stats = useMemo(() => {
+    const assignedPositions = struktur.filter((item) => item.guru_id).length
+    const assignedClasses = waliKelas.filter((item) => item.wali_guru_id).length
+
+    return {
+      positions: struktur.length,
+      assignedPositions,
+      classes: waliKelas.length,
+      assignedClasses,
+      teachers: guruOptions.length,
+      missingTotal: (struktur.length - assignedPositions) + (waliKelas.length - assignedClasses)
+    }
+  }, [guruOptions.length, struktur, waliKelas])
+
+  const filteredStruktur = useMemo(() => {
+    return struktur.filter((item) => includesQuery(
+      positionSearch,
+      item.jabatan,
+      item.guru_nama,
+      getTeacherName(item.guru_id)
+    ))
+  }, [getTeacherName, positionSearch, struktur])
+
+  const filteredWaliKelas = useMemo(() => {
+    return waliKelas.filter((item) => {
+      if (gradeFilter && item.grade !== gradeFilter) return false
+      return includesQuery(
+        waliSearch,
+        formatNamaKelas(item),
+        item.grade,
+        item.suffix,
+        item.wali_guru_nama,
+        getTeacherName(item.wali_guru_id)
+      )
+    })
+  }, [formatNamaKelas, getTeacherName, gradeFilter, waliKelas, waliSearch])
+
+  async function addPosisi(event) {
+    event?.preventDefault()
+    const jabatan = normalizeSpaces(posBaru)
+    const normalizedJabatan = jabatan.toLowerCase()
+
+    if (!jabatan) {
       pushToast('error', 'Nama jabatan harus diisi')
       return
     }
-    
-    if (FORBIDDEN.test(jab)) {
-      pushToast('error', 'Nama posisi tidak boleh mengandung . # $ [ ]')
+
+    if (FORBIDDEN.test(jabatan)) {
+      pushToast('error', 'Nama jabatan tidak boleh mengandung . # $ [ ]')
       return
     }
 
-    const id = slug(jab)
+    const duplicate = struktur.some((item) => normalizeSpaces(item.jabatan).toLowerCase() === normalizedJabatan)
+    if (duplicate) {
+      pushToast('error', 'Jabatan tersebut sudah ada di struktur sekolah ini')
+      return
+    }
+
+    const guruNama = posGuru ? getTeacherName(posGuru) : ''
+    const payload = {
+      id: makePositionId(jabatan),
+      jabatan,
+      guru_id: posGuru || null,
+      guru_nama: guruNama,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    }
 
     try {
-      setLoading(true)
-
-      // Cek apakah sudah ada
-      const { data: existing } = await supabase
-        .from('struktur_sekolah')
-        .select('id')
-        .eq('id', id)
-        .single()
-
-      if (existing) {
-        pushToast('error', 'Posisi sudah ada.')
-        return
-      }
-
-      const guruId = posGuru || ''
-      const guruNama = guruId ? (guruList.find(g => g.id === guruId)?.name || '') : ''
-
+      setSavingKey('add-position')
       const { error } = await supabase
         .from('struktur_sekolah')
-        .insert({
-          id,
-          jabatan: jab,
-          guru_id: guruId || null,
-          guru_nama: guruNama,
-          created_at: new Date().toISOString()
-        })
+        .insert(payload)
 
       if (error) throw error
 
-      pushToast('success', `Posisi "${jab}" berhasil ditambahkan`)
+      pushToast('success', `Jabatan "${jabatan}" berhasil ditambahkan`)
       setPosBaru('')
       setPosGuru('')
-      await loadStruktur()
+      await loadData({ silent: true })
     } catch (error) {
       console.error('Error adding posisi:', error)
-      pushToast('error', error.message || 'Gagal menambah posisi')
+      pushToast('error', error?.message || 'Gagal menambah jabatan')
     } finally {
-      setLoading(false)
+      setSavingKey('')
     }
   }
 
-  async function updatePosisi(posisiId, newGuruId) {
-    try {
-      setLoading(true)
-      const guruNama = newGuruId ? (guruList.find(g => g.id === newGuruId)?.name || '') : ''
+  function startEditPosition(item) {
+    setEditingWali({ id: '', guruId: '' })
+    setEditingPosition({ id: item.id, guruId: item.guru_id || '' })
+  }
 
+  async function savePosition(item) {
+    const guruId = editingPosition.guruId || ''
+    const guruNama = guruId ? getTeacherName(guruId) : ''
+
+    try {
+      setSavingKey(`position-${item.id}`)
       const { error } = await supabase
         .from('struktur_sekolah')
         .update({
-          guru_id: newGuruId || null,
+          guru_id: guruId || null,
           guru_nama: guruNama,
           updated_at: new Date().toISOString()
         })
-        .eq('id', posisiId)
+        .eq('id', item.id)
 
       if (error) throw error
 
-      pushToast('success', 'Posisi berhasil diupdate')
-      await loadStruktur()
+      pushToast('success', 'Penanggung jawab jabatan berhasil disimpan')
+      setEditingPosition({ id: '', guruId: '' })
+      await loadData({ silent: true })
     } catch (error) {
       console.error('Error updating posisi:', error)
-      pushToast('error', error.message || 'Gagal mengupdate posisi')
+      pushToast('error', error?.message || 'Gagal menyimpan jabatan')
     } finally {
-      setLoading(false)
+      setSavingKey('')
     }
   }
 
-  async function updateWaliKelas(kelasId, newGuruId) {
-    try {
-      setLoading(true)
-      const guruNama = newGuruId ? (guruList.find(g => g.id === newGuruId)?.name || '') : ''
+  async function deletePosition(item) {
+    if (!confirmDelete(`Hapus jabatan "${item.jabatan}" dari struktur sekolah?`)) return
 
+    try {
+      setSavingKey(`delete-position-${item.id}`)
+      const { error } = await supabase
+        .from('struktur_sekolah')
+        .delete()
+        .eq('id', item.id)
+
+      if (error) throw error
+
+      pushToast('success', 'Jabatan berhasil dihapus')
+      await loadData({ silent: true })
+    } catch (error) {
+      console.error('Error deleting posisi:', error)
+      pushToast('error', error?.message || 'Gagal menghapus jabatan')
+    } finally {
+      setSavingKey('')
+    }
+  }
+
+  function startEditWali(item) {
+    setEditingPosition({ id: '', guruId: '' })
+    setEditingWali({ id: item.id, guruId: item.wali_guru_id || '' })
+  }
+
+  async function saveWaliKelas(item) {
+    const guruId = editingWali.guruId || ''
+    const guruNama = guruId ? getTeacherName(guruId) : ''
+
+    try {
+      setSavingKey(`wali-${item.id}`)
       const { error } = await supabase
         .from('kelas_struktur')
         .upsert({
-          kelas_id: kelasId,
-          wali_guru_id: newGuruId || null,
+          kelas_id: item.id,
+          wali_guru_id: guruId || null,
           wali_guru_nama: guruNama,
           updated_at: new Date().toISOString()
         }, { onConflict: 'kelas_id' })
 
       if (error) throw error
 
-      pushToast('success', 'Wali kelas berhasil diupdate')
-      await loadWaliKelas()
+      pushToast('success', 'Wali kelas berhasil disimpan')
+      setEditingWali({ id: '', guruId: '' })
+      await loadData({ silent: true })
     } catch (error) {
       console.error('Error updating wali kelas:', error)
-      pushToast('error', error.message || 'Gagal mengupdate wali kelas')
+      pushToast('error', error?.message || 'Gagal menyimpan wali kelas')
     } finally {
-      setLoading(false)
+      setSavingKey('')
     }
   }
 
-  async function hapusPosisi(p) {
-    if (!confirmDelete(`Hapus posisi "${p.jabatan}"?`)) return
+  const busy = loading || Boolean(savingKey)
 
-    try {
-      setLoading(true)
-      const { error } = await supabase
-        .from('struktur_sekolah')
-        .delete()
-        .eq('id', p.id)
-
-      if (error) throw error
-
-      pushToast('success', 'Posisi berhasil dihapus')
-      await loadStruktur()
-    } catch (error) {
-      console.error('Error deleting posisi:', error)
-      pushToast('error', error.message || 'Gagal menghapus posisi')
-    } finally {
-      setLoading(false)
-    }
+  if (loading) {
+    return (
+      <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+        <div className="flex items-center justify-center gap-3 text-sm font-semibold text-slate-500">
+          <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+          Memuat struktur sekolah...
+        </div>
+      </div>
+    )
   }
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-200">
-        <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+      {showHeader && (
+        <section className="page-title-card">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-center gap-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-100 text-blue-700">
+                <Building2 className="h-6 w-6" />
+              </div>
+              <div>
+                <h2 className="page-title-heading">Struktur Sekolah</h2>
+                <p className="page-title-description">
+                  Kelola jabatan formal, penanggung jawab, dan wali kelas aktif.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={() => loadData({ silent: true })}
+              disabled={busy || refreshing}
+            >
+              <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+              Muat ulang
+            </button>
+          </div>
+        </section>
+      )}
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <StatCard
+          icon={Briefcase}
+          label="Jabatan"
+          value={stats.positions}
+          description={`${stats.assignedPositions} sudah ada penanggung jawab`}
+          tone="blue"
+        />
+        <StatCard
+          icon={GraduationCap}
+          label="Wali kelas"
+          value={`${stats.assignedClasses}/${stats.classes}`}
+          description="Kelas yang sudah memiliki wali"
+          tone="emerald"
+        />
+        <StatCard
+          icon={Users}
+          label="Guru tersedia"
+          value={stats.teachers}
+          description="Guru yang bisa dipilih"
+          tone="slate"
+        />
+        <StatCard
+          icon={AlertCircle}
+          label="Perlu dilengkapi"
+          value={stats.missingTotal}
+          description="Jabatan atau kelas tanpa penanggung jawab"
+          tone={stats.missingTotal ? 'amber' : 'emerald'}
+        />
+      </div>
+
+      <SectionCard
+        icon={Plus}
+        title="Tambah Jabatan"
+        description="Buat jabatan baru lalu pilih penanggung jawabnya bila sudah tersedia."
+      >
+        <form onSubmit={addPosisi} className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto] lg:items-end">
           <div>
-            <h2 className="text-2xl font-bold text-gray-900 flex items-center space-x-2">
-              <span className="p-2 bg-purple-100 rounded-lg">🏢</span>
-              <span>Struktur Sekolah</span>
-            </h2>
-            <p className="text-gray-600 text-sm mt-1">
-              Kelola jabatan dan penanggung jawab di sekolah
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* Statistik */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-white rounded-xl p-4 shadow border border-purple-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-500">Total Posisi</p>
-              <p className="text-2xl font-bold text-gray-900">{struktur.length}</p>
-            </div>
-            <div className="p-3 bg-purple-100 rounded-lg">
-              <span className="text-xl">👔</span>
-            </div>
-          </div>
-        </div>
-        <div className="bg-white rounded-xl p-4 shadow border border-green-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-500">Total Wali Kelas</p>
-              <p className="text-2xl font-bold text-gray-900">{waliKelas.filter(wk => wk.wali_guru_id).length}</p>
-            </div>
-            <div className="p-3 bg-green-100 rounded-lg">
-              <span className="text-xl">👨‍🏫</span>
-            </div>
-          </div>
-        </div>
-        <div className="bg-white rounded-xl p-4 shadow border border-blue-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-500">Total Kelas</p>
-              <p className="text-2xl font-bold text-gray-900">{waliKelas.length}</p>
-            </div>
-            <div className="p-3 bg-blue-100 rounded-lg">
-              <span className="text-xl">🏫</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Form Tambah Posisi */}
-      <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-200">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center space-x-2">
-          <span className="p-2 bg-blue-100 rounded-lg">➕</span>
-          <span>Tambah Posisi Baru</span>
-        </h3>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="md:col-span-2">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Jabatan <span className="text-red-500">*</span>
-            </label>
+            <FieldLabel required>Nama jabatan</FieldLabel>
             <input
-              className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm text-gray-900"
+              className="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
               list="list-posisi"
-              placeholder="cth: Kepala Sekolah"
+              placeholder="Contoh: Kepala Sekolah"
               value={posBaru}
-              onChange={e => setPosBaru(e.target.value)}
+              onChange={(event) => setPosBaru(event.target.value)}
+              disabled={Boolean(savingKey)}
             />
             <datalist id="list-posisi">
-              {DEFAULT_POS.map(p => (
-                <option key={p} value={p} />
+              {DEFAULT_POS.map((position) => (
+                <option key={position} value={position} />
               ))}
             </datalist>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Penanggung Jawab</label>
-            <select
-              className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm text-gray-900"
+            <FieldLabel>Penanggung jawab</FieldLabel>
+            <TeacherSelect
               value={posGuru}
-              onChange={e => setPosGuru(e.target.value)}
-            >
-              <option value="">Pilih guru</option>
-              {guruList.map(g => (
-                <option key={g.id} value={g.id}>{g.label || g.name}</option>
-              ))}
-            </select>
+              onChange={setPosGuru}
+              options={guruOptions}
+              disabled={Boolean(savingKey)}
+            />
           </div>
-          <div className="flex items-end">
+          <button
+            type="submit"
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={busy || !normalizeSpaces(posBaru)}
+          >
+            {savingKey === 'add-position' ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Plus className="h-4 w-4" />
+            )}
+            Tambah
+          </button>
+        </form>
+      </SectionCard>
+
+      <SectionCard
+        icon={Briefcase}
+        title="Jabatan Sekolah"
+        description="Ubah penanggung jawab setiap jabatan dengan tombol edit lalu simpan."
+        meta={`${filteredStruktur.length} dari ${struktur.length} jabatan`}
+        action={
+          !showHeader && (
             <button
-              className="w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white py-2.5 px-4 rounded-lg hover:from-blue-700 hover:to-blue-800 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 text-sm font-medium shadow-md flex items-center justify-center space-x-2 disabled:opacity-50"
-              onClick={addPosisi}
-              disabled={loading || !posBaru.trim()}
+              type="button"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={() => loadData({ silent: true })}
+              disabled={busy || refreshing}
             >
-              {loading ? (
-                <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                  <span>Menambah...</span>
-                </>
-              ) : (
-                <>
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                  </svg>
-                  <span>Tambah Posisi</span>
-                </>
-              )}
+              <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+              Muat ulang
             </button>
+          )
+        }
+      >
+        <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div className="relative w-full md:max-w-sm">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              className="h-10 w-full rounded-xl border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+              placeholder="Cari jabatan atau guru"
+              value={positionSearch}
+              onChange={(event) => setPositionSearch(event.target.value)}
+            />
           </div>
         </div>
-      </div>
 
-      {/* Struktur Sekolah */}
-      <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-200">
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="text-lg font-semibold text-gray-900 flex items-center space-x-2">
-            <span className="p-2 bg-purple-100 rounded-lg">📊</span>
-            <span>Struktur Sekolah</span>
-          </h3>
-          <span className="text-sm text-gray-500">
-            {struktur.length} posisi
-          </span>
-        </div>
+        {filteredStruktur.length ? (
+          <div className="overflow-hidden rounded-2xl border border-slate-200">
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-slate-200 text-sm">
+                <thead className="bg-slate-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left font-bold text-slate-600">Jabatan</th>
+                    <th className="px-4 py-3 text-left font-bold text-slate-600">Penanggung jawab</th>
+                    <th className="px-4 py-3 text-left font-bold text-slate-600">Status</th>
+                    <th className="px-4 py-3 text-right font-bold text-slate-600">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {filteredStruktur.map((item) => {
+                    const editing = editingPosition.id === item.id
+                    const teacherName = item.guru_nama || getTeacherName(item.guru_id)
+                    const rowSaving = savingKey === `position-${item.id}` || savingKey === `delete-position-${item.id}`
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {struktur.map((p, index) => (
-            <div
-              key={p.id}
-              className="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all duration-300 p-4 hover:border-purple-300"
-            >
-              <div className="flex justify-between items-start">
-                <div className="flex-1">
-                  <div className="flex items-center space-x-2 mb-2">
-                    <div className="w-8 h-8 bg-gradient-to-r from-purple-500 to-purple-600 rounded-full flex items-center justify-center">
-                      <span className="text-xs font-bold text-white">{index + 1}</span>
-                    </div>
-                    <h4 className="font-bold text-gray-900 text-lg">{p.jabatan}</h4>
-                  </div>
-
-                  {editMode === p.id ? (
-                    <div className="space-y-2">
-                      <select
-                        className="block w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
-                        value={p.guru_id || ''}
-                        onChange={e => updatePosisi(p.id, e.target.value)}
-                        onBlur={() => setEditMode(null)}
-                        autoFocus
-                      >
-                        <option value="">Pilih penanggung jawab</option>
-                        {guruList.map(g => (
-                          <option key={g.id} value={g.id}>{g.label || g.name}</option>
-                        ))}
-                      </select>
-                      <p className="text-xs text-gray-500">
-                        Klik di luar untuk menyimpan
-                      </p>
-                    </div>
-                  ) : (
-                    <div
-                      className="cursor-pointer group"
-                      onClick={() => setEditMode(p.id)}
-                    >
-                      <p className="text-gray-700 text-sm">
-                        {p.guru_nama || 'Belum ada penanggung jawab'}
-                      </p>
-                      <p className="text-gray-500 text-xs mt-1 group-hover:text-gray-700 transition-colors">
-                        <span className="inline-flex items-center">
-                          <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                          </svg>
-                          Klik untuk mengubah
-                        </span>
-                      </p>
-                    </div>
-                  )}
-                </div>
-                <button
-                  className="text-red-500 hover:text-red-700 p-2 rounded-lg transition-all duration-200 hover:bg-red-50 ml-2"
-                  onClick={() => hapusPosisi(p)}
-                  disabled={loading}
-                  title="Hapus posisi"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
-                </button>
-              </div>
+                    return (
+                      <tr key={item.id} className="transition hover:bg-slate-50/70">
+                        <td className="px-4 py-4 align-middle">
+                          <div className="font-bold text-slate-900">{item.jabatan}</div>
+                        </td>
+                        <td className="min-w-[260px] px-4 py-4 align-middle">
+                          {editing ? (
+                            <TeacherSelect
+                              value={editingPosition.guruId}
+                              onChange={(guruId) => setEditingPosition({ id: item.id, guruId })}
+                              options={guruOptions}
+                              placeholder="Kosongkan penanggung jawab"
+                              disabled={Boolean(savingKey)}
+                            />
+                          ) : teacherName ? (
+                            <div className="flex items-center gap-2 text-slate-700">
+                              <UserCheck className="h-4 w-4 text-emerald-600" />
+                              <span className="font-medium">{teacherName}</span>
+                            </div>
+                          ) : (
+                            <span className="text-slate-400">Belum ada penanggung jawab</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-4 align-middle">
+                          <StatusBadge active={Boolean(item.guru_id)} />
+                        </td>
+                        <td className="px-4 py-4 align-middle">
+                          <div className="flex justify-end gap-2">
+                            {editing ? (
+                              <>
+                                <button
+                                  type="button"
+                                  className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-3 text-xs font-bold text-white transition hover:bg-blue-700 disabled:opacity-60"
+                                  onClick={() => savePosition(item)}
+                                  disabled={Boolean(savingKey)}
+                                >
+                                  {rowSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                                  Simpan
+                                </button>
+                                <button
+                                  type="button"
+                                  className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+                                  onClick={() => setEditingPosition({ id: '', guruId: '' })}
+                                  disabled={Boolean(savingKey)}
+                                >
+                                  <X className="h-4 w-4" />
+                                  Batal
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  className="inline-flex h-9 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+                                  onClick={() => startEditPosition(item)}
+                                  disabled={busy}
+                                  title="Edit penanggung jawab"
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="inline-flex h-9 items-center justify-center rounded-xl border border-red-200 bg-white px-3 text-red-600 transition hover:bg-red-50 disabled:opacity-60"
+                                  onClick={() => deletePosition(item)}
+                                  disabled={busy}
+                                  title="Hapus jabatan"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
             </div>
-          ))}
-          {!struktur.length && (
-            <div className="col-span-full text-center py-12 text-gray-500">
-              <div className="w-20 h-20 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
-                <svg className="w-10 h-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                </svg>
-              </div>
-              <p className="text-lg font-medium">Belum ada data struktur</p>
-              <p className="text-sm mt-1">Tambahkan posisi baru untuk memulai</p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Wali Kelas */}
-      <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-200">
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="text-lg font-semibold text-gray-900 flex items-center space-x-2">
-            <span className="p-2 bg-green-100 rounded-lg">👨‍🏫</span>
-            <span>Wali Kelas</span>
-          </h3>
-          <span className="text-sm text-gray-500">
-            {waliKelas.filter(wk => wk.wali_guru_id).length} dari {waliKelas.length} kelas
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {waliKelas.map((wk, index) => (
-            <div
-              key={wk.id}
-              className={`bg-white rounded-xl border shadow-sm hover:shadow-md transition-all duration-300 p-4 ${
-                wk.wali_guru_id 
-                  ? 'border-green-200 hover:border-green-300' 
-                  : 'border-gray-200 hover:border-gray-300'
-              }`}
-            >
-              <div className="flex justify-between items-start">
-                <div className="flex-1">
-                  <div className="flex items-center space-x-2 mb-2">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                      wk.wali_guru_id ? 'bg-green-100' : 'bg-gray-100'
-                    }`}>
-                      <span className={`text-xs font-bold ${
-                        wk.wali_guru_id ? 'text-green-600' : 'text-gray-400'
-                      }`}>
-                        {wk.grade?.charAt(0) || '?'}
-                      </span>
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-gray-900 text-lg">{formatNamaKelas(wk)}</h4>
-                      <p className="text-xs text-gray-500">
-                        {wk.grade} • {wk.suffix || '-'}
-                      </p>
-                    </div>
-                  </div>
-
-                  {editMode === `wali_${wk.id}` ? (
-                    <div className="space-y-2">
-                      <select
-                        className="block w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
-                        value={wk.wali_guru_id || ''}
-                        onChange={e => updateWaliKelas(wk.id, e.target.value)}
-                        onBlur={() => setEditMode(null)}
-                        autoFocus
-                      >
-                        <option value="">Pilih wali kelas</option>
-                        {guruList.map(g => (
-                          <option key={g.id} value={g.id}>{g.label || g.name}</option>
-                        ))}
-                      </select>
-                      <p className="text-xs text-gray-500">
-                        Klik di luar untuk menyimpan
-                      </p>
-                    </div>
-                  ) : (
-                    <div
-                      className="cursor-pointer group"
-                      onClick={() => setEditMode(`wali_${wk.id}`)}
-                    >
-                      <p className={`text-sm ${
-                        wk.wali_guru_nama ? 'text-gray-700' : 'text-gray-500 italic'
-                      }`}>
-                        {wk.wali_guru_nama || 'Belum ada wali kelas'}
-                      </p>
-                      <p className="text-gray-500 text-xs mt-1 group-hover:text-gray-700 transition-colors">
-                        <span className="inline-flex items-center">
-                          <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                          </svg>
-                          Klik untuk mengubah
-                        </span>
-                      </p>
-                    </div>
-                  )}
-                </div>
-                
-                {wk.wali_guru_id && (
-                  <div className="ml-2">
-                    <span className="text-xs px-2 py-1 bg-green-100 text-green-800 rounded-full">
-                      ✅
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
-          {!waliKelas.length && (
-            <div className="col-span-full text-center py-12 text-gray-500">
-              <div className="w-20 h-20 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
-                <svg className="w-10 h-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                </svg>
-              </div>
-              <p className="text-lg font-medium">Belum ada data wali kelas</p>
-              <p className="text-sm mt-1">Atur wali kelas di tab Kelas & Jadwal</p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {loading && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl p-6 flex items-center space-x-3 shadow-2xl">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-            <span className="text-gray-700 font-medium">Memproses...</span>
           </div>
+        ) : (
+          <EmptyState
+            icon={Briefcase}
+            title={struktur.length ? 'Tidak ada jabatan yang cocok' : 'Belum ada jabatan'}
+            description={struktur.length ? 'Ubah kata kunci pencarian untuk melihat data lain.' : 'Tambahkan jabatan sekolah dari form di atas.'}
+          />
+        )}
+      </SectionCard>
+
+      <SectionCard
+        icon={GraduationCap}
+        title="Wali Kelas"
+        description="Kelola wali kelas berdasarkan daftar kelas aktif."
+        meta={`${stats.assignedClasses} dari ${stats.classes} kelas terisi`}
+      >
+        <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_220px]">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              className="h-10 w-full rounded-xl border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+              placeholder="Cari kelas atau wali kelas"
+              value={waliSearch}
+              onChange={(event) => setWaliSearch(event.target.value)}
+            />
+          </div>
+          <select
+            className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+            value={gradeFilter}
+            onChange={(event) => setGradeFilter(event.target.value)}
+          >
+            <option value="">Semua tingkatan</option>
+            {GRADE_OPTS.map((grade) => (
+              <option key={grade} value={grade}>
+                Kelas {grade}
+              </option>
+            ))}
+          </select>
         </div>
-      )}
+
+        {filteredWaliKelas.length ? (
+          <div className="overflow-hidden rounded-2xl border border-slate-200">
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-slate-200 text-sm">
+                <thead className="bg-slate-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left font-bold text-slate-600">Kelas</th>
+                    <th className="px-4 py-3 text-left font-bold text-slate-600">Wali kelas</th>
+                    <th className="px-4 py-3 text-left font-bold text-slate-600">Status</th>
+                    <th className="px-4 py-3 text-right font-bold text-slate-600">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {filteredWaliKelas.map((item) => {
+                    const editing = editingWali.id === item.id
+                    const teacherName = item.wali_guru_nama || getTeacherName(item.wali_guru_id)
+                    const rowSaving = savingKey === `wali-${item.id}`
+
+                    return (
+                      <tr key={item.id} className="transition hover:bg-slate-50/70">
+                        <td className="px-4 py-4 align-middle">
+                          <div className="font-bold text-slate-900">{formatNamaKelas(item)}</div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            Tingkat {item.grade || '-'}{item.suffix ? `, rombel ${item.suffix}` : ''}
+                          </div>
+                        </td>
+                        <td className="min-w-[260px] px-4 py-4 align-middle">
+                          {editing ? (
+                            <TeacherSelect
+                              value={editingWali.guruId}
+                              onChange={(guruId) => setEditingWali({ id: item.id, guruId })}
+                              options={guruOptions}
+                              placeholder="Kosongkan wali kelas"
+                              disabled={Boolean(savingKey)}
+                            />
+                          ) : teacherName ? (
+                            <div className="flex items-center gap-2 text-slate-700">
+                              <UserCheck className="h-4 w-4 text-emerald-600" />
+                              <span className="font-medium">{teacherName}</span>
+                            </div>
+                          ) : (
+                            <span className="text-slate-400">Belum ada wali kelas</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-4 align-middle">
+                          <StatusBadge active={Boolean(item.wali_guru_id)} activeLabel="Ada wali" inactiveLabel="Kosong" />
+                        </td>
+                        <td className="px-4 py-4 align-middle">
+                          <div className="flex justify-end gap-2">
+                            {editing ? (
+                              <>
+                                <button
+                                  type="button"
+                                  className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-3 text-xs font-bold text-white transition hover:bg-blue-700 disabled:opacity-60"
+                                  onClick={() => saveWaliKelas(item)}
+                                  disabled={Boolean(savingKey)}
+                                >
+                                  {rowSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                                  Simpan
+                                </button>
+                                <button
+                                  type="button"
+                                  className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+                                  onClick={() => setEditingWali({ id: '', guruId: '' })}
+                                  disabled={Boolean(savingKey)}
+                                >
+                                  <X className="h-4 w-4" />
+                                  Batal
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                type="button"
+                                className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+                                onClick={() => startEditWali(item)}
+                                disabled={busy}
+                              >
+                                <Pencil className="h-4 w-4" />
+                                Edit
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : (
+          <EmptyState
+            icon={GraduationCap}
+            title={waliKelas.length ? 'Tidak ada kelas yang cocok' : 'Belum ada data kelas'}
+            description={waliKelas.length ? 'Ubah filter tingkatan atau kata kunci pencarian.' : 'Tambahkan kelas terlebih dahulu di menu Kelas.'}
+          />
+        )}
+      </SectionCard>
     </div>
   )
 }

@@ -18,6 +18,7 @@ import {
   AlertCircle,
   RefreshCcw,
   Clock,
+  CalendarCheck,
   UserCheck,
   BarChart3
 } from 'lucide-react'
@@ -52,6 +53,39 @@ const getTodayLocal = () => {
 }
 
 const toTimeValue = (value) => String(value || '').slice(0, 5)
+
+const SETTINGS_SCAN_COLUMNS = `
+  id,
+  scan_manual_enabled,
+  scan_always_active,
+  manual_jam_masuk_mulai,
+  manual_jam_masuk_selesai,
+  manual_jam_pulang_mulai,
+  manual_jam_pulang_selesai,
+  auto_alpha_enabled
+`
+
+const LEGACY_SETTINGS_SCAN_COLUMNS = `
+  id,
+  scan_manual_enabled,
+  manual_jam_masuk_mulai,
+  manual_jam_masuk_selesai,
+  manual_jam_pulang_mulai,
+  manual_jam_pulang_selesai,
+  auto_alpha_enabled
+`
+
+const isMissingSettingsColumnError = (error, columnName) => {
+  if (!error) return false
+  const raw = [
+    error.code,
+    error.message,
+    error.details,
+    error.hint
+  ].filter(Boolean).join(' ').toLowerCase()
+
+  return raw.includes(columnName.toLowerCase()) || raw.includes('schema cache')
+}
 
 const scanDateToTimeValue = (value) => {
   if (!value) return ''
@@ -108,6 +142,7 @@ export default function Scan() {
   // --- SETTINGS ---
   const [settingsId, setSettingsId] = useState(null)
   const [manualModeEnabled, setManualModeEnabled] = useState(false)
+  const [scanAlwaysActive, setScanAlwaysActive] = useState(true)
   const [settingsLoading, setSettingsLoading] = useState(false)
   const [autoAlphaEnabled, setAutoAlphaEnabled] = useState(true)
 
@@ -131,6 +166,7 @@ export default function Scan() {
 
   const [scannedStudents, setScannedStudents] = useState([])
   const [scanMode, setScanMode] = useState('masuk')
+  const scanOperationalActive = scanAlwaysActive || manualModeEnabled
 
   // Buffer RFID reader
   const rfidBufferRef = useRef('')
@@ -149,25 +185,62 @@ export default function Scan() {
     kelaslistRef.current = kelaslist
   }, [kelaslist])
 
+  const applyLoadedScanSettings = useCallback((data = {}) => {
+    if (!data) return
+
+    setSettingsId(data.id ?? null)
+    setManualModeEnabled(data.scan_manual_enabled ?? false)
+    setScanAlwaysActive(data.scan_always_active ?? true)
+    setAutoAlphaEnabled(data.auto_alpha_enabled ?? true)
+
+    setSessionSettings((prev) => ({
+      ...prev,
+      jam_masuk_mulai: data.manual_jam_masuk_mulai
+        ? String(data.manual_jam_masuk_mulai).slice(0, 5)
+        : prev.jam_masuk_mulai,
+      jam_masuk_selesai: data.manual_jam_masuk_selesai
+        ? String(data.manual_jam_masuk_selesai).slice(0, 5)
+        : prev.jam_masuk_selesai,
+      jam_pulang_mulai: data.manual_jam_pulang_mulai
+        ? String(data.manual_jam_pulang_mulai).slice(0, 5)
+        : prev.jam_pulang_mulai,
+      jam_pulang_selesai: data.manual_jam_pulang_selesai
+        ? String(data.manual_jam_pulang_selesai).slice(0, 5)
+        : prev.jam_pulang_selesai
+    }))
+  }, [])
+
   /* ========= LOAD SETTINGS ========= */
 
   useEffect(() => {
     const loadSettings = async () => {
       setSettingsLoading(true)
       try {
-        const { data, error } = await supabase
+        const apiSettings = await supabase.admin.scanSettings()
+        if (!apiSettings.error && apiSettings.data) {
+          applyLoadedScanSettings(apiSettings.data)
+          return
+        }
+
+        if (apiSettings.error) {
+          console.warn('Fallback load scan settings via Supabase:', apiSettings.error)
+        }
+
+        let { data, error } = await supabase
           .from('settings')
-          .select(`
-            id,
-            scan_manual_enabled,
-            manual_jam_masuk_mulai,
-            manual_jam_masuk_selesai,
-            manual_jam_pulang_mulai,
-            manual_jam_pulang_selesai
-          `)
+          .select(SETTINGS_SCAN_COLUMNS)
           .order('id', { ascending: true })
           .limit(1)
           .single()
+
+        if (isMissingSettingsColumnError(error, 'scan_always_active')) {
+          ; ({ data, error } = await supabase
+            .from('settings')
+            .select(LEGACY_SETTINGS_SCAN_COLUMNS)
+            .order('id', { ascending: true })
+            .limit(1)
+            .single())
+        }
 
         if (error && error.code !== 'PGRST116') {
           // error lain (network, dll)
@@ -176,38 +249,28 @@ export default function Scan() {
 
         if (data) {
           // sudah ada pengaturan
-          setSettingsId(data.id)
-          setManualModeEnabled(data.scan_manual_enabled ?? false)
-
-          setSessionSettings((prev) => ({
-            ...prev,
-            jam_masuk_mulai: data.manual_jam_masuk_mulai
-              ? data.manual_jam_masuk_mulai.slice(0, 5)
-              : prev.jam_masuk_mulai,
-            jam_masuk_selesai: data.manual_jam_masuk_selesai
-              ? data.manual_jam_masuk_selesai.slice(0, 5)
-              : prev.jam_masuk_selesai,
-            jam_pulang_mulai: data.manual_jam_pulang_mulai
-              ? data.manual_jam_pulang_mulai.slice(0, 5)
-              : prev.jam_pulang_mulai,
-            jam_pulang_selesai: data.manual_jam_pulang_selesai
-              ? data.manual_jam_pulang_selesai.slice(0, 5)
-              : prev.jam_pulang_selesai
-          }))
+          applyLoadedScanSettings(data)
           return
         }
 
         // Tidak ada row (PGRST116) → buat default
-        const { data: inserted, error: insertErr } = await supabase
+        let { data: inserted, error: insertErr } = await supabase
           .from('settings')
-          .insert({ scan_manual_enabled: false })
-          .select('id, scan_manual_enabled')
+          .insert({ scan_manual_enabled: false, scan_always_active: true })
+          .select('id, scan_manual_enabled, scan_always_active')
           .single()
+
+        if (isMissingSettingsColumnError(insertErr, 'scan_always_active')) {
+          ; ({ data: inserted, error: insertErr } = await supabase
+            .from('settings')
+            .insert({ scan_manual_enabled: false })
+            .select('id, scan_manual_enabled')
+            .single())
+        }
 
         if (insertErr) throw insertErr
 
-        setSettingsId(inserted.id)
-        setManualModeEnabled(inserted.scan_manual_enabled ?? false)
+        applyLoadedScanSettings(inserted)
       } catch (err) {
         console.error(err)
         pushToast(
@@ -220,11 +283,14 @@ export default function Scan() {
     }
 
     loadSettings()
-  }, [pushToast])
+  }, [applyLoadedScanSettings, pushToast])
 
   // Auto-switch scan mode based on time
   useEffect(() => {
-    if (!manualModeEnabled) return
+    if (!scanOperationalActive) {
+      setScanMode(null)
+      return
+    }
 
     const updateMode = () => {
       const now = new Date()
@@ -251,41 +317,110 @@ export default function Scan() {
     updateMode()
     const timer = setInterval(updateMode, 60000)
     return () => clearInterval(timer)
-  }, [manualModeEnabled, sessionSettings])
+  }, [scanOperationalActive, sessionSettings])
+
+  useEffect(() => {
+    if (!scanAlwaysActive) return
+
+    const syncToday = () => {
+      const today = getTodayLocal()
+      setSessionSettings((prev) => (
+        prev.tanggal === today ? prev : { ...prev, tanggal: today }
+      ))
+    }
+
+    syncToday()
+    const timer = setInterval(syncToday, 30000)
+    window.addEventListener('focus', syncToday)
+
+    return () => {
+      clearInterval(timer)
+      window.removeEventListener('focus', syncToday)
+    }
+  }, [scanAlwaysActive])
 
   // fungsi update settings
   const updateSettings = useCallback(
     async (payload) => {
       try {
         setSettingsLoading(true)
-        if (settingsId) {
-          const { error } = await supabase
-            .from('settings')
-            .update(payload)
-            .eq('id', settingsId)
 
-          if (error) throw error
-        } else {
+        const apiSave = await supabase.admin.updateScanSettings(payload)
+        if (!apiSave.error) {
+          if (apiSave.data) applyLoadedScanSettings(apiSave.data)
+          return true
+        }
+
+        console.warn('Fallback save scan settings via Supabase:', apiSave.error)
+
+        const applyPayload = async (nextPayload) => {
+          if (settingsId) {
+            const { error } = await supabase
+              .from('settings')
+              .update(nextPayload)
+              .eq('id', settingsId)
+
+            if (error) throw error
+            return null
+          }
+
           const { data, error } = await supabase
             .from('settings')
-            .insert(payload)
+            .insert(nextPayload)
             .select('id')
             .single()
 
           if (error) throw error
-          setSettingsId(data.id)
+          return data
         }
+
+        let savedData = null
+        if (settingsId) {
+          try {
+            await applyPayload(payload)
+          } catch (error) {
+            if (
+              Object.prototype.hasOwnProperty.call(payload, 'scan_always_active') &&
+              isMissingSettingsColumnError(error, 'scan_always_active')
+            ) {
+              const { scan_always_active: _ignored, ...legacyPayload } = payload
+              await applyPayload(legacyPayload)
+            } else {
+              throw error
+            }
+          }
+        } else {
+          try {
+            savedData = await applyPayload(payload)
+          } catch (error) {
+            if (
+              Object.prototype.hasOwnProperty.call(payload, 'scan_always_active') &&
+              isMissingSettingsColumnError(error, 'scan_always_active')
+            ) {
+              const { scan_always_active: _ignored, ...legacyPayload } = payload
+              savedData = await applyPayload(legacyPayload)
+            } else {
+              throw error
+            }
+          }
+          setSettingsId(savedData.id)
+        }
+
+        return true
       } catch (err) {
         console.error(err)
         pushToast(
           'error',
-          'Gagal menyimpan pengaturan scan manual ke server'
+          err?.message
+            ? `Gagal menyimpan pengaturan scan manual: ${err.message}`
+            : 'Gagal menyimpan pengaturan scan manual ke server'
         )
+        return false
       } finally {
         setSettingsLoading(false)
       }
     },
-    [settingsId, pushToast]
+    [applyLoadedScanSettings, settingsId, pushToast]
   )
 
   /* ========= HELPER VALIDASI JAM SCAN ========= */
@@ -339,14 +474,24 @@ export default function Scan() {
   }, [sessionSettings, pushToast])
 
   const toggleManualMode = async () => {
+    if (scanAlwaysActive) {
+      pushToast('info', 'Mode manual dikelola otomatis karena scan harian realtime aktif.')
+      return
+    }
+
     if (!manualModeEnabled) {
       const ok = validateSessionSettings()
       if (!ok) return
     }
 
     const next = !manualModeEnabled
+    const previous = manualModeEnabled
     setManualModeEnabled(next)
-    await updateSettings({ scan_manual_enabled: next })
+    const saved = await updateSettings({ scan_manual_enabled: next })
+    if (!saved) {
+      setManualModeEnabled(previous)
+      return
+    }
 
     if (next) {
       pushToast('success', 'Mode scan manual diaktifkan')
@@ -355,18 +500,69 @@ export default function Scan() {
     }
   }
 
+  const toggleScanAlwaysActive = async () => {
+    const next = !scanAlwaysActive
+
+    if (next) {
+      const ok = validateSessionSettings()
+      if (!ok) return
+
+      const today = getTodayLocal()
+      const previousAlwaysActive = scanAlwaysActive
+      const previousManualMode = manualModeEnabled
+      setSessionSettings((prev) => ({ ...prev, tanggal: today }))
+      setScanAlwaysActive(true)
+      setManualModeEnabled(true)
+      const saved = await updateSettings({
+        scan_always_active: true,
+        scan_manual_enabled: true
+      })
+      if (!saved) {
+        setScanAlwaysActive(previousAlwaysActive)
+        setManualModeEnabled(previousManualMode)
+        return
+      }
+      pushToast('success', 'Scan harian realtime diaktifkan. Tanggal operasional otomatis mengikuti hari ini.')
+    } else {
+      const previousAlwaysActive = scanAlwaysActive
+      const previousManualMode = manualModeEnabled
+      setScanAlwaysActive(false)
+      setManualModeEnabled(false)
+      const saved = await updateSettings({
+        scan_always_active: false,
+        scan_manual_enabled: false
+      })
+      if (!saved) {
+        setScanAlwaysActive(previousAlwaysActive)
+        setManualModeEnabled(previousManualMode)
+        return
+      }
+      pushToast('info', 'Scan harian realtime dimatikan. Mode manual bisa diatur sendiri.')
+    }
+  }
+
   const handleSaveJamSettings = async () => {
     const ok = validateSessionSettings()
     if (!ok) return
 
-    await updateSettings({
+    const saved = await updateSettings({
       manual_jam_masuk_mulai: sessionSettings.jam_masuk_mulai,
       manual_jam_masuk_selesai: sessionSettings.jam_masuk_selesai,
       manual_jam_pulang_mulai: sessionSettings.jam_pulang_mulai,
       manual_jam_pulang_selesai: sessionSettings.jam_pulang_selesai
     })
+    if (!saved) return
 
     pushToast('success', 'Pengaturan jam scan manual tersimpan.')
+  }
+
+  const toggleAutoAlpha = async () => {
+    const next = !autoAlphaEnabled
+    setAutoAlphaEnabled(next)
+    const saved = await updateSettings({ auto_alpha_enabled: next })
+    if (!saved) {
+      setAutoAlphaEnabled(!next)
+    }
   }
 
   /* ========= LOAD KELAS & STATISTIK ========= */
@@ -375,45 +571,10 @@ export default function Scan() {
     async (dateString) => {
       setLoadingData(true)
       try {
-        const { data: kelas, error: errKelas } = await supabase
-          .from('kelas')
-          .select('*')
-          .order('grade', { ascending: true })
+        const { data, error } = await supabase.admin.scanSessionSummary({ date: dateString })
+        if (error) throw error
 
-        if (errKelas) throw errKelas
-
-        const { data: profiles, error: errProf } = await supabase
-          .from('profiles')
-          .select('id, kelas, role')
-          .eq('role', 'siswa')
-
-        if (errProf) throw errProf
-
-        const baseDate = dateString
-          ? new Date(`${dateString}T00:00:00`)
-          : new Date()
-        const hariIni = format(baseDate, 'EEEE', { locale: localeId })
-
-        const { data: jadwal, error: errJadwal } = await supabase
-          .from('jadwal')
-          .select('kelas_id')
-          .eq('hari', hariIni)
-
-        if (errJadwal) throw errJadwal
-
-        const stats = (kelas || []).map((k) => {
-          const studentCount =
-            profiles?.filter((p) => p.kelas === k.id).length || 0
-          const subjectCount =
-            jadwal?.filter((j) => j.kelas_id === k.id).length || 0
-
-          return {
-            ...k,
-            total_siswa: studentCount,
-            total_mapel: subjectCount,
-            scanned_count: 0
-          }
-        })
+        const stats = data?.classes || []
 
         setKelasList(stats)
         kelaslistRef.current = stats
@@ -450,58 +611,32 @@ export default function Scan() {
     async (dateString) => {
       if (!dateString) return
       try {
-        const { data: tempScans, error: errTemp } = await supabase
-          .from('absensi_scan_temp')
-          .select(
-            'id, tanggal, siswa_id, kelas, sesi, scan_at, mapel_count, card_uid'
-          )
-          .eq('tanggal', dateString)
-          .order('scan_at', { ascending: false })
+        const { data, error } = await supabase.admin.scanSessionSummary({ date: dateString })
+        if (error) throw error
 
-        if (errTemp) throw errTemp
-
-        if (!tempScans || tempScans.length === 0) {
+        const tempScans = data?.recent_scans || []
+        if (!tempScans.length) {
           setScannedStudents([])
           return
         }
 
-        const uniqueIds = Array.from(
-          new Set(tempScans.map((t) => t.siswa_id))
-        )
-
-        const { data: allStudents, error: errStudents } =
-          await supabase
-            .from('profiles')
-            .select('id, nama, kelas, photo_url, nis, rfid_uid')
-            .in(
-              'id',
-              uniqueIds.length
-                ? uniqueIds
-                : ['00000000-0000-0000-0000-000000000000']
-            )
-
-        if (errStudents) throw errStudents
-
-        const studentMap = (allStudents || []).reduce((acc, s) => {
-          acc[s.id] = s
-          return acc
-        }, {})
-
         const mapped = tempScans
           .map((row) => {
-            const stu = studentMap[row.siswa_id]
-            if (!stu) return null
-
             const scanDate = row.scan_at ? new Date(row.scan_at) : null
 
             const kelasInfo = kelaslistRef.current.find(
-              (k) => k.id === stu.kelas
+              (k) => k.id === row.kelas
             )
             const mapelCount =
               row.mapel_count ?? (kelasInfo?.total_mapel || 0)
 
             return {
-              ...stu,
+              id: row.siswa_id,
+              nama: row.siswa_nama,
+              nis: row.siswa_nis,
+              kelas: row.kelas,
+              photo_url: row.siswa_photo_url,
+              rfid_uid: row.siswa_rfid_uid,
               scan_time: scanDate
                 ? scanDate.toLocaleTimeString()
                 : '',
@@ -522,12 +657,12 @@ export default function Scan() {
   )
 
   useEffect(() => {
-    if (!manualModeEnabled) {
+    if (!scanOperationalActive) {
       setScannedStudents([])
       return
     }
     loadScansFromTemp(tanggal)
-  }, [manualModeEnabled, tanggal, loadScansFromTemp])
+  }, [scanOperationalActive, tanggal, loadScansFromTemp])
 
   /* ========= LOGIC SCANNING MANUAL ========= */
 
@@ -535,7 +670,7 @@ export default function Scan() {
     async (code, options = {}) => {
       if (!code) return
 
-      if (!manualModeEnabled) {
+      if (!scanOperationalActive) {
         // Mode Langsung: Cari siswa dan absen langsung ke mapel aktif
         setLoading(true)
         try {
@@ -793,44 +928,11 @@ export default function Scan() {
         setLoading(false)
       }
     },
-    [sessionSettings, manualModeEnabled, pushToast, setLoading, tanggal]
+    [sessionSettings, scanOperationalActive, pushToast, setLoading, tanggal]
   )
 
-  useEffect(() => {
-    const updateModeByTime = () => {
-      const now = new Date()
-      const timeStr = now.toTimeString().slice(0, 5)
-      const {
-        jam_masuk_mulai,
-        jam_masuk_selesai,
-        jam_pulang_mulai,
-        jam_pulang_selesai
-      } = sessionSettings
-
-      setScanMode((prev) => {
-        let current = prev
-        if (
-          timeStr >= jam_masuk_mulai &&
-          timeStr <= jam_masuk_selesai
-        ) {
-          current = 'masuk'
-        } else if (
-          timeStr >= jam_pulang_mulai &&
-          timeStr <= jam_pulang_selesai
-        ) {
-          current = 'pulang'
-        }
-        return current
-      })
-    }
-
-    updateModeByTime()
-    const interval = setInterval(updateModeByTime, 30000)
-    return () => clearInterval(interval)
-  }, [sessionSettings])
-
   const handleDeleteScan = async (record) => {
-    if (!manualModeEnabled) {
+    if (!scanOperationalActive) {
       pushToast(
         'info',
         'Mode scan manual belum diaktifkan, penghapusan scan dinonaktifkan.'
@@ -879,7 +981,7 @@ export default function Scan() {
   // Listener global keyboard RFID USB
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (activeTab !== 1 || !manualModeEnabled) return
+      if (activeTab !== 1 || !scanOperationalActive) return
 
       // Jangan ganggu kalau lagi ngetik di input / textarea / select
       const tag = e.target.tagName
@@ -904,7 +1006,7 @@ export default function Scan() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [activeTab, manualModeEnabled, handleProcessScan])
+  }, [activeTab, scanOperationalActive, handleProcessScan])
 
   // Realtime dari device lain
   useEffect(() => {
@@ -920,7 +1022,7 @@ export default function Scan() {
           // filter: 'status=eq.raw'
         },
         (payload) => {
-          if (activeTab !== 1 || !manualModeEnabled) return
+          if (activeTab !== 1 || !scanOperationalActive) return
           const row = payload.new
           if (!row || row.status !== 'raw') return
           handleProcessScan(row.card_uid, {
@@ -934,12 +1036,12 @@ export default function Scan() {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [activeTab, manualModeEnabled, handleProcessScan])
+  }, [activeTab, scanOperationalActive, handleProcessScan])
 
   /* ========= SIMPAN ABSENSI ========= */
 
   const handleSaveAttendance = async () => {
-    if (!manualModeEnabled) {
+    if (!scanOperationalActive) {
       pushToast('error', 'Mode scan manual belum diaktifkan.')
       return
     }
@@ -1414,6 +1516,41 @@ export default function Scan() {
                     </div>
 
                     <div className="p-6 space-y-6">
+                      <div className={`flex flex-col gap-4 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between ${scanAlwaysActive
+                        ? 'border-blue-200 bg-blue-50'
+                        : 'border-gray-200 bg-gray-50'
+                        }`}>
+                        <div className="flex items-start gap-3">
+                          <div className={`mt-0.5 rounded-lg p-2 ${scanAlwaysActive ? 'bg-blue-600 text-white' : 'bg-white text-gray-500'}`}>
+                            <CalendarCheck className="h-5 w-5" />
+                          </div>
+                          <div>
+                            <div className="font-semibold text-gray-900">
+                              Aktif Setiap Hari (Realtime)
+                            </div>
+                            <p className="mt-1 text-sm text-gray-600">
+                              Tanggal operasional otomatis mengikuti hari ini. Scan masuk/pulang tetap aktif sesuai rentang jam tanpa perlu diset manual tiap hari.
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={toggleScanAlwaysActive}
+                          disabled={settingsLoading}
+                          className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${scanAlwaysActive
+                            ? 'bg-blue-600'
+                            : 'bg-gray-300'
+                            } ${settingsLoading ? 'cursor-not-allowed opacity-50' : ''}`}
+                        >
+                          <span
+                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${scanAlwaysActive
+                              ? 'translate-x-6'
+                              : 'translate-x-1'
+                              }`}
+                          />
+                        </button>
+                      </div>
+
                       {/* Date and Time Settings */}
                       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         <div className="space-y-4">
@@ -1424,14 +1561,20 @@ export default function Scan() {
                             <input
                               type="date"
                               value={tanggal}
+                              disabled={scanAlwaysActive}
                               onChange={(e) =>
                                 setSessionSettings((prev) => ({
                                   ...prev,
                                   tanggal: e.target.value
                                 }))
                               }
-                              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none disabled:cursor-not-allowed disabled:bg-blue-50 disabled:text-blue-700"
                             />
+                            {scanAlwaysActive && (
+                              <p className="mt-2 text-xs font-medium text-blue-700">
+                                Otomatis tersinkron ke tanggal hari ini secara realtime.
+                              </p>
+                            )}
                           </div>
 
                           <div className="grid grid-cols-2 gap-4">
@@ -1521,24 +1664,26 @@ export default function Scan() {
                                 Mode Scan Manual
                               </div>
                               <div className="text-sm text-gray-600">
-                                {manualModeEnabled
-                                  ? 'Scan RFID aktif sesuai jam yang diatur'
-                                  : 'Scan RFID dinonaktifkan'}
+                                {scanAlwaysActive
+                                  ? 'Aktif otomatis harian sesuai jam yang diatur'
+                                  : manualModeEnabled
+                                    ? 'Scan RFID aktif sesuai jam yang diatur'
+                                    : 'Scan RFID dinonaktifkan'}
                               </div>
                             </div>
                             <button
                               onClick={toggleManualMode}
-                              disabled={settingsLoading}
-                              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${manualModeEnabled
+                              disabled={settingsLoading || scanAlwaysActive}
+                              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${scanOperationalActive
                                 ? 'bg-blue-600'
                                 : 'bg-gray-300'
-                                } ${settingsLoading
+                                } ${settingsLoading || scanAlwaysActive
                                   ? 'opacity-50 cursor-not-allowed'
                                   : ''
                                 }`}
                             >
                               <span
-                                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${manualModeEnabled
+                                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${scanOperationalActive
                                   ? 'translate-x-6'
                                   : 'translate-x-1'
                                   }`}
@@ -1558,13 +1703,12 @@ export default function Scan() {
                               </div>
                             </div>
                             <button
-                              onClick={() =>
-                                setAutoAlphaEnabled((prev) => !prev)
-                              }
+                              onClick={toggleAutoAlpha}
+                              disabled={settingsLoading}
                               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${autoAlphaEnabled
                                 ? 'bg-red-600'
                                 : 'bg-gray-300'
-                                }`}
+                                } ${settingsLoading ? 'cursor-not-allowed opacity-50' : ''}`}
                             >
                               <span
                                 className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${autoAlphaEnabled
@@ -1604,30 +1748,31 @@ export default function Scan() {
                       Status Scanner
                     </h4>
 
-                    {manualModeEnabled ? (
+                    {scanOperationalActive ? (
                       <div className="mb-4 p-4 text-sm text-green-800 bg-green-50 border border-green-200 rounded-lg flex gap-3">
                         <CheckCircle className="w-5 h-5 text-green-600 shrink-0 mt-0.5" />
                         <div>
                           <div className="font-semibold">
-                            Mode manual aktif
+                            {scanAlwaysActive ? 'Scan harian realtime aktif' : 'Mode manual aktif'}
                           </div>
                           <div className="mt-1">
+                            {scanAlwaysActive ? 'Tanggal operasional mengikuti hari ini. ' : ''}
                             Sistem otomatis menentukan{' '}
                             <b>scan MASUK</b> / <b>PULANG</b> berdasarkan
                             jam scan. Scanner RFID siap menerima input
-                            dari perangkat USB.
+                            dari perangkat USB dan realtime.
                           </div>
                         </div>
                       </div>
                     ) : (
-                      <div className="mb-4 p-4 text-sm text-blue-800 bg-blue-50 border border-blue-200 rounded-lg flex gap-3">
-                        <CheckCircle className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+                      <div className="mb-4 p-4 text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-lg flex gap-3">
+                        <AlertCircle className="w-5 h-5 text-gray-500 shrink-0 mt-0.5" />
                         <div>
                           <div className="font-semibold">
-                            Mode langsung aktif
+                            Scanner belum aktif
                           </div>
                           <div className="mt-1">
-                            Scan RFID akan langsung mencatat kehadiran siswa ke mata pelajaran yang sedang berlangsung saat ini.
+                            Aktifkan scan harian realtime atau mode scan manual untuk menerima input RFID.
                           </div>
                         </div>
                       </div>

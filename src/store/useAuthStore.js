@@ -9,6 +9,12 @@ import { useUIStore } from './useUIStore'
 import { logError } from '../utils/logger'
 import { isValidRole } from '../utils/role'
 import { hasRealLoginEmail, shouldForceAccountSetup } from '../utils/accountSetup'
+import {
+  DEFAULT_USER_THEME,
+  normalizeUserTheme,
+  withResolvedThemePreference,
+  writeUserThemeLocal
+} from '../theme/userThemes'
 
 // Helper kecil biar konsisten
 const normalizeEmail = (email) => email.trim().toLowerCase()
@@ -32,6 +38,7 @@ const buildProfilePayload = (user) => {
     role,
     nama,
     status: 'active',
+    created_via: 'manual_registration',
     created_at: new Date().toISOString()
   }
 
@@ -51,7 +58,9 @@ const ensureProfile = async (user) => {
     .eq('id', user.id)
     .single()
 
-  if (!error && data) return { profile: data }
+  if (!error && data) {
+    return { profile: withResolvedThemePreference(data, user.id) }
+  }
 
   if (error && error.code === 'PGRST116') {
     const payload = buildProfilePayload(user)
@@ -69,7 +78,7 @@ const ensureProfile = async (user) => {
         .single())
 
     if (error) return { error }
-    return { profile: data }
+    return { profile: withResolvedThemePreference(data, user.id) }
   }
 
   return { error }
@@ -154,7 +163,7 @@ export const useAuthStore = create((set, get) => ({
             return { user: null, profile: null, settings }
           }
 
-          profile = loadedProfile
+          profile = withResolvedThemePreference(loadedProfile, user.id)
         }
 
         if (user && !isValidRole(profile?.role)) {
@@ -208,6 +217,8 @@ export const useAuthStore = create((set, get) => ({
           }
         }
 
+        profile = withResolvedThemePreference(profile, user?.id)
+
         if (user) {
           setAuthSessionHint(true)
         }
@@ -229,7 +240,11 @@ export const useAuthStore = create((set, get) => ({
           void get().loadSuperAdmin(profile)
         }
 
-        return { user, profile, settings }
+        return {
+          user,
+          profile,
+          settings
+        }
       } catch (err) {
         logError('Init error:', err)
         clearAuthSessionHint()
@@ -295,7 +310,10 @@ export const useAuthStore = create((set, get) => ({
 
       const session = sessionData?.session || null
       const user = session?.user || null
-      const profile = session?.profile || sessionData?.profile || null
+      const profile = withResolvedThemePreference(
+        session?.profile || sessionData?.profile || null,
+        session?.user?.id
+      )
       let settings = session?.settings || sessionData?.settings || get().settings || null
       const hasSuperAdminBootstrap =
         sessionData?.superAdminChecked === true ||
@@ -401,11 +419,15 @@ export const useAuthStore = create((set, get) => ({
       const user = authData?.user
       if (!user) throw new Error('User tidak ditemukan')
 
-      const { profile, error: profileError } = await ensureProfile(user)
-      if (profileError) {
-        logError('Profile error:', profileError)
-        await supabase.auth.signOut()
-        throw new Error('Gagal memuat data profil')
+      let profile = withResolvedThemePreference(authData?.profile, user.id);
+      if (!profile) {
+        const { profile: fetchedProfile, error: profileError } = await ensureProfile(user);
+        if (profileError) {
+          logError('Profile error:', profileError);
+          await supabase.auth.signOut();
+          throw new Error('Gagal memuat data profil');
+        }
+        profile = withResolvedThemePreference(fetchedProfile, user.id);
       }
 
       if (!isValidRole(profile?.role)) {
@@ -439,7 +461,7 @@ export const useAuthStore = create((set, get) => ({
       const accountSetupRequired = shouldForceAccountSetup(profile, user?.email)
 
       setAuthSessionHint(true)
-      set({ user, profile, settings, error: null })
+      set({ user, profile: withResolvedThemePreference(profile, user.id), settings, error: null })
       void get().loadSuperAdmin(profile)
 
       if (accountSetupRequired) {
@@ -480,7 +502,7 @@ export const useAuthStore = create((set, get) => ({
       }
 
       const user = authData?.user
-      const profile = authData?.profile
+      const profile = withResolvedThemePreference(authData?.profile, user?.id)
       if (!user || !profile) {
         throw new Error('Data akun Google tidak lengkap')
       }
@@ -556,7 +578,7 @@ export const useAuthStore = create((set, get) => ({
       }
 
       const user = authData?.user
-      const profile = authData?.profile
+      const profile = withResolvedThemePreference(authData?.profile, user?.id)
       if (!user || !profile) {
         throw new Error('Data akun Google tidak lengkap')
       }
@@ -661,7 +683,10 @@ export const useAuthStore = create((set, get) => ({
       }
 
       const nextUser = authData?.user || get().user
-      const nextProfile = authData?.profile || get().profile
+      const nextProfile = withResolvedThemePreference(
+        authData?.profile || get().profile,
+        nextUser?.id
+      )
 
       set({
         user: nextUser,
@@ -760,6 +785,7 @@ export const useAuthStore = create((set, get) => ({
         nis: profileData.nis || null,
         agama: profileData.agama || null,
         jabatan: profileData.jabatan || null,
+        created_via: 'manual_registration',
         created_at: new Date().toISOString()
       })
 
@@ -849,7 +875,7 @@ export const useAuthStore = create((set, get) => ({
           return
         }
 
-        set({ profile: data })
+        set({ profile: withResolvedThemePreference(data, user.id) })
         void get().loadSuperAdmin(data)
       } else if (error) {
         logError('Refresh profile error:', error)
@@ -898,6 +924,63 @@ export const useAuthStore = create((set, get) => ({
      Utility
      =========================== */
   clearError: () => set({ error: null }),
+
+  updateThemePreference: async (themeId) => {
+    const { pushToast } = useUIStore.getState()
+    const user = get().user
+    const profile = get().profile
+
+    if (!user?.id || !profile) {
+      const message = 'Sesi pengguna tidak ditemukan.'
+      pushToast('error', message)
+      return { error: message }
+    }
+
+    const nextTheme = normalizeUserTheme(themeId || DEFAULT_USER_THEME)
+
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          theme_preference: nextTheme,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', user.id)
+
+      if (error) throw error
+
+      writeUserThemeLocal(user.id, nextTheme)
+      const nextProfile = {
+        ...profile,
+        theme_preference: nextTheme,
+        updated_at: new Date().toISOString()
+      }
+      set({ profile: nextProfile, error: null })
+      pushToast('success', 'Tema berhasil diperbarui')
+      return { profile: nextProfile }
+    } catch (err) {
+      const message = err?.message || 'Gagal menyimpan tema pengguna'
+      logError('Update theme preference error:', err)
+
+      if (/theme_preference/i.test(message)) {
+        writeUserThemeLocal(user.id, nextTheme)
+        const fallbackProfile = {
+          ...profile,
+          theme_preference: nextTheme
+        }
+        set({ profile: fallbackProfile, error: null })
+        pushToast(
+          'warning',
+          'Kolom tema user belum ada di database. Tema diterapkan lokal dulu.'
+        )
+        return { profile: fallbackProfile, warning: 'db_column_missing' }
+      }
+
+      set({ error: message })
+      pushToast('error', message)
+      return { error: message }
+    }
+  },
 
   checkUserStatus: () => {
     const { user, profile } = get()

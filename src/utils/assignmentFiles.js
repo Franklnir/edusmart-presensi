@@ -1,5 +1,6 @@
 export const MAX_ASSIGNMENT_PHOTOS = 6
-export const ASSIGNMENT_PHOTO_MAX_BYTES = 150 * 1024
+export const ASSIGNMENT_PHOTO_MAX_BYTES = 680 * 1024
+export const ASSIGNMENT_PHOTOS_MAX_TOTAL_BYTES = ASSIGNMENT_PHOTO_MAX_BYTES * MAX_ASSIGNMENT_PHOTOS
 
 export const parseAssignmentFileList = (value, fallback = '') => {
   const items = []

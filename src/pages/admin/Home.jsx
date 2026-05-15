@@ -53,6 +53,41 @@ const toIsoFromDateTimeLocal = (value) => {
   return date.toISOString()
 }
 
+const SETTINGS_PERIOD_COLUMNS = 'tahun_ajaran, semester_aktif, periode_mulai, periode_selesai, periode_ganjil_mulai, periode_ganjil_selesai, periode_genap_mulai, periode_genap_selesai'
+
+const getPeriodEndDateTime = (period) => {
+  const raw = period?.endsAt || period?.periodeSelesai || ''
+  if (!raw) return null
+  const date = new Date(`${raw}T23:59:59`)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+const getPeriodEndDateTimeLocal = (period) => {
+  const end = getPeriodEndDateTime(period)
+  return end ? toDateTimeLocalValue(end.toISOString()) : ''
+}
+
+const clampDateToPeriodEnd = (date, period) => {
+  const periodEnd = getPeriodEndDateTime(period)
+  if (periodEnd && date > periodEnd) return periodEnd
+  return date
+}
+
+const isAfterPeriodEnd = (isoValue, period) => {
+  if (!isoValue) return false
+  const date = new Date(isoValue)
+  const periodEnd = getPeriodEndDateTime(period)
+  if (Number.isNaN(date.getTime()) || !periodEnd) return false
+  return date > periodEnd
+}
+
+const applySemesterPeriodFilters = (query, period) => {
+  let next = query
+  if (period?.tahunAjaran) next = next.eq('tahun_ajaran', period.tahunAjaran)
+  if (period?.semester) next = next.eq('semester', period.semester)
+  return next
+}
+
 const formatDateTimeLabel = (value) => {
   if (!value) return '-'
   const date = new Date(value)
@@ -66,11 +101,11 @@ const formatDateTimeLabel = (value) => {
   })
 }
 
-const defaultRegistrationDeadlineLocal = (days = 7) => {
+const defaultRegistrationDeadlineLocal = (days = 7, period = null) => {
   const date = new Date()
   date.setSeconds(0, 0)
   date.setDate(date.getDate() + Number(days || 0))
-  return toDateTimeLocalValue(date.toISOString())
+  return toDateTimeLocalValue(clampDateToPeriodEnd(date, period).toISOString())
 }
 
 // Komponen Stat Card
@@ -140,6 +175,20 @@ export default function AHome() {
     pengumuman: 0,
     eskul: 0
   })
+  const [activeEskulPeriod, setActiveEskulPeriod] = useState(() => resolveAcademicPeriod())
+
+  const loadCurrentAcademicPeriod = useCallback(async () => {
+    const { data } = await supabase
+      .from('settings')
+      .select(SETTINGS_PERIOD_COLUMNS)
+      .order('id')
+      .limit(1)
+      .maybeSingle()
+
+    const period = resolveAcademicPeriod(data || {})
+    setActiveEskulPeriod(period)
+    return period
+  }, [])
 
   /* --- Monitoring Admin --- */
   const [adminList, setAdminList] = useState([])
@@ -148,21 +197,95 @@ export default function AHome() {
   const loadAllData = useCallback(async () => {
     setIsLoading(true)
     try {
-      await Promise.allSettled([loadPengumuman()])
-
-      setIsLoading(false)
-
-      void Promise.allSettled([
-        loadEskulList(),
-        loadStatistics(),
-        loadGuruDanSiswa(),
-        loadAdminList()
+      await loadCurrentAcademicPeriod()
+      const [summaryRes, batchRes] = await Promise.all([
+        supabase.admin.dashboardSummary(),
+        supabase.batch([
+          {
+            key: 'people',
+            query: supabase
+              .from('profiles')
+              .select('id, nama, email, kelas, role, status, angkatan')
+              .in('role', ['admin', 'guru', 'teacher', 'siswa'])
+              .order('role')
+              .order('nama')
+          },
+          {
+            key: 'pengumuman',
+            query: supabase
+              .from('pengumuman')
+              .select('id,judul,keterangan,target,created_at,updated_at')
+              .order('created_at', { ascending: false })
+          },
+          {
+            key: 'eskul',
+            query: supabase
+              .from('ekskul')
+              .select('id,nama,keterangan,hari,jam_mulai,jam_selesai,pembina_guru_id,registration_deadline_at,created_at,updated_at')
+              .order('nama')
+          }
+        ])
       ])
+
+      const { data, error, errors } = batchRes
+      if (summaryRes.error) {
+        throw new Error(summaryRes.error.message || 'Ringkasan dashboard gagal dimuat')
+      }
+      if (error && !data) {
+        throw new Error(error.message || 'Data dashboard gagal dimuat')
+      }
+      if (errors && Object.keys(errors).length > 0) {
+        console.warn('Sebagian data dashboard gagal dimuat:', errors)
+      }
+
+      const people = data?.people?.data || []
+      const guruRows = people.filter((item) => item.role === 'guru' || item.role === 'teacher')
+      const siswaRows = people.filter((item) => item.role === 'siswa')
+      const adminRows = people.filter((item) => item.role === 'admin')
+      const summary = summaryRes.data || {}
+
+      setStats({
+        siswa: summary.siswa || siswaRows.length,
+        guru: summary.guru || guruRows.length,
+        admin: summary.admin || adminRows.length,
+        kelas: summary.kelas || 0,
+        absensi: summary.absensi || 0,
+        pengumuman: summary.pengumuman || (data?.pengumuman?.data || []).length,
+        eskul: summary.eskul || (data?.eskul?.data || []).length
+      })
+
+      setGuruList(
+        guruRows.map((guru) => ({
+          id: guru.id,
+          name: `${guru.nama || 'Tanpa Nama'}${guru.email ? ` (${guru.email})` : ''}`
+        }))
+      )
+      setSiswaList(
+        siswaRows.map((siswa) => ({
+          uid: siswa.id,
+          nama: siswa.nama || siswa.email || 'Tanpa Nama',
+          kelas: siswa.kelas || '',
+          email: siswa.email,
+          angkatan: siswa.angkatan || ''
+        }))
+      )
+      setAdminList(
+        adminRows.map((admin) => ({
+          id: admin.id,
+          nama: admin.nama || admin.email || 'Tanpa Nama',
+          email: admin.email || '-',
+          status: admin.status || 'active'
+        }))
+      )
+      setPengumumanList(data?.pengumuman?.data || [])
+      setEskulList(data?.eskul?.data || [])
+
     } catch (error) {
-      pushToast('error', 'Gagal memuat data awal')
+      pushToast('error', error?.message ? `Gagal memuat data awal: ${error.message}` : 'Gagal memuat data awal')
+    } finally {
       setIsLoading(false)
     }
-  }, [pushToast])
+  }, [loadCurrentAcademicPeriod, pushToast])
 
   useEffect(() => {
     loadAllData()
@@ -170,52 +293,17 @@ export default function AHome() {
 
   const loadStatistics = useCallback(async () => {
     try {
-      const { data: settingsRow } = await supabase
-        .from('settings')
-        .select('tahun_ajaran, semester_aktif')
-        .order('id')
-        .limit(1)
-        .maybeSingle()
-      const period = resolveAcademicPeriod(settingsRow || {})
-      const [
-        { count: siswa },
-        { count: guru },
-        { count: admin },
-        { count: kelas },
-        { count: absensi },
-        { count: pengumuman },
-        { count: eskul }
-      ] = await Promise.all([
-        supabase
-          .from('profiles')
-          .select('*', { count: 'exact', head: true })
-          .eq('role', 'siswa'),
-        supabase
-          .from('profiles')
-          .select('*', { count: 'exact', head: true })
-          .eq('role', 'guru'),
-        supabase
-          .from('profiles')
-          .select('*', { count: 'exact', head: true })
-          .eq('role', 'admin'),
-        supabase.from('kelas').select('*', { count: 'exact', head: true }),
-        supabase
-          .from('absensi')
-          .select('*', { count: 'exact', head: true })
-          .eq('tahun_ajaran', period.tahunAjaran)
-          .eq('semester', period.semester),
-        supabase.from('pengumuman').select('*', { count: 'exact', head: true }),
-        supabase.from('ekskul').select('*', { count: 'exact', head: true })
-      ])
+      const { data, error } = await supabase.admin.dashboardSummary()
+      if (error) throw error
 
       setStats({
-        siswa: siswa || 0,
-        guru: guru || 0,
-        admin: admin || 0,
-        kelas: kelas || 0,
-        absensi: absensi || 0,
-        pengumuman: pengumuman || 0,
-        eskul: eskul || 0
+        siswa: data?.siswa || 0,
+        guru: data?.guru || 0,
+        admin: data?.admin || 0,
+        kelas: data?.kelas || 0,
+        absensi: data?.absensi || 0,
+        pengumuman: data?.pengumuman || 0,
+        eskul: data?.eskul || 0
       })
     } catch (error) {
       pushToast('error', 'Gagal memuat statistik')
@@ -226,6 +314,7 @@ export default function AHome() {
     const channel = supabase
       .channel('admin_home_period')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, () => {
+        void loadCurrentAcademicPeriod()
         void loadStatistics()
       })
       .subscribe()
@@ -233,7 +322,7 @@ export default function AHome() {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [loadStatistics])
+  }, [loadCurrentAcademicPeriod, loadStatistics])
 
   const loadAdminList = useCallback(async () => {
     try {
@@ -283,7 +372,7 @@ export default function AHome() {
       // Load siswa dari profiles
       const { data: siswaData, error: siswaError } = await supabase
         .from('profiles')
-        .select('id, nama, email, kelas, role')
+        .select('id, nama, email, kelas, role, angkatan')
         .eq('role', 'siswa')
         .order('kelas')
         .order('nama')
@@ -293,7 +382,8 @@ export default function AHome() {
           uid: siswa.id,
           nama: siswa.nama || siswa.email || 'Tanpa Nama',
           kelas: siswa.kelas || '',
-          email: siswa.email
+          email: siswa.email,
+          angkatan: siswa.angkatan || ''
         }))
         setSiswaList(formattedSiswa)
       }
@@ -436,7 +526,7 @@ export default function AHome() {
     jam_mulai: '',
     jam_selesai: '',
     pembina_guru_id: '',
-    registration_deadline_at: defaultRegistrationDeadlineLocal(7)
+    registration_deadline_at: defaultRegistrationDeadlineLocal(7, activeEskulPeriod)
   })
   const [eskulAnggota, setEskulAnggota] = useState([])
   const [eskulAbsensiStats, setEskulAbsensiStats] = useState({})
@@ -488,16 +578,27 @@ export default function AHome() {
     if (!eskulSel) return
 
     try {
-      const { data, error } = await supabase
+      const period = await loadCurrentAcademicPeriod()
+
+      let anggotaQuery = supabase
         .from('ekskul_anggota')
         .select('*')
         .eq('ekskul_id', eskulSel)
+      anggotaQuery = applySemesterPeriodFilters(anggotaQuery, period)
+
+      let { data, error } = await anggotaQuery
+      if (error && /tahun_ajaran|semester|angkatan/i.test(error.message || '')) {
+        ; ({ data, error } = await supabase
+          .from('ekskul_anggota')
+          .select('*')
+          .eq('ekskul_id', eskulSel))
+      }
 
       if (error) throw error
       const anggota = data || []
       setEskulAnggota(anggota)
 
-      // Ambil statistik absensi eskul (Hadir & Izin) untuk SEMUA bulan
+      // Ambil statistik absensi eskul untuk bulan dalam periode akademik aktif.
       const userIds = anggota.map((a) => a.user_id).filter(Boolean)
 
       if (userIds.length === 0) {
@@ -505,12 +606,23 @@ export default function AHome() {
         return
       }
 
-      const { data: absData, error: absError } = await supabase
+      let absQuery = supabase
         .from('absensi_eskul')
         .select('user_id, status')
         .eq('ekskul_id', eskulSel)
         .in('user_id', userIds)
         .in('status', ['Hadir', 'Izin'])
+      absQuery = applySemesterPeriodFilters(absQuery, period)
+
+      let { data: absData, error: absError } = await absQuery
+      if (absError && /tahun_ajaran|semester/i.test(absError.message || '')) {
+        ; ({ data: absData, error: absError } = await supabase
+          .from('absensi_eskul')
+          .select('user_id, status')
+          .eq('ekskul_id', eskulSel)
+          .in('user_id', userIds)
+          .in('status', ['Hadir', 'Izin']))
+      }
 
       if (absError) throw absError
 
@@ -531,7 +643,7 @@ export default function AHome() {
     } catch (error) {
       pushToast('error', 'Gagal memuat data anggota eskul')
     }
-  }, [eskulSel, pushToast])
+  }, [eskulSel, loadCurrentAcademicPeriod, pushToast])
 
   // Load eskul detail dan anggota ketika eskulSel berubah
   useEffect(() => {
@@ -543,7 +655,7 @@ export default function AHome() {
         jam_mulai: '',
         jam_selesai: '',
         pembina_guru_id: '',
-        registration_deadline_at: defaultRegistrationDeadlineLocal(7)
+        registration_deadline_at: defaultRegistrationDeadlineLocal(7, activeEskulPeriod)
       })
       setEskulAnggota([])
       setEskulAbsensiStats({})
@@ -552,7 +664,7 @@ export default function AHome() {
 
     loadEskulDetail()
     loadEskulAnggota()
-  }, [eskulSel, loadEskulDetail, loadEskulAnggota])
+  }, [activeEskulPeriod, eskulSel, loadEskulDetail, loadEskulAnggota])
 
   // daftar hari yang sedang dipilih (multi hari)
   const selectedHariValues = useMemo(
@@ -570,6 +682,7 @@ export default function AHome() {
         id: a.id,
         nama: s.nama || a.user_id,
         kelas: s.kelas || '—',
+        angkatan: a.angkatan || s.angkatan || '—',
         hadirCount: stat.hadir,
         izinCount: stat.izin
       }
@@ -607,16 +720,16 @@ export default function AHome() {
 
     setEskulForm((prev) => ({
       ...prev,
-      registration_deadline_at: toDateTimeLocalValue(date.toISOString())
+      registration_deadline_at: toDateTimeLocalValue(clampDateToPeriodEnd(date, activeEskulPeriod).toISOString())
     }))
-  }, [])
+  }, [activeEskulPeriod])
 
   const clearEskulRegistrationDeadline = useCallback(() => {
     setEskulForm((prev) => ({
       ...prev,
-      registration_deadline_at: ''
+      registration_deadline_at: defaultRegistrationDeadlineLocal(7, activeEskulPeriod)
     }))
-  }, [])
+  }, [activeEskulPeriod])
 
   const simpanEskul = useCallback(async () => {
     const nama = (eskulForm.nama || '').trim()
@@ -639,6 +752,12 @@ export default function AHome() {
     const deadlineDate = new Date(registrationDeadlineIso)
     if (deadlineDate.getTime() <= Date.now()) {
       pushToast('error', 'Batas pendaftaran harus di masa depan.')
+      return
+    }
+
+    const period = await loadCurrentAcademicPeriod()
+    if (isAfterPeriodEnd(registrationDeadlineIso, period)) {
+      pushToast('error', `Batas pendaftaran tidak boleh melewati akhir periode aktif (${formatDateTimeLabel(getPeriodEndDateTime(period)?.toISOString())}).`)
       return
     }
 
@@ -697,7 +816,7 @@ export default function AHome() {
     } finally {
       setLoadingEskul(false)
     }
-  }, [eskulForm, eskulSel, loadEskulList, loadStatistics, pushToast])
+  }, [eskulForm, eskulSel, loadCurrentAcademicPeriod, loadEskulList, loadStatistics, pushToast])
 
   const hapusEskul = useCallback(async () => {
     if (!eskulSel) return
@@ -736,25 +855,48 @@ export default function AHome() {
     if (!eskulSel || !addMemberUid) return
 
     try {
+      const period = await loadCurrentAcademicPeriod()
+      const selectedStudent = siswaMap[addMemberUid] || {}
+
       // Cek apakah sudah menjadi anggota
-      const { data: existing } = await supabase
+      let existingQuery = supabase
         .from('ekskul_anggota')
         .select('id')
         .eq('ekskul_id', eskulSel)
         .eq('user_id', addMemberUid)
-        .single()
+      existingQuery = applySemesterPeriodFilters(existingQuery, period)
+
+      let { data: existing, error: existingError } = await existingQuery.maybeSingle()
+      if (existingError && /tahun_ajaran|semester/i.test(existingError.message || '')) {
+        ; ({ data: existing, error: existingError } = await supabase
+          .from('ekskul_anggota')
+          .select('id')
+          .eq('ekskul_id', eskulSel)
+          .eq('user_id', addMemberUid)
+          .maybeSingle())
+      }
+      if (existingError) throw existingError
 
       if (existing) {
-        pushToast('warning', 'Siswa ini sudah menjadi anggota eskul')
+        pushToast('warning', 'Siswa ini sudah menjadi anggota eskul pada tahun ajaran aktif.')
         setAddMemberUid('')
         return
       }
 
-      const { error } = await supabase.from('ekskul_anggota').insert({
+      const insertPayload = {
         ekskul_id: eskulSel,
         user_id: addMemberUid,
+        tahun_ajaran: period.tahunAjaran,
+        semester: period.semester,
+        angkatan: selectedStudent.angkatan || null,
         created_at: new Date().toISOString()
-      })
+      }
+
+      let { error } = await supabase.from('ekskul_anggota').insert(insertPayload)
+      if (error && /tahun_ajaran|semester|angkatan/i.test(error.message || '')) {
+        const { tahun_ajaran, semester, angkatan, ...legacyPayload } = insertPayload
+        ; ({ error } = await supabase.from('ekskul_anggota').insert(legacyPayload))
+      }
 
       if (error) throw error
       pushToast('success', 'Anggota berhasil ditambahkan!')
@@ -763,7 +905,7 @@ export default function AHome() {
     } catch (error) {
       pushToast('error', 'Gagal menambah anggota')
     }
-  }, [eskulSel, addMemberUid, loadEskulAnggota, pushToast])
+  }, [eskulSel, addMemberUid, loadCurrentAcademicPeriod, loadEskulAnggota, pushToast, siswaMap])
 
   const hapusAnggotaEskul = useCallback(async (anggotaId) => {
     if (!eskulSel) return
@@ -790,6 +932,9 @@ export default function AHome() {
   const registrationDeadlineClosed = registrationDeadlineIso
     ? Date.now() > new Date(registrationDeadlineIso).getTime()
     : false
+  const registrationDeadlinePastPeriod = isAfterPeriodEnd(registrationDeadlineIso, activeEskulPeriod)
+  const activePeriodEndInput = getPeriodEndDateTimeLocal(activeEskulPeriod)
+  const activePeriodEndLabel = formatDateTimeLabel(getPeriodEndDateTime(activeEskulPeriod)?.toISOString())
 
   if (isLoading) {
     return (
@@ -1152,12 +1297,17 @@ export default function AHome() {
                         className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-amber-500 focus:border-amber-500 transition-all duration-200"
                         value={eskulForm.registration_deadline_at}
                         min={toDateTimeLocalValue(new Date().toISOString())}
-                        onChange={(e) =>
+                        max={activePeriodEndInput}
+                        onChange={(e) => {
+                          const raw = e.target.value
+                          const date = new Date(raw)
                           setEskulForm((f) => ({
                             ...f,
-                            registration_deadline_at: e.target.value
+                            registration_deadline_at: raw && !Number.isNaN(date.getTime())
+                              ? toDateTimeLocalValue(clampDateToPeriodEnd(date, activeEskulPeriod).toISOString())
+                              : raw
                           }))
-                        }
+                        }}
                       />
                       <div className="flex flex-wrap items-center gap-2">
                         <button
@@ -1188,6 +1338,8 @@ export default function AHome() {
                         className={`inline-flex items-center px-2.5 py-1 rounded-full font-semibold ${registrationDeadlineIso
                           ? registrationDeadlineClosed
                             ? 'bg-rose-100 text-rose-700 border border-rose-200'
+                            : registrationDeadlinePastPeriod
+                            ? 'bg-amber-100 text-amber-700 border border-amber-200'
                             : 'bg-emerald-100 text-emerald-700 border border-emerald-200'
                           : 'bg-gray-100 text-gray-600 border border-gray-200'
                           }`}
@@ -1195,16 +1347,21 @@ export default function AHome() {
                         {registrationDeadlineIso
                           ? registrationDeadlineClosed
                             ? 'Pendaftaran Ditutup'
+                            : registrationDeadlinePastPeriod
+                            ? 'Lewat Periode'
                             : 'Pendaftaran Dibuka'
                           : 'Belum Diatur'}
                       </span>
                       <span className="text-gray-500">
                         Batas: {registrationDeadlineLabel}
                       </span>
+                      <span className="text-gray-500">
+                        Periode aktif: {activeEskulPeriod.label} sampai {activePeriodEndLabel}
+                      </span>
                     </div>
                     <p className="mt-2 text-xs text-gray-500">
                       Setelah batas lewat, siswa tidak bisa daftar atau membatalkan
-                      keikutsertaan eskul.
+                      keikutsertaan eskul. Batas pendaftaran dikunci agar tidak melewati akhir periode aktif.
                     </p>
                   </div>
 
@@ -1311,6 +1468,8 @@ export default function AHome() {
                               <div className="text-sm text-gray-500 mt-1">
                                 Kelas:{' '}
                                 <span className="font-medium">{a.kelas}</span>
+                                <span className="mx-1">•</span>
+                                Angkatan: <span className="font-medium">{a.angkatan}</span>
                               </div>
                               {/* Status kehadiran & izin (total semua bulan) */}
                               <div className="mt-2 flex flex-wrap gap-2 text-xs">

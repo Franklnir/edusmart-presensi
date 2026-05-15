@@ -29,12 +29,16 @@ class PresenceController extends ApiController
         $now = now();
 
         $profile = Profile::query()->where('id', $user->id)->where('tenant_id', $tenantId)->first();
+        if (! $profile) {
+            return response()->json(['data' => 'ok']);
+        }
+
         $userAgent = substr((string) $request->header('User-Agent', ''), 0, 255);
         $presencePayload = [
             'tenant_id' => $tenantId,
             'user_id' => $user->id,
             'device_id' => $deviceId,
-            'role' => $profile?->role,
+            'role' => $profile->role,
             'user_agent' => $userAgent,
             'last_seen_at' => $now,
             'last_active_at' => null,
@@ -66,7 +70,7 @@ class PresenceController extends ApiController
                 ->where('device_id', $deviceId)
                 ->update([
                     'tenant_id' => $tenantId,
-                    'role' => $profile?->role,
+                    'role' => $profile->role,
                     'user_agent' => $userAgent,
                     'last_seen_at' => $now,
                     'updated_at' => $now,

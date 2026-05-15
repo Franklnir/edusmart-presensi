@@ -9,6 +9,7 @@ import {
   resolveCertificateFileUrl
 } from '../../utils/certificateFiles'
 import { loadExcelJsBrowser } from '../../utils/excelBrowser'
+import { resolveAcademicPeriod } from '../../utils/academicPeriod'
 
 // --- HELPER FUNCTIONS ---
 
@@ -301,12 +302,16 @@ const RiwayatSertifikatOverlay = ({ sertifikatList, onClose, onViewDetail, onDow
 }
 
 // Komponen Overlay Absensi Eskul
-const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
+const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap, academicPeriod }) => {
   const { pushToast, setLoading } = useUIStore()
   const [anggotaEskul, setAnggotaEskul] = useState([])
   const [absensiData, setAbsensiData] = useState({})
-  const [selectedMonths, setSelectedMonths] = useState([new Date().getMonth()])
-  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear())
+  const periodMonths = academicPeriod?.months?.length ? academicPeriod.months : resolveAcademicPeriod().months
+  const currentMonthValue = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`
+  const defaultSelectedMonths = periodMonths.some((month) => month.value === currentMonthValue)
+    ? [currentMonthValue]
+    : (periodMonths[0]?.value ? [periodMonths[0].value] : [])
+  const [selectedMonths, setSelectedMonths] = useState(defaultSelectedMonths)
   const [viewMode, setViewMode] = useState('detail') // 'detail' atau 'rekap'
 
   // Generate tanggal-tanggal dalam bulan-bulan yang dipilih yang sesuai dengan hari eskul
@@ -314,7 +319,11 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
     const dates = []
     const hariEskulList = eskul.hari ? eskul.hari.split(',') : []
 
-    selectedMonths.forEach(month => {
+    selectedMonths.forEach(monthValue => {
+      const [yearText, monthText] = String(monthValue || '').split('-')
+      const selectedYear = parseInt(yearText, 10)
+      const month = parseInt(monthText, 10) - 1
+      if (!Number.isFinite(selectedYear) || !Number.isFinite(month)) return
       const daysInMonth = new Date(selectedYear, month + 1, 0).getDate()
 
       for (let day = 1; day <= daysInMonth; day++) {
@@ -325,7 +334,8 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
             date: new Date(selectedYear, month, day),
             dateStr: date.toISOString().split('T')[0],
             dayName,
-            month: month
+            month: month,
+            monthValue
           })
         }
       }
@@ -342,10 +352,13 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
     const loadAnggotaEskul = async () => {
       try {
         setLoading(true)
-        const { data, error } = await supabase
+        let anggotaQuery = supabase
           .from('ekskul_anggota')
           .select('*')
           .eq('ekskul_id', eskul.id)
+        if (academicPeriod?.tahunAjaran) anggotaQuery = anggotaQuery.eq('tahun_ajaran', academicPeriod.tahunAjaran)
+        if (academicPeriod?.semester) anggotaQuery = anggotaQuery.eq('semester', academicPeriod.semester)
+        const { data, error } = await anggotaQuery
 
         if (error) throw error
 
@@ -357,7 +370,7 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
         if (userIds.length > 0) {
           const { data: profileRows, error: profileError } = await supabase
             .from('profiles')
-            .select('id, nama, email, kelas, role')
+            .select('id, nama, email, kelas, role, angkatan')
             .in('id', userIds)
 
           if (profileError) throw profileError
@@ -372,12 +385,13 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
           const uid = String(anggota.user_id || '')
           const siswa = profileById[uid] || siswaMap[uid] || {}
           const fallbackName = uid ? `ID: ${uid.slice(0, 8)}...` : 'Tanpa User ID'
-          return {
-            id: anggota.id,
-            user_id: anggota.user_id,
-            nama: siswa.nama || siswa.email || fallbackName,
-            kelas: siswa.kelas || '—',
-            role: siswa.role || null,
+            return {
+              id: anggota.id,
+              user_id: anggota.user_id,
+              angkatan: anggota.angkatan || siswa.angkatan || null,
+              nama: siswa.nama || siswa.email || fallbackName,
+              kelas: siswa.kelas || '—',
+              role: siswa.role || null,
             created_at: anggota.created_at
           }
         }).sort((a, b) => a.kelas.localeCompare(b.kelas) || a.nama.localeCompare(b.nama))
@@ -394,7 +408,7 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
     if (eskul) {
       loadAnggotaEskul()
     }
-  }, [eskul, siswaMap, setLoading, pushToast])
+  }, [academicPeriod?.semester, academicPeriod?.tahunAjaran, eskul, siswaMap, setLoading, pushToast])
 
   // Load data absensi
   useEffect(() => {
@@ -403,11 +417,14 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
         if (anggotaEskul.length === 0) return
 
         const dateStrs = eskulDates.map(d => d.dateStr)
-        const { data, error } = await supabase
+        let absensiQuery = supabase
           .from('absensi_eskul')
           .select('*')
           .in('ekskul_id', [eskul.id])
           .in('tanggal', dateStrs)
+        if (academicPeriod?.tahunAjaran) absensiQuery = absensiQuery.eq('tahun_ajaran', academicPeriod.tahunAjaran)
+        if (academicPeriod?.semester) absensiQuery = absensiQuery.eq('semester', academicPeriod.semester)
+        const { data, error } = await absensiQuery
 
         if (error) throw error
 
@@ -425,7 +442,7 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
     }
 
     loadAbsensiData()
-  }, [anggotaEskul, eskulDates, eskul.id])
+  }, [academicPeriod?.semester, academicPeriod?.tahunAjaran, anggotaEskul, eskulDates, eskul.id])
 
   // === Hitung statistik kehadiran (TANPA menganggap kosong sebagai Alpha) ===
   const calculateStats = (userId) => {
@@ -463,6 +480,8 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
         .eq('ekskul_id', eskul.id)
         .eq('user_id', userId)
         .eq('tanggal', tanggal)
+        .eq('tahun_ajaran', academicPeriod?.tahunAjaran || '')
+        .eq('semester', academicPeriod?.semester || '')
         .single()
 
       if (existing) {
@@ -485,6 +504,9 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
             user_id: userId,
             tanggal,
             status,
+            tahun_ajaran: academicPeriod?.tahunAjaran || null,
+            semester: academicPeriod?.semester || null,
+            angkatan: anggotaEskul.find((anggota) => anggota.user_id === userId)?.angkatan || null,
             created_at: new Date().toISOString()
           })
 
@@ -509,9 +531,9 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
   // Fungsi untuk export ke Excel dengan format & warna
   const exportToExcel = async () => {
     try {
-      const periodLabel = `${selectedMonths
-        .map((month) => new Date(selectedYear, month).toLocaleDateString('id-ID', { month: 'long' }))
-        .join(', ')} ${selectedYear}`
+      const periodLabel = selectedMonths
+        .map((value) => periodMonths.find((month) => month.value === value)?.label || value)
+        .join(', ')
 
       const excelDataRekap = [
         ['REKAP ABSENSI EKSKUL', '', '', '', '', '', ''],
@@ -621,9 +643,7 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
       })
 
       const buffer = await workbook.xlsx.writeBuffer()
-      const fileName = `Rekap_Absensi_${eskul.nama.replace(/\s+/g, '_')}_${selectedMonths
-        .map((month) => month + 1)
-        .join('-')}_${selectedYear}.xlsx`
+      const fileName = `Rekap_Absensi_${eskul.nama.replace(/\s+/g, '_')}_${selectedMonths.join('-')}.xlsx`
 
       const blob = new Blob([buffer], {
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
@@ -825,16 +845,16 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
   }
 
   // Toggle bulan yang dipilih
-  const toggleMonth = (month) => {
+  const toggleMonth = (monthValue) => {
     setSelectedMonths(prev =>
-      prev.includes(month)
-        ? prev.filter(m => m !== month)
-        : [...prev, month]
+      prev.includes(monthValue)
+        ? prev.filter(m => m !== monthValue)
+        : [...prev, monthValue]
     )
   }
 
   const selectAllMonths = () => {
-    setSelectedMonths([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
+    setSelectedMonths(periodMonths.map((month) => month.value))
   }
 
   const clearAllMonths = () => {
@@ -865,33 +885,21 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap }) => {
 
           {/* Month Selector dan View Toggle */}
           <div className="flex items-center gap-4 mt-4 flex-wrap">
-            {/* Tahun */}
-            <select
-              value={selectedYear}
-              onChange={(e) => setSelectedYear(parseInt(e.target.value))}
-              className="bg-white/10 text-white border border-white/30 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-white/50"
-            >
-              {Array.from({ length: 5 }, (_, i) => {
-                const year = new Date().getFullYear() - 2 + i
-                return <option key={year} value={year} className="text-gray-900">{year}</option>
-              })}
-            </select>
-
             {/* Pilihan Bulan Multiple */}
             <div className="flex items-center gap-2">
               <span className="text-purple-100 text-sm font-medium">Bulan:</span>
               <div className="flex flex-wrap gap-1">
-                {Array.from({ length: 12 }, (_, i) => (
+                {periodMonths.map((month) => (
                   <button
-                    key={i}
-                    onClick={() => toggleMonth(i)}
+                    key={month.value}
+                    onClick={() => toggleMonth(month.value)}
                     className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
-                      selectedMonths.includes(i)
+                      selectedMonths.includes(month.value)
                         ? 'bg-white text-purple-700 shadow-md'
                         : 'bg-white/10 text-white hover:bg-white/20'
                     }`}
                   >
-                    {new Date(selectedYear, i).toLocaleDateString('id-ID', { month: 'short' })}
+                    {month.shortLabel || month.label}
                   </button>
                 ))}
               </div>
@@ -1191,6 +1199,7 @@ export default function JadwalGuru() {
 
   const [activeHari, setActiveHari] = useState('Hari Ini')
   const [currentTime, setCurrentTime] = useState(new Date())
+  const [activeAcademicPeriod, setActiveAcademicPeriod] = useState(() => resolveAcademicPeriod())
 
   const { todayStr, todayName } = React.useMemo(() => {
     const now = new Date()
@@ -1202,6 +1211,23 @@ export default function JadwalGuru() {
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000)
     return () => clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    const loadAcademicPeriod = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('settings')
+          .select('tahun_ajaran,semester_aktif,periode_mulai,periode_selesai,periode_ganjil_mulai,periode_ganjil_selesai,periode_genap_mulai,periode_genap_selesai')
+          .limit(1)
+          .maybeSingle()
+        if (error && error.code !== 'PGRST116') throw error
+        setActiveAcademicPeriod(resolveAcademicPeriod(data || {}))
+      } catch (error) {
+        console.warn('Gagal memuat periode akademik aktif:', error)
+      }
+    }
+    loadAcademicPeriod()
   }, [])
 
   // Map siswa
@@ -1330,11 +1356,14 @@ export default function JadwalGuru() {
         setWaliKelasSaya(waliData || [])
 
         // Jadwal
-        const { data: jadwalData } = await supabase
+        let jadwalQuery = supabase
           .from('jadwal')
           .select('*')
           .eq('guru_id', user.id)
           .order('jam_mulai', { ascending: true })
+        if (activeAcademicPeriod.tahunAjaran) jadwalQuery = jadwalQuery.eq('tahun_ajaran', activeAcademicPeriod.tahunAjaran)
+        if (activeAcademicPeriod.semester) jadwalQuery = jadwalQuery.eq('semester', activeAcademicPeriod.semester)
+        const { data: jadwalData } = await jadwalQuery
         setJadwal(jadwalData || [])
 
         // Ekskul
@@ -1345,10 +1374,13 @@ export default function JadwalGuru() {
 
         if (ekskulData) {
           const ekskulWithCount = await Promise.all(ekskulData.map(async (e) => {
-            const { count } = await supabase
+            let countQuery = supabase
               .from('ekskul_anggota')
               .select('*', { count: 'exact', head: true })
               .eq('ekskul_id', e.id)
+            if (activeAcademicPeriod.tahunAjaran) countQuery = countQuery.eq('tahun_ajaran', activeAcademicPeriod.tahunAjaran)
+            if (activeAcademicPeriod.semester) countQuery = countQuery.eq('semester', activeAcademicPeriod.semester)
+            const { count } = await countQuery
             return { ...e, jumlah_anggota: count || 0 }
           }))
           setEskulDiampu(ekskulWithCount)
@@ -1382,7 +1414,7 @@ export default function JadwalGuru() {
       }
     }
     fetchData()
-  }, [user?.id])
+  }, [activeAcademicPeriod.semester, activeAcademicPeriod.tahunAjaran, user?.id])
 
   const loadSemuaJamKosongHariIni = React.useCallback(async () => {
     if (!todayStr) return
@@ -2106,6 +2138,7 @@ export default function JadwalGuru() {
           eskul={selectedEskul}
           onClose={closeAbsensiOverlay}
           siswaMap={siswaMap}
+          academicPeriod={activeAcademicPeriod}
         />
       )}
 
