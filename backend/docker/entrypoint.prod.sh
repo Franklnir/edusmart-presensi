@@ -47,6 +47,32 @@ if [ -n "${RFID_MOSQUITTO_PASSWORD_FILE:-}" ] || [ -n "${RFID_MOSQUITTO_ACL_FILE
   chmod 0770 "$MOSQUITTO_PASSWORD_DIR" "$MOSQUITTO_ACL_DIR" || true
 fi
 
+set_php_fpm_pool_value() {
+  key="$1"
+  value="$2"
+  pool_conf="${PHP_FPM_POOL_CONF:-/usr/local/etc/php-fpm.d/www.conf}"
+
+  if [ ! -f "$pool_conf" ]; then
+    return 0
+  fi
+
+  if grep -Eq "^[;[:space:]]*${key}[[:space:]]*=" "$pool_conf"; then
+    sed -i -E "s|^[;[:space:]]*${key}[[:space:]]*=.*|${key} = ${value}|" "$pool_conf"
+  else
+    printf '\n%s = %s\n' "$key" "$value" >> "$pool_conf"
+  fi
+}
+
+if [ "${APP_ROLE:-web}" = "web" ]; then
+  set_php_fpm_pool_value "pm" "${PHP_FPM_PM:-dynamic}"
+  set_php_fpm_pool_value "pm.max_children" "${PHP_FPM_PM_MAX_CHILDREN:-12}"
+  set_php_fpm_pool_value "pm.start_servers" "${PHP_FPM_PM_START_SERVERS:-3}"
+  set_php_fpm_pool_value "pm.min_spare_servers" "${PHP_FPM_PM_MIN_SPARE_SERVERS:-2}"
+  set_php_fpm_pool_value "pm.max_spare_servers" "${PHP_FPM_PM_MAX_SPARE_SERVERS:-5}"
+  set_php_fpm_pool_value "pm.max_requests" "${PHP_FPM_PM_MAX_REQUESTS:-500}"
+  set_php_fpm_pool_value "catch_workers_output" "yes"
+fi
+
 # Remove stale caches that may reference dev-only providers
 # (e.g. laravel/pail) when container is built with --no-dev.
 rm -f \

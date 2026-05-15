@@ -129,6 +129,30 @@ Jika output kosong, image backend yang dipakai belum valid. Re-run GitHub Action
 deploy/release-prod.sh --ref <commit-or-tag> --pull-images
 ```
 
+### Preset VPS 4 Core / 4 GB
+
+Untuk VPS 4 core / 4 GB RAM, preset ini tetap menyalakan semua fitur: aplikasi utama, database, Redis, Nginx, Caddy, worker, scheduler, RFID/MQTT, dan WhatsApp/Evolution. Override `docker-compose.prod.4gb.yml` tetap memberi batas RAM/CPU agar service tambahan tidak mengambil resource berlebihan dari aplikasi utama.
+
+Isi ini di `.env.production` pada VPS:
+
+```dotenv
+EDUSMART_COMPOSE_FILES=docker-compose.prod.yml:docker-compose.prod.4gb.yml
+COMPOSE_PROFILES=rfid,whatsapp
+EDUSMART_APP_SERVICES="backend worker scheduler mosquitto mosquitto_reloader rfid_bridge evolution_postgres evolution_redis evolution_api nginx caddy"
+EDUSMART_CORE_HEALTH_SERVICES="postgres redis backend worker scheduler mosquitto rfid_bridge evolution_postgres evolution_redis evolution_api nginx caddy"
+REDIS_MAXMEMORY=384mb
+PHP_FPM_PM_MAX_CHILDREN=12
+AUTH_IP_RATE_LIMIT_PER_MINUTE=180
+```
+
+Lalu deploy seperti biasa:
+
+```bash
+deploy/release-prod.sh --ref <commit-or-tag> --pull-images
+```
+
+Catatan kapasitas: 4 GB masih bisa dipakai sebagai awal, tetapi saat siswa aktif sudah sering 300+ bersamaan atau WhatsApp/RFID mulai ramai, upgrade ke 8 GB akan jauh lebih lega dan lebih stabil.
+
 ## 3.0 Bootstrap Super Admin Fresh Install
 
 Untuk database fresh, isi env ini sebelum first deploy:
@@ -364,8 +388,9 @@ docker compose --env-file .env.production -f docker-compose.prod.yml restart cad
 - `SESSION_SECURE_COOKIE=true`
 - `SESSION_ENCRYPT=true`
 - `AUTH_RATE_LIMIT_PER_MINUTE=12`
-- `AUTH_IP_RATE_LIMIT_PER_MINUTE=90`
+- `AUTH_IP_RATE_LIMIT_PER_MINUTE=180`
 - `AUTH_LOGIN_MAX_ATTEMPTS=5`
+- `PHP_FPM_PM_MAX_CHILDREN=12` untuk VPS 4 GB sebagai titik awal aman
 - `STORAGE_WRITE_RATE_LIMIT_PER_MINUTE=90`
 - `STORAGE_READ_RATE_LIMIT_PER_MINUTE=180`
 - `STORAGE_GUEST_RATE_LIMIT_PER_MINUTE=60`

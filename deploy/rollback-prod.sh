@@ -11,6 +11,7 @@ RESTORE_DB_FILE=""
 SKIP_PRE_BACKUP="false"
 APP_SERVICES=(backend worker scheduler rfid_bridge nginx caddy)
 IMAGE_SERVICES=(backend nginx)
+COMPOSE_FILES=()
 
 usage() {
   cat <<'USAGE'
@@ -20,7 +21,7 @@ Usage:
 Options:
   --ref <git_ref>         Git ref rollback target (contoh: v1.2.3 atau commit SHA)
   --env-file <path>       Path env production (default: .env.production)
-  --compose-file <path>   Path docker compose file (default: docker-compose.prod.yml)
+  --compose-file <path>   Path docker compose file. Bisa diulang untuk override.
   --restore-db <file>     Restore DB dari file .sql / .sql.gz setelah checkout ref
   --skip-pre-backup       Lewati backup DB sebelum rollback
   -h, --help              Tampilkan bantuan
@@ -58,6 +59,63 @@ read_env_var() {
   ' "$file"
 }
 
+split_words() {
+  local value="$1"
+  # shellcheck disable=SC2206
+  SPLIT_WORDS_RESULT=($value)
+}
+
+split_colon_paths() {
+  local value="$1"
+  local old_ifs="$IFS"
+  IFS=':'
+  # shellcheck disable=SC2206
+  SPLIT_PATHS_RESULT=($value)
+  IFS="$old_ifs"
+}
+
+compose_args() {
+  local args=(--env-file "$ENV_FILE")
+  local file
+
+  for file in "${COMPOSE_FILES[@]}"; do
+    args+=(-f "$file")
+  done
+
+  printf '%s\0' "${args[@]}"
+}
+
+compose() {
+  local args=()
+  local item
+
+  while IFS= read -r -d '' item; do
+    args+=("$item")
+  done < <(compose_args)
+
+  docker compose "${args[@]}" "$@"
+}
+
+prune_missing_compose_files() {
+  local existing=()
+  local file
+
+  for file in "${COMPOSE_FILES[@]}"; do
+    if [[ -f "$file" ]]; then
+      existing+=("$file")
+    else
+      echo "[warn] compose file $file tidak ada di ref target, dilewati." >&2
+    fi
+  done
+
+  if [[ "${#existing[@]}" -eq 0 ]]; then
+    echo "Error: tidak ada compose file yang tersedia setelah checkout." >&2
+    exit 1
+  fi
+
+  COMPOSE_FILES=("${existing[@]}")
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --ref)
@@ -69,7 +127,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --compose-file)
-      COMPOSE_FILE="${2:-}"
+      COMPOSE_FILES+=("${2:-}")
       shift 2
       ;;
     --restore-db)
@@ -103,9 +161,32 @@ if [[ ! -f "$ENV_FILE" ]]; then
   exit 1
 fi
 
-if [[ ! -f "$COMPOSE_FILE" ]]; then
-  echo "Error: compose file tidak ditemukan: $COMPOSE_FILE" >&2
-  exit 1
+if [[ "${#COMPOSE_FILES[@]}" -eq 0 ]]; then
+  ENV_COMPOSE_FILES="${EDUSMART_COMPOSE_FILES:-$(read_env_var EDUSMART_COMPOSE_FILES "$ENV_FILE")}"
+  if [[ -n "$ENV_COMPOSE_FILES" ]]; then
+    split_colon_paths "$ENV_COMPOSE_FILES"
+    COMPOSE_FILES=("${SPLIT_PATHS_RESULT[@]}")
+  else
+    COMPOSE_FILES=("$COMPOSE_FILE")
+  fi
+fi
+
+for COMPOSE_FILE_ITEM in "${COMPOSE_FILES[@]}"; do
+  if [[ ! -f "$COMPOSE_FILE_ITEM" ]]; then
+    echo "Error: compose file tidak ditemukan: $COMPOSE_FILE_ITEM" >&2
+    exit 1
+  fi
+done
+
+ENV_COMPOSE_PROFILES="${COMPOSE_PROFILES:-$(read_env_var COMPOSE_PROFILES "$ENV_FILE")}"
+if [[ -n "$ENV_COMPOSE_PROFILES" ]]; then
+  export COMPOSE_PROFILES="$ENV_COMPOSE_PROFILES"
+fi
+
+ENV_APP_SERVICES="${EDUSMART_APP_SERVICES:-$(read_env_var EDUSMART_APP_SERVICES "$ENV_FILE")}"
+if [[ -n "$ENV_APP_SERVICES" ]]; then
+  split_words "$ENV_APP_SERVICES"
+  APP_SERVICES=("${SPLIT_WORDS_RESULT[@]}")
 fi
 
 if [[ -n "$RESTORE_DB_FILE" && ! -f "$RESTORE_DB_FILE" ]]; then
@@ -140,7 +221,7 @@ git rev-parse --verify "$TARGET_REF" >/dev/null
 if [[ "$SKIP_PRE_BACKUP" != "true" ]]; then
   echo "[2/7] Membuat backup DB sebelum rollback: $PRE_ROLLBACK_BACKUP"
   mkdir -p "$BACKUP_DIR"
-  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T postgres \
+  compose exec -T postgres \
     pg_dump --clean --if-exists --no-owner --no-privileges -U "$DB_USERNAME" "$DB_DATABASE" \
     | gzip >"$PRE_ROLLBACK_BACKUP"
 else
@@ -149,20 +230,21 @@ fi
 
 echo "[3/7] Checkout target ref: $TARGET_REF"
 git checkout "$TARGET_REF"
+prune_missing_compose_files
 
 echo "[4/7] Pull image registry & restart service produksi tanpa build lokal..."
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" pull \
+compose pull \
   "${IMAGE_SERVICES[@]}"
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-build \
+compose up -d --no-build \
   "${APP_SERVICES[@]}"
 
 if [[ -n "$RESTORE_DB_FILE" ]]; then
   echo "[5/7] Restore database dari: $RESTORE_DB_FILE"
   if [[ "$RESTORE_DB_FILE" == *.gz ]]; then
-    gunzip -c "$RESTORE_DB_FILE" | docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T postgres \
+    gunzip -c "$RESTORE_DB_FILE" | compose exec -T postgres \
       psql -v ON_ERROR_STOP=1 -U "$DB_USERNAME" "$DB_DATABASE"
   else
-    cat "$RESTORE_DB_FILE" | docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T postgres \
+    cat "$RESTORE_DB_FILE" | compose exec -T postgres \
       psql -v ON_ERROR_STOP=1 -U "$DB_USERNAME" "$DB_DATABASE"
   fi
 else
@@ -170,7 +252,7 @@ else
 fi
 
 echo "[6/7] Refresh cache aplikasi..."
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T backend php artisan optimize:clear >/dev/null
+compose exec -T backend php artisan optimize:clear >/dev/null
 
 echo "[7/7] Verifikasi health API..."
 curl -fsS "http://127.0.0.1:${HEALTH_PORT}/api/health" >/dev/null

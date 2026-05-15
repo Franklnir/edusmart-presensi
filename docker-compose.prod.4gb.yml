@@ -1,0 +1,116 @@
+# Override untuk VPS kecil 4 core / 4 GB RAM.
+# Pakai bersama docker-compose.prod.yml, bukan sebagai compose file tunggal.
+
+services:
+  postgres:
+    command:
+      - postgres
+      - -c
+      - max_connections=80
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - effective_cache_size=2GB
+      - -c
+      - work_mem=4MB
+      - -c
+      - maintenance_work_mem=128MB
+      - -c
+      - checkpoint_completion_target=0.9
+      - -c
+      - wal_buffers=16MB
+    mem_limit: 900m
+    cpus: "1.00"
+    pids_limit: 256
+
+  redis:
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --save
+      - "60"
+      - "1000"
+      - --requirepass
+      - ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      - --maxmemory
+      - ${REDIS_MAXMEMORY:-384mb}
+      - --maxmemory-policy
+      - noeviction
+    mem_limit: 512m
+    cpus: "0.40"
+    pids_limit: 128
+
+  backend:
+    mem_limit: 900m
+    cpus: "1.50"
+    pids_limit: 256
+
+  worker:
+    mem_limit: 512m
+    cpus: "0.75"
+    pids_limit: 160
+
+  scheduler:
+    mem_limit: 256m
+    cpus: "0.25"
+    pids_limit: 96
+
+  nginx:
+    mem_limit: 192m
+    cpus: "0.50"
+    pids_limit: 128
+
+  caddy:
+    mem_limit: 192m
+    cpus: "0.25"
+    pids_limit: 128
+
+  mosquitto_init:
+    profiles:
+      - rfid
+    mem_limit: 96m
+    cpus: "0.20"
+    pids_limit: 96
+
+  mosquitto:
+    profiles:
+      - rfid
+    mem_limit: 128m
+    cpus: "0.20"
+    pids_limit: 96
+
+  mosquitto_reloader:
+    profiles:
+      - rfid
+    mem_limit: 64m
+    cpus: "0.10"
+    pids_limit: 64
+
+  rfid_bridge:
+    profiles:
+      - rfid
+    mem_limit: 256m
+    cpus: "0.35"
+    pids_limit: 128
+
+  evolution_postgres:
+    profiles:
+      - whatsapp
+    mem_limit: 512m
+    cpus: "0.50"
+    pids_limit: 192
+
+  evolution_redis:
+    profiles:
+      - whatsapp
+    mem_limit: 256m
+    cpus: "0.25"
+    pids_limit: 96
+
+  evolution_api:
+    profiles:
+      - whatsapp
+    mem_limit: 768m
+    cpus: "0.75"
+    pids_limit: 256

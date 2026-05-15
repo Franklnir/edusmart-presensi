@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env.production}"
 COMPOSE_FILE="${COMPOSE_FILE:-$ROOT_DIR/docker-compose.prod.yml}"
+COMPOSE_FILES=()
 
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "[fail] env file tidak ditemukan: $ENV_FILE"
@@ -46,6 +47,37 @@ read_env_value() {
   fi
 
   printf '%s\n' "$value"
+}
+
+split_colon_paths() {
+  local value="$1"
+  local old_ifs="$IFS"
+  IFS=':'
+  # shellcheck disable=SC2206
+  SPLIT_PATHS_RESULT=($value)
+  IFS="$old_ifs"
+}
+
+compose_args() {
+  local args=(--env-file "$ENV_FILE")
+  local file
+
+  for file in "${COMPOSE_FILES[@]}"; do
+    args+=(-f "$file")
+  done
+
+  printf '%s\0' "${args[@]}"
+}
+
+compose() {
+  local args=()
+  local item
+
+  while IFS= read -r -d '' item; do
+    args+=("$item")
+  done < <(compose_args)
+
+  docker compose "${args[@]}" "$@"
 }
 
 host_from_url() {
@@ -97,6 +129,17 @@ check_container_state() {
   esac
 }
 
+check_optional_container_state() {
+  local container="$1"
+
+  if ! docker inspect "$container" >/dev/null 2>&1; then
+    echo "[skip] container opsional $container tidak aktif"
+    return 0
+  fi
+
+  check_container_state "$container"
+}
+
 check_admin_login() {
   local host="$1"
   [[ -z "${SMOKE_SUPER_ADMIN_EMAIL:-}" || -z "${SMOKE_SUPER_ADMIN_PASSWORD:-}" ]] && return 0
@@ -118,6 +161,25 @@ check_admin_login() {
     note_fail "login super admin ke ${host} gagal dengan status ${http_code}"
   fi
 }
+
+ENV_COMPOSE_FILES="${EDUSMART_COMPOSE_FILES:-$(read_env_value EDUSMART_COMPOSE_FILES)}"
+if [[ -n "$ENV_COMPOSE_FILES" ]]; then
+  split_colon_paths "$ENV_COMPOSE_FILES"
+  for file in "${SPLIT_PATHS_RESULT[@]}"; do
+    if [[ "$file" == /* ]]; then
+      COMPOSE_FILES+=("$file")
+    else
+      COMPOSE_FILES+=("$ROOT_DIR/$file")
+    fi
+  done
+else
+  COMPOSE_FILES=("$COMPOSE_FILE")
+fi
+
+ENV_COMPOSE_PROFILES="${COMPOSE_PROFILES:-$(read_env_value COMPOSE_PROFILES)}"
+if [[ -n "$ENV_COMPOSE_PROFILES" ]]; then
+  export COMPOSE_PROFILES="$ENV_COMPOSE_PROFILES"
+fi
 
 require_cmd docker
 require_cmd curl
@@ -143,8 +205,10 @@ check_https_health "${APP_URL%/}/api/health" "health utama"
 if [[ -n "$ADMIN_HOST" ]]; then
   check_https_health "https://${ADMIN_HOST}/api/health" "health admin"
 fi
-if [[ -n "$EVOLUTION_HOST" ]]; then
+if [[ -n "$EVOLUTION_HOST" ]] && docker inspect edusmart-evolution-api >/dev/null 2>&1; then
   check_https_health "https://${EVOLUTION_HOST}" "host Evolution publik"
+elif [[ -n "$EVOLUTION_HOST" ]]; then
+  echo "[skip] host Evolution publik tidak dicek karena service Evolution tidak aktif"
 fi
 
 echo
@@ -154,16 +218,16 @@ check_container_state "edusmart-nginx"
 check_container_state "edusmart-backend"
 check_container_state "edusmart-worker"
 check_container_state "edusmart-scheduler"
-check_container_state "edusmart-rfid-bridge"
 check_container_state "edusmart-postgres"
 check_container_state "edusmart-redis"
-check_container_state "edusmart-evolution-api"
-check_container_state "edusmart-evolution-postgres"
-check_container_state "edusmart-evolution-redis"
+check_optional_container_state "edusmart-rfid-bridge"
+check_optional_container_state "edusmart-evolution-api"
+check_optional_container_state "edusmart-evolution-postgres"
+check_optional_container_state "edusmart-evolution-redis"
 
 echo
 echo "== Compose Snapshot =="
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps
+compose ps
 
 echo
 echo "== Optional Login =="

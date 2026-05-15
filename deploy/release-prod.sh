@@ -14,6 +14,7 @@ RUN_EXTERNAL_SMOKE_CHECK="false"
 APP_SERVICES=(backend worker scheduler rfid_bridge nginx caddy)
 IMAGE_SERVICES=(backend nginx)
 CORE_HEALTH_SERVICES=(postgres redis backend worker scheduler nginx caddy)
+COMPOSE_FILES=()
 PREV_FULL_REF=""
 PREV_REF=""
 PREV_BACKEND_IMAGE=""
@@ -29,7 +30,7 @@ Usage:
 Options:
   --ref <git_ref>         Ref release (tag/branch/commit). Wajib.
   --env-file <path>       Path env file (default: .env.production)
-  --compose-file <path>   Path docker compose file (default: docker-compose.prod.yml)
+  --compose-file <path>   Path docker compose file. Bisa diulang untuk override.
   --skip-backup           Lewati backup DB sebelum release
   --skip-build            Legacy alias; build lokal production sudah dinonaktifkan
   --pull-images           Pull image dari registry sebelum deploy (default)
@@ -71,8 +72,89 @@ read_env_var() {
   ' "$file"
 }
 
+split_words() {
+  local value="$1"
+  # shellcheck disable=SC2206
+  SPLIT_WORDS_RESULT=($value)
+}
+
+split_colon_paths() {
+  local value="$1"
+  local old_ifs="$IFS"
+  IFS=':'
+  # shellcheck disable=SC2206
+  SPLIT_PATHS_RESULT=($value)
+  IFS="$old_ifs"
+}
+
+compose_args() {
+  local args=(--env-file "$ENV_FILE")
+  local file
+
+  for file in "${COMPOSE_FILES[@]}"; do
+    args+=(-f "$file")
+  done
+
+  printf '%s\0' "${args[@]}"
+}
+
 compose() {
-  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
+  local args=()
+  local item
+
+  while IFS= read -r -d '' item; do
+    args+=("$item")
+  done < <(compose_args)
+
+  docker compose "${args[@]}" "$@"
+}
+
+validate_compose_files_available() {
+  local file
+
+  for file in "${COMPOSE_FILES[@]}"; do
+    if [[ -f "$file" ]]; then
+      continue
+    fi
+
+    if [[ "$file" != /* ]] && git cat-file -e "$TARGET_REF:$file" 2>/dev/null; then
+      continue
+    fi
+
+    echo "Error: compose file tidak ditemukan: $file" >&2
+    exit 1
+  done
+}
+
+validate_compose_files_present() {
+  local file
+
+  for file in "${COMPOSE_FILES[@]}"; do
+    if [[ ! -f "$file" ]]; then
+      echo "Error: compose file tidak ditemukan setelah checkout: $file" >&2
+      exit 1
+    fi
+  done
+}
+
+prune_missing_compose_files() {
+  local existing=()
+  local file
+
+  for file in "${COMPOSE_FILES[@]}"; do
+    if [[ -f "$file" ]]; then
+      existing+=("$file")
+    else
+      echo "[rollback] compose file $file tidak ada di ref lama, dilewati." >&2
+    fi
+  done
+
+  if [[ "${#existing[@]}" -eq 0 ]]; then
+    echo "[rollback] tidak ada compose file yang tersedia untuk rollback." >&2
+    return 1
+  fi
+
+  COMPOSE_FILES=("${existing[@]}")
 }
 
 compose_service_image() {
@@ -154,6 +236,11 @@ rollback_application() {
     return "$checkout_status"
   fi
 
+  prune_missing_compose_files || {
+    set -e
+    return 1
+  }
+
   if [[ -n "$PREV_BACKEND_IMAGE" ]]; then
     export EDUSMART_BACKEND_IMAGE="$PREV_BACKEND_IMAGE"
   fi
@@ -209,7 +296,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --compose-file)
-      COMPOSE_FILE="${2:-}"
+      COMPOSE_FILES+=("${2:-}")
       shift 2
       ;;
     --skip-backup)
@@ -259,9 +346,31 @@ if [[ ! -f "$ENV_FILE" ]]; then
   exit 1
 fi
 
-if [[ ! -f "$COMPOSE_FILE" ]]; then
-  echo "Error: compose file tidak ditemukan: $COMPOSE_FILE" >&2
-  exit 1
+if [[ "${#COMPOSE_FILES[@]}" -eq 0 ]]; then
+  ENV_COMPOSE_FILES="${EDUSMART_COMPOSE_FILES:-$(read_env_var EDUSMART_COMPOSE_FILES "$ENV_FILE")}"
+  if [[ -n "$ENV_COMPOSE_FILES" ]]; then
+    split_colon_paths "$ENV_COMPOSE_FILES"
+    COMPOSE_FILES=("${SPLIT_PATHS_RESULT[@]}")
+  else
+    COMPOSE_FILES=("$COMPOSE_FILE")
+  fi
+fi
+
+ENV_COMPOSE_PROFILES="${COMPOSE_PROFILES:-$(read_env_var COMPOSE_PROFILES "$ENV_FILE")}"
+if [[ -n "$ENV_COMPOSE_PROFILES" ]]; then
+  export COMPOSE_PROFILES="$ENV_COMPOSE_PROFILES"
+fi
+
+ENV_APP_SERVICES="${EDUSMART_APP_SERVICES:-$(read_env_var EDUSMART_APP_SERVICES "$ENV_FILE")}"
+if [[ -n "$ENV_APP_SERVICES" ]]; then
+  split_words "$ENV_APP_SERVICES"
+  APP_SERVICES=("${SPLIT_WORDS_RESULT[@]}")
+fi
+
+ENV_CORE_HEALTH_SERVICES="${EDUSMART_CORE_HEALTH_SERVICES:-$(read_env_var EDUSMART_CORE_HEALTH_SERVICES "$ENV_FILE")}"
+if [[ -n "$ENV_CORE_HEALTH_SERVICES" ]]; then
+  split_words "$ENV_CORE_HEALTH_SERVICES"
+  CORE_HEALTH_SERVICES=("${SPLIT_WORDS_RESULT[@]}")
 fi
 
 if [[ -n "$(git status --porcelain)" ]]; then
@@ -282,14 +391,17 @@ fi
 echo "[1/9] Fetch refs terbaru..."
 git fetch --all --tags --prune
 git rev-parse --verify "$TARGET_REF" >/dev/null
+validate_compose_files_available
 
 PREV_FULL_REF="$(git rev-parse HEAD)"
 PREV_REF="$(git rev-parse --short HEAD)"
-PREV_BACKEND_IMAGE="$(compose_service_image backend)"
-PREV_NGINX_IMAGE="$(compose_service_image nginx)"
 
 echo "[2/9] Checkout release ref: $TARGET_REF"
 git checkout "$TARGET_REF"
+validate_compose_files_present
+
+PREV_BACKEND_IMAGE="$(compose_service_image backend)"
+PREV_NGINX_IMAGE="$(compose_service_image nginx)"
 
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 BACKUP_DIR="backups"
@@ -333,7 +445,11 @@ run_internal_health_checks
 if [[ "$RUN_EXTERNAL_SMOKE_CHECK" == "true" ]]; then
   DEPLOY_PHASE="external_smoke_check"
   echo "[8/9] Smoke check eksternal..."
-  ENV_FILE="$ROOT_DIR/$ENV_FILE" COMPOSE_FILE="$ROOT_DIR/$COMPOSE_FILE" "$ROOT_DIR/deploy/scripts/prod_smoke_check.sh"
+  SMOKE_ENV_FILE="$ENV_FILE"
+  if [[ "$SMOKE_ENV_FILE" != /* ]]; then
+    SMOKE_ENV_FILE="$ROOT_DIR/$SMOKE_ENV_FILE"
+  fi
+  ENV_FILE="$SMOKE_ENV_FILE" EDUSMART_COMPOSE_FILES="$(IFS=:; echo "${COMPOSE_FILES[*]}")" "$ROOT_DIR/deploy/scripts/prod_smoke_check.sh"
 fi
 
 DEPLOY_PHASE="done"

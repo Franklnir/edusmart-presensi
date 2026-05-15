@@ -96,6 +96,20 @@ Jika Google Client ID perlu masuk ke frontend, simpan sebagai secret:
 - Repo di VPS bisa `git fetch` dari GitHub.
 - VPS bisa `docker pull` dari `ghcr.io`.
 
+Untuk VPS 4 core / 4 GB, isi tambahan ini di `.env.production` VPS agar GitHub Actions tetap deploy lewat flow yang sama, memakai override resource kecil, dan tetap menyalakan RFID/MQTT serta WhatsApp/Evolution:
+
+```dotenv
+EDUSMART_COMPOSE_FILES=docker-compose.prod.yml:docker-compose.prod.4gb.yml
+COMPOSE_PROFILES=rfid,whatsapp
+EDUSMART_APP_SERVICES="backend worker scheduler mosquitto mosquitto_reloader rfid_bridge evolution_postgres evolution_redis evolution_api nginx caddy"
+EDUSMART_CORE_HEALTH_SERVICES="postgres redis backend worker scheduler mosquitto rfid_bridge evolution_postgres evolution_redis evolution_api nginx caddy"
+REDIS_MAXMEMORY=384mb
+PHP_FPM_PM_MAX_CHILDREN=12
+AUTH_IP_RATE_LIMIT_PER_MINUTE=180
+```
+
+Script deploy membaca nilai itu dari `.env.production`, jadi tidak perlu menambahkan argumen khusus di workflow GitHub.
+
 ## Alur Setelah Aktif
 
 ```bash
@@ -144,5 +158,5 @@ Jika deploy gagal sebelum update service, cek log job `Deploy To VPS` dan jalank
 ```bash
 cd /opt/edusmart-presensi
 git status --short
-docker compose --env-file .env.production -f docker-compose.prod.yml ps
+docker compose --env-file .env.production -f docker-compose.prod.yml -f docker-compose.prod.4gb.yml ps
 ```
