@@ -185,27 +185,50 @@ check_compose_service() {
   local service="$1"
   local container_id
   local state
+  local start_ts
+  local now_ts
+  local timeout
+  local last_state
 
-  container_id="$(compose ps -q "$service" 2>/dev/null || true)"
-  if [[ -z "$container_id" ]]; then
-    echo "[fail] service $service tidak punya container aktif" >&2
-    return 1
-  fi
+  timeout="${DEPLOY_HEALTH_WAIT_SECONDS:-180}"
+  start_ts="$(date +%s)"
+  last_state=""
 
-  state="$(docker inspect --format '{{.State.Status}}{{if .State.Health}}/{{.State.Health.Status}}{{end}}' "$container_id")"
-  case "$state" in
-    running|running/healthy)
-      echo "[ok] service $service: $state"
-      ;;
-    *)
-      echo "[fail] service $service: $state" >&2
+  while true; do
+    container_id="$(compose ps -q "$service" 2>/dev/null || true)"
+    if [[ -n "$container_id" ]]; then
+      state="$(docker inspect --format '{{.State.Status}}{{if .State.Health}}/{{.State.Health.Status}}{{end}}' "$container_id" 2>/dev/null || true)"
+    else
+      state="missing"
+    fi
+
+    case "$state" in
+      running|running/healthy)
+        echo "[ok] service $service: $state"
+        return 0
+        ;;
+    esac
+
+    if [[ "$state" != "$last_state" ]]; then
+      echo "[wait] service $service: $state"
+      last_state="$state"
+    fi
+
+    now_ts="$(date +%s)"
+    if (( now_ts - start_ts >= timeout )); then
+      echo "[fail] service $service tidak sehat setelah ${timeout}s: $state" >&2
       return 1
-      ;;
-  esac
+    fi
+
+    sleep 5
+  done
 }
 
 run_internal_health_checks() {
   local response
+  local start_ts
+  local now_ts
+  local timeout
 
   echo "      - cek container inti"
   for service in "${CORE_HEALTH_SERVICES[@]}"; do
@@ -213,11 +236,18 @@ run_internal_health_checks() {
   done
 
   echo "      - cek endpoint API lokal"
-  response="$(curl -fsS "http://127.0.0.1:${HEALTH_PORT}/api/health")"
-  if ! printf '%s' "$response" | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"'; then
-    echo "[fail] response /api/health tidak valid: $response" >&2
-    return 1
-  fi
+  timeout="${DEPLOY_HEALTH_WAIT_SECONDS:-180}"
+  start_ts="$(date +%s)"
+  response=""
+  until response="$(curl -fsS "http://127.0.0.1:${HEALTH_PORT}/api/health" 2>/dev/null)" \
+    && printf '%s' "$response" | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"'; do
+    now_ts="$(date +%s)"
+    if (( now_ts - start_ts >= timeout )); then
+      echo "[fail] /api/health belum valid setelah ${timeout}s: ${response:-no response}" >&2
+      return 1
+    fi
+    sleep 5
+  done
   echo "[ok] /api/health status ok"
 
   echo "      - cek koneksi Laravel ke database"
