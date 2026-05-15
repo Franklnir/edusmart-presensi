@@ -169,6 +169,18 @@ compose_service_image() {
   docker inspect --format '{{.Config.Image}}' "$container_id" 2>/dev/null || true
 }
 
+compose_service_state() {
+  local service="$1"
+  local container_id
+  container_id="$(compose ps -q "$service" 2>/dev/null || true)"
+  if [[ -z "$container_id" ]]; then
+    printf '%s\n' ""
+    return 0
+  fi
+
+  docker inspect --format '{{.State.Status}}' "$container_id" 2>/dev/null || true
+}
+
 check_compose_service() {
   local service="$1"
   local container_id
@@ -408,11 +420,20 @@ BACKUP_DIR="backups"
 RELEASE_BACKUP="${BACKUP_DIR}/pre-release-${TIMESTAMP}.sql.gz"
 
 if [[ "$SKIP_BACKUP" != "true" ]]; then
-  echo "[3/9] Backup DB sebelum deploy: $RELEASE_BACKUP"
-  mkdir -p "$BACKUP_DIR"
-  compose exec -T postgres \
-    pg_dump --clean --if-exists --no-owner --no-privileges -U "$DB_USERNAME" "$DB_DATABASE" \
-    | gzip >"$RELEASE_BACKUP"
+  POSTGRES_STATE="$(compose_service_state postgres)"
+  if [[ -z "$POSTGRES_STATE" ]]; then
+    echo "[3/9] Skip backup DB: service postgres belum ada di VPS ini (first deploy)."
+  elif [[ "$POSTGRES_STATE" != "running" ]]; then
+    echo "Error: service postgres ada tapi statusnya '$POSTGRES_STATE'. Backup DB dibatalkan agar deploy tidak lanjut tanpa backup." >&2
+    echo "       Perbaiki postgres lebih dulu atau jalankan manual dengan --skip-backup jika ini benar-benar initial deploy." >&2
+    exit 1
+  else
+    echo "[3/9] Backup DB sebelum deploy: $RELEASE_BACKUP"
+    mkdir -p "$BACKUP_DIR"
+    compose exec -T postgres \
+      pg_dump --clean --if-exists --no-owner --no-privileges -U "$DB_USERNAME" "$DB_DATABASE" \
+      | gzip >"$RELEASE_BACKUP"
+  fi
 else
   echo "[3/9] Skip backup DB (--skip-backup)"
 fi
