@@ -229,27 +229,31 @@ jobs:
         run: |
           set -euo pipefail
           port="${VPS_PORT:-22}"
-          remote_dir="$(printf '%q' "$VPS_APP_DIR")"
-          release_ref="$(printf '%q' "$RELEASE_REF")"
-          backend_image="$(printf '%q' "$EDUSMART_BACKEND_IMAGE")"
-          nginx_image="$(printf '%q' "$EDUSMART_NGINX_IMAGE")"
-          ghcr_username="$(printf '%q' "${GHCR_USERNAME:-}")"
-          ghcr_token="$(printf '%q' "${GHCR_TOKEN:-}")"
 
-          ssh -i ~/.ssh/edusmart_deploy_key -p "$port" \
+          {
+            printf 'set -Eeuo pipefail\n'
+            printf 'REMOTE_DIR=%q\n' "$VPS_APP_DIR"
+            printf 'RELEASE_REF=%q\n' "$RELEASE_REF"
+            printf 'BACKEND_IMAGE=%q\n' "$EDUSMART_BACKEND_IMAGE"
+            printf 'NGINX_IMAGE=%q\n' "$EDUSMART_NGINX_IMAGE"
+            printf 'GHCR_USERNAME=%q\n' "${GHCR_USERNAME:-}"
+            printf 'GHCR_TOKEN=%q\n' "${GHCR_TOKEN:-}"
+            printf '%s\n' \
+              'cd "$REMOTE_DIR"' \
+              'if [ -n "$GHCR_USERNAME" ] && [ -n "$GHCR_TOKEN" ]; then' \
+              '  printf "%s" "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin' \
+              'fi' \
+              'unset GHCR_TOKEN' \
+              'git fetch --all --tags --prune' \
+              'git rev-parse --verify "$RELEASE_REF" >/dev/null' \
+              'tmp_script="$(mktemp)"' \
+              'trap '"'"'rm -f "$tmp_script"'"'"' EXIT' \
+              'git show "$RELEASE_REF":deploy/release-prod.sh > "$tmp_script"' \
+              'chmod +x "$tmp_script"' \
+              'EDUSMART_BACKEND_IMAGE="$BACKEND_IMAGE" EDUSMART_NGINX_IMAGE="$NGINX_IMAGE" EDUSMART_ROOT_DIR="$REMOTE_DIR" "$tmp_script" --ref "$RELEASE_REF" --pull-images'
+          } | ssh -i ~/.ssh/edusmart_deploy_key -p "$port" \
             -o BatchMode=yes \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
             "$VPS_USER@$VPS_HOST" \
-            "set -Eeuo pipefail
-             cd $remote_dir
-             if [ -n $ghcr_username ] && [ -n $ghcr_token ]; then
-               printf '%s' $ghcr_token | docker login ghcr.io -u $ghcr_username --password-stdin
-             fi
-             git fetch --all --tags --prune
-             git rev-parse --verify $release_ref >/dev/null
-             tmp_script=\"\$(mktemp)\"
-             trap 'rm -f \"\$tmp_script\"' EXIT
-             git show $release_ref:deploy/release-prod.sh > \"\$tmp_script\"
-             chmod +x \"\$tmp_script\"
-             EDUSMART_BACKEND_IMAGE=$backend_image EDUSMART_NGINX_IMAGE=$nginx_image EDUSMART_ROOT_DIR=$remote_dir \"\$tmp_script\" --ref $release_ref --pull-images"
+            "bash -s"
