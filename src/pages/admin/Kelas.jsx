@@ -6,6 +6,7 @@ import { queryClient, queryKeys } from '../../lib/queryClient'
 import { useUIStore } from '../../store/useUIStore'
 import PasswordInput from '../../components/PasswordInput'
 import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveFilter'
+import { Trash2 } from 'lucide-react'
 import { verifyCurrentUserPassword as verifyPassword } from '../../services/authService'
 import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 import { loadExcelJsBrowser } from '../../utils/excelBrowser'
@@ -1478,7 +1479,33 @@ export default function AKelas({ initialTab = 'kelas' }) {
   }
 
   async function hapusKelas(id) {
-    if (!confirmDelete('Yakin mau hapus kelas? Snapshot kelas, struktur, dan jadwal akan disimpan di riwayat pemulihan.')) return
+    const targetClass = kelas.find((item) => item.id === id)
+    const className = String(targetClass?.nama || targetClass?.id || id || 'kelas ini').toUpperCase()
+    const loadedSelectedStudents = id === kelasSelected && selectedStudentsLoadedKey === buildStudentDetailKey(id)
+    const selectedStudentCount = loadedSelectedStudents ? siswaDiKelasTerpilih.length : null
+
+    if (selectedStudentCount > 0) {
+      pushToast('error', `Kelas ${className} masih digunakan oleh ${selectedStudentCount} siswa aktif. Pindahkan siswa terlebih dahulu, baru hapus kelasnya.`, {
+        title: 'Kelas masih dipakai siswa',
+        duration: 7000
+      })
+      return
+    }
+
+    const confirmed = await requestConfirmation({
+      title: 'Hapus kelas kosong?',
+      message: `Kelas ${className} akan dihapus dari daftar aktif dan snapshot-nya disimpan ke riwayat pemulihan.`,
+      confirmText: 'Hapus kelas',
+      cancelText: 'Batal',
+      tone: 'danger',
+      details: [
+        'Kelas hanya bisa dihapus jika tidak ada siswa aktif yang masih memakai kelas tersebut.',
+        'Struktur kelas dan jadwal akan disimpan sehingga kelas kosong masih bisa dipulihkan dari riwayat.',
+        'Data historis seperti absensi, tugas, dan quiz tidak ikut dihapus.'
+      ]
+    })
+
+    if (!confirmed) return
 
     try {
       setLoading(true)
@@ -1497,7 +1524,15 @@ export default function AKelas({ initialTab = 'kelas' }) {
       }
     } catch (error) {
       console.error('Error deleting kelas:', error)
-      pushToast('error', error?.message || 'Gagal menghapus kelas')
+      const title = error?.code === 'class_has_students'
+        ? 'Kelas masih dipakai siswa'
+        : error?.status === 409
+          ? 'Kelas belum bisa dihapus'
+          : 'Gagal menghapus kelas'
+      pushToast('error', error?.message || 'Gagal menghapus kelas', {
+        title,
+        duration: 7000
+      })
     } finally {
       setLoading(false)
     }
@@ -2494,19 +2529,19 @@ export default function AKelas({ initialTab = 'kelas' }) {
                           <span className="text-xs opacity-75 mt-1">Grade {k.grade}</span>
                           <span className="text-[11px] opacity-75">Angkatan masuk {k.angkatan || '-'}</span>
                         </button>
-                        
-                        {/* Delete button (only visible on hover) */}
+
                         <button
-                          className="absolute -top-2 -right-2 p-1.5 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-all duration-200 hover:bg-red-600 shadow-lg z-10"
+                          type="button"
+                          className="absolute -right-2 -top-2 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full border border-rose-200 bg-white text-rose-600 shadow-lg transition hover:bg-rose-50 hover:text-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-300 disabled:cursor-not-allowed disabled:opacity-50"
                           onClick={(e) => {
                             e.stopPropagation()
                             hapusKelas(k.id)
                           }}
-                          title="Hapus kelas"
+                          disabled={loading}
+                          title="Hapus kelas kosong"
+                          aria-label={`Hapus kelas ${k.nama || k.id}`}
                         >
-                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                          </svg>
+                          <Trash2 className="h-4 w-4" />
                         </button>
                       </div>
                     ))}

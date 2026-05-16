@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -53,14 +54,18 @@ class ClassHistoryController extends ApiController
         $students = $studentQuery->limit(4)->get(['id', 'nama', 'kelas']);
         $studentCount = $this->countRows('profiles', 'kelas', $classId, $tenantId);
         if ($studentCount > 0) {
-            $names = $students->take(3)->pluck('nama')->filter()->implode(', ');
+            $studentNames = $students->take(3)->pluck('nama')->filter()->values();
+            $names = $studentNames->implode(', ');
             $remaining = $studentCount > 3 ? ' dan '.($studentCount - 3).' lainnya' : '';
+            $message = 'Tidak bisa hapus: kelas masih digunakan oleh '.$studentCount.' siswa. '
+                .trim($names.$remaining).'. Pindahkan siswa terlebih dahulu.';
 
-            return $this->deny(
-                'Tidak bisa hapus: kelas masih digunakan oleh '.$studentCount.' siswa. '
-                .trim($names.$remaining).'. Pindahkan siswa terlebih dahulu.',
-                409
-            );
+            return response()->json([
+                'error' => $message,
+                'code' => 'class_has_students',
+                'student_count' => $studentCount,
+                'student_names' => $studentNames->all(),
+            ], 409);
         }
 
         try {
@@ -127,6 +132,16 @@ class ClassHistoryController extends ApiController
                 return DB::table('kelas_deleted_histories')->where('id', $historyId)->first();
             });
         } catch (HttpExceptionInterface $exception) {
+            throw $exception;
+        } catch (QueryException $exception) {
+            $sqlState = (string) ($exception->errorInfo[0] ?? '');
+            if ($sqlState === '23503') {
+                return response()->json([
+                    'error' => 'Tidak bisa hapus: kelas masih dipakai data terkait. Pindahkan atau bersihkan data yang masih terhubung ke kelas ini terlebih dahulu.',
+                    'code' => 'class_has_related_records',
+                ], 409);
+            }
+
             throw $exception;
         }
 
