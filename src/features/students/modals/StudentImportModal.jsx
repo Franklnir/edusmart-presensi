@@ -4,6 +4,10 @@ import {
   IMPORT_SOURCE_LABEL,
   SISWA_IMPORT_EXAMPLE_COLUMNS,
 } from '../utils/studentFormatters'
+import {
+  SPREADSHEET_IMPORT_ACCEPT,
+  SPREADSHEET_IMPORT_FORMAT_LABEL,
+} from '../../../utils/spreadsheet'
 
 function SourceButton({ active, onClick, children }) {
   return (
@@ -355,7 +359,7 @@ function StudentImportModal({
                 <div className="space-y-3">
                   <input
                     type="file"
-                    accept=".xlsx,.csv"
+                    accept={SPREADSHEET_IMPORT_ACCEPT}
                     onChange={(e) => onImportFileChange(e.target.files?.[0])}
                     className="block w-full text-sm text-gray-700 file:mr-4 file:rounded-lg file:border-0 file:bg-blue-50 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-blue-700 hover:file:bg-blue-100"
                     disabled={importLoading || !kelasList.length}
@@ -400,7 +404,7 @@ function StudentImportModal({
                   <li>Login awal siswa: pakai <b>NIS</b> dan password sementara di atas.</li>
                   <li>Nama kelas harus mengarah ke kelas yang sudah dibuat di website ini.</li>
                   <li>Huruf besar dan kecil tidak ngaruh, jadi <b>x ipa 1</b> dan <b>X IPA 1</b> akan dianggap sama.</li>
-                  <li>Upload file Excel yang didukung adalah <b>.xlsx</b>. Kalau file masih <b>.xls</b>, simpan ulang dulu sebagai <b>.xlsx</b> atau <b>.csv</b>.</li>
+                  <li>Format upload yang didukung: <b>{SPREADSHEET_IMPORT_FORMAT_LABEL}</b>.</li>
                   <li>Setelah login, siswa wajib ganti password. Email bisa dilengkapi nanti kalau memang belum ada.</li>
                 </ul>
               </div>

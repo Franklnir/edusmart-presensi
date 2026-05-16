@@ -1,6 +1,9 @@
 import { loadExcelJsBrowser } from './excelBrowser'
+import { loadSheetJsBrowser } from './sheetjsBrowser'
 
 const DEFAULT_SHEET_NAME = 'Sheet1'
+export const SPREADSHEET_IMPORT_ACCEPT = '.xlsx,.xls,.xlsm,.xlsb,.ods,.fods,.xml,.csv,.tsv,.txt,.html,.htm'
+export const SPREADSHEET_IMPORT_FORMAT_LABEL = '.xlsx, .xls, .xlsm, .xlsb, .ods, .csv, .tsv, .txt, atau tabel HTML'
 
 const pad2 = (value) => String(value).padStart(2, '0')
 
@@ -140,6 +143,10 @@ export const parseExcelSerialDate = (serialValue) => {
 export const readRowsFromCsvText = (csvText) => {
   const delimiter = detectCsvDelimiter(csvText)
   const matrix = parseCsvMatrix(csvText, delimiter)
+  return matrixToRows(matrix)
+}
+
+const matrixToRows = (matrix = []) => {
   if (!matrix.length) return []
 
   const headers = buildUniqueHeaders(matrix[0])
@@ -213,23 +220,7 @@ const htmlTableToRows = (htmlText) => {
     .map((tr) => Array.from(tr.querySelectorAll('th,td')).map((cell) => cell.textContent?.trim() || ''))
     .filter((row) => row.some((cell) => !isEmptyValue(cell)))
 
-  if (!matrix.length) return []
-
-  const headers = buildUniqueHeaders(matrix[0])
-  const rows = []
-  for (let rowIdx = 1; rowIdx < matrix.length; rowIdx += 1) {
-    const sourceRow = matrix[rowIdx] || []
-    const hasData = sourceRow.some((cell) => !isEmptyValue(cell))
-    if (!hasData) continue
-
-    const row = {}
-    headers.forEach((header, colIdx) => {
-      row[header] = sourceRow[colIdx] ?? ''
-    })
-    rows.push(row)
-  }
-
-  return rows
+  return matrixToRows(matrix)
 }
 
 const readRowsFromTextSpreadsheet = (text) => {
@@ -252,6 +243,15 @@ const excelReadErrorMessage = (error) => {
   }
 
   return 'File Excel tidak bisa dibaca. Pastikan formatnya .xlsx atau .csv yang valid.'
+}
+
+const sheetJsReadErrorMessage = (error) => {
+  const message = String(error?.message || '')
+  if (/password|encrypted/i.test(message)) {
+    return 'File spreadsheet terkunci password atau terenkripsi. Buka file, hilangkan proteksi/password, lalu upload ulang.'
+  }
+
+  return 'File spreadsheet tidak bisa dibaca. Pastikan file tidak rusak dan formatnya termasuk format spreadsheet yang didukung.'
 }
 
 const worksheetToRows = (worksheet) => {
@@ -300,6 +300,49 @@ const worksheetToRows = (worksheet) => {
   return out
 }
 
+const excelJsWorkbookToRows = (workbook) => {
+  const worksheets = workbook?.worksheets || []
+  for (const worksheet of worksheets) {
+    const rows = worksheetToRows(worksheet)
+    if (rows.length) return rows
+  }
+
+  return []
+}
+
+const sheetJsWorksheetToRows = (worksheet, XLSX) => {
+  if (!worksheet) return []
+
+  const matrix = XLSX.utils.sheet_to_json(worksheet, {
+    header: 1,
+    raw: true,
+    defval: '',
+    blankrows: false,
+  })
+
+  return matrixToRows(matrix)
+}
+
+const sheetJsWorkbookToRows = (workbook, XLSX) => {
+  const sheetNames = workbook?.SheetNames || []
+  for (const sheetName of sheetNames) {
+    const rows = sheetJsWorksheetToRows(workbook.Sheets?.[sheetName], XLSX)
+    if (rows.length) return rows
+  }
+
+  return []
+}
+
+const readRowsWithSheetJs = async (buffer) => {
+  const XLSX = await loadSheetJsBrowser()
+  const workbook = XLSX.read(buffer, {
+    type: 'array',
+    cellDates: true,
+  })
+
+  return sheetJsWorkbookToRows(workbook, XLSX)
+}
+
 export const readRowsFromSpreadsheetFile = async (file) => {
   const name = String(file?.name || '').toLowerCase()
 
@@ -313,17 +356,29 @@ export const readRowsFromSpreadsheetFile = async (file) => {
     throw new Error('File kosong. Upload file .xlsx atau .csv yang sudah berisi data.')
   }
 
-  if (isOldExcelBuffer(buffer) || (name.endsWith('.xls') && !name.endsWith('.xlsx'))) {
-    throw new Error('File Excel .xls lama belum didukung. Buka file lalu Save As sebagai Excel Workbook (.xlsx) atau .csv.')
-  }
-
   if (!isZipBuffer(buffer)) {
     if (isLikelyTextBuffer(buffer)) {
       const text = decodeBufferText(buffer)
+      if (looksLikeHtml(text)) {
+        return readRowsFromTextSpreadsheet(text)
+      }
+
+      try {
+        const rows = await readRowsWithSheetJs(buffer)
+        if (rows.length) return rows
+      } catch { }
+
       return readRowsFromTextSpreadsheet(text)
     }
 
-    throw new Error('File bukan format Excel .xlsx yang valid. Upload file .xlsx asli atau .csv, bukan file yang hanya diganti ekstensinya.')
+    try {
+      return await readRowsWithSheetJs(buffer)
+    } catch (error) {
+      if (isOldExcelBuffer(buffer) || (name.endsWith('.xls') && !name.endsWith('.xlsx'))) {
+        throw new Error('File Excel .xls lama tidak berhasil dibaca. Pastikan file tidak rusak atau export ulang sebagai .xlsx/.csv.')
+      }
+      throw new Error(sheetJsReadErrorMessage(error))
+    }
   }
 
   const ExcelJS = await loadExcelJsBrowser()
@@ -332,15 +387,24 @@ export const readRowsFromSpreadsheetFile = async (file) => {
   try {
     await workbook.xlsx.load(buffer)
   } catch (error) {
-    throw new Error(excelReadErrorMessage(error))
+    try {
+      return await readRowsWithSheetJs(buffer)
+    } catch {
+      throw new Error(excelReadErrorMessage(error))
+    }
   }
 
-  const worksheet = workbook?.worksheets?.[0]
-  if (!worksheet) {
-    throw new Error('Sheet pertama tidak ditemukan. Pastikan file berisi minimal 1 sheet yang terisi.')
+  const rows = excelJsWorkbookToRows(workbook)
+  if (rows.length) {
+    return rows
   }
 
-  return worksheetToRows(worksheet)
+  try {
+    const fallbackRows = await readRowsWithSheetJs(buffer)
+    if (fallbackRows.length) return fallbackRows
+  } catch { }
+
+  throw new Error('Sheet berisi data tidak ditemukan. Pastikan file memiliki minimal 1 sheet yang berisi header dan data.')
 }
 
 const toCellText = (value) => {

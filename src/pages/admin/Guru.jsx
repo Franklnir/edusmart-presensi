@@ -5,7 +5,11 @@ import { formatDate } from '../../lib/time'
 import { useUIStore } from '../../store/useUIStore'
 import ProfileAvatar from '../../components/ProfileAvatar'
 import PasswordInput from '../../components/PasswordInput'
-import { exportRowsToExcel } from '../../utils/spreadsheet'
+import {
+  exportRowsToExcel,
+  SPREADSHEET_IMPORT_ACCEPT,
+  SPREADSHEET_IMPORT_FORMAT_LABEL,
+} from '../../utils/spreadsheet'
 import { formatPresenceText, isPresenceOnline, presenceBadgeClassName } from '../../utils/presence'
 import {
   buildAliasMap,
@@ -1790,7 +1794,7 @@ export default function AGuru() {
                   <div className="space-y-3">
                     <input
                       type="file"
-                      accept=".xlsx,.csv"
+                      accept={SPREADSHEET_IMPORT_ACCEPT}
                       onChange={(e) => handleImportFileChange(e.target.files?.[0])}
                       className="block w-full text-sm text-gray-700 file:mr-4 file:rounded-lg file:border-0 file:bg-blue-50 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-blue-700 hover:file:bg-blue-100"
                       disabled={importLoading || !kelasList.length}
@@ -1834,7 +1838,7 @@ export default function AGuru() {
                     <li>NIP/NUPTK dipakai sebagai nomor induk guru, bukan username login awal di sistem ini.</li>
                     <li>Nama kelas harus mengarah ke kelas yang sudah dibuat di website ini.</li>
                     <li>Huruf besar dan kecil tidak ngaruh, jadi <b>x a mipa</b> dan <b>X A MIPA</b> akan dianggap sama.</li>
-                    <li>Upload file Excel yang didukung adalah <b>.xlsx</b>. Kalau file masih <b>.xls</b>, simpan ulang dulu sebagai <b>.xlsx</b> atau <b>.csv</b>.</li>
+                    <li>Format upload yang didukung: <b>{SPREADSHEET_IMPORT_FORMAT_LABEL}</b>.</li>
                     <li>Setelah login, guru wajib mengganti password.</li>
                   </ul>
                 </div>
