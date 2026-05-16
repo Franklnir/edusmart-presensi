@@ -735,19 +735,19 @@ class AdminController extends ApiController
 
     public function applyAcademicPeriod(Request $request)
     {
-        if (! $this->isAdmin($request)) {
+        if ($this->isAdmin($request) === false) {
             return $this->deny();
         }
 
         $tenantId = $this->tenantId($request);
-        if (! $tenantId) {
+        if ($tenantId === null || $tenantId === '') {
             return $this->deny('Tenant tidak valid', 400);
         }
 
         $payload = $request->all();
         $tahunAjaran = AcademicPeriod::normalizeAcademicYear($payload['tahun_ajaran'] ?? null);
         $semester = AcademicPeriod::normalizeSemester($payload['semester_aktif'] ?? null);
-        if (! $tahunAjaran || ! $semester) {
+        if ($tahunAjaran === null || $semester === null) {
             return $this->deny('Tahun ajaran atau semester belum valid.', 422);
         }
 
@@ -803,7 +803,7 @@ class AdminController extends ApiController
         $yearChanged = $previousYear !== $tahunAjaran;
         $autoRollover = filter_var($payload['auto_rollover'] ?? false, FILTER_VALIDATE_BOOLEAN);
 
-        if ($yearChanged && ! $autoRollover) {
+        if ($yearChanged && $autoRollover === false) {
             return $this->deny('Perubahan tahun ajaran harus dijalankan melalui rollover akademik.', 409);
         }
 
@@ -1958,7 +1958,7 @@ class AdminController extends ApiController
 
     private function saveAcademicPeriodSettings(string $tenantId, ?object $existing, array $payload): ?object
     {
-        if (! Schema::hasTable('settings')) {
+        if (Schema::hasTable('settings') === false) {
             throw new \RuntimeException('Tabel settings belum tersedia.');
         }
 
@@ -2001,7 +2001,7 @@ class AdminController extends ApiController
 
     private function rolloverAcademicYearData(string $tenantId, array $period, string $previousYear): array
     {
-        if (! Schema::hasTable('kelas') || ! Schema::hasTable('profiles')) {
+        if (Schema::hasTable('kelas') === false || Schema::hasTable('profiles') === false) {
             return [
                 'promoted_students' => 0,
                 'alumni_students' => 0,
@@ -2020,7 +2020,7 @@ class AdminController extends ApiController
         $classInfoById = [];
         $classesByGradeSuffix = [];
         foreach ($classRows as $row) {
-            if (! $this->isActiveClassRow($row)) {
+            if ($this->isActiveClassRow($row) === false) {
                 continue;
             }
 
@@ -2054,32 +2054,35 @@ class AdminController extends ApiController
         $targetGradeByClass = [];
         $alumniIds = [];
         $affectedClassIds = [];
+        $studentClassSnapshots = [];
+        $clearedClassStudentIds = [];
         $skippedStudents = 0;
         $missingTargets = [];
 
         foreach ($studentRows as $student) {
             $studentId = trim((string) ($student->id ?? ''));
             $classId = trim((string) ($student->kelas ?? ''));
-            if ($studentId === '' || $classId === '' || ! isset($classInfoById[$classId])) {
-                $skippedStudents++;
+            if ($studentId === '' || $classId === '' || isset($classInfoById[$classId]) === false) {
+                $skippedStudents += 1;
                 continue;
             }
 
             $currentClass = $classInfoById[$classId];
             $nextGrade = $this->nextAcademicGrade($currentClass['grade']);
             if ($nextGrade === null) {
-                $skippedStudents++;
+                $skippedStudents += 1;
                 continue;
             }
 
             $affectedClassIds[$classId] = true;
             if ($nextGrade === 'ALUMNI') {
                 $alumniIds[] = $studentId;
+                $clearedClassStudentIds[] = $studentId;
                 continue;
             }
 
             $targetClass = $classesByGradeSuffix[$nextGrade][$currentClass['suffix']] ?? null;
-            if (! $targetClass) {
+            if ($targetClass === null) {
                 $missingTargets[$nextGrade.' '.$currentClass['suffix']] = true;
                 continue;
             }
@@ -2087,9 +2090,10 @@ class AdminController extends ApiController
             $updatesByTarget[$targetClass['id']][] = $studentId;
             $targetGradeByClass[$targetClass['id']] = $nextGrade;
             $affectedClassIds[$targetClass['id']] = true;
+            $studentClassSnapshots[$studentId] = $targetClass['id'];
         }
 
-        if (! empty($missingTargets)) {
+        if ($missingTargets !== []) {
             $labels = array_keys($missingTargets);
             sort($labels, SORT_NATURAL);
             throw new \RuntimeException(
@@ -2120,7 +2124,7 @@ class AdminController extends ApiController
             $promotedStudents += count($studentIds);
         }
 
-        if (! empty($alumniIds)) {
+        if ($alumniIds !== []) {
             $alumniPayload = [
                 'status' => 'alumni',
                 'kelas' => '',
@@ -2140,14 +2144,16 @@ class AdminController extends ApiController
             }
         }
 
+        $snapshotUpdates = $this->syncStudentClassSnapshotTables($tenantId, $studentClassSnapshots, $clearedClassStudentIds);
+
         $affectedIds = array_keys($affectedClassIds);
-        if (! empty($affectedIds) && Schema::hasTable('kelas_struktur')) {
+        if ($affectedIds !== [] && Schema::hasTable('kelas_struktur')) {
             $structurePayload = $this->filterExistingPayload('kelas_struktur', [
                 'ketua_siswa_id' => null,
                 'ketua_siswa_nama' => null,
                 'updated_at' => $now,
             ]);
-            if (! empty($structurePayload)) {
+            if ($structurePayload !== []) {
                 $query = DB::table('kelas_struktur')->whereIn('kelas_id', $affectedIds);
                 if (Schema::hasColumn('kelas_struktur', 'tenant_id')) {
                     $query->where('tenant_id', $tenantId);
@@ -2161,12 +2167,68 @@ class AdminController extends ApiController
             'alumni_students' => count($alumniIds),
             'skipped_students' => $skippedStudents,
             'classes_synced' => $this->syncClassPeriodMetadata($tenantId, $period),
+            'related_snapshots_synced' => $snapshotUpdates,
         ];
+    }
+
+    private function syncStudentClassSnapshotTables(string $tenantId, array $studentClassMap, array $clearedStudentIds): int
+    {
+        $updates = 0;
+        $snapshotTables = [
+            'organisasi_anggota' => 'siswa_id',
+            'osis_anggota' => 'siswa_id',
+        ];
+
+        foreach ($snapshotTables as $table => $studentColumn) {
+            if (
+                Schema::hasTable($table) === false
+                || Schema::hasColumn($table, $studentColumn) === false
+                || Schema::hasColumn($table, 'kelas') === false
+            ) {
+                continue;
+            }
+
+            foreach ($studentClassMap as $studentId => $classId) {
+                $payload = $this->filterExistingPayload($table, [
+                    'kelas' => $classId,
+                    'updated_at' => now(),
+                ]);
+                if ($payload === []) {
+                    continue;
+                }
+
+                $query = DB::table($table)->where($studentColumn, $studentId);
+                if (Schema::hasColumn($table, 'tenant_id')) {
+                    $query->where('tenant_id', $tenantId);
+                }
+                $updates += (int) $query->update($payload);
+            }
+
+            if ($clearedStudentIds !== []) {
+                $payload = $this->filterExistingPayload($table, [
+                    'kelas' => null,
+                    'updated_at' => now(),
+                ]);
+                if ($payload === []) {
+                    continue;
+                }
+
+                foreach (array_chunk($clearedStudentIds, 500) as $chunk) {
+                    $query = DB::table($table)->whereIn($studentColumn, $chunk);
+                    if (Schema::hasColumn($table, 'tenant_id')) {
+                        $query->where('tenant_id', $tenantId);
+                    }
+                    $updates += (int) $query->update($payload);
+                }
+            }
+        }
+
+        return $updates;
     }
 
     private function syncClassPeriodMetadata(string $tenantId, array $period): int
     {
-        if (! Schema::hasTable('kelas')) {
+        if (Schema::hasTable('kelas') === false) {
             return 0;
         }
 
@@ -2178,7 +2240,7 @@ class AdminController extends ApiController
 
         $count = 0;
         foreach ($rows as $row) {
-            if (! $this->isActiveClassRow($row)) {
+            if ($this->isActiveClassRow($row) === false) {
                 continue;
             }
 
@@ -2202,7 +2264,7 @@ class AdminController extends ApiController
                 $query->where('tenant_id', $tenantId);
             }
             $query->update($update);
-            $count++;
+            $count += 1;
         }
 
         return $count;
@@ -2210,7 +2272,7 @@ class AdminController extends ApiController
 
     private function filterExistingPayload(string $table, array $payload): array
     {
-        if (! Schema::hasTable($table)) {
+        if (Schema::hasTable($table) === false) {
             return [];
         }
 
@@ -2223,7 +2285,7 @@ class AdminController extends ApiController
 
     private function isActiveClassRow(object $row): bool
     {
-        if (! property_exists($row, 'is_active')) {
+        if (property_exists($row, 'is_active') === false) {
             return true;
         }
 
@@ -2232,7 +2294,7 @@ class AdminController extends ApiController
             return $value;
         }
 
-        return ! in_array(strtolower(trim((string) $value)), ['0', 'false', 'no', 'inactive'], true);
+        return in_array(strtolower(trim((string) $value)), ['0', 'false', 'no', 'inactive'], true) === false;
     }
 
     private function classGradeFromRow(object $row): string
