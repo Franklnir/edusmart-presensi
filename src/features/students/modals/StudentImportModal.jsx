@@ -43,6 +43,7 @@ function StudentImportModal({
   importRows,
   importErrors,
   importBlockingErrorMessage,
+  importProgress,
   importSummary,
   onClose,
   onSwitchSource,
@@ -59,6 +60,42 @@ function StudentImportModal({
   getNamaKelas
 }) {
   if (!isOpen) return null
+
+  const canRunImport = Boolean(importRows.length && kelasList.length && !importLoading)
+  const importButtonText = importLoading
+    ? 'Memproses...'
+    : importErrors.length > 0 && importRows.length > 0
+      ? 'Import Data Valid'
+      : 'Mulai Import'
+  const importButtonHint = !kelasList.length
+    ? 'Buat kelas terlebih dahulu sebelum import.'
+    : !importRows.length && importErrors.length > 0
+      ? 'Belum ada baris valid. Perbaiki error yang tampil dulu.'
+      : !importRows.length
+        ? 'Upload file atau ambil data Google Sheets terlebih dahulu.'
+        : importErrors.length > 0
+          ? `${importRows.length} baris valid bisa diimport, ${importErrors.length} baris error akan dilewati.`
+          : ''
+  const progress = importProgress || {}
+  const progressTotal = Math.max(Number(progress.total || 0), 0)
+  const progressCurrent = Math.min(Math.max(Number(progress.current || 0), 0), progressTotal || 0)
+  const progressPercent = progressTotal > 0
+    ? Math.min(100, Math.round((progressCurrent / progressTotal) * 100))
+    : progress.phase === 'done'
+      ? 100
+      : 0
+  const progressSteps = [
+    ['reading', 'Baca file'],
+    ['ready', 'Validasi'],
+    ['processing', 'Import'],
+    ['history', 'Riwayat'],
+    ['done', 'Selesai']
+  ]
+  const activeStepIndex = Math.max(0, progressSteps.findIndex(([key]) => key === progress.phase))
+  const showProgress = importSource !== 'history' && (
+    importLoading ||
+    ['reading', 'ready', 'processing', 'history', 'done'].includes(progress.phase)
+  )
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-start justify-center overflow-y-auto p-4 sm:items-center">
@@ -421,6 +458,9 @@ function StudentImportModal({
               {importErrors.length > 0 && (
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
                   <p className="font-semibold mb-2">Contoh error</p>
+                  {importRows.length > 0 ? (
+                    <p className="mb-2">Baris yang valid tetap bisa diimport. Baris error akan dilewati dan masuk ringkasan gagal.</p>
+                  ) : null}
                   {importBlockingErrorMessage ? (
                     <p className="mb-2">{importBlockingErrorMessage}</p>
                   ) : null}
@@ -431,6 +471,58 @@ function StudentImportModal({
                       </li>
                     ))}
                   </ul>
+                </div>
+              )}
+
+              {showProgress && (
+                <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-900">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-semibold">{progress.message || 'Menyiapkan import...'}</p>
+                      <p className="text-xs text-blue-700">
+                        {progressTotal > 0 ? `${progressCurrent}/${progressTotal} baris diproses` : 'Menyiapkan data'}
+                      </p>
+                    </div>
+                    {importLoading ? (
+                      <span className="h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-blue-200 border-t-blue-700" />
+                    ) : (
+                      <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-blue-700">
+                        {progressPercent}%
+                      </span>
+                    )}
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-white">
+                    <div
+                      className="h-full rounded-full bg-blue-600 transition-all duration-500"
+                      style={{ width: `${progressPercent}%` }}
+                    />
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
+                    {progressSteps.map(([key, label], index) => {
+                      const done = index < activeStepIndex || progress.phase === 'done'
+                      const active = index === activeStepIndex && progress.phase !== 'done'
+                      return (
+                        <div
+                          key={key}
+                          className={`rounded-lg border px-2 py-1.5 text-center text-xs font-semibold ${
+                            done
+                              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                              : active
+                                ? 'border-blue-200 bg-white text-blue-700'
+                                : 'border-blue-100 bg-blue-50/60 text-blue-500'
+                          }`}
+                        >
+                          {label}
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2 text-xs text-blue-800">
+                    <span>Baru: <b>{progress.created || 0}</b></span>
+                    <span>Update: <b>{progress.updated || 0}</b></span>
+                    <span>Lewati: <b>{progress.skipped || 0}</b></span>
+                    <span>Gagal: <b>{progress.failed || 0}</b></span>
+                  </div>
                 </div>
               )}
 
@@ -468,12 +560,15 @@ function StudentImportModal({
             <button
               type="button"
               onClick={onRunImport}
-              disabled={importLoading || !importRows.length || !kelasList.length || importErrors.length > 0}
+              disabled={!canRunImport}
               className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-60"
             >
-              {importLoading ? 'Memproses...' : 'Mulai Import'}
+              {importButtonText}
             </button>
           )}
+          {importSource !== 'history' && importButtonHint ? (
+            <p className="basis-full text-right text-xs text-gray-500">{importButtonHint}</p>
+          ) : null}
         </div>
       </div>
     </div>

@@ -460,6 +460,7 @@ export default function AGuru() {
   const [importRows, setImportRows] = useState([])
   const [importErrors, setImportErrors] = useState([])
   const [importLoading, setImportLoading] = useState(false)
+  const [importProgress, setImportProgress] = useState({ phase: 'idle' })
   const [importSummary, setImportSummary] = useState(null)
 
   const availableKelasNames = useMemo(
@@ -591,6 +592,44 @@ export default function AGuru() {
       ],
     [importRows, kelasList]
   )
+
+  const importCanRun = Boolean(importRows.length && kelasList.length && !importLoading)
+  const importButtonText = importLoading
+    ? 'Memproses...'
+    : importErrors.length > 0 && importRows.length > 0
+      ? 'Import Data Valid'
+      : 'Mulai Import'
+  const importButtonHint = !kelasList.length
+    ? 'Buat kelas terlebih dahulu sebelum import.'
+    : !importRows.length && importErrors.length > 0
+      ? 'Belum ada baris valid. Perbaiki error yang tampil dulu.'
+      : !importRows.length
+        ? 'Upload file atau ambil data Google Sheets terlebih dahulu.'
+        : importErrors.length > 0
+          ? `${importRows.length} baris valid bisa diimport, ${importErrors.length} baris error akan dilewati.`
+          : ''
+  const importProgressTotal = Math.max(Number(importProgress.total || 0), 0)
+  const importProgressCurrent = Math.min(
+    Math.max(Number(importProgress.current || 0), 0),
+    importProgressTotal || 0
+  )
+  const importProgressPercent = importProgressTotal > 0
+    ? Math.min(100, Math.round((importProgressCurrent / importProgressTotal) * 100))
+    : importProgress.phase === 'done'
+      ? 100
+      : 0
+  const importProgressSteps = [
+    ['reading', 'Baca file'],
+    ['ready', 'Validasi'],
+    ['processing', 'Import'],
+    ['history', 'Finalisasi'],
+    ['done', 'Selesai']
+  ]
+  const importActiveStepIndex = Math.max(
+    0,
+    importProgressSteps.findIndex(([key]) => key === importProgress.phase)
+  )
+  const showImportProgress = importLoading || ['reading', 'ready', 'processing', 'history', 'done'].includes(importProgress.phase)
 
   /* ===== Password Modal Functions ===== */
   const openPasswordModal = (title, action) => {
@@ -1002,6 +1041,17 @@ export default function AGuru() {
     setImportRows(cleaned)
     setImportErrors(errors)
     setImportSummary(null)
+    setImportProgress({
+      phase: 'ready',
+      current: 0,
+      total: cleaned.length,
+      failed: errors.length,
+      message: cleaned.length
+        ? `${cleaned.length} baris siap diimport${errors.length ? `, ${errors.length} baris perlu diperbaiki` : ''}.`
+        : 'Belum ada baris valid untuk diimport.'
+    })
+
+    return { rows: cleaned, errors }
   }
 
   const handleImportFileChange = async (file) => {
@@ -1009,6 +1059,12 @@ export default function AGuru() {
     if (!ensureKelasReadyForImport()) return
     setImportFile(file)
     setImportLoading(true)
+    setImportProgress({
+      phase: 'reading',
+      current: 0,
+      total: 0,
+      message: `Membaca file ${file.name}...`
+    })
     try {
       const rows = await readRowsFromFile(file)
       prepareImportRows(rows)
@@ -1028,6 +1084,12 @@ export default function AGuru() {
     }
 
     setImportLoading(true)
+    setImportProgress({
+      phase: 'reading',
+      current: 0,
+      total: 0,
+      message: 'Mengambil data Google Sheets...'
+    })
     try {
       const rows = await readRowsFromSheetUrl(csvUrl)
       prepareImportRows(rows)
@@ -1044,6 +1106,7 @@ export default function AGuru() {
     setImportRows([])
     setImportErrors([])
     setImportSummary(null)
+    setImportProgress({ phase: 'idle' })
     setImportSource('file')
   }
 
@@ -1163,7 +1226,7 @@ export default function AGuru() {
       return
     }
 
-    if (importErrors.length) {
+    if (importErrors.length && !importRows.length) {
       pushToast('error', importBlockingErrorMessage)
       return
     }
@@ -1172,8 +1235,11 @@ export default function AGuru() {
       ? importedKelasNames.join(', ')
       : availableKelasNames.join(', ')
 
+    const invalidNote = importErrors.length
+      ? `\n\n${importErrors.length} baris error akan dilewati dan dicatat sebagai gagal.`
+      : ''
     const confirmed = window.confirm(
-      `Apakah Anda yakin ingin masukin data guru dengan kelas ${kelasTersedia}?`
+      `Apakah Anda yakin ingin masukin ${importRows.length} data guru valid dengan kelas ${kelasTersedia}?${invalidNote}`
     )
 
     if (!confirmed) {
@@ -1185,12 +1251,28 @@ export default function AGuru() {
       created: 0,
       updated: 0,
       skipped: 0,
-      failed: 0,
-      errors: []
+      failed: importErrors.length,
+      errors: importErrors.map((error) => ({
+        row: error.row,
+        reason: error.reason
+      }))
     }
+    const totalRows = importRows.length
+    let processedRows = 0
+    setImportProgress({
+      phase: 'processing',
+      current: 0,
+      total: totalRows,
+      created: 0,
+      updated: 0,
+      skipped: 0,
+      failed: summary.failed,
+      message: 'Memulai import data guru...'
+    })
 
     for (const row of importRows) {
       try {
+        // eslint-disable-next-line no-await-in-loop
         const result = await upsertGuruRow(row)
         if (result === 'created') summary.created += 1
         else if (result === 'updated') summary.updated += 1
@@ -1201,10 +1283,36 @@ export default function AGuru() {
           row: row.__rowNum,
           reason: error?.message || 'Gagal memproses'
         })
+      } finally {
+        processedRows += 1
+        setImportProgress({
+          phase: 'processing',
+          current: processedRows,
+          total: totalRows,
+          created: summary.created,
+          updated: summary.updated,
+          skipped: summary.skipped,
+          failed: summary.failed,
+          message: `Memproses baris ${row.__rowNum}...`
+        })
+        if (processedRows % 5 === 0) {
+          // eslint-disable-next-line no-await-in-loop
+          await new Promise((resolve) => setTimeout(resolve, 0))
+        }
       }
     }
 
     setImportSummary(summary)
+    setImportProgress({
+      phase: 'done',
+      current: totalRows,
+      total: totalRows,
+      created: summary.created,
+      updated: summary.updated,
+      skipped: summary.skipped,
+      failed: summary.failed,
+      message: 'Import guru selesai.'
+    })
     pushToast('success', `Import guru selesai: ${summary.created} baru, ${summary.updated} update, ${summary.skipped} lewati, ${summary.failed} gagal.`)
     setImportLoading(false)
     await loadGuruRaw()
@@ -1855,6 +1963,9 @@ export default function AGuru() {
                 {importErrors.length > 0 && (
                   <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
                     <p className="font-semibold mb-2">Contoh error</p>
+                    {importRows.length > 0 ? (
+                      <p className="mb-2">Baris yang valid tetap bisa diimport. Baris error akan dilewati dan masuk ringkasan gagal.</p>
+                    ) : null}
                     {importBlockingErrorMessage ? (
                       <p className="mb-2">{importBlockingErrorMessage}</p>
                     ) : null}
@@ -1865,6 +1976,58 @@ export default function AGuru() {
                         </li>
                       ))}
                     </ul>
+                  </div>
+                )}
+
+                {showImportProgress && (
+                  <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-900">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-semibold">{importProgress.message || 'Menyiapkan import...'}</p>
+                        <p className="text-xs text-blue-700">
+                          {importProgressTotal > 0 ? `${importProgressCurrent}/${importProgressTotal} baris diproses` : 'Menyiapkan data'}
+                        </p>
+                      </div>
+                      {importLoading ? (
+                        <span className="h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-blue-200 border-t-blue-700" />
+                      ) : (
+                        <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-blue-700">
+                          {importProgressPercent}%
+                        </span>
+                      )}
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-white">
+                      <div
+                        className="h-full rounded-full bg-blue-600 transition-all duration-500"
+                        style={{ width: `${importProgressPercent}%` }}
+                      />
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
+                      {importProgressSteps.map(([key, label], index) => {
+                        const done = index < importActiveStepIndex || importProgress.phase === 'done'
+                        const active = index === importActiveStepIndex && importProgress.phase !== 'done'
+                        return (
+                          <div
+                            key={key}
+                            className={`rounded-lg border px-2 py-1.5 text-center text-xs font-semibold ${
+                              done
+                                ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                : active
+                                  ? 'border-blue-200 bg-white text-blue-700'
+                                  : 'border-blue-100 bg-blue-50/60 text-blue-500'
+                            }`}
+                          >
+                            {label}
+                          </div>
+                        )
+                      })}
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2 text-xs text-blue-800">
+                      <span>Baru: <b>{importProgress.created || 0}</b></span>
+                      <span>Update: <b>{importProgress.updated || 0}</b></span>
+                      <span>Lewati: <b>{importProgress.skipped || 0}</b></span>
+                      <span>Gagal: <b>{importProgress.failed || 0}</b></span>
+                    </div>
                   </div>
                 )}
 
@@ -1899,11 +2062,14 @@ export default function AGuru() {
                 <button
                   type="button"
                   onClick={handleRunImport}
-                  disabled={importLoading || !importRows.length || !kelasList.length || importErrors.length > 0}
+                  disabled={!importCanRun}
                   className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-60"
                 >
-                  {importLoading ? 'Memproses...' : 'Mulai Import'}
+                  {importButtonText}
                 </button>
+                {importButtonHint ? (
+                  <p className="basis-full text-right text-xs text-gray-500">{importButtonHint}</p>
+                ) : null}
               </div>
             </div>
           </div>

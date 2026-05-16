@@ -39,6 +39,7 @@ export function useStudentImport({
   const [importRows, setImportRows] = useState([])
   const [importErrors, setImportErrors] = useState([])
   const [importLoading, setImportLoading] = useState(false)
+  const [importProgress, setImportProgress] = useState({ phase: 'idle' })
   const [importSummary, setImportSummary] = useState(null)
   const [importHistories, setImportHistories] = useState([])
   const [importHistoryItems, setImportHistoryItems] = useState([])
@@ -93,6 +94,17 @@ export function useStudentImport({
     setImportRows(rows)
     setImportErrors(errors)
     setImportSummary(null)
+    setImportProgress({
+      phase: 'ready',
+      current: 0,
+      total: rows.length,
+      failed: errors.length,
+      message: rows.length
+        ? `${rows.length} baris siap diimport${errors.length ? `, ${errors.length} baris perlu diperbaiki` : ''}.`
+        : 'Belum ada baris valid untuk diimport.',
+    })
+
+    return { rows, errors }
   }, [kelasLookup])
 
   const copyImportExampleToClipboard = useCallback(async () => {
@@ -134,6 +146,12 @@ export function useStudentImport({
     if (!ensureKelasReadyForImport()) return
     setImportFile(file)
     setImportLoading(true)
+    setImportProgress({
+      phase: 'reading',
+      current: 0,
+      total: 0,
+      message: `Membaca file ${file.name}...`,
+    })
     try {
       const rows = await readRowsFromFile(file)
       prepareImportRows(rows)
@@ -157,6 +175,12 @@ export function useStudentImport({
     }
 
     setImportLoading(true)
+    setImportProgress({
+      phase: 'reading',
+      current: 0,
+      total: 0,
+      message: 'Mengambil data Google Sheets...',
+    })
     try {
       const rows = await readRowsFromSheetUrl(csvUrl)
       prepareImportRows(rows)
@@ -173,6 +197,7 @@ export function useStudentImport({
     setImportRows([])
     setImportErrors([])
     setImportSummary(null)
+    setImportProgress({ phase: 'idle' })
     setImportHistories([])
     setImportHistoryItems([])
     setSelectedImportHistory(null)
@@ -308,7 +333,7 @@ export function useStudentImport({
       return
     }
 
-    if (importErrors.length) {
+    if (importErrors.length && !importRows.length) {
       pushToast('error', importBlockingErrorMessage)
       return
     }
@@ -317,8 +342,11 @@ export function useStudentImport({
       ? importedKelasNames.join(', ')
       : availableKelasNames.join(', ')
 
+    const invalidNote = importErrors.length
+      ? `\n\n${importErrors.length} baris error akan dilewati dan dicatat sebagai gagal.`
+      : ''
     const confirmed = window.confirm(
-      `Apakah Anda yakin ingin masukin data siswa dengan kelas ${kelasTersedia}?`
+      `Apakah Anda yakin ingin masukin ${importRows.length} data siswa valid dengan kelas ${kelasTersedia}?${invalidNote}`
     )
 
     if (!confirmed) {
@@ -330,10 +358,34 @@ export function useStudentImport({
       created: 0,
       updated: 0,
       skipped: 0,
-      failed: 0,
-      errors: [],
+      failed: importErrors.length,
+      errors: importErrors.map((error) => ({
+        row: error.row,
+        reason: error.reason,
+      })),
     }
-    const historyItems = []
+    const historyItems = importErrors.map((error) => ({
+      profile_id: null,
+      status: 'failed',
+      created_user: false,
+      nis: null,
+      nama: null,
+      kelas: error.className || null,
+      error_message: error.reason || 'Validasi gagal',
+      imported_at: new Date().toISOString(),
+    }))
+    const totalRows = importRows.length
+    let processedRows = 0
+    setImportProgress({
+      phase: 'processing',
+      current: 0,
+      total: totalRows,
+      created: 0,
+      updated: 0,
+      skipped: 0,
+      failed: summary.failed,
+      message: 'Memulai import data siswa...',
+    })
 
     for (const row of importRows) {
       try {
@@ -370,17 +422,43 @@ export function useStudentImport({
           error_message: reason,
           imported_at: new Date().toISOString(),
         })
+      } finally {
+        processedRows += 1
+        setImportProgress({
+          phase: 'processing',
+          current: processedRows,
+          total: totalRows,
+          created: summary.created,
+          updated: summary.updated,
+          skipped: summary.skipped,
+          failed: summary.failed,
+          message: `Memproses baris ${row.__rowNum}...`,
+        })
+        if (processedRows % 5 === 0) {
+          // eslint-disable-next-line no-await-in-loop
+          await new Promise((resolve) => setTimeout(resolve, 0))
+        }
       }
     }
 
     let historyId = null
     try {
+      setImportProgress({
+        phase: 'history',
+        current: totalRows,
+        total: totalRows,
+        created: summary.created,
+        updated: summary.updated,
+        skipped: summary.skipped,
+        failed: summary.failed,
+        message: 'Menyimpan riwayat import...',
+      })
       historyId = await persistStudentImportHistory({
         userId,
         importSource,
         importFileName: importFile?.name,
         sheetUrl,
-        totalRows: importRows.length,
+        totalRows: importRows.length + importErrors.length,
         summary,
         itemRows: historyItems,
       })
@@ -392,6 +470,16 @@ export function useStudentImport({
     setImportSummary({
       ...summary,
       historyId,
+    })
+    setImportProgress({
+      phase: 'done',
+      current: totalRows,
+      total: totalRows,
+      created: summary.created,
+      updated: summary.updated,
+      skipped: summary.skipped,
+      failed: summary.failed,
+      message: 'Import siswa selesai.',
     })
     pushToast('success', `Import siswa selesai: ${summary.created} baru, ${summary.updated} update, ${summary.skipped} lewati, ${summary.failed} gagal.`)
     setImportLoading(false)
@@ -408,7 +496,7 @@ export function useStudentImport({
     availableKelasNames,
     ensureKelasReadyForImport,
     importBlockingErrorMessage,
-    importErrors.length,
+    importErrors,
     importedKelasNames,
     importFile?.name,
     importRows,
@@ -441,6 +529,7 @@ export function useStudentImport({
     importHistoryItems,
     importHistoryLoading,
     importLoading,
+    importProgress,
     importModalOpen,
     importRows,
     importSource,

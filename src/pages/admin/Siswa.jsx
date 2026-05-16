@@ -301,6 +301,7 @@ export default function ASiswa() {
     importHistoryItems,
     importHistoryLoading,
     importLoading,
+    importProgress,
     importModalOpen,
     importRows,
     importSource,
@@ -762,6 +763,7 @@ export default function ASiswa() {
           importRows={importRows}
           importErrors={importErrors}
           importBlockingErrorMessage={importBlockingErrorMessage}
+          importProgress={importProgress}
           importSummary={importSummary}
           onClose={closeImportModal}
           onSwitchSource={switchImportSource}
