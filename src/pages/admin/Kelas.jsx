@@ -335,16 +335,9 @@ export default function AKelas({ initialTab = 'kelas' }) {
   const [newGrade, setNewGrade] = useState('')
   const [newSuffix, setNewSuffix] = useState('')
   const selObj = React.useMemo(() => kelas.find(k => k.id === kelasSelected) || null, [kelas, kelasSelected])
-  const activeAcademicCohortYear = React.useMemo(() => {
-    const startYear = Number(
-      academicPeriod.startYear || String(academicPeriod.tahunAjaran || '').slice(0, 4)
-    )
-
-    return Number.isFinite(startYear) && startYear > 0 ? String(startYear) : ''
-  }, [academicPeriod.startYear, academicPeriod.tahunAjaran])
   const newClassCohortYear = React.useMemo(() => (
-    newGrade ? inferCohortYear(newGrade, academicPeriod.startYear) : activeAcademicCohortYear
-  ), [activeAcademicCohortYear, academicPeriod.startYear, newGrade])
+    newGrade ? inferCohortYear(newGrade, academicPeriod.startYear) : ''
+  ), [academicPeriod.startYear, newGrade])
   const newClassCohortHelp = React.useMemo(() => {
     if (!newGrade || !newClassCohortYear) {
       return 'Pilih grade untuk melihat angkatan masuk siswa pada periode aktif.'

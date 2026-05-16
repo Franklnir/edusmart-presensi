@@ -1608,11 +1608,15 @@ export default function APengaturan() {
     periode_genap_mulai: periodForm.periodeGenapMulai,
     periode_genap_selesai: periodForm.periodeGenapSelesai
   })
-  const academicMonthLabels = (
-    activeAcademicPeriod.academicYearMonths?.length
-      ? activeAcademicPeriod.academicYearMonths
-      : activeAcademicPeriod.months
-  ).map((month) => month.label)
+  const browserNow = new Date()
+  const currentMonthValue = `${browserNow.getFullYear()}-${String(browserNow.getMonth() + 1).padStart(2, '0')}`
+  const currentAcademicPeriod = getCurrentAcademicPeriod(browserNow)
+  const activePeriodMatchesCalendar =
+    activeAcademicPeriod.tahunAjaran === currentAcademicPeriod.tahunAjaran &&
+    activeAcademicPeriod.semester === currentAcademicPeriod.semester
+  const academicMonths = activeAcademicPeriod.months?.length
+    ? activeAcademicPeriod.months
+    : activeAcademicPeriod.academicYearMonths || []
   const periodYearOptions = generateAcademicYearOptions({ back: 5, forward: 2 })
   const semesterPeriodCards = [
     {
@@ -1972,6 +1976,15 @@ export default function APengaturan() {
                   <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 font-semibold text-slate-700">
                     {activeAcademicPeriod.rangeLabel || '-'}
                   </span>
+                  <span
+                    className={`rounded-full border px-3 py-1 font-semibold ${
+                      activePeriodMatchesCalendar
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                        : 'border-amber-200 bg-amber-50 text-amber-800'
+                    }`}
+                  >
+                    Kalender hari ini: {currentAcademicPeriod.tahunAjaran} - {currentAcademicPeriod.semester}
+                  </span>
                 </div>
               </div>
 
@@ -2115,18 +2128,29 @@ export default function APengaturan() {
 
             <div className="mt-5">
               <div>
-                <p className="text-sm font-semibold text-gray-700">Bulan Semester</p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {academicMonthLabels.map((label) => (
-                    <span
-                      key={label}
-                      className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700"
-                    >
-                      {label}
-                    </span>
-                    ))}
-                  </div>
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-sm font-semibold text-gray-700">Bulan Semester Aktif</p>
+                  <span className="text-xs font-semibold text-amber-700">Kuning = bulan berjalan</span>
                 </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {academicMonths.map((month) => {
+                    const isCurrentMonth = month.value === currentMonthValue
+
+                    return (
+                      <span
+                        key={month.value || month.label}
+                        className={`rounded-lg border px-3 py-2 text-xs font-semibold ${
+                          isCurrentMonth
+                            ? 'border-amber-300 bg-amber-100 text-amber-900 shadow-sm'
+                            : 'border-emerald-100 bg-emerald-50 text-emerald-700'
+                        }`}
+                      >
+                        {month.label}
+                      </span>
+                    )
+                  })}
+                </div>
+              </div>
             </div>
           </div>
           )}
