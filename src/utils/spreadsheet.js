@@ -46,7 +46,9 @@ const detectCsvDelimiter = (csvText) => {
 
   const commaCount = (firstLine.match(/,/g) || []).length
   const semicolonCount = (firstLine.match(/;/g) || []).length
+  const tabCount = (firstLine.match(/\t/g) || []).length
 
+  if (tabCount > commaCount && tabCount > semicolonCount) return '\t'
   return semicolonCount > commaCount ? ';' : ','
 }
 
@@ -158,6 +160,100 @@ export const readRowsFromCsvText = (csvText) => {
   return rows
 }
 
+const decodeBufferText = (buffer) => {
+  try {
+    return new TextDecoder('utf-8').decode(buffer).replace(/^\uFEFF/, '')
+  } catch {
+    return ''
+  }
+}
+
+const isZipBuffer = (buffer) => {
+  const bytes = new Uint8Array(buffer.slice(0, 4))
+  return bytes[0] === 0x50 && bytes[1] === 0x4b
+}
+
+const isOldExcelBuffer = (buffer) => {
+  const bytes = new Uint8Array(buffer.slice(0, 8))
+  return (
+    bytes[0] === 0xd0 &&
+    bytes[1] === 0xcf &&
+    bytes[2] === 0x11 &&
+    bytes[3] === 0xe0 &&
+    bytes[4] === 0xa1 &&
+    bytes[5] === 0xb1 &&
+    bytes[6] === 0x1a &&
+    bytes[7] === 0xe1
+  )
+}
+
+const isLikelyTextBuffer = (buffer) => {
+  const bytes = new Uint8Array(buffer.slice(0, Math.min(buffer.byteLength, 4096)))
+  if (!bytes.length) return false
+
+  let controlCount = 0
+  for (const byte of bytes) {
+    const allowedControl = byte === 0x09 || byte === 0x0a || byte === 0x0d
+    if (byte < 0x20 && !allowedControl) controlCount += 1
+  }
+
+  return controlCount / bytes.length < 0.02
+}
+
+const looksLikeHtml = (text) => /^(\s|\uFEFF)*(<!doctype\s+html|<html|<head|<body|<table)\b/i.test(text)
+
+const htmlTableToRows = (htmlText) => {
+  if (typeof DOMParser === 'undefined') return []
+
+  const doc = new DOMParser().parseFromString(htmlText, 'text/html')
+  const table = doc.querySelector('table')
+  if (!table) return []
+
+  const matrix = Array.from(table.querySelectorAll('tr'))
+    .map((tr) => Array.from(tr.querySelectorAll('th,td')).map((cell) => cell.textContent?.trim() || ''))
+    .filter((row) => row.some((cell) => !isEmptyValue(cell)))
+
+  if (!matrix.length) return []
+
+  const headers = buildUniqueHeaders(matrix[0])
+  const rows = []
+  for (let rowIdx = 1; rowIdx < matrix.length; rowIdx += 1) {
+    const sourceRow = matrix[rowIdx] || []
+    const hasData = sourceRow.some((cell) => !isEmptyValue(cell))
+    if (!hasData) continue
+
+    const row = {}
+    headers.forEach((header, colIdx) => {
+      row[header] = sourceRow[colIdx] ?? ''
+    })
+    rows.push(row)
+  }
+
+  return rows
+}
+
+const readRowsFromTextSpreadsheet = (text) => {
+  if (looksLikeHtml(text)) {
+    const rows = htmlTableToRows(text)
+    if (rows.length) return rows
+    throw new Error('File yang diupload terlihat seperti halaman web/HTML, bukan Excel valid. Unduh ulang sebagai .xlsx atau .csv.')
+  }
+
+  return readRowsFromCsvText(text)
+}
+
+const excelReadErrorMessage = (error) => {
+  const message = String(error?.message || '')
+  if (/password|encrypted/i.test(message)) {
+    return 'File Excel terkunci password atau terenkripsi. Buka file, hilangkan proteksi/password, lalu simpan ulang sebagai .xlsx.'
+  }
+  if (/sheets|workbook|zip|central directory|invalid/i.test(message)) {
+    return 'File Excel tidak valid atau belum didukung. Buka file lalu Save As sebagai Excel Workbook (.xlsx), bukan .xls/Strict Open XML, atau simpan sebagai .csv.'
+  }
+
+  return 'File Excel tidak bisa dibaca. Pastikan formatnya .xlsx atau .csv yang valid.'
+}
+
 const worksheetToRows = (worksheet) => {
   if (!worksheet) return []
 
@@ -212,22 +308,31 @@ export const readRowsFromSpreadsheetFile = async (file) => {
     return readRowsFromCsvText(text)
   }
 
-  if (name.endsWith('.xls') && !name.endsWith('.xlsx')) {
-    throw new Error('File Excel .xls lama belum didukung. Simpan ulang sebagai .xlsx atau .csv lalu coba lagi.')
+  const buffer = await file.arrayBuffer()
+  if (!buffer.byteLength) {
+    throw new Error('File kosong. Upload file .xlsx atau .csv yang sudah berisi data.')
   }
 
-  const buffer = await file.arrayBuffer()
+  if (isOldExcelBuffer(buffer) || (name.endsWith('.xls') && !name.endsWith('.xlsx'))) {
+    throw new Error('File Excel .xls lama belum didukung. Buka file lalu Save As sebagai Excel Workbook (.xlsx) atau .csv.')
+  }
+
+  if (!isZipBuffer(buffer)) {
+    if (isLikelyTextBuffer(buffer)) {
+      const text = decodeBufferText(buffer)
+      return readRowsFromTextSpreadsheet(text)
+    }
+
+    throw new Error('File bukan format Excel .xlsx yang valid. Upload file .xlsx asli atau .csv, bukan file yang hanya diganti ekstensinya.')
+  }
+
   const ExcelJS = await loadExcelJsBrowser()
   const workbook = new ExcelJS.Workbook()
 
   try {
     await workbook.xlsx.load(buffer)
   } catch (error) {
-    const message = String(error?.message || '')
-    if (message.includes('sheets')) {
-      throw new Error('File Excel tidak valid atau belum didukung. Coba buka lalu simpan ulang sebagai .xlsx atau .csv.')
-    }
-    throw new Error('File Excel tidak bisa dibaca. Pastikan formatnya .xlsx atau .csv yang valid.')
+    throw new Error(excelReadErrorMessage(error))
   }
 
   const worksheet = workbook?.worksheets?.[0]
