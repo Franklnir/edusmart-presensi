@@ -1045,12 +1045,12 @@ export default function APengaturan() {
       const confirmedYear = await requestConfirmation({
         title: 'Ubah tahun ajaran aktif?',
         message: `Periode tahun ajaran akan berubah dari ${previousPayload.tahun_ajaran || '-'} ke ${nextPayload.tahun_ajaran}.`,
-        confirmText: 'Ya, lanjutkan',
+        confirmText: 'Ya, rollover otomatis',
         cancelText: 'Batal',
         tone: 'warning',
         details: [
-          'Filter tugas, absensi, jadwal, laporan, rekap, dan storage akan mengikuti tahun ajaran baru.',
-          'Pastikan proses kenaikan kelas sudah benar sebelum menyimpan perubahan ini.'
+          'Sistem akan menaikkan siswa aktif satu tingkat: X ke XI, XI ke XII, dan XII menjadi alumni.',
+          'Metadata kelas aktif, filter tugas, absensi, jadwal, laporan, rekap, dan storage akan mengikuti periode baru.'
         ]
       })
       if (!confirmedYear) return
@@ -1088,6 +1088,7 @@ export default function APengaturan() {
         tone: 'warning',
         details: [
           'Filter tugas, absensi, jadwal, laporan, rekap, dan storage akan mengikuti periode baru.',
+          'Metadata daftar kelas aktif ikut disinkronkan dengan semester/periode baru.',
           `Periode aktif setelah disimpan: ${tahunAjaran} - Semester ${semester}.`
         ]
       })
@@ -1104,20 +1105,13 @@ export default function APengaturan() {
         periode_ganjil_selesai: ganjilPreview.endsAt,
         periode_genap_mulai: genapPreview.startsAt,
         periode_genap_selesai: genapPreview.endsAt,
-        updated_at: new Date().toISOString()
+        auto_rollover: yearChanged
       }
 
-      let query = supabase.from('settings')
-      if (settingsId) {
-        query = query.update(payload).eq('id', settingsId).select('id').single()
-      } else {
-        query = query.upsert(payload).select('id').single()
-      }
-
-      const { data, error } = await query
+      const { data, error } = await supabase.admin.applyAcademicPeriod(payload)
       if (error) throw error
 
-      const savedRow = Array.isArray(data) ? data[0] : data
+      const savedRow = data?.settings || (Array.isArray(data) ? data[0] : data)
       if (savedRow?.id && !settingsId) setSettingsId(savedRow.id)
       const savedPeriodForm = resolvePeriodForm(payload)
       setPeriodForm(savedPeriodForm)
@@ -1125,7 +1119,13 @@ export default function APengaturan() {
       setDrivePeriodFilter({ tahunAjaran, semester })
       clearCachedSettingsRow()
       queryClient.invalidateQueries({ queryKey: SETTINGS_QUERY_KEY })
-      pushToast('success', `Periode aktif disimpan: ${tahunAjaran} - ${semester}`, {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'academic-summary'] })
+      queryClient.invalidateQueries({ queryKey: ['admin', 'student-options'] })
+      const rollover = data?.rollover
+      const rolloverText = rollover
+        ? ` Siswa naik: ${rollover.promoted_students || 0}, alumni: ${rollover.alumni_students || 0}.`
+        : ''
+      pushToast('success', `Periode aktif disimpan: ${tahunAjaran} - ${semester}.${rolloverText}`, {
         title: 'Kalender akademik diperbarui'
       })
     } catch (error) {

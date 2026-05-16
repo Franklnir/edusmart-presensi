@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Models\Profile;
 use App\Models\User;
+use App\Support\AcademicPeriod;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
@@ -730,6 +731,127 @@ class AdminController extends ApiController
                 'generated_at' => now()->toISOString(),
             ],
         ]);
+    }
+
+    public function applyAcademicPeriod(Request $request)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        $payload = $request->all();
+        $tahunAjaran = AcademicPeriod::normalizeAcademicYear($payload['tahun_ajaran'] ?? null);
+        $semester = AcademicPeriod::normalizeSemester($payload['semester_aktif'] ?? null);
+        if (! $tahunAjaran || ! $semester) {
+            return $this->deny('Tahun ajaran atau semester belum valid.', 422);
+        }
+
+        $ganjilStart = AcademicPeriod::normalizeDate($payload['periode_ganjil_mulai'] ?? null);
+        $ganjilEnd = AcademicPeriod::normalizeDate($payload['periode_ganjil_selesai'] ?? null);
+        $genapStart = AcademicPeriod::normalizeDate($payload['periode_genap_mulai'] ?? null);
+        $genapEnd = AcademicPeriod::normalizeDate($payload['periode_genap_selesai'] ?? null);
+        $activeStart = AcademicPeriod::normalizeDate($payload['periode_mulai'] ?? null);
+        $activeEnd = AcademicPeriod::normalizeDate($payload['periode_selesai'] ?? null);
+
+        if ($semester === AcademicPeriod::SEMESTER_GANJIL) {
+            $ganjilStart = $ganjilStart ?: $activeStart;
+            $ganjilEnd = $ganjilEnd ?: $activeEnd;
+        } else {
+            $genapStart = $genapStart ?: $activeStart;
+            $genapEnd = $genapEnd ?: $activeEnd;
+        }
+
+        $ganjilPeriod = AcademicPeriod::make(
+            $tahunAjaran,
+            AcademicPeriod::SEMESTER_GANJIL,
+            $ganjilStart,
+            $ganjilEnd
+        );
+        $genapPeriod = AcademicPeriod::make(
+            $tahunAjaran,
+            AcademicPeriod::SEMESTER_GENAP,
+            $genapStart,
+            $genapEnd
+        );
+        if (empty($ganjilPeriod['custom_range'])) {
+            return $this->deny('Rentang bulan semester Ganjil belum valid.', 422);
+        }
+        if (empty($genapPeriod['custom_range'])) {
+            return $this->deny('Rentang bulan semester Genap belum valid.', 422);
+        }
+
+        $activePeriod = $semester === AcademicPeriod::SEMESTER_GENAP ? $genapPeriod : $ganjilPeriod;
+        $settingsPayload = [
+            'tahun_ajaran' => $tahunAjaran,
+            'semester_aktif' => $semester,
+            'periode_mulai' => $activePeriod['starts_at'],
+            'periode_selesai' => $activePeriod['ends_at'],
+            'periode_ganjil_mulai' => $ganjilPeriod['starts_at'],
+            'periode_ganjil_selesai' => $ganjilPeriod['ends_at'],
+            'periode_genap_mulai' => $genapPeriod['starts_at'],
+            'periode_genap_selesai' => $genapPeriod['ends_at'],
+        ];
+
+        $existing = $this->firstTenantRow('settings', $tenantId);
+        $previousYear = AcademicPeriod::normalizeAcademicYear($existing->tahun_ajaran ?? null)
+            ?: AcademicPeriod::current()['tahun_ajaran'];
+        $yearChanged = $previousYear !== $tahunAjaran;
+        $autoRollover = filter_var($payload['auto_rollover'] ?? false, FILTER_VALIDATE_BOOLEAN);
+
+        if ($yearChanged && ! $autoRollover) {
+            return $this->deny('Perubahan tahun ajaran harus dijalankan melalui rollover akademik.', 409);
+        }
+
+        $previousStartYear = (int) substr($previousYear, 0, 4);
+        $targetStartYear = (int) substr($tahunAjaran, 0, 4);
+        if ($yearChanged && $targetStartYear !== $previousStartYear + 1) {
+            return $this->deny('Rollover otomatis hanya bisa maju tepat satu tahun ajaran.', 422);
+        }
+
+        try {
+            $result = DB::transaction(function () use (
+                $tenantId,
+                $existing,
+                $settingsPayload,
+                $activePeriod,
+                $previousYear,
+                $yearChanged
+            ) {
+                $rollover = null;
+                $classesSynced = 0;
+
+                if ($yearChanged) {
+                    $rollover = $this->rolloverAcademicYearData($tenantId, $activePeriod, $previousYear);
+                    $classesSynced = (int) ($rollover['classes_synced'] ?? 0);
+                } else {
+                    $classesSynced = $this->syncClassPeriodMetadata($tenantId, $activePeriod);
+                }
+
+                $settings = $this->saveAcademicPeriodSettings($tenantId, $existing, $settingsPayload);
+
+                return [
+                    'settings' => $settings ? (array) $settings : null,
+                    'period' => [
+                        'tahun_ajaran' => $activePeriod['tahun_ajaran'],
+                        'semester' => $activePeriod['semester'],
+                        'starts_at' => $activePeriod['starts_at'],
+                        'ends_at' => $activePeriod['ends_at'],
+                    ],
+                    'year_changed' => $yearChanged,
+                    'classes_synced' => $classesSynced,
+                    'rollover' => $rollover,
+                ];
+            });
+        } catch (\RuntimeException $e) {
+            return $this->deny($e->getMessage(), 422);
+        }
+
+        return response()->json(['data' => $result]);
     }
 
     public function studentOptions(Request $request)
@@ -1832,6 +1954,355 @@ class AdminController extends ApiController
         }
 
         return "{$local}.{$tenantPart}@import.local";
+    }
+
+    private function saveAcademicPeriodSettings(string $tenantId, ?object $existing, array $payload): ?object
+    {
+        if (! Schema::hasTable('settings')) {
+            throw new \RuntimeException('Tabel settings belum tersedia.');
+        }
+
+        $update = $this->filterExistingPayload('settings', $payload);
+        if (Schema::hasColumn('settings', 'updated_at')) {
+            $update['updated_at'] = now();
+        }
+
+        if ($existing) {
+            $query = DB::table('settings')->where('id', $existing->id);
+            if (Schema::hasColumn('settings', 'tenant_id')) {
+                $query->where('tenant_id', $tenantId);
+            }
+            $query->update($update);
+
+            $select = DB::table('settings')->where('id', $existing->id);
+            if (Schema::hasColumn('settings', 'tenant_id')) {
+                $select->where('tenant_id', $tenantId);
+            }
+
+            return $select->first();
+        }
+
+        if (Schema::hasColumn('settings', 'tenant_id')) {
+            $update['tenant_id'] = $tenantId;
+        }
+        if (Schema::hasColumn('settings', 'created_at')) {
+            $update['created_at'] = now();
+        }
+
+        $id = DB::table('settings')->insertGetId($update);
+
+        $select = DB::table('settings')->where('id', $id);
+        if (Schema::hasColumn('settings', 'tenant_id')) {
+            $select->where('tenant_id', $tenantId);
+        }
+
+        return $select->first();
+    }
+
+    private function rolloverAcademicYearData(string $tenantId, array $period, string $previousYear): array
+    {
+        if (! Schema::hasTable('kelas') || ! Schema::hasTable('profiles')) {
+            return [
+                'promoted_students' => 0,
+                'alumni_students' => 0,
+                'skipped_students' => 0,
+                'classes_synced' => 0,
+            ];
+        }
+
+        $targetStartYear = (int) substr((string) $period['tahun_ajaran'], 0, 4);
+        $classRows = $this->tenantQuery('kelas', $tenantId)
+            ->select($this->existingColumns('kelas', [
+                'id', 'nama', 'grade', 'suffix', 'angkatan', 'tahun_ajaran', 'semester', 'is_active',
+            ]))
+            ->get();
+
+        $classInfoById = [];
+        $classesByGradeSuffix = [];
+        foreach ($classRows as $row) {
+            if (! $this->isActiveClassRow($row)) {
+                continue;
+            }
+
+            $grade = $this->classGradeFromRow($row);
+            $suffix = $this->classSuffixFromRow($row, $grade);
+            $id = trim((string) ($row->id ?? ''));
+            if ($id === '' || $grade === '' || $suffix === '') {
+                continue;
+            }
+
+            $info = [
+                'id' => $id,
+                'grade' => $grade,
+                'suffix' => $suffix,
+                'label' => trim($grade.' '.$suffix),
+            ];
+            $classInfoById[$id] = $info;
+            $classesByGradeSuffix[$grade][$suffix] = $info;
+        }
+
+        $studentRows = DB::table('profiles')
+            ->where('tenant_id', $tenantId)
+            ->where('role', 'siswa')
+            ->whereRaw('lower(coalesce(status, \'active\')) = ?', ['active'])
+            ->select($this->existingColumns('profiles', ['id', 'kelas', 'angkatan', 'status']))
+            ->orderBy('kelas')
+            ->orderBy('id')
+            ->get();
+
+        $updatesByTarget = [];
+        $targetGradeByClass = [];
+        $alumniIds = [];
+        $affectedClassIds = [];
+        $skippedStudents = 0;
+        $missingTargets = [];
+
+        foreach ($studentRows as $student) {
+            $studentId = trim((string) ($student->id ?? ''));
+            $classId = trim((string) ($student->kelas ?? ''));
+            if ($studentId === '' || $classId === '' || ! isset($classInfoById[$classId])) {
+                $skippedStudents++;
+                continue;
+            }
+
+            $currentClass = $classInfoById[$classId];
+            $nextGrade = $this->nextAcademicGrade($currentClass['grade']);
+            if ($nextGrade === null) {
+                $skippedStudents++;
+                continue;
+            }
+
+            $affectedClassIds[$classId] = true;
+            if ($nextGrade === 'ALUMNI') {
+                $alumniIds[] = $studentId;
+                continue;
+            }
+
+            $targetClass = $classesByGradeSuffix[$nextGrade][$currentClass['suffix']] ?? null;
+            if (! $targetClass) {
+                $missingTargets[$nextGrade.' '.$currentClass['suffix']] = true;
+                continue;
+            }
+
+            $updatesByTarget[$targetClass['id']][] = $studentId;
+            $targetGradeByClass[$targetClass['id']] = $nextGrade;
+            $affectedClassIds[$targetClass['id']] = true;
+        }
+
+        if (! empty($missingTargets)) {
+            $labels = array_keys($missingTargets);
+            sort($labels, SORT_NATURAL);
+            throw new \RuntimeException(
+                'Kelas tujuan rollover belum lengkap: '.implode(', ', array_slice($labels, 0, 12)).
+                (count($labels) > 12 ? ', ...' : '').
+                '. Buat kelas tujuan dulu atau gunakan Kenaikan Kelas manual.'
+            );
+        }
+
+        $now = now();
+        $promotedStudents = 0;
+        foreach ($updatesByTarget as $targetClassId => $studentIds) {
+            $update = [
+                'kelas' => $targetClassId,
+                'updated_at' => $now,
+            ];
+            if (Schema::hasColumn('profiles', 'angkatan')) {
+                $update['angkatan'] = $this->cohortYearForGrade($targetGradeByClass[$targetClassId] ?? '', $targetStartYear);
+            }
+            $update = $this->filterExistingPayload('profiles', $update);
+
+            foreach (array_chunk($studentIds, 500) as $chunk) {
+                DB::table('profiles')
+                    ->where('tenant_id', $tenantId)
+                    ->whereIn('id', $chunk)
+                    ->update($update);
+            }
+            $promotedStudents += count($studentIds);
+        }
+
+        if (! empty($alumniIds)) {
+            $alumniPayload = [
+                'status' => 'alumni',
+                'kelas' => '',
+                'tahun_lulus' => $targetStartYear,
+                'disabled_at' => $now,
+                'alasan_nonaktif' => 'Lulus otomatis saat rollover dari '.$previousYear.' ke '.$period['tahun_ajaran'].'.',
+                'rfid_uid' => null,
+                'updated_at' => $now,
+            ];
+            $alumniPayload = $this->filterExistingPayload('profiles', $alumniPayload);
+
+            foreach (array_chunk($alumniIds, 500) as $chunk) {
+                DB::table('profiles')
+                    ->where('tenant_id', $tenantId)
+                    ->whereIn('id', $chunk)
+                    ->update($alumniPayload);
+            }
+        }
+
+        $affectedIds = array_keys($affectedClassIds);
+        if (! empty($affectedIds) && Schema::hasTable('kelas_struktur')) {
+            $structurePayload = $this->filterExistingPayload('kelas_struktur', [
+                'ketua_siswa_id' => null,
+                'ketua_siswa_nama' => null,
+                'updated_at' => $now,
+            ]);
+            if (! empty($structurePayload)) {
+                $query = DB::table('kelas_struktur')->whereIn('kelas_id', $affectedIds);
+                if (Schema::hasColumn('kelas_struktur', 'tenant_id')) {
+                    $query->where('tenant_id', $tenantId);
+                }
+                $query->update($structurePayload);
+            }
+        }
+
+        return [
+            'promoted_students' => $promotedStudents,
+            'alumni_students' => count($alumniIds),
+            'skipped_students' => $skippedStudents,
+            'classes_synced' => $this->syncClassPeriodMetadata($tenantId, $period),
+        ];
+    }
+
+    private function syncClassPeriodMetadata(string $tenantId, array $period): int
+    {
+        if (! Schema::hasTable('kelas')) {
+            return 0;
+        }
+
+        $targetStartYear = (int) substr((string) $period['tahun_ajaran'], 0, 4);
+        $rows = $this->tenantQuery('kelas', $tenantId)
+            ->select($this->existingColumns('kelas', ['id', 'nama', 'grade', 'suffix', 'is_active']))
+            ->orderBy('id')
+            ->get();
+
+        $count = 0;
+        foreach ($rows as $row) {
+            if (! $this->isActiveClassRow($row)) {
+                continue;
+            }
+
+            $grade = $this->classGradeFromRow($row);
+            $update = [
+                'tahun_ajaran' => $period['tahun_ajaran'],
+                'semester' => $period['semester'],
+                'updated_at' => now(),
+            ];
+            if ($grade !== '') {
+                $update['angkatan'] = $this->cohortYearForGrade($grade, $targetStartYear);
+            }
+
+            $update = $this->filterExistingPayload('kelas', $update);
+            if (empty($update)) {
+                continue;
+            }
+
+            $query = DB::table('kelas')->where('id', $row->id);
+            if (Schema::hasColumn('kelas', 'tenant_id')) {
+                $query->where('tenant_id', $tenantId);
+            }
+            $query->update($update);
+            $count++;
+        }
+
+        return $count;
+    }
+
+    private function filterExistingPayload(string $table, array $payload): array
+    {
+        if (! Schema::hasTable($table)) {
+            return [];
+        }
+
+        return array_filter(
+            $payload,
+            fn ($value, $column) => Schema::hasColumn($table, (string) $column),
+            ARRAY_FILTER_USE_BOTH
+        );
+    }
+
+    private function isActiveClassRow(object $row): bool
+    {
+        if (! property_exists($row, 'is_active')) {
+            return true;
+        }
+
+        $value = $row->is_active;
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        return ! in_array(strtolower(trim((string) $value)), ['0', 'false', 'no', 'inactive'], true);
+    }
+
+    private function classGradeFromRow(object $row): string
+    {
+        $grade = $this->normalizeClassGrade($row->grade ?? '');
+        if ($grade !== '') {
+            return $grade;
+        }
+
+        return $this->parseClassGrade((string) ($row->nama ?? $row->id ?? ''));
+    }
+
+    private function classSuffixFromRow(object $row, string $grade): string
+    {
+        $suffix = trim((string) ($row->suffix ?? ''));
+        if ($suffix === '') {
+            $suffix = $this->stripClassGradePrefix((string) ($row->nama ?? $row->id ?? ''), $grade);
+        }
+
+        return strtoupper(trim((string) preg_replace('/\s+/', ' ', $suffix)));
+    }
+
+    private function normalizeClassGrade(string $value): string
+    {
+        $grade = strtoupper(trim((string) preg_replace('/\s+/', ' ', $value)));
+
+        return in_array($grade, ['VII', 'VIII', 'IX', 'X', 'XI', 'XII'], true) ? $grade : '';
+    }
+
+    private function parseClassGrade(string $value): string
+    {
+        $normalized = strtoupper(trim((string) preg_replace('/[\s_-]+/', ' ', $value)));
+        if (preg_match('/^(XII|XI|X|IX|VIII|VII)\b/', $normalized, $matches)) {
+            return $matches[1];
+        }
+
+        return '';
+    }
+
+    private function stripClassGradePrefix(string $value, string $grade): string
+    {
+        $normalized = strtoupper(trim((string) preg_replace('/[\s_-]+/', ' ', $value)));
+        if ($grade !== '' && str_starts_with($normalized, $grade.' ')) {
+            return trim(substr($normalized, strlen($grade) + 1));
+        }
+
+        return $normalized;
+    }
+
+    private function nextAcademicGrade(string $grade): ?string
+    {
+        return match ($grade) {
+            'VII' => 'VIII',
+            'VIII' => 'IX',
+            'IX', 'XII' => 'ALUMNI',
+            'X' => 'XI',
+            'XI' => 'XII',
+            default => null,
+        };
+    }
+
+    private function cohortYearForGrade(string $grade, int $academicStartYear): string
+    {
+        $offset = match ($grade) {
+            'VIII', 'XI' => -1,
+            'IX', 'XII' => -2,
+            default => 0,
+        };
+
+        return (string) ($academicStartYear + $offset);
     }
 
     private function firstTenantRow(string $table, string $tenantId): ?object

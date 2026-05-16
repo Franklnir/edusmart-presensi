@@ -2000,6 +2000,15 @@ const auth = {
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
+    async applyAcademicPeriod(payload = {}) {
+      const res = await apiFetch('/api/admin/academic-period/apply', {
+        method: 'POST',
+        body: payload,
+        timeoutMs: 45000
+      })
+      if (!res.error) invalidateDbSelectCache()
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
     async studentOptions(params = {}) {
       const res = await apiFetch(`/api/admin/student-options${buildQueryString(params)}`, {
         method: 'GET',
