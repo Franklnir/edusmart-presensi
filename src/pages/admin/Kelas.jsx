@@ -301,6 +301,13 @@ export default function AKelas({ initialTab = 'kelas' }) {
   const [newGrade, setNewGrade] = useState('')
   const [newSuffix, setNewSuffix] = useState('')
   const selObj = React.useMemo(() => kelas.find(k => k.id === kelasSelected) || null, [kelas, kelasSelected])
+  const activeAcademicCohortYear = React.useMemo(() => {
+    const startYear = Number(
+      academicPeriod.startYear || String(academicPeriod.tahunAjaran || '').slice(0, 4)
+    )
+
+    return Number.isFinite(startYear) && startYear > 0 ? String(startYear) : ''
+  }, [academicPeriod.startYear, academicPeriod.tahunAjaran])
 
   // Struktur kelas
   const [waliGuruId, setWaliGuruId] = useState('')
@@ -1341,7 +1348,12 @@ export default function AKelas({ initialTab = 'kelas' }) {
 
     const nama = makeClassName(grade, suffix).toUpperCase()
     const id = slug(nama)
-    const angkatan = String(inferCohortYear(grade, academicPeriod.startYear)).trim()
+    const angkatan = activeAcademicCohortYear
+
+    if (!angkatan) {
+      pushToast('error', 'Periode akademik aktif belum valid. Periksa pengaturan tahun ajaran.')
+      return
+    }
 
     try {
       setLoading(true)
@@ -2485,10 +2497,10 @@ export default function AKelas({ initialTab = 'kelas' }) {
                           Angkatan
                         </label>
                         <div className="block w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-gray-900 shadow-sm">
-                          {newGrade ? inferCohortYear(newGrade, academicPeriod.startYear) : '-'}
+                          {activeAcademicCohortYear || '-'}
                         </div>
                         <p className="text-xs text-gray-500 mt-1">
-                          Otomatis mengikuti tahun ajaran aktif dan grade kelas.
+                          Mengikuti tahun awal periode aktif, tidak berubah saat grade dipilih.
                         </p>
                       </div>
                       <button

@@ -3589,7 +3589,7 @@ class DbController extends ApiController
     private function cohortFromRow(string $table, array $row, ?string $tenantId): ?string
     {
         if ($table === 'kelas') {
-            return $this->inferCohortFromClassLabel($row['grade'] ?? $row['nama'] ?? $row['id'] ?? null, $tenantId);
+            return $this->activeAcademicCohortForTenant($tenantId);
         }
 
         $classId = match ($table) {
@@ -3614,29 +3614,15 @@ class DbController extends ApiController
         return null;
     }
 
-    private function inferCohortFromClassLabel($classValue, ?string $tenantId): ?string
+    private function activeAcademicCohortForTenant(?string $tenantId): ?string
     {
         $period = $this->currentAcademicPeriodForTenant($tenantId);
-        $academicStartYear = (int) substr($period['tahun_ajaran'], 0, 4);
+        $academicStartYear = (int) substr((string) ($period['tahun_ajaran'] ?? ''), 0, 4);
         if ($academicStartYear <= 0) {
             return null;
         }
 
-        $grade = strtoupper(trim((string) ($classValue ?? '')));
-        if ($grade === '') {
-            return (string) $academicStartYear;
-        }
-        if (preg_match('/^(XII|XI|X|IX|VIII|VII)\b/', $grade, $matches)) {
-            $grade = $matches[1];
-        }
-
-        $offset = match ($grade) {
-            'VIII', 'XI' => -1,
-            'IX', 'XII' => -2,
-            default => 0,
-        };
-
-        return (string) ($academicStartYear + $offset);
+        return (string) $academicStartYear;
     }
 
     private function cohortForClass($classId, ?string $tenantId): ?string
