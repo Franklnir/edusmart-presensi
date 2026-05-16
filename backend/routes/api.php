@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\ClassHistoryController;
 use App\Http\Controllers\Api\DbController;
 use App\Http\Controllers\Api\GoogleDriveController;
 use App\Http\Controllers\Api\InfrastructureController;
+use App\Http\Controllers\Api\MobileDirectoryController;
 use App\Http\Controllers\Api\PresenceController;
 use App\Http\Controllers\Api\QuizController;
 use App\Http\Controllers\Api\ReportController;
@@ -28,6 +29,13 @@ Route::get('/health', function () {
 });
 
 Route::get('/internal/tls/authorize', [InfrastructureController::class, 'authorizeTlsDomain'])
+    ->middleware('throttle:api')
+    ->withoutMiddleware([
+        ResolveTenant::class,
+        EnsureTenantMatchesProfile::class,
+    ]);
+
+Route::get('/mobile/schools', [MobileDirectoryController::class, 'schools'])
     ->middleware('throttle:api')
     ->withoutMiddleware([
         ResolveTenant::class,
