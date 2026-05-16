@@ -2016,8 +2016,7 @@ class AdminController extends ApiController
         string $previousYear,
         string $previousSemester,
         bool $carryEskulMembers
-    ): array
-    {
+    ): array {
         if (Schema::hasTable('kelas') === false || Schema::hasTable('profiles') === false) {
             return [
                 'promoted_students' => 0,
@@ -2082,6 +2081,7 @@ class AdminController extends ApiController
             $classId = trim((string) ($student->kelas ?? ''));
             if ($studentId === '' || $classId === '' || isset($classInfoById[$classId]) === false) {
                 $skippedStudents += 1;
+
                 continue;
             }
 
@@ -2089,6 +2089,7 @@ class AdminController extends ApiController
             $nextGrade = $this->nextAcademicGrade($currentClass['grade']);
             if ($nextGrade === null) {
                 $skippedStudents += 1;
+
                 continue;
             }
 
@@ -2096,12 +2097,14 @@ class AdminController extends ApiController
             if ($nextGrade === 'ALUMNI') {
                 $alumniIds[] = $studentId;
                 $clearedClassStudentIds[] = $studentId;
+
                 continue;
             }
 
             $targetClass = $classesByGradeSuffix[$nextGrade][$currentClass['suffix']] ?? null;
             if ($targetClass === null) {
                 $missingTargets[$nextGrade.' '.$currentClass['suffix']] = true;
+
                 continue;
             }
 
@@ -2205,8 +2208,7 @@ class AdminController extends ApiController
         string $sourceSemester,
         array $targetPeriod,
         array $studentIds
-    ): int
-    {
+    ): int {
         $studentIds = array_values(array_unique(array_filter(array_map(
             fn ($value) => trim((string) $value),
             $studentIds
