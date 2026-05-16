@@ -51,6 +51,9 @@ Route::post('/auth/login', [AuthController::class, 'login'])
 Route::get('/auth/google/redirect', [AuthController::class, 'googleRedirect'])
     ->middleware(['web', 'throttle:auth'])
     ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
+Route::get('/auth/google/mobile/redirect', [AuthController::class, 'googleMobileRedirect'])
+    ->middleware(['web', 'throttle:auth'])
+    ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
 Route::get('/auth/google/popup-context', [AuthController::class, 'googlePopupContext'])
     ->middleware('throttle:auth')
     ->withoutMiddleware([
@@ -61,6 +64,9 @@ Route::post('/auth/google/code-login', [AuthController::class, 'googleCodeLogin'
     ->middleware('throttle:auth')
     ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
 Route::post('/auth/google/credential-login', [AuthController::class, 'googleCredentialLogin'])
+    ->middleware('throttle:auth')
+    ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
+Route::post('/auth/google/mobile/exchange', [AuthController::class, 'googleMobileExchange'])
     ->middleware('throttle:auth')
     ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
 Route::get('/auth/google/callback', [AuthController::class, 'googleCallback'])

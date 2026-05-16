@@ -41,6 +41,10 @@ return [
         'client_secret' => env('GOOGLE_CLIENT_SECRET'),
         'redirect_uri' => env('GOOGLE_REDIRECT_URI'),
         'prompt' => env('GOOGLE_AUTH_PROMPT', 'select_account'),
+        'mobile_redirect_schemes' => array_values(array_filter(array_map(
+            'trim',
+            explode(',', env('GOOGLE_MOBILE_REDIRECT_SCHEMES', 'edusmart-presensi,edusmart'))
+        ))),
         'drive' => [
             'enabled' => filter_var(env('GOOGLE_DRIVE_ENABLED', env('GOOGLE_AUTH_ENABLED', false)), FILTER_VALIDATE_BOOL),
             'client_id' => env('GOOGLE_DRIVE_CLIENT_ID', env('GOOGLE_CLIENT_ID')),

@@ -157,6 +157,49 @@ class AuthController extends ApiController
         return redirect()->away($this->googleAuthorizationUrl($request, $state));
     }
 
+    public function googleMobileRedirect(Request $request): RedirectResponse
+    {
+        $mobileRedirectUri = $this->sanitizeMobileRedirectUri((string) $request->query('redirect_uri', ''));
+        $fallbackRedirect = $mobileRedirectUri ?: 'edusmart-presensi://google-auth';
+
+        if ($mobileRedirectUri === null) {
+            return redirect()->away($this->appendQueryToUrl($fallbackRedirect, [
+                'google' => 'failed',
+                'google_error' => 'Redirect aplikasi mobile tidak valid.',
+            ]));
+        }
+
+        if (! $this->isGoogleAuthEnabled()) {
+            return redirect()->away($this->appendQueryToUrl($mobileRedirectUri, [
+                'google' => 'disabled',
+            ]));
+        }
+
+        if ($this->googleClientId() === '' || $this->googleClientSecret() === '') {
+            return redirect()->away($this->appendQueryToUrl($mobileRedirectUri, [
+                'google' => 'failed',
+                'google_error' => 'Konfigurasi Google OAuth belum lengkap.',
+            ]));
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return redirect()->away($this->appendQueryToUrl($mobileRedirectUri, [
+                'google' => 'tenant_invalid',
+            ]));
+        }
+
+        $state = $this->createGoogleState($request, 'login', [
+            'mobile' => true,
+            'mobile_redirect_uri' => $mobileRedirectUri,
+            'tenant_id' => $tenantId,
+            'host' => $this->currentHost($request),
+            'redirect' => $mobileRedirectUri,
+        ]);
+
+        return redirect()->away($this->googleAuthorizationUrl($request, $state));
+    }
+
     public function googleLinkRedirect(Request $request): RedirectResponse
     {
         $redirectTarget = $this->sanitizeFrontendRedirect(
@@ -324,6 +367,78 @@ class AuthController extends ApiController
         ]);
     }
 
+    public function googleMobileExchange(Request $request)
+    {
+        if (! $this->isGoogleAuthEnabled()) {
+            return response()->json(['error' => 'Login Google belum diaktifkan oleh administrator.'], 422);
+        }
+
+        $validated = $request->validate([
+            'ticket' => ['required', 'string', 'size:64'],
+        ]);
+
+        $payload = $this->pullGoogleLoginHandoffTicket((string) $validated['ticket']);
+        if (! is_array($payload) || ! (bool) ($payload['mobile'] ?? false)) {
+            return response()->json(['error' => 'Sesi login Google tidak valid atau sudah kedaluwarsa.'], 422);
+        }
+
+        $createdAt = (int) ($payload['created_at'] ?? 0);
+        if ($createdAt <= 0 || (time() - $createdAt) > self::GOOGLE_LOGIN_HANDOFF_TTL_SECONDS) {
+            return response()->json(['error' => 'Sesi login Google sudah kedaluwarsa.'], 422);
+        }
+
+        $expectedHost = strtolower(trim((string) ($payload['host'] ?? '')));
+        $currentHost = $this->currentHost($request);
+        if ($expectedHost === '' || $expectedHost !== $currentHost) {
+            return response()->json(['error' => 'Sesi login Google tidak cocok dengan sekolah yang dipilih.'], 422);
+        }
+
+        $userId = trim((string) ($payload['user_id'] ?? ''));
+        $user = $userId !== '' ? User::query()->find($userId) : null;
+        if (! $user) {
+            return response()->json(['error' => 'Akun pengguna tidak ditemukan.'], 422);
+        }
+
+        $tenantId = trim((string) ($payload['tenant_id'] ?? ''));
+        $isSuperAdminIdentity = $this->isSuperAdminByIdentity(
+            (string) $user->id,
+            (string) ($user->email ?? '')
+        );
+        if (! $isSuperAdminIdentity && $tenantId !== '') {
+            $profile = Profile::query()
+                ->where('id', $user->id)
+                ->where('tenant_id', $tenantId)
+                ->first();
+            if (! $profile) {
+                return response()->json(['error' => 'Akun tidak memiliki akses tenant ini.'], 403);
+            }
+            if ($profile->status === 'nonaktif') {
+                $message = 'Akun ini dinonaktifkan. Hubungi administrator.';
+                if ($profile->alasan_nonaktif) {
+                    $message .= ' Alasan: '.$profile->alasan_nonaktif;
+                }
+
+                return response()->json(['error' => $message], 403);
+            }
+        }
+
+        Auth::login($user);
+        $user->unsetRelation('profile');
+        $request->setUserResolver(fn () => $user);
+        if ($request->hasSession()) {
+            $request->session()->regenerate();
+        }
+
+        return response()->json([
+            'data' => [
+                'user' => $user->fresh(),
+                'profile' => $this->profile($request),
+                'settings' => $this->bootstrapSettings($request),
+                'is_super_admin' => $isSuperAdminIdentity,
+            ],
+        ]);
+    }
+
     public function googleCredentialLink(Request $request)
     {
         if (! $this->isGoogleAuthEnabled()) {
@@ -450,6 +565,10 @@ class AuthController extends ApiController
 
         $googleError = trim((string) $request->query('error', ''));
         if ($googleError !== '') {
+            if ($mobileResponse = $this->googleMobileErrorResponse($statePayload, 'Login Google dibatalkan atau ditolak.')) {
+                return $mobileResponse;
+            }
+
             if ($popupResponse = $this->googlePopupErrorResponse($statePayload, 'Login Google dibatalkan atau ditolak.')) {
                 return $popupResponse;
             }
@@ -462,6 +581,10 @@ class AuthController extends ApiController
 
         $code = trim((string) $request->query('code', ''));
         if ($code === '') {
+            if ($mobileResponse = $this->googleMobileErrorResponse($statePayload, 'Kode autentikasi Google tidak ditemukan.')) {
+                return $mobileResponse;
+            }
+
             if ($popupResponse = $this->googlePopupErrorResponse($statePayload, 'Kode autentikasi Google tidak ditemukan.')) {
                 return $popupResponse;
             }
@@ -474,6 +597,10 @@ class AuthController extends ApiController
 
         $googleUser = $this->exchangeGoogleCodeForUser($request, $code);
         if (! $googleUser['ok']) {
+            if ($mobileResponse = $this->googleMobileErrorResponse($statePayload, (string) $googleUser['message'])) {
+                return $mobileResponse;
+            }
+
             if ($popupResponse = $this->googlePopupErrorResponse($statePayload, (string) $googleUser['message'])) {
                 return $popupResponse;
             }
@@ -499,6 +626,10 @@ class AuthController extends ApiController
             }
 
             $user = $this->completeGoogleLogin($request, $statePayload, $googleUser);
+            if ($mobileResponse = $this->googleMobileSuccessResponse($request, $statePayload, $user)) {
+                return $mobileResponse;
+            }
+
             $handoffResponse = $this->buildGoogleLoginHandoffRedirect(
                 $request,
                 $statePayload,
@@ -518,6 +649,10 @@ class AuthController extends ApiController
             ]));
         } catch (\Throwable $e) {
             $this->reportUnexpectedGoogleDomainException($e);
+
+            if ($mobileResponse = $this->googleMobileErrorResponse($statePayload, $this->safeGoogleErrorMessage($e->getMessage()))) {
+                return $mobileResponse;
+            }
 
             if ($popupResponse = $this->googlePopupErrorResponse($statePayload, $this->safeGoogleErrorMessage($e->getMessage()))) {
                 return $popupResponse;
@@ -1776,6 +1911,94 @@ class AuthController extends ApiController
         $port = isset($parts['port']) ? ':'.((int) $parts['port']) : '';
 
         return $scheme.'://'.$host.$port;
+    }
+
+    private function sanitizeMobileRedirectUri(string $raw): ?string
+    {
+        $value = trim($raw);
+        if ($value === '' || strlen($value) > 512 || str_contains($value, "\0")) {
+            return null;
+        }
+
+        $parts = parse_url($value);
+        if (! is_array($parts)) {
+            return null;
+        }
+
+        $scheme = strtolower(trim((string) ($parts['scheme'] ?? '')));
+        $allowedSchemes = array_values(array_unique(array_filter(array_map(
+            static fn ($item) => strtolower(trim((string) $item)),
+            (array) config('services.google.mobile_redirect_schemes', ['edusmart-presensi', 'edusmart'])
+        ))));
+
+        if ($scheme === '' || ! in_array($scheme, $allowedSchemes, true)) {
+            return null;
+        }
+
+        $host = trim((string) ($parts['host'] ?? ''));
+        $path = trim((string) ($parts['path'] ?? ''));
+        if ($host === '' && $path === '') {
+            return null;
+        }
+
+        $query = isset($parts['query']) && trim((string) $parts['query']) !== ''
+            ? '?'.trim((string) $parts['query'])
+            : '';
+
+        return $scheme.'://'.$host.$path.$query;
+    }
+
+    private function googleMobileSuccessResponse(Request $request, array $statePayload, User $user): ?RedirectResponse
+    {
+        if (! (bool) ($statePayload['mobile'] ?? false)) {
+            return null;
+        }
+
+        $redirectUri = $this->sanitizeMobileRedirectUri((string) ($statePayload['mobile_redirect_uri'] ?? ''));
+        if ($redirectUri === null) {
+            return null;
+        }
+
+        $ticket = $this->createGoogleLoginHandoffTicket([
+            'mobile' => true,
+            'user_id' => (string) $user->id,
+            'tenant_id' => (string) ($statePayload['tenant_id'] ?? ''),
+            'host' => (string) ($statePayload['host'] ?? $this->currentHost($request)),
+            'redirect' => $redirectUri,
+            'mode' => 'login',
+            'created_at' => time(),
+        ]);
+
+        $this->logoutWebSession($request);
+
+        if ($ticket === '') {
+            return redirect()->away($this->appendQueryToUrl($redirectUri, [
+                'google' => 'failed',
+                'google_error' => 'Sesi login Google gagal dibuat.',
+            ]));
+        }
+
+        return redirect()->away($this->appendQueryToUrl($redirectUri, [
+            'google' => 'success',
+            'ticket' => $ticket,
+        ]));
+    }
+
+    private function googleMobileErrorResponse(array $statePayload, string $message): ?RedirectResponse
+    {
+        if (! (bool) ($statePayload['mobile'] ?? false)) {
+            return null;
+        }
+
+        $redirectUri = $this->sanitizeMobileRedirectUri((string) ($statePayload['mobile_redirect_uri'] ?? ''));
+        if ($redirectUri === null) {
+            return null;
+        }
+
+        return redirect()->away($this->appendQueryToUrl($redirectUri, [
+            'google' => 'failed',
+            'google_error' => $this->safeGoogleErrorMessage($message),
+        ]));
     }
 
     private function safeGoogleErrorMessage(?string $message): string
