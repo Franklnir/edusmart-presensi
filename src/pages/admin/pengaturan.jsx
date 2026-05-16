@@ -564,6 +564,7 @@ export default function APengaturan() {
   const [periodForm, setPeriodForm] = useState(() => resolvePeriodForm())
   const [persistedPeriodForm, setPersistedPeriodForm] = useState(() => resolvePeriodForm())
   const [savingPeriod, setSavingPeriod] = useState(false)
+  const [carryEskulMembers, setCarryEskulMembers] = useState(false)
 
   const autoSaveTimerRef = useRef(null)
   const initialLoadDoneRef = useRef(false)
@@ -938,6 +939,13 @@ export default function APengaturan() {
 
   function handlePeriodChange(e) {
     const { name, value } = e.target
+    if (name === 'tahunAjaran') {
+      const nextYear = normalizeAcademicYear(value) || value
+      if (nextYear === persistedPeriodForm.tahunAjaran) {
+        setCarryEskulMembers(false)
+      }
+    }
+
     setPeriodForm((prev) => {
       if (name === 'tahunAjaran') {
         const nextYear = normalizeAcademicYear(value) || value
@@ -995,6 +1003,7 @@ export default function APengaturan() {
 
   function handleUseCurrentPeriod() {
     const current = getCurrentAcademicPeriod()
+    setCarryEskulMembers(false)
     setPeriodForm(resolvePeriodForm({
       tahun_ajaran: current.tahunAjaran,
       semester_aktif: current.semester
@@ -1050,7 +1059,10 @@ export default function APengaturan() {
         tone: 'warning',
         details: [
           'Sistem akan menaikkan siswa aktif satu tingkat: X ke XI, XI ke XII, dan XII menjadi alumni.',
-          'Metadata kelas aktif, filter tugas, absensi, jadwal, laporan, rekap, dan storage akan mengikuti periode baru.'
+          'Metadata kelas aktif, filter tugas, absensi, jadwal, laporan, rekap, dan storage akan mengikuti periode baru.',
+          carryEskulMembers
+            ? 'Anggota eskul aktif akan disalin sebagai keanggotaan baru pada periode target.'
+            : 'Anggota eskul tidak disalin otomatis; keanggotaan periode baru bisa diatur manual.'
         ]
       })
       if (!confirmedYear) return
@@ -1105,7 +1117,8 @@ export default function APengaturan() {
         periode_ganjil_selesai: ganjilPreview.endsAt,
         periode_genap_mulai: genapPreview.startsAt,
         periode_genap_selesai: genapPreview.endsAt,
-        auto_rollover: yearChanged
+        auto_rollover: yearChanged,
+        carry_eskul_members: yearChanged && carryEskulMembers
       }
 
       const { data, error } = await supabase.admin.applyAcademicPeriod(payload)
@@ -1125,7 +1138,11 @@ export default function APengaturan() {
       const rolloverText = rollover
         ? ` Siswa naik: ${rollover.promoted_students || 0}, alumni: ${rollover.alumni_students || 0}.`
         : ''
-      pushToast('success', `Periode aktif disimpan: ${tahunAjaran} - ${semester}.${rolloverText}`, {
+      const eskulText = rollover && payload.carry_eskul_members
+        ? ` Eskul disalin: ${rollover.eskul_members_copied || 0}.`
+        : ''
+      setCarryEskulMembers(false)
+      pushToast('success', `Periode aktif disimpan: ${tahunAjaran} - ${semester}.${rolloverText}${eskulText}`, {
         title: 'Kalender akademik diperbarui'
       })
     } catch (error) {
@@ -1534,6 +1551,7 @@ export default function APengaturan() {
   }
   const googleLinked = Boolean(user?.google_linked || providerState.googleLinked)
   const emailVerified = Boolean(user?.email_confirmed_at || user?.emailVerified || providerState.emailVerified)
+  const periodYearWillChange = periodForm.tahunAjaran !== persistedPeriodForm.tahunAjaran
   const activeAcademicPeriod = resolveAcademicPeriod({
     tahun_ajaran: periodForm.tahunAjaran,
     semester_aktif: periodForm.semester,
@@ -2003,6 +2021,25 @@ export default function APengaturan() {
                   })}
                 </div>
               </div>
+
+              {periodYearWillChange && (
+                <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                  <input
+                    type="checkbox"
+                    checked={carryEskulMembers}
+                    onChange={(event) => setCarryEskulMembers(event.target.checked)}
+                    className="mt-1 h-4 w-4 rounded border-amber-300 text-emerald-600 focus:ring-emerald-500"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-bold text-amber-900">
+                      Salin anggota eskul aktif ke periode baru
+                    </span>
+                    <span className="mt-1 block text-xs leading-5 text-amber-800">
+                      Membuat keanggotaan baru untuk siswa yang naik kelas; riwayat periode lama tetap utuh.
+                    </span>
+                  </span>
+                </label>
+              )}
 
               <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-xs leading-5 text-slate-600">

@@ -800,8 +800,11 @@ class AdminController extends ApiController
         $existing = $this->firstTenantRow('settings', $tenantId);
         $previousYear = AcademicPeriod::normalizeAcademicYear($existing->tahun_ajaran ?? null)
             ?: AcademicPeriod::current()['tahun_ajaran'];
+        $previousSemester = AcademicPeriod::normalizeSemester($existing->semester_aktif ?? null)
+            ?: AcademicPeriod::current()['semester'];
         $yearChanged = $previousYear !== $tahunAjaran;
         $autoRollover = filter_var($payload['auto_rollover'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        $carryEskulMembers = filter_var($payload['carry_eskul_members'] ?? false, FILTER_VALIDATE_BOOLEAN);
 
         if ($yearChanged && $autoRollover === false) {
             return $this->deny('Perubahan tahun ajaran harus dijalankan melalui rollover akademik.', 409);
@@ -820,13 +823,21 @@ class AdminController extends ApiController
                 $settingsPayload,
                 $activePeriod,
                 $previousYear,
-                $yearChanged
+                $previousSemester,
+                $yearChanged,
+                $carryEskulMembers
             ) {
                 $rollover = null;
                 $classesSynced = 0;
 
                 if ($yearChanged) {
-                    $rollover = $this->rolloverAcademicYearData($tenantId, $activePeriod, $previousYear);
+                    $rollover = $this->rolloverAcademicYearData(
+                        $tenantId,
+                        $activePeriod,
+                        $previousYear,
+                        $previousSemester,
+                        $carryEskulMembers
+                    );
                     $classesSynced = (int) ($rollover['classes_synced'] ?? 0);
                 } else {
                     $classesSynced = $this->syncClassPeriodMetadata($tenantId, $activePeriod);
@@ -1999,7 +2010,13 @@ class AdminController extends ApiController
         return $select->first();
     }
 
-    private function rolloverAcademicYearData(string $tenantId, array $period, string $previousYear): array
+    private function rolloverAcademicYearData(
+        string $tenantId,
+        array $period,
+        string $previousYear,
+        string $previousSemester,
+        bool $carryEskulMembers
+    ): array
     {
         if (Schema::hasTable('kelas') === false || Schema::hasTable('profiles') === false) {
             return [
@@ -2007,6 +2024,7 @@ class AdminController extends ApiController
                 'alumni_students' => 0,
                 'skipped_students' => 0,
                 'classes_synced' => 0,
+                'eskul_members_copied' => 0,
             ];
         }
 
@@ -2145,6 +2163,15 @@ class AdminController extends ApiController
         }
 
         $snapshotUpdates = $this->syncStudentClassSnapshotTables($tenantId, $studentClassSnapshots, $clearedClassStudentIds);
+        $eskulMembersCopied = $carryEskulMembers
+            ? $this->copyEskulMembershipsToAcademicPeriod(
+                $tenantId,
+                $previousYear,
+                $previousSemester,
+                $period,
+                array_keys($studentClassSnapshots)
+            )
+            : 0;
 
         $affectedIds = array_keys($affectedClassIds);
         if ($affectedIds !== [] && Schema::hasTable('kelas_struktur')) {
@@ -2168,7 +2195,156 @@ class AdminController extends ApiController
             'skipped_students' => $skippedStudents,
             'classes_synced' => $this->syncClassPeriodMetadata($tenantId, $period),
             'related_snapshots_synced' => $snapshotUpdates,
+            'eskul_members_copied' => $eskulMembersCopied,
         ];
+    }
+
+    private function copyEskulMembershipsToAcademicPeriod(
+        string $tenantId,
+        string $sourceYear,
+        string $sourceSemester,
+        array $targetPeriod,
+        array $studentIds
+    ): int
+    {
+        $studentIds = array_values(array_unique(array_filter(array_map(
+            fn ($value) => trim((string) $value),
+            $studentIds
+        ))));
+        if ($studentIds === [] || Schema::hasTable('ekskul_anggota') === false) {
+            return 0;
+        }
+
+        foreach (['ekskul_id', 'user_id', 'tahun_ajaran', 'semester'] as $column) {
+            if (Schema::hasColumn('ekskul_anggota', $column) === false) {
+                return 0;
+            }
+        }
+
+        $targetYear = AcademicPeriod::normalizeAcademicYear($targetPeriod['tahun_ajaran'] ?? null);
+        $targetSemester = AcademicPeriod::normalizeSemester($targetPeriod['semester'] ?? null);
+        $sourceYear = AcademicPeriod::normalizeAcademicYear($sourceYear);
+        $sourceSemester = AcademicPeriod::normalizeSemester($sourceSemester);
+        if (
+            $targetYear === null
+            || $targetSemester === null
+            || $sourceYear === null
+            || $sourceSemester === null
+            || ($sourceYear === $targetYear && $sourceSemester === $targetSemester)
+        ) {
+            return 0;
+        }
+
+        $cohortByStudent = [];
+        if (Schema::hasColumn('profiles', 'angkatan')) {
+            foreach (array_chunk($studentIds, 500) as $chunk) {
+                $profileQuery = DB::table('profiles')->whereIn('id', $chunk);
+                if (Schema::hasColumn('profiles', 'tenant_id')) {
+                    $profileQuery->where('tenant_id', $tenantId);
+                }
+
+                foreach ($profileQuery->pluck('angkatan', 'id') as $studentId => $cohort) {
+                    $cohortByStudent[(string) $studentId] = $cohort;
+                }
+            }
+        }
+
+        $validEskulIds = null;
+        if (Schema::hasTable('ekskul') && Schema::hasColumn('ekskul', 'id')) {
+            $validEskulIds = [];
+            $ekskulQuery = DB::table('ekskul');
+            if (Schema::hasColumn('ekskul', 'tenant_id')) {
+                $ekskulQuery->where('tenant_id', $tenantId);
+            }
+
+            foreach ($ekskulQuery->pluck('id') as $ekskulId) {
+                $id = trim((string) $ekskulId);
+                if ($id !== '') {
+                    $validEskulIds[$id] = true;
+                }
+            }
+        }
+
+        $existingTargetKeys = [];
+        foreach (array_chunk($studentIds, 500) as $chunk) {
+            $targetQuery = DB::table('ekskul_anggota')
+                ->where('tahun_ajaran', $targetYear)
+                ->where('semester', $targetSemester)
+                ->whereIn('user_id', $chunk);
+            if (Schema::hasColumn('ekskul_anggota', 'tenant_id')) {
+                $targetQuery->where('tenant_id', $tenantId);
+            }
+
+            foreach ($targetQuery->get(['ekskul_id', 'user_id']) as $row) {
+                $userId = trim((string) ($row->user_id ?? ''));
+                $ekskulId = trim((string) ($row->ekskul_id ?? ''));
+                if ($userId !== '' && $ekskulId !== '') {
+                    $existingTargetKeys[$userId.'|'.$ekskulId] = true;
+                }
+            }
+        }
+
+        $sourceColumns = $this->existingColumns('ekskul_anggota', ['id', 'ekskul_id', 'user_id', 'angkatan']);
+        $sourceRows = [];
+        foreach (array_chunk($studentIds, 500) as $chunk) {
+            $sourceQuery = DB::table('ekskul_anggota')
+                ->where('tahun_ajaran', $sourceYear)
+                ->where('semester', $sourceSemester)
+                ->whereIn('user_id', $chunk)
+                ->whereNotNull('ekskul_id')
+                ->where('ekskul_id', '!=', '')
+                ->whereNotNull('user_id')
+                ->where('user_id', '!=', '');
+            if (Schema::hasColumn('ekskul_anggota', 'tenant_id')) {
+                $sourceQuery->where('tenant_id', $tenantId);
+            }
+            if (Schema::hasColumn('ekskul_anggota', 'id')) {
+                $sourceQuery->orderBy('id');
+            }
+
+            foreach ($sourceQuery->get($sourceColumns) as $row) {
+                $sourceRows[] = $row;
+            }
+        }
+
+        $now = now();
+        $insertRows = [];
+        $seenSourceKeys = [];
+        foreach ($sourceRows as $row) {
+            $userId = trim((string) ($row->user_id ?? ''));
+            $ekskulId = trim((string) ($row->ekskul_id ?? ''));
+            if ($userId === '' || $ekskulId === '') {
+                continue;
+            }
+            if ($validEskulIds !== null && isset($validEskulIds[$ekskulId]) === false) {
+                continue;
+            }
+
+            $key = $userId.'|'.$ekskulId;
+            if (isset($seenSourceKeys[$key]) || isset($existingTargetKeys[$key])) {
+                continue;
+            }
+
+            $seenSourceKeys[$key] = true;
+            $insertRows[] = $this->filterExistingPayload('ekskul_anggota', [
+                'tenant_id' => $tenantId,
+                'ekskul_id' => $ekskulId,
+                'user_id' => $userId,
+                'tahun_ajaran' => $targetYear,
+                'semester' => $targetSemester,
+                'angkatan' => $cohortByStudent[$userId] ?? ($row->angkatan ?? null),
+                'created_at' => $now,
+                'updated_at' => $now,
+            ]);
+        }
+
+        foreach (array_chunk($insertRows, 500) as $chunk) {
+            if ($chunk !== []) {
+                DB::table('ekskul_anggota')->insert($chunk);
+            }
+        }
+
+        return count($insertRows);
     }
 
     private function syncStudentClassSnapshotTables(string $tenantId, array $studentClassMap, array $clearedStudentIds): int
