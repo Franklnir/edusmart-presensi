@@ -838,7 +838,7 @@ const runApiFetch = async (path, options = {}) => {
 
     return {
       data: null,
-      error: makeError(json?.error || json?.message || res.statusText, res.status),
+      error: makeError(json?.error || json?.message || res.statusText, res.status, json?.code || json?.reason),
       raw: json
     }
   }
@@ -2007,7 +2007,7 @@ const auth = {
         timeoutMs: 45000
       })
       if (!res.error) invalidateDbSelectCache()
-      return { data: res.raw?.data ?? res.data, error: res.error }
+      return { data: res.raw?.data ?? res.data, error: res.error, raw: res.raw }
     },
     async studentOptions(params = {}) {
       const res = await apiFetch(`/api/admin/student-options${buildQueryString(params)}`, {

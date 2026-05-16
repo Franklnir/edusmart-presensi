@@ -196,8 +196,29 @@ const mapStudentRows = (rows = []) => (rows || []).map((user) => ({
   email: user.email || '',
   kelas: user.kelas || '',
   status: user.status || 'active',
-  angkatan: user.angkatan || ''
+  angkatan: user.angkatan || '',
+  classHistory: Array.isArray(user.class_history) ? user.class_history : []
 }))
+
+const formatStudentClassHistory = (history = []) => {
+  const rows = (history || [])
+    .filter((item) => item?.class_id || item?.class_name || item?.tahun_ajaran)
+    .slice(0, 4)
+
+  if (!rows.length) return 'Riwayat awal belum tercatat'
+
+  return rows
+    .map((item) => {
+      const className = String(item.class_name || item.class_id || '-').toUpperCase()
+      const period = [item.tahun_ajaran, item.semester ? `Smt ${item.semester}` : '']
+        .filter(Boolean)
+        .join(' ')
+      const cohort = item.angkatan ? `angkatan masuk ${item.angkatan}` : ''
+
+      return [className, period, cohort].filter(Boolean).join(' / ')
+    })
+    .join(' -> ')
+}
 
 const mapScheduleRows = (rows = [], period = {}) => {
   const mapped = (rows || []).map((row) => ({
@@ -236,7 +257,7 @@ const buildScheduleDetailKey = (classId = '', period = {}) => (
 
 /* ===== Component Utama: AKelas (Terkunci Password) ===== */
 export default function AKelas({ initialTab = 'kelas' }) {
-  const { pushToast } = useUIStore()
+  const { pushToast, requestConfirmation } = useUIStore()
   const location = useLocation()
   const navigate = useNavigate()
   const isSchedulePage = initialTab === 'jadwal'
@@ -321,6 +342,16 @@ export default function AKelas({ initialTab = 'kelas' }) {
 
     return Number.isFinite(startYear) && startYear > 0 ? String(startYear) : ''
   }, [academicPeriod.startYear, academicPeriod.tahunAjaran])
+  const newClassCohortYear = React.useMemo(() => (
+    newGrade ? inferCohortYear(newGrade, academicPeriod.startYear) : activeAcademicCohortYear
+  ), [activeAcademicCohortYear, academicPeriod.startYear, newGrade])
+  const newClassCohortHelp = React.useMemo(() => {
+    if (!newGrade || !newClassCohortYear) {
+      return 'Pilih grade untuk melihat angkatan masuk siswa pada periode aktif.'
+    }
+
+    return `Kelas ${newGrade} pada ${academicPeriod.tahunAjaran} berarti angkatan masuk ${newClassCohortYear}.`
+  }, [academicPeriod.tahunAjaran, newClassCohortYear, newGrade])
 
   // Struktur kelas
   const [waliGuruId, setWaliGuruId] = useState('')
@@ -948,7 +979,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
     return `${kelasSelected}-${cleanYear}-${cleanSemester}-${cleanHari}-${cleanMapel}-${cleanJamMulai}-${cleanJamSelesai}`
   }
 
-  async function persistAcademicPeriod(nextPeriod, { silent = false } = {}) {
+  async function persistAcademicPeriod(nextPeriod, { silent = false, manualRolloverCompleted = false } = {}) {
     const tahunAjaran = normalizeAcademicYear(nextPeriod?.tahunAjaran)
     const semester = normalizeSemester(nextPeriod?.semester)
     const ganjilRange = resolveAcademicPeriod({
@@ -989,12 +1020,35 @@ export default function AKelas({ initialTab = 'kelas' }) {
       periode_ganjil_selesai: ganjilRange.endsAt,
       periode_genap_mulai: genapRange.startsAt,
       periode_genap_selesai: genapRange.endsAt,
+      manual_rollover_completed: manualRolloverCompleted,
       updated_at: new Date().toISOString()
     }
 
-    const { error } = await supabase
-      .from('settings')
-      .upsert(payload)
+    let { error, raw } = await supabase.admin.applyAcademicPeriod(payload)
+    if (error?.code === 'academic_period_calendar_confirmation_required') {
+      const serverCalendar = raw?.data?.server_calendar || {}
+      const confirmedCalendar = await requestConfirmation({
+        title: 'Validasi kalender server',
+        message: error.message || 'Periode yang dipilih perlu dikonfirmasi ulang.',
+        confirmText: 'Ya, tetap simpan',
+        cancelText: 'Batal',
+        tone: 'warning',
+        details: [
+          `Tanggal server: ${serverCalendar.today || '-'} (${serverCalendar.timezone || 'Asia/Jakarta'})`,
+          `Kalender server: ${serverCalendar.tahun_ajaran || '-'} - Semester ${serverCalendar.semester || '-'}`,
+          `Target simpan: ${tahunAjaran} - Semester ${semester}`
+        ]
+      })
+      if (!confirmedCalendar) {
+        throw new Error('Perubahan periode dibatalkan.')
+      }
+
+      const retry = await supabase.admin.applyAcademicPeriod({
+        ...payload,
+        calendar_confirmed: true
+      })
+      error = retry.error
+    }
 
     if (error) throw error
 
@@ -1319,7 +1373,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
       }
 
       if (promotionAdvancePeriod) {
-        await persistAcademicPeriod(nextAcademicPeriod, { silent: true })
+        await persistAcademicPeriod(nextAcademicPeriod, { silent: true, manualRolloverCompleted: true })
         pushToast('success', `Periode aktif diperbarui ke ${nextAcademicPeriod.tahunAjaran} - ${nextAcademicPeriod.semester}`)
       }
 
@@ -1361,7 +1415,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
 
     const nama = makeClassName(grade, suffix).toUpperCase()
     const id = slug(nama)
-    const angkatan = String(inferCohortYear(grade, academicPeriod.startYear)).trim()
+    const angkatan = String(newClassCohortYear || inferCohortYear(grade, academicPeriod.startYear)).trim()
 
     if (!angkatan) {
       pushToast('error', 'Periode akademik aktif belum valid. Periksa pengaturan tahun ajaran.')
@@ -2445,7 +2499,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
                         >
                           <span className="block text-lg font-bold">{(k.nama || k.id).toUpperCase()}</span>
                           <span className="text-xs opacity-75 mt-1">Grade {k.grade}</span>
-                          <span className="text-[11px] opacity-75">Angkatan {k.angkatan || '-'}</span>
+                          <span className="text-[11px] opacity-75">Angkatan masuk {k.angkatan || '-'}</span>
                         </button>
                         
                         {/* Delete button (only visible on hover) */}
@@ -2517,17 +2571,17 @@ export default function AKelas({ initialTab = 'kelas' }) {
                           Contoh hasil: VII A, X IPA 1, dll.
                         </p>
                       </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Angkatan
-                        </label>
-                        <div className="block w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-gray-900 shadow-sm">
-                          {newGrade ? inferCohortYear(newGrade, academicPeriod.startYear) : activeAcademicCohortYear || '-'}
-                        </div>
-                        <p className="text-xs text-gray-500 mt-1">
-                          Mengikuti tahun ajaran aktif dan tingkatan kelas agar cohort tetap benar saat rollover.
-                        </p>
-                      </div>
+	                      <div>
+	                        <label className="block text-sm font-medium text-gray-700 mb-2">
+	                          Angkatan Masuk
+	                        </label>
+	                        <div className="block w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-gray-900 shadow-sm">
+	                          {newClassCohortYear || '-'}
+	                        </div>
+	                        <p className="text-xs text-gray-500 mt-1">
+	                          {newClassCohortHelp}
+	                        </p>
+	                      </div>
                       <button
                         className="w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white py-3 px-4 rounded-lg hover:from-blue-700 hover:to-blue-800 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 font-medium shadow-md flex items-center justify-center space-x-2 disabled:opacity-50"
                         onClick={tambahKelas}
@@ -2623,11 +2677,51 @@ export default function AKelas({ initialTab = 'kelas' }) {
                             </svg>
                             <span>Reset</span>
                           </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
+	                        </div>
+	                      </div>
+	                    </div>
+	                    <div className="mt-6 border-t border-gray-100 pt-5">
+	                      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+	                        <div>
+	                          <h4 className="text-sm font-bold text-gray-900">Siswa Di Kelas Ini</h4>
+	                          <p className="text-xs text-gray-500">
+	                            Label angkatan menunjukkan tahun masuk cohort; riwayat menunjukkan periode kelas yang pernah diikuti.
+	                          </p>
+	                        </div>
+	                        <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+	                          {classDetailLoading ? 'Memuat...' : `${siswaDiKelasTerpilih.length} siswa`}
+	                        </span>
+	                      </div>
+
+	                      <div className="mt-3 overflow-hidden rounded-xl border border-gray-200">
+	                        {classDetailLoading ? (
+	                          <div className="px-4 py-5 text-sm text-gray-500">Memuat siswa dan riwayat kelas...</div>
+	                        ) : siswaDiKelasTerpilih.length ? (
+	                          <div className="divide-y divide-gray-100">
+	                            {siswaDiKelasTerpilih.map((siswa) => (
+	                              <div key={siswa.uid} className="px-4 py-3">
+	                                <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+	                                  <div className="min-w-0">
+	                                    <p className="truncate text-sm font-semibold text-gray-900">{siswa.nama}</p>
+	                                    <p className="truncate text-xs text-gray-500">{siswa.email || 'Tanpa email'}</p>
+	                                  </div>
+	                                  <span className="shrink-0 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
+	                                    Angkatan masuk {siswa.angkatan || '-'}
+	                                  </span>
+	                                </div>
+	                                <p className="mt-2 text-xs text-gray-600">
+	                                  Riwayat: {formatStudentClassHistory(siswa.classHistory)}
+	                                </p>
+	                              </div>
+	                            ))}
+	                          </div>
+	                        ) : (
+	                          <div className="px-4 py-5 text-sm text-gray-500">Belum ada siswa aktif di kelas ini.</div>
+	                        )}
+	                      </div>
+	                    </div>
+	                  </div>
+	                )}
 
               </div>
             )}

@@ -581,6 +581,7 @@ class AdminController extends ApiController
         return response()->json([
             'data' => [
                 'profile' => (array) $profile,
+                'class_history' => $this->studentClassHistoriesForStudents($tenantId, [$id])[$id] ?? [],
                 'org_member' => $this->studentOrganizationMemberships($tenantId, $id),
                 'osis' => $this->studentOsisMembership($tenantId, $id),
             ],
@@ -672,6 +673,19 @@ class AdminController extends ApiController
                 ->limit($studentLimit)
                 ->get()
                 ->map(fn ($row) => (array) $row)
+                ->values();
+
+            $historiesByStudent = $this->studentClassHistoriesForStudents(
+                $tenantId,
+                $students->pluck('id')->filter()->map(fn ($id) => (string) $id)->all()
+            );
+            $students = $students
+                ->map(function (array $row) use ($historiesByStudent) {
+                    $studentId = (string) ($row['id'] ?? '');
+                    $row['class_history'] = $historiesByStudent[$studentId] ?? [];
+
+                    return $row;
+                })
                 ->values();
         }
 
@@ -804,15 +818,60 @@ class AdminController extends ApiController
             ?: AcademicPeriod::current()['semester'];
         $yearChanged = $previousYear !== $tahunAjaran;
         $autoRollover = filter_var($payload['auto_rollover'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        $manualRolloverCompleted = filter_var($payload['manual_rollover_completed'] ?? false, FILTER_VALIDATE_BOOLEAN);
         $carryEskulMembers = filter_var($payload['carry_eskul_members'] ?? false, FILTER_VALIDATE_BOOLEAN);
-
-        if ($yearChanged && $autoRollover === false) {
-            return $this->deny('Perubahan tahun ajaran harus dijalankan melalui rollover akademik.', 409);
-        }
 
         $previousStartYear = (int) substr($previousYear, 0, 4);
         $targetStartYear = (int) substr($tahunAjaran, 0, 4);
-        if ($yearChanged && $targetStartYear !== $previousStartYear + 1) {
+        $serverNow = Carbon::now('Asia/Jakarta');
+        $calendarPeriod = AcademicPeriod::current($serverNow);
+        $calendarStartYear = (int) substr((string) $calendarPeriod['tahun_ajaran'], 0, 4);
+        $calendarConfirmed = filter_var($payload['calendar_confirmed'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        $isCalendarCorrection = $yearChanged
+            && $previousStartYear > $calendarStartYear
+            && $targetStartYear === $calendarStartYear;
+        $requiresRollover = $yearChanged && $isCalendarCorrection === false && $manualRolloverCompleted === false;
+        $targetMatchesServerCalendar = $tahunAjaran === $calendarPeriod['tahun_ajaran']
+            && $semester === $calendarPeriod['semester'];
+
+        if ($targetStartYear < $calendarStartYear) {
+            return $this->deny(
+                'Periode lama tidak boleh dijadikan periode aktif. Gunakan filter Mode Arsip untuk melihat data '.$tahunAjaran.'.',
+                422
+            );
+        }
+
+        if ($targetStartYear > $calendarStartYear + 1) {
+            return $this->deny('Periode aktif tidak boleh melompat lebih dari satu tahun ajaran dari kalender server.', 422);
+        }
+
+        if (($isCalendarCorrection || $targetMatchesServerCalendar === false) && $calendarConfirmed === false) {
+            return $this->academicPeriodConfirmationRequired(
+                $isCalendarCorrection
+                    ? 'Periode aktif tersimpan berada di masa depan. Konfirmasi untuk mengoreksi kalender aktif tanpa membalik otomatis riwayat siswa.'
+                    : 'Periode yang dipilih tidak sama dengan kalender server saat ini. Konfirmasi ulang sebelum dipakai sebagai periode operasional.',
+                $calendarPeriod,
+                $serverNow,
+                [
+                    'tahun_ajaran' => $previousYear,
+                    'semester' => $previousSemester,
+                ],
+                [
+                    'tahun_ajaran' => $tahunAjaran,
+                    'semester' => $semester,
+                ]
+            );
+        }
+
+        if ($yearChanged && $isCalendarCorrection === false && $targetStartYear !== $previousStartYear + 1) {
+            return $this->deny('Rollover akademik hanya bisa maju tepat satu tahun ajaran.', 422);
+        }
+
+        if ($requiresRollover && $autoRollover === false) {
+            return $this->deny('Perubahan tahun ajaran harus dijalankan melalui rollover akademik atau Kenaikan Kelas manual.', 409);
+        }
+
+        if ($requiresRollover && $targetStartYear !== $previousStartYear + 1) {
             return $this->deny('Rollover otomatis hanya bisa maju tepat satu tahun ajaran.', 422);
         }
 
@@ -825,12 +884,18 @@ class AdminController extends ApiController
                 $previousYear,
                 $previousSemester,
                 $yearChanged,
+                $requiresRollover,
+                $isCalendarCorrection,
+                $manualRolloverCompleted,
+                $calendarPeriod,
+                $serverNow,
                 $carryEskulMembers
             ) {
                 $rollover = null;
                 $classesSynced = 0;
+                $classHistorySnapshots = 0;
 
-                if ($yearChanged) {
+                if ($requiresRollover) {
                     $rollover = $this->rolloverAcademicYearData(
                         $tenantId,
                         $activePeriod,
@@ -844,6 +909,13 @@ class AdminController extends ApiController
                 }
 
                 $settings = $this->saveAcademicPeriodSettings($tenantId, $existing, $settingsPayload);
+                $classHistorySnapshots = $this->snapshotStudentClassHistoriesForPeriod(
+                    $tenantId,
+                    $activePeriod,
+                    $requiresRollover
+                        ? 'auto_rollover'
+                        : ($manualRolloverCompleted ? 'manual_rollover_completed' : 'period_sync')
+                );
 
                 return [
                     'settings' => $settings ? (array) $settings : null,
@@ -854,6 +926,15 @@ class AdminController extends ApiController
                         'ends_at' => $activePeriod['ends_at'],
                     ],
                     'year_changed' => $yearChanged,
+                    'calendar_correction' => $isCalendarCorrection,
+                    'manual_rollover_completed' => $manualRolloverCompleted,
+                    'class_history_snapshots' => $classHistorySnapshots,
+                    'server_calendar' => [
+                        'today' => $serverNow->toDateString(),
+                        'timezone' => 'Asia/Jakarta',
+                        'tahun_ajaran' => $calendarPeriod['tahun_ajaran'],
+                        'semester' => $calendarPeriod['semester'],
+                    ],
                     'classes_synced' => $classesSynced,
                     'rollover' => $rollover,
                 ];
@@ -863,6 +944,30 @@ class AdminController extends ApiController
         }
 
         return response()->json(['data' => $result]);
+    }
+
+    private function academicPeriodConfirmationRequired(
+        string $message,
+        array $serverPeriod,
+        Carbon $serverNow,
+        array $previousPeriod,
+        array $targetPeriod
+    ) {
+        return response()->json([
+            'error' => $message,
+            'code' => 'academic_period_calendar_confirmation_required',
+            'data' => [
+                'server_calendar' => [
+                    'today' => $serverNow->toDateString(),
+                    'timezone' => 'Asia/Jakarta',
+                    'tahun_ajaran' => $serverPeriod['tahun_ajaran'] ?? null,
+                    'semester' => $serverPeriod['semester'] ?? null,
+                    'label' => ($serverPeriod['tahun_ajaran'] ?? '-').' - Semester '.($serverPeriod['semester'] ?? '-'),
+                ],
+                'previous_period' => $previousPeriod,
+                'target_period' => $targetPeriod,
+            ],
+        ], 409);
     }
 
     public function studentOptions(Request $request)
@@ -2446,6 +2551,143 @@ class AdminController extends ApiController
         }
 
         return $count;
+    }
+
+    private function studentClassHistoriesForStudents(string $tenantId, array $studentIds): array
+    {
+        $ids = array_values(array_unique(array_filter(
+            array_map(fn ($id) => trim((string) $id), $studentIds),
+            fn ($id) => $id !== ''
+        )));
+        if ($ids === [] || ! Schema::hasTable('student_class_histories')) {
+            return [];
+        }
+
+        $columns = $this->existingColumns('student_class_histories', [
+            'id', 'student_id', 'class_id', 'class_name', 'grade', 'suffix', 'angkatan',
+            'tahun_ajaran', 'semester', 'status', 'source', 'note', 'valid_from',
+            'valid_until', 'created_at',
+        ]);
+        if ($columns === []) {
+            return [];
+        }
+
+        $rows = $this->tenantQuery('student_class_histories', $tenantId)
+            ->whereIn('student_id', $ids)
+            ->select($columns)
+            ->orderBy('student_id')
+            ->orderByDesc(Schema::hasColumn('student_class_histories', 'valid_from') ? 'valid_from' : 'created_at')
+            ->limit(max(100, count($ids) * 8))
+            ->get()
+            ->map(fn ($row) => (array) $row)
+            ->groupBy(fn ($row) => (string) ($row['student_id'] ?? ''));
+
+        $histories = [];
+        foreach ($rows as $studentId => $studentRows) {
+            $histories[$studentId] = $studentRows
+                ->take(8)
+                ->values()
+                ->all();
+        }
+
+        return $histories;
+    }
+
+    private function snapshotStudentClassHistoriesForPeriod(string $tenantId, array $period, string $source): int
+    {
+        if (
+            ! Schema::hasTable('student_class_histories')
+            || ! Schema::hasTable('profiles')
+            || ! Schema::hasTable('kelas')
+        ) {
+            return 0;
+        }
+
+        $classRows = $this->tenantQuery('kelas', $tenantId)
+            ->select($this->existingColumns('kelas', ['id', 'nama', 'grade', 'suffix', 'angkatan']))
+            ->get()
+            ->keyBy(fn ($row) => (string) ($row->id ?? ''));
+
+        $studentRows = DB::table('profiles')
+            ->where('tenant_id', $tenantId)
+            ->where('role', 'siswa')
+            ->whereNotNull('kelas')
+            ->where('kelas', '!=', '')
+            ->whereRaw('lower(coalesce(status, \'active\')) = ?', ['active'])
+            ->select($this->existingColumns('profiles', ['id', 'kelas', 'angkatan', 'status']))
+            ->orderBy('kelas')
+            ->orderBy('id')
+            ->get();
+
+        if ($studentRows->isEmpty()) {
+            return 0;
+        }
+
+        $now = now();
+        $inserted = 0;
+        foreach ($studentRows->chunk(500) as $chunk) {
+            $studentIds = $chunk->pluck('id')->filter()->map(fn ($id) => (string) $id)->values()->all();
+            $existingKeys = $this->tenantQuery('student_class_histories', $tenantId)
+                ->whereIn('student_id', $studentIds)
+                ->where('tahun_ajaran', $period['tahun_ajaran'])
+                ->where('semester', $period['semester'])
+                ->whereNull('valid_until')
+                ->select($this->existingColumns('student_class_histories', ['student_id', 'class_id']))
+                ->get()
+                ->mapWithKeys(fn ($row) => [(string) ($row->student_id ?? '').'|'.(string) ($row->class_id ?? '') => true]);
+
+            $rowsToInsert = [];
+            $studentsToClose = [];
+            foreach ($chunk as $student) {
+                $studentId = (string) ($student->id ?? '');
+                $classId = (string) ($student->kelas ?? '');
+                if ($studentId === '' || $classId === '') {
+                    continue;
+                }
+
+                if ($existingKeys->has($studentId.'|'.$classId)) {
+                    continue;
+                }
+
+                $class = $classRows->get($classId);
+                $studentsToClose[] = $studentId;
+                $rowsToInsert[] = $this->filterExistingPayload('student_class_histories', [
+                    'id' => (string) Str::uuid(),
+                    'tenant_id' => $tenantId,
+                    'student_id' => $studentId,
+                    'class_id' => $classId,
+                    'class_name' => $class->nama ?? $classId,
+                    'grade' => $class ? $this->classGradeFromRow($class) : $this->parseClassGrade($classId),
+                    'suffix' => $class ? $this->classSuffixFromRow($class, $this->classGradeFromRow($class)) : null,
+                    'angkatan' => $student->angkatan ?? ($class->angkatan ?? null),
+                    'tahun_ajaran' => $period['tahun_ajaran'],
+                    'semester' => $period['semester'],
+                    'status' => $student->status ?? 'active',
+                    'source' => $source,
+                    'note' => 'Snapshot otomatis periode akademik aktif.',
+                    'valid_from' => $now,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ]);
+            }
+
+            if ($rowsToInsert === []) {
+                continue;
+            }
+
+            $this->tenantQuery('student_class_histories', $tenantId)
+                ->whereIn('student_id', array_values(array_unique($studentsToClose)))
+                ->whereNull('valid_until')
+                ->update($this->filterExistingPayload('student_class_histories', [
+                    'valid_until' => $now,
+                    'updated_at' => $now,
+                ]));
+
+            DB::table('student_class_histories')->insert($rowsToInsert);
+            $inserted += count($rowsToInsert);
+        }
+
+        return $inserted;
     }
 
     private function filterExistingPayload(string $table, array $payload): array

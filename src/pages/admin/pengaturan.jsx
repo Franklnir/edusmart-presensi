@@ -1049,47 +1049,69 @@ export default function APengaturan() {
       return
     }
 
+    const previousStartYear = Number(String(previousPayload.tahun_ajaran || '').slice(0, 4))
+    const targetStartYear = Number(String(nextPayload.tahun_ajaran || '').slice(0, 4))
     const yearChanged = nextPayload.tahun_ajaran !== previousPayload.tahun_ajaran
+    const yearMovesForwardOneStep = yearChanged && targetStartYear === previousStartYear + 1
+    const yearMovesBackward = yearChanged && targetStartYear < previousStartYear
+
     if (yearChanged) {
-      const confirmedYear = await requestConfirmation({
-        title: 'Ubah tahun ajaran aktif?',
-        message: `Periode tahun ajaran akan berubah dari ${previousPayload.tahun_ajaran || '-'} ke ${nextPayload.tahun_ajaran}.`,
-        confirmText: 'Ya, rollover otomatis',
-        cancelText: 'Batal',
-        tone: 'warning',
-        details: [
-          'Sistem akan menaikkan siswa aktif satu tingkat: X ke XI, XI ke XII, dan XII menjadi alumni.',
-          'Metadata kelas aktif, filter tugas, absensi, jadwal, laporan, rekap, dan storage akan mengikuti periode baru.',
-          carryEskulMembers
-            ? 'Anggota eskul aktif akan disalin sebagai keanggotaan baru pada periode target.'
-            : 'Anggota eskul tidak disalin otomatis; keanggotaan periode baru bisa diatur manual.'
-        ]
-      })
+      const confirmedYear = yearMovesForwardOneStep
+        ? await requestConfirmation({
+            title: 'Ubah tahun ajaran aktif?',
+            message: `Periode tahun ajaran akan berubah dari ${previousPayload.tahun_ajaran || '-'} ke ${nextPayload.tahun_ajaran}.`,
+            confirmText: 'Ya, rollover otomatis',
+            cancelText: 'Batal',
+            tone: 'warning',
+            details: [
+              'Sistem akan menaikkan siswa aktif satu tingkat: X ke XI, XI ke XII, dan XII menjadi alumni.',
+              'Metadata kelas aktif, filter tugas, absensi, jadwal, laporan, rekap, dan storage akan mengikuti periode baru.',
+              carryEskulMembers
+                ? 'Anggota eskul aktif akan disalin sebagai keanggotaan baru pada periode target.'
+                : 'Anggota eskul tidak disalin otomatis; keanggotaan periode baru bisa diatur manual.'
+            ]
+          })
+        : await requestConfirmation({
+            title: yearMovesBackward ? 'Koreksi periode aktif?' : 'Tahun ajaran tidak berurutan',
+            message: yearMovesBackward
+              ? `Periode aktif akan dikoreksi dari ${previousPayload.tahun_ajaran || '-'} ke ${nextPayload.tahun_ajaran}.`
+              : `Periode aktif akan berubah dari ${previousPayload.tahun_ajaran || '-'} ke ${nextPayload.tahun_ajaran}.`,
+            confirmText: yearMovesBackward ? 'Ya, koreksi periode' : 'Cek ke server',
+            cancelText: 'Batal',
+            tone: 'warning',
+            details: [
+              'Koreksi kalender aktif tidak membalik otomatis riwayat kelas siswa.',
+              'Backend tetap mengecek kalender server Asia/Jakarta sebelum perubahan disimpan.',
+              'Data periode lama sebaiknya dibuka lewat Mode Arsip, bukan dengan menurunkan periode aktif.'
+            ]
+          })
       if (!confirmedYear) return
 
-      const hasRetainedStudents = await requestConfirmation({
-        title: 'Ada siswa yang tidak naik kelas?',
-        message: 'Jika ada siswa yang tetap di kelas asal, pilih siswa tersebut melalui fitur Kenaikan Kelas sebelum tahun ajaran baru diaktifkan.',
-        confirmText: 'Ada, pilih siswa dulu',
-        cancelText: 'Tidak ada',
-        tone: 'info'
-      })
-      if (hasRetainedStudents) {
-        const openPromotion = await requestConfirmation({
-          title: 'Buka Kenaikan Kelas?',
-          message: 'Anda akan diarahkan ke Kelas & Jadwal untuk memilih siswa yang tidak naik kelas.',
-          confirmText: 'Buka Kenaikan Kelas',
-          cancelText: 'Tetap di sini',
+      if (yearMovesForwardOneStep) {
+        const hasRetainedStudents = await requestConfirmation({
+          title: 'Ada siswa yang tidak naik kelas?',
+          message: 'Jika ada siswa yang tetap di kelas asal, pilih siswa tersebut melalui fitur Kenaikan Kelas sebelum tahun ajaran baru diaktifkan.',
+          confirmText: 'Ada, pilih siswa dulu',
+          cancelText: 'Tidak ada',
           tone: 'info'
         })
-        if (openPromotion) {
-          window.location.assign('/admin/kelas?openPromotion=1')
+        if (hasRetainedStudents) {
+          const openPromotion = await requestConfirmation({
+            title: 'Buka Kenaikan Kelas?',
+            message: 'Anda akan diarahkan ke Kelas & Jadwal untuk memilih siswa yang tidak naik kelas.',
+            confirmText: 'Buka Kenaikan Kelas',
+            cancelText: 'Tetap di sini',
+            tone: 'info'
+          })
+          if (openPromotion) {
+            window.location.assign('/admin/kelas?openPromotion=1')
+          }
+          pushToast('warning', 'Pilih siswa melalui fitur Kenaikan Kelas sebelum mengaktifkan tahun ajaran baru.', {
+            title: 'Kenaikan kelas diperlukan',
+            duration: 8000
+          })
+          return
         }
-        pushToast('warning', 'Pilih siswa melalui fitur Kenaikan Kelas sebelum mengaktifkan tahun ajaran baru.', {
-          title: 'Kenaikan kelas diperlukan',
-          duration: 8000
-        })
-        return
       }
     } else {
       const confirmedPeriod = await requestConfirmation({
@@ -1117,11 +1139,35 @@ export default function APengaturan() {
         periode_ganjil_selesai: ganjilPreview.endsAt,
         periode_genap_mulai: genapPreview.startsAt,
         periode_genap_selesai: genapPreview.endsAt,
-        auto_rollover: yearChanged,
-        carry_eskul_members: yearChanged && carryEskulMembers
+        auto_rollover: yearMovesForwardOneStep,
+        carry_eskul_members: yearMovesForwardOneStep && carryEskulMembers
       }
 
-      const { data, error } = await supabase.admin.applyAcademicPeriod(payload)
+      let { data, error, raw } = await supabase.admin.applyAcademicPeriod(payload)
+      if (error?.code === 'academic_period_calendar_confirmation_required') {
+        const serverCalendar = raw?.data?.server_calendar || {}
+        const targetPeriod = raw?.data?.target_period || {}
+        const confirmedCalendar = await requestConfirmation({
+          title: 'Validasi kalender server',
+          message: error.message || 'Periode yang dipilih perlu dikonfirmasi ulang.',
+          confirmText: 'Ya, tetap simpan',
+          cancelText: 'Batal',
+          tone: 'warning',
+          details: [
+            `Tanggal server: ${serverCalendar.today || '-'} (${serverCalendar.timezone || 'Asia/Jakarta'})`,
+            `Kalender server: ${serverCalendar.tahun_ajaran || '-'} - Semester ${serverCalendar.semester || '-'}`,
+            `Target simpan: ${targetPeriod.tahun_ajaran || tahunAjaran} - Semester ${targetPeriod.semester || semester}`
+          ]
+        })
+        if (!confirmedCalendar) return
+
+        const retry = await supabase.admin.applyAcademicPeriod({
+          ...payload,
+          calendar_confirmed: true
+        })
+        data = retry.data
+        error = retry.error
+      }
       if (error) throw error
 
       const savedRow = data?.settings || (Array.isArray(data) ? data[0] : data)
