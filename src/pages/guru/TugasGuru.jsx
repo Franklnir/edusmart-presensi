@@ -15,6 +15,7 @@ import FileDropzone from '../../components/FileDropzone'
 import FilePreviewModal from '../../components/FilePreviewModal'
 import PhotoGalleryModal from '../../components/PhotoGalleryModal'
 import UploadProgressTrain from '../../components/UploadProgressTrain'
+import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveFilter'
 import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 import { parseSupabaseError } from '../../utils/supabaseError'
 import {
@@ -439,8 +440,15 @@ export default function TugasGuru() {
   const {
     activeAcademicPeriod,
     period,
+    periodFilter,
+    academicYearOptions,
+    semesterOptions,
+    setAcademicYear,
+    setSemester,
+    resetToActivePeriod,
     applyPeriodFilters,
-    academicPeriodPayload
+    activeAcademicPeriodPayload,
+    isViewingArchivePeriod
   } = useActiveAcademicPeriod()
 
   /* ---------- State ---------- */
@@ -472,6 +480,12 @@ export default function TugasGuru() {
   const [timeRange, setTimeRange] = useState('week') // week | all | custom_months
   const [filterStatus, setFilterStatus] = useState('all') // all | active | expired
   const [selectedMonths, setSelectedMonths] = useState([])
+
+  useEffect(() => {
+    if (isViewingArchivePeriod && timeRange === 'week') {
+      setTimeRange('all')
+    }
+  }, [isViewingArchivePeriod, timeRange])
 
   // Detail
   const [selectedTugas, setSelectedTugas] = useState(null)
@@ -1243,7 +1257,7 @@ export default function TugasGuru() {
         deadline: new Date(form.deadline).toISOString(),
         file_url: form.file_url, // simpan PATH (bukan URL)
         created_by: user.id,
-        ...academicPeriodPayload
+        ...activeAcademicPeriodPayload
       }
 
       const { error } = await supabase.from('tugas').insert(payload)
@@ -1954,7 +1968,7 @@ export default function TugasGuru() {
           </div>
 
           <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-            Periode tugas baru: <b>{period.tahunAjaran}</b> - Semester <b>{period.semester}</b>
+            Periode tugas baru: <b>{activeAcademicPeriod.tahunAjaran}</b> - Semester <b>{activeAcademicPeriod.semester}</b>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mt-4">
@@ -2168,13 +2182,17 @@ export default function TugasGuru() {
                   </select>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">Periode Aktif</label>
-                  <div className="w-full px-4 py-3 border border-slate-300 rounded-xl bg-slate-50 text-sm">
-                    <div className="font-semibold text-slate-900">{activeAcademicPeriod.tahunAjaran}</div>
-                    <div className="text-xs text-slate-500">Semester {activeAcademicPeriod.semester}</div>
-                  </div>
-                </div>
+                <AcademicPeriodArchiveFilter
+                  activeAcademicPeriod={activeAcademicPeriod}
+                  periodFilter={periodFilter}
+                  academicYearOptions={academicYearOptions}
+                  semesterOptions={semesterOptions}
+                  setAcademicYear={setAcademicYear}
+                  setSemester={setSemester}
+                  resetToActivePeriod={resetToActivePeriod}
+                  title="Periode Riwayat"
+                  compact
+                />
 
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-2">Rentang Waktu</label>

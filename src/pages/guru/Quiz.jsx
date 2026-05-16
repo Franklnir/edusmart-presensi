@@ -6,6 +6,7 @@ import { useUIStore } from '../../store/useUIStore'
 import { formatDateTime } from '../../lib/time'
 import ProfileAvatar from '../../components/ProfileAvatar'
 import FilePreviewModal from '../../components/FilePreviewModal'
+import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveFilter'
 import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 
 import {
@@ -83,8 +84,14 @@ export default function GuruQuiz() {
   const {
     activeAcademicPeriod,
     period,
+    periodFilter,
+    academicYearOptions,
+    semesterOptions,
+    setAcademicYear,
+    setSemester,
+    resetToActivePeriod,
     applyPeriodFilters,
-    academicPeriodPayload
+    activeAcademicPeriodPayload
   } = useActiveAcademicPeriod()
 
   const [jadwal, setJadwal] = useState([])
@@ -1200,7 +1207,7 @@ export default function GuruQuiz() {
       duration_minutes: quizForm.mode !== 'regular' ? 60 : null,
       result_visible_to_students: false,
       access_device: 'both',
-      ...academicPeriodPayload,
+      ...activeAcademicPeriodPayload,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     }
@@ -2153,13 +2160,17 @@ export default function GuruQuiz() {
                 ))}
               </select>
             </div>
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">Periode Aktif</label>
-              <div className="w-full px-4 py-3 border border-slate-300 rounded-xl bg-slate-50 text-sm shadow-sm">
-                <div className="font-semibold text-slate-900">{activeAcademicPeriod.tahunAjaran}</div>
-                <div className="text-xs text-slate-500">Semester {activeAcademicPeriod.semester}</div>
-              </div>
-            </div>
+            <AcademicPeriodArchiveFilter
+              activeAcademicPeriod={activeAcademicPeriod}
+              periodFilter={periodFilter}
+              academicYearOptions={academicYearOptions}
+              semesterOptions={semesterOptions}
+              setAcademicYear={setAcademicYear}
+              setSemester={setSemester}
+              resetToActivePeriod={resetToActivePeriod}
+              title="Periode Quiz"
+              compact
+            />
           </div>
         </div>
 

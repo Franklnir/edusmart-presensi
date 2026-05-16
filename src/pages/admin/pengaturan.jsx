@@ -1916,6 +1916,9 @@ export default function APengaturan() {
               <div className="min-w-0">
                 <p className="text-xs font-semibold uppercase tracking-wide text-emerald-600">Kalender Akademik</p>
                 <h2 className="mt-1 text-xl font-bold text-gray-900">Periode Aktif Sekolah</h2>
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+                  Periode aktif dipakai untuk operasional baru. Data tahun sebelumnya dibuka dari filter periode pada halaman tugas, quiz, absensi, jadwal, eskul, laporan, dan storage.
+                </p>
                 <div className="mt-3 flex flex-wrap gap-2 text-xs">
                   <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 font-semibold text-emerald-700">
                     {activeAcademicPeriod.label}

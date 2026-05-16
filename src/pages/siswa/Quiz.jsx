@@ -5,6 +5,7 @@ import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import { formatDateTime, parseDateTime } from '../../lib/time'
 import FilePreviewModal from '../../components/FilePreviewModal'
+import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveFilter'
 import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 
 const safeDate = (value) => {
@@ -348,7 +349,17 @@ export default function SiswaQuiz() {
 
   const { user, profile } = useAuthStore()
   const { pushToast, setLoading } = useUIStore()
-  const { activeAcademicPeriod, period, applyPeriodFilters } = useActiveAcademicPeriod()
+  const {
+    activeAcademicPeriod,
+    period,
+    periodFilter,
+    academicYearOptions,
+    semesterOptions,
+    setAcademicYear,
+    setSemester,
+    resetToActivePeriod,
+    applyPeriodFilters
+  } = useActiveAcademicPeriod()
 
   const [quizList, setQuizList] = useState([])
   const [quizLoadDone, setQuizLoadDone] = useState(false)
@@ -2463,16 +2474,18 @@ export default function SiswaQuiz() {
                 <div className="font-semibold text-slate-800">{profile?.nama || '-'}</div>
                 <div className="text-xs text-slate-500 mt-1">Kelas: {kelasId || '-'}</div>
               </div>
-              <div className="bg-gradient-to-r from-emerald-50 to-cyan-50 border border-emerald-100 rounded-2xl px-4 py-3">
-                <div className="text-xs text-emerald-700 font-semibold">Periode Aktif</div>
-                <div className="font-semibold text-slate-800">{period.tahunAjaran}</div>
-                <div className="text-xs text-slate-500 mt-1">
-                  Semester {period.semester}
-                  {period.tahunAjaran !== activeAcademicPeriod.tahunAjaran || period.semester !== activeAcademicPeriod.semester
-                    ? `, sekolah: ${activeAcademicPeriod.tahunAjaran} ${activeAcademicPeriod.semester}`
-                    : ''}
-                </div>
-              </div>
+              <AcademicPeriodArchiveFilter
+                activeAcademicPeriod={activeAcademicPeriod}
+                periodFilter={periodFilter}
+                academicYearOptions={academicYearOptions}
+                semesterOptions={semesterOptions}
+                setAcademicYear={setAcademicYear}
+                setSemester={setSemester}
+                resetToActivePeriod={resetToActivePeriod}
+                title="Periode Quiz"
+                className="min-w-[17rem]"
+                compact
+              />
               <select
                 className="border border-slate-200 rounded-2xl px-4 py-3 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 value={selectedMapel}

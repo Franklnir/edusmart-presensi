@@ -5,11 +5,10 @@ import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import ProfileAvatar from '../../components/ProfileAvatar'
+import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveFilter'
 import {
   SEMESTER_GANJIL,
   SEMESTER_GENAP,
-  normalizeAcademicYear,
-  normalizeSemester,
   resolveAcademicPeriod
 } from '../../utils/academicPeriod'
 import {
@@ -48,6 +47,29 @@ const SEMESTER_OPTIONS = [
   { value: SEMESTER_GANJIL, label: 'Semester 1 (Ganjil)' },
   { value: SEMESTER_GENAP, label: 'Semester 2 (Genap)' }
 ]
+
+const PERIOD_FILTER_STORAGE_KEY = 'edusmart.academic.periodFilter'
+
+const readStoredPeriodFilter = (fallback) => {
+  if (typeof window === 'undefined') return fallback
+
+  try {
+    const raw = window.localStorage.getItem(PERIOD_FILTER_STORAGE_KEY)
+    return raw ? normalizePeriodFilter(JSON.parse(raw)) : fallback
+  } catch (error) {
+    return fallback
+  }
+}
+
+const writeStoredPeriodFilter = (periodFilter) => {
+  if (typeof window === 'undefined') return
+
+  try {
+    window.localStorage.setItem(PERIOD_FILTER_STORAGE_KEY, JSON.stringify(periodFilter))
+  } catch (error) {
+    // Ignore storage errors so the filter still works in memory.
+  }
+}
 
 /* ===== Error Boundary Component ===== */
 const ErrorBoundary = ({ children }) => {
@@ -720,11 +742,25 @@ function AbsensiGuru() {
   })
 
   const initialAcademicPeriod = resolveAcademicPeriod()
-  const [activeAcademicPeriod, setActiveAcademicPeriod] = useState(initialAcademicPeriod)
-  const [periodFilter, setPeriodFilter] = useState(() => ({
+  const initialPeriodFilter = {
     tahunAjaran: initialAcademicPeriod.tahunAjaran,
     semester: initialAcademicPeriod.semester
-  }))
+  }
+  const [activeAcademicPeriod, setActiveAcademicPeriod] = useState(initialAcademicPeriod)
+  const [periodFilter, setPeriodFilter] = useState(() => readStoredPeriodFilter(initialPeriodFilter))
+  const academicYearOptions = useMemo(() => getAcademicYearOptions(activeAcademicPeriod), [activeAcademicPeriod])
+  const setAcademicYear = (tahunAjaran) => {
+    setPeriodFilter((prev) => normalizePeriodFilter({ ...prev, tahunAjaran }))
+  }
+  const setSemester = (semester) => {
+    setPeriodFilter((prev) => normalizePeriodFilter({ ...prev, semester }))
+  }
+  const resetToActivePeriod = () => {
+    setPeriodFilter({
+      tahunAjaran: activeAcademicPeriod.tahunAjaran,
+      semester: activeAcademicPeriod.semester
+    })
+  }
 
   // Data states
   const [jadwalAll, setJadwalAll] = useState([])
@@ -1113,9 +1149,17 @@ function AbsensiGuru() {
 
         const resolved = resolveAcademicPeriod(data || {})
         setActiveAcademicPeriod(resolved)
-        setPeriodFilter({
-          tahunAjaran: resolved.tahunAjaran,
-          semester: resolved.semester
+        setPeriodFilter((prev) => {
+          const normalized = normalizePeriodFilter(prev)
+          const stillInitial =
+            normalized.tahunAjaran === initialAcademicPeriod.tahunAjaran &&
+            normalized.semester === initialAcademicPeriod.semester
+          if (!stillInitial) return normalized
+
+          return {
+            tahunAjaran: resolved.tahunAjaran,
+            semester: resolved.semester
+          }
         })
       } catch (error) {
         console.warn('Gagal memuat periode akademik aktif:', error)
@@ -1124,6 +1168,10 @@ function AbsensiGuru() {
 
     loadAcademicPeriod()
   }, [])
+
+  useEffect(() => {
+    writeStoredPeriodFilter(periodFilter)
+  }, [periodFilter])
 
   /* ===== Load Data Jadwal & Guru ===== */
   useEffect(() => {
@@ -2583,18 +2631,17 @@ function AbsensiGuru() {
             <div className={view === 'absen' ? 'grid grid-cols-1 2xl:grid-cols-[minmax(0,1fr)_390px] gap-5 items-start' : 'grid grid-cols-1 gap-5'}>
               <div className="min-w-0 space-y-5">
                 <div className={`grid grid-cols-1 md:grid-cols-2 gap-5 items-start ${view === 'absen' ? 'xl:grid-cols-3' : 'xl:grid-cols-2'}`}>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wide">
-                  Periode
-                </label>
-                <div className="w-full px-4 py-3 rounded-2xl border border-slate-300 bg-slate-50 text-sm shadow-sm">
-                  <div className="font-semibold text-slate-900">{activeAcademicPeriod.tahunAjaran}</div>
-                  <div className="text-xs text-slate-500">Semester {activeAcademicPeriod.semester}</div>
-                </div>
-                <div className="mt-1 text-[11px] text-slate-500">
-                  {activeAcademicPeriod.rangeLabel || 'Periode aktif sekolah'}
-                </div>
-              </div>
+              <AcademicPeriodArchiveFilter
+                activeAcademicPeriod={activeAcademicPeriod}
+                periodFilter={periodFilter}
+                academicYearOptions={academicYearOptions}
+                semesterOptions={SEMESTER_OPTIONS}
+                setAcademicYear={setAcademicYear}
+                setSemester={setSemester}
+                resetToActivePeriod={resetToActivePeriod}
+                title="Periode Absensi"
+                compact
+              />
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wide">
                   Pilih Kelas

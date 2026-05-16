@@ -14,6 +14,7 @@ import FileDropzone from '../../components/FileDropzone'
 import FilePreviewModal from '../../components/FilePreviewModal'
 import PhotoGalleryModal from '../../components/PhotoGalleryModal'
 import UploadProgressTrain from '../../components/UploadProgressTrain'
+import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveFilter'
 import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 import { parseSupabaseError } from '../../utils/supabaseError'
 import {
@@ -440,7 +441,19 @@ function MiniCard({ title, value, icon, cls }) {
 export default function TugasSiswa() {
   const { user, profile } = useAuthStore()
   const { pushToast, setLoading } = useUIStore()
-  const { activeAcademicPeriod, period, applyPeriodFilters, academicPeriodPayload } = useActiveAcademicPeriod()
+  const {
+    activeAcademicPeriod,
+    period,
+    periodFilter,
+    academicYearOptions,
+    semesterOptions,
+    setAcademicYear,
+    setSemester,
+    resetToActivePeriod,
+    applyPeriodFilters,
+    academicPeriodPayload,
+    isViewingArchivePeriod
+  } = useActiveAcademicPeriod()
   const [searchParams] = useSearchParams()
   const requestedTugasId = String(searchParams.get('tugas') || '').trim()
 
@@ -459,6 +472,12 @@ export default function TugasSiswa() {
     normalizeStatusFilter(searchParams.get('status')) || 'all'
   )) // all | belum | menunggu | dinilai
   const [searchTerm, setSearchTerm] = useState('')
+
+  useEffect(() => {
+    if (isViewingArchivePeriod && timeRange === 'week') {
+      setTimeRange('all')
+    }
+  }, [isViewingArchivePeriod, timeRange])
 
   const [selectedTugas, setSelectedTugas] = useState(null)
   const [detail, setDetail] = useState(null)
@@ -1468,16 +1487,18 @@ export default function TugasSiswa() {
                 <div className="font-semibold text-slate-800">{profile?.nama || '-'}</div>
                 <div className="text-xs text-slate-500 mt-1">Kelas: {kelasSiswa || '-'}</div>
               </div>
-              <div className="bg-purple-50 border border-purple-100 rounded-2xl px-4 py-3">
-                <div className="text-xs text-purple-600">Periode Aktif</div>
-                <div className="font-semibold text-purple-900">{period.tahunAjaran}</div>
-                <div className="text-xs text-purple-700 mt-1">
-                  Semester {period.semester}
-                  {period.tahunAjaran !== activeAcademicPeriod.tahunAjaran || period.semester !== activeAcademicPeriod.semester
-                    ? ` • Aktif sekolah ${activeAcademicPeriod.tahunAjaran} ${activeAcademicPeriod.semester}`
-                    : ''}
-                </div>
-              </div>
+              <AcademicPeriodArchiveFilter
+                activeAcademicPeriod={activeAcademicPeriod}
+                periodFilter={periodFilter}
+                academicYearOptions={academicYearOptions}
+                semesterOptions={semesterOptions}
+                setAcademicYear={setAcademicYear}
+                setSemester={setSemester}
+                resetToActivePeriod={resetToActivePeriod}
+                title="Periode Tugas"
+                className="min-w-[17rem]"
+                compact
+              />
 
               <button
                 type="button"

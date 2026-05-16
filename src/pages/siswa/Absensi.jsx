@@ -6,9 +6,10 @@ import React, {
   useRef
 } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { CalendarDays, QrCode } from 'lucide-react'
+import { QrCode } from 'lucide-react'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
+import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveFilter'
 import Badge from '../../features/attendance/components/AttendanceBadge'
 import CalendarOverlay from '../../features/attendance/components/CalendarOverlay'
 import JadwalCard from '../../features/attendance/components/JadwalCard'
@@ -44,7 +45,12 @@ export default function SAbsensi() {
   const {
     academicPeriodPayload,
     activeAcademicPeriod,
+    academicYearOptions,
     periodFilter,
+    resetToActivePeriod,
+    semesterOptions,
+    setAcademicYear,
+    setSemester,
   } = useAttendanceAcademicPeriod()
 
   const [tab, setTab] = useState('manual')
@@ -372,19 +378,18 @@ export default function SAbsensi() {
                       </p>
                     </div>
                     <div className="p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                      <div className="min-w-0 md:col-span-2 xl:col-span-1">
-                        <label className="block text-[11px] font-semibold tracking-wide text-slate-600 uppercase mb-1.5">
-                          Periode Semester
-                        </label>
-                        <div className="w-full px-3 py-2.5 border border-slate-300 rounded-xl bg-slate-50 text-sm">
-                          <div className="font-semibold text-slate-900">{activeAcademicPeriod.tahunAjaran}</div>
-                          <div className="text-xs text-slate-500">Semester {activeAcademicPeriod.semester}</div>
-                        </div>
-                        <div className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-500">
-                          <CalendarDays className="h-3.5 w-3.5" />
-                          {activeAcademicPeriod.rangeLabel || 'Periode aktif sekolah'}
-                        </div>
-                      </div>
+                      <AcademicPeriodArchiveFilter
+                        activeAcademicPeriod={activeAcademicPeriod}
+                        periodFilter={periodFilter}
+                        academicYearOptions={academicYearOptions}
+                        semesterOptions={semesterOptions}
+                        setAcademicYear={setAcademicYear}
+                        setSemester={setSemester}
+                        resetToActivePeriod={resetToActivePeriod}
+                        title="Periode Absensi"
+                        className="min-w-0 md:col-span-2 xl:col-span-1"
+                        compact
+                      />
                       <div className="min-w-0">
                         <label className="block text-[11px] font-semibold tracking-wide text-slate-600 uppercase mb-1.5">
                           Tanggal Absen

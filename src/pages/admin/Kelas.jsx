@@ -5,7 +5,9 @@ import { supabase, apiFetch } from '../../lib/supabase'
 import { queryClient, queryKeys } from '../../lib/queryClient'
 import { useUIStore } from '../../store/useUIStore'
 import PasswordInput from '../../components/PasswordInput'
+import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveFilter'
 import { verifyCurrentUserPassword as verifyPassword } from '../../services/authService'
+import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 import { loadExcelJsBrowser } from '../../utils/excelBrowser'
 import {
   getNextAcademicPeriod,
@@ -238,6 +240,17 @@ export default function AKelas({ initialTab = 'kelas' }) {
   const location = useLocation()
   const navigate = useNavigate()
   const isSchedulePage = initialTab === 'jadwal'
+  const {
+    activeAcademicPeriod: activeSchedulePeriod,
+    activeSemesterPeriod: schedulePeriod,
+    periodFilter: schedulePeriodFilter,
+    academicYearOptions,
+    semesterOptions,
+    setAcademicYear,
+    setSemester,
+    resetToActivePeriod,
+    isViewingArchivePeriod: isViewingScheduleArchive
+  } = useActiveAcademicPeriod()
   const routeClassId = React.useMemo(() => {
     const params = new URLSearchParams(location.search)
     return String(params.get('kelas') || '').trim()
@@ -349,7 +362,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
     if (!kelasSelected) return
 
     const studentKey = buildStudentDetailKey(kelasSelected)
-    const scheduleKey = buildScheduleDetailKey(kelasSelected, academicPeriod)
+    const scheduleKey = buildScheduleDetailKey(kelasSelected, schedulePeriod)
     const needsStudents = !isSchedulePage && (force || selectedStudentsLoadedKey !== studentKey)
     const needsSchedule = includeSchedule && (force || jadwalLoadedKey !== scheduleKey)
     const needsMapel = includeSchedule && mapelList.length === 0
@@ -363,8 +376,8 @@ export default function AKelas({ initialTab = 'kelas' }) {
         include_students: needsStudents,
         include_schedule: needsSchedule,
         include_mapel: needsMapel,
-        tahun_ajaran: academicPeriod.tahunAjaran,
-        semester: academicPeriod.semester,
+        tahun_ajaran: schedulePeriod.tahunAjaran,
+        semester: schedulePeriod.semester,
         students_limit: 1000
       }
 
@@ -383,7 +396,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
       })
 
       const nextStudents = needsStudents ? mapStudentRows(data?.selected_students || []) : null
-      const nextSchedule = needsSchedule ? mapScheduleRows(data?.schedule || [], academicPeriod) : null
+      const nextSchedule = needsSchedule ? mapScheduleRows(data?.schedule || [], schedulePeriod) : null
       const nextMapel = needsMapel ? mapSubjectRows(data?.mapel || []) : null
 
       startTransition(() => {
@@ -408,12 +421,12 @@ export default function AKelas({ initialTab = 'kelas' }) {
       setClassDetailLoading(false)
     }
   }, [
-    academicPeriod,
     isSchedulePage,
     jadwalLoadedKey,
     kelasSelected,
     mapelList.length,
     pushToast,
+    schedulePeriod,
     selectedStudentsLoadedKey
   ])
 
@@ -509,18 +522,18 @@ export default function AKelas({ initialTab = 'kelas' }) {
   useEffect(() => {
     if (!isAuthorized || tab !== 'jadwal' || !kelasSelected) return
 
-    const key = `${kelasSelected}|${academicPeriod.tahunAjaran}|${academicPeriod.semester}`
+    const key = `${kelasSelected}|${schedulePeriod.tahunAjaran}|${schedulePeriod.semester}`
     if (jadwalLoadedKey === key) return
 
     loadSelectedClassData({ includeSchedule: true })
   }, [
-    academicPeriod.semester,
-    academicPeriod.tahunAjaran,
     isAuthorized,
     jadwalLoadedKey,
     kelasSelected,
     loadSelectedClassData,
     mapelList.length,
+    schedulePeriod.semester,
+    schedulePeriod.tahunAjaran,
     tab
   ])
 
@@ -660,8 +673,8 @@ export default function AKelas({ initialTab = 'kelas' }) {
         .from('jadwal')
         .select('*')
         .eq('kelas_id', kelasSelected)
-        .eq('tahun_ajaran', academicPeriod.tahunAjaran)
-        .eq('semester', academicPeriod.semester)
+        .eq('tahun_ajaran', schedulePeriod.tahunAjaran)
+        .eq('semester', schedulePeriod.semester)
         .order('hari')
         .order('jam_mulai')
 
@@ -675,8 +688,8 @@ export default function AKelas({ initialTab = 'kelas' }) {
         guruNama: j.guru_nama || '',
         jamMulai: toTimeHHMM(j.jam_mulai),
         jamSelesai: toTimeHHMM(j.jam_selesai),
-        tahunAjaran: j.tahun_ajaran || academicPeriod.tahunAjaran,
-        semester: j.semester || academicPeriod.semester
+        tahunAjaran: j.tahun_ajaran || schedulePeriod.tahunAjaran,
+        semester: j.semester || schedulePeriod.semester
       }))
 
       rows.sort((a, b) => {
@@ -687,13 +700,13 @@ export default function AKelas({ initialTab = 'kelas' }) {
       })
 
       setJadwal(rows)
-      setJadwalLoadedKey(`${kelasSelected}|${academicPeriod.tahunAjaran}|${academicPeriod.semester}`)
+      setJadwalLoadedKey(`${kelasSelected}|${schedulePeriod.tahunAjaran}|${schedulePeriod.semester}`)
     } catch (error) {
       console.error('Error loading jadwal:', error)
       pushToast('error', 'Gagal memuat jadwal')
       throw error
     }
-  }, [academicPeriod.semester, academicPeriod.tahunAjaran, kelasSelected, pushToast])
+  }, [kelasSelected, pushToast, schedulePeriod.semester, schedulePeriod.tahunAjaran])
 
   const loadStrukturKelas = useCallback(async () => {
     if (!kelasSelected) return
@@ -1609,6 +1622,10 @@ export default function AKelas({ initialTab = 'kelas' }) {
   /* ------- JADWAL ------- */
   async function tambahJadwal(e) {
     e?.preventDefault?.()
+    if (isViewingScheduleArchive) {
+      pushToast('warning', 'Jadwal arsip hanya untuk dilihat. Kembali ke periode aktif untuk menambah jadwal.')
+      return
+    }
     if (!kelasSelected) {
       pushToast('error', 'Pilih kelas terlebih dahulu.')
       return
@@ -1681,6 +1698,10 @@ export default function AKelas({ initialTab = 'kelas' }) {
   }
 
   async function hapusJadwal(id) {
+    if (isViewingScheduleArchive) {
+      pushToast('warning', 'Jadwal arsip hanya untuk dilihat. Kembali ke periode aktif untuk menghapus jadwal.')
+      return
+    }
     if (!confirmDelete('Yakin mau menghapus jadwal ini?')) return
 
     try {
@@ -1720,6 +1741,10 @@ export default function AKelas({ initialTab = 'kelas' }) {
 
   async function saveEdit() {
     if (!editData) return
+    if (isViewingScheduleArchive) {
+      pushToast('warning', 'Jadwal arsip hanya untuk dilihat. Kembali ke periode aktif untuk mengedit jadwal.')
+      return
+    }
 
     const { hari, guruId } = editData
     const jamMulai = toTimeHHMM(editData.jamMulai)
@@ -1858,8 +1883,8 @@ export default function AKelas({ initialTab = 'kelas' }) {
       const { data, error } = await supabase
         .from('jadwal')
         .select('*')
-        .eq('tahun_ajaran', academicPeriod.tahunAjaran)
-        .eq('semester', academicPeriod.semester)
+        .eq('tahun_ajaran', schedulePeriod.tahunAjaran)
+        .eq('semester', schedulePeriod.semester)
         .order('kelas_id')
         .order('hari')
         .order('jam_mulai')
@@ -1911,8 +1936,8 @@ export default function AKelas({ initialTab = 'kelas' }) {
         .from('jadwal')
         .select('*')
         .eq('kelas_id', selectedId)
-        .eq('tahun_ajaran', academicPeriod.tahunAjaran)
-        .eq('semester', academicPeriod.semester)
+        .eq('tahun_ajaran', schedulePeriod.tahunAjaran)
+        .eq('semester', schedulePeriod.semester)
         .order('hari')
         .order('jam_mulai')
       if (error) throw error
@@ -2634,9 +2659,20 @@ export default function AKelas({ initialTab = 'kelas' }) {
                       </div>
                       <div className="rounded-xl border border-orange-100 bg-orange-50 p-4 text-sm text-orange-900">
                         <p className="font-semibold">Periode jadwal</p>
-                        <p className="mt-1">{academicPeriod.tahunAjaran} - Semester {academicPeriod.semester}</p>
+                        <p className="mt-1">{schedulePeriod.tahunAjaran} - Semester {schedulePeriod.semester}</p>
                         <p className="mt-2 text-xs text-orange-700">Perubahan periode aktif tetap dikelola dari halaman Pengaturan.</p>
                       </div>
+                      <AcademicPeriodArchiveFilter
+                        activeAcademicPeriod={activeSchedulePeriod}
+                        periodFilter={schedulePeriodFilter}
+                        academicYearOptions={academicYearOptions}
+                        semesterOptions={semesterOptions}
+                        setAcademicYear={setAcademicYear}
+                        setSemester={setSemester}
+                        resetToActivePeriod={resetToActivePeriod}
+                        title="Periode Data"
+                        compact
+                      />
                       {kelasSelected && (
                         <button
                           type="button"
@@ -2724,8 +2760,13 @@ export default function AKelas({ initialTab = 'kelas' }) {
                           Kelola jadwal pelajaran untuk kelas ini
                         </p>
                         <p className="text-xs text-blue-700 mt-1">
-                          Periode: {academicPeriod.tahunAjaran} - Semester {academicPeriod.semester}
+                          Periode: {schedulePeriod.tahunAjaran} - Semester {schedulePeriod.semester}
                         </p>
+                        {isViewingScheduleArchive && (
+                          <p className="text-xs text-amber-700 mt-1">
+                            Mode arsip: perubahan jadwal dinonaktifkan.
+                          </p>
+                        )}
                       </div>
                       
                       <div className="mt-4 lg:mt-0 w-full lg:w-auto">
@@ -2898,7 +2939,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
                           <button
                             type="submit"
                             className="w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white py-2.5 px-4 rounded-lg hover:from-blue-700 hover:to-blue-800 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 text-sm font-medium shadow-md flex items-center justify-center space-x-2 disabled:opacity-50"
-                            disabled={loading || !form.hari || !form.mapel || !form.jamMulai || !form.jamSelesai}
+                            disabled={isViewingScheduleArchive || loading || !form.hari || !form.mapel || !form.jamMulai || !form.jamSelesai}
                           >
                             {loading ? (
                               <>

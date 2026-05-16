@@ -3,6 +3,8 @@ import { supabase } from '../../lib/supabase'
 import { useUIStore } from '../../store/useUIStore'
 import { useAuthStore } from '../../store/useAuthStore'
 import { resolveAcademicPeriod } from '../../utils/academicPeriod'
+import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveFilter'
+import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 
 /* ===== Utils ===== */
 const slug = (s = '') =>
@@ -162,6 +164,16 @@ LoadingSkeleton.displayName = 'LoadingSkeleton'
 export default function AHome() {
   const { pushToast } = useUIStore()
   const { user, profile } = useAuthStore()
+  const {
+    activeAcademicPeriod: activeSchoolPeriod,
+    activeSemesterPeriod: eskulDataPeriod,
+    periodFilter: eskulPeriodFilter,
+    academicYearOptions,
+    semesterOptions,
+    setAcademicYear,
+    setSemester,
+    resetToActivePeriod
+  } = useActiveAcademicPeriod()
 
   const [isLoading, setIsLoading] = useState(true)
 
@@ -176,6 +188,10 @@ export default function AHome() {
     eskul: 0
   })
   const [activeEskulPeriod, setActiveEskulPeriod] = useState(() => resolveAcademicPeriod())
+
+  useEffect(() => {
+    setActiveEskulPeriod(activeSchoolPeriod)
+  }, [activeSchoolPeriod])
 
   const loadCurrentAcademicPeriod = useCallback(async () => {
     const { data } = await supabase
@@ -578,7 +594,7 @@ export default function AHome() {
     if (!eskulSel) return
 
     try {
-      const period = await loadCurrentAcademicPeriod()
+      const period = eskulDataPeriod
 
       let anggotaQuery = supabase
         .from('ekskul_anggota')
@@ -643,7 +659,7 @@ export default function AHome() {
     } catch (error) {
       pushToast('error', 'Gagal memuat data anggota eskul')
     }
-  }, [eskulSel, loadCurrentAcademicPeriod, pushToast])
+  }, [eskulDataPeriod, eskulSel, pushToast])
 
   // Load eskul detail dan anggota ketika eskulSel berubah
   useEffect(() => {
@@ -1412,6 +1428,18 @@ export default function AHome() {
                 </div>
 
                 <div className="p-6">
+                  <AcademicPeriodArchiveFilter
+                    activeAcademicPeriod={activeSchoolPeriod}
+                    periodFilter={eskulPeriodFilter}
+                    academicYearOptions={academicYearOptions}
+                    semesterOptions={semesterOptions}
+                    setAcademicYear={setAcademicYear}
+                    setSemester={setSemester}
+                    resetToActivePeriod={resetToActivePeriod}
+                    title="Periode Keanggotaan"
+                    className="mb-6"
+                  />
+
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                     <div className="md:col-span-2">
                       <label className="block text-sm font-semibold text-gray-700 mb-3">

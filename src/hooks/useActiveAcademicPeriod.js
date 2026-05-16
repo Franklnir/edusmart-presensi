@@ -14,15 +14,59 @@ const toPeriodFilter = (period) => ({
   semester: period.semester
 })
 
-export default function useActiveAcademicPeriod() {
+const DEFAULT_FILTER_STORAGE_KEY = 'edusmart.academic.periodFilter'
+
+const normalizeStoredPeriodFilter = (value, fallback) => {
+  if (!value || typeof value !== 'object') return fallback
+  const tahunAjaran = normalizeAcademicYear(value.tahunAjaran || value.tahun_ajaran)
+  const semester = normalizeSemester(value.semester)
+  if (!tahunAjaran || !semester) return fallback
+
+  return { tahunAjaran, semester }
+}
+
+const readStoredPeriodFilter = (storageKey, fallback) => {
+  if (!storageKey || typeof window === 'undefined') return fallback
+
+  try {
+    const raw = window.localStorage.getItem(storageKey)
+    return raw ? normalizeStoredPeriodFilter(JSON.parse(raw), fallback) : fallback
+  } catch (error) {
+    return fallback
+  }
+}
+
+const writeStoredPeriodFilter = (storageKey, periodFilter) => {
+  if (!storageKey || typeof window === 'undefined') return
+
+  try {
+    window.localStorage.setItem(storageKey, JSON.stringify(periodFilter))
+  } catch (error) {
+    // Ignore storage errors so the filter still works in memory.
+  }
+}
+
+export default function useActiveAcademicPeriod({
+  storageKey = DEFAULT_FILTER_STORAGE_KEY,
+  persistFilter = true
+} = {}) {
   const fallback = useMemo(() => resolveAcademicPeriod(), [])
   const [activeAcademicPeriod, setActiveAcademicPeriod] = useState(fallback)
-  const [periodFilter, setPeriodFilter] = useState(() => toPeriodFilter(fallback))
+  const [periodFilter, setPeriodFilter] = useState(() => (
+    persistFilter
+      ? readStoredPeriodFilter(storageKey, toPeriodFilter(fallback))
+      : toPeriodFilter(fallback)
+  ))
   const activeAcademicPeriodRef = useRef(fallback)
 
   useEffect(() => {
     activeAcademicPeriodRef.current = activeAcademicPeriod
   }, [activeAcademicPeriod])
+
+  useEffect(() => {
+    if (!persistFilter) return
+    writeStoredPeriodFilter(storageKey, periodFilter)
+  }, [periodFilter, persistFilter, storageKey])
 
   useEffect(() => {
     let cancelled = false
@@ -174,6 +218,9 @@ export default function useActiveAcademicPeriod() {
     periodFilter,
     period: yearScopedPeriod,
     activeSemesterPeriod: resolvedPeriod,
+    isViewingArchivePeriod:
+      resolvedPeriod.tahunAjaran !== activeAcademicPeriod.tahunAjaran ||
+      resolvedPeriod.semester !== activeAcademicPeriod.semester,
     academicYearOptions,
     semesterOptions: [SEMESTER_GANJIL, SEMESTER_GENAP],
     setAcademicYear,
@@ -182,6 +229,14 @@ export default function useActiveAcademicPeriod() {
     resetToActivePeriod,
     applyPeriodFilters,
     applySemesterPeriodFilters,
+    activeAcademicPeriodPayload: {
+      tahun_ajaran: activeAcademicPeriod.tahunAjaran,
+      semester: activeAcademicPeriod.semester
+    },
+    selectedAcademicPeriodPayload: {
+      tahun_ajaran: resolvedPeriod.tahunAjaran,
+      semester: resolvedPeriod.semester
+    },
     academicPeriodPayload: {
       tahun_ajaran: resolvedPeriod.tahunAjaran,
       semester: resolvedPeriod.semester

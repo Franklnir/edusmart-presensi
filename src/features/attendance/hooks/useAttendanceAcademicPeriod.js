@@ -1,14 +1,43 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../../lib/supabase'
-import { resolveAcademicPeriod } from '../utils/attendanceDate'
+import {
+  SEMESTER_OPTIONS,
+  getAcademicYearOptions,
+  normalizePeriodFilter,
+  resolveAcademicPeriod
+} from '../utils/attendanceDate'
+
+const STORAGE_KEY = 'edusmart.academic.periodFilter'
+
+const readStoredPeriodFilter = (fallback) => {
+  if (typeof window === 'undefined') return fallback
+
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY)
+    return raw ? normalizePeriodFilter(JSON.parse(raw)) : fallback
+  } catch (error) {
+    return fallback
+  }
+}
+
+const writeStoredPeriodFilter = (periodFilter) => {
+  if (typeof window === 'undefined') return
+
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(periodFilter))
+  } catch (error) {
+    // Ignore storage errors so the filter still works in memory.
+  }
+}
 
 export function useAttendanceAcademicPeriod() {
   const initialAcademicPeriod = resolveAcademicPeriod()
   const [activeAcademicPeriod, setActiveAcademicPeriod] = useState(initialAcademicPeriod)
-  const [periodFilter, setPeriodFilter] = useState(() => ({
+  const initialFilter = {
     tahunAjaran: initialAcademicPeriod.tahunAjaran,
     semester: initialAcademicPeriod.semester
-  }))
+  }
+  const [periodFilter, setPeriodFilter] = useState(() => readStoredPeriodFilter(initialFilter))
 
   useEffect(() => {
     const loadAcademicPeriod = async () => {
@@ -26,9 +55,17 @@ export function useAttendanceAcademicPeriod() {
 
         const resolved = resolveAcademicPeriod(data || {})
         setActiveAcademicPeriod(resolved)
-        setPeriodFilter({
-          tahunAjaran: resolved.tahunAjaran,
-          semester: resolved.semester
+        setPeriodFilter((prev) => {
+          const normalized = normalizePeriodFilter(prev)
+          const stillInitial =
+            normalized.tahunAjaran === initialAcademicPeriod.tahunAjaran &&
+            normalized.semester === initialAcademicPeriod.semester
+          if (!stillInitial) return normalized
+
+          return {
+            tahunAjaran: resolved.tahunAjaran,
+            semester: resolved.semester
+          }
         })
       } catch (error) {
         console.warn('Gagal memuat periode akademik aktif:', error)
@@ -38,15 +75,42 @@ export function useAttendanceAcademicPeriod() {
     loadAcademicPeriod()
   }, [])
 
+  useEffect(() => {
+    writeStoredPeriodFilter(periodFilter)
+  }, [periodFilter])
+
   const academicPeriodPayload = useMemo(() => ({
     tahun_ajaran: periodFilter.tahunAjaran,
     semester: periodFilter.semester
   }), [periodFilter.semester, periodFilter.tahunAjaran])
 
+  const setAcademicYear = (tahunAjaran) => {
+    setPeriodFilter((prev) => normalizePeriodFilter({ ...prev, tahunAjaran }))
+  }
+
+  const setSemester = (semester) => {
+    setPeriodFilter((prev) => normalizePeriodFilter({ ...prev, semester }))
+  }
+
+  const resetToActivePeriod = () => {
+    setPeriodFilter({
+      tahunAjaran: activeAcademicPeriod.tahunAjaran,
+      semester: activeAcademicPeriod.semester
+    })
+  }
+
   return {
     academicPeriodPayload,
     activeAcademicPeriod,
+    academicYearOptions: getAcademicYearOptions(activeAcademicPeriod),
+    isViewingArchivePeriod:
+      periodFilter.tahunAjaran !== activeAcademicPeriod.tahunAjaran ||
+      periodFilter.semester !== activeAcademicPeriod.semester,
     periodFilter,
+    resetToActivePeriod,
+    semesterOptions: SEMESTER_OPTIONS,
+    setAcademicYear,
     setPeriodFilter,
+    setSemester,
   }
 }
