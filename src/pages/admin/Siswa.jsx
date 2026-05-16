@@ -64,7 +64,7 @@ const SISWA_LIST_COLUMNS = [
    MAIN COMPONENT - SISWA
 ======================================================================= */
 export default function ASiswa() {
-  const { pushToast } = useUIStore()
+  const { pushToast, requestConfirmation } = useUIStore()
   const { user, profile } = useAuthStore()
   const [loadingInit, setLoadingInit] = useState(true)
   const location = useLocation()
@@ -317,6 +317,7 @@ export default function ASiswa() {
     kelasList,
     userId: user?.id,
     pushToast,
+    requestConfirmation,
     reloadStudents: loadSiswaRaw,
   })
 

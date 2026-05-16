@@ -387,7 +387,7 @@ function Select({ label, error, options = [], className = '', ...props }) {
 }
 
 export default function AGuru() {
-  const { pushToast } = useUIStore()
+  const { pushToast, requestConfirmation } = useUIStore()
   const [loadingInit, setLoadingInit] = useState(true)
 
   /* ===== Password Modal State ===== */
@@ -1235,12 +1235,22 @@ export default function AGuru() {
       ? importedKelasNames.join(', ')
       : availableKelasNames.join(', ')
 
-    const invalidNote = importErrors.length
-      ? `\n\n${importErrors.length} baris error akan dilewati dan dicatat sebagai gagal.`
-      : ''
-    const confirmed = window.confirm(
-      `Apakah Anda yakin ingin masukin ${importRows.length} data guru valid dengan kelas ${kelasTersedia}?${invalidNote}`
-    )
+    const details = [
+      `${importRows.length} baris valid akan diproses.`,
+      `Kelas tujuan: ${kelasTersedia || '-'}.`
+    ]
+    if (importErrors.length) {
+      details.push(`${importErrors.length} baris error akan dilewati dan dicatat sebagai gagal.`)
+    }
+
+    const confirmed = await requestConfirmation({
+      title: 'Mulai import guru?',
+      message: 'Sistem akan membuat atau memperbarui akun guru dari data yang sudah valid.',
+      confirmText: 'Mulai Import',
+      cancelText: 'Batal',
+      tone: 'info',
+      details
+    })
 
     if (!confirmed) {
       return

@@ -30,6 +30,7 @@ export function useStudentImport({
   kelasList,
   userId,
   pushToast,
+  requestConfirmation,
   reloadStudents,
 }) {
   const [importModalOpen, setImportModalOpen] = useState(false)
@@ -342,12 +343,24 @@ export function useStudentImport({
       ? importedKelasNames.join(', ')
       : availableKelasNames.join(', ')
 
-    const invalidNote = importErrors.length
-      ? `\n\n${importErrors.length} baris error akan dilewati dan dicatat sebagai gagal.`
-      : ''
-    const confirmed = window.confirm(
-      `Apakah Anda yakin ingin masukin ${importRows.length} data siswa valid dengan kelas ${kelasTersedia}?${invalidNote}`
-    )
+    const details = [
+      `${importRows.length} baris valid akan diproses.`,
+      `Kelas tujuan: ${kelasTersedia || '-'}.`,
+    ]
+    if (importErrors.length) {
+      details.push(`${importErrors.length} baris error akan dilewati dan dicatat sebagai gagal.`)
+    }
+
+    const confirmed = requestConfirmation
+      ? await requestConfirmation({
+        title: 'Mulai import siswa?',
+        message: 'Sistem akan membuat atau memperbarui akun siswa dari data yang sudah valid.',
+        confirmText: 'Mulai Import',
+        cancelText: 'Batal',
+        tone: 'info',
+        details,
+      })
+      : window.confirm(`Apakah Anda yakin ingin masukin ${importRows.length} data siswa valid dengan kelas ${kelasTersedia}?`)
 
     if (!confirmed) {
       return
@@ -503,6 +516,7 @@ export function useStudentImport({
     importSource,
     loadImportHistories,
     pushToast,
+    requestConfirmation,
     reloadStudents,
     sheetUrl,
     userId,
