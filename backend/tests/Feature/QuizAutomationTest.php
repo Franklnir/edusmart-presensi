@@ -734,6 +734,86 @@ class QuizAutomationTest extends TestCase
         ]);
     }
 
+    public function test_ongoing_quiz_attempt_is_locked_to_first_device(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        [$siswa] = $this->createUserWithProfile($tenantId, 'siswa', 'X-1');
+        [$guru] = $this->createUserWithProfile($tenantId, 'guru', 'X-1');
+
+        $quizId = (string) Str::uuid();
+        DB::table('quizzes')->insert([
+            'id' => $quizId,
+            'tenant_id' => $tenantId,
+            'guru_id' => $guru->id,
+            'kelas_id' => 'X-1',
+            'mapel' => 'IPA',
+            'nama' => 'Quiz Device Lock',
+            'starts_at' => now()->subMinute(),
+            'deadline_at' => now()->addHour(),
+            'is_live' => false,
+            'is_active' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $questionId = (string) Str::uuid();
+        DB::table('quiz_questions')->insert([
+            'id' => $questionId,
+            'tenant_id' => $tenantId,
+            'quiz_id' => $quizId,
+            'nomor' => 1,
+            'soal' => 'Pilih jawaban',
+            'poin' => 10,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $optionId = (string) Str::uuid();
+        DB::table('quiz_options')->insert([
+            'id' => $optionId,
+            'tenant_id' => $tenantId,
+            'question_id' => $questionId,
+            'label' => 'A',
+            'text' => 'Benar',
+            'is_correct' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $firstStart = $this->actingAs($siswa)->postJson('/api/quiz/start', [
+            'quiz_id' => $quizId,
+            'client_meta' => ['device_id' => 'device-a', 'device' => 'web'],
+        ]);
+        $firstStart->assertOk();
+        $submissionId = $firstStart->json('data.submission.id');
+
+        $secondStart = $this->actingAs($siswa)->postJson('/api/quiz/start', [
+            'quiz_id' => $quizId,
+            'client_meta' => ['device_id' => 'device-b', 'device' => 'web'],
+        ]);
+        $secondStart->assertStatus(409);
+        $secondStart->assertJsonPath('code', 'quiz_device_session_locked');
+
+        $sameDeviceAnswer = $this->actingAs($siswa)->postJson('/api/quiz/answer', [
+            'quiz_id' => $quizId,
+            'submission_id' => $submissionId,
+            'question_id' => $questionId,
+            'option_id' => $optionId,
+            'client_meta' => ['device_id' => 'device-a', 'device' => 'web'],
+        ]);
+        $sameDeviceAnswer->assertOk();
+
+        $otherDeviceAnswer = $this->actingAs($siswa)->postJson('/api/quiz/answer', [
+            'quiz_id' => $quizId,
+            'submission_id' => $submissionId,
+            'question_id' => $questionId,
+            'option_id' => $optionId,
+            'client_meta' => ['device_id' => 'device-b', 'device' => 'web'],
+        ]);
+        $otherDeviceAnswer->assertStatus(409);
+        $otherDeviceAnswer->assertJsonPath('code', 'quiz_device_session_locked');
+    }
+
     public function test_save_answer_endpoint_rejects_option_from_other_question(): void
     {
         $tenantId = $this->defaultTenantId();

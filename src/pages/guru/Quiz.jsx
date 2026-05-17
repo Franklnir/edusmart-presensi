@@ -2181,20 +2181,20 @@ export default function GuruQuiz() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden transition-all duration-300 hover:shadow-md">
-            <div className="flex items-center justify-between p-4 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-white">
+          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-slate-200 p-4">
               <div className="flex items-center gap-3">
-                <div className="w-2 h-8 bg-indigo-600 rounded-full"></div>
+                <div className="h-8 w-1.5 rounded-full bg-indigo-600"></div>
                 <div>
                   <h2 className="text-lg font-bold text-gray-900">Daftar Quiz</h2>
                   <p className="text-xs text-gray-500 mt-0.5">{filteredQuizList.length} quiz tersedia</p>
                 </div>
               </div>
               <div className="flex flex-wrap justify-end gap-1.5">
-                <span className="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-xs font-semibold">
+                <span className="rounded-md bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">
                   {selectedMapel || 'Semua mapel'}
                 </span>
-                <span className="px-3 py-1 bg-cyan-100 text-cyan-700 rounded-full text-xs font-semibold">
+                <span className="rounded-md bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
                   {selectedMonthLabel}
                 </span>
               </div>
@@ -2232,78 +2232,59 @@ export default function GuruQuiz() {
                       ? `Esai terkoreksi (${essayGradedCount})`
                       : 'Belum ada jawaban esai'
                 const correctionBorder = essayStudentPendingCount > 0 ? 'ring-1 ring-red-200/70' : ''
-                const isNewestCard = filteredQuizList[0]?.id === q.id
+                const isSelected = selectedQuizId === q.id
                 return (
                   <button
                     key={q.id}
                     type="button"
                     onClick={() => setSelectedQuizId(q.id)}
-                    className={`w-full text-left border-2 rounded-2xl p-4 transition-all duration-300 ${
-                      status.kind === 'expired'
-                        ? selectedQuizId === q.id
-                          ? 'border-red-400 bg-gradient-to-r from-red-100 to-rose-100 shadow-sm shadow-red-100/60'
-                          : 'border-red-300 bg-gradient-to-r from-red-100 to-rose-100 hover:border-red-400 hover:shadow-sm'
-                        : selectedQuizId === q.id
-                          ? 'border-indigo-400 bg-gradient-to-r from-indigo-50 to-blue-50 shadow-sm shadow-indigo-100/60'
-                          : status.kind === 'active'
-                            ? 'border-emerald-200 bg-gradient-to-r from-emerald-50/90 to-green-50/50 hover:border-emerald-300 hover:shadow-sm'
-                            : 'border-amber-200 bg-gradient-to-r from-amber-50/90 to-yellow-50/40 hover:border-amber-300 hover:shadow-sm'
+                    className={`w-full rounded-xl border p-3 text-left transition-colors ${
+                      isSelected
+                        ? 'border-indigo-500 bg-indigo-50/50 shadow-sm'
+                        : 'border-slate-200 bg-white hover:border-indigo-200 hover:bg-slate-50'
                     } ${correctionBorder}`}
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="font-semibold text-slate-900 text-base">{q.nama}</div>
-                      <div className="flex flex-wrap items-center justify-end gap-1.5">
-                        <span className={`inline-flex text-[11px] px-2 py-0.5 rounded-full border ${status.tone}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-base font-semibold text-slate-900">{q.nama}</div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          {getModeLabel(q)} • Akses {getAccessDeviceLabel(q.access_device)}
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 flex-col items-end gap-1">
+                        <span className={`inline-flex rounded-md border px-2 py-0.5 text-[11px] ${status.tone}`}>
                           {status.label}
                         </span>
-                        {isNewestCard && (
-                          <span className="inline-flex text-[11px] px-2 py-0.5 rounded-full border bg-indigo-100 text-indigo-700 border-indigo-200">
-                            Terbaru dibuat
-                          </span>
-                        )}
-                        <span className={`inline-flex text-[11px] px-2 py-0.5 rounded-full border ${mutationMeta.tone}`}>
+                        <span className={`inline-flex rounded-md border px-2 py-0.5 text-[11px] ${mutationMeta.tone}`}>
                           {mutationMeta.label}
                         </span>
                       </div>
                     </div>
-                    <div className="text-xs text-slate-500 mt-1">
-                      {getModeLabel(q)} • Akses {getAccessDeviceLabel(q.access_device)}
+                    <div className="mt-3 grid grid-cols-2 gap-3 text-[11px] text-slate-500">
+                      <div>
+                        <span className="block font-medium text-slate-700">Mulai</span>
+                        <span>{q.starts_at ? formatDateTime(q.starts_at) : '-'}</span>
+                      </div>
+                      <div>
+                        <span className="block font-medium text-slate-700">Selesai</span>
+                        <span>{quizEndAt ? formatDateTime(quizEndAt) : '-'}</span>
+                      </div>
                     </div>
-                    <div className="text-[11px] text-indigo-600 mt-1 font-semibold">Klik untuk edit & kelola quiz ini</div>
-                    <div className="text-[11px] text-slate-500 mt-2">
-                      Mulai: {q.starts_at ? formatDateTime(q.starts_at) : '-'}
-                    </div>
-                    <div className="text-[11px] text-slate-500">
-                      Selesai: {quizEndAt ? formatDateTime(quizEndAt) : '-'}
-                    </div>
-                    <div className="mt-3 text-[11px] text-slate-600 flex flex-wrap gap-2">
-                      <span className="px-2 py-1 rounded-lg bg-white/80 border border-slate-200">Total: {stats.total_students ?? 0}</span>
-                      <span className="px-2 py-1 rounded-lg bg-white/80 border border-slate-200">Belum: {stats.not_started_count ?? 0}</span>
+                    <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500">
+                      <span>Total siswa: {stats.total_students ?? 0}</span>
+                      <span>Belum: {stats.not_started_count ?? 0}</span>
                       {essayQuestionCount > 0 && (
-                        <span className="px-2 py-1 rounded-lg bg-white/80 border border-amber-200 text-amber-700">
-                          Belum dikoreksi: {essayStudentPendingCount}
-                        </span>
+                        <span>Koreksi: {essayStudentGradedCount}/{essayStudentGradedCount + essayStudentPendingCount}</span>
                       )}
-                      {essayQuestionCount > 0 && (
-                        <span className="px-2 py-1 rounded-lg bg-white/80 border border-emerald-200 text-emerald-700">
-                          Sudah dikoreksi: {essayStudentGradedCount}
-                        </span>
-                      )}
+                      <span>Hasil: {resultVisible ? 'Aktif' : 'Nonaktif'}</span>
                     </div>
-                    <div className={`mt-2 inline-flex text-[11px] px-2.5 py-1 rounded-lg border font-semibold ${correctionTone}`}>
+                    <div className={`mt-3 inline-flex rounded-md border px-2 py-1 text-[11px] font-semibold ${correctionTone}`}>
                       {correctionLabel}
                     </div>
-                    <div className={`mt-2 inline-flex text-[11px] px-2.5 py-1 rounded-lg border font-semibold ${
-                      resultVisible
-                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                        : 'border-slate-200 bg-slate-50 text-slate-600'
-                    }`}>
-                      Hasil ke siswa: {resultVisible ? 'Aktif' : 'Nonaktif'}
-                    </div>
                     {countdownMeta && (
-                      <div className={`mt-2 rounded-xl border px-3 py-2 ${countdownMeta.tone}`}>
-                        <div className="text-[11px] font-semibold uppercase tracking-wide">{countdownMeta.label}</div>
-                        <div className="text-base font-black leading-none mt-1">
+                      <div className={`mt-3 rounded-lg border px-3 py-2 ${countdownMeta.tone}`}>
+                        <div className="text-[11px] font-semibold">{countdownMeta.label}</div>
+                        <div className="mt-1 text-sm font-bold leading-none">
                           {formatRemaining(countdownMeta.seconds)}
                         </div>
                       </div>
@@ -2323,10 +2304,10 @@ export default function GuruQuiz() {
 
           {selectedQuiz && (
             <>
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden transition-all duration-300 hover:shadow-md">
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 p-4 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-white">
+              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                <div className="flex flex-col gap-4 border-b border-slate-200 p-4 md:flex-row md:items-center md:justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="w-2 h-8 bg-blue-600 rounded-full"></div>
+                    <div className="h-8 w-1.5 rounded-full bg-blue-600"></div>
                     <div>
                       <h3 className="text-lg font-bold text-slate-900">{selectedQuiz.nama}</h3>
                       <p className="text-sm text-slate-500">
@@ -2334,23 +2315,23 @@ export default function GuruQuiz() {
                       </p>
                     </div>
                   </div>
-                  <div className="flex flex-col items-end gap-2">
+                  <div className="flex flex-wrap items-center gap-2 md:justify-end">
                     <button
                       type="button"
                       onClick={openEditQuizForm}
-                      className="inline-flex w-fit px-3 py-2 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 text-xs font-bold hover:bg-indigo-100 transition-colors"
+                      className="inline-flex w-fit rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 transition-colors hover:bg-indigo-100"
                     >
                       Edit Info Quiz
                     </button>
                     {selectedStatus && (
-                      <span className={`inline-flex w-fit text-xs px-3 py-1 rounded-full border ${selectedStatus.tone}`}>
+                      <span className={`inline-flex w-fit rounded-md border px-2.5 py-1 text-xs ${selectedStatus.tone}`}>
                         {selectedStatus.label}
                       </span>
                     )}
-                    <span className={`inline-flex w-fit text-[11px] px-2.5 py-1 rounded-full border ${getQuizMutationMeta(selectedQuiz).tone}`}>
+                    <span className={`inline-flex w-fit rounded-md border px-2.5 py-1 text-[11px] ${getQuizMutationMeta(selectedQuiz).tone}`}>
                       {getQuizMutationMeta(selectedQuiz).label}
                     </span>
-                    <span className={`inline-flex w-fit text-[11px] px-2.5 py-1 rounded-full border ${
+                    <span className={`inline-flex w-fit rounded-md border px-2.5 py-1 text-[11px] ${
                       selectedQuiz?.result_visible_to_students
                         ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
                         : 'border-slate-200 bg-slate-50 text-slate-600'
@@ -2358,43 +2339,41 @@ export default function GuruQuiz() {
                       Hasil ke siswa: {selectedQuiz?.result_visible_to_students ? 'Aktif' : 'Nonaktif'}
                     </span>
                     {selectedCountdownMeta && (
-                      <div className={`rounded-xl border px-3 py-2 text-right ${selectedCountdownMeta.tone}`}>
-                        <div className="text-[11px] font-semibold uppercase tracking-wide">
-                          {selectedCountdownMeta.label}
-                        </div>
-                        <div className="text-lg font-black leading-none mt-0.5">
+                      <div className={`rounded-lg border px-3 py-2 text-right ${selectedCountdownMeta.tone}`}>
+                        <div className="text-[11px] font-semibold">{selectedCountdownMeta.label}</div>
+                        <div className="mt-0.5 text-base font-bold leading-none">
                           {formatRemaining(selectedCountdownMeta.seconds)}
                         </div>
                       </div>
                     )}
                   </div>
                 </div>
-                <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-sm">
-                  <div className="px-3 py-2 rounded-xl bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 text-slate-700">
+                <div className="grid grid-cols-1 gap-3 p-4 text-sm sm:grid-cols-2 lg:grid-cols-5">
+                  <div className="rounded-lg border border-slate-200 px-3 py-2 text-slate-700">
                     Total siswa mapel: <span className="font-semibold text-slate-900">{totalStudents}</span>
                   </div>
-                  <div className="px-3 py-2 rounded-xl bg-gradient-to-r from-emerald-50 to-green-50 border border-emerald-200 text-slate-700">
+                  <div className="rounded-lg border border-slate-200 px-3 py-2 text-slate-700">
                     Sudah mengerjakan: <span className="font-semibold text-slate-900">{joinedCount}</span>
                   </div>
-                  <div className="px-3 py-2 rounded-xl bg-gradient-to-r from-amber-50 to-yellow-50 border border-amber-200 text-slate-700">
+                  <div className="rounded-lg border border-slate-200 px-3 py-2 text-slate-700">
                     Belum mengerjakan: <span className="font-semibold text-slate-900">{notStartedCount}</span>
                   </div>
-                  <div className={`px-3 py-2 rounded-xl border ${
+                  <div className={`rounded-lg border px-3 py-2 ${
                     quizContentLocked
-                      ? 'bg-gradient-to-r from-orange-50 to-amber-50 border-orange-200 text-orange-700'
-                      : 'bg-gradient-to-r from-emerald-50 to-green-50 border-emerald-200 text-emerald-700'
+                      ? 'border-orange-200 bg-orange-50 text-orange-700'
+                      : 'border-slate-200 text-slate-700'
                   }`}>
                     Sedang mengerjakan: <span className="font-semibold">
                       {activeWorkingStudents.length} siswa
                       {ongoingOnlineCount > 0 ? ` • ${ongoingOnlineCount} online` : ''}
                     </span>
                   </div>
-                  <div className={`px-3 py-2 rounded-xl border ${
+                  <div className={`rounded-lg border px-3 py-2 ${
                     selectedEssayStudentPendingCount > 0
-                      ? 'bg-gradient-to-r from-red-50 to-rose-50 border-red-200 text-red-700'
+                      ? 'border-red-200 bg-red-50 text-red-700'
                       : selectedEssayQuestionCount > 0
-                        ? 'bg-gradient-to-r from-emerald-50 to-green-50 border-emerald-200 text-emerald-700'
-                        : 'bg-gradient-to-r from-slate-50 to-gray-50 border-slate-200 text-slate-600'
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                        : 'border-slate-200 text-slate-600'
                   }`}>
                     Status koreksi: <span className="font-semibold">
                       {selectedEssayQuestionCount === 0
@@ -2405,16 +2384,16 @@ export default function GuruQuiz() {
                 </div>
               </div>
 
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden transition-all duration-300 hover:shadow-md">
-                <div className="flex items-center justify-between p-4 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-white">
+              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                <div className="flex items-center justify-between border-b border-slate-200 p-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-2 h-8 bg-emerald-600 rounded-full"></div>
+                    <div className="h-8 w-1.5 rounded-full bg-emerald-600"></div>
                     <h3 className="text-lg font-bold text-slate-900">Jadwal Quiz</h3>
                   </div>
                   <button
                     type="button"
                     onClick={handleSaveSchedule}
-                    className="px-4 py-2.5 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 transition-colors"
+                    className="rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700"
                   >
                     Simpan Jadwal
                   </button>
@@ -2425,7 +2404,7 @@ export default function GuruQuiz() {
                     <label className="text-sm font-semibold text-slate-600">Tanggal Mulai</label>
                     <input
                       type="datetime-local"
-                      className="mt-1 w-full border border-slate-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                       min={startInputMin}
                       max={periodEndInput || undefined}
                       value={scheduleForm.starts_at}
@@ -2437,7 +2416,7 @@ export default function GuruQuiz() {
                     <label className="text-sm font-semibold text-slate-600">Tanggal Selesai</label>
                     <input
                       type="datetime-local"
-                      className="mt-1 w-full border border-slate-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                       min={deadlineInputMin}
                       max={periodEndInput || undefined}
                       value={scheduleForm.deadline_at}
@@ -2446,20 +2425,20 @@ export default function GuruQuiz() {
                   </div>
                 </div>
                 {scheduleDurationMinutes != null && (
-                  <div className="text-xs text-indigo-700 mt-3 p-3 rounded-xl border border-indigo-200 bg-indigo-50">
+                  <div className="mt-3 rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-xs text-indigo-700">
                     Total durasi otomatis: <span className="font-semibold">{scheduleDurationMinutes} menit</span>
                     {normalizeMode(selectedQuiz) !== 'regular' && ' (dipakai sebagai timer UTS/UAS siswa)'}
                   </div>
                 )}
                 {schedulePreviewEndAt && (
-                  <div className="text-xs text-emerald-700 mt-3 p-3 rounded-xl border border-emerald-200 bg-emerald-50">
+                  <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-700">
                     Perkiraan selesai: <span className="font-semibold">{formatDateTime(schedulePreviewEndAt)}</span>
                   </div>
                 )}
-                <div className="text-xs text-slate-500 mt-3 p-3 rounded-xl border border-emerald-200 bg-emerald-50/70">
+                <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">
                   Batas tahun periode: {periodRangeLabel}. Saat ada siswa mengerjakan, hanya deadline/durasi yang boleh diubah.
                 </div>
-                <div className={`text-xs mt-3 p-3 rounded-xl border ${
+                <div className={`mt-3 rounded-lg border p-3 text-xs ${
                   selectedQuizSettingsReady.ok
                     ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
                     : 'border-amber-200 bg-amber-50 text-amber-700'
@@ -2467,17 +2446,17 @@ export default function GuruQuiz() {
                   Status sebelum jadwal: <span className="font-semibold">{selectedQuizSettingsReady.message}</span>
                 </div>
                 {selectedStatus?.kind === 'expired' && !quizContentLocked && (
-                  <div className="text-xs text-amber-700 mt-3 p-3 rounded-xl border border-amber-200 bg-amber-50">
+                  <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
                     Quiz ini sudah berakhir. Untuk menjadwalkan ulang, ubah Tanggal Mulai ke waktu setelah sekarang dan sesuaikan durasi/deadline.
                   </div>
                 )}
                 </div>
               </div>
 
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden transition-all duration-300 hover:shadow-md">
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 p-4 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-white">
+              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                <div className="flex flex-col gap-3 border-b border-slate-200 p-4 md:flex-row md:items-center md:justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="w-2 h-8 bg-slate-700 rounded-full"></div>
+                    <div className="h-8 w-1.5 rounded-full bg-slate-700"></div>
                     <h3 className="text-lg font-bold text-slate-900">Keamanan Quiz</h3>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -2485,7 +2464,7 @@ export default function GuruQuiz() {
                       type="button"
                       onClick={handleSaveSecuritySettings}
                       disabled={securitySaving || quizContentLocked}
-                      className="px-4 py-2.5 rounded-xl bg-slate-800 text-white text-sm font-semibold hover:bg-slate-900 transition-colors disabled:opacity-60"
+                      className="rounded-lg bg-slate-800 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-slate-900 disabled:opacity-60"
                     >
                       {securitySaving ? 'Menyimpan...' : quizContentLocked ? 'Keamanan Dikunci' : 'Simpan Keamanan'}
                     </button>
@@ -2493,14 +2472,14 @@ export default function GuruQuiz() {
                       type="button"
                       onClick={handleCloseQuiz}
                       disabled={closingQuiz}
-                      className="px-4 py-2.5 rounded-xl border border-red-200 bg-red-50 text-red-700 text-sm font-semibold hover:bg-red-100 transition-colors disabled:opacity-60"
+                      className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 disabled:opacity-60"
                     >
                       {closingQuiz ? 'Menutup...' : 'Tutup Quiz'}
                     </button>
                   </div>
                 </div>
                 <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <label className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <label className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
                     <span className="text-sm font-semibold text-slate-700">Acak urutan soal</span>
                     <input
                       type="checkbox"
@@ -2510,7 +2489,7 @@ export default function GuruQuiz() {
                       disabled={quizContentLocked}
                     />
                   </label>
-                  <label className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <label className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
                     <span className="text-sm font-semibold text-slate-700">Acak opsi jawaban</span>
                     <input
                       type="checkbox"
@@ -2523,7 +2502,7 @@ export default function GuruQuiz() {
                   <div>
                     <label className="text-sm font-semibold text-slate-600">Batas Percobaan</label>
                     <select
-                      className="mt-1 w-full border border-slate-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-slate-500 bg-white"
+                      className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-4 py-3 focus:outline-none focus:ring-2 focus:ring-slate-500"
                       value={securityForm.max_attempts}
                       onChange={(e) => setSecurityForm((prev) => ({ ...prev, max_attempts: e.target.value }))}
                       disabled={quizContentLocked}
@@ -2539,7 +2518,7 @@ export default function GuruQuiz() {
                   <div>
                     <label className="text-sm font-semibold text-slate-600">Mode Keamanan</label>
                     <select
-                      className="mt-1 w-full border border-slate-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-slate-500 bg-white"
+                      className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-4 py-3 focus:outline-none focus:ring-2 focus:ring-slate-500"
                       value={securityForm.security_mode}
                       onChange={(e) => setSecurityForm((prev) => ({ ...prev, security_mode: e.target.value }))}
                       disabled={quizContentLocked}
@@ -2551,7 +2530,7 @@ export default function GuruQuiz() {
                   <div className="md:col-span-2">
                     <label className="text-sm font-semibold text-slate-600">Akses Perangkat Quiz</label>
                     <select
-                      className="mt-1 w-full border border-slate-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-slate-500 bg-white"
+                      className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-4 py-3 focus:outline-none focus:ring-2 focus:ring-slate-500"
                       value={securityForm.access_device}
                       onChange={(e) => setSecurityForm((prev) => ({ ...prev, access_device: e.target.value }))}
                       disabled={quizContentLocked}
@@ -2569,7 +2548,7 @@ export default function GuruQuiz() {
                   <div className="md:col-span-2">
                     <label className="text-sm font-semibold text-slate-600">
                       Kode Akses Baru
-                      <span className={`ml-2 text-[11px] px-2 py-0.5 rounded-full border ${
+                      <span className={`ml-2 rounded-md border px-2 py-0.5 text-[11px] ${
                         selectedQuiz?.has_access_code
                           ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
                           : 'border-slate-200 bg-slate-50 text-slate-500'
@@ -2579,7 +2558,7 @@ export default function GuruQuiz() {
                     </label>
                     <input
                       type="password"
-                      className="mt-1 w-full border border-slate-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-slate-500"
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-slate-500"
                       value={securityForm.access_code}
                       onChange={(e) => setSecurityForm((prev) => ({ ...prev, access_code: e.target.value }))}
                       placeholder="Kosongkan jika tidak diubah"
@@ -2589,10 +2568,10 @@ export default function GuruQuiz() {
                 </div>
               </div>
 
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden transition-all duration-300 hover:shadow-md">
-                <div className="flex items-center justify-between p-4 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-white">
+              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                <div className="flex items-center justify-between border-b border-slate-200 p-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-2 h-8 bg-indigo-600 rounded-full"></div>
+                    <div className="h-8 w-1.5 rounded-full bg-indigo-600"></div>
                     <div>
                       <h3 className="text-lg font-bold text-slate-900">Soal Quiz</h3>
                       <div className={`text-xs font-semibold mt-0.5 ${
@@ -2607,7 +2586,7 @@ export default function GuruQuiz() {
                       type="button"
                       onClick={handleToggleResultVisibility}
                       disabled={!selectedQuiz || resultVisibilitySaving || quizContentLocked}
-                      className={`px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-60 ${
+	                      className={`rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors disabled:opacity-60 ${
                         selectedQuiz?.result_visible_to_students
                           ? 'border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
                           : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
@@ -2628,7 +2607,7 @@ export default function GuruQuiz() {
                         setShowStudentPreview(true)
                       }}
                       disabled={!questions.length}
-                      className="px-4 py-2.5 rounded-xl border border-indigo-200 text-indigo-700 text-sm font-semibold hover:bg-indigo-50 disabled:opacity-60"
+	                      className="rounded-lg border border-indigo-200 px-4 py-2.5 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-60"
                     >
                       Preview Siswa
                     </button>
@@ -2636,7 +2615,7 @@ export default function GuruQuiz() {
                       type="button"
                       onClick={() => openQuestionForm()}
                       disabled={quizContentLocked}
-                      className="px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+	                      className="rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {quizContentLocked ? 'Soal Dikunci' : '+ Tambah Soal'}
                     </button>

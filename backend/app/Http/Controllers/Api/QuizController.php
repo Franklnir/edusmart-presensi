@@ -261,6 +261,12 @@ class QuizController extends ApiController
                     ->where('submission_id', $submission->id)
                     ->get()
                 : collect();
+            if ($submission && (string) ($submission->status ?? '') === 'ongoing') {
+                $sessionResponse = $this->ensureSubmissionDeviceSession($request, $tenantId, $submission, $request->query(), $this->quizNow($quiz));
+                if ($sessionResponse !== null) {
+                    return $sessionResponse;
+                }
+            }
             $canSeeAnswers = $submission
                 && (string) ($submission->status ?? '') === 'finished'
                 && $this->boolValue($quiz->result_visible_to_students ?? false);
@@ -382,6 +388,12 @@ class QuizController extends ApiController
                 ],
             ]);
         }
+        if ($submission) {
+            $sessionResponse = $this->ensureSubmissionDeviceSession($request, $tenantId, $submission, $request->input('client_meta'), $now);
+            if ($sessionResponse !== null) {
+                return $sessionResponse;
+            }
+        }
 
         $availability = $this->quizAvailabilityForStudent($quiz, $now);
         if (! $availability['ok']) {
@@ -412,6 +424,10 @@ class QuizController extends ApiController
                 return $created['response'];
             }
             $submission = $created['submission'];
+        }
+        $sessionResponse = $this->ensureSubmissionDeviceSession($request, $tenantId, $submission, $request->input('client_meta'), $now);
+        if ($sessionResponse !== null) {
+            return $sessionResponse;
         }
         $submissionId = (string) $submission->id;
 
@@ -512,6 +528,10 @@ class QuizController extends ApiController
             }
             $submission = $created['submission'];
         }
+        $sessionResponse = $this->ensureSubmissionDeviceSession($request, $tenantId, $submission, $request->input('client_meta'), $now);
+        if ($sessionResponse !== null) {
+            return $sessionResponse;
+        }
 
         $detail = $this->studentQuizDetail($tenantId, $quiz, $submission, $now);
 
@@ -562,6 +582,10 @@ class QuizController extends ApiController
         }
         if ((string) ($submission->status ?? '') === 'finished') {
             return response()->json(['error' => 'Quiz sudah selesai, jawaban tidak bisa diubah'], 422);
+        }
+        $sessionResponse = $this->ensureSubmissionDeviceSession($request, $tenantId, $submission, $request->input('client_meta'), $now);
+        if ($sessionResponse !== null) {
+            return $sessionResponse;
         }
 
         $availability = $this->quizAvailabilityForStudent($quiz, $now);
@@ -632,9 +656,13 @@ class QuizController extends ApiController
             ->where('quiz_id', $quizId)
             ->where('siswa_id', $request->user()?->id)
             ->where('tenant_id', $tenantId)
-            ->first(['id']);
+            ->first();
         if (! $submission) {
             return response()->json(['error' => 'Attempt quiz tidak ditemukan'], 404);
+        }
+        $sessionResponse = $this->ensureSubmissionDeviceSession($request, $tenantId, $submission, $request->input('client_meta'), $this->quizNow());
+        if ($sessionResponse !== null) {
+            return $sessionResponse;
         }
 
         $eventType = trim((string) $request->input('event_type', 'warning'));
@@ -2091,22 +2119,29 @@ class QuizController extends ApiController
         return $this->normalizeQuizAccessDevice($quiz->access_device ?? null) ?: 'both';
     }
 
-    private function clientDeviceFromMeta($clientMeta): ?string
+    private function clientMetaArray($clientMeta): array
     {
         if (is_string($clientMeta)) {
             $decoded = json_decode($clientMeta, true);
-            $clientMeta = is_array($decoded) ? $decoded : null;
+
+            return is_array($decoded) ? $decoded : [];
+        }
+        if (is_array($clientMeta)) {
+            return $clientMeta;
+        }
+        if (is_object($clientMeta)) {
+            return (array) $clientMeta;
         }
 
+        return [];
+    }
+
+    private function clientDeviceFromMeta($clientMeta): ?string
+    {
         $values = [];
-        if (is_array($clientMeta)) {
-            foreach (['device', 'client_device', 'client', 'source', 'platform'] as $key) {
-                $values[] = strtolower(trim((string) ($clientMeta[$key] ?? '')));
-            }
-        } elseif (is_object($clientMeta)) {
-            foreach (['device', 'client_device', 'client', 'source', 'platform'] as $key) {
-                $values[] = strtolower(trim((string) ($clientMeta->{$key} ?? '')));
-            }
+        $meta = $this->clientMetaArray($clientMeta);
+        foreach (['device', 'client_device', 'client', 'source', 'platform'] as $key) {
+            $values[] = strtolower(trim((string) ($meta[$key] ?? '')));
         }
 
         foreach ($values as $value) {
@@ -2117,6 +2152,110 @@ class QuizController extends ApiController
                 return 'web';
             }
         }
+
+        return null;
+    }
+
+    private function normalizeClientDeviceId($value): string
+    {
+        $raw = trim((string) ($value ?? ''));
+        if ($raw === '') {
+            return '';
+        }
+
+        $clean = preg_replace('/[^A-Za-z0-9._:-]/', '', $raw) ?: '';
+
+        return Str::limit($clean, 191, '');
+    }
+
+    private function clientDeviceIdFromMeta($clientMeta): string
+    {
+        $meta = $this->clientMetaArray($clientMeta);
+        foreach (['device_id', 'deviceId', 'client_device_id', 'browser_device_id', 'session_device_id'] as $key) {
+            $deviceId = $this->normalizeClientDeviceId($meta[$key] ?? '');
+            if ($deviceId !== '') {
+                return $deviceId;
+            }
+        }
+
+        return '';
+    }
+
+    private function requestQuizDeviceId(Request $request, $clientMeta = null): string
+    {
+        $deviceId = $this->clientDeviceIdFromMeta($clientMeta);
+        if ($deviceId !== '') {
+            return $deviceId;
+        }
+
+        foreach ([
+            $request->input('client_device_id'),
+            $request->query('client_device_id'),
+            $request->header('X-EduSmart-Device-Id'),
+            $request->header('X-Device-Id'),
+        ] as $value) {
+            $deviceId = $this->normalizeClientDeviceId($value);
+            if ($deviceId !== '') {
+                return $deviceId;
+            }
+        }
+
+        $fingerprintSource = implode('|', [
+            (string) ($request->user()?->id ?? ''),
+            $this->requestClientDevice($request, $clientMeta),
+            (string) $request->ip(),
+            Str::limit((string) $request->userAgent(), 180, ''),
+        ]);
+
+        return 'fp-'.sha1($fingerprintSource);
+    }
+
+    private function ensureSubmissionDeviceSession(Request $request, string $tenantId, object $submission, $clientMeta, Carbon $now)
+    {
+        if ((string) ($submission->status ?? '') === 'finished') {
+            return null;
+        }
+
+        $currentDeviceId = $this->requestQuizDeviceId($request, $clientMeta);
+        $storedMeta = $this->clientMetaArray($submission->client_meta ?? null);
+        $lockedDeviceId = $this->clientDeviceIdFromMeta($storedMeta);
+
+        if ($lockedDeviceId !== '' && ! hash_equals($lockedDeviceId, $currentDeviceId)) {
+            return response()->json([
+                'error' => 'Quiz ini sedang aktif di perangkat lain. Lanjutkan dari perangkat pertama atau minta guru mereset attempt.',
+                'code' => 'quiz_device_session_locked',
+            ], 409);
+        }
+
+        if (! Schema::hasColumn('quiz_submissions', 'client_meta')) {
+            return null;
+        }
+
+        $incomingMeta = $this->clientMetaArray($clientMeta);
+        $clientDevice = $this->requestClientDevice($request, $clientMeta);
+        $mergedMeta = array_merge($storedMeta, $incomingMeta, [
+            'device_id' => $currentDeviceId,
+            'session_device_id' => $currentDeviceId,
+            'client_device' => $clientDevice,
+            'session_locked' => true,
+            'last_seen_at' => $now->toISOString(),
+        ]);
+        if (empty($mergedMeta['locked_at'])) {
+            $mergedMeta['locked_at'] = $now->toISOString();
+        }
+
+        $update = [
+            'client_meta' => $this->encodeJsonOrNull($mergedMeta),
+            'updated_at' => $now,
+        ];
+        if (Schema::hasColumn('quiz_submissions', 'client_device')) {
+            $update['client_device'] = $clientDevice;
+        }
+
+        DB::table('quiz_submissions')
+            ->where('id', $submission->id)
+            ->where('tenant_id', $tenantId)
+            ->update($update);
 
         return null;
     }

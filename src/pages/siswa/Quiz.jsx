@@ -52,6 +52,26 @@ const normalizeQuestionNumbering = (questionRows = []) => (
   }))
 )
 
+const getStableQuizDeviceId = () => {
+  if (typeof window === 'undefined') return ''
+  const key = 'edusmart_device_id'
+  let deviceId = ''
+  try {
+    deviceId = window.localStorage.getItem(key) || ''
+  } catch { }
+  if (!deviceId) {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      deviceId = crypto.randomUUID()
+    } else {
+      deviceId = `dev-${Date.now()}-${Math.random().toString(16).slice(2)}`
+    }
+    try {
+      window.localStorage.setItem(key, deviceId)
+    } catch { }
+  }
+  return deviceId
+}
+
 const normalizeAnswerOrder = (value) => {
   if (!value) return null
   let parsed = value
@@ -433,6 +453,28 @@ export default function SiswaQuiz() {
   const quizDetailReloadTimerRef = useRef(null)
 
   const kelasId = profile?.kelas || profile?.kelas_id || ''
+  const buildQuizClientMeta = useCallback((extra = {}) => ({
+    client: 'web',
+    device: 'web',
+    client_device: 'web',
+    device_id: getStableQuizDeviceId(),
+    user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+    viewport: typeof window !== 'undefined'
+      ? { width: window.innerWidth, height: window.innerHeight }
+      : null,
+    ...extra
+  }), [])
+  const handleQuizRequestError = useCallback((error) => {
+    if (error?.code !== 'quiz_device_session_locked') return false
+    setIsTaking(false)
+    setSessionNeedsManualStart(false)
+    setSubmitConfirmOpen(false)
+    pushToast('error', error.message || 'Quiz sedang aktif di perangkat lain.')
+    if (isSessionPage) {
+      navigate('/siswa/quiz', { replace: true })
+    }
+    return true
+  }, [isSessionPage, navigate, pushToast])
 
   const orderedQuizList = useMemo(() => (
     sortQuizzesByPriority(quizList, nowTick)
@@ -810,12 +852,13 @@ export default function SiswaQuiz() {
         submission_id: submissionId,
         event_type: normalizedType,
         event_message: normalizedMessage || null,
-        event_meta: meta && typeof meta === 'object' ? meta : null
+        event_meta: meta && typeof meta === 'object' ? meta : null,
+        client_meta: buildQuizClientMeta()
       })
     } catch {
       // no-op: logging tidak boleh mengganggu quiz
     }
-  }, [selectedQuiz?.id, activeSubmissionId, user?.id])
+  }, [selectedQuiz?.id, activeSubmissionId, user?.id, buildQuizClientMeta])
 
   const triggerViolationPrompt = (message, eventType = 'warning', meta = {}) => {
     if (autoSubmitLockRef.current || violationTriggeredRef.current || !isTaking) return
@@ -1179,7 +1222,9 @@ export default function SiswaQuiz() {
       setLoading(true)
       const { data, error } = await supabase.quiz.detail(targetQuizId, {
         tahun_ajaran: period.tahunAjaran,
-        semester: period.semester
+        semester: period.semester,
+        client: 'web',
+        client_device_id: getStableQuizDeviceId()
       })
       if (error?.code === 'REQUEST_ABORTED') return
       if (error) throw error
@@ -1233,6 +1278,7 @@ export default function SiswaQuiz() {
       })
     } catch (err) {
       if (err?.code === 'REQUEST_ABORTED') return
+      if (handleQuizRequestError(err)) return
       setQuizDetailsLoadedForId('')
       setQuizDetailsError(err?.message || 'Gagal memuat detail quiz')
       pushToast('error', err?.message || 'Gagal memuat detail quiz')
@@ -1276,15 +1322,9 @@ export default function SiswaQuiz() {
     const { data, error } = await supabase.quiz.start({
       quiz_id: selectedQuiz.id,
       access_code: accessCodeInput.trim() || undefined,
-      client_meta: {
-        client: 'web',
-        device: 'web',
-        fullscreen: Boolean(document.fullscreenElement),
-        user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
-        viewport: typeof window !== 'undefined'
-          ? { width: window.innerWidth, height: window.innerHeight }
-          : null
-      }
+      client_meta: buildQuizClientMeta({
+        fullscreen: Boolean(document.fullscreenElement)
+      })
     })
     if (error) throw error
 
@@ -1336,7 +1376,15 @@ export default function SiswaQuiz() {
   const saveAnswer = async (questionId, value, questionType = 'mcq', options = {}) => {
     if (!selectedQuiz) return
     if (answerInteractionLocked) return
-    const sub = await ensureSubmission()
+    let sub = null
+    try {
+      sub = await ensureSubmission()
+    } catch (err) {
+      if (!handleQuizRequestError(err) && !options?.silent) {
+        pushToast('error', err?.message || 'Gagal menyiapkan sesi quiz')
+      }
+      return
+    }
     if (!sub?.id) return
 
     const mode = normalizeQuestionType(questionType)
@@ -1354,11 +1402,14 @@ export default function SiswaQuiz() {
       submission_id: sub.id,
       question_id: questionId,
       option_id: optionId,
-      essay_answer: essayAnswer
+      essay_answer: essayAnswer,
+      client_meta: buildQuizClientMeta({
+        fullscreen: Boolean(document.fullscreenElement)
+      })
     })
 
     if (error) {
-      if (!options?.silent) {
+      if (!handleQuizRequestError(error) && !options?.silent) {
         pushToast('error', error?.message || 'Gagal menyimpan jawaban')
       }
       return
@@ -1440,7 +1491,10 @@ export default function SiswaQuiz() {
       const { data, error } = await supabase.quiz.submit({
         quiz_id: selectedQuiz.id,
         submission_id: sub.id,
-        answers: buildSubmitAnswersPayload()
+        answers: buildSubmitAnswersPayload(),
+        client_meta: buildQuizClientMeta({
+          fullscreen: Boolean(document.fullscreenElement)
+        })
       })
       if (error) throw error
 
@@ -1472,7 +1526,9 @@ export default function SiswaQuiz() {
         navigate('/siswa/quiz', { replace: true })
       }
     } catch (err) {
-      pushToast('error', err?.message || 'Gagal menyelesaikan quiz')
+      if (!handleQuizRequestError(err)) {
+        pushToast('error', err?.message || 'Gagal menyelesaikan quiz')
+      }
     } finally {
       setIsSubmitting(false)
       autoSubmitLockRef.current = false
@@ -1769,7 +1825,9 @@ export default function SiswaQuiz() {
       } catch (err) {
         if (!canceled) {
           setSessionNeedsManualStart(true)
-          pushToast('error', err?.message || 'Gagal memulai sesi quiz')
+          if (!handleQuizRequestError(err)) {
+            pushToast('error', err?.message || 'Gagal memulai sesi quiz')
+          }
         }
       } finally {
         if (!canceled) setLoading(false)
@@ -1791,7 +1849,8 @@ export default function SiswaQuiz() {
     quizDetailsLoadedForId,
     questions.length,
     isTaking,
-    isStrictSecurity
+    isStrictSecurity,
+    handleQuizRequestError
   ])
 
   useEffect(() => {
@@ -2530,33 +2589,33 @@ export default function SiswaQuiz() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden transition-all duration-300 hover:shadow-md">
-            <div className="flex items-center justify-between p-5 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-white">
+          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-slate-200 p-5">
               <div className="flex items-center gap-3">
-                <div className="w-2 h-8 bg-indigo-600 rounded-full"></div>
+                <div className="h-8 w-1.5 rounded-full bg-indigo-600"></div>
                 <div>
                   <h2 className="text-xl font-bold text-gray-900">Daftar Quiz</h2>
                   <p className="text-xs text-gray-500 mt-0.5">{filteredQuizzes.length} quiz ditampilkan</p>
                 </div>
               </div>
               <div className="flex flex-wrap justify-end gap-1.5">
-                <span className="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-xs font-semibold">
+                <span className="rounded-md bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">
                   {selectedMapel || 'Semua mapel'}
                 </span>
-                <span className="px-3 py-1 bg-cyan-100 text-cyan-700 rounded-full text-xs font-semibold">
+                <span className="rounded-md bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
                   {selectedMonthLabel}
                 </span>
               </div>
             </div>
             <div className="p-5 space-y-3 min-h-[30rem] max-h-[calc(100vh-130px)] overflow-y-auto">
-              <div className="flex flex-wrap gap-2">
-                <span className="text-[11px] px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
+              <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500">
+                <span>
                   Berlangsung: {quizStatusSummary.active}
                 </span>
-                <span className="text-[11px] px-2.5 py-1 rounded-full bg-amber-100 text-amber-700 border border-amber-200">
+                <span>
                   Akan datang: {quizStatusSummary.scheduled}
                 </span>
-                <span className="text-[11px] px-2.5 py-1 rounded-full bg-blue-100 text-blue-700 border border-blue-200">
+                <span>
                   Selesai: {quizStatusSummary.done}
                 </span>
               </div>
@@ -2565,7 +2624,7 @@ export default function SiswaQuiz() {
                   Belum ada quiz untuk kelas ini.
                 </div>
               )}
-              {filteredQuizzes.map((q, index) => {
+              {filteredQuizzes.map((q) => {
                 const status = getQuizStatus(q, q.submission, nowTick)
                 const mutationMeta = getQuizMutationMeta(q)
                 const canViewResult = Boolean(q.result_visible_to_students)
@@ -2575,102 +2634,55 @@ export default function SiswaQuiz() {
                 const durationText = q.submission?.started_at
                   ? formatDurationText(q.submission.started_at, q.submission.finished_at || nowTick)
                   : null
-                const isNewestCard = index === 0
+                const isSelected = selectedQuizId === q.id
                 return (
                   <button
                     key={q.id}
                     type="button"
                     onClick={() => setSelectedQuizId(q.id)}
-                    className={`w-full text-left border-2 rounded-2xl p-4 transition-all duration-300 ${
-                      status.kind === 'expired'
-                        ? selectedQuizId === q.id
-                          ? 'border-red-400 bg-gradient-to-r from-red-100 to-rose-100 shadow-sm shadow-red-100/60'
-                          : 'border-red-300 bg-gradient-to-r from-red-100 to-rose-100 hover:border-red-400 hover:shadow-sm'
-                        : selectedQuizId === q.id
-                          ? 'border-indigo-400 bg-gradient-to-r from-indigo-50 to-blue-50 shadow-sm shadow-indigo-100/60'
-                          : status.kind === 'active' || status.kind === 'done'
-                            ? 'border-emerald-200 bg-gradient-to-r from-emerald-50/90 to-green-50/40 hover:border-emerald-300 hover:shadow-sm'
-                            : 'border-amber-200 bg-gradient-to-r from-amber-50/90 to-yellow-50/40 hover:border-amber-300 hover:shadow-sm'
+                    className={`w-full text-left rounded-xl border p-3 transition-colors ${
+                      isSelected
+                        ? 'border-indigo-500 bg-indigo-50/50 shadow-sm'
+                        : 'border-slate-200 bg-white hover:border-indigo-200 hover:bg-slate-50'
                     }`}
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <div className="font-semibold text-slate-900">{q.nama}</div>
-                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                          <span className="text-[11px] px-2 py-0.5 rounded-full bg-white/80 border border-slate-200 text-slate-700">
-                            {q.mapel}
-                          </span>
-                          <span className="text-[11px] px-2 py-0.5 rounded-full bg-white/80 border border-slate-200 text-slate-700">
-                            Mode {getModeLabel(q)}
-                          </span>
-                          <span className={`text-[11px] px-2 py-0.5 rounded-full border ${
-                            normalizeAccessDevice(q.access_device) === 'mobile'
-                              ? 'bg-amber-100 text-amber-700 border-amber-200'
-                              : 'bg-white/80 text-slate-700 border-slate-200'
-                          }`}>
-                            Akses {getAccessDeviceLabel(q.access_device)}
-                          </span>
-                          {isNewestCard && (
-                            <span className="text-[11px] px-2 py-0.5 rounded-full bg-indigo-100 border border-indigo-200 text-indigo-700 font-semibold">
-                              Terbaru dibuat
-                            </span>
-                          )}
-                          <span className={`text-[11px] px-2 py-0.5 rounded-full border ${mutationMeta.tone}`}>
-                            {mutationMeta.label}
-                          </span>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate font-semibold text-slate-900">{q.nama}</div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          {q.mapel || '-'} • {getModeLabel(q)} • Akses {getAccessDeviceLabel(q.access_device)}
                         </div>
                       </div>
-                      <span className={`text-[11px] px-2 py-0.5 rounded-full border ${status.tone}`}>
+                      <span className={`shrink-0 rounded-md border px-2 py-0.5 text-[11px] ${status.tone}`}>
                         {status.label}
                       </span>
                     </div>
-                    <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <div className="text-[11px] rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-sky-800">
-                        <span className="font-semibold">Mulai</span>
-                        <div className="mt-0.5">{q.starts_at ? formatDateTime(q.starts_at) : '-'}</div>
+                    <div className="mt-3 grid grid-cols-2 gap-3 text-[11px] text-slate-500">
+                      <div>
+                        <span className="block font-medium text-slate-700">Mulai</span>
+                        <span>{q.starts_at ? formatDateTime(q.starts_at) : '-'}</span>
                       </div>
-                      <div className="text-[11px] rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-rose-800">
-                        <span className="font-semibold">{quizEndLabel}</span>
-                        <div className="mt-0.5">{quizEndAt ? formatDateTime(quizEndAt) : '-'}</div>
+                      <div>
+                        <span className="block font-medium text-slate-700">{quizEndLabel}</span>
+                        <span>{quizEndAt ? formatDateTime(quizEndAt) : '-'}</span>
                       </div>
                     </div>
                     {countdownMeta && (
-                      <div className={`mt-2 rounded-xl border px-3 py-2 ${countdownMeta.tone}`}>
-                        <div className="text-[11px] font-semibold uppercase tracking-wide">{countdownMeta.label}</div>
-                        <div className="text-base font-black leading-none mt-1">
+                      <div className={`mt-3 rounded-lg border px-3 py-2 ${countdownMeta.tone}`}>
+                        <div className="text-[11px] font-semibold">{countdownMeta.label}</div>
+                        <div className="mt-1 text-sm font-bold leading-none">
                           {formatRemaining(countdownMeta.seconds)}
                         </div>
                       </div>
                     )}
-                    <div className="mt-2 flex items-center gap-2 flex-wrap">
+                    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
+                      <span>{mutationMeta.label}</span>
+                      <span>Hasil: {canViewResult ? 'Bisa dilihat' : 'Disembunyikan'}</span>
                       {canViewResult && q.submission?.score != null && (
-                        <span className="text-[11px] px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-200">
-                          Nilai: {q.submission.score}
-                        </span>
+                        <span>Nilai: {q.submission.score}</span>
                       )}
                       {durationText && (
-                        <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
-                          Durasi: {durationText}
-                        </span>
-                      )}
-                      <span className={`text-[11px] px-2 py-0.5 rounded-full border ${
-                        canViewResult
-                          ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
-                          : 'bg-slate-100 text-slate-600 border-slate-200'
-                      }`}>
-                        Hasil: {canViewResult ? 'Bisa dilihat' : 'Disembunyikan'}
-                      </span>
-                      {canViewResult && q.submission?.status === 'finished' && (
-                        <span
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setSelectedQuizId(q.id)
-                            setShowResultDetail(true)
-                          }}
-                          className="text-[11px] px-2.5 py-1 rounded-full bg-indigo-100 text-indigo-700 border border-indigo-200 hover:bg-indigo-200 font-semibold cursor-pointer"
-                        >
-                          Detail Hasil
-                        </span>
+                        <span>Durasi: {durationText}</span>
                       )}
                     </div>
                   </button>
@@ -2687,43 +2699,34 @@ export default function SiswaQuiz() {
             )}
 
             {selectedQuiz && (
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden transition-all duration-300 hover:shadow-md">
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 p-5 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-white">
+              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                <div className="flex flex-col gap-4 border-b border-slate-200 p-5 md:flex-row md:items-center md:justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="w-2 h-8 bg-teal-600 rounded-full"></div>
+                    <div className="h-9 w-1.5 rounded-full bg-teal-600"></div>
                     <div>
                       <h3 className="text-xl font-bold text-slate-900">{selectedQuiz.nama}</h3>
-                      <div className="text-sm text-slate-500 mt-1 flex flex-wrap items-center gap-1.5">
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-sm text-slate-500">
                         <span>{selectedQuiz.mapel}</span>
                         <span>•</span>
                         <span>Mode {getModeLabel(selectedQuiz)}</span>
                         <span>•</span>
                         <span>Akses {getAccessDeviceLabel(selectedQuiz.access_device)}</span>
-                        <span className={`text-[11px] px-2 py-0.5 rounded-full border ${getQuizMutationMeta(selectedQuiz).tone}`}>
-                          {getQuizMutationMeta(selectedQuiz).label}
-                        </span>
-                        <span className={`text-[11px] px-2 py-0.5 rounded-full border ${
-                          selectedQuiz?.result_visible_to_students
-                            ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
-                            : 'bg-slate-100 text-slate-600 border-slate-200'
-                        }`}>
-                          Hasil: {selectedQuiz?.result_visible_to_students ? 'Bisa dilihat' : 'Disembunyikan'}
-                        </span>
                       </div>
                     </div>
                   </div>
-                  <div className="flex flex-col items-end gap-2">
+                  <div className="flex flex-wrap items-center gap-2 md:justify-end">
                     {selectedStatus && (
-                      <span className={`text-xs px-3 py-1 rounded-full ${selectedStatus.tone}`}>
+                      <span className={`rounded-md border px-2.5 py-1 text-xs ${selectedStatus.tone}`}>
                         {selectedStatus.label}
                       </span>
                     )}
+                    <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs text-slate-600">
+                      {getQuizMutationMeta(selectedQuiz).label}
+                    </span>
                     {selectedCountdownMeta && (
-                      <div className={`rounded-xl border px-3 py-2 text-right ${selectedCountdownMeta.tone}`}>
-                        <div className="text-[11px] font-semibold uppercase tracking-wide">
-                          {selectedCountdownMeta.label}
-                        </div>
-                        <div className="text-lg font-black leading-none mt-0.5">
+                      <div className={`rounded-lg border px-3 py-2 text-right ${selectedCountdownMeta.tone}`}>
+                        <div className="text-[11px] font-semibold">{selectedCountdownMeta.label}</div>
+                        <div className="mt-0.5 text-base font-bold leading-none">
                           {formatRemaining(selectedCountdownMeta.seconds)}
                         </div>
                       </div>
@@ -2732,15 +2735,15 @@ export default function SiswaQuiz() {
                 </div>
 
                 <div className="p-5">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
-                    <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3">
-                      <div className="text-xs text-sky-700 font-semibold">Tanggal Mulai</div>
+                  <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+                      <div className="text-xs font-semibold text-slate-500">Tanggal Mulai</div>
                       <div className="text-sm text-slate-800 mt-1 font-semibold">
                         {selectedQuiz.starts_at ? formatDateTime(selectedQuiz.starts_at) : '-'}
                       </div>
                     </div>
-                    <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3">
-                      <div className="text-xs text-rose-700 font-semibold">
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+                      <div className="text-xs font-semibold text-slate-500">
                         {normalizeMode(selectedQuiz) === 'regular' ? 'Deadline' : 'Selesai'}
                       </div>
                       <div className="text-sm text-slate-800 mt-1 font-semibold">
@@ -2748,53 +2751,35 @@ export default function SiswaQuiz() {
                       </div>
                     </div>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                    <div className="border border-blue-200 rounded-2xl p-3 bg-gradient-to-r from-blue-50 to-indigo-50">
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    <div className="rounded-lg border border-slate-200 p-3">
                       <div className="text-xs text-slate-500">Jumlah Soal</div>
                       <div className="text-xl font-bold text-slate-900">{totalQuestions}</div>
                     </div>
-                    <div className="border border-purple-200 rounded-2xl p-3 bg-gradient-to-r from-purple-50 to-indigo-50">
+                    <div className="rounded-lg border border-slate-200 p-3">
                       <div className="text-xs text-slate-500">Terjawab</div>
                       <div className="text-xl font-bold text-slate-900">{answeredCount}</div>
                     </div>
-                    <div className="border border-emerald-200 rounded-2xl p-3 bg-gradient-to-r from-emerald-50 to-green-50">
+                    <div className="rounded-lg border border-slate-200 p-3">
                       <div className="text-xs text-slate-500">Nilai</div>
                       <div className="text-xl font-bold text-slate-900">
                         {canViewSelectedResult ? (activeSubmission?.score ?? '-') : '-'}
                       </div>
                     </div>
-                    <div className="border border-amber-200 rounded-2xl p-3 bg-gradient-to-r from-amber-50 to-yellow-50">
+                    <div className="rounded-lg border border-slate-200 p-3">
                       <div className="text-xs text-slate-500">Durasi Anda</div>
                       <div className="text-xl font-bold text-slate-900">{activeDurationText}</div>
                     </div>
                   </div>
 
-                  <div className="mt-4 grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_auto] gap-4">
-                    <div className="rounded-2xl border border-slate-200 bg-gradient-to-r from-white to-cyan-50/50 px-4 py-3">
+                  <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_220px]">
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
                       <div className="text-sm font-semibold text-slate-800">Ruang Persiapan Quiz</div>
-                      <div className="text-xs text-slate-600 mt-1">
-                        Pastikan koneksi stabil, baterai cukup, dan siapkan jawaban sebelum klik mulai.
-                      </div>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <span className="text-[11px] px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
-                          {isStrictSecurity ? 'Fullscreen wajib aktif' : 'Mode standard aktif'}
-                        </span>
-                        <span className="text-[11px] px-2.5 py-1 rounded-full bg-sky-100 text-sky-700 border border-sky-200">
-                          Auto simpan jawaban esai
-                        </span>
-                        <span className="text-[11px] px-2.5 py-1 rounded-full bg-amber-100 text-amber-700 border border-amber-200">
-                          Hindari pindah tab/aplikasi
-                        </span>
-                        <span className={`text-[11px] px-2.5 py-1 rounded-full border ${
-                          selectedWebAccessBlocked
-                            ? 'bg-rose-50 text-rose-700 border-rose-200'
-                            : 'bg-indigo-50 text-indigo-700 border-indigo-200'
-                        }`}>
-                          Akses {getAccessDeviceLabel(selectedQuiz.access_device)}
-                        </span>
+                      <div className="mt-1 text-xs text-slate-600">
+                        {isStrictSecurity ? 'Mode strict: fullscreen wajib aktif.' : 'Mode standard.'} Akses {getAccessDeviceLabel(selectedQuiz.access_device)}.
                       </div>
                       {selectedWebAccessBlocked && (
-                        <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+                        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
                           {selectedWebAccessBlockMessage}
                         </div>
                       )}
@@ -2802,7 +2787,7 @@ export default function SiswaQuiz() {
                         <label className="text-xs font-semibold text-slate-600">Kode Akses</label>
                         <input
                           type="password"
-                          className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
+                          className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
                           value={accessCodeInput}
                           onChange={(e) => setAccessCodeInput(e.target.value)}
                           placeholder="Isi jika diberikan guru"
@@ -2810,16 +2795,16 @@ export default function SiswaQuiz() {
                       </div>
                     </div>
 
-                    <div className="flex flex-col sm:flex-row xl:flex-col gap-2 xl:min-w-[220px]">
+                    <div className="flex flex-col gap-2 sm:flex-row xl:flex-col xl:min-w-[220px]">
                       {selectedCanStartInWeb && (
                         <button
                           type="button"
                           onClick={handleStartQuiz}
                           disabled={isStartCountdownActive}
-                          className={`px-5 py-2.5 rounded-2xl text-white font-semibold transition-colors shadow-sm ${
+                          className={`rounded-lg px-5 py-2.5 font-semibold text-white shadow-sm transition-colors ${
                             isStartCountdownActive
                               ? 'bg-indigo-300 cursor-not-allowed'
-                              : 'bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-700 hover:to-emerald-700'
+                              : 'bg-indigo-600 hover:bg-indigo-700'
                           }`}
                         >
                           {isStartCountdownActive
@@ -2833,13 +2818,13 @@ export default function SiswaQuiz() {
                         <button
                           type="button"
                           disabled
-                          className="px-5 py-2.5 rounded-2xl bg-slate-100 text-slate-400 font-semibold cursor-not-allowed"
+                          className="cursor-not-allowed rounded-lg bg-slate-100 px-5 py-2.5 font-semibold text-slate-400"
                         >
                           {selectedWebAccessBlocked ? 'Akses Mobile Saja' : 'Quiz belum tersedia'}
                         </button>
                       )}
                       {activeSubmission?.score != null && (
-                        <div className="text-sm text-emerald-700 border border-emerald-200 bg-emerald-50 rounded-2xl px-3 py-2 text-center">
+                        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-center text-sm text-emerald-700">
                           {canViewSelectedResult ? 'Nilai sudah keluar.' : 'Nilai sudah keluar, tapi masih disembunyikan guru.'}
                         </div>
                       )}
@@ -2847,7 +2832,7 @@ export default function SiswaQuiz() {
                         <button
                           type="button"
                           onClick={() => setShowResultDetail(true)}
-                          className="px-5 py-2.5 rounded-2xl border border-indigo-200 bg-indigo-50 text-indigo-700 font-semibold hover:bg-indigo-100"
+                          className="rounded-lg border border-indigo-200 bg-indigo-50 px-5 py-2.5 font-semibold text-indigo-700 hover:bg-indigo-100"
                         >
                           Detail Hasil
                         </button>
