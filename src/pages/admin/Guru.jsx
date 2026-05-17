@@ -166,6 +166,42 @@ const normalizeKelasKey = (value) =>
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '')
 
+const GRADE_ROMAN_TO_NUMBER = {
+  x: '10',
+  xi: '11',
+  xii: '12'
+}
+
+const GRADE_NUMBER_TO_ROMAN = {
+  10: 'x',
+  11: 'xi',
+  12: 'xii'
+}
+
+const buildKelasLookupKeys = (value) => {
+  const raw = String(value || '').trim().toLowerCase()
+  if (!raw) return []
+
+  const keys = new Set([normalizeKelasKey(raw)])
+  const tokens = raw.match(/[a-z]+|\d+/g) || []
+
+  if (tokens.length) {
+    const [grade, ...rest] = tokens
+    const swappedGrade = GRADE_ROMAN_TO_NUMBER[grade] || GRADE_NUMBER_TO_ROMAN[grade]
+    if (swappedGrade) {
+      keys.add(normalizeKelasKey([swappedGrade, ...rest].join(' ')))
+      keys.add(normalizeKelasKey([swappedGrade, ...rest].join('')))
+      keys.add(normalizeKelasKey([swappedGrade, ...rest].join('-')))
+    }
+
+    keys.add(normalizeKelasKey(tokens.join(' ')))
+    keys.add(normalizeKelasKey(tokens.join('')))
+    keys.add(normalizeKelasKey(tokens.join('-')))
+  }
+
+  return Array.from(keys).filter(Boolean)
+}
+
 const slugifyKelas = (value) =>
   String(value || '')
     .trim()
@@ -175,16 +211,31 @@ const slugifyKelas = (value) =>
 
 const GURU_ALIAS_MAP = buildAliasMap({
   nama: ['nama', 'name', 'nama guru', 'nama lengkap', 'full name'],
-  nis: ['nis', 'nip', 'nik', 'noinduk', 'nomor induk', 'teacherid'],
-  kelas: ['kelas', 'class', 'rombel', 'kelas_id', 'kelas guru', 'tingkat', 'grade'],
+  nis: [
+    'nis',
+    'nip',
+    'nuptk',
+    'nip/nuptk',
+    'nip nuptk',
+    'nip_nuptk',
+    'nik',
+    'noinduk',
+    'no induk',
+    'nomor induk',
+    'nomor induk guru',
+    'nomor induk pegawai',
+    'teacher id',
+    'teacherid'
+  ],
+  kelas: ['kelas', 'class', 'rombel', 'kelas_id', 'kelas guru', 'kelas wali', 'wali kelas', 'kelas utama', 'tingkat', 'grade'],
   jk: ['jk', 'jenis kelamin', 'gender', 'kelamin', 'sex'],
   tanggal_lahir: ['tanggal lahir', 'tgl lahir', 'tgl_lahir', 'dob', 'birthdate'],
   agama: ['agama', 'religion'],
   alamat: ['alamat', 'address'],
-  telp: ['telp', 'telepon', 'phone', 'no hp', 'nohp', 'hp', 'wa', 'whatsapp'],
-  jabatan: ['jabatan', 'position', 'role'],
-  email: ['email', 'email guru'],
-  status: ['status']
+  telp: ['telp', 'telepon', 'phone', 'no hp', 'nomor hp', 'nohp', 'hp', 'wa', 'whatsapp', 'no hp guru'],
+  jabatan: ['jabatan', 'position', 'role', 'jabatan guru'],
+  email: ['email', 'email guru', 'alamat email', 'email aktif'],
+  status: ['status', 'status guru', 'status akun']
 })
 
 const GURU_IMPORT_EXAMPLE_COLUMNS = [
@@ -197,7 +248,8 @@ const GURU_IMPORT_EXAMPLE_COLUMNS = [
   { key: 'alamat', label: 'Alamat', cellClassName: 'min-w-[220px] whitespace-normal leading-5' },
   { key: 'telp', label: 'No HP', cellClassName: 'min-w-[136px] whitespace-nowrap' },
   { key: 'jabatan', label: 'Jabatan', cellClassName: 'min-w-[156px] whitespace-normal leading-5' },
-  { key: 'email', label: 'Email', cellClassName: 'min-w-[220px] whitespace-nowrap' }
+  { key: 'email', label: 'Email', cellClassName: 'min-w-[220px] whitespace-nowrap' },
+  { key: 'status', label: 'Status', cellClassName: 'min-w-[96px] whitespace-nowrap' }
 ]
 
 const GURU_IMPORT_EXAMPLE_HEADERS = GURU_IMPORT_EXAMPLE_COLUMNS.map((column) => column.label)
@@ -469,8 +521,7 @@ export default function AGuru() {
   )
 
   const importExampleRows = useMemo(() => {
-    const fallbackKelas = ['X A MIPA', 'X B MIPA']
-    const classNames = availableKelasNames.length ? availableKelasNames : fallbackKelas
+    const classNames = availableKelasNames.length ? availableKelasNames : ['', '', '']
     const sampleNames = [
       'Dewi Kartika Sari',
       'Ahmad Fauzan Pratama',
@@ -533,7 +584,8 @@ export default function AGuru() {
         alamat: sampleAddresses[index] || `Jl. Contoh ${index + 1}, Bandung`,
         telp: `08131${String(2345678 + index).padStart(7, '0')}`,
         jabatan: sampleJabatan[index] || 'Guru Mata Pelajaran',
-        email: `${emailSlug || `contoh.guru.${index + 1}`}@example.com`
+        email: `${emailSlug || `contoh.guru.${index + 1}`}@example.com`,
+        status: ''
       }
     })
   }, [availableKelasNames])
@@ -572,7 +624,7 @@ export default function AGuru() {
         ...new Set(importMissingKelasErrors.map((item) => item.className).filter(Boolean))
       ]
       const suffix = missingNames.length ? ` Kelas yang belum tersedia: ${missingNames.join(', ')}.` : ''
-      return `Maaf, kelas data guru yang ada di file Excel, CSV, atau Google Sheets belum tersedia di website ini. Silakan buat terlebih dahulu.${suffix}`
+      return `Ada kelas pada file import guru yang belum tersedia di website ini.${suffix} Kosongkan kolom kelas jika guru belum punya kelas wali, atau buat kelasnya terlebih dahulu.`
     }
 
     return 'Masih ada data import guru yang belum valid. Perbaiki dulu semua error sebelum memulai import.'
@@ -593,21 +645,19 @@ export default function AGuru() {
     [importRows, kelasList]
   )
 
-  const importCanRun = Boolean(importRows.length && kelasList.length && !importLoading)
+  const importCanRun = Boolean(importRows.length && !importLoading)
   const importButtonText = importLoading
     ? 'Memproses...'
     : importErrors.length > 0 && importRows.length > 0
       ? 'Import Data Valid'
       : 'Mulai Import'
-  const importButtonHint = !kelasList.length
-    ? 'Buat kelas terlebih dahulu sebelum import.'
-    : !importRows.length && importErrors.length > 0
-      ? 'Belum ada baris valid. Perbaiki error yang tampil dulu.'
-      : !importRows.length
-        ? 'Upload file atau ambil data Google Sheets terlebih dahulu.'
-        : importErrors.length > 0
-          ? `${importRows.length} baris valid bisa diimport, ${importErrors.length} baris error akan dilewati.`
-          : ''
+  const importButtonHint = !importRows.length && importErrors.length > 0
+    ? 'Belum ada baris valid. Perbaiki error yang tampil dulu.'
+    : !importRows.length
+      ? 'Upload file atau ambil data Google Sheets terlebih dahulu.'
+      : importErrors.length > 0
+        ? `${importRows.length} baris valid bisa diimport, ${importErrors.length} baris error akan dilewati.`
+        : ''
   const importProgressTotal = Math.max(Number(importProgress.total || 0), 0)
   const importProgressCurrent = Math.min(
     Math.max(Number(importProgress.current || 0), 0),
@@ -908,7 +958,7 @@ export default function AGuru() {
         `${kelas.grade || ''}-${kelas.suffix || ''}`.trim()
       ]
         .filter(Boolean)
-        .map(normalizeKelasKey)
+        .flatMap(buildKelasLookupKeys)
 
       keys.forEach((key) => {
         if (key) map.set(key, kelas.id)
@@ -919,18 +969,16 @@ export default function AGuru() {
 
   const resolveKelasId = (value) => {
     if (!value) return ''
-    const key = normalizeKelasKey(value)
-    if (kelasLookup.has(key)) return kelasLookup.get(key)
+    const keys = buildKelasLookupKeys(value)
+    for (const key of keys) {
+      if (kelasLookup.has(key)) return kelasLookup.get(key)
+    }
 
     const slug = slugifyKelas(value)
-    const slugKey = normalizeKelasKey(slug)
-    return kelasLookup.get(slugKey) || ''
-  }
-
-  const ensureKelasReadyForImport = () => {
-    if (kelasList.length) return true
-    pushToast('error', 'Anda belum membuat kelas. Buat kelas terlebih dahulu sebelum import data guru.')
-    return false
+    for (const key of buildKelasLookupKeys(slug)) {
+      if (kelasLookup.has(key)) return kelasLookup.get(key)
+    }
+    return ''
   }
 
   const copyImportExampleToClipboard = async () => {
@@ -952,7 +1000,7 @@ export default function AGuru() {
       const stamp = new Date().toISOString().slice(0, 10)
       const suffix = availableKelasNames.length
         ? `${availableKelasNames.length}-kelas`
-        : 'template-default'
+        : 'tanpa-kelas'
       const fileName = `template_import_guru_${suffix}_${stamp}.xlsx`
 
       await exportRowsToExcel({
@@ -996,6 +1044,8 @@ export default function AGuru() {
   const prepareImportRows = (rawRows) => {
     const cleaned = []
     const errors = []
+    const seenNip = new Map()
+    const seenEmail = new Map()
 
     rawRows.forEach((row, idx) => {
       const normalized = normalizeImportRow(row, idx)
@@ -1004,23 +1054,15 @@ export default function AGuru() {
       if (!normalized.nis || !normalized.nama) {
         errors.push({
           row: normalized.__rowNum,
-          reason: 'NIS/NIP dan Nama wajib diisi'
+          reason: 'NIP/NUPTK dan Nama wajib diisi'
         })
         return
       }
 
-      if (!normalized.kelas_raw) {
+      if (normalized.kelas_raw && !normalized.kelas) {
         errors.push({
           row: normalized.__rowNum,
-          reason: 'Kelas wajib diisi'
-        })
-        return
-      }
-
-      if (!normalized.kelas) {
-        errors.push({
-          row: normalized.__rowNum,
-          reason: `Maaf, kelas "${normalized.kelas_raw}" belum tersedia di website ini. Silakan buat terlebih dahulu.`,
+          reason: `Kelas "${normalized.kelas_raw}" belum tersedia. Buat kelasnya terlebih dahulu atau kosongkan kolom kelas untuk guru tanpa kelas wali.`,
           type: 'kelas_missing',
           className: normalized.kelas_raw
         })
@@ -1035,6 +1077,26 @@ export default function AGuru() {
         return
       }
 
+      const nipKey = normalized.nis.toLowerCase()
+      if (seenNip.has(nipKey)) {
+        errors.push({
+          row: normalized.__rowNum,
+          reason: `NIP/NUPTK duplikat dengan baris ${seenNip.get(nipKey)}`
+        })
+        return
+      }
+
+      const emailKey = normalized.email.toLowerCase()
+      if (seenEmail.has(emailKey)) {
+        errors.push({
+          row: normalized.__rowNum,
+          reason: `Email duplikat dengan baris ${seenEmail.get(emailKey)}`
+        })
+        return
+      }
+
+      seenNip.set(nipKey, normalized.__rowNum)
+      seenEmail.set(emailKey, normalized.__rowNum)
       cleaned.push(normalized)
     })
 
@@ -1056,7 +1118,6 @@ export default function AGuru() {
 
   const handleImportFileChange = async (file) => {
     if (!file) return
-    if (!ensureKelasReadyForImport()) return
     setImportFile(file)
     setImportLoading(true)
     setImportProgress({
@@ -1076,7 +1137,6 @@ export default function AGuru() {
   }
 
   const handleLoadSheet = async () => {
-    if (!ensureKelasReadyForImport()) return
     const csvUrl = buildGoogleSheetCsvUrl(sheetUrl)
     if (!csvUrl) {
       pushToast('error', 'Link Google Sheets tidak valid')
@@ -1155,7 +1215,7 @@ export default function AGuru() {
 
     if (existing?.id) {
       if (existing.role && !['guru', 'teacher'].includes(existing.role)) {
-        throw new Error('NIS/NIP sudah digunakan untuk role lain')
+        throw new Error('NIP/NUPTK sudah digunakan untuk role lain')
       }
 
       const existingEmail = String(existing.email || '').trim().toLowerCase()
@@ -1222,23 +1282,19 @@ export default function AGuru() {
       return
     }
 
-    if (!ensureKelasReadyForImport()) {
-      return
-    }
-
     if (importErrors.length && !importRows.length) {
       pushToast('error', importBlockingErrorMessage)
       return
     }
 
-    const kelasTersedia = importedKelasNames.length
-      ? importedKelasNames.join(', ')
-      : availableKelasNames.join(', ')
+    const kelasTersedia = importedKelasNames.join(', ')
 
-    const details = [
-      `${importRows.length} baris valid akan diproses.`,
-      `Kelas tujuan: ${kelasTersedia || '-'}.`
-    ]
+    const details = [`${importRows.length} baris valid akan diproses.`]
+    if (kelasTersedia) {
+      details.push(`Kelas yang terisi: ${kelasTersedia}.`)
+    } else {
+      details.push('Kolom kelas kosong; guru tetap dibuat tanpa kelas wali.')
+    }
     if (importErrors.length) {
       details.push(`${importErrors.length} baris error akan dilewati dan dicatat sebagai gagal.`)
     }
@@ -1800,17 +1856,14 @@ export default function AGuru() {
                   </button>
                 </div>
 
-                <div className={`rounded-xl border p-4 text-sm ${kelasList.length
-                  ? 'bg-indigo-50 border-indigo-200 text-indigo-900'
-                  : 'bg-red-50 border-red-200 text-red-800'
-                  }`}>
+                <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-900">
                   <p className="font-semibold mb-1">
-                    {kelasList.length ? 'Konfirmasi kelas yang sudah dibuat' : 'Import ditolak sementara'}
+                    {kelasList.length ? 'Kelas wali bersifat opsional' : 'Import guru tetap bisa tanpa kelas'}
                   </p>
                   {kelasList.length ? (
                     <>
                       <p className="mb-3">
-                        Apakah Anda yakin ingin masukin data guru dengan kelas yang sudah kita buat?
+                        Jika kolom kelas diisi, namanya harus sesuai dengan kelas yang sudah dibuat. Jika guru belum menjadi wali kelas, kosongkan kolom kelas.
                       </p>
                       <div className="flex flex-wrap gap-2">
                         {availableKelasNames.map((kelasName) => (
@@ -1825,7 +1878,7 @@ export default function AGuru() {
                     </>
                   ) : (
                     <p>
-                      Anda belom membuat kelas, jadi upload Excel, CSV, atau Google Sheets belum bisa diproses.
+                      Belum ada kelas di sistem. Import guru tetap bisa diproses; biarkan kolom kelas kosong dan lengkapi kelas nanti jika dibutuhkan.
                     </p>
                   )}
                 </div>
@@ -1837,7 +1890,9 @@ export default function AGuru() {
                         Contoh format {importExampleRows.length} baris
                       </p>
                       <p className="text-xs text-gray-500">
-                        Satu baris contoh untuk tiap kelas yang sudah dibuat. Bisa dipakai untuk Excel, CSV, atau langsung dipaste ke Google Sheets.
+                        {availableKelasNames.length
+                          ? 'Contoh mengikuti kelas yang sudah dibuat. Kolom kelas boleh dikosongkan jika guru belum punya kelas wali.'
+                          : 'Contoh tanpa kelas wali. Bisa dipakai untuk Excel, CSV, atau langsung dipaste ke Google Sheets.'}
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -1859,7 +1914,7 @@ export default function AGuru() {
                   </div>
 
                   <div className="max-h-64 overflow-auto">
-                    <table className="w-full min-w-[1160px] text-sm">
+                    <table className="w-full min-w-[1260px] text-sm">
                       <thead className="bg-slate-50">
                         <tr>
                           {GURU_IMPORT_EXAMPLE_COLUMNS.map((column) => (
@@ -1915,7 +1970,7 @@ export default function AGuru() {
                       accept={SPREADSHEET_IMPORT_ACCEPT}
                       onChange={(e) => handleImportFileChange(e.target.files?.[0])}
                       className="block w-full text-sm text-gray-700 file:mr-4 file:rounded-lg file:border-0 file:bg-blue-50 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-blue-700 hover:file:bg-blue-100"
-                      disabled={importLoading || !kelasList.length}
+                      disabled={importLoading}
                     />
                     {importFile && (
                       <p className="text-xs text-gray-500">File terpilih: {importFile.name}</p>
@@ -1931,13 +1986,13 @@ export default function AGuru() {
                       value={sheetUrl}
                       onChange={(e) => setSheetUrl(e.target.value)}
                       className="w-full rounded-lg border border-gray-200 px-4 py-2 text-sm"
-                      disabled={importLoading || !kelasList.length}
+                      disabled={importLoading}
                     />
                     <button
                       type="button"
                       onClick={handleLoadSheet}
                       className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-60"
-                      disabled={importLoading || !sheetUrl.trim() || !kelasList.length}
+                      disabled={importLoading || !sheetUrl.trim()}
                     >
                       Ambil Data
                     </button>
@@ -1947,14 +2002,15 @@ export default function AGuru() {
                 <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-800">
                   <p className="font-semibold mb-1">Catatan penting</p>
                   <ul className="list-disc list-inside space-y-1">
-                    <li>Kolom wajib: <b>Nama</b>, <b>NIP/NUPTK</b>, <b>Email</b>, dan <b>Kelas</b>.</li>
+                    <li>Kolom wajib: <b>Nama</b>, <b>NIP/NUPTK</b>, dan <b>Email</b>.</li>
                     <li>Kolom <b>JK</b> bisa diisi <b>L</b>/<b>P</b>, <b>Laki-laki</b>, <b>Laki laki</b>, <b>Perempuan</b>, atau <b>Perumpuan</b>.</li>
                     <li>Password awal sistem akan diamankan otomatis oleh server.</li>
                     <li>Untuk <b>login pertama</b>, guru cukup pakai <b>tanggal lahir polos</b> (contoh 05/08/2010 → <b>05082010</b>).</li>
                     <li>Kalau <b>tanggal lahir</b> kosong, login pertama memakai <b>NIP/NUPTK</b> sebagai password sementara.</li>
                     <li>Login awal guru: pakai <b>Email</b> dan password sementara di atas.</li>
                     <li>NIP/NUPTK dipakai sebagai nomor induk guru, bukan username login awal di sistem ini.</li>
-                    <li>Nama kelas harus mengarah ke kelas yang sudah dibuat di website ini.</li>
+                    <li>Kolom <b>Kelas</b> opsional. Isi hanya jika guru menjadi wali/kelas utama, dan namanya harus mengarah ke kelas yang sudah dibuat di website ini.</li>
+                    <li>Kolom <b>Status</b> opsional. Kosong berarti akun baru dibuat aktif dan akun lama tidak diubah statusnya.</li>
                     <li>Huruf besar dan kecil tidak ngaruh, jadi <b>x a mipa</b> dan <b>X A MIPA</b> akan dianggap sama.</li>
                     <li>Format upload yang didukung: <b>{SPREADSHEET_IMPORT_FORMAT_LABEL}</b>.</li>
                     <li>Setelah login, guru wajib mengganti password.</li>

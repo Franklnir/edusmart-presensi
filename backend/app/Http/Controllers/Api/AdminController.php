@@ -255,8 +255,8 @@ class AdminController extends ApiController
                     ->where('tenant_id', $tenantId)
                     ->first();
 
-                if ($role === 'siswa' && array_key_exists('tanggal_lahir', $profilePayload)) {
-                    $this->syncImportedInitialStudentPassword($tenantId, $userId, $now);
+                if (in_array($role, ['siswa', 'guru'], true) && array_key_exists('tanggal_lahir', $profilePayload)) {
+                    $this->syncImportedInitialProfilePassword($tenantId, $userId, $now);
                 }
             } else {
                 $user = User::query()->create([
@@ -1942,13 +1942,18 @@ class AdminController extends ApiController
 
     private function syncImportedInitialStudentPassword(string $tenantId, string $studentId, mixed $timestamp = null): bool
     {
+        return $this->syncImportedInitialProfilePassword($tenantId, $studentId, $timestamp);
+    }
+
+    private function syncImportedInitialProfilePassword(string $tenantId, string $profileId, mixed $timestamp = null): bool
+    {
         $profile = Profile::query()
-            ->where('id', $studentId)
+            ->where('id', $profileId)
             ->where('tenant_id', $tenantId)
-            ->where('role', 'siswa')
+            ->whereIn('role', ['siswa', 'guru', 'teacher'])
             ->first();
 
-        if (! $profile || ! $this->isImportedInitialStudentAccount($profile)) {
+        if (! $profile || ! $this->isImportedInitialProfileAccount($profile)) {
             return false;
         }
 
@@ -1963,7 +1968,7 @@ class AdminController extends ApiController
         }
 
         DB::table('users')
-            ->where('id', $studentId)
+            ->where('id', $profileId)
             ->update([
                 'password' => Hash::make($this->normalizeProvisionPassword($seed)),
                 'updated_at' => $timestamp ?: now(),
@@ -1974,7 +1979,12 @@ class AdminController extends ApiController
 
     private function isImportedInitialStudentAccount(Profile $profile): bool
     {
-        if (strtolower(trim((string) ($profile->role ?? ''))) !== 'siswa') {
+        return $this->isImportedInitialProfileAccount($profile);
+    }
+
+    private function isImportedInitialProfileAccount(Profile $profile): bool
+    {
+        if (! in_array(strtolower(trim((string) ($profile->role ?? ''))), ['siswa', 'guru', 'teacher'], true)) {
             return false;
         }
         if (! (bool) ($profile->must_change_password ?? false)) {
