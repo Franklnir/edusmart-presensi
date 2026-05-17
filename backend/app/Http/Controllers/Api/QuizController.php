@@ -239,7 +239,9 @@ class QuizController extends ApiController
             ->select($this->selectExistingQuizColumns('quiz_questions', ['id', 'quiz_id', 'nomor', 'soal', 'type', 'poin', 'media_url', 'created_at', 'updated_at']))
             ->where('quiz_id', $quizId)
             ->orderBy('nomor')
+            ->orderBy('id')
             ->get();
+        $questions = $this->normalizeQuestionNumbersForPayload($questions);
         $questionIds = $questions->pluck('id')->filter()->values()->all();
         $optionsByQuestion = empty($questionIds) ? collect() : DB::table('quiz_options')
             ->select($this->selectExistingQuizColumns('quiz_options', ['id', 'question_id', 'label', 'text', 'is_correct', 'created_at', 'updated_at']))
@@ -2486,6 +2488,7 @@ class QuizController extends ApiController
             ->orderBy('nomor')
             ->orderBy('id')
             ->get();
+        $questions = $this->normalizeQuestionNumbersForPayload($questions);
 
         $questionIds = $questions->pluck('id')->map(fn ($id) => (string) $id)->all();
         $optionsByQuestion = [];
@@ -2912,6 +2915,15 @@ class QuizController extends ApiController
         }
 
         return $query->first(['id', 'guru_id', 'kelas_id', 'nama']);
+    }
+
+    private function normalizeQuestionNumbersForPayload($questions)
+    {
+        return $questions->values()->map(function ($question, int $index) {
+            $question->nomor = $index + 1;
+
+            return $question;
+        });
     }
 
     private function normalizeQuestionType($value): string

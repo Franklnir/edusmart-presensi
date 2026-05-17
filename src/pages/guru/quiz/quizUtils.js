@@ -127,6 +127,13 @@ export const getQuestionTypeLabel = (value) => (
   normalizeQuestionType(value) === 'essay' ? 'Esai' : 'Pilihan Ganda'
 )
 
+export const normalizeQuestionNumbering = (questionRows = []) => (
+  (questionRows || []).map((question, index) => ({
+    ...question,
+    nomor: index + 1
+  }))
+)
+
 export const getQuizEndAt = (quiz) => {
   const mode = normalizeMode(quiz)
   if (mode === 'regular') return safeDate(quiz?.deadline_at)

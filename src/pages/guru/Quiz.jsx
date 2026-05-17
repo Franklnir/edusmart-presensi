@@ -32,6 +32,7 @@ import {
   normalizeMode,
   getModeLabel,
   normalizeQuestionType,
+  normalizeQuestionNumbering,
   getQuestionTypeLabel,
   getQuizEndAt,
   getRemainingSeconds,
@@ -216,6 +217,11 @@ export default function GuruQuiz() {
   const detailReviewCompletedAt = detailSubmission?.essay_review_completed_at || null
   const previewQuestion = questions[previewQuestionIndex] || null
   const teacherQuestion = questions[teacherQuestionIndex] || null
+  const editingQuestionDisplayNumber = useMemo(() => {
+    if (!editingQuestion?.id) return questions.length + 1
+    const index = questions.findIndex((question) => question.id === editingQuestion.id)
+    return index >= 0 ? index + 1 : Number(editingQuestion.nomor || 1)
+  }, [editingQuestion?.id, editingQuestion?.nomor, questions])
   const attemptedStudents = useMemo(() => (
     participants
       .filter((p) => p.submission?.started_at)
@@ -768,7 +774,7 @@ export default function GuruQuiz() {
       if (detailError?.code === 'REQUEST_ABORTED') return
       if (detailError) throw detailError
 
-      const questionRows = detailData?.questions || []
+      const questionRows = normalizeQuestionNumbering(detailData?.questions || [])
       const byQuestion = detailData?.options_by_question || {}
       const submissionRows = detailData?.submissions || []
       const answersBySubmission = detailData?.answers_by_submission || {}
@@ -1715,7 +1721,7 @@ export default function GuruQuiz() {
       if (error) throw error
 
       const answerByQuestionId = new Map((data || []).map((row) => [row.question_id, row]))
-      const rows = (questions || []).map((question) => {
+      const rows = (questions || []).map((question, index) => {
         const answer = answerByQuestionId.get(question.id) || null
         const questionType = normalizeQuestionType(question?.question_type)
         const options = (optionsByQuestion[question.id] || [])
@@ -1726,7 +1732,7 @@ export default function GuruQuiz() {
 
         return {
           questionId: question.id,
-          nomor: question.nomor,
+          nomor: index + 1,
           soal: question.soal,
           questionImagePath: question.image_path || '',
           poin: Number(question.poin || 0),
@@ -2665,9 +2671,9 @@ export default function GuruQuiz() {
                                 ? 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'
                                 : 'border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
                             }`}
-                            title={`Soal ${question.nomor} - ${getQuestionTypeLabel(question.question_type)}`}
+                            title={`Soal ${idx + 1} - ${getQuestionTypeLabel(question.question_type)}`}
                           >
-                            {question.nomor}
+                            {idx + 1}
                           </button>
                         ))}
                       </div>
@@ -2690,7 +2696,7 @@ export default function GuruQuiz() {
                     >
                       <div className="flex items-center justify-between">
                         <div className="font-semibold text-slate-900">
-                          Soal {teacherQuestion.nomor} • {teacherQuestion.poin} poin
+                          Soal {teacherQuestionIndex + 1} • {teacherQuestion.poin} poin
                         </div>
                         <div className="flex gap-2 text-xs">
                           <button
@@ -2726,7 +2732,7 @@ export default function GuruQuiz() {
                           <div className="inline-flex max-w-full flex-col rounded-xl border border-slate-200 bg-slate-50 p-2">
                             <img
                               src={getQuizImageUrl(teacherQuestion.image_path)}
-                              alt={`Gambar soal ${teacherQuestion.nomor}`}
+                              alt={`Gambar soal ${teacherQuestionIndex + 1}`}
                               className="block max-h-56 w-auto max-w-full object-contain rounded-lg cursor-zoom-in"
                               onClick={() => setPreviewMediaUrl(getQuizImageUrl(teacherQuestion.image_path))}
                             />
@@ -3170,7 +3176,7 @@ export default function GuruQuiz() {
                                     : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
                             } ${essaySavingQuestionId ? 'opacity-70 cursor-not-allowed' : ''}`}
                           >
-                            {row.nomor || index + 1}
+                            {index + 1}
                           </button>
                         )
                       })}
@@ -3179,6 +3185,7 @@ export default function GuruQuiz() {
 
                   {detailActiveAnswer && (() => {
                     const row = detailActiveAnswer
+                    const questionNumber = detailActiveQuestionIndex + 1
                     const isEssay = row.questionType === 'essay'
                     const answerText = String(row.essayAnswer || '').trim()
                     const isScoring = essaySavingQuestionId === row.questionId
@@ -3201,7 +3208,7 @@ export default function GuruQuiz() {
                       <div className={`border rounded-2xl p-4 ${essayCardTone}`}>
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="font-semibold text-slate-900">
-                            Soal {row.nomor} • {row.poin} poin
+                            Soal {questionNumber} • {row.poin} poin
                           </div>
                           <span className={`text-[11px] px-2 py-0.5 rounded-full border ${
                             isEssay
@@ -3217,7 +3224,7 @@ export default function GuruQuiz() {
                             <div className="inline-flex max-w-full flex-col rounded-xl border border-slate-200 bg-slate-50 p-2">
                               <img
                                 src={getQuizImageUrl(row.questionImagePath)}
-                                alt={`Gambar soal ${row.nomor}`}
+                                alt={`Gambar soal ${questionNumber}`}
                                 className="block max-h-56 w-auto max-w-full object-contain rounded-lg cursor-zoom-in"
                                 onClick={() => setPreviewMediaUrl(getQuizImageUrl(row.questionImagePath))}
                               />
@@ -3445,7 +3452,7 @@ export default function GuruQuiz() {
                       <div className="border border-slate-200 rounded-2xl p-4 bg-white shadow-sm">
                         <div className="flex items-center justify-between mb-2">
                           <div className="font-semibold text-slate-900">
-                            Soal {previewQuestion.nomor || previewQuestionIndex + 1}
+                            Soal {previewQuestionIndex + 1}
                             <span className={`ml-2 text-[11px] px-2 py-0.5 rounded-full border align-middle ${
                               normalizeQuestionType(previewQuestion.question_type) === 'essay'
                                 ? 'bg-amber-50 text-amber-700 border-amber-200'
@@ -3462,7 +3469,7 @@ export default function GuruQuiz() {
                             <div className="inline-flex max-w-full flex-col rounded-xl border border-slate-200 bg-slate-50 p-2">
                               <img
                                 src={getQuizImageUrl(previewQuestion.image_path)}
-                                alt={`Preview soal ${previewQuestion.nomor}`}
+                                alt={`Preview soal ${previewQuestionIndex + 1}`}
                                 className="block max-h-56 w-auto max-w-full object-contain rounded-lg cursor-zoom-in"
                                 onClick={() => setPreviewMediaUrl(getQuizImageUrl(previewQuestion.image_path))}
                               />
@@ -3561,7 +3568,7 @@ export default function GuruQuiz() {
                               : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
                           }`}
                         >
-                          {question.nomor || idx + 1}
+                          {idx + 1}
                         </button>
                       ))}
                     </div>
@@ -3750,7 +3757,7 @@ export default function GuruQuiz() {
               <div className="border border-slate-200 rounded-2xl p-4 bg-white shadow-sm">
                 <div className="flex items-center justify-between mb-2">
                   <div className="font-semibold text-slate-900">
-                    Soal {editingQuestion?.nomor || questions.length + 1}
+                    Soal {editingQuestionDisplayNumber}
                     <span className={`ml-2 text-[11px] px-2 py-0.5 rounded-full border align-middle ${
                       normalizeQuestionType(questionForm.question_type) === 'essay'
                         ? 'bg-amber-50 text-amber-700 border-amber-200'

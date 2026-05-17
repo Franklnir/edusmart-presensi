@@ -45,6 +45,13 @@ const normalizeQuestionType = (value) => {
   return 'mcq'
 }
 
+const normalizeQuestionNumbering = (questionRows = []) => (
+  (questionRows || []).map((question, index) => ({
+    ...question,
+    nomor: index + 1
+  }))
+)
+
 const normalizeAnswerOrder = (value) => {
   if (!value) return null
   let parsed = value
@@ -1204,6 +1211,7 @@ export default function SiswaQuiz() {
       }
 
       const orderedDetail = applyQuizOrder(questionRows || [], grouped, submissionRow?.answer_order)
+      const numberedQuestions = normalizeQuestionNumbering(orderedDetail.questions)
       startTransition(() => {
         if (quizPayload) {
           setSessionQuizFallback(quizPayload)
@@ -1215,7 +1223,7 @@ export default function SiswaQuiz() {
             return [quizPayload, ...prev]
           })
         }
-        setQuestions(orderedDetail.questions)
+        setQuestions(numberedQuestions)
         setOptionsByQuestion(orderedDetail.optionsByQuestion)
         setAnswers(answerMap)
         setAnswerIds(answerIdMap)
@@ -1282,7 +1290,7 @@ export default function SiswaQuiz() {
 
     sub = data?.submission || sub
     if (Array.isArray(data?.questions)) {
-      setQuestions(data.questions)
+      setQuestions(normalizeQuestionNumbering(data.questions))
       setOptionsByQuestion(data.options_by_question || {})
       setQuizDetailsLoadedForId(selectedQuiz.id)
     }
@@ -2275,7 +2283,7 @@ export default function SiswaQuiz() {
                           <div className="border border-slate-200 rounded-2xl p-4 bg-white shadow-sm">
                             <div className="flex items-center justify-between mb-2">
                               <div className="font-semibold text-slate-900">
-                                Soal {activeQuestion.nomor || activeQuestionIndex + 1}
+                                Soal {activeQuestionIndex + 1}
                                 <span className={`ml-2 text-[11px] px-2 py-0.5 rounded-full border align-middle ${
                                   normalizeQuestionType(activeQuestion.question_type) === 'essay'
                                     ? 'bg-amber-50 text-amber-700 border-amber-200'
@@ -2292,7 +2300,7 @@ export default function SiswaQuiz() {
                                 <div className="inline-flex max-w-full flex-col rounded-2xl border border-slate-200 bg-slate-50 p-2.5">
                                   <img
                                     src={getQuizImageUrl(activeQuestion.image_path)}
-                                    alt={`Gambar soal ${activeQuestion.nomor || activeQuestionIndex + 1}`}
+                                    alt={`Gambar soal ${activeQuestionIndex + 1}`}
                                     className="block max-h-[22rem] w-auto max-w-full object-contain rounded-xl cursor-zoom-in"
                                     onClick={() => setPreviewMediaUrl(getQuizImageUrl(activeQuestion.image_path))}
                                   />
@@ -2405,7 +2413,7 @@ export default function SiswaQuiz() {
                               {questions.map((q, index) => {
                                 const isActive = index === activeQuestionIndex
                                 const isAnswered = isQuestionAnswered(q)
-                                const numberLabel = q?.nomor || index + 1
+                                const numberLabel = index + 1
                                 return (
                                   <button
                                     key={q.id}
@@ -2906,7 +2914,7 @@ export default function SiswaQuiz() {
                     <div key={question.id} className="rounded-2xl border border-slate-200 bg-white p-4">
                       <div className="flex items-center justify-between gap-2">
                         <div className="font-semibold text-slate-900">
-                          Soal {question.nomor || idx + 1}
+                          Soal {idx + 1}
                           <span className={`ml-2 text-[11px] px-2 py-0.5 rounded-full border align-middle ${
                             questionType === 'essay'
                               ? 'bg-amber-50 text-amber-700 border-amber-200'
@@ -2924,7 +2932,7 @@ export default function SiswaQuiz() {
                           <div className="inline-flex max-w-full flex-col rounded-xl border border-slate-200 bg-slate-50 p-2">
                             <img
                               src={getQuizImageUrl(question.image_path)}
-                              alt={`Gambar soal ${question.nomor || idx + 1}`}
+                              alt={`Gambar soal ${idx + 1}`}
                               className="block max-h-56 w-auto max-w-full object-contain rounded-lg cursor-zoom-in"
                               onClick={() => setPreviewMediaUrl(getQuizImageUrl(question.image_path))}
                             />
