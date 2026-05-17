@@ -42,6 +42,12 @@ const FILE_SIZE_LIMITS = {
   PRESENTATION: 5 * 1024 * 1024
 }
 
+const KELAS_COLUMNS = 'id,nama,grade,suffix,tingkat,jurusan,angkatan'
+const JADWAL_GURU_COLUMNS = 'id,kelas_id,mapel,guru_id,guru_nama,hari,jam_mulai,jam_selesai,tahun_ajaran,semester'
+const TUGAS_GURU_COLUMNS = 'id,kelas,judul,mapel,mulai,deadline,keterangan,file_url,link,created_by,created_at,updated_at,tahun_ajaran,semester,angkatan'
+const TUGAS_JAWABAN_STATS_COLUMNS = 'tugas_id,user_id,nilai,status'
+const TUGAS_JAWABAN_DETAIL_COLUMNS = 'id,tugas_id,user_id,file_url,file_urls,link_url,komentar_siswa,nilai,status,waktu_submit,profiles(nama,photo_url)'
+
 const isHttpUrl = (v = '') => /^https?:\/\//i.test(String(v || ''))
 const looksLikeDomainUrl = (v = '') => /^[a-z0-9-]+(\.[a-z0-9-]+)+(?::\d+)?(\/|$)/i.test(String(v || '').trim())
 
@@ -161,7 +167,17 @@ const getTaskWindowInfo = (mulai, deadline, stats = {}, nowRef = new Date()) => 
   }
 }
 
-const validateTimelineInput = (mulai, deadline) => {
+const isPastDateTimeLocal = (value) => {
+  if (!value) return false
+  const date = new Date(value)
+  if (!isValidDate(date)) return false
+  const now = new Date()
+  now.setSeconds(0, 0)
+  return date < now
+}
+
+const validateTimelineInput = (mulai, deadline, options = {}) => {
+  const { allowPastStart = false, allowPastDeadline = false } = options
   const now = new Date()
   now.setSeconds(0, 0)
   const mulaiDate = mulai ? new Date(mulai) : null
@@ -169,8 +185,8 @@ const validateTimelineInput = (mulai, deadline) => {
 
   if (!mulai || !isValidDate(mulaiDate)) return 'Waktu mulai wajib diisi dan valid'
   if (!deadline || !isValidDate(deadlineDate)) return 'Deadline wajib diisi dan valid'
-  if (mulaiDate < now) return 'Waktu mulai tidak boleh di masa lalu'
-  if (deadlineDate < now) return 'Deadline tidak boleh di masa lalu'
+  if (!allowPastStart && mulaiDate < now) return 'Waktu mulai tidak boleh di masa lalu'
+  if (!allowPastDeadline && deadlineDate < now) return 'Deadline tidak boleh di masa lalu'
   if (deadlineDate <= mulaiDate) return 'Deadline harus setelah waktu mulai'
   return ''
 }
@@ -571,7 +587,7 @@ export default function TugasGuru() {
   useEffect(() => {
     const loadKelasData = async () => {
       try {
-        const { data, error } = await supabase.from('kelas').select('*').order('grade').order('suffix')
+        const { data, error } = await supabase.from('kelas').select(KELAS_COLUMNS).order('grade').order('suffix')
         if (error) throw error
         setKelasList(data || [])
       } catch (error) {
@@ -588,7 +604,7 @@ export default function TugasGuru() {
     const loadJadwal = async () => {
       if (!user?.id) return
       try {
-        let query = supabase.from('jadwal').select('*').eq('guru_id', user.id)
+        let query = supabase.from('jadwal').select(JADWAL_GURU_COLUMNS).eq('guru_id', user.id)
         query = applyPeriodFilters(query)
         const { data, error } = await query
         if (error) throw error
@@ -650,7 +666,7 @@ export default function TugasGuru() {
       setLoading(true)
       const now = new Date()
 
-      let query = supabase.from('tugas').select('*').eq('created_by', user.id)
+      let query = supabase.from('tugas').select(TUGAS_GURU_COLUMNS).eq('created_by', user.id)
       query = applyPeriodFilters(query)
 
       if (selectedKelasFilter) query = query.eq('kelas', selectedKelasFilter)
@@ -703,7 +719,7 @@ export default function TugasGuru() {
       const jawabanPromise =
         tugasIds.length > 0
           ? applyPeriodFilters(
-              supabase.from('tugas_jawaban').select('tugas_id, user_id, nilai').in('tugas_id', tugasIds)
+              supabase.from('tugas_jawaban').select(TUGAS_JAWABAN_STATS_COLUMNS).in('tugas_id', tugasIds)
             )
           : Promise.resolve({ data: [], error: null })
 
@@ -805,7 +821,7 @@ export default function TugasGuru() {
 
       let tugasQuery = supabase
         .from('tugas')
-        .select('*')
+        .select(TUGAS_GURU_COLUMNS)
         .eq('created_by', user.id)
       tugasQuery = applyPeriodFilters(tugasQuery)
       const { data: tugasData, error: tugasError } = await tugasQuery
@@ -819,9 +835,9 @@ export default function TugasGuru() {
       const tugasIds = tugasData.map((t) => t.id)
       let jawabanQuery = supabase
         .from('tugas_jawaban')
-        .select('id, tugas_id, user_id, nilai')
+        .select('id,tugas_id,user_id,nilai,status')
         .in('tugas_id', tugasIds)
-        .eq('nilai', null)
+        .is('nilai', null)
       jawabanQuery = applyPeriodFilters(jawabanQuery)
       const { data: jawabanData, error: jawabanError } = await jawabanQuery
 
@@ -913,7 +929,7 @@ export default function TugasGuru() {
 
         const jawabanPromise = supabase
           .from('tugas_jawaban')
-          .select('id, tugas_id, user_id, file_url, file_urls, link_url, komentar_siswa, nilai, status, waktu_submit, profiles(nama, photo_url)')
+          .select(TUGAS_JAWABAN_DETAIL_COLUMNS)
           .eq('tugas_id', tugas.id)
 
         const [
@@ -1312,6 +1328,8 @@ export default function TugasGuru() {
     }
 
     const originalFile = selectedTugas.file_url || ''
+    const originalMulai = toDatetimeLocalValue(selectedTugas.mulai || selectedTugas.created_at)
+    const originalDeadline = toDatetimeLocalValue(selectedTugas.deadline)
     setEditForm({
       id: selectedTugas.id,
       kelas: selectedTugas.kelas,
@@ -1319,8 +1337,10 @@ export default function TugasGuru() {
       judul: selectedTugas.judul,
       keterangan: selectedTugas.keterangan || '',
       link: selectedTugas.link || '',
-      mulai: toDatetimeLocalValue(selectedTugas.mulai || selectedTugas.created_at),
-      deadline: toDatetimeLocalValue(selectedTugas.deadline),
+      mulai: originalMulai,
+      deadline: originalDeadline,
+      originalMulai,
+      originalDeadline,
       file_url: originalFile,
       created_by: selectedTugas.created_by,
       hasGradedSubmissions: Boolean(selectedTugas.hasGradedSubmissions || (selectedTugas.stats?.sudah || 0) > 0)
@@ -1346,7 +1366,12 @@ export default function TugasGuru() {
       return
     }
 
-    const timelineError = validateTimelineInput(editForm.mulai, editForm.deadline)
+    const mulaiChanged = String(editForm.mulai || '') !== String(editForm.originalMulai || '')
+    const deadlineChanged = String(editForm.deadline || '') !== String(editForm.originalDeadline || '')
+    const timelineError = validateTimelineInput(editForm.mulai, editForm.deadline, {
+      allowPastStart: !mulaiChanged,
+      allowPastDeadline: !deadlineChanged
+    })
     if (timelineError) {
       pushToast('error', timelineError)
       return
@@ -1365,11 +1390,11 @@ export default function TugasGuru() {
         judul: editForm.judul,
         keterangan: editForm.keterangan,
         link: safeLink || null,
-        mulai: new Date(editForm.mulai).toISOString(),
-        deadline: new Date(editForm.deadline).toISOString(),
         file_url: editForm.file_url,
         updated_at: new Date().toISOString()
       }
+      if (mulaiChanged) payload.mulai = new Date(editForm.mulai).toISOString()
+      if (deadlineChanged) payload.deadline = new Date(editForm.deadline).toISOString()
 
       const { error } = await supabase
         .from('tugas')
@@ -1663,7 +1688,121 @@ export default function TugasGuru() {
             <p>Tidak ada data</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <>
+          <div className="space-y-3 md:hidden">
+            {siswaList.map((siswa) => {
+              const jawaban = siswa.jawaban
+              const photoValues = parseAssignmentFileList(jawaban?.file_urls, jawaban?.file_url)
+                .filter(isImageLikeFile)
+                .slice(0, MAX_ASSIGNMENT_PHOTOS)
+              const studentComment = String(jawaban?.komentar_siswa || '').trim()
+
+              return (
+                <div key={siswa.id} className="rounded-xl border border-white/70 bg-white p-3 shadow-sm">
+                  <div className="flex items-start gap-3">
+                    <Avatar src={siswa.photo_url} name={siswa.nama} />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-bold text-slate-900">{siswa.nama}</p>
+                      <p className="text-xs text-slate-500">{siswa.kelas}</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {jawaban?.waktu_submit ? formatDateTime(jawaban.waktu_submit) : type === 'belum' ? 'Belum mengumpulkan' : '-'}
+                      </p>
+                    </div>
+                    {type !== 'belum' && (
+                      <span className={`rounded-full px-2 py-1 text-xs font-bold ${jawaban?.nilai != null ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                        {jawaban?.nilai != null ? jawaban.nilai : 'Menunggu'}
+                      </span>
+                    )}
+                  </div>
+
+                  {type !== 'belum' && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {photoValues.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => openPhotoGallery(photoValues, 0, `Galeri ${siswa.nama || 'Siswa'}`)}
+                          className="rounded-lg bg-emerald-100 px-2.5 py-1.5 text-xs font-semibold text-emerald-700"
+                        >
+                          Galeri ({photoValues.length})
+                        </button>
+                      )}
+                      {jawaban?.file_url && (
+                        <button
+                          type="button"
+                          onClick={() => openPreviewAny(jawaban.file_url, 'Gagal membuka file jawaban')}
+                          className="rounded-lg bg-blue-100 px-2.5 py-1.5 text-xs font-semibold text-blue-700"
+                        >
+                          File
+                        </button>
+                      )}
+                      {jawaban?.link_url && (
+                        <button
+                          type="button"
+                          onClick={() => setPreviewFile(jawaban.link_url)}
+                          className="rounded-lg bg-purple-100 px-2.5 py-1.5 text-xs font-semibold text-purple-700"
+                        >
+                          Link
+                        </button>
+                      )}
+                      {studentComment && (
+                        <button
+                          type="button"
+                          onClick={() => setStudentCommentPreview({
+                            siswa: siswa.nama || jawaban?.nama || 'Siswa',
+                            kelas: siswa.kelas || '',
+                            waktu: jawaban?.waktu_submit || '',
+                            komentar: studentComment
+                          })}
+                          className="inline-flex items-center gap-1 rounded-lg bg-amber-100 px-2.5 py-1.5 text-xs font-semibold text-amber-800"
+                        >
+                          <MessageSquare className="h-3.5 w-3.5" />
+                          Komentar
+                        </button>
+                      )}
+                      {!jawaban?.file_url && !jawaban?.link_url && !studentComment && (
+                        <span className="text-xs text-slate-500">Tidak ada jawaban file/link.</span>
+                      )}
+                    </div>
+                  )}
+
+                  {type !== 'belum' && (
+                    <div className="mt-3 flex items-center gap-2">
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        inputMode="numeric"
+                        className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        placeholder="Nilai 0-100"
+                        value={nilaiInput[siswa.id] ?? ''}
+                        onChange={(e) => {
+                          const val = e.target.value
+                          if (val === '') return setNilaiInput((prev) => ({ ...prev, [siswa.id]: '' }))
+                          const n = parseInt(val, 10)
+                          if (!Number.isNaN(n) && n >= 0 && n <= 100) {
+                            setNilaiInput((prev) => ({ ...prev, [siswa.id]: val }))
+                          }
+                        }}
+                      />
+                      <button
+                        className="rounded-lg bg-green-600 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          simpanNilai(siswa.id)
+                        }}
+                        disabled={loading}
+                        type="button"
+                      >
+                        {loading ? '...' : 'Simpan'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          <div className="hidden overflow-x-auto md:block">
             <table className="w-full min-w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-200">
@@ -1708,7 +1847,7 @@ export default function TugasGuru() {
                                 onClick={() => openPhotoGallery(photoValues, 0, `Galeri ${siswa.nama || 'Siswa'}`)}
                                 className="inline-flex items-center gap-1 px-2 py-1 bg-emerald-100 text-emerald-700 rounded-lg text-xs hover:bg-emerald-200 transition-colors"
                               >
-                                🖼️ Galeri ({photoValues.length})
+                                Galeri ({photoValues.length})
                               </button>
                             )}
                             {jawaban?.file_url && (
@@ -1726,7 +1865,7 @@ export default function TugasGuru() {
                                 }}
                                 className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-700 rounded-lg text-xs hover:bg-blue-200 transition-colors"
                               >
-                                📎 File
+                                File
                               </button>
                             )}
                             {jawaban?.link_url && (
@@ -1735,7 +1874,7 @@ export default function TugasGuru() {
                                 onClick={() => setPreviewFile(jawaban.link_url)}
                                 className="inline-flex items-center gap-1 px-2 py-1 bg-purple-100 text-purple-700 rounded-lg text-xs hover:bg-purple-200 transition-colors"
                               >
-                                🔗 Link
+                                Link
                               </button>
                             )}
                             {studentComment && (
@@ -1779,7 +1918,7 @@ export default function TugasGuru() {
                                 : 'bg-yellow-100 text-yellow-700'
                             }`}
                           >
-                            {jawaban?.nilai != null ? `✅ ${jawaban.nilai}` : '📝 Menunggu'}
+                            {jawaban?.nilai != null ? jawaban.nilai : 'Menunggu'}
                           </span>
                         )}
                       </td>
@@ -1805,14 +1944,15 @@ export default function TugasGuru() {
                               }}
                             />
                             <button
-                              className="px-3 py-1 bg-green-600 text-white rounded-lg text-xs font-semibold hover:bg-green-700 transition-colors"
+                              className="rounded-lg bg-green-600 px-3 py-1 text-xs font-semibold text-white transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
                               onClick={(e) => {
                                 e.stopPropagation()
                                 simpanNilai(siswa.id)
                               }}
+                              disabled={loading}
                               type="button"
                             >
-                              💾 Simpan
+                              {loading ? '...' : 'Simpan'}
                             </button>
                           </div>
                         </td>
@@ -1823,6 +1963,7 @@ export default function TugasGuru() {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </div>
     )
@@ -2089,11 +2230,10 @@ export default function TugasGuru() {
           <button
             className="w-full mt-6 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-bold py-4 px-6 rounded-2xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3 text-base shadow-lg"
             onClick={tambahTugas}
-            disabled={!kelas || !selectedMapel || !form.judul || !form.mulai || !form.deadline}
+            disabled={loading || isUploadingFile || !kelas || !selectedMapel || !form.judul || !form.mulai || !form.deadline}
             type="button"
           >
-            <span>💾</span>
-            <span>Simpan Tugas Baru</span>
+            <span>{loading ? 'Menyimpan...' : 'Simpan Tugas Baru'}</span>
           </button>
         </div>
 
@@ -2433,39 +2573,40 @@ export default function TugasGuru() {
               }}
             />
 
-            <div className="absolute inset-0 flex items-center justify-center p-3 sm:p-6">
-              <div className="w-full max-w-6xl bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="absolute inset-0 flex items-center justify-center p-2 sm:p-6">
+              <div className="flex max-h-[94vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl sm:rounded-3xl">
                 {/* Header modal */}
-                <div className="p-5 sm:p-6 border-b border-slate-200 bg-gradient-to-r from-slate-50 to-blue-50/40">
-                  <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
+                <div className="shrink-0 border-b border-slate-200 bg-white px-4 py-4 sm:px-6">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                     <div className="min-w-0">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-2xl bg-blue-600 text-white flex items-center justify-center font-bold">
-                          📌
+                        <div className="h-11 w-1.5 rounded-full bg-blue-600" />
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-blue-100 bg-blue-50 text-sm font-bold text-blue-700">
+                          TG
                         </div>
                         <div className="min-w-0">
-                          <div className="text-xl sm:text-2xl font-extrabold text-slate-800 truncate">
+                          <div className="truncate text-lg font-bold text-slate-950 sm:text-2xl">
                             {selectedTugas.judul}
                           </div>
-                          <div className="text-sm text-slate-600 mt-1">
+                          <div className="mt-1 text-sm text-slate-600">
                             {formatKelasDisplay(selectedTugas.kelas)} • {selectedTugas.mapel}
                           </div>
                         </div>
                       </div>
 
                       <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                        <span className="px-3 py-1 rounded-full bg-slate-100 text-slate-700 font-semibold">
+                        <span className="rounded-full bg-slate-100 px-3 py-1 font-semibold text-slate-700">
                           Dibuat: {formatDateTime(selectedTugas.created_at)}
                         </span>
                         <span
-                          className={`px-3 py-1 rounded-full font-semibold ${
+                          className={`rounded-full px-3 py-1 font-semibold ${
                             selectedTugas.isBeforeStart ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-700'
                           }`}
                         >
                           Mulai: {formatDateTime(selectedTugas.mulai || selectedTugas.created_at)}
                         </span>
                         <span
-                          className={`px-3 py-1 rounded-full font-semibold ${
+                          className={`rounded-full px-3 py-1 font-semibold ${
                             selectedTugas.isExpired
                               ? 'bg-red-100 text-red-700'
                               : selectedTugas.isNearDeadline
@@ -2476,35 +2617,35 @@ export default function TugasGuru() {
                           Deadline: {formatDateTime(selectedTugas.deadline)}
                         </span>
                         {selectedTugas.file_url && (
-                          <span className="px-3 py-1 rounded-full bg-blue-100 text-blue-700 font-semibold">
+                          <span className="rounded-full bg-blue-100 px-3 py-1 font-semibold text-blue-700">
                             Ada Lampiran
                           </span>
                         )}
                         {selectedTugas.link && (
-                          <span className="px-3 py-1 rounded-full bg-purple-100 text-purple-700 font-semibold">
+                          <span className="rounded-full bg-purple-100 px-3 py-1 font-semibold text-purple-700">
                             Ada Link
                           </span>
                         )}
                       </div>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-2 justify-end">
+                    <div className="flex flex-wrap items-center gap-2 lg:justify-end">
                       {selectedTugas.file_url && (
                         <button
                           type="button"
                           onClick={() => openPreviewAny(selectedTugas.file_url, 'Gagal membuka lampiran tugas')}
-                          className="px-4 py-2 rounded-2xl bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors"
+                          className="rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
                         >
-                          📎 Lampiran
+                          Lampiran
                         </button>
                       )}
                       {selectedTugas.link && (
                         <button
                           type="button"
                           onClick={() => openPreviewAny(selectedTugas.link, 'Gagal membuka link referensi')}
-                          className="px-4 py-2 rounded-2xl bg-purple-600 text-white font-semibold hover:bg-purple-700 transition-colors"
+                          className="rounded-xl bg-purple-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-purple-700"
                         >
-                          🔗 Link Referensi
+                          Link Referensi
                         </button>
                       )}
 
@@ -2513,17 +2654,18 @@ export default function TugasGuru() {
                           <button
                             type="button"
                             onClick={openEditTugas}
-                            className="px-4 py-2 rounded-2xl bg-slate-800 text-white font-semibold hover:bg-slate-900 transition-colors"
+                            disabled={loading || isUploadingFile}
+                            className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
                           >
-                            ✏️ Edit
+                            Edit
                           </button>
                           <button
                             type="button"
                             onClick={() => hapusTugas(selectedTugas.id, selectedTugas.file_url)}
-                            disabled={selectedHasGradedSubmission}
-                            className="px-4 py-2 rounded-2xl bg-red-600 text-white font-semibold hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            disabled={selectedHasGradedSubmission || loading || isUploadingFile}
+                            className="rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            {selectedHasGradedSubmission ? '🔒 Tidak Bisa Hapus' : '🗑️ Hapus'}
+                            {selectedHasGradedSubmission ? 'Tidak Bisa Hapus' : 'Hapus'}
                           </button>
                         </>
                       ) : (
@@ -2531,16 +2673,18 @@ export default function TugasGuru() {
                           <button
                             type="button"
                             onClick={simpanEditTugas}
-                            className="px-4 py-2 rounded-2xl bg-green-600 text-white font-semibold hover:bg-green-700 transition-colors"
+                            disabled={loading || isUploadingFile}
+                            className="rounded-xl bg-green-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
                           >
-                            💾 Simpan Perubahan
+                            {loading ? 'Menyimpan...' : 'Simpan'}
                           </button>
                           <button
                             type="button"
                             onClick={() => { void cancelEditTugas() }}
-                            className="px-4 py-2 rounded-2xl bg-white border border-slate-200 text-slate-700 font-semibold hover:bg-slate-50 transition-colors"
+                            disabled={loading || isUploadingFile}
+                            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                           >
-                            ✖️ Batal
+                            Batal
                           </button>
                         </>
                       )}
@@ -2548,16 +2692,17 @@ export default function TugasGuru() {
                       <button
                         type="button"
                         onClick={() => { void closeSelectedTugas() }}
-                        className="px-4 py-2 rounded-2xl bg-white border border-slate-200 text-slate-700 font-semibold hover:bg-slate-50 transition-colors"
+                        className="rounded-xl border border-slate-200 bg-white p-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-900"
+                        aria-label="Tutup detail tugas"
                       >
-                        ❌ Tutup
+                        <X className="h-5 w-5" />
                       </button>
                     </div>
                   </div>
                 </div>
 
                 {/* Body modal */}
-                <div className="p-5 sm:p-6 max-h-[75vh] overflow-auto">
+                <div className="flex-1 overflow-auto p-4 sm:p-6">
                   {/* Edit Form */}
                   {isEditingTugas && editForm ? (
                     <div className="space-y-5">
@@ -2579,7 +2724,7 @@ export default function TugasGuru() {
                             className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
                             value={editForm.mulai}
                             onChange={(e) => setEditForm((p) => ({ ...p, mulai: e.target.value }))}
-                            min={getNowDateTimeLocal()}
+                            min={isPastDateTimeLocal(editForm.originalMulai) ? undefined : getNowDateTimeLocal()}
                           />
                         </div>
 
@@ -2590,7 +2735,7 @@ export default function TugasGuru() {
                             className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
                             value={editForm.deadline}
                             onChange={(e) => setEditForm((p) => ({ ...p, deadline: e.target.value }))}
-                            min={maxDateTimeLocal(getNowDateTimeLocal(), editForm.mulai || getNowDateTimeLocal())}
+                            min={isPastDateTimeLocal(editForm.originalDeadline) ? undefined : maxDateTimeLocal(getNowDateTimeLocal(), editForm.mulai || getNowDateTimeLocal())}
                           />
                         </div>
 
@@ -2657,37 +2802,37 @@ export default function TugasGuru() {
                     </div>
                   ) : (
                     <>
-                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                        <div className="lg:col-span-2 space-y-4">
+                      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+                        <div className="space-y-4">
                           {selectedTugas.keterangan ? (
-                            <div className="bg-white border border-slate-200 rounded-2xl p-4">
-                              <div className="text-sm font-bold text-slate-800 mb-2">🧾 Instruksi</div>
+                            <div className="rounded-xl border border-slate-200 bg-white p-4">
+                              <div className="mb-2 text-sm font-bold text-slate-900">Instruksi</div>
                               <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">
                                 {selectedTugas.keterangan}
                               </div>
                             </div>
                           ) : (
-                            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-slate-500">
+                            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-slate-500">
                               <div className="font-semibold">Tidak ada keterangan.</div>
                             </div>
                           )}
 
                           {selectedTugas.link && (
-                            <div className="bg-white border border-slate-200 rounded-2xl p-4">
-                              <div className="text-sm font-bold text-slate-800 mb-2">🔗 Link Referensi</div>
-                              <div className="text-xs text-slate-500 break-all mb-3">{selectedTugas.link}</div>
+                            <div className="rounded-xl border border-slate-200 bg-white p-4">
+                              <div className="mb-2 text-sm font-bold text-slate-900">Link Referensi</div>
+                              <div className="mb-3 break-all text-xs text-slate-500">{selectedTugas.link}</div>
                               <button
                                 type="button"
                                 onClick={() => openPreviewAny(selectedTugas.link, 'Gagal membuka link referensi')}
-                                className="px-4 py-2 rounded-xl bg-purple-600 text-white text-sm font-semibold hover:bg-purple-700 transition-colors"
+                                className="rounded-lg bg-purple-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-purple-700"
                               >
-                                👁️ Preview Link
+                                Preview Link
                               </button>
                             </div>
                           )}
 
                           {isLoadingDetail ? (
-                            <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center">
+                            <div className="rounded-xl border border-slate-200 bg-white p-10 text-center">
                               <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
                               <div className="text-slate-600 font-semibold">Memuat detail...</div>
                             </div>
@@ -2700,24 +2845,24 @@ export default function TugasGuru() {
                           )}
                         </div>
 
-                        <div className="space-y-4">
-                          <div className="bg-white border border-slate-200 rounded-2xl p-4">
-                            <div className="text-sm font-bold text-slate-800 mb-3">📊 Ringkasan</div>
+                        <div className="space-y-4 lg:sticky lg:top-0 lg:self-start">
+                          <div className="rounded-xl border border-slate-200 bg-white p-4">
+                            <div className="mb-3 text-sm font-bold text-slate-900">Ringkasan</div>
 
                             <div className="grid grid-cols-2 gap-3">
-                              <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200">
+                              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                                 <div className="text-xs text-slate-500">Total Siswa</div>
                                 <div className="text-xl font-extrabold text-slate-800">{siswaDiKelas.length}</div>
                               </div>
-                              <div className="p-3 rounded-2xl bg-blue-50 border border-blue-200">
+                              <div className="rounded-xl border border-blue-200 bg-blue-50 p-3">
                                 <div className="text-xs text-blue-700">Mengumpulkan</div>
                                 <div className="text-xl font-extrabold text-blue-800">{jawabanTugas.length}</div>
                               </div>
-                              <div className="p-3 rounded-2xl bg-yellow-50 border border-yellow-200">
+                              <div className="rounded-xl border border-yellow-200 bg-yellow-50 p-3">
                                 <div className="text-xs text-yellow-700">Menunggu Nilai</div>
                                 <div className="text-xl font-extrabold text-yellow-800">{siswaDikerjakan.length}</div>
                               </div>
-                              <div className="p-3 rounded-2xl bg-green-50 border border-green-200">
+                              <div className="rounded-xl border border-green-200 bg-green-50 p-3">
                                 <div className="text-xs text-green-700">Sudah Dinilai</div>
                                 <div className="text-xl font-extrabold text-green-800">{siswaDinilai.length}</div>
                               </div>
@@ -2729,26 +2874,26 @@ export default function TugasGuru() {
                           </div>
 
                           {selectedTugas.file_url && (
-                            <div className="bg-white border border-slate-200 rounded-2xl p-4">
-                              <div className="text-sm font-bold text-slate-800 mb-2">📎 Lampiran</div>
+                            <div className="rounded-xl border border-slate-200 bg-white p-4">
+                              <div className="mb-2 text-sm font-bold text-slate-900">Lampiran</div>
                               <div className="flex flex-wrap gap-2">
                                 {renderFileButton(selectedTugas.file_url, 'Preview Lampiran')}
                               </div>
-                              <div className="text-[11px] text-slate-500 mt-2">
+                              <div className="mt-2 text-[11px] text-slate-500">
                                 Preview butuh policy storage SELECT + signed URL.
                               </div>
                             </div>
                           )}
 
                           {selectedTugas.link && (
-                            <div className="bg-white border border-slate-200 rounded-2xl p-4">
-                              <div className="text-sm font-bold text-slate-800 mb-2">🔗 Link Referensi</div>
+                            <div className="rounded-xl border border-slate-200 bg-white p-4">
+                              <div className="mb-2 text-sm font-bold text-slate-900">Link Referensi</div>
                               <button
                                 type="button"
                                 onClick={() => openPreviewAny(selectedTugas.link, 'Gagal membuka link referensi')}
-                                className="w-full px-4 py-3 rounded-2xl bg-purple-600 text-white font-bold hover:bg-purple-700 transition-colors"
+                                className="w-full rounded-xl bg-purple-600 px-4 py-3 font-bold text-white transition-colors hover:bg-purple-700"
                               >
-                                👁️ Preview Link
+                                Preview Link
                               </button>
                             </div>
                           )}

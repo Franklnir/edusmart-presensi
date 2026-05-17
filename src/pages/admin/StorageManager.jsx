@@ -3,12 +3,20 @@ import {
   AlertTriangle,
   Archive,
   BarChart3,
+  CheckCircle2,
+  Cloud,
   Database,
+  ExternalLink,
+  FileText,
+  FolderOpen,
   HardDrive,
+  Link2,
   RefreshCw,
   Save,
   ShieldCheck,
-  Trash2
+  Trash2,
+  Unplug,
+  XCircle
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
@@ -32,6 +40,24 @@ const SEMESTERS = [
   { value: 'Genap', label: 'Genap' }
 ]
 
+const DRIVE_FILE_BUCKET_OPTIONS = [
+  { value: 'all', label: 'Semua file' },
+  { value: 'assignments', label: 'Tugas' },
+  { value: 'quiz-media', label: 'Quiz' }
+]
+
+const DRIVE_STATUS_DEFAULT = {
+  ready: false,
+  configured: false,
+  provider_configured: true,
+  status: 'not_connected',
+  status_label: 'Belum tersambung',
+  quota: { used_label: '0 B', limit_label: 'Tidak terbatas', percent: null },
+  today: { uploaded_label: '0 B', files: 0 },
+  app_storage: { uploaded_label: '0 B', files: 0 },
+  app_storage_all: { uploaded_label: '0 B', files: 0 }
+}
+
 const numberFormatter = new Intl.NumberFormat('id-ID')
 const toBytesFromGb = (value) => {
   const num = Number(value)
@@ -43,6 +69,19 @@ const toBytesFromMb = (value) => {
 }
 const bytesToGbInput = (bytes) => bytes ? String(Math.round((Number(bytes) / 1024 / 1024 / 1024) * 100) / 100) : ''
 const bytesToMbInput = (bytes) => bytes ? String(Math.round((Number(bytes) / 1024 / 1024) * 100) / 100) : ''
+const activeTabFromUrl = () => {
+  if (typeof window === 'undefined') return 'storage'
+  return new URLSearchParams(window.location.search).get('tab') === 'drive' ? 'drive' : 'storage'
+}
+const normalizeDriveStatus = (data) => data || DRIVE_STATUS_DEFAULT
+const labelOrZero = (value) => value || '0 B'
+const driveBadgeClass = (ready, status) => (
+  ready
+    ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
+    : status === 'needs_attention'
+      ? 'bg-amber-100 text-amber-800 border-amber-200'
+      : 'bg-slate-100 text-slate-600 border-slate-200'
+)
 
 function StatTile({ icon: Icon, label, value, hint }) {
   return (
@@ -83,6 +122,7 @@ function StorageManager() {
   const { isSuperAdmin, superAdminChecked } = useAuthStore()
   const { pushToast } = useUIStore()
   const [loading, setLoading] = useState(false)
+  const [activeTab, setActiveTab] = useState(activeTabFromUrl)
   const [summary, setSummary] = useState(null)
   const [superSummary, setSuperSummary] = useState(null)
   const [selectedTenantId, setSelectedTenantId] = useState('')
@@ -100,6 +140,16 @@ function StorageManager() {
   const [cleanupLoading, setCleanupLoading] = useState(false)
   const [restoringTrashId, setRestoringTrashId] = useState('')
   const [purgingTrash, setPurgingTrash] = useState(false)
+  const [driveStatus, setDriveStatus] = useState(DRIVE_STATUS_DEFAULT)
+  const [driveFiles, setDriveFiles] = useState([])
+  const [driveLoading, setDriveLoading] = useState(false)
+  const [driveFilesLoading, setDriveFilesLoading] = useState(false)
+  const [driveConnecting, setDriveConnecting] = useState(false)
+  const [driveSyncing, setDriveSyncing] = useState(false)
+  const [driveDisconnecting, setDriveDisconnecting] = useState(false)
+  const [driveFileBucket, setDriveFileBucket] = useState('all')
+  const [driveFileSearch, setDriveFileSearch] = useState('')
+  const [drivePeriod, setDrivePeriod] = useState({ tahun_ajaran: '', semester: '' })
 
   const activeSummary = tenantDetail || summary || {}
   const usage = activeSummary?.usage || {}
@@ -110,6 +160,29 @@ function StorageManager() {
   const uploaders = Array.isArray(activeSummary?.by_uploader) ? activeSummary.by_uploader : []
   const recommendations = Array.isArray(activeSummary?.recommendations) ? activeSummary.recommendations : []
   const trashFiles = Array.isArray(activeSummary?.trash_files) ? activeSummary.trash_files : []
+  const driveReady = Boolean(driveStatus?.ready)
+  const driveProviderConfigured = driveStatus?.provider_configured !== false
+  const driveQuotaPercent = Number(driveStatus?.quota?.percent)
+  const driveQuotaPercentLabel = Number.isFinite(driveQuotaPercent) ? `${driveQuotaPercent.toLocaleString('id-ID')}%` : 'Tidak terbatas'
+  const driveQuotaBarWidth = Number.isFinite(driveQuotaPercent) ? Math.max(0, Math.min(100, driveQuotaPercent)) : 0
+  const driveFilteredStorage = driveStatus?.app_storage || DRIVE_STATUS_DEFAULT.app_storage
+  const driveAllStorage = driveStatus?.app_storage_all || driveStatus?.app_storage || DRIVE_STATUS_DEFAULT.app_storage
+  const driveClassUsageRows = Array.isArray(driveStatus?.usage_by_class) ? driveStatus.usage_by_class : []
+  const driveSemesterUsageRows = Array.isArray(driveStatus?.usage_by_semester) ? driveStatus.usage_by_semester : []
+  const driveFileQuery = driveFileSearch.trim().toLowerCase()
+  const driveVisibleFiles = driveFileQuery
+    ? driveFiles.filter((file) => [
+      file.drive_file_name,
+      file.module_label,
+      file.bucket,
+      file.kelas,
+      file.angkatan,
+      file.tahun_ajaran,
+      file.semester,
+      file.extension,
+      file.source_path
+    ].some((value) => String(value || '').toLowerCase().includes(driveFileQuery)))
+    : driveFiles
 
   const tenants = useMemo(() => (
     Array.isArray(superSummary?.tenants) ? superSummary.tenants : []
@@ -128,6 +201,47 @@ function StorageManager() {
     setSuperSummary(data || null)
     const firstTenant = data?.tenants?.[0]?.id
     setSelectedTenantId((current) => current || firstTenant || '')
+  }
+
+  const loadDriveStatus = async ({ sync = false } = {}) => {
+    if (isSuperAdmin) return
+    setDriveLoading(true)
+    try {
+      const params = {
+        tahun_ajaran: drivePeriod.tahun_ajaran,
+        semester: drivePeriod.semester
+      }
+      const api = sync ? supabase.admin.syncGoogleDrive(params) : supabase.admin.googleDrive(params)
+      const { data, error } = await api
+      if (error) throw error
+      setDriveStatus(normalizeDriveStatus(data))
+    } catch (error) {
+      setDriveStatus(DRIVE_STATUS_DEFAULT)
+      pushToast('error', error?.message || 'Gagal memuat status Google Drive')
+    } finally {
+      setDriveLoading(false)
+    }
+  }
+
+  const loadDriveFiles = async () => {
+    if (isSuperAdmin) return
+    setDriveFilesLoading(true)
+    try {
+      const params = {
+        tahun_ajaran: drivePeriod.tahun_ajaran,
+        semester: drivePeriod.semester,
+        limit: 40
+      }
+      if (driveFileBucket !== 'all') params.bucket = driveFileBucket
+      const { data, error } = await supabase.admin.googleDriveFiles(params)
+      if (error) throw error
+      setDriveFiles(Array.isArray(data?.rows) ? data.rows : [])
+    } catch (error) {
+      setDriveFiles([])
+      pushToast('error', error?.message || 'Gagal memuat file Google Drive')
+    } finally {
+      setDriveFilesLoading(false)
+    }
   }
 
   const fetchTenantDetail = async (tenantId) => {
@@ -161,7 +275,9 @@ function StorageManager() {
   const refresh = async () => {
     setLoading(true)
     try {
-      if (isSuperAdmin) {
+      if (activeTab === 'drive' && !isSuperAdmin) {
+        await Promise.all([loadDriveStatus(), loadDriveFiles()])
+      } else if (isSuperAdmin) {
         await loadSuperSummary()
       } else {
         await loadAdminSummary()
@@ -178,6 +294,58 @@ function StorageManager() {
     refresh()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [superAdminChecked, isSuperAdmin])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const url = new URL(window.location.href)
+    const driveState = String(url.searchParams.get('drive') || '').trim()
+    const driveError = String(url.searchParams.get('drive_error') || '').trim()
+    if (!driveState && !driveError) return
+
+    if (driveState === 'connected') pushToast('success', 'Google Drive sekolah berhasil tersambung.')
+    if (driveState === 'failed') pushToast('error', driveError || 'Gagal menyambungkan Google Drive sekolah.')
+    url.searchParams.delete('drive')
+    url.searchParams.delete('drive_error')
+    window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`)
+  }, [pushToast])
+
+  useEffect(() => {
+    if (isSuperAdmin && activeTab === 'drive') {
+      setActiveTab('storage')
+    }
+  }, [activeTab, isSuperAdmin])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const url = new URL(window.location.href)
+    if (activeTab === 'drive') url.searchParams.set('tab', 'drive')
+    else url.searchParams.delete('tab')
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
+  }, [activeTab])
+
+  useEffect(() => {
+    const activePeriod = summary?.active_period || {}
+    if (drivePeriod.tahun_ajaran || !activePeriod?.tahun_ajaran) return
+    setDrivePeriod({
+      tahun_ajaran: activePeriod.tahun_ajaran || '',
+      semester: activePeriod.semester || ''
+    })
+  }, [drivePeriod.tahun_ajaran, summary?.active_period])
+
+  useEffect(() => {
+    if (!superAdminChecked || isSuperAdmin || activeTab !== 'drive') return
+    let alive = true
+    ;(async () => {
+      await Promise.all([loadDriveStatus(), loadDriveFiles()])
+    })().catch(() => {
+      if (alive) {
+        setDriveStatus(DRIVE_STATUS_DEFAULT)
+        setDriveFiles([])
+      }
+    })
+    return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, driveFileBucket, drivePeriod.semester, drivePeriod.tahun_ajaran, isSuperAdmin, superAdminChecked])
 
   useEffect(() => {
     if (!isSuperAdmin || !selectedTenantId) return
@@ -290,6 +458,55 @@ function StorageManager() {
     }
   }
 
+  const handleConnectGoogleDrive = async () => {
+    setDriveConnecting(true)
+    try {
+      const returnUrl = (() => {
+        if (typeof window === 'undefined') return '/admin/storage?tab=drive'
+        const url = new URL(window.location.href)
+        url.searchParams.set('tab', 'drive')
+        url.hash = ''
+        return `${url.origin}${url.pathname}${url.search}`
+      })()
+      const { data, error } = await supabase.admin.googleDriveConnectUrl({ return_url: returnUrl })
+      if (error) throw error
+      if (!data?.authorization_url) throw new Error('URL otorisasi Google Drive tidak tersedia')
+      window.location.assign(data.authorization_url)
+    } catch (error) {
+      pushToast('error', error?.message || 'Gagal menyiapkan sambungan Google Drive')
+      setDriveConnecting(false)
+    }
+  }
+
+  const handleSyncGoogleDrive = async () => {
+    setDriveSyncing(true)
+    try {
+      await loadDriveStatus({ sync: true })
+      await loadDriveFiles()
+      pushToast('success', 'Status Google Drive sekolah berhasil dicek')
+    } finally {
+      setDriveSyncing(false)
+    }
+  }
+
+  const handleDisconnectGoogleDrive = async () => {
+    const confirmed = window.confirm('Putuskan Google Drive sekolah? Upload berikutnya akan kembali ke storage VPS/object storage sampai disambungkan lagi.')
+    if (!confirmed) return
+
+    setDriveDisconnecting(true)
+    try {
+      const { data, error } = await supabase.admin.disconnectGoogleDrive()
+      if (error) throw error
+      setDriveStatus(normalizeDriveStatus(data))
+      await loadDriveFiles()
+      pushToast('success', 'Google Drive sekolah berhasil diputuskan')
+    } catch (error) {
+      pushToast('error', error?.message || 'Gagal memutuskan Google Drive')
+    } finally {
+      setDriveDisconnecting(false)
+    }
+  }
+
   if (!superAdminChecked) {
     return <div className="p-6 text-sm text-slate-500">Memuat akses storage manager...</div>
   }
@@ -301,10 +518,10 @@ function StorageManager() {
           <div>
             <p className="text-xs font-bold uppercase tracking-wide text-indigo-600">Storage Manager</p>
             <h1 className="text-2xl font-bold text-slate-950">
-              {isSuperAdmin ? 'Kontrol Storage Platform' : 'Storage Sekolah'}
+              {isSuperAdmin ? 'Kontrol Storage Platform' : 'Storage & Google Drive'}
             </h1>
             <p className="mt-1 text-sm text-slate-500">
-              Pantau kuota, file terbesar, kategori boros, rekomendasi cleanup, dan trash.
+              Kelola VPS storage, kuota sekolah, Google Drive, inventaris file, rekomendasi cleanup, dan Trash dari satu halaman.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -331,6 +548,244 @@ function StorageManager() {
           </div>
         </div>
 
+        {!isSuperAdmin && (
+          <div className="flex gap-2 overflow-x-auto rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+            <button
+              type="button"
+              onClick={() => setActiveTab('storage')}
+              className={`inline-flex min-w-max items-center gap-2 rounded-md px-4 py-2 text-sm font-semibold ${activeTab === 'storage' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+            >
+              <HardDrive size={16} />
+              VPS Storage
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('drive')}
+              className={`inline-flex min-w-max items-center gap-2 rounded-md px-4 py-2 text-sm font-semibold ${activeTab === 'drive' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+            >
+              <Cloud size={16} />
+              Google Drive
+            </button>
+          </div>
+        )}
+
+        {activeTab === 'drive' && !isSuperAdmin && (
+          <section className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+              <StatTile icon={Cloud} label="Status Drive" value={driveStatus?.status_label || 'Belum tersambung'} hint={driveStatus?.account_email || 'Akun belum tersambung'} />
+              <StatTile icon={Database} label="Storage Periode" value={labelOrZero(driveFilteredStorage.uploaded_label)} hint={`${numberFormatter.format(driveFilteredStorage.files || 0)} file`} />
+              <StatTile icon={Archive} label="Total EduSmart" value={labelOrZero(driveAllStorage.uploaded_label)} hint={`${numberFormatter.format(driveAllStorage.files || 0)} file`} />
+              <StatTile icon={ShieldCheck} label="Quota Drive" value={driveQuotaPercentLabel} hint={`${driveStatus?.quota?.used_label || '0 B'} terpakai`} />
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+              <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-sm font-bold text-slate-900">Google Drive Sekolah</h2>
+                      <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${driveBadgeClass(driveReady, driveStatus?.status)}`}>
+                        {driveLoading ? 'Memuat...' : driveStatus?.status_label || 'Belum tersambung'}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Dokumen tugas dan media quiz dapat dialihkan ke Google Drive saat koneksi siap.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={handleConnectGoogleDrive}
+                      disabled={!driveProviderConfigured || driveConnecting || driveSyncing}
+                      className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                    >
+                      <Link2 size={16} />
+                      {driveConnecting ? 'Menyambungkan...' : driveReady ? 'Sambungkan Ulang' : 'Sambungkan'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSyncGoogleDrive}
+                      disabled={!driveProviderConfigured || driveSyncing || driveConnecting}
+                      className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                    >
+                      <RefreshCw size={16} className={driveSyncing ? 'animate-spin' : ''} />
+                      Cek
+                    </button>
+                    {driveStatus?.folder_url && (
+                      <a
+                        href={driveStatus.folder_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100"
+                      >
+                        <FolderOpen size={16} />
+                        Folder
+                      </a>
+                    )}
+                    {driveStatus?.configured && (
+                      <button
+                        type="button"
+                        onClick={handleDisconnectGoogleDrive}
+                        disabled={driveDisconnecting || driveConnecting}
+                        className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-60"
+                      >
+                        <Unplug size={16} />
+                        {driveDisconnecting ? 'Memutuskan...' : 'Putuskan'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {!driveProviderConfigured && (
+                  <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                    Credential Google Drive server belum lengkap.
+                  </div>
+                )}
+                {driveStatus?.last_error && (
+                  <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                    {driveStatus.last_error}
+                  </div>
+                )}
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  {[
+                    ['Provider server', driveProviderConfigured, driveProviderConfigured ? 'Credential tersedia' : 'Credential belum lengkap'],
+                    ['Akun sekolah', Boolean(driveStatus?.configured), driveStatus?.account_email || 'Belum tersambung'],
+                    ['Folder root', driveReady, driveStatus?.folder_name || 'Folder belum dibuat'],
+                    ['Berbagi link', Boolean(driveStatus?.share_uploaded_files), driveStatus?.share_uploaded_files ? 'Link file otomatis siap dibuka' : 'Berbagi link dimatikan']
+                  ].map(([label, ok, detail]) => (
+                    <div key={label} className="flex items-start gap-2 rounded-lg border border-slate-100 bg-slate-50 p-3">
+                      {ok ? <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" /> : <XCircle className="mt-0.5 h-4 w-4 text-slate-400" />}
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-900">{label}</p>
+                        <p className="truncate text-xs text-slate-500">{detail}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-4">
+                  <ProgressLine label="Pemakaian quota Google Drive" value={driveQuotaPercentLabel} percent={driveQuotaBarWidth} />
+                </div>
+              </section>
+
+              <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                <h2 className="text-sm font-bold text-slate-900">Filter Drive</h2>
+                <div className="mt-3 space-y-3">
+                  <input
+                    value={drivePeriod.tahun_ajaran}
+                    onChange={(event) => setDrivePeriod((prev) => ({ ...prev, tahun_ajaran: event.target.value }))}
+                    placeholder="Tahun ajaran, contoh 2025/2026"
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  />
+                  <select
+                    value={drivePeriod.semester}
+                    onChange={(event) => setDrivePeriod((prev) => ({ ...prev, semester: event.target.value }))}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  >
+                    <option value="">Semua semester</option>
+                    <option value="Ganjil">Ganjil</option>
+                    <option value="Genap">Genap</option>
+                  </select>
+                  <select
+                    value={driveFileBucket}
+                    onChange={(event) => setDriveFileBucket(event.target.value)}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  >
+                    {DRIVE_FILE_BUCKET_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                  </select>
+                  <input
+                    type="search"
+                    value={driveFileSearch}
+                    onChange={(event) => setDriveFileSearch(event.target.value)}
+                    placeholder="Cari file, kelas, periode"
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  />
+                </div>
+              </section>
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+              <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                <h2 className="text-sm font-bold text-slate-900">Pemakaian Per Kelas</h2>
+                <div className="mt-3 space-y-2">
+                  {driveClassUsageRows.slice(0, 10).map((row, index) => (
+                    <div key={`${row.kelas || 'kelas'}-${index}`} className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 px-3 py-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-slate-900">{row.kelas || 'Tanpa kelas'}</p>
+                        <p className="text-xs text-slate-500">{numberFormatter.format(row.files || 0)} file · Angkatan {row.angkatan || '-'}</p>
+                      </div>
+                      <span className="text-sm font-bold text-slate-700">{row.uploaded_label || '0 B'}</span>
+                    </div>
+                  ))}
+                  {driveClassUsageRows.length === 0 && <p className="text-sm text-slate-500">Belum ada upload Drive pada filter ini.</p>}
+                </div>
+                {driveSemesterUsageRows.length > 0 && (
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {driveSemesterUsageRows.slice(0, 6).map((row, index) => (
+                      <span key={`${row.tahun_ajaran}-${row.semester}-${index}`} className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
+                        {row.tahun_ajaran || '-'} {row.semester || '-'}: {row.uploaded_label || '0 B'}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <h2 className="text-sm font-bold text-slate-900">Inventaris File Drive</h2>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+                    <FileText size={14} />
+                    {driveFilesLoading ? 'Memuat' : `${numberFormatter.format(driveVisibleFiles.length)} file`}
+                  </span>
+                </div>
+                <div className="mt-3 overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="text-left text-xs uppercase tracking-wide text-slate-500">
+                      <tr>
+                        <th className="py-2 pr-3">File</th>
+                        <th className="py-2 pr-3">Konteks</th>
+                        <th className="py-2 pr-3 text-right">Ukuran</th>
+                        <th className="py-2 pr-3 text-right">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {driveVisibleFiles.map((file) => (
+                        <tr key={file.id} className="border-t border-slate-100">
+                          <td className="py-3 pr-3">
+                            <p className="max-w-[260px] truncate font-semibold text-slate-900">{file.drive_file_name || 'Tanpa nama'}</p>
+                            <p className="text-xs text-slate-500">{file.module_label || file.bucket || 'File'} {file.extension ? `.${file.extension}` : ''}</p>
+                          </td>
+                          <td className="py-3 pr-3 text-xs text-slate-600">
+                            <p>{file.tahun_ajaran || '-'} / {file.semester || '-'}</p>
+                            <p>{file.kelas || 'Tanpa kelas'}</p>
+                          </td>
+                          <td className="py-3 pr-3 text-right font-semibold text-slate-900">{file.size_label || '0 B'}</td>
+                          <td className="py-3 pr-3 text-right">
+                            {file.drive_web_view_link ? (
+                              <a href={file.drive_web_view_link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-100">
+                                <ExternalLink size={14} />
+                                Buka
+                              </a>
+                            ) : <span className="text-xs text-slate-400">-</span>}
+                          </td>
+                        </tr>
+                      ))}
+                      {!driveFilesLoading && driveVisibleFiles.length === 0 && (
+                        <tr>
+                          <td className="py-8 text-center text-slate-500" colSpan={4}>Belum ada file Google Drive pada filter ini.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            </div>
+          </section>
+        )}
+
+        {activeTab === 'storage' && (
+          <>
         {isSuperAdmin && (
           <div className="grid gap-4 lg:grid-cols-4">
             <StatTile icon={HardDrive} label="Total VPS" value={superSummary?.server?.total_label} />
@@ -621,6 +1076,8 @@ function StorageManager() {
             </div>
           )}
         </section>
+          </>
+        )}
       </div>
     </div>
   )

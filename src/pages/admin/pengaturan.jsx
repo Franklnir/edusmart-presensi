@@ -589,11 +589,22 @@ export default function APengaturan() {
 
   useEffect(() => {
     const nextMenu = resolveSettingsMenuFromSearch(location.search)
+    if (nextMenu === 'drive') {
+      const params = new URLSearchParams(location.search)
+      params.set('tab', 'drive')
+      params.delete('menu')
+      navigate(`/admin/storage?${params.toString()}`, { replace: true })
+      return
+    }
     setActiveSettingsMenu((current) => (current === nextMenu ? current : nextMenu))
-  }, [location.search])
+  }, [location.search, navigate])
 
   const handleSettingsMenuChange = (menuId) => {
     if (!SETTINGS_MENU_IDS.has(menuId)) return
+    if (menuId === 'drive') {
+      navigate('/admin/storage?tab=drive')
+      return
+    }
 
     setActiveSettingsMenu(menuId)
 
@@ -1738,7 +1749,7 @@ export default function APengaturan() {
       icon: Users
     }
   ]
-  const settingsVisibleMenuItems = settingsMenuItems.filter((item) => item.id !== 'academic')
+  const settingsVisibleMenuItems = settingsMenuItems.filter((item) => item.id !== 'academic' && item.id !== 'drive')
   const activeSettings = settingsMenuItems.find((item) => item.id === activeSettingsMenu) || settingsMenuItems[0]
   const showSettingsMainColumn = ['identity', 'drive'].includes(activeSettingsMenu)
   const showSettingsSidebarColumn = ['identity', 'admin', 'registration'].includes(activeSettingsMenu)

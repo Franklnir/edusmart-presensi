@@ -71,7 +71,7 @@ export const menuConfig = {
       icon: 'cog',
       items: [
         { id: 'admin-approvals', to: '/admin/approvals', label: 'Approval', icon: 'shield' },
-        { id: 'admin-storage', to: '/admin/storage', label: 'Storage', icon: 'storage' },
+        { id: 'admin-storage', to: '/admin/storage', label: 'Storage & Drive', icon: 'storage' },
         { id: 'admin-backup', to: '/admin/backup', label: 'Backup', icon: 'backup' },
         { id: 'admin-pengaturan', to: '/admin/pengaturan?menu=identity', label: 'Pengaturan', icon: 'cog' },
       ],
