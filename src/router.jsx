@@ -34,6 +34,7 @@ const ASiswa = lazyRoute('/admin/siswa')
 const AScan = lazyRoute('/admin/scan')
 const Sertifikat = lazyRoute('/admin/sertifikat')
 const ABackup = lazyRoute('/admin/backup')
+const AStorage = lazyRoute('/admin/storage')
 const APengaturan = lazyRoute('/admin/pengaturan')
 const ATenants = lazyRoute('/admin/tenants')
 const ASuperAdmins = lazyRoute('/admin/super-admins')
@@ -109,6 +110,7 @@ const AppRoutes = () => (
       <Route path="/admin/super-admins" element={lazyElement(ASuperAdmins)} />
       <Route path="/admin/audit-trail" element={lazyElement(AAuditTrail)} />
       <Route path="/admin/plugins" element={lazyElement(APlugins)} />
+      <Route path="/admin/storage" element={lazyElement(AStorage)} />
       <Route element={<AdminLockGate />}>
         <Route path="/admin/home" element={lazyElement(AHome)} />
         <Route path="/admin/kelas" element={lazyElement(AKelas)} />

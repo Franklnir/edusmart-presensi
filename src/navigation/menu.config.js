@@ -71,6 +71,7 @@ export const menuConfig = {
       icon: 'cog',
       items: [
         { id: 'admin-approvals', to: '/admin/approvals', label: 'Approval', icon: 'shield' },
+        { id: 'admin-storage', to: '/admin/storage', label: 'Storage', icon: 'storage' },
         { id: 'admin-backup', to: '/admin/backup', label: 'Backup', icon: 'backup' },
         { id: 'admin-pengaturan', to: '/admin/pengaturan?menu=identity', label: 'Pengaturan', icon: 'cog' },
       ],
@@ -91,6 +92,7 @@ export const superAdminGroup = {
   icon: 'shield',
   items: [
     { id: 'super-tenants', to: '/admin/tenants', label: 'Sekolah', icon: 'school' },
+    { id: 'super-storage', to: '/admin/storage', label: 'Storage VPS', icon: 'storage' },
     { id: 'super-admins', to: '/admin/super-admins', label: 'Super Admin', icon: 'shield' },
     { id: 'super-audit-trail', to: '/admin/audit-trail', label: 'Audit Trail', icon: 'chart' },
     { id: 'super-plugins', to: '/admin/plugins', label: 'Plugins', icon: 'cog' },

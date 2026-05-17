@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Services\GoogleDrive\GoogleDriveService;
 use App\Services\Storage\S3CompatibleStorageSigner;
+use App\Services\Storage\StorageManagementService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
@@ -16,7 +17,8 @@ class StorageController extends ApiController
 {
     public function __construct(
         private readonly GoogleDriveService $googleDriveService,
-        private readonly S3CompatibleStorageSigner $objectStorageSigner
+        private readonly S3CompatibleStorageSigner $objectStorageSigner,
+        private readonly StorageManagementService $storageManagementService
     ) {}
 
     private array $tenantColumnCache = [];
@@ -166,6 +168,14 @@ class StorageController extends ApiController
             return $assignmentFileSizeError;
         }
 
+        $quotaError = $this->storageManagementService->assertUploadAllowed(
+            (string) ($this->tenantId($request) ?? ''),
+            (int) ($file->getSize() ?: 0)
+        );
+        if ($quotaError) {
+            return response()->json(['error' => $quotaError], 422);
+        }
+
         $imageRuleError = $this->validateImageSizePolicy($bucket, $path, $file);
         if ($imageRuleError) {
             return $imageRuleError;
@@ -214,6 +224,15 @@ class StorageController extends ApiController
         }
 
         $uploadedSizeBytes = (int) ($storage->size($fullPath) ?: 0);
+        $this->storageManagementService->registerUploadedFile($request, [
+            'bucket' => $bucket,
+            'path' => $path,
+            'provider' => 'local',
+            'file_name' => $file->getClientOriginalName(),
+            'mime_type' => $file->getMimeType() ?: $file->getClientMimeType(),
+            'extension' => $this->normalizeExtension($file),
+            'size_bytes' => $uploadedSizeBytes,
+        ]);
 
         return response()->json([
             'data' => [
@@ -284,6 +303,14 @@ class StorageController extends ApiController
             return $imageSizeError;
         }
 
+        $quotaError = $this->storageManagementService->assertUploadAllowed(
+            (string) ($this->tenantId($request) ?? ''),
+            $sizeBytes
+        );
+        if ($quotaError) {
+            return response()->json(['error' => $quotaError], 422);
+        }
+
         $objectKey = $this->buildStoragePath($bucket, $path);
         try {
             $signed = $this->objectStorageSigner->presignPut(
@@ -314,6 +341,63 @@ class StorageController extends ApiController
                     'headers' => $signed['headers'],
                     'expiresAt' => $signed['expiresAt'],
                 ],
+            ],
+        ]);
+    }
+
+    public function confirmUpload(Request $request)
+    {
+        $bucket = trim((string) $request->input('bucket', ''));
+        $path = trim((string) $request->input('path', ''));
+        $provider = trim((string) $request->input('provider', 'object_storage')) ?: 'object_storage';
+        $fileName = trim((string) $request->input('filename', ''));
+        $mime = trim((string) $request->input('mime_type', $request->input('mime', '')));
+        $sizeBytes = max(0, (int) $request->input('size_bytes', 0));
+
+        if ($bucket === '' || $path === '' || $sizeBytes <= 0) {
+            return $this->deny('Bucket, path, dan ukuran file wajib diisi', 422);
+        }
+        if (! in_array($bucket, $this->allowedBuckets, true)) {
+            return $this->deny('Bucket tidak diizinkan', 400);
+        }
+
+        $path = $this->sanitizePath($path);
+        if (! $path) {
+            return $this->deny('Path tidak valid', 422);
+        }
+        if (! $this->canWrite($request, $bucket, $path)) {
+            return $this->deny('Akses upload ditolak');
+        }
+
+        $quotaError = $this->storageManagementService->assertUploadAllowed(
+            (string) ($this->tenantId($request) ?? ''),
+            $sizeBytes
+        );
+        if ($quotaError) {
+            return response()->json(['error' => $quotaError], 422);
+        }
+
+        $this->storageManagementService->registerUploadedFile($request, [
+            'bucket' => $bucket,
+            'path' => $path,
+            'provider' => $provider,
+            'file_name' => $fileName ?: basename($path),
+            'mime_type' => $this->resolveMetadataMime($fileName ?: basename($path), $mime),
+            'extension' => $this->extensionFromFileName($fileName ?: basename($path)),
+            'size_bytes' => $sizeBytes,
+            'metadata' => [
+                'confirmed_from_client' => true,
+                'object_key' => $request->input('object_key'),
+            ],
+        ]);
+
+        return response()->json([
+            'data' => [
+                'bucket' => $bucket,
+                'path' => $path,
+                'provider' => $provider,
+                'uploadedSizeBytes' => $sizeBytes,
+                'uploadedSizeLabel' => $this->formatBytes($sizeBytes),
             ],
         ]);
     }
@@ -422,6 +506,12 @@ class StorageController extends ApiController
                     ], 422);
                 }
             }
+
+            $this->storageManagementService->markRemoved(
+                (string) ($this->tenantId($request) ?? ''),
+                $bucket,
+                $path
+            );
         }
 
         return response()->json(['data' => 'deleted']);

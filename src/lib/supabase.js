@@ -1705,6 +1705,29 @@ class StorageBucket {
       }
     }
 
+    const confirm = await apiFetch('/api/storage/confirm-upload', {
+      method: 'POST',
+      body: {
+        bucket: this.bucket,
+        path: directData.path || path,
+        provider: 'object_storage',
+        filename: file?.name || path.split('/').pop() || 'file',
+        mime_type: directData.contentType || file?.type || '',
+        size_bytes: Number(file?.size || 0),
+        object_key: directData.objectKey || ''
+      },
+      cacheTtlMs: 0,
+      signal: options.signal
+    })
+    if (confirm.error) {
+      return {
+        attempted: true,
+        canFallback: false,
+        data: null,
+        error: confirm.error
+      }
+    }
+
     invalidateSignedUrlCache(this.bucket, path)
     const originalSize = Number(options?.originalFile?.size || file?.size || 0)
     const uploadedSize = Number(file?.size || 0)
@@ -2546,6 +2569,42 @@ const auth = {
         body: {}
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async storageManager(params = {}) {
+      const res = await apiFetch(`/api/admin/storage-manager${buildQueryString(params)}`, {
+        method: 'GET',
+        cacheTtlMs: 10 * 1000,
+        staleKey: 'admin.storage-manager',
+        timeoutMs: 15000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async storageCleanupPreview(payload = {}) {
+      const res = await apiFetch('/api/admin/storage-manager/cleanup/preview', {
+        method: 'POST',
+        body: payload,
+        cacheTtlMs: 0,
+        timeoutMs: 20000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async storageCleanupExecute(payload = {}) {
+      const res = await apiFetch('/api/admin/storage-manager/cleanup/execute', {
+        method: 'POST',
+        body: payload,
+        cacheTtlMs: 0,
+        timeoutMs: 60000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async restoreStorageTrash(fileId) {
+      const res = await apiFetch(`/api/admin/storage-manager/trash/${fileId}/restore`, {
+        method: 'POST',
+        body: {},
+        cacheTtlMs: 0,
+        timeoutMs: 20000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
     }
   },
   super: {
@@ -2655,6 +2714,68 @@ const auth = {
     },
     async deleteAdmin(id) {
       const res = await apiFetch(`/api/super/admins/${id}`, { method: 'DELETE' })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async storageOverview() {
+      const res = await apiFetch('/api/super/storage', {
+        method: 'GET',
+        cacheTtlMs: 10 * 1000,
+        staleKey: 'super.storage',
+        timeoutMs: 20000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async tenantStorage(id, params = {}) {
+      const res = await apiFetch(`/api/super/tenants/${id}/storage${buildQueryString(params)}`, {
+        method: 'GET',
+        cacheTtlMs: 10 * 1000,
+        staleKey: `super.tenant-storage.${id}`,
+        timeoutMs: 20000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async updateTenantStorageQuota(id, payload = {}) {
+      const res = await apiFetch(`/api/super/tenants/${id}/storage/quota`, {
+        method: 'PATCH',
+        body: payload,
+        cacheTtlMs: 0
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async superStorageCleanupPreview(id, payload = {}) {
+      const res = await apiFetch(`/api/super/tenants/${id}/storage/cleanup/preview`, {
+        method: 'POST',
+        body: payload,
+        cacheTtlMs: 0,
+        timeoutMs: 20000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async superStorageCleanupExecute(id, payload = {}) {
+      const res = await apiFetch(`/api/super/tenants/${id}/storage/cleanup/execute`, {
+        method: 'POST',
+        body: payload,
+        cacheTtlMs: 0,
+        timeoutMs: 60000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async restoreStorageTrash(id, fileId) {
+      const res = await apiFetch(`/api/super/tenants/${id}/storage/trash/${fileId}/restore`, {
+        method: 'POST',
+        body: {},
+        cacheTtlMs: 0,
+        timeoutMs: 20000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async purgeExpiredStorageTrash() {
+      const res = await apiFetch('/api/super/storage/trash/purge-expired', {
+        method: 'POST',
+        body: {},
+        cacheTtlMs: 0,
+        timeoutMs: 60000
+      })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
     async auditTrail(params = {}) {

@@ -132,6 +132,7 @@ class AppServiceProvider extends ServiceProvider
                 $path = $request->path();
                 $isWrite = str_contains($path, '/storage/upload')
                     || str_contains($path, '/storage/direct-upload')
+                    || str_contains($path, '/storage/confirm-upload')
                     || str_contains($path, '/storage/remove');
                 $prefix = $isWrite ? 'storage-write' : 'storage-read';
                 $rate = $isWrite ? $writePerMinute : $readPerMinute;

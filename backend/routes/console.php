@@ -6,6 +6,7 @@ use App\Services\Quiz\QuizScoringService;
 use App\Services\Rfid\MqttBridgeService;
 use App\Services\Rfid\RfidDeviceService;
 use App\Services\Rfid\TenantMqttConfigService;
+use App\Services\Storage\StorageManagementService;
 use App\Services\WhatsApp\WhatsAppIntegrationService;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
@@ -251,6 +252,23 @@ Schedule::call(function (WhatsAppIntegrationService $integrationService) {
     ->name('whatsapp:sync-integrations')
     ->everyMinute()
     ->withoutOverlapping();
+
+Schedule::call(function (StorageManagementService $storageManagementService) {
+    $storageManagementService->purgeExpiredTrash();
+})
+    ->name('storage:purge-expired-trash')
+    ->dailyAt('02:20')
+    ->withoutOverlapping();
+
+Artisan::command('storage:purge-expired-trash', function (StorageManagementService $storageManagementService) {
+    $result = $storageManagementService->purgeExpiredTrash();
+
+    $this->info('Trash storage kedaluwarsa berhasil diproses.');
+    $this->line('File  : '.($result['files'] ?? 0));
+    $this->line('Ukuran: '.($result['bytes_label'] ?? '0 B'));
+
+    return 0;
+})->purpose('Hapus permanen file storage yang sudah lebih dari 30 hari di Trash');
 
 Artisan::command('rfid:mqtt-bridge {--once : Jalankan sekali lalu keluar} {--tenant=* : Batasi publish mode ke tenant slug tertentu}', function (MqttBridgeService $bridge) {
     $once = (bool) $this->option('once');

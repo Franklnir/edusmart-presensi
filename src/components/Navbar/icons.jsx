@@ -14,6 +14,7 @@ import {
   Circle,
   Database,
   GraduationCap,
+  HardDrive,
   Home,
   LogOut,
   Menu,
@@ -57,6 +58,7 @@ const iconComponents = {
   users: UsersRound,
   teacher: GraduationCap,
   chat: MessageCircle,
+  storage: HardDrive,
   menu: Menu,
   x: X,
 }

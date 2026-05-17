@@ -16,6 +16,7 @@ use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\RfidController;
 use App\Http\Controllers\Api\SettingsController;
 use App\Http\Controllers\Api\StorageController;
+use App\Http\Controllers\Api\StorageManagementController;
 use App\Http\Controllers\Api\SuperAdminController;
 use App\Http\Controllers\Api\SuperPluginController;
 use App\Http\Controllers\Api\TugasController;
@@ -161,6 +162,7 @@ Route::post('/db/batch', [DbController::class, 'batch'])->middleware('throttle:d
 Route::prefix('storage')->middleware(['auth:sanctum', 'throttle:storage'])->group(function () {
     Route::post('/upload', [StorageController::class, 'upload']);
     Route::post('/direct-upload', [StorageController::class, 'directUpload']);
+    Route::post('/confirm-upload', [StorageController::class, 'confirmUpload']);
     Route::post('/upload-destination', [StorageController::class, 'uploadDestination']);
     Route::post('/remove', [StorageController::class, 'remove']);
 });
@@ -211,6 +213,10 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'throttle:api'])->group(func
     Route::post('/google-drive/connect-url', [GoogleDriveController::class, 'connectUrl']);
     Route::post('/google-drive/sync', [GoogleDriveController::class, 'sync']);
     Route::post('/google-drive/disconnect', [GoogleDriveController::class, 'disconnect']);
+    Route::get('/storage-manager', [StorageManagementController::class, 'adminSummary']);
+    Route::post('/storage-manager/cleanup/preview', [StorageManagementController::class, 'adminCleanupPreview']);
+    Route::post('/storage-manager/cleanup/execute', [StorageManagementController::class, 'adminCleanupExecute']);
+    Route::post('/storage-manager/trash/{fileId}/restore', [StorageManagementController::class, 'restoreTrashFile']);
 });
 Route::get('/admin/google-drive/callback', [GoogleDriveController::class, 'callback'])
     ->middleware(['web', 'throttle:auth'])
@@ -234,6 +240,13 @@ Route::middleware(['auth:sanctum', 'throttle:super', 'super.domain'])->group(fun
     Route::get('/super/tenants', [SuperAdminController::class, 'index']);
     Route::post('/super/tenants', [SuperAdminController::class, 'store']);
     Route::get('/super/tenants/{id}', [SuperAdminController::class, 'showTenant']);
+    Route::get('/super/storage', [StorageManagementController::class, 'superOverview']);
+    Route::post('/super/storage/trash/purge-expired', [StorageManagementController::class, 'superPurgeExpiredTrash']);
+    Route::get('/super/tenants/{tenantId}/storage', [StorageManagementController::class, 'superTenantSummary']);
+    Route::patch('/super/tenants/{tenantId}/storage/quota', [StorageManagementController::class, 'superUpdateQuota']);
+    Route::post('/super/tenants/{tenantId}/storage/cleanup/preview', [StorageManagementController::class, 'superCleanupPreview']);
+    Route::post('/super/tenants/{tenantId}/storage/cleanup/execute', [StorageManagementController::class, 'superCleanupExecute']);
+    Route::post('/super/tenants/{tenantId}/storage/trash/{fileId}/restore', [StorageManagementController::class, 'superRestoreTrashFile']);
     Route::post('/super/tenants/{tenantId}/domains', [SuperAdminController::class, 'storeTenantDomain']);
     Route::patch('/super/tenants/{tenantId}/rfid-mqtt', [SuperAdminController::class, 'updateTenantRfidMqtt']);
     Route::post('/super/tenants/{tenantId}/rfid-mqtt/mosquitto', [SuperAdminController::class, 'provisionTenantRfidMosquitto']);

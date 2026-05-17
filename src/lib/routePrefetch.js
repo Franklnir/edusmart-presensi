@@ -28,6 +28,7 @@ const routeLoaders = {
   '/admin/scan': () => import('../pages/admin/Scan'),
   '/admin/sertifikat': () => import('../pages/admin/Sertifikat'),
   '/admin/backup': () => import('../pages/admin/Backup'),
+  '/admin/storage': () => import('../pages/admin/StorageManager'),
   '/admin/pengaturan': () => import('../pages/admin/pengaturan'),
   '/admin/tenants': () => import('../pages/admin/Tenants'),
   '/admin/super-admins': () => import('../pages/admin/SuperAdmins'),
