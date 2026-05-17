@@ -161,7 +161,7 @@ class AuthSuperAdminHardeningTest extends TestCase
             ]);
 
         $wrongTenantPassword->assertStatus(401);
-        $wrongTenantPassword->assertJsonPath('error', 'Email/NIS atau password salah');
+        $wrongTenantPassword->assertJsonPath('error', 'Password tidak sesuai. Periksa kembali password akun Anda.');
     }
 
     public function test_public_register_checks_duplicate_email_inside_current_tenant_only(): void
