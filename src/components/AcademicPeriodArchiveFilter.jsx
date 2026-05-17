@@ -113,7 +113,7 @@ export default function AcademicPeriodArchiveFilter({
                 {selectedYear || '-'}{selectedSemester ? ` - Semester ${selectedSemester}` : ''}
               </div>
               <div className="mt-0.5 text-[11px] font-medium text-slate-500">
-                {isArchive ? 'Periode arsip terpin' : 'Mengikuti periode aktif sekolah'}
+                {isArchive ? 'Periode arsip dipilih' : 'Mengikuti periode aktif sekolah'}
               </div>
             </div>
             <span
@@ -121,7 +121,7 @@ export default function AcademicPeriodArchiveFilter({
                 isArchive ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-700'
               }`}
             >
-              {isArchive ? 'Terpin' : 'Aktif'}
+              {isArchive ? 'Arsip' : 'Aktif'}
             </span>
           </div>
         </button>
