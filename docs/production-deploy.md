@@ -210,6 +210,32 @@ Catatan multi-tenant:
 - Gunakan URL Google frontend yang relatif (`/api/auth/google/...`) agar otomatis mengikuti host tenant aktif.
 - Pastikan `GOOGLE_REDIRECT_URI` memakai root domain publik yang sama dengan `VITE_ROOT_DOMAIN`, misalnya `https://edusmart.example.com/api/auth/google/callback`.
 
+## 3.2.1 Object Storage untuk Upload Tugas
+
+Untuk sekolah dengan upload tugas ramai, aktifkan signed direct upload agar file siswa/guru langsung dikirim dari browser ke bucket S3-compatible, Cloudflare R2, atau MinIO. Backend tetap mengecek role/path/ukuran file, lalu hanya menyimpan metadata jawaban.
+
+Contoh env Cloudflare R2 / MinIO:
+
+```dotenv
+ASSIGNMENT_DIRECT_UPLOAD_ENABLED=true
+ASSIGNMENT_OBJECT_STORAGE_LABEL="Cloudflare R2"
+ASSIGNMENT_OBJECT_STORAGE_ACCESS_KEY_ID=<access-key>
+ASSIGNMENT_OBJECT_STORAGE_SECRET_ACCESS_KEY=<secret-key>
+ASSIGNMENT_OBJECT_STORAGE_REGION=auto
+ASSIGNMENT_OBJECT_STORAGE_BUCKET=edusmart-assignments
+ASSIGNMENT_OBJECT_STORAGE_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
+ASSIGNMENT_OBJECT_STORAGE_USE_PATH_STYLE_ENDPOINT=true
+ASSIGNMENT_DIRECT_UPLOAD_EXPIRES_SECONDS=900
+```
+
+Bucket harus private dan CORS bucket perlu mengizinkan domain sekolah:
+
+- Method: `PUT`, `GET`, `HEAD`
+- Header: `Content-Type`
+- Origin: `https://edusmart.example.com` dan subdomain tenant yang dipakai
+
+Jika env ini belum aktif atau bucket belum siap, upload tugas otomatis memakai flow lama Google Drive/VPS.
+
 ## 3.3 Konfigurasi RFID MQTT Bridge
 
 Service bridge di `docker-compose.prod.yml` bernama `rfid_bridge` dan akan auto-restart.

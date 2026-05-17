@@ -11,6 +11,7 @@ Dokumen ini mencatat area performa yang perlu dijaga saat data siswa, guru, abse
 - Tabel Admin Siswa memakai skeleton, disabled pagination saat memuat, dan layout mobile berupa card/list.
 - Upload tugas siswa/guru menampilkan progress nyata, mendeteksi target Google Drive/VPS sebelum upload, dan upload banyak foto siswa dikirim berurutan agar tidak membebani storage saat ramai.
 - Submit jawaban tugas siswa memakai endpoint idempotent ber-lock per siswa+tugas, sehingga double click atau tab ganda tidak membuat duplikasi jawaban.
+- Bucket `assignments` sudah mendukung signed direct upload ke object storage S3-compatible/R2/MinIO. Jika env object storage belum aktif, flow lama Google Drive/VPS tetap menjadi fallback.
 
 ## Rekomendasi Index Database
 
@@ -74,8 +75,26 @@ CREATE INDEX IF NOT EXISTS tugas_jawaban_tugas_user_idx
 - Pertahankan upload file lewat storage, lalu simpan metadata jawaban secara terpisah. Request submit jawaban harus kecil dan cepat.
 - Jalankan queue worker untuk WhatsApp/Google Drive/sinkronisasi lain. Jangan kirim notifikasi atau proses file berat di request upload utama.
 - Jika 600-1000 siswa upload pada jam yang sama, batasi upload paralel di frontend dan backend. Frontend siswa saat ini mengirim foto satu per satu agar koneksi perangkat dan storage lebih stabil.
-- Untuk skala lebih besar, pindahkan bucket `assignments` ke object storage seperti S3-compatible/Cloudflare R2/MinIO dan gunakan signed direct upload agar bandwidth file tidak lewat PHP app server.
+- Untuk skala lebih besar, aktifkan signed direct upload bucket `assignments` ke object storage seperti S3-compatible/Cloudflare R2/MinIO agar bandwidth file tidak lewat PHP app server.
 - Pantau `storage` rate limit, disk usage, queue backlog, dan error 413/429. Naikkan limit hanya setelah bandwidth/storage siap.
+
+### Env Signed Direct Upload Assignments
+
+Aktifkan setelah bucket object storage siap. Untuk Cloudflare R2 dan MinIO biasanya gunakan path-style endpoint.
+
+```dotenv
+ASSIGNMENT_DIRECT_UPLOAD_ENABLED=true
+ASSIGNMENT_OBJECT_STORAGE_LABEL="Cloudflare R2"
+ASSIGNMENT_OBJECT_STORAGE_ACCESS_KEY_ID=...
+ASSIGNMENT_OBJECT_STORAGE_SECRET_ACCESS_KEY=...
+ASSIGNMENT_OBJECT_STORAGE_REGION=auto
+ASSIGNMENT_OBJECT_STORAGE_BUCKET=edusmart-assignments
+ASSIGNMENT_OBJECT_STORAGE_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
+ASSIGNMENT_OBJECT_STORAGE_USE_PATH_STYLE_ENDPOINT=true
+ASSIGNMENT_DIRECT_UPLOAD_EXPIRES_SECONDS=900
+```
+
+Bucket CORS minimal perlu mengizinkan origin domain sekolah untuk method `PUT`, `GET`, dan `HEAD`, serta header `Content-Type`. Simpan object tetap private; aplikasi hanya memberi signed URL sementara setelah permission siswa/guru dicek.
 
 ## Catatan Lanjutan
 

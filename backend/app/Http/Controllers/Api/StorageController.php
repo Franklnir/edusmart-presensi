@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Services\GoogleDrive\GoogleDriveService;
+use App\Services\Storage\S3CompatibleStorageSigner;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
@@ -14,7 +15,8 @@ use Illuminate\Support\Str;
 class StorageController extends ApiController
 {
     public function __construct(
-        private readonly GoogleDriveService $googleDriveService
+        private readonly GoogleDriveService $googleDriveService,
+        private readonly S3CompatibleStorageSigner $objectStorageSigner
     ) {}
 
     private array $tenantColumnCache = [];
@@ -226,6 +228,96 @@ class StorageController extends ApiController
         ]);
     }
 
+    public function directUpload(Request $request)
+    {
+        $bucket = trim((string) $request->input('bucket', ''));
+        $path = trim((string) $request->input('path', ''));
+        $fileName = trim((string) $request->input('filename', ''));
+        $mime = trim((string) $request->input('mime_type', $request->input('mime', '')));
+        $sizeBytes = max(0, (int) $request->input('size_bytes', 0));
+
+        if ($bucket === '') {
+            return $this->deny('Bucket wajib diisi', 422);
+        }
+
+        if (! in_array($bucket, $this->allowedBuckets, true)) {
+            return $this->deny('Bucket tidak diizinkan', 400);
+        }
+
+        if (! $this->objectStorageEnabledForBucket($bucket)) {
+            return response()->json([
+                'data' => [
+                    'available' => false,
+                    'bucket' => $bucket,
+                    'provider' => 'api',
+                    'providerLabel' => 'Server',
+                ],
+            ]);
+        }
+
+        if ($path === '' || $fileName === '' || $sizeBytes <= 0) {
+            return $this->deny('Bucket, path, nama file, dan ukuran file wajib diisi', 422);
+        }
+
+        $path = $this->sanitizePath($path);
+        if (! $path) {
+            return $this->deny('Path tidak valid', 422);
+        }
+
+        if (! $this->canWrite($request, $bucket, $path)) {
+            return $this->deny('Akses upload ditolak');
+        }
+
+        $mime = $this->resolveMetadataMime($fileName, $mime);
+        $policyError = $this->validateUploadMetadataPolicy($bucket, $fileName, $mime, $sizeBytes);
+        if ($policyError) {
+            return $policyError;
+        }
+
+        $assignmentSizeError = $this->validateAssignmentMetadataSizePolicy($bucket, $fileName, $sizeBytes);
+        if ($assignmentSizeError) {
+            return $assignmentSizeError;
+        }
+
+        $imageSizeError = $this->validateMetadataImageSizePolicy($bucket, $fileName, $mime, $sizeBytes);
+        if ($imageSizeError) {
+            return $imageSizeError;
+        }
+
+        $objectKey = $this->buildStoragePath($bucket, $path);
+        try {
+            $signed = $this->objectStorageSigner->presignPut(
+                $objectKey,
+                $mime,
+                $this->objectStorageSigner->expiresSeconds()
+            );
+        } catch (\Throwable $e) {
+            return response()->json([
+                'error' => 'Gagal membuat signed upload URL: '.$e->getMessage(),
+            ], 422);
+        }
+
+        return response()->json([
+            'data' => [
+                'available' => true,
+                'bucket' => $bucket,
+                'path' => $path,
+                'fullPath' => $path,
+                'objectKey' => $objectKey,
+                'provider' => 'object_storage',
+                'providerLabel' => $this->objectStorageSigner->label(),
+                'contentType' => $mime,
+                'maxBytes' => $this->maxUploadBytesForBucket($bucket),
+                'upload' => [
+                    'method' => $signed['method'],
+                    'url' => $signed['url'],
+                    'headers' => $signed['headers'],
+                    'expiresAt' => $signed['expiresAt'],
+                ],
+            ],
+        ]);
+    }
+
     public function uploadDestination(Request $request)
     {
         $bucket = trim((string) $request->input('bucket', ''));
@@ -238,6 +330,16 @@ class StorageController extends ApiController
 
         if (! in_array($bucket, $this->allowedBuckets, true)) {
             return $this->deny('Bucket tidak diizinkan', 400);
+        }
+
+        if ($this->objectStorageEnabledForBucket($bucket)) {
+            return response()->json([
+                'data' => [
+                    'bucket' => $bucket,
+                    'provider' => 'object_storage',
+                    'providerLabel' => $this->objectStorageSigner->label(),
+                ],
+            ]);
         }
 
         $usesDrive = $this->googleDriveService->canUploadStorageFileMetadata(
@@ -308,6 +410,18 @@ class StorageController extends ApiController
             if ($storage->exists($fullPath)) {
                 $storage->delete($fullPath);
             }
+
+            if ($this->objectStorageEnabledForBucket($bucket)) {
+                try {
+                    if (! $this->objectStorageSigner->deleteObject($fullPath)) {
+                        return response()->json(['error' => 'Gagal menghapus file dari object storage'], 422);
+                    }
+                } catch (\Throwable $e) {
+                    return response()->json([
+                        'error' => 'Gagal menghapus file object storage: '.$e->getMessage(),
+                    ], 422);
+                }
+            }
         }
 
         return response()->json(['data' => 'deleted']);
@@ -334,6 +448,27 @@ class StorageController extends ApiController
 
         if (! $this->canRead($request, $bucket, $path)) {
             return $this->deny('Akses baca ditolak');
+        }
+
+        $storage = Storage::disk('local');
+        $fullPath = $this->buildStoragePath($bucket, $path);
+        if ($this->objectStorageEnabledForBucket($bucket) && ! $storage->exists($fullPath)) {
+            try {
+                $signed = $this->objectStorageSigner->presignGet($fullPath, $expiresIn);
+
+                return response()->json([
+                    'data' => [
+                        'signedUrl' => $signed['url'],
+                        'expiresAt' => $signed['expiresAt'],
+                        'provider' => 'object_storage',
+                        'providerLabel' => $this->objectStorageSigner->label(),
+                    ],
+                ]);
+            } catch (\Throwable $e) {
+                return response()->json([
+                    'error' => 'Gagal membuat URL file object storage: '.$e->getMessage(),
+                ], 422);
+            }
         }
 
         $tenantId = (string) ($this->tenantId($request) ?? '');
@@ -396,6 +531,18 @@ class StorageController extends ApiController
         $fullPath = $this->buildStoragePath($bucket, $path);
 
         if (! $storage->exists($fullPath)) {
+            if ($this->objectStorageEnabledForBucket($bucket)) {
+                try {
+                    $signed = $this->objectStorageSigner->presignGet($fullPath, $this->normalizeExpiresIn($expires));
+
+                    return redirect()->away($signed['url']);
+                } catch (\Throwable $e) {
+                    return response()->json([
+                        'error' => 'Gagal membaca file object storage: '.$e->getMessage(),
+                    ], 422);
+                }
+            }
+
             return $this->deny('File tidak ditemukan', 404);
         }
 
@@ -1052,6 +1199,159 @@ class StorageController extends ApiController
         }
 
         return null;
+    }
+
+    private function validateUploadMetadataPolicy(
+        string $bucket,
+        string $fileName,
+        string $mime,
+        int $fileBytes
+    ): ?JsonResponse {
+        $policy = self::UPLOAD_POLICY[$bucket] ?? null;
+        if (! is_array($policy)) {
+            return response()->json(['error' => 'Kebijakan upload untuk bucket ini belum tersedia'], 422);
+        }
+
+        $maxBytes = (int) ($policy['max_bytes'] ?? 0);
+        if ($maxBytes > 0 && $fileBytes > $maxBytes) {
+            return response()->json([
+                'error' => sprintf(
+                    'Ukuran file melebihi batas (%s). Maksimal %s.',
+                    $this->formatBytes($fileBytes),
+                    $this->formatBytes($maxBytes)
+                ),
+            ], 422);
+        }
+
+        $extension = $this->extensionFromFileName($fileName);
+        if ($extension === '' || in_array($extension, self::DANGEROUS_EXTENSIONS, true)) {
+            return response()->json(['error' => 'Ekstensi file tidak diizinkan'], 422);
+        }
+
+        $allowedExtensions = array_map('strtolower', (array) ($policy['extensions'] ?? []));
+        if (! empty($allowedExtensions) && ! in_array($extension, $allowedExtensions, true)) {
+            return response()->json(['error' => 'Ekstensi file tidak sesuai kebijakan bucket'], 422);
+        }
+
+        $mime = strtolower(trim($mime));
+        if ($mime === '') {
+            return response()->json(['error' => 'MIME type file tidak valid'], 422);
+        }
+
+        $allowedMimes = array_map('strtolower', (array) ($policy['mimes'] ?? []));
+        if (! empty($allowedMimes) && ! in_array($mime, $allowedMimes, true)) {
+            return response()->json(['error' => 'Tipe file tidak diizinkan'], 422);
+        }
+
+        return null;
+    }
+
+    private function validateAssignmentMetadataSizePolicy(
+        string $bucket,
+        string $fileName,
+        int $fileBytes
+    ): ?JsonResponse {
+        if ($bucket !== 'assignments') {
+            return null;
+        }
+
+        $extension = $this->extensionFromFileName($fileName);
+        $maxBytes = null;
+        $label = null;
+
+        if (in_array($extension, self::ASSIGNMENT_DOCUMENT_EXTENSIONS, true)) {
+            $maxBytes = self::ASSIGNMENT_DOCUMENT_MAX_BYTES;
+            $label = 'PDF/dokumen';
+        } elseif (in_array($extension, self::ASSIGNMENT_PRESENTATION_EXTENSIONS, true)) {
+            $maxBytes = self::ASSIGNMENT_PRESENTATION_MAX_BYTES;
+            $label = 'PPT/presentasi';
+        }
+
+        if (! $maxBytes || ! $label || $fileBytes <= $maxBytes) {
+            return null;
+        }
+
+        return response()->json([
+            'error' => sprintf(
+                'Ukuran %s maksimal %s. File saat ini %s.',
+                $label,
+                $this->formatBytes($maxBytes),
+                $this->formatBytes($fileBytes)
+            ),
+        ], 422);
+    }
+
+    private function validateMetadataImageSizePolicy(
+        string $bucket,
+        string $fileName,
+        string $mime,
+        int $fileBytes
+    ): ?JsonResponse {
+        $extension = $this->extensionFromFileName($fileName);
+        $isImage = str_starts_with(strtolower($mime), 'image/')
+            || in_array($extension, ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'tif', 'tiff', 'heic', 'heif', 'avif'], true);
+        if (! $isImage) {
+            return null;
+        }
+
+        $maxBytes = $bucket === 'assignments' ? self::ASSIGNMENT_IMAGE_MAX_BYTES : null;
+        if (! $maxBytes || $fileBytes <= $maxBytes) {
+            return null;
+        }
+
+        return response()->json([
+            'error' => sprintf(
+                'Ukuran gambar tugas maksimal %s. File saat ini %s.',
+                $this->formatBytes($maxBytes),
+                $this->formatBytes($fileBytes)
+            ),
+        ], 422);
+    }
+
+    private function maxUploadBytesForBucket(string $bucket): int
+    {
+        return (int) (self::UPLOAD_POLICY[$bucket]['max_bytes'] ?? 0);
+    }
+
+    private function objectStorageEnabledForBucket(string $bucket): bool
+    {
+        return $bucket === 'assignments' && $this->objectStorageSigner->isEnabled();
+    }
+
+    private function resolveMetadataMime(string $fileName, string $mime): string
+    {
+        $mime = strtolower(trim($mime));
+        if ($mime !== '') {
+            return $mime;
+        }
+
+        return $this->mimeForExtension($this->extensionFromFileName($fileName));
+    }
+
+    private function extensionFromFileName(string $fileName): string
+    {
+        return strtolower(trim((string) pathinfo($fileName, PATHINFO_EXTENSION)));
+    }
+
+    private function mimeForExtension(string $extension): string
+    {
+        return match (strtolower($extension)) {
+            'jpg', 'jpeg' => 'image/jpeg',
+            'png' => 'image/png',
+            'webp' => 'image/webp',
+            'pdf' => 'application/pdf',
+            'doc' => 'application/msword',
+            'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'odt' => 'application/vnd.oasis.opendocument.text',
+            'rtf' => 'application/rtf',
+            'xls' => 'application/vnd.ms-excel',
+            'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'ppt' => 'application/vnd.ms-powerpoint',
+            'pptx' => 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            'odp' => 'application/vnd.oasis.opendocument.presentation',
+            'txt' => 'text/plain',
+            default => '',
+        };
     }
 
     private function normalizeMime(UploadedFile $file): string

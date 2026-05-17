@@ -130,7 +130,9 @@ class AppServiceProvider extends ServiceProvider
                 $readPerMinute = $clampInt('STORAGE_READ_RATE_LIMIT_PER_MINUTE', 180, 60, 900);
                 $bucket = strtolower(trim((string) ($request->input('bucket') ?? $request->query('bucket') ?? '')));
                 $path = $request->path();
-                $isWrite = str_contains($path, '/storage/upload') || str_contains($path, '/storage/remove');
+                $isWrite = str_contains($path, '/storage/upload')
+                    || str_contains($path, '/storage/direct-upload')
+                    || str_contains($path, '/storage/remove');
                 $prefix = $isWrite ? 'storage-write' : 'storage-read';
                 $rate = $isWrite ? $writePerMinute : $readPerMinute;
 

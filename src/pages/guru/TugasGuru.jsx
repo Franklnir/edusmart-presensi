@@ -80,12 +80,14 @@ const ASSIGNMENT_FILE_ACCEPT = {
 
 const uploadToneForProvider = (provider) => {
   if (provider === 'google_drive') return 'emerald'
+  if (provider === 'object_storage') return 'purple'
   if (provider === 'local') return 'red'
   return 'blue'
 }
 
 const uploadDetailForProvider = (provider, fallback) => {
   if (provider === 'google_drive') return 'File sedang dikirim ke Google Drive sekolah.'
+  if (provider === 'object_storage') return 'File dikirim langsung ke object storage sekolah.'
   if (provider === 'local') return 'File sedang dikirim ke VPS.'
   return fallback
 }
@@ -1101,7 +1103,9 @@ export default function TugasGuru() {
 
       const storedFileValue = uploadData?.path || uploadData?.fullPath || filePath
       const sizeLabel = uploadData?.uploadedSizeLabel || formatFileSize(uploadData?.uploadedSizeBytes || compressed.size)
-      const storedProvider = uploadData?.provider === 'google_drive' ? 'google_drive' : 'local'
+      const storedProvider = ['google_drive', 'object_storage'].includes(uploadData?.provider)
+        ? uploadData.provider
+        : 'local'
       setUploadProvider(storedProvider)
 
       if (mode === 'edit') {

@@ -21,7 +21,7 @@ export default function UploadProgressTrain({
     : null
   const badgeLabel = normalizedProgress !== null
     ? `${normalizedProgress}%`
-    : tone === 'emerald' ? 'DRIVE' : tone === 'red' ? 'VPS' : 'UPLOAD'
+    : tone === 'emerald' ? 'DRIVE' : tone === 'purple' ? 'DIRECT' : tone === 'red' ? 'VPS' : 'UPLOAD'
 
   return (
     <div

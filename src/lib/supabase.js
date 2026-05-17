@@ -1081,6 +1081,126 @@ const apiUploadFormData = async (path, form, options = {}) => {
   return result
 }
 
+const apiUploadDirectObject = async (upload, file, options = {}) => new Promise((resolve) => {
+  if (!upload?.url || !file) {
+    resolve({
+      data: null,
+      error: makeError('Signed upload URL tidak tersedia', 422, 'DIRECT_UPLOAD_INVALID'),
+      raw: null
+    })
+    return
+  }
+
+  if (typeof XMLHttpRequest === 'undefined') {
+    fetch(upload.url, {
+      method: upload.method || 'PUT',
+      headers: upload.headers || {},
+      body: file,
+      signal: options.signal
+    })
+      .then((response) => {
+        if (!response.ok) {
+          resolve({
+            data: null,
+            error: makeError('Upload object storage gagal', response.status, 'DIRECT_UPLOAD_FAILED'),
+            raw: null
+          })
+          return
+        }
+        resolve({ data: { uploaded: true }, error: null, raw: null })
+      })
+      .catch((error) => {
+        resolve({
+          data: null,
+          error: makeError(
+            error?.name === 'AbortError'
+              ? 'Request dibatalkan'
+              : 'Upload langsung ke object storage gagal. Periksa koneksi atau konfigurasi CORS bucket.',
+            error?.name === 'AbortError' ? 0 : 502,
+            error?.name === 'AbortError' ? 'REQUEST_ABORTED' : 'DIRECT_UPLOAD_NETWORK_ERROR'
+          ),
+          raw: null,
+          aborted: error?.name === 'AbortError'
+        })
+      })
+    return
+  }
+
+  const xhr = new XMLHttpRequest()
+  xhr.open(upload.method || 'PUT', upload.url)
+  xhr.withCredentials = false
+
+  Object.entries(upload.headers || {}).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value) !== '') {
+      xhr.setRequestHeader(key, String(value))
+    }
+  })
+
+  if (xhr.upload && typeof options.onProgress === 'function') {
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable || !event.total) return
+      const progress = Math.max(0, Math.min(100, Math.round((event.loaded / event.total) * 100)))
+      options.onProgress(progress, event)
+    }
+  }
+
+  const cleanup = () => {
+    if (options.signal) options.signal.removeEventListener('abort', abortHandler)
+  }
+
+  const abortHandler = () => {
+    xhr.abort()
+    cleanup()
+    resolve({
+      data: null,
+      error: makeError('Request dibatalkan', 0, 'REQUEST_ABORTED'),
+      raw: null,
+      aborted: true
+    })
+  }
+
+  if (options.signal) {
+    if (options.signal.aborted) {
+      abortHandler()
+      return
+    }
+    options.signal.addEventListener('abort', abortHandler, { once: true })
+  }
+
+  xhr.onload = () => {
+    cleanup()
+    if (xhr.status < 200 || xhr.status >= 300) {
+      resolve({
+        data: null,
+        error: makeError(
+          xhr.statusText || 'Upload object storage gagal',
+          xhr.status || 502,
+          'DIRECT_UPLOAD_FAILED'
+        ),
+        raw: xhr.responseText || null
+      })
+      return
+    }
+
+    resolve({ data: { uploaded: true }, error: null, raw: xhr.responseText || null })
+  }
+
+  xhr.onerror = () => {
+    cleanup()
+    resolve({
+      data: null,
+      error: makeError(
+        'Upload langsung ke object storage gagal. Periksa koneksi atau konfigurasi CORS bucket.',
+        502,
+        'DIRECT_UPLOAD_NETWORK_ERROR'
+      ),
+      raw: null
+    })
+  }
+
+  xhr.send(file)
+})
+
 const buildQueryString = (params = {}) => {
   const query = new URLSearchParams()
   Object.entries(params || {}).forEach(([key, value]) => {
@@ -1493,6 +1613,25 @@ class StorageBucket {
       }
     }
 
+    if (this.bucket === ASSIGNMENT_BUCKET && !options?.fastLocal) {
+      const direct = await this.directUpload(path, uploadFile, {
+        ...options,
+        originalFile: file
+      })
+
+      if (direct?.attempted && !direct.error) {
+        return { data: direct.data, error: null }
+      }
+
+      if (direct?.attempted && direct.error && !direct.canFallback) {
+        return { data: null, error: direct.error }
+      }
+
+      if (direct?.attempted && direct.error && direct.canFallback) {
+        console.warn('Direct assignment upload gagal, fallback ke upload API:', direct.error)
+      }
+    }
+
     const form = new FormData()
     form.append('bucket', this.bucket)
     form.append('path', path)
@@ -1521,6 +1660,71 @@ class StorageBucket {
     }
 
     return { data: baseData, error: res.error }
+  }
+
+  async directUpload(path, file, options = {}) {
+    const initiate = await apiFetch('/api/storage/direct-upload', {
+      method: 'POST',
+      body: {
+        bucket: this.bucket,
+        path,
+        filename: file?.name || path.split('/').pop() || 'file',
+        mime_type: file?.type || '',
+        size_bytes: Number(file?.size || 0),
+        upsert: Boolean(options?.upsert)
+      },
+      cacheTtlMs: 0,
+      signal: options.signal
+    })
+
+    if (initiate.error) {
+      return {
+        attempted: true,
+        canFallback: false,
+        data: null,
+        error: initiate.error
+      }
+    }
+
+    const directData = initiate.raw?.data ?? initiate.data
+    if (!directData?.available || !directData?.upload?.url) {
+      return { attempted: false, canFallback: true, data: null, error: null }
+    }
+
+    const uploadResult = await apiUploadDirectObject(directData.upload, file, {
+      signal: options.signal,
+      onProgress: options.onProgress
+    })
+
+    if (uploadResult.error) {
+      return {
+        attempted: true,
+        canFallback: uploadResult.error?.code !== 'REQUEST_ABORTED',
+        data: null,
+        error: uploadResult.error
+      }
+    }
+
+    invalidateSignedUrlCache(this.bucket, path)
+    const originalSize = Number(options?.originalFile?.size || file?.size || 0)
+    const uploadedSize = Number(file?.size || 0)
+    return {
+      attempted: true,
+      canFallback: false,
+      data: {
+        path: directData.path || path,
+        fullPath: directData.fullPath || directData.path || path,
+        bucket: this.bucket,
+        objectKey: directData.objectKey || '',
+        provider: 'object_storage',
+        providerLabel: directData.providerLabel || 'Object Storage',
+        uploadedSizeBytes: uploadedSize,
+        uploadedSizeLabel: formatBytesLabel(uploadedSize),
+        originalSizeBytes: originalSize,
+        isCompressed: uploadedSize > 0 && originalSize > 0 && uploadedSize !== originalSize
+      },
+      error: null
+    }
   }
 
   async uploadDestination({ filename = '', mime_type = '', mime = '' } = {}) {

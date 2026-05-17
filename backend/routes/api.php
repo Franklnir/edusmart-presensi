@@ -160,6 +160,7 @@ Route::post('/db/batch', [DbController::class, 'batch'])->middleware('throttle:d
 
 Route::prefix('storage')->middleware(['auth:sanctum', 'throttle:storage'])->group(function () {
     Route::post('/upload', [StorageController::class, 'upload']);
+    Route::post('/direct-upload', [StorageController::class, 'directUpload']);
     Route::post('/upload-destination', [StorageController::class, 'uploadDestination']);
     Route::post('/remove', [StorageController::class, 'remove']);
 });

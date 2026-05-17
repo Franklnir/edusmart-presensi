@@ -56,6 +56,25 @@ return [
         ],
     ],
 
+    'assignment_object_storage' => [
+        'enabled' => filter_var(env('ASSIGNMENT_DIRECT_UPLOAD_ENABLED', false), FILTER_VALIDATE_BOOL),
+        'label' => env('ASSIGNMENT_OBJECT_STORAGE_LABEL', 'Object Storage'),
+        'key' => env('ASSIGNMENT_OBJECT_STORAGE_ACCESS_KEY_ID', env('AWS_ACCESS_KEY_ID')),
+        'secret' => env('ASSIGNMENT_OBJECT_STORAGE_SECRET_ACCESS_KEY', env('AWS_SECRET_ACCESS_KEY')),
+        'session_token' => env('ASSIGNMENT_OBJECT_STORAGE_SESSION_TOKEN', env('AWS_SESSION_TOKEN')),
+        'region' => env('ASSIGNMENT_OBJECT_STORAGE_REGION', env('AWS_DEFAULT_REGION', 'us-east-1')),
+        'bucket' => env('ASSIGNMENT_OBJECT_STORAGE_BUCKET', env('AWS_BUCKET')),
+        'endpoint' => env('ASSIGNMENT_OBJECT_STORAGE_ENDPOINT', env('AWS_ENDPOINT')),
+        'use_path_style_endpoint' => filter_var(
+            env(
+                'ASSIGNMENT_OBJECT_STORAGE_USE_PATH_STYLE_ENDPOINT',
+                env('AWS_USE_PATH_STYLE_ENDPOINT', env('AWS_ENDPOINT') ? true : false)
+            ),
+            FILTER_VALIDATE_BOOL
+        ),
+        'expires_seconds' => (int) env('ASSIGNMENT_DIRECT_UPLOAD_EXPIRES_SECONDS', 900),
+    ],
+
     'evolution_api' => [
         'base_url' => env('EVOLUTION_API_BASE_URL'),
         'api_key' => env('EVOLUTION_API_KEY'),
