@@ -9,17 +9,39 @@ import {
   hydrateCertificateFileUrls,
   resolveCertificateFileUrl
 } from '../../utils/certificateFiles'
-import { resolveAcademicPeriod } from '../../utils/academicPeriod'
+import {
+  normalizeAcademicYear,
+  normalizeSemester,
+  resolveAcademicPeriod
+} from '../../utils/academicPeriod'
 
 const DASHBOARD_TASK_LIMIT = 6
 const DASHBOARD_TASK_QUERY_LIMIT = 80
 const DASHBOARD_TASK_COLUMNS = 'id, kelas, judul, mapel, deadline, keterangan, file_url, link'
+const ACADEMIC_PERIOD_STORAGE_KEY = 'edusmart.academic.periodFilter'
 
 const isValidDate = (date) => date instanceof Date && !Number.isNaN(date.getTime())
 
 const getTaskDeadlineTime = (task) => {
   const deadline = task?.deadline ? new Date(task.deadline) : null
   return deadline && isValidDate(deadline) ? deadline.getTime() : Number.POSITIVE_INFINITY
+}
+
+const readStoredAcademicPeriodFilter = (activePeriod) => {
+  if (typeof window === 'undefined') return null
+
+  try {
+    const raw = window.localStorage.getItem(ACADEMIC_PERIOD_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    const tahunAjaran = normalizeAcademicYear(parsed?.tahunAjaran || parsed?.tahun_ajaran)
+    const semester = normalizeSemester(parsed?.semester)
+    if (!tahunAjaran || !semester) return null
+    if (tahunAjaran === activePeriod.tahunAjaran && semester === activePeriod.semester) return null
+    return { tahunAjaran, semester }
+  } catch (error) {
+    return null
+  }
 }
 
 const formatDateTimeLabel = (value) => {
@@ -589,7 +611,18 @@ export default function SHome() {
       .limit(1)
       .maybeSingle()
 
-    const period = resolveAcademicPeriod(data || {})
+    const activePeriod = resolveAcademicPeriod(data || {})
+    const storedPeriod = readStoredAcademicPeriodFilter(activePeriod)
+    const period = storedPeriod
+      ? resolveAcademicPeriod({
+        tahun_ajaran: storedPeriod.tahunAjaran,
+        semester_aktif: storedPeriod.semester,
+        periode_ganjil_mulai: activePeriod.periodeGanjilMulai,
+        periode_ganjil_selesai: activePeriod.periodeGanjilSelesai,
+        periode_genap_mulai: activePeriod.periodeGenapMulai,
+        periode_genap_selesai: activePeriod.periodeGenapSelesai
+      })
+      : activePeriod
     activeAcademicPeriodRef.current = period
     return period
   }

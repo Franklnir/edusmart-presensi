@@ -61,11 +61,19 @@ const readStoredPeriodFilter = (fallback) => {
   }
 }
 
-const writeStoredPeriodFilter = (periodFilter) => {
+const writeStoredPeriodFilter = (periodFilter, activeAcademicPeriod) => {
   if (typeof window === 'undefined') return
 
   try {
-    window.localStorage.setItem(PERIOD_FILTER_STORAGE_KEY, JSON.stringify(periodFilter))
+    const followsActive =
+      periodFilter?.tahunAjaran === activeAcademicPeriod?.tahunAjaran &&
+      periodFilter?.semester === activeAcademicPeriod?.semester
+
+    if (followsActive) {
+      window.localStorage.removeItem(PERIOD_FILTER_STORAGE_KEY)
+    } else {
+      window.localStorage.setItem(PERIOD_FILTER_STORAGE_KEY, JSON.stringify(periodFilter))
+    }
   } catch (error) {
     // Ignore storage errors so the filter still works in memory.
   }
@@ -1170,8 +1178,8 @@ function AbsensiGuru() {
   }, [])
 
   useEffect(() => {
-    writeStoredPeriodFilter(periodFilter)
-  }, [periodFilter])
+    writeStoredPeriodFilter(periodFilter, activeAcademicPeriod)
+  }, [activeAcademicPeriod, periodFilter])
 
   /* ===== Load Data Jadwal & Guru ===== */
   useEffect(() => {

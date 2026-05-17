@@ -62,14 +62,21 @@ class AuthController extends ApiController
 
     public function me(Request $request)
     {
-        $user = $this->user($request);
+        $user = $request->user('sanctum') ?: $this->user($request);
         if (! $user) {
             return response()->json(['data' => null]);
         }
 
-        $profile = $this->profile($request);
+        $request->setUserResolver(fn () => $user);
 
-        if ($this->isSuperAdminIdentity($request) && ! $profile) {
+        $profile = $this->profile($request);
+        $isSuperAdminIdentity = $this->isSuperAdminIdentity($request);
+
+        if (! $isSuperAdminIdentity && ! $profile && $this->tenantId($request)) {
+            return response()->json(['error' => 'Akses tenant ditolak'], 403);
+        }
+
+        if ($isSuperAdminIdentity && ! $profile) {
             $profile = new Profile([
                 'id' => $user->id,
                 'tenant_id' => $this->tenantId($request),
@@ -85,7 +92,7 @@ class AuthController extends ApiController
                 'user' => $user,
                 'profile' => $profile,
                 'settings' => $this->bootstrapSettings($request),
-                'is_super_admin' => $this->isSuperAdmin($request),
+                'is_super_admin' => $isSuperAdminIdentity,
             ],
         ]);
     }
@@ -757,6 +764,19 @@ class AuthController extends ApiController
         );
         $usedInitialPasswordAlias = false;
 
+        if (! $isSuperAdminIdentity && (! $profileForLogin || ! $loginUser)) {
+            $this->registerFailedLoginAttempt($throttleKey);
+            $this->logAuthEvent($request, 'login_failed_account_not_registered', [
+                'email' => $email,
+                'tenant_id' => $tenantId,
+                'host' => $host,
+            ]);
+
+            return response()->json([
+                'error' => 'Akun belum terdaftar di sekolah ini. Periksa email/NIS atau hubungi admin sekolah.',
+            ], 404);
+        }
+
         if (! $loginUser || ! Hash::check($password, (string) $loginUser->password)) {
             $initialAliasPassword = $this->resolveInitialPasswordAliasForLogin($profileForLogin, $password);
 
@@ -770,7 +790,9 @@ class AuthController extends ApiController
                     'host' => $host,
                 ]);
 
-                return response()->json(['error' => 'Email/NIS atau password salah'], 401);
+                return response()->json([
+                    'error' => 'Password tidak sesuai. Periksa kembali password akun Anda.',
+                ], 401);
             }
         }
 
@@ -866,7 +888,7 @@ class AuthController extends ApiController
             ->first();
 
         if (! $profile) {
-            return ['error' => 'NIS atau password salah', 'code' => 401];
+            return ['error' => 'NIS belum terdaftar di sekolah ini. Periksa kembali NIS atau hubungi admin sekolah.', 'code' => 404];
         }
 
         $email = strtolower(trim((string) ($profile->email ?? '')));

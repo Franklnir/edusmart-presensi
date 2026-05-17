@@ -87,9 +87,11 @@ Route::post('/auth/reset-password', [AuthController::class, 'resetPassword'])
 Route::get('/auth/verify-email/{id}/{hash}', [AuthController::class, 'verifyEmail'])
     ->name('verification.verify')
     ->middleware('throttle:6,1');
+Route::get('/auth/me', [AuthController::class, 'me'])
+    ->middleware('throttle:api')
+    ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
 Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout']);
-    Route::get('/auth/me', [AuthController::class, 'me']);
     Route::post('/auth/update-password', [AuthController::class, 'updatePassword']);
     Route::post('/auth/update-account', [AuthController::class, 'updateAccount']);
     Route::post('/auth/verify-email/resend', [AuthController::class, 'resendVerificationEmail']);

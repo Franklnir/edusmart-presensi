@@ -187,11 +187,13 @@ export const openGoogleAuthPopup = ({
 
     window.addEventListener('message', handleMessage)
 
-    closeTimer = window.setInterval(() => {
-      if (!popup.closed) return
+    if (bridgeOrigin === window.location.origin) {
+      closeTimer = window.setInterval(() => {
+        if (!popup.closed) return
 
-      finalize(() => reject(new Error('Popup Google ditutup sebelum proses selesai.')))
-    }, 500)
+        finalize(() => reject(new Error('Popup Google ditutup sebelum proses selesai.')))
+      }, 500)
+    }
 
     timeoutTimer = window.setTimeout(() => {
       try {
@@ -200,7 +202,7 @@ export const openGoogleAuthPopup = ({
         // ignore
       }
 
-      finalize(() => reject(new Error('Login Google terlalu lama. Coba lagi.')))
+      finalize(() => reject(new Error('Login Google terlalu lama. Jika popup sudah tertutup, coba masuk kembali.')))
     }, timeoutMs)
   })
 }

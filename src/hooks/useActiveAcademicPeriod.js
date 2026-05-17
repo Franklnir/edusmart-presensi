@@ -36,11 +36,19 @@ const readStoredPeriodFilter = (storageKey, fallback) => {
   }
 }
 
-const writeStoredPeriodFilter = (storageKey, periodFilter) => {
+const writeStoredPeriodFilter = (storageKey, periodFilter, activeAcademicPeriod) => {
   if (!storageKey || typeof window === 'undefined') return
 
   try {
-    window.localStorage.setItem(storageKey, JSON.stringify(periodFilter))
+    const followsActive =
+      periodFilter?.tahunAjaran === activeAcademicPeriod?.tahunAjaran &&
+      periodFilter?.semester === activeAcademicPeriod?.semester
+
+    if (followsActive) {
+      window.localStorage.removeItem(storageKey)
+    } else {
+      window.localStorage.setItem(storageKey, JSON.stringify(periodFilter))
+    }
   } catch (error) {
     // Ignore storage errors so the filter still works in memory.
   }
@@ -65,8 +73,8 @@ export default function useActiveAcademicPeriod({
 
   useEffect(() => {
     if (!persistFilter) return
-    writeStoredPeriodFilter(storageKey, periodFilter)
-  }, [periodFilter, persistFilter, storageKey])
+    writeStoredPeriodFilter(storageKey, periodFilter, activeAcademicPeriod)
+  }, [activeAcademicPeriod, periodFilter, persistFilter, storageKey])
 
   useEffect(() => {
     let cancelled = false

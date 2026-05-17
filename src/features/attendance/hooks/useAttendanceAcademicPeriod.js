@@ -20,11 +20,19 @@ const readStoredPeriodFilter = (fallback) => {
   }
 }
 
-const writeStoredPeriodFilter = (periodFilter) => {
+const writeStoredPeriodFilter = (periodFilter, activeAcademicPeriod) => {
   if (typeof window === 'undefined') return
 
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(periodFilter))
+    const followsActive =
+      periodFilter?.tahunAjaran === activeAcademicPeriod?.tahunAjaran &&
+      periodFilter?.semester === activeAcademicPeriod?.semester
+
+    if (followsActive) {
+      window.localStorage.removeItem(STORAGE_KEY)
+    } else {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(periodFilter))
+    }
   } catch (error) {
     // Ignore storage errors so the filter still works in memory.
   }
@@ -76,8 +84,8 @@ export function useAttendanceAcademicPeriod() {
   }, [])
 
   useEffect(() => {
-    writeStoredPeriodFilter(periodFilter)
-  }, [periodFilter])
+    writeStoredPeriodFilter(periodFilter, activeAcademicPeriod)
+  }, [activeAcademicPeriod, periodFilter])
 
   const academicPeriodPayload = useMemo(() => ({
     tahun_ajaran: periodFilter.tahunAjaran,

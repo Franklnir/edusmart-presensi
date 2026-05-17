@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
@@ -253,6 +254,10 @@ class AdminController extends ApiController
                     ->where('id', $userId)
                     ->where('tenant_id', $tenantId)
                     ->first();
+
+                if ($role === 'siswa' && array_key_exists('tanggal_lahir', $profilePayload)) {
+                    $this->syncImportedInitialStudentPassword($tenantId, $userId, $now);
+                }
             } else {
                 $user = User::query()->create([
                     'id' => $userId,
@@ -1725,6 +1730,10 @@ class AdminController extends ApiController
                 ->where('tenant_id', $tenantId)
                 ->update($data);
 
+            if (array_key_exists('tanggal_lahir', $data)) {
+                $this->syncImportedInitialStudentPassword($tenantId, $id, $now);
+            }
+
             if (array_key_exists('nama', $data)) {
                 DB::table('users')
                     ->where('id', $id)
@@ -1929,6 +1938,71 @@ class AdminController extends ApiController
             'admin', 'admin_created', 'created_by_admin', 'buatan_admin' => 'admin_created',
             default => $default,
         };
+    }
+
+    private function syncImportedInitialStudentPassword(string $tenantId, string $studentId, mixed $timestamp = null): bool
+    {
+        $profile = Profile::query()
+            ->where('id', $studentId)
+            ->where('tenant_id', $tenantId)
+            ->where('role', 'siswa')
+            ->first();
+
+        if (! $profile || ! $this->isImportedInitialStudentAccount($profile)) {
+            return false;
+        }
+
+        $seed = $this->buildBirthDatePasswordSeed($profile->tanggal_lahir);
+        if ($seed === '') {
+            $nis = trim((string) ($profile->nis ?? ''));
+            $digits = preg_replace('/\D+/', '', $nis) ?? '';
+            $seed = $digits !== '' ? $digits : $nis;
+        }
+        if ($seed === '') {
+            return false;
+        }
+
+        DB::table('users')
+            ->where('id', $studentId)
+            ->update([
+                'password' => Hash::make($this->normalizeProvisionPassword($seed)),
+                'updated_at' => $timestamp ?: now(),
+            ]);
+
+        return true;
+    }
+
+    private function isImportedInitialStudentAccount(Profile $profile): bool
+    {
+        if (strtolower(trim((string) ($profile->role ?? ''))) !== 'siswa') {
+            return false;
+        }
+        if (! (bool) ($profile->must_change_password ?? false)) {
+            return false;
+        }
+
+        $createdVia = $this->normalizeProfileCreatedVia($profile->created_via ?? null, '');
+        $email = strtolower(trim((string) ($profile->email ?? '')));
+
+        return $createdVia === 'import' || Str::endsWith($email, '@import.local');
+    }
+
+    private function buildBirthDatePasswordSeed(mixed $tanggalLahir): string
+    {
+        if (! $tanggalLahir) {
+            return '';
+        }
+
+        try {
+            $date = date_create((string) $tanggalLahir);
+            if (! $date) {
+                return '';
+            }
+
+            return $date->format('dmY');
+        } catch (\Throwable $e) {
+            return '';
+        }
     }
 
     private function normalizeProvisionPassword(string $password): string

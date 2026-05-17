@@ -5,11 +5,8 @@ import { queryClient, queryKeys } from '../../lib/queryClient'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import { loadExcelJsBrowser } from '../../utils/excelBrowser'
-import {
-  SEMESTER_GANJIL,
-  SEMESTER_GENAP,
-  resolveAcademicPeriod
-} from '../../utils/academicPeriod'
+import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveFilter'
+import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 import {
   getKelasDisplayName,
   getNamaKelasFromList,
@@ -114,9 +111,18 @@ export default function LaporanRekap() {
     getCurrentMonthValue()
   ]) // Default: bulan berjalan
   const [tahun, setTahun] = useState(new Date().getFullYear())
-  const [activeAcademicPeriod, setActiveAcademicPeriod] = useState(() => resolveAcademicPeriod())
-  const [selectedTahunAjaran, setSelectedTahunAjaran] = useState(() => resolveAcademicPeriod().tahunAjaran)
-  const [selectedSemester, setSelectedSemester] = useState(() => resolveAcademicPeriod().semester)
+  const {
+    activeAcademicPeriod,
+    academicYearOptions,
+    isViewingArchivePeriod,
+    period: reportPeriod,
+    periodFilter,
+    resetToActivePeriod,
+    selectedAcademicPeriodPayload,
+    semesterOptions,
+    setAcademicYear,
+    setSemester
+  } = useActiveAcademicPeriod()
 
   // -- Data Result State --
   const [absensiData, setAbsensiData] = useState(null)
@@ -155,10 +161,10 @@ export default function LaporanRekap() {
 
   const selectedFilterKelasMeta = activeTab === 'rekap' ? selectedWaliKelasMeta : selectedKelasMeta
 
-  const reportPeriod = activeAcademicPeriod
-
   const reportPeriodLabel = `${reportPeriod.tahunAjaran} - Tahun Ajaran`
-  const isActiveReportPeriod = true
+  const isActiveReportPeriod = !isViewingArchivePeriod
+  const selectedTahunAjaran = selectedAcademicPeriodPayload.tahun_ajaran
+  const selectedSemester = selectedAcademicPeriodPayload.semester
   const reportMonthOptions = useMemo(
     () => ((reportPeriod.academicYearMonths?.length ? reportPeriod.academicYearMonths : reportPeriod.months) || []).map((month) => ({
       value: month.value,
@@ -240,29 +246,6 @@ export default function LaporanRekap() {
       return { ...prev, siswa: normalizedRank }
     })
   }, [rekapWaliData?.siswa, rekapWaliData?.policy, rankingPolicy])
-
-  useEffect(() => {
-    const loadAcademicPeriod = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('settings')
-          .select('tahun_ajaran, semester_aktif, periode_mulai, periode_selesai, periode_ganjil_mulai, periode_ganjil_selesai, periode_genap_mulai, periode_genap_selesai')
-          .order('id', { ascending: true })
-          .limit(1)
-          .maybeSingle()
-
-        if (error) throw error
-        const resolved = resolveAcademicPeriod(data || {})
-        setActiveAcademicPeriod(resolved)
-        setSelectedTahunAjaran(resolved.tahunAjaran)
-        setSelectedSemester(resolved.semester)
-      } catch (error) {
-        console.error('Gagal memuat periode akademik aktif:', error)
-      }
-    }
-
-    loadAcademicPeriod()
-  }, [])
 
   // 1. Initial Load (Lib & Click Outside)
   useEffect(() => {
@@ -3133,18 +3116,17 @@ export default function LaporanRekap() {
             </div>
           )}
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Periode Aktif
-            </label>
-            <div className="w-full border border-slate-300 rounded-xl px-4 py-3 text-sm bg-slate-50">
-              <div className="font-semibold text-slate-900">{activeAcademicPeriod.tahunAjaran}</div>
-              <div className="text-xs text-slate-500">Semester {activeAcademicPeriod.semester}</div>
-            </div>
-            <div className="mt-1 text-[11px] text-slate-500">
-              {activeAcademicPeriod.rangeLabel || 'Periode aktif sekolah'}
-            </div>
-          </div>
+          <AcademicPeriodArchiveFilter
+            activeAcademicPeriod={activeAcademicPeriod}
+            periodFilter={periodFilter}
+            academicYearOptions={academicYearOptions}
+            semesterOptions={semesterOptions}
+            setAcademicYear={setAcademicYear}
+            setSemester={setSemester}
+            resetToActivePeriod={resetToActivePeriod}
+            title="Periode Laporan"
+            compact
+          />
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
