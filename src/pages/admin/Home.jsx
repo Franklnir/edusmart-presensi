@@ -222,7 +222,7 @@ export default function AHome() {
             query: supabase
               .from('profiles')
               .select('id, nama, email, kelas, role, status, angkatan')
-              .in('role', ['admin', 'guru', 'teacher', 'siswa'])
+              .in('role', ['admin', 'guru', 'teacher'])
               .order('role')
               .order('nama')
           },
@@ -256,12 +256,11 @@ export default function AHome() {
 
       const people = data?.people?.data || []
       const guruRows = people.filter((item) => item.role === 'guru' || item.role === 'teacher')
-      const siswaRows = people.filter((item) => item.role === 'siswa')
       const adminRows = people.filter((item) => item.role === 'admin')
       const summary = summaryRes.data || {}
 
       setStats({
-        siswa: summary.siswa || siswaRows.length,
+        siswa: summary.siswa || 0,
         guru: summary.guru || guruRows.length,
         admin: summary.admin || adminRows.length,
         kelas: summary.kelas || 0,
@@ -274,15 +273,6 @@ export default function AHome() {
         guruRows.map((guru) => ({
           id: guru.id,
           name: `${guru.nama || 'Tanpa Nama'}${guru.email ? ` (${guru.email})` : ''}`
-        }))
-      )
-      setSiswaList(
-        siswaRows.map((siswa) => ({
-          uid: siswa.id,
-          nama: siswa.nama || siswa.email || 'Tanpa Nama',
-          kelas: siswa.kelas || '',
-          email: siswa.email,
-          angkatan: siswa.angkatan || ''
         }))
       )
       setAdminList(
@@ -366,6 +356,52 @@ export default function AHome() {
   /* --- Data Umum (Guru & Siswa) --- */
   const [guruList, setGuruList] = useState([])
   const [siswaList, setSiswaList] = useState([])
+  const [studentOptionsLoading, setStudentOptionsLoading] = useState(false)
+  const [studentOptionsLoaded, setStudentOptionsLoaded] = useState(false)
+
+  const mergeSiswaOptions = useCallback((rows = []) => {
+    if (!Array.isArray(rows) || rows.length === 0) return
+
+    setSiswaList((prev) => {
+      const map = new Map(prev.map((item) => [item.uid, item]))
+      rows.forEach((row) => {
+        const uid = row.uid || row.id
+        if (!uid) return
+        map.set(uid, {
+          uid,
+          nama: row.nama || row.email || 'Tanpa Nama',
+          kelas: row.kelas || '',
+          email: row.email || '',
+          angkatan: row.angkatan || ''
+        })
+      })
+      return Array.from(map.values()).sort(
+        (a, b) =>
+          (a.kelas || '').localeCompare(b.kelas || '', 'id') ||
+          (a.nama || '').localeCompare(b.nama || '', 'id')
+      )
+    })
+  }, [])
+
+  const loadStudentOptions = useCallback(async ({ force = false } = {}) => {
+    if (studentOptionsLoading) return
+    if (studentOptionsLoaded && !force) return
+
+    setStudentOptionsLoading(true)
+    try {
+      const { data, error } = await supabase.admin.studentOptions({
+        per_page: 200,
+        status: 'active'
+      })
+      if (error) throw error
+      mergeSiswaOptions(data?.rows || [])
+      setStudentOptionsLoaded(true)
+    } catch (error) {
+      pushToast('error', 'Gagal memuat pilihan siswa')
+    } finally {
+      setStudentOptionsLoading(false)
+    }
+  }, [mergeSiswaOptions, pushToast, studentOptionsLoaded, studentOptionsLoading])
 
   const loadGuruDanSiswa = useCallback(async () => {
     try {
@@ -569,7 +605,7 @@ export default function AHome() {
     try {
       const { data, error } = await supabase
         .from('ekskul')
-        .select('*')
+        .select('id,nama,keterangan,hari,jam_mulai,jam_selesai,pembina_guru_id,registration_deadline_at')
         .eq('id', eskulSel)
         .single()
 
@@ -598,7 +634,7 @@ export default function AHome() {
 
       let anggotaQuery = supabase
         .from('ekskul_anggota')
-        .select('*')
+        .select('id,ekskul_id,user_id,angkatan,status,created_at,updated_at,tahun_ajaran,semester')
         .eq('ekskul_id', eskulSel)
       anggotaQuery = applySemesterPeriodFilters(anggotaQuery, period)
 
@@ -606,7 +642,7 @@ export default function AHome() {
       if (error && /tahun_ajaran|semester|angkatan/i.test(error.message || '')) {
         ; ({ data, error } = await supabase
           .from('ekskul_anggota')
-          .select('*')
+          .select('id,ekskul_id,user_id,angkatan,status,created_at,updated_at')
           .eq('ekskul_id', eskulSel))
       }
 
@@ -620,6 +656,16 @@ export default function AHome() {
       if (userIds.length === 0) {
         setEskulAbsensiStats({})
         return
+      }
+
+      const { data: memberProfiles, error: memberProfileError } = await supabase
+        .from('profiles')
+        .select('id,nama,email,kelas,angkatan')
+        .eq('role', 'siswa')
+        .in('id', userIds)
+
+      if (!memberProfileError && memberProfiles) {
+        mergeSiswaOptions(memberProfiles)
       }
 
       let absQuery = supabase
@@ -659,7 +705,7 @@ export default function AHome() {
     } catch (error) {
       pushToast('error', 'Gagal memuat data anggota eskul')
     }
-  }, [eskulDataPeriod, eskulSel, pushToast])
+  }, [eskulDataPeriod, eskulSel, mergeSiswaOptions, pushToast])
 
   // Load eskul detail dan anggota ketika eskulSel berubah
   useEffect(() => {
@@ -1451,9 +1497,16 @@ export default function AHome() {
                       <select
                         className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all duration-200"
                         value={addMemberUid}
+                        onFocus={() => loadStudentOptions()}
                         onChange={(e) => setAddMemberUid(e.target.value)}
                       >
-                        <option value="">— Pilih siswa —</option>
+                        <option value="">
+                          {studentOptionsLoading
+                            ? 'Memuat siswa...'
+                            : studentOptionsLoaded
+                              ? '— Pilih siswa —'
+                              : 'Klik untuk memuat siswa'}
+                        </option>
                         {siswaList.map((s) => (
                           <option key={s.uid} value={s.uid}>
                             {s.nama} ({s.kelas || '—'})

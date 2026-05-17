@@ -119,11 +119,11 @@ export default function RingkasanKelasTable({
           event: '*',
           schema: 'public',
           table: 'absensi',
-          filter: `kelas=eq.${kelas}`
+          filter: `tanggal=eq.${tanggal}`
         },
         (payload) => {
           const row = payload.new || payload.old
-          if (row && row.mapel === mapel && row.tanggal === tanggal) {
+          if (row && row.kelas === kelas && row.mapel === mapel && row.tanggal === tanggal) {
             loadDataSiswa()
           }
         }

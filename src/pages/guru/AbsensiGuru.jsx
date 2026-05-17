@@ -989,8 +989,7 @@ function AbsensiGuru() {
           table: 'jadwal',
           filter: `guru_id=eq.${user.id}`
         },
-        (payload) => {
-          console.log('Jadwal changed:', payload)
+        () => {
           loadJadwal()
         }
       )
@@ -1015,7 +1014,7 @@ function AbsensiGuru() {
           event: '*',
           schema: 'public',
           table: 'absensi',
-          filter: `kelas=eq.${kelas}`
+          filter: `tanggal=eq.${tgl}`
         },
         (payload) => {
           if (view !== 'absen') return
@@ -1031,7 +1030,6 @@ function AbsensiGuru() {
             return
           }
 
-          console.log('Absensi realtime (filtered):', payload)
           setAbsensi(prev => applyRealtimeChange(prev, payload))
           setLastUpdate(new Date())
         }
@@ -1047,7 +1045,7 @@ function AbsensiGuru() {
           event: '*',
           schema: 'public',
           table: 'absensi_ajuan',
-          filter: `kelas=eq.${kelas}`
+          filter: `tanggal=eq.${tgl}`
         },
         (payload) => {
           if (view !== 'absen') return
@@ -1063,7 +1061,6 @@ function AbsensiGuru() {
             return
           }
 
-          console.log('Ajuan realtime (filtered):', payload)
           setAjuan(prev => applyRealtimeChange(prev, payload))
           setLastUpdate(new Date())
 
@@ -1097,8 +1094,7 @@ function AbsensiGuru() {
           table: 'jam_kosong',
           filter: `created_by=eq.${user.id}`
         },
-        (payload) => {
-          console.log('Jam kosong changed:', payload)
+        () => {
           if (view === 'jam_kosong') {
             loadRiwayatJamKosong()
           }
@@ -2014,7 +2010,6 @@ function AbsensiGuru() {
         }
 
         if (updates.length > 0) {
-          console.log(`✅ Auto-alpha: ${updates.length} siswa`)
           setLastAutoAlphaRun(prev => ({ ...prev, [runKey]: Date.now() }))
           upsertAbsensiState(data)
 

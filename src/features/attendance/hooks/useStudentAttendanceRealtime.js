@@ -69,18 +69,18 @@ export function useStudentAttendanceRealtime({
     channels.push(settingsChannel)
 
     const ringkasanChannel = supabase
-      .channel(`absensi-ringkasan-${profile.kelas}`)
+      .channel(`absensi-ringkasan-${profile.kelas}-${tgl || 'all'}`)
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
           table: 'absensi',
-          filter: `kelas=eq.${profile.kelas}`
+          filter: tgl ? `tanggal=eq.${tgl}` : `kelas=eq.${profile.kelas}`
         },
         (payload) => {
           const row = payload.new || payload.old
-          if (row && row.mapel === mapel && row.tanggal === tgl) {
+          if (row && row.kelas === profile.kelas && row.mapel === mapel && row.tanggal === tgl) {
             loadRingkasDanStatus()
           }
         }

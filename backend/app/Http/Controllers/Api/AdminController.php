@@ -488,6 +488,8 @@ class AdminController extends ApiController
         $page = max(1, (int) $request->query('page', 1));
         $allRows = filter_var($request->query('all', false), FILTER_VALIDATE_BOOLEAN);
         $perPage = $allRows ? min(10000, max(1, (int) $request->query('per_page', 10000))) : $this->perPage($request);
+        $includeContext = filter_var($request->query('include_context', true), FILTER_VALIDATE_BOOLEAN);
+        $includeStats = filter_var($request->query('include_stats', true), FILTER_VALIDATE_BOOLEAN);
 
         $presenceAgg = $this->presenceAggregateQuery($tenantId);
         $query = $this->studentBaseQuery($tenantId, $teacherClassIds)
@@ -520,31 +522,35 @@ class AdminController extends ApiController
             ->map(fn ($row) => (array) $row)
             ->values();
 
-        $kelas = $this->tenantQuery('kelas', $tenantId)
-            ->select($this->existingColumns('kelas', ['id', 'nama', 'tingkat', 'jurusan', 'wali_kelas', 'angkatan', 'created_at', 'updated_at']))
-            ->when($teacherClassIds !== null, fn ($builder) => $builder->whereIn('id', $teacherClassIds))
-            ->orderBy('id')
-            ->get()
-            ->map(fn ($row) => (array) $row)
-            ->values();
+        $payload = [
+            'rows' => $rows,
+            'meta' => $this->paginationMeta($page, $perPage, $total, $allRows),
+        ];
 
-        $struktur = $this->tenantQuery('kelas_struktur', $tenantId)
-            ->select($this->existingColumns('kelas_struktur', ['kelas_id', 'wali_guru_id', 'wali_guru_nama', 'ketua_siswa_id', 'ketua_siswa_nama', 'created_at', 'updated_at']))
-            ->when($teacherClassIds !== null, fn ($builder) => $builder->whereIn('kelas_id', $teacherClassIds))
-            ->get()
-            ->map(fn ($row) => (array) $row)
-            ->values();
+        if ($includeStats) {
+            $payload['stats'] = $this->studentStats($tenantId, $teacherClassIds);
+        }
 
-        return response()->json([
-            'data' => [
-                'rows' => $rows,
-                'meta' => $this->paginationMeta($page, $perPage, $total, $allRows),
-                'stats' => $this->studentStats($tenantId, $teacherClassIds),
-                'kelas' => $kelas,
-                'struktur' => $struktur,
-                'wali_kelas_ids' => $teacherClassIds ?? [],
-            ],
-        ]);
+        if ($includeContext) {
+            $payload['kelas'] = $this->tenantQuery('kelas', $tenantId)
+                ->select($this->existingColumns('kelas', ['id', 'nama', 'tingkat', 'jurusan', 'wali_kelas', 'angkatan', 'created_at', 'updated_at']))
+                ->when($teacherClassIds !== null, fn ($builder) => $builder->whereIn('id', $teacherClassIds))
+                ->orderBy('id')
+                ->get()
+                ->map(fn ($row) => (array) $row)
+                ->values();
+
+            $payload['struktur'] = $this->tenantQuery('kelas_struktur', $tenantId)
+                ->select($this->existingColumns('kelas_struktur', ['kelas_id', 'wali_guru_id', 'wali_guru_nama', 'ketua_siswa_id', 'ketua_siswa_nama', 'created_at', 'updated_at']))
+                ->when($teacherClassIds !== null, fn ($builder) => $builder->whereIn('kelas_id', $teacherClassIds))
+                ->get()
+                ->map(fn ($row) => (array) $row)
+                ->values();
+
+            $payload['wali_kelas_ids'] = $teacherClassIds ?? [];
+        }
+
+        return response()->json(['data' => $payload]);
     }
 
     public function studentDetail(Request $request, string $id)

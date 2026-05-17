@@ -2573,6 +2573,28 @@ export const removeStorageObject = async (bucket, urlOrPath) => {
 /* ===================== REALTIME (POLLING) ===================== */
 const DEFAULT_REALTIME_POLL_MS = 4000
 const DEFAULT_REALTIME_POLL_HIDDEN_MS = 12000
+const REALTIME_POLL_COLUMNS_BY_TABLE = Object.freeze({
+  absensi: 'id,kelas,tanggal,uid,mapel,status,nama,waktu,komentar,oleh,dikonfirmasi,tahun_ajaran,semester,created_at,updated_at',
+  absensi_ajuan: 'id,kelas,tanggal,uid,nama,alasan,mapel,created_at,status_guru,kategori_final,guru_id,guru_nama,waktu_respon,tahun_ajaran,semester',
+  absensi_settings: 'id,kelas,tanggal,mapel,mode,allow_self_absen,tahun_ajaran,semester,updated_at',
+  jam_kosong: 'id,tanggal,kelas,mapel,jam_mulai,jam_selesai,alasan,guru_pengganti,created_by,created_at,updated_at,tahun_ajaran,semester',
+  jadwal: 'id,kelas_id,hari,mapel,guru_id,guru_nama,jam_mulai,jam_selesai,tahun_ajaran,semester,created_at,updated_at',
+  kelas: 'id,nama,grade,suffix,tingkat,jurusan,angkatan,tahun_ajaran,semester,is_active,updated_at',
+  kelas_struktur: 'kelas_id,wali_guru_id,wali_guru_nama,ketua_siswa_id,ketua_siswa_nama,updated_at',
+  pengumuman: 'id,judul,keterangan,target,created_at,updated_at',
+  profiles: 'id,nama,email,role,kelas,status,nis,rfid_uid,photo_url,photo_path,updated_at',
+  quizzes: 'id,kelas_id,guru_id,mapel,nama,starts_at,deadline_at,mode,is_live,is_active,live_started_at,duration_minutes,result_visible_to_students,updated_at',
+  quiz_questions: 'id,quiz_id,nomor,soal,image_path,poin,question_type,updated_at',
+  quiz_options: 'id,question_id,label,text,image_path,is_correct,updated_at',
+  quiz_submissions: 'id,quiz_id,siswa_id,status,score,total_points,started_at,finished_at,last_saved_at,essay_review_completed_at,essay_review_completed_by,updated_at',
+  quiz_answers: 'id,submission_id,question_id,option_id,essay_answer,essay_score,is_correct,poin,updated_at',
+  quiz_violation_logs: 'id,quiz_id,submission_id,siswa_id,event_type,event_message,event_meta,created_at',
+  rfid_scans: 'id,tenant_id,card_uid,device_id,status,created_at',
+  settings: 'id,tahun_ajaran,semester_aktif,periode_mulai,periode_selesai,updated_at',
+  tugas: 'id,kelas,judul,mapel,mulai,deadline,keterangan,file_url,link,created_by,created_at,updated_at,tahun_ajaran,semester,angkatan',
+  tugas_jawaban: 'id,tugas_id,user_id,file_url,link_url,file_name,file_urls,status,nilai,waktu_submit,dinilai_at,dinilai_oleh,komentar_siswa,updated_at,tahun_ajaran,semester,angkatan',
+  user_presence: 'id,user_id,device_id,online,activity,last_seen_at,updated_at'
+})
 
 const toPositiveInt = (value, fallback) => {
   const n = Number(value)
@@ -2587,6 +2609,10 @@ const REALTIME_POLL_MS = toPositiveInt(
 const REALTIME_POLL_HIDDEN_MS = toPositiveInt(
   import.meta.env.VITE_REALTIME_POLL_HIDDEN_MS,
   DEFAULT_REALTIME_POLL_HIDDEN_MS
+)
+
+const realtimeColumnsForTable = (table) => (
+  REALTIME_POLL_COLUMNS_BY_TABLE[String(table || '').trim()] || '*'
 )
 
 let channelCounter = 0
@@ -2834,7 +2860,7 @@ class RealtimePollingManager {
     const body = {
       table: entry.table,
       action: 'select',
-      columns: '*',
+      columns: realtimeColumnsForTable(entry.table),
       filters: { eq: {}, in: {}, gte: {}, lte: {}, gt: {}, lt: {} },
       order: [],
       limit: null,

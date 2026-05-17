@@ -85,6 +85,7 @@ export default function ASiswa() {
   })
 
   // Data states
+  const [loadingRows, setLoadingRows] = useState(false)
   const [siswaRaw, setSiswaRaw] = useState([])
   const [siswa, setSiswa] = useState([])
   const [kelasList, setKelasList] = useState([])
@@ -156,9 +157,16 @@ export default function ASiswa() {
 
   const loadAllData = async (page = siswaMeta.page || 1, overrides = {}) => {
     const isInitialLoad = !siswaRaw.length && !siswaMeta.total
+    const shouldIncludeContext = overrides.includeContext ?? (!kelasList.length && !waliChecked)
+    const shouldIncludeStats = overrides.includeStats ?? !siswaServerStats
     try {
       if (isInitialLoad) setLoadingInit(true)
-      const params = buildStudentRequestParams(page, overrides)
+      else setLoadingRows(true)
+      const params = {
+        ...buildStudentRequestParams(page, overrides),
+        include_context: shouldIncludeContext,
+        include_stats: shouldIncludeStats
+      }
 
       const data = await queryClient.fetchQuery({
         queryKey: queryKeys.admin.students(params),
@@ -184,10 +192,12 @@ export default function ASiswa() {
       startTransition(() => {
         setSiswaRaw(siswaRows)
         setSiswa(siswaRows)
-        setKelasList(kelasRows)
-        setStrukturKelas(struktur)
-        setWaliKelasIds(data?.wali_kelas_ids || [])
-        setWaliChecked(true)
+        if (Array.isArray(data?.kelas)) setKelasList(kelasRows)
+        if (Array.isArray(data?.struktur)) setStrukturKelas(struktur)
+        if (Array.isArray(data?.wali_kelas_ids)) {
+          setWaliKelasIds(data.wali_kelas_ids)
+          setWaliChecked(true)
+        }
         setSiswaMeta(data?.meta || {
           page,
           per_page: 25,
@@ -196,7 +206,7 @@ export default function ASiswa() {
           from: siswaRows.length ? 1 : 0,
           to: siswaRows.length
         })
-        setSiswaServerStats(data?.stats || null)
+        if (data?.stats) setSiswaServerStats(data.stats)
       })
     } catch (error) {
       if (error?.code === 'REQUEST_ABORTED') return
@@ -205,20 +215,23 @@ export default function ASiswa() {
       if (isGuru) setWaliChecked(true)
     } finally {
       if (isInitialLoad) setLoadingInit(false)
+      else setLoadingRows(false)
     }
   }
 
   const loadSiswaRaw = async (kelasIds = waliKelasIds) => {
     queryClient.invalidateQueries({ queryKey: ['admin', 'students'] })
     await loadAllData(siswaMeta.page || 1, {
-      qKelas: Array.isArray(kelasIds) && kelasIds.length === 1 ? kelasIds[0] : undefined
+      qKelas: Array.isArray(kelasIds) && kelasIds.length === 1 ? kelasIds[0] : undefined,
+      includeContext: true,
+      includeStats: true
     })
   }
 
   const loadKelasList = async (kelasIds = []) => {
     let query = supabase
       .from('kelas')
-      .select('*')
+      .select('id,nama,grade,suffix,tingkat,jurusan,wali_kelas,angkatan')
 
     if (Array.isArray(kelasIds) && kelasIds.length) {
       query = query.in('id', kelasIds)
@@ -235,7 +248,7 @@ export default function ASiswa() {
   const loadStrukturKelas = async (kelasIds = []) => {
     let query = supabase
       .from('kelas_struktur')
-      .select('*')
+      .select('kelas_id,wali_guru_id,wali_guru_nama,ketua_siswa_id,ketua_siswa_nama')
 
     if (Array.isArray(kelasIds) && kelasIds.length) {
       query = query.in('kelas_id', kelasIds)
@@ -514,7 +527,8 @@ export default function ASiswa() {
       qNIS: '',
       qKelas: isGuru && kelasOptions.length === 1 ? (kelasOptions[0]?.value || '') : '',
       qHasRfid: '',
-      qStatus: ''
+      qStatus: '',
+      includeStats: true
     })
   }
 
@@ -562,13 +576,14 @@ export default function ASiswa() {
     canNextPage: (siswaMeta.page || 1) < (siswaMeta.page_count || 1),
     previousPage: () => {
       const prev = Math.max(1, (siswaMeta.page || 1) - 1)
-      if (prev !== siswaMeta.page) loadAllData(prev)
+      if (prev !== siswaMeta.page) loadAllData(prev, { includeContext: false, includeStats: false })
     },
     nextPage: () => {
       const next = Math.min(siswaMeta.page_count || 1, (siswaMeta.page || 1) + 1)
-      if (next !== siswaMeta.page) loadAllData(next)
+      if (next !== siswaMeta.page) loadAllData(next, { includeContext: false, includeStats: false })
     },
-  }), [siswa, siswaMeta])
+    isLoading: loadingRows
+  }), [siswa, siswaMeta, loadingRows])
   const paginatedSiswa = siswaPagination.items
 
   /* ===== Grade helpers ===== */
@@ -830,6 +845,7 @@ export default function ASiswa() {
         {/* Tabel Siswa */}
         <StudentTableSection
           loadingInit={loadingInit}
+          loadingRows={loadingRows}
           siswa={siswa}
           siswaRaw={siswaRaw}
           totalCount={siswaMeta.total}
