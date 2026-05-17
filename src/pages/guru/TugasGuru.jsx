@@ -466,7 +466,7 @@ const buildLast12Months = () => {
 ========================= */
 export default function TugasGuru() {
   const { user, profile } = useAuthStore()
-  const { pushToast, setLoading } = useUIStore()
+  const { loading, pushToast, setLoading } = useUIStore()
   const {
     activeAcademicPeriod,
     period,
