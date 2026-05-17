@@ -2,11 +2,19 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Services\WhatsApp\WhatsAppNotificationService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class TugasController extends ApiController
 {
+    public function __construct(
+        private readonly WhatsAppNotificationService $whatsAppNotificationService
+    ) {}
+
     public function index(Request $request)
     {
         $query = DB::table('tugas');
@@ -229,5 +237,209 @@ class TugasController extends ApiController
         DB::table('tugas_jawaban')->where('id', $id)->delete();
 
         return response()->json(['data' => 'deleted']);
+    }
+
+    public function submitJawaban(Request $request)
+    {
+        if (! $this->isSiswa($request)) {
+            return $this->deny();
+        }
+
+        $userId = (string) $request->user()->id;
+        $tenantId = (string) ($this->tenantId($request) ?? $this->profileTenantId($request) ?? '');
+        $kelas = (string) ($this->currentKelas($request) ?? '');
+        $tugasId = trim((string) $request->input('tugas_id', ''));
+
+        if ($kelas === '' || $tugasId === '') {
+            return $this->deny('Tugas tidak diizinkan', 422);
+        }
+
+        $lockKey = 'assignment-submit|'.sha1($tenantId.'|'.$tugasId.'|'.$userId);
+        $lock = Cache::lock($lockKey, 15);
+        if (! $lock->get()) {
+            return $this->deny('Jawaban sedang diproses. Tunggu beberapa detik lalu cek kembali.', 429);
+        }
+
+        try {
+            $result = DB::transaction(function () use ($request, $tenantId, $kelas, $tugasId, $userId) {
+                $tugasQuery = DB::table('tugas')->where('id', $tugasId)->where('kelas', $kelas);
+                $this->applyTenantColumnFilter($tugasQuery, 'tugas', $tenantId);
+                $tugas = $tugasQuery->first();
+                if (! $tugas) {
+                    return ['error' => 'Tugas tidak diizinkan', 'status' => 422];
+                }
+
+                $availabilityError = $this->tugasAvailabilityError($tugas);
+                if ($availabilityError !== null) {
+                    return ['error' => $availabilityError, 'status' => 422];
+                }
+
+                $existingQuery = DB::table('tugas_jawaban')
+                    ->where('tugas_id', $tugasId)
+                    ->where('user_id', $userId);
+                $this->applyTenantColumnFilter($existingQuery, 'tugas_jawaban', $tenantId);
+                $existing = $existingQuery->lockForUpdate()->first();
+
+                if ($existing && $this->isJawabanDinilai($existing)) {
+                    return ['error' => 'Jawaban yang sudah dinilai tidak boleh diubah', 'status' => 422];
+                }
+
+                $payload = $this->buildStudentAnswerPayload($request, $tenantId, $tugasId, $userId);
+                $beforeRows = $existing ? [(array) $existing] : [];
+
+                if ($existing) {
+                    $update = $payload;
+                    unset($update['tugas_id'], $update['user_id'], $update['tenant_id']);
+
+                    $target = DB::table('tugas_jawaban')->where('id', $existing->id);
+                    $this->applyTenantColumnFilter($target, 'tugas_jawaban', $tenantId);
+                    $target->update($update);
+
+                    $id = $existing->id;
+                    $action = 'update';
+                } else {
+                    $id = DB::table('tugas_jawaban')->insertGetId($payload);
+                    $action = 'insert';
+                }
+
+                $rowQuery = DB::table('tugas_jawaban')->where('id', $id);
+                $this->applyTenantColumnFilter($rowQuery, 'tugas_jawaban', $tenantId);
+                $row = $rowQuery->first();
+
+                $this->notifyTugasJawabanMutation($tenantId, $action, $beforeRows, $row ? [(array) $row] : []);
+
+                return ['row' => $row];
+            });
+        } finally {
+            optional($lock)->release();
+        }
+
+        if (isset($result['error'])) {
+            return $this->deny($result['error'], (int) ($result['status'] ?? 422));
+        }
+
+        return response()->json(['data' => $result['row'] ?? null]);
+    }
+
+    private function applyTenantColumnFilter($query, string $table, string $tenantId): void
+    {
+        if ($tenantId !== '' && Schema::hasColumn($table, 'tenant_id')) {
+            $query->where('tenant_id', $tenantId);
+        }
+    }
+
+    private function buildStudentAnswerPayload(Request $request, string $tenantId, string $tugasId, string $userId): array
+    {
+        $payload = [
+            'tugas_id' => $tugasId,
+            'user_id' => $userId,
+            'file_url' => $this->nullableTrimmedString($request->input('file_url')),
+            'link_url' => $this->nullableUrl($request->input('link_url')),
+            'file_name' => $this->nullableTrimmedString($request->input('file_name')),
+            'waktu_submit' => now(),
+            'status' => 'menunggu',
+        ];
+
+        if (Schema::hasColumn('tugas_jawaban', 'tenant_id') && $tenantId !== '') {
+            $payload['tenant_id'] = $tenantId;
+        }
+
+        if (Schema::hasColumn('tugas_jawaban', 'file_urls')) {
+            $fileUrls = $request->input('file_urls');
+            $payload['file_urls'] = is_array($fileUrls)
+                ? json_encode(array_values(array_filter(array_map(
+                    fn ($value) => $this->nullableTrimmedString($value),
+                    $fileUrls
+                ))))
+                : null;
+        }
+
+        if (Schema::hasColumn('tugas_jawaban', 'komentar_siswa')) {
+            $comment = $this->nullableTrimmedString($request->input('komentar_siswa'));
+            $payload['komentar_siswa'] = $comment ? mb_substr($comment, 0, 500) : null;
+        }
+
+        foreach (['tahun_ajaran', 'semester', 'angkatan'] as $column) {
+            if (Schema::hasColumn('tugas_jawaban', $column) && $request->filled($column)) {
+                $payload[$column] = $this->nullableTrimmedString($request->input($column));
+            }
+        }
+
+        return array_filter(
+            $payload,
+            fn ($value, $key) => Schema::hasColumn('tugas_jawaban', (string) $key) && $value !== '',
+            ARRAY_FILTER_USE_BOTH
+        );
+    }
+
+    private function tugasAvailabilityError(object $tugas): ?string
+    {
+        $now = now();
+        $mulai = $this->parseDateTime($tugas->mulai ?? $tugas->created_at ?? null);
+        $deadline = $this->parseDateTime($tugas->deadline ?? null);
+
+        if ($mulai && $now->lt($mulai)) {
+            return 'Tugas belum dibuka';
+        }
+
+        if ($deadline && $now->gt($deadline)) {
+            return 'Deadline tugas sudah lewat';
+        }
+
+        return null;
+    }
+
+    private function parseDateTime($value): ?Carbon
+    {
+        if (! $value) {
+            return null;
+        }
+
+        try {
+            return Carbon::parse($value);
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    private function isJawabanDinilai(object $row): bool
+    {
+        return $row->nilai !== null || strtolower((string) ($row->status ?? '')) === 'dinilai';
+    }
+
+    private function nullableTrimmedString($value): ?string
+    {
+        $text = trim((string) ($value ?? ''));
+
+        return $text === '' ? null : $text;
+    }
+
+    private function nullableUrl($value): ?string
+    {
+        $url = $this->nullableTrimmedString($value);
+        if (! $url) {
+            return null;
+        }
+
+        return filter_var($url, FILTER_VALIDATE_URL) ? $url : null;
+    }
+
+    private function notifyTugasJawabanMutation(string $tenantId, string $action, array $beforeRows, array $afterRows): void
+    {
+        if ($tenantId === '') {
+            return;
+        }
+
+        try {
+            $this->whatsAppNotificationService->handleTableMutation(
+                $tenantId,
+                'tugas_jawaban',
+                $action,
+                $beforeRows,
+                $afterRows
+            );
+        } catch (\Throwable) {
+            // Notifikasi tidak boleh menghambat submit jawaban siswa.
+        }
     }
 }

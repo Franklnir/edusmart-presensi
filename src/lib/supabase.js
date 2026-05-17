@@ -954,6 +954,133 @@ export const apiFetch = async (path, options = {}) => {
   return request
 }
 
+const apiUploadFormData = async (path, form, options = {}) => {
+  try {
+    await ensureCsrf()
+  } catch {
+    return {
+      data: null,
+      error: makeError(
+        `Tidak bisa terhubung ke server API (${API_URL}).`,
+        0,
+        'NETWORK_ERROR'
+      ),
+      raw: null
+    }
+  }
+
+  const uploadOnce = () => new Promise((resolve) => {
+    if (typeof XMLHttpRequest === 'undefined') {
+      resolve(apiFetch(path, { method: 'POST', body: form, signal: options.signal }))
+      return
+    }
+
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', `${API_URL}${path}`)
+    xhr.withCredentials = true
+    xhr.setRequestHeader('Accept', 'application/json')
+    if (TENANT_SLUG) xhr.setRequestHeader('X-Tenant', TENANT_SLUG)
+    const xsrf = getCookie('XSRF-TOKEN')
+    if (xsrf) xhr.setRequestHeader('X-XSRF-TOKEN', decodeURIComponent(xsrf))
+
+    if (xhr.upload && typeof options.onProgress === 'function') {
+      xhr.upload.onprogress = (event) => {
+        if (!event.lengthComputable || !event.total) return
+        const progress = Math.max(0, Math.min(100, Math.round((event.loaded / event.total) * 100)))
+        options.onProgress(progress, event)
+      }
+    }
+
+    const cleanup = () => {
+      if (options.signal) options.signal.removeEventListener('abort', abortHandler)
+    }
+
+    const parseBody = () => {
+      try {
+        return xhr.responseText ? JSON.parse(xhr.responseText) : null
+      } catch {
+        return null
+      }
+    }
+
+    const abortHandler = () => {
+      xhr.abort()
+      cleanup()
+      resolve({
+        data: null,
+        error: makeError('Request dibatalkan', 0, 'REQUEST_ABORTED'),
+        raw: null,
+        aborted: true
+      })
+    }
+
+    if (options.signal) {
+      if (options.signal.aborted) {
+        abortHandler()
+        return
+      }
+      options.signal.addEventListener('abort', abortHandler, { once: true })
+    }
+
+    xhr.onload = () => {
+      cleanup()
+      const raw = parseBody()
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const message = raw?.error || raw?.message || xhr.statusText || 'Upload gagal'
+        if (isSessionExpiredStatus(xhr.status) && !shouldIgnoreSessionExpiredHandling(path)) {
+          notifySessionExpired({
+            path,
+            status: xhr.status,
+            message: SESSION_EXPIRED_MESSAGE
+          })
+          resolve({
+            data: null,
+            error: makeError(SESSION_EXPIRED_MESSAGE, xhr.status, 'SESSION_EXPIRED'),
+            raw
+          })
+          return
+        }
+        resolve({
+          data: null,
+          error: makeError(message, xhr.status, raw?.code || null),
+          raw
+        })
+        return
+      }
+
+      resolve({ data: raw?.data ?? raw, error: null, raw })
+    }
+
+    xhr.onerror = () => {
+      cleanup()
+      resolve({
+        data: null,
+        error: makeError(
+          `Tidak bisa terhubung ke server API (${API_URL}).`,
+          0,
+          'NETWORK_ERROR'
+        ),
+        raw: null
+      })
+    }
+
+    xhr.send(form)
+  })
+
+  let result = await uploadOnce()
+  if (result?.raw === null && result?.error?.code === 'REQUEST_ABORTED') return result
+
+  if (result?.error?.status === 419) {
+    csrfReady = false
+    try {
+      await ensureCsrf(true)
+      result = await uploadOnce()
+    } catch { }
+  }
+
+  return result
+}
+
 const buildQueryString = (params = {}) => {
   const query = new URLSearchParams()
   Object.entries(params || {}).forEach(([key, value]) => {
@@ -1373,7 +1500,12 @@ class StorageBucket {
     if (options?.upsert) form.append('upsert', 'true')
     if (options?.fastLocal) form.append('fast_local', 'true')
 
-    const res = await apiFetch('/api/storage/upload', { method: 'POST', body: form })
+    const res = typeof options?.onProgress === 'function'
+      ? await apiUploadFormData('/api/storage/upload', form, {
+        signal: options.signal,
+        onProgress: options.onProgress
+      })
+      : await apiFetch('/api/storage/upload', { method: 'POST', body: form, signal: options.signal })
 
     const rawData = res.raw?.data ?? res.data
     const baseData = rawData && typeof rawData === 'object' ? { ...rawData } : { value: rawData }
@@ -1389,6 +1521,18 @@ class StorageBucket {
     }
 
     return { data: baseData, error: res.error }
+  }
+
+  async uploadDestination({ filename = '', mime_type = '', mime = '' } = {}) {
+    const res = await apiFetch('/api/storage/upload-destination', {
+      method: 'POST',
+      body: {
+        bucket: this.bucket,
+        filename,
+        mime_type: mime_type || mime
+      }
+    })
+    return { data: res.raw?.data ?? res.data, error: res.error }
   }
 
   async update(path, file, options = {}) {
@@ -3051,6 +3195,16 @@ export const supabase = {
       const res = await apiFetch('/api/presence/ping', {
         method: 'POST',
         body: { device_id: deviceId, activity }
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    }
+  },
+  assignments: {
+    async submitAnswer(payload = {}) {
+      const res = await apiFetch('/api/tugas/jawaban/submit', {
+        method: 'POST',
+        body: payload,
+        cacheTtlMs: 0
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     }

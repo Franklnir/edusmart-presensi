@@ -9,6 +9,8 @@ Dokumen ini mencatat area performa yang perlu dijaga saat data siswa, guru, abse
 - Realtime fallback polling memakai daftar kolom eksplisit untuk tabel umum, bukan `select('*')`.
 - Listener absensi kelas difilter per tanggal agar polling tidak menarik seluruh riwayat satu kelas.
 - Tabel Admin Siswa memakai skeleton, disabled pagination saat memuat, dan layout mobile berupa card/list.
+- Upload tugas siswa/guru menampilkan progress nyata, mendeteksi target Google Drive/VPS sebelum upload, dan upload banyak foto siswa dikirim berurutan agar tidak membebani storage saat ramai.
+- Submit jawaban tugas siswa memakai endpoint idempotent ber-lock per siswa+tugas, sehingga double click atau tab ganda tidak membuat duplikasi jawaban.
 
 ## Rekomendasi Index Database
 
@@ -66,6 +68,14 @@ CREATE INDEX IF NOT EXISTS quiz_submissions_quiz_siswa_idx
 CREATE INDEX IF NOT EXISTS tugas_jawaban_tugas_user_idx
   ON tugas_jawaban (tugas_id, user_id);
 ```
+
+## Upload Tugas Saat Ramai
+
+- Pertahankan upload file lewat storage, lalu simpan metadata jawaban secara terpisah. Request submit jawaban harus kecil dan cepat.
+- Jalankan queue worker untuk WhatsApp/Google Drive/sinkronisasi lain. Jangan kirim notifikasi atau proses file berat di request upload utama.
+- Jika 600-1000 siswa upload pada jam yang sama, batasi upload paralel di frontend dan backend. Frontend siswa saat ini mengirim foto satu per satu agar koneksi perangkat dan storage lebih stabil.
+- Untuk skala lebih besar, pindahkan bucket `assignments` ke object storage seperti S3-compatible/Cloudflare R2/MinIO dan gunakan signed direct upload agar bandwidth file tidak lewat PHP app server.
+- Pantau `storage` rate limit, disk usage, queue backlog, dan error 413/429. Naikkan limit hanya setelah bandwidth/storage siap.
 
 ## Catatan Lanjutan
 

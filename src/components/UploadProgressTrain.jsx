@@ -11,18 +11,31 @@ const toneClasses = {
 export default function UploadProgressTrain({
   label = 'Mengupload file...',
   detail = 'File sedang dikirim ke storage.',
+  progress = null,
   tone = 'blue',
   className = ''
 }) {
   const toneClass = toneClasses[tone] || toneClasses.blue
-  const badgeLabel = tone === 'emerald' ? 'DRIVE' : tone === 'red' ? 'VPS' : 'UPLOAD'
+  const normalizedProgress = Number.isFinite(Number(progress))
+    ? Math.max(0, Math.min(100, Math.round(Number(progress))))
+    : null
+  const badgeLabel = normalizedProgress !== null
+    ? `${normalizedProgress}%`
+    : tone === 'emerald' ? 'DRIVE' : tone === 'red' ? 'VPS' : 'UPLOAD'
 
   return (
     <div
       className={`upload-train ${toneClass} ${className}`}
+      data-determinate={normalizedProgress !== null ? 'true' : 'false'}
       role="status"
       aria-live="polite"
       aria-label={label}
+      style={normalizedProgress !== null
+        ? {
+          '--upload-progress': `${normalizedProgress}%`,
+          '--upload-progress-ratio': normalizedProgress / 100
+        }
+        : undefined}
     >
       <div className="upload-train__header">
         <span className="upload-train__icon" aria-hidden="true">

@@ -90,6 +90,18 @@ const uploadDetailForProvider = (provider, fallback) => {
   return fallback
 }
 
+const resolveAssignmentUploadDestination = async (file) => {
+  try {
+    const { data } = await supabase.storage.from(ASSIGNMENT_BUCKET).uploadDestination({
+      filename: file?.name || '',
+      mime_type: file?.type || ''
+    })
+    return data || null
+  } catch {
+    return null
+  }
+}
+
 const MIN_UPLOAD_ANIMATION_MS = 250
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const holdUploadAnimation = async (startedAt) => {
@@ -471,6 +483,7 @@ export default function TugasGuru() {
   const [uploadedFileSizeCreate, setUploadedFileSizeCreate] = useState('')
   const [compressionProgress, setCompressionProgress] = useState(null)
   const [uploadProvider, setUploadProvider] = useState(null)
+  const [uploadPercent, setUploadPercent] = useState(null)
 
   // History filter
   const [listTugas, setListTugas] = useState([])
@@ -1061,18 +1074,25 @@ export default function TugasGuru() {
     try {
       setIsUploadingFile(true)
       setUploadProvider(null)
+      setUploadPercent(null)
       setCompressionProgress('Mengkompresi file...')
 
       const compressed = await compressFileBeforeUpload(file)
+      const destination = await resolveAssignmentUploadDestination(compressed)
+      if (destination?.provider) setUploadProvider(destination.provider)
 
       const safeName = sanitizeFileName(compressed.name)
       const filePath = `tugas_lampiran/${user.id}/${Date.now()}-${safeName}`
 
-      setCompressionProgress('Mengupload file...')
+      setCompressionProgress(`Mengupload file${destination?.providerLabel ? ` ke ${destination.providerLabel}` : ''}...`)
 
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from(ASSIGNMENT_BUCKET)
-        .upload(filePath, compressed, { upsert: false, cacheControl: '3600' })
+        .upload(filePath, compressed, {
+          upsert: false,
+          cacheControl: '3600',
+          onProgress: setUploadPercent
+        })
 
       if (uploadError) {
         // RLS storage paling sering muncul di sini
@@ -1118,6 +1138,7 @@ export default function TugasGuru() {
     } catch (error) {
       console.error('Upload error:', error)
       setCompressionProgress(null)
+      setUploadPercent(null)
       const parsed = parseSupabaseError(error)
       // bantu diagnosa biar cepat
       if (parsed.code === 'rls_denied' || parsed.code === 'storage_policy_recursion') {
@@ -1129,6 +1150,7 @@ export default function TugasGuru() {
       await holdUploadAnimation(animationStartedAt)
       setIsUploadingFile(false)
       setUploadProvider(null)
+      setUploadPercent(null)
     }
   }
 
@@ -2004,6 +2026,7 @@ export default function TugasGuru() {
                 <UploadProgressTrain
                   label={compressionProgress || 'Mengupload file...'}
                   detail={uploadDetailForProvider(uploadProvider, 'Lampiran tugas sedang diproses dan dikirim.')}
+                  progress={uploadPercent}
                   tone={uploadToneForProvider(uploadProvider)}
                 />
               ) : form.file_url ? (
@@ -2616,6 +2639,7 @@ export default function TugasGuru() {
                           <UploadProgressTrain
                             label={compressionProgress || 'Mengupload file...'}
                             detail={uploadDetailForProvider(uploadProvider, 'Lampiran tugas sedang diproses dan dikirim.')}
+                            progress={uploadPercent}
                             tone={uploadToneForProvider(uploadProvider)}
                           />
                         ) : (

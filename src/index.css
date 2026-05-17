@@ -421,6 +421,20 @@ body.quiz-strict-active img {
   animation: uploadTrainMove 2.4s cubic-bezier(0.45, 0, 0.2, 1) infinite;
 }
 
+.upload-train[data-determinate="true"] .upload-train__fill,
+.upload-train[data-determinate="true"] .upload-train__engine,
+.upload-train[data-determinate="true"] .upload-train__rail::after {
+  animation: none;
+}
+
+.upload-train[data-determinate="true"] .upload-train__fill {
+  transform: scaleX(var(--upload-progress-ratio, 0));
+}
+
+.upload-train[data-determinate="true"] .upload-train__engine {
+  left: clamp(0.24rem, calc(var(--upload-progress, 0%) - 0.72rem), calc(100% - 1.64rem));
+}
+
 .upload-train__battery-cap {
   width: 0.3rem;
   height: 0.78rem;

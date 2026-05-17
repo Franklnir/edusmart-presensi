@@ -120,6 +120,18 @@ const uploadDetailForProvider = (provider, fallback) => {
   return fallback
 }
 
+const resolveAssignmentUploadDestination = async (file) => {
+  try {
+    const { data } = await supabase.storage.from(ASSIGNMENT_BUCKET).uploadDestination({
+      filename: file?.name || '',
+      mime_type: file?.type || ''
+    })
+    return data || null
+  } catch {
+    return null
+  }
+}
+
 const MIN_UPLOAD_ANIMATION_MS = 250
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const holdUploadAnimation = async (startedAt) => {
@@ -492,6 +504,7 @@ export default function TugasSiswa() {
 
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(null)
+  const [uploadPercent, setUploadPercent] = useState(null)
   const [answerUploadProvider, setAnswerUploadProvider] = useState(null)
   const [pendingJawabanFile, setPendingJawabanFile] = useState(null)
   const [pendingJawabanPhotos, setPendingJawabanPhotos] = useState([])
@@ -943,18 +956,25 @@ export default function TugasSiswa() {
     try {
       setIsUploading(true)
       setAnswerUploadProvider(null)
+      setUploadPercent(null)
       setUploadProgress('Mengkompresi file...')
 
       const compressed = await compressFileBeforeUpload(file)
+      const destination = await resolveAssignmentUploadDestination(compressed)
+      if (destination?.provider) setAnswerUploadProvider(destination.provider)
 
       const safeName = sanitizeFileName(compressed.name)
       const filePath = `${selectedTugas.id}/${user.id}-${Date.now()}-${safeName}`
 
-      setUploadProgress('Mengupload file...')
+      setUploadProgress(`Mengupload file${destination?.providerLabel ? ` ke ${destination.providerLabel}` : ''}...`)
 
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from(ASSIGNMENT_BUCKET)
-        .upload(filePath, compressed, { upsert: false, cacheControl: '3600' })
+        .upload(filePath, compressed, {
+          upsert: false,
+          cacheControl: '3600',
+          onProgress: setUploadPercent
+        })
 
       if (uploadError) throw new Error(uploadError.message)
 
@@ -993,12 +1013,14 @@ export default function TugasSiswa() {
     } catch (error) {
       console.error('Upload jawaban error:', error)
       setUploadProgress(null)
+      setUploadPercent(null)
       const parsed = parseSupabaseError(error)
       pushToast('error', `Gagal upload file: ${parsed.message}`)
     } finally {
       await holdUploadAnimation(animationStartedAt)
       setIsUploading(false)
       setAnswerUploadProvider(null)
+      setUploadPercent(null)
     }
   }
 
@@ -1006,6 +1028,7 @@ export default function TugasSiswa() {
     if (!inputFiles?.length || !user?.id || !selectedTugas) return
     const files = normalizePhotoFiles(inputFiles)
     const animationStartedAt = Date.now()
+    let uploaded = []
 
     if (files.length === 0) {
       pushToast('error', 'Pilih file foto dari galeri perangkat.')
@@ -1032,25 +1055,38 @@ export default function TugasSiswa() {
     try {
       setIsUploading(true)
       setAnswerUploadProvider(null)
+      setUploadPercent(null)
       setUploadProgress(`Menyiapkan ${files.length} foto...`)
 
-      setUploadProgress(`Mengupload ${files.length} foto...`)
-      const uploaded = await Promise.all(files.map(async (file, i) => {
+      uploaded = []
+      for (let i = 0; i < files.length; i += 1) {
+        const file = files[i]
+        setUploadProgress(`Mengkompresi foto ${i + 1}/${files.length}...`)
         const compressed = await compressImage(file, ASSIGNMENT_PHOTO_MAX_BYTES / 1024)
+        const destination = await resolveAssignmentUploadDestination(compressed)
+        if (destination?.provider) setAnswerUploadProvider(destination.provider)
         const safeName = sanitizeFileName(compressed.name || `foto-${i + 1}.jpg`)
         const filePath = `${selectedTugas.id}/${user.id}-${Date.now()}-${i + 1}-${safeName}`
 
+        setUploadProgress(`Mengupload foto ${i + 1}/${files.length}${destination?.providerLabel ? ` ke ${destination.providerLabel}` : ''}...`)
         const { data: uploadData, error: uploadError } = await supabase.storage
           .from(ASSIGNMENT_BUCKET)
-          .upload(filePath, compressed, { upsert: false, cacheControl: '3600' })
+          .upload(filePath, compressed, {
+            upsert: false,
+            cacheControl: '3600',
+            onProgress: (progress) => {
+              const aggregate = Math.round(((i + (progress / 100)) / files.length) * 100)
+              setUploadPercent(Math.max(0, Math.min(100, aggregate)))
+            }
+          })
 
         if (uploadError) throw new Error(uploadError.message)
 
         const storedFileValue = uploadData?.path || uploadData?.fullPath || filePath
         const sizeLabel = uploadData?.uploadedSizeLabel || formatFileSize(uploadData?.uploadedSizeBytes || compressed.size)
         const storedProvider = uploadData?.provider === 'google_drive' ? 'google_drive' : 'local'
-        return { value: storedFileValue, sizeLabel, provider: storedProvider }
-      }))
+        uploaded.push({ value: storedFileValue, sizeLabel, provider: storedProvider })
+      }
       setAnswerUploadProvider(uploaded.some((item) => item.provider === 'google_drive') ? 'google_drive' : 'local')
 
       const stalePending = [
@@ -1076,13 +1112,23 @@ export default function TugasSiswa() {
       showUploadSuccessNotice(`${values.length} foto siap`, 'Tambahkan komentar bila perlu, lalu klik Kirim Jawaban.')
     } catch (error) {
       console.error('Upload foto jawaban error:', error)
+      if (uploaded.length > 0) {
+        await Promise.allSettled(
+          uploaded
+            .map((item) => item?.value)
+            .filter(Boolean)
+            .map((value) => deleteJawabanFileFromStorage(value, selectedTugas.id, user.id))
+        )
+      }
       setUploadProgress(null)
+      setUploadPercent(null)
       const parsed = parseSupabaseError(error)
       pushToast('error', `Gagal upload foto: ${parsed.message}`)
     } finally {
       await holdUploadAnimation(animationStartedAt)
       setIsUploading(false)
       setAnswerUploadProvider(null)
+      setUploadPercent(null)
       if (galleryInputRef.current) galleryInputRef.current.value = ''
     }
   }
@@ -1202,6 +1248,10 @@ export default function TugasSiswa() {
 
   const saveJawaban = async () => {
     if (!user?.id || !selectedTugas || !detail?.tugas) return
+    if (isUploading || loading) {
+      pushToast('info', 'Tunggu proses upload atau submit sebelumnya selesai.')
+      return
+    }
 
     // ANTI-IDOR: pastikan tugas untuk kelas siswa
     const kelas = selectedKelas || kelasSiswa
@@ -1267,19 +1317,8 @@ export default function TugasSiswa() {
         ...academicPeriodPayload
       }
 
-      if (existing?.id) {
-        // ANTI-IDOR: update hanya row milik user (RLS harus enforce juga)
-        const { error } = await supabase
-          .from('tugas_jawaban')
-          .update(payload)
-          .eq('id', existing.id)
-          .eq('user_id', user.id)
-
-        if (error) throw error
-      } else {
-        const { error } = await supabase.from('tugas_jawaban').insert(payload)
-        if (error) throw error
-      }
+      const { error } = await supabase.assignments.submitAnswer(payload)
+      if (error) throw error
 
       const nextFiles = photoValues.length > 0
         ? photoValues
@@ -2078,6 +2117,7 @@ export default function TugasSiswa() {
                               <UploadProgressTrain
                                 label={uploadProgress || 'Mengupload file...'}
                                 detail={uploadDetailForProvider(answerUploadProvider, 'Jawaban sedang diproses dan dikirim.')}
+                                progress={uploadPercent}
                                 tone={uploadToneForProvider(answerUploadProvider)}
                               />
                             ) : (jawabanFileKey || detail?.myJawaban?.file_url) ? (
@@ -2096,7 +2136,7 @@ export default function TugasSiswa() {
                                   onFiles={handleUploadJawabanFile}
                                   accept={ASSIGNMENT_FILE_ACCEPT}
                                   label="Ganti file"
-                                  disabled={isSubmissionLocked}
+                                  disabled={isSubmissionLocked || isUploading}
                                   small
                                 />
                               </div>
@@ -2105,7 +2145,7 @@ export default function TugasSiswa() {
                                 onFiles={handleUploadJawabanFile}
                                 accept={ASSIGNMENT_FILE_ACCEPT}
                                 label="Seret file jawaban ke sini atau klik untuk memilih"
-                                disabled={isSubmissionLocked}
+                                disabled={isSubmissionLocked || isUploading}
                               />
                             )}
 
@@ -2124,10 +2164,10 @@ export default function TugasSiswa() {
                             <button
                               type="button"
                               onClick={saveJawaban}
-                              disabled={isSubmissionLocked}
+                              disabled={isSubmissionLocked || isUploading || loading}
                               className="flex-1 px-4 py-3 rounded-2xl bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white font-bold transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                              🚀 Kirim Jawaban
+                              {loading ? 'Mengirim Jawaban...' : '🚀 Kirim Jawaban'}
                             </button>
                             {detail?.myJawaban?.link_url && (
                               <button

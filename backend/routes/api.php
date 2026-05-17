@@ -18,6 +18,7 @@ use App\Http\Controllers\Api\SettingsController;
 use App\Http\Controllers\Api\StorageController;
 use App\Http\Controllers\Api\SuperAdminController;
 use App\Http\Controllers\Api\SuperPluginController;
+use App\Http\Controllers\Api\TugasController;
 use App\Http\Controllers\Api\WhatsAppController;
 use App\Http\Controllers\Api\WhatsAppWebhookController;
 use App\Http\Middleware\EnsureTenantMatchesProfile;
@@ -164,6 +165,10 @@ Route::prefix('storage')->middleware(['auth:sanctum', 'throttle:storage'])->grou
 });
 Route::get('/storage/signed', [StorageController::class, 'signed'])->middleware('throttle:storage');
 Route::get('/storage/object', [StorageController::class, 'object'])->middleware('throttle:storage');
+
+Route::prefix('tugas')->middleware(['auth:sanctum', 'throttle:api'])->group(function () {
+    Route::post('/jawaban/submit', [TugasController::class, 'submitJawaban']);
+});
 
 Route::prefix('reports')->middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::get('/teacher-summary', [ReportController::class, 'teacherSummary']);
