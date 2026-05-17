@@ -90,8 +90,7 @@ const TENANT_DETAIL_TABS = [
   { value: 'admins', label: 'Admin', icon: UserCog },
   { value: 'domains', label: 'Domain', icon: Globe2 },
   { value: 'backup', label: 'Backup & Restore', icon: Database },
-  { value: 'devices', label: 'RFID & MQTT', icon: ShieldCheck },
-  { value: 'storage', label: 'Storage', icon: HardDrive }
+  { value: 'devices', label: 'RFID & MQTT', icon: ShieldCheck }
 ]
 
 const STANDARD_RFID_MQTT_TOPICS = {
@@ -196,12 +195,6 @@ const dnsStatusBadgeClass = (status) => {
   return 'bg-slate-100 text-slate-600'
 }
 
-const driveStatusBadgeClass = (drive = {}) => {
-  if (drive?.ready) return 'bg-emerald-100 text-emerald-700'
-  if (drive?.status === 'needs_attention') return 'bg-amber-100 text-amber-700'
-  return 'bg-slate-100 text-slate-600'
-}
-
 const formatDnsRecords = (records = []) => {
   if (!Array.isArray(records) || records.length === 0) return 'Belum ada record'
 
@@ -303,23 +296,6 @@ const copyText = async (text) => {
   const copied = document.execCommand('copy')
   textarea.remove()
   return copied
-}
-
-const formatBytes = (bytes) => {
-  const value = Number(bytes || 0)
-  if (!Number.isFinite(value) || value <= 0) return '0 B'
-
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let size = value
-  let idx = 0
-
-  while (size >= 1024 && idx < units.length - 1) {
-    size /= 1024
-    idx += 1
-  }
-
-  const precision = idx === 0 ? 0 : 2
-  return `${Number(size.toFixed(precision)).toLocaleString('id-ID')} ${units[idx]}`
 }
 
 const toCellValue = (value) => {
@@ -665,7 +641,6 @@ const Tenants = () => {
   })
   const [tenantSearch, setTenantSearch] = useState('')
   const [tenantStatusFilter, setTenantStatusFilter] = useState('all')
-  const [tenantDriveFilter, setTenantDriveFilter] = useState('all')
 
   const rootDomain = useMemo(() => getRootDomain(), [])
   const platformRootDomain = platformDomains?.platform?.root_domain || rootDomain
@@ -1521,9 +1496,6 @@ const Tenants = () => {
   const detailStats = tenantDetail?.stats || {}
   const detailAdmins = Array.isArray(tenantDetail?.admins) ? tenantDetail.admins : []
   const detailDomains = Array.isArray(tenantDetail?.domains) ? tenantDetail.domains : []
-  const detailStorage = tenantDetail?.storage || {}
-  const detailGoogleDrive = tenantDetail?.google_drive || {}
-  const storageBuckets = Array.isArray(detailStorage?.buckets) ? detailStorage.buckets : []
   const detailRfidNotes = Array.isArray(detailRfidTemplate?.notes) ? detailRfidTemplate.notes : []
   const primaryAdminUserId = String(detailTenant?.primary_admin_user_id || '')
   const primaryAdminInfo = detailAdmins.find(
@@ -1569,31 +1541,24 @@ const Tenants = () => {
         total: summary.total + 1,
         active: summary.active + (status === 'active' ? 1 : 0),
         suspended: summary.suspended + (status === 'suspended' ? 1 : 0),
-        archived: summary.archived + (status === 'archived' ? 1 : 0),
-        driveReady: summary.driveReady + (tenant?.google_drive?.ready ? 1 : 0)
+        archived: summary.archived + (status === 'archived' ? 1 : 0)
       }
     },
-    { total: 0, active: 0, suspended: 0, archived: 0, driveReady: 0 }
+    { total: 0, active: 0, suspended: 0, archived: 0 }
   )
   const selectedTenantRow = tenants.find((tenant) => tenant.id === selectedTenantId)
   const readyAdminDomains = adminDomains.filter((domain) => domain?.status === 'ready').length
   const normalizedTenantSearch = tenantSearch.trim().toLowerCase()
   const filteredTenants = tenants.filter((tenant) => {
     const status = String(tenant?.status || '').toLowerCase()
-    const driveReady = Boolean(tenant?.google_drive?.ready)
     const matchesSearch = !normalizedTenantSearch || [
       tenant?.name,
       tenant?.slug,
-      tenant?.id,
-      tenant?.google_drive?.account_email
+      tenant?.id
     ].some((value) => String(value || '').toLowerCase().includes(normalizedTenantSearch))
     const matchesStatus = tenantStatusFilter === 'all' || status === tenantStatusFilter
-    const matchesDrive =
-      tenantDriveFilter === 'all' ||
-      (tenantDriveFilter === 'ready' && driveReady) ||
-      (tenantDriveFilter === 'not-ready' && !driveReady)
 
-    return matchesSearch && matchesStatus && matchesDrive
+    return matchesSearch && matchesStatus
   })
   const formSlug = slugify(form.slug)
   const formSlugReserved = formSlug ? isReservedTenantSlug(formSlug) : false
@@ -1618,8 +1583,7 @@ const Tenants = () => {
     admins: detailAdmins.length ? numberFormatter.format(detailAdmins.length) : '',
     domains: detailDomains.length ? numberFormatter.format(detailDomains.length) : '',
     backup: restoreFileName ? 'file siap' : '',
-    devices: detailRfidMqttConfig?.available ? 'aktif' : '',
-    storage: detailGoogleDrive?.ready ? 'siap' : ''
+    devices: detailRfidMqttConfig?.available ? 'aktif' : ''
   }
 
   return (
@@ -1658,7 +1622,7 @@ const Tenants = () => {
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <TenantMetricCard
           icon={School}
           label="Total sekolah"
@@ -1681,13 +1645,6 @@ const Tenants = () => {
           tone="amber"
         />
         <TenantMetricCard
-          icon={HardDrive}
-          label="Drive siap"
-          value={numberFormatter.format(tenantSummary.driveReady)}
-          description="Google Drive tenant aktif"
-          tone="slate"
-        />
-        <TenantMetricCard
           icon={ShieldCheck}
           label="Host admin"
           value={numberFormatter.format(readyAdminDomains)}
@@ -1703,7 +1660,7 @@ const Tenants = () => {
               <div>
                 <h2 className="text-lg font-bold text-slate-900">Daftar Sekolah</h2>
                 <p className="mt-1 text-sm text-slate-600">
-                  Pilih sekolah untuk membuka detail admin, domain, storage, backup, dan konfigurasi perangkat.
+                  Pilih sekolah untuk membuka detail admin, domain, backup, dan konfigurasi perangkat. Storage dikelola dari menu Storage VPS.
                 </p>
               </div>
               {selectedTenantId && (
@@ -1716,14 +1673,14 @@ const Tenants = () => {
               )}
             </div>
 
-            <div className="mt-5 grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_180px_180px_auto]">
+            <div className="mt-5 grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_180px_auto]">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <input
                   type="search"
                   value={tenantSearch}
                   onChange={(event) => setTenantSearch(event.target.value)}
-                  placeholder="Cari nama sekolah, slug, tenant ID, atau akun Drive"
+                  placeholder="Cari nama sekolah, slug, atau tenant ID"
                   className="h-11 w-full rounded-xl border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
                 />
               </div>
@@ -1737,21 +1694,11 @@ const Tenants = () => {
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
               </select>
-              <select
-                value={tenantDriveFilter}
-                onChange={(event) => setTenantDriveFilter(event.target.value)}
-                className={tenantFieldClass}
-              >
-                <option value="all">Semua Drive</option>
-                <option value="ready">Drive siap</option>
-                <option value="not-ready">Drive belum siap</option>
-              </select>
               <button
                 type="button"
                 onClick={() => {
                   setTenantSearch('')
                   setTenantStatusFilter('all')
-                  setTenantDriveFilter('all')
                 }}
                 className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
               >
@@ -1784,7 +1731,6 @@ const Tenants = () => {
                     <th className="px-5 py-3">Sekolah</th>
                     <th className="px-5 py-3">Subdomain</th>
                     <th className="px-5 py-3">Status</th>
-                    <th className="px-5 py-3">Google Drive</th>
                     <th className="px-5 py-3">Dibuat</th>
                     <th className="px-5 py-3 text-right">Aksi</th>
                   </tr>
@@ -1823,16 +1769,6 @@ const Tenants = () => {
                           >
                             {tenant.status || 'unknown'}
                           </span>
-                        </td>
-                        <td className="px-5 py-4">
-                          <div className="flex flex-col gap-1">
-                            <span className={`w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${driveStatusBadgeClass(tenant.google_drive)}`}>
-                              {tenant.google_drive?.ready ? 'Siap' : tenant.google_drive?.status_label || 'Belum'}
-                            </span>
-                            <span className="text-[11px] text-slate-500">
-                              {tenant.google_drive?.quota?.used_label || '0 B'}
-                            </span>
-                          </div>
                         </td>
                         <td className="px-5 py-4 text-slate-500">{formatDateTime(tenant.created_at)}</td>
                         <td className="px-5 py-4 text-right">
@@ -2392,7 +2328,7 @@ const Tenants = () => {
           ) : (
             <div className="space-y-4 p-5">
               <div className="rounded-2xl border border-slate-200 bg-white p-2">
-                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-6">
+                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
                   {TENANT_DETAIL_TABS.map((tab) => {
                     const Icon = tab.icon
                     const isActive = detailTab === tab.value
@@ -2442,7 +2378,7 @@ const Tenants = () => {
                     </div>
                   </div>
 
-                  <div className="grid gap-3 lg:grid-cols-3">
+                  <div className="grid gap-3 lg:grid-cols-4">
                     <button
                       type="button"
                       onClick={() => setDetailTab('admins')}
@@ -2476,6 +2412,19 @@ const Tenants = () => {
                         {restoreFileName ? `File restore siap: ${restoreFileName}` : 'Upload JSON untuk dry-run restore.'}
                       </p>
                     </button>
+                    <a
+                      href={`/admin/storage?tenant=${encodeURIComponent(selectedTenantId)}`}
+                      className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 text-left transition hover:border-cyan-200 hover:bg-cyan-50"
+                    >
+                      <p className="text-xs font-semibold uppercase text-slate-500">Storage VPS</p>
+                      <p className="mt-1 flex items-center gap-2 text-sm font-bold text-slate-900">
+                        <HardDrive className="h-4 w-4" />
+                        Kelola storage sekolah
+                      </p>
+                      <p className="mt-1 text-xs text-slate-600">
+                        Kuota, Drive, cleanup, trash, dan inventaris file dipusatkan di Storage VPS.
+                      </p>
+                    </a>
                   </div>
                 </>
               )}
@@ -3064,134 +3013,6 @@ const Tenants = () => {
                 </div>
               </div>
 
-              )}
-
-              {detailTab === 'storage' && (
-                <>
-                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50/40 p-4 space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h3 className="text-sm font-semibold text-slate-900">Google Drive Sekolah</h3>
-                  <span className={`text-xs px-2 py-1 rounded-full ${driveStatusBadgeClass(detailGoogleDrive)}`}>
-                    {detailGoogleDrive?.status_label || 'Belum tersambung'}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                  <div className="rounded-xl border border-emerald-200 bg-white p-3">
-                    <p className="text-xs text-slate-500">Status</p>
-                    <p className="text-sm font-bold text-slate-900 mt-1">
-                      {detailGoogleDrive?.ready ? 'Siap dipakai' : detailGoogleDrive?.status_label || '-'}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-emerald-200 bg-white p-3">
-                    <p className="text-xs text-slate-500">Storage Saat Ini</p>
-                    <p className="text-lg font-bold text-slate-900 mt-1">
-                      {detailGoogleDrive?.quota?.used_label || '0 B'}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-emerald-200 bg-white p-3">
-                    <p className="text-xs text-slate-500">Upload Hari Ini</p>
-                    <p className="text-lg font-bold text-slate-900 mt-1">
-                      {detailGoogleDrive?.today?.uploaded_label || '0 B'}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-emerald-200 bg-white p-3">
-                    <p className="text-xs text-slate-500">File EduSmart</p>
-                    <p className="text-lg font-bold text-slate-900 mt-1">
-                      {numberFormatter.format(toNumber(detailGoogleDrive?.app_storage?.files))}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 text-xs">
-                  <div className="rounded-xl border border-emerald-200 bg-white p-3 lg:col-span-2">
-                    <p className="font-semibold text-slate-500">Akun</p>
-                    <p className="mt-1 break-all text-sm font-semibold text-slate-900">
-                      {detailGoogleDrive?.account_email || '-'}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-emerald-200 bg-white p-3">
-                    <p className="font-semibold text-slate-500">Limit</p>
-                    <p className="mt-1 text-sm font-semibold text-slate-900">
-                      {detailGoogleDrive?.quota?.limit_label || 'Tidak terbatas'}
-                    </p>
-                  </div>
-                </div>
-
-                {detailGoogleDrive?.last_error && (
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-                    {detailGoogleDrive.last_error}
-                  </div>
-                )}
-              </div>
-
-              <div className="rounded-2xl border border-cyan-200 bg-cyan-50/50 p-4 space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h3 className="text-sm font-semibold text-slate-900">Monitoring Storage Tenant (Realtime)</h3>
-                  <span className="text-[11px] px-2 py-1 rounded-full bg-cyan-100 text-cyan-800 border border-cyan-200">
-                    Auto-refresh 15 detik
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                  <div className="rounded-xl border border-cyan-200 bg-white p-3">
-                    <p className="text-xs text-slate-500">Storage Terpakai</p>
-                    <p className="text-lg font-bold text-slate-900 mt-1">
-                      {detailStorage.total_label || formatBytes(detailStorage.total_bytes)}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-cyan-200 bg-white p-3">
-                    <p className="text-xs text-slate-500">File Tersimpan</p>
-                    <p className="text-lg font-bold text-slate-900 mt-1">
-                      {numberFormatter.format(toNumber(detailStorage.resolved_files))}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-cyan-200 bg-white p-3">
-                    <p className="text-xs text-slate-500">Referensi Tidak Ditemukan</p>
-                    <p className="text-lg font-bold text-amber-700 mt-1">
-                      {numberFormatter.format(toNumber(detailStorage.unresolved_references))}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-cyan-200 bg-white p-3">
-                    <p className="text-xs text-slate-500">Update Terakhir</p>
-                    <p className="text-sm font-semibold text-slate-900 mt-1">
-                      {formatDateTime(detailStorage.computed_at)}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-xs">
-                    <thead>
-                      <tr className="text-left text-slate-500">
-                        <th className="py-2 pr-3">Bucket</th>
-                        <th className="py-2 pr-3">File</th>
-                        <th className="py-2 pr-3">Ukuran</th>
-                      </tr>
-                    </thead>
-                    <tbody className="text-slate-700">
-                      {storageBuckets.map((bucket) => (
-                        <tr key={bucket.bucket} className="border-t border-cyan-100">
-                          <td className="py-2 pr-3 font-medium text-slate-900">{bucket.bucket || '-'}</td>
-                          <td className="py-2 pr-3">{numberFormatter.format(toNumber(bucket.files))}</td>
-                          <td className="py-2 pr-3">
-                            {bucket.bytes_label || formatBytes(bucket.bytes)}
-                          </td>
-                        </tr>
-                      ))}
-                      {storageBuckets.length === 0 && (
-                        <tr>
-                          <td colSpan={3} className="py-3 text-slate-500">
-                            Belum ada data storage.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-                </>
               )}
 
               {detailTab === 'backup' && (

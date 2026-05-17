@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Services\GoogleDrive\GoogleDriveService;
 use App\Services\Storage\StorageManagementService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -11,7 +12,8 @@ use Illuminate\Support\Facades\Validator;
 class StorageManagementController extends ApiController
 {
     public function __construct(
-        private readonly StorageManagementService $storageManagementService
+        private readonly StorageManagementService $storageManagementService,
+        private readonly GoogleDriveService $googleDriveService
     ) {}
 
     public function adminSummary(Request $request)
@@ -85,7 +87,16 @@ class StorageManagementController extends ApiController
             return $this->deny();
         }
 
-        return $this->ok($this->storageManagementService->superOverview());
+        $overview = $this->storageManagementService->superOverview();
+        if (isset($overview['tenants']) && is_array($overview['tenants'])) {
+            $overview['tenants'] = array_map(function (array $tenant) {
+                $tenant['google_drive'] = $this->googleDriveService->summaryForTenant((string) ($tenant['id'] ?? ''));
+
+                return $tenant;
+            }, $overview['tenants']);
+        }
+
+        return $this->ok($overview);
     }
 
     public function superTenantSummary(Request $request, string $tenantId)
@@ -187,6 +198,59 @@ class StorageManagementController extends ApiController
         return $this->ok(['restored' => true]);
     }
 
+    public function superTenantDriveSummary(Request $request, string $tenantId)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenant = $this->tenantByIdOrSlug($tenantId);
+        if (! $tenant) {
+            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+        }
+
+        return $this->ok($this->googleDriveService->statusForTenant(
+            (string) $tenant->id,
+            false,
+            $this->driveUsageFilters($request)
+        ));
+    }
+
+    public function superTenantDriveSync(Request $request, string $tenantId)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenant = $this->tenantByIdOrSlug($tenantId);
+        if (! $tenant) {
+            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+        }
+
+        return $this->ok($this->googleDriveService->statusForTenant(
+            (string) $tenant->id,
+            true,
+            $this->driveUsageFilters($request)
+        ));
+    }
+
+    public function superTenantDriveFiles(Request $request, string $tenantId)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenant = $this->tenantByIdOrSlug($tenantId);
+        if (! $tenant) {
+            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+        }
+
+        return $this->ok($this->googleDriveService->filesForTenant(
+            (string) $tenant->id,
+            $this->driveFileFilters($request)
+        ));
+    }
+
     public function superPurgeExpiredTrash(Request $request)
     {
         if (! $this->isSuperAdmin($request)) {
@@ -214,6 +278,26 @@ class StorageManagementController extends ApiController
             'older_than_days' => $request->input('older_than_days', $request->query('older_than_days')),
             'largest_percent' => $request->input('largest_percent', $request->query('largest_percent')),
             'mode' => $request->input('mode', $request->query('mode', 'cleanup')),
+        ];
+    }
+
+    private function driveUsageFilters(Request $request): array
+    {
+        return [
+            'tahun_ajaran' => (string) $request->query('tahun_ajaran', $request->query('tahunAjaran', '')),
+            'semester' => (string) $request->query('semester', ''),
+        ];
+    }
+
+    private function driveFileFilters(Request $request): array
+    {
+        return [
+            ...$this->driveUsageFilters($request),
+            'bucket' => (string) $request->query('bucket', ''),
+            'kelas' => (string) $request->query('kelas', ''),
+            'angkatan' => (string) $request->query('angkatan', ''),
+            'q' => (string) $request->query('q', ''),
+            'limit' => (int) $request->query('limit', 50),
         ];
     }
 

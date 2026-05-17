@@ -129,11 +129,7 @@ class SuperAdminController extends ApiController
 
         $this->applyPagination($query, $request);
 
-        $tenants = $query->get()->map(function ($tenant) {
-            $tenant->google_drive = $this->googleDriveService->summaryForTenant((string) $tenant->id);
-
-            return $tenant;
-        });
+        $tenants = $query->get();
 
         return $this->ok($tenants);
     }
@@ -213,8 +209,6 @@ class SuperAdminController extends ApiController
         });
 
         $domains = $this->tenantDomainService->listTenantDomains((string) $tenant->id);
-        $storage = $this->buildTenantStorageUsage((string) $tenant->id);
-        $googleDrive = $this->googleDriveService->summaryForTenant((string) $tenant->id);
         $rfidMqttConfig = $this->tenantMqttConfigService->tenantConfig(
             (string) $tenant->id,
             (string) $tenant->slug,
@@ -256,8 +250,6 @@ class SuperAdminController extends ApiController
                 ],
                 'admins' => $admins,
                 'domains' => $domains,
-                'storage' => $storage,
-                'google_drive' => $googleDrive,
                 'rfid_mqtt_config' => $this->tenantMqttConfigService->publicConfig($rfidMqttConfig),
                 'rfid_template' => $rfidTemplate,
                 'password_security' => [

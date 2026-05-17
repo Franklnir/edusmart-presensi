@@ -247,6 +247,9 @@ Route::middleware(['auth:sanctum', 'throttle:super', 'super.domain'])->group(fun
     Route::post('/super/tenants/{tenantId}/storage/cleanup/preview', [StorageManagementController::class, 'superCleanupPreview']);
     Route::post('/super/tenants/{tenantId}/storage/cleanup/execute', [StorageManagementController::class, 'superCleanupExecute']);
     Route::post('/super/tenants/{tenantId}/storage/trash/{fileId}/restore', [StorageManagementController::class, 'superRestoreTrashFile']);
+    Route::get('/super/tenants/{tenantId}/google-drive', [StorageManagementController::class, 'superTenantDriveSummary']);
+    Route::get('/super/tenants/{tenantId}/google-drive/files', [StorageManagementController::class, 'superTenantDriveFiles']);
+    Route::post('/super/tenants/{tenantId}/google-drive/sync', [StorageManagementController::class, 'superTenantDriveSync']);
     Route::post('/super/tenants/{tenantId}/domains', [SuperAdminController::class, 'storeTenantDomain']);
     Route::patch('/super/tenants/{tenantId}/rfid-mqtt', [SuperAdminController::class, 'updateTenantRfidMqtt']);
     Route::post('/super/tenants/{tenantId}/rfid-mqtt/mosquitto', [SuperAdminController::class, 'provisionTenantRfidMosquitto']);

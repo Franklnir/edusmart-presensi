@@ -2734,6 +2734,33 @@ const auth = {
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
+    async tenantGoogleDrive(id, params = {}) {
+      const res = await apiFetch(`/api/super/tenants/${id}/google-drive${buildQueryString(params)}`, {
+        method: 'GET',
+        cacheTtlMs: 10 * 1000,
+        staleKey: `super.tenant-google-drive.${id}`,
+        timeoutMs: 20000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async tenantGoogleDriveFiles(id, params = {}) {
+      const res = await apiFetch(`/api/super/tenants/${id}/google-drive/files${buildQueryString(params)}`, {
+        method: 'GET',
+        cacheTtlMs: 10 * 1000,
+        staleKey: `super.tenant-google-drive-files.${id}`,
+        timeoutMs: 20000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async syncTenantGoogleDrive(id, params = {}) {
+      const res = await apiFetch(`/api/super/tenants/${id}/google-drive/sync${buildQueryString(params)}`, {
+        method: 'POST',
+        body: {},
+        cacheTtlMs: 0,
+        timeoutMs: 30000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
     async updateTenantStorageQuota(id, payload = {}) {
       const res = await apiFetch(`/api/super/tenants/${id}/storage/quota`, {
         method: 'PATCH',

@@ -22,6 +22,7 @@ import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import { formatDateTime } from '../../lib/time'
+import useDebounce from '../../hooks/useDebounce'
 
 const CATEGORIES = [
   { value: '', label: 'Semua kategori' },
@@ -72,6 +73,10 @@ const bytesToMbInput = (bytes) => bytes ? String(Math.round((Number(bytes) / 102
 const activeTabFromUrl = () => {
   if (typeof window === 'undefined') return 'storage'
   return new URLSearchParams(window.location.search).get('tab') === 'drive' ? 'drive' : 'storage'
+}
+const selectedTenantFromUrl = () => {
+  if (typeof window === 'undefined') return ''
+  return new URLSearchParams(window.location.search).get('tenant') || ''
 }
 const normalizeDriveStatus = (data) => data || DRIVE_STATUS_DEFAULT
 const labelOrZero = (value) => value || '0 B'
@@ -125,9 +130,11 @@ function StorageManager() {
   const [activeTab, setActiveTab] = useState(activeTabFromUrl)
   const [summary, setSummary] = useState(null)
   const [superSummary, setSuperSummary] = useState(null)
-  const [selectedTenantId, setSelectedTenantId] = useState('')
+  const [selectedTenantId, setSelectedTenantId] = useState(selectedTenantFromUrl)
   const [tenantDetail, setTenantDetail] = useState(null)
   const [quotaForm, setQuotaForm] = useState({ quotaGb: '', maxUploadMb: '', notes: '' })
+  const [storageFilters, setStorageFilters] = useState({ tahun_ajaran: '', semester: '', category: '' })
+  const [storageFilterDraft, setStorageFilterDraft] = useState({ tahun_ajaran: '', semester: '', category: '' })
   const [cleanupForm, setCleanupForm] = useState({
     tahun_ajaran: '',
     semester: '',
@@ -150,6 +157,8 @@ function StorageManager() {
   const [driveFileBucket, setDriveFileBucket] = useState('all')
   const [driveFileSearch, setDriveFileSearch] = useState('')
   const [drivePeriod, setDrivePeriod] = useState({ tahun_ajaran: '', semester: '' })
+  const [driveFilesTotal, setDriveFilesTotal] = useState(0)
+  const debouncedDriveFileSearch = useDebounce(driveFileSearch, 350)
 
   const activeSummary = tenantDetail || summary || {}
   const usage = activeSummary?.usage || {}
@@ -169,28 +178,16 @@ function StorageManager() {
   const driveAllStorage = driveStatus?.app_storage_all || driveStatus?.app_storage || DRIVE_STATUS_DEFAULT.app_storage
   const driveClassUsageRows = Array.isArray(driveStatus?.usage_by_class) ? driveStatus.usage_by_class : []
   const driveSemesterUsageRows = Array.isArray(driveStatus?.usage_by_semester) ? driveStatus.usage_by_semester : []
-  const driveFileQuery = driveFileSearch.trim().toLowerCase()
-  const driveVisibleFiles = driveFileQuery
-    ? driveFiles.filter((file) => [
-      file.drive_file_name,
-      file.module_label,
-      file.bucket,
-      file.kelas,
-      file.angkatan,
-      file.tahun_ajaran,
-      file.semester,
-      file.extension,
-      file.source_path
-    ].some((value) => String(value || '').toLowerCase().includes(driveFileQuery)))
-    : driveFiles
+  const driveVisibleFiles = driveFiles
 
   const tenants = useMemo(() => (
     Array.isArray(superSummary?.tenants) ? superSummary.tenants : []
   ), [superSummary])
   const selectedTenant = tenants.find((tenant) => tenant.id === selectedTenantId)
+  const selectedTenantName = selectedTenant?.name || tenantDetail?.tenant?.name || 'Sekolah dipilih'
 
-  const loadAdminSummary = async () => {
-    const { data, error } = await supabase.admin.storageManager()
+  const loadAdminSummary = async (filters = storageFilters) => {
+    const { data, error } = await supabase.admin.storageManager(filters)
     if (error) throw error
     setSummary(data || null)
   }
@@ -204,14 +201,16 @@ function StorageManager() {
   }
 
   const loadDriveStatus = async ({ sync = false } = {}) => {
-    if (isSuperAdmin) return
+    if (isSuperAdmin && !selectedTenantId) return
     setDriveLoading(true)
     try {
       const params = {
         tahun_ajaran: drivePeriod.tahun_ajaran,
         semester: drivePeriod.semester
       }
-      const api = sync ? supabase.admin.syncGoogleDrive(params) : supabase.admin.googleDrive(params)
+      const api = isSuperAdmin
+        ? (sync ? supabase.super.syncTenantGoogleDrive(selectedTenantId, params) : supabase.super.tenantGoogleDrive(selectedTenantId, params))
+        : (sync ? supabase.admin.syncGoogleDrive(params) : supabase.admin.googleDrive(params))
       const { data, error } = await api
       if (error) throw error
       setDriveStatus(normalizeDriveStatus(data))
@@ -224,28 +223,34 @@ function StorageManager() {
   }
 
   const loadDriveFiles = async () => {
-    if (isSuperAdmin) return
+    if (isSuperAdmin && !selectedTenantId) return
     setDriveFilesLoading(true)
     try {
       const params = {
         tahun_ajaran: drivePeriod.tahun_ajaran,
         semester: drivePeriod.semester,
-        limit: 40
+        q: debouncedDriveFileSearch.trim(),
+        limit: 50
       }
       if (driveFileBucket !== 'all') params.bucket = driveFileBucket
-      const { data, error } = await supabase.admin.googleDriveFiles(params)
+      const api = isSuperAdmin
+        ? supabase.super.tenantGoogleDriveFiles(selectedTenantId, params)
+        : supabase.admin.googleDriveFiles(params)
+      const { data, error } = await api
       if (error) throw error
       setDriveFiles(Array.isArray(data?.rows) ? data.rows : [])
+      setDriveFilesTotal(Number(data?.total || 0))
     } catch (error) {
       setDriveFiles([])
+      setDriveFilesTotal(0)
       pushToast('error', error?.message || 'Gagal memuat file Google Drive')
     } finally {
       setDriveFilesLoading(false)
     }
   }
 
-  const fetchTenantDetail = async (tenantId) => {
-    const { data, error } = await supabase.super.tenantStorage(tenantId)
+  const fetchTenantDetail = async (tenantId, filters = storageFilters) => {
+    const { data, error } = await supabase.super.tenantStorage(tenantId, filters)
     if (error) throw error
     return data || null
   }
@@ -263,24 +268,31 @@ function StorageManager() {
     if (isSuperAdmin) {
       await loadSuperSummary()
       if (selectedTenantId) {
-        const data = await fetchTenantDetail(selectedTenantId)
+        const data = await fetchTenantDetail(selectedTenantId, storageFilters)
         applyTenantDetail(data)
       }
       return
     }
 
-    await loadAdminSummary()
+    await loadAdminSummary(storageFilters)
   }
 
   const refresh = async () => {
     setLoading(true)
     try {
-      if (activeTab === 'drive' && !isSuperAdmin) {
-        await Promise.all([loadDriveStatus(), loadDriveFiles()])
-      } else if (isSuperAdmin) {
+      if (isSuperAdmin) {
         await loadSuperSummary()
+        if (selectedTenantId) {
+          const data = await fetchTenantDetail(selectedTenantId, storageFilters)
+          applyTenantDetail(data)
+        }
+        if (activeTab === 'drive' && selectedTenantId) {
+          await Promise.all([loadDriveStatus(), loadDriveFiles()])
+        }
+      } else if (activeTab === 'drive') {
+        await Promise.all([loadDriveStatus(), loadDriveFiles()])
       } else {
-        await loadAdminSummary()
+        await loadAdminSummary(storageFilters)
       }
     } catch (error) {
       pushToast('error', error?.message || 'Gagal memuat storage manager')
@@ -310,30 +322,27 @@ function StorageManager() {
   }, [pushToast])
 
   useEffect(() => {
-    if (isSuperAdmin && activeTab === 'drive') {
-      setActiveTab('storage')
-    }
-  }, [activeTab, isSuperAdmin])
-
-  useEffect(() => {
     if (typeof window === 'undefined') return
     const url = new URL(window.location.href)
     if (activeTab === 'drive') url.searchParams.set('tab', 'drive')
     else url.searchParams.delete('tab')
+    if (selectedTenantId) url.searchParams.set('tenant', selectedTenantId)
+    else url.searchParams.delete('tenant')
     window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
-  }, [activeTab])
+  }, [activeTab, selectedTenantId])
 
   useEffect(() => {
-    const activePeriod = summary?.active_period || {}
+    const activePeriod = (isSuperAdmin ? tenantDetail : summary)?.active_period || {}
     if (drivePeriod.tahun_ajaran || !activePeriod?.tahun_ajaran) return
     setDrivePeriod({
       tahun_ajaran: activePeriod.tahun_ajaran || '',
       semester: activePeriod.semester || ''
     })
-  }, [drivePeriod.tahun_ajaran, summary?.active_period])
+  }, [drivePeriod.tahun_ajaran, isSuperAdmin, summary?.active_period, tenantDetail?.active_period])
 
   useEffect(() => {
-    if (!superAdminChecked || isSuperAdmin || activeTab !== 'drive') return
+    if (!superAdminChecked || activeTab !== 'drive') return
+    if (isSuperAdmin && !selectedTenantId) return
     let alive = true
     ;(async () => {
       await Promise.all([loadDriveStatus(), loadDriveFiles()])
@@ -345,12 +354,15 @@ function StorageManager() {
     })
     return () => { alive = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, driveFileBucket, drivePeriod.semester, drivePeriod.tahun_ajaran, isSuperAdmin, superAdminChecked])
+  }, [activeTab, debouncedDriveFileSearch, driveFileBucket, drivePeriod.semester, drivePeriod.tahun_ajaran, isSuperAdmin, selectedTenantId, superAdminChecked])
 
   useEffect(() => {
     if (!isSuperAdmin || !selectedTenantId) return
+    setDriveStatus(DRIVE_STATUS_DEFAULT)
+    setDriveFiles([])
+    setDriveFilesTotal(0)
     let alive = true
-    fetchTenantDetail(selectedTenantId)
+    fetchTenantDetail(selectedTenantId, storageFilters)
       .then((data) => {
         if (!alive) return
         applyTenantDetail(data)
@@ -458,7 +470,45 @@ function StorageManager() {
     }
   }
 
+  const loadStorageWithFilters = async (nextFilters) => {
+    setLoading(true)
+    try {
+      setStorageFilters(nextFilters)
+      setCleanupForm((prev) => ({
+        ...prev,
+        tahun_ajaran: nextFilters.tahun_ajaran,
+        semester: nextFilters.semester,
+        category: nextFilters.category
+      }))
+      if (isSuperAdmin) {
+        if (selectedTenantId) {
+          const data = await fetchTenantDetail(selectedTenantId, nextFilters)
+          applyTenantDetail(data)
+        } else {
+          await loadSuperSummary()
+        }
+      } else {
+        await loadAdminSummary(nextFilters)
+      }
+    } catch (error) {
+      pushToast('error', error?.message || 'Gagal menerapkan filter storage')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleApplyStorageFilters = () => {
+    loadStorageWithFilters(storageFilterDraft)
+  }
+
+  const handleResetStorageFilters = () => {
+    const next = { tahun_ajaran: '', semester: '', category: '' }
+    setStorageFilterDraft(next)
+    loadStorageWithFilters(next)
+  }
+
   const handleConnectGoogleDrive = async () => {
+    if (isSuperAdmin) return
     setDriveConnecting(true)
     try {
       const returnUrl = (() => {
@@ -490,6 +540,7 @@ function StorageManager() {
   }
 
   const handleDisconnectGoogleDrive = async () => {
+    if (isSuperAdmin) return
     const confirmed = window.confirm('Putuskan Google Drive sekolah? Upload berikutnya akan kembali ke storage VPS/object storage sampai disambungkan lagi.')
     if (!confirmed) return
 
@@ -518,10 +569,10 @@ function StorageManager() {
           <div>
             <p className="text-xs font-bold uppercase tracking-wide text-indigo-600">Storage Manager</p>
             <h1 className="text-2xl font-bold text-slate-950">
-              {isSuperAdmin ? 'Kontrol Storage Platform' : 'Storage & Google Drive'}
+              {isSuperAdmin ? 'Storage VPS Platform' : 'Storage & Google Drive'}
             </h1>
             <p className="mt-1 text-sm text-slate-500">
-              Kelola VPS storage, kuota sekolah, Google Drive, inventaris file, rekomendasi cleanup, dan Trash dari satu halaman.
+              Kelola kuota sekolah, VPS/object storage, Google Drive, inventaris file, rekomendasi cleanup, dan Trash dari satu halaman.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -548,28 +599,58 @@ function StorageManager() {
           </div>
         </div>
 
-        {!isSuperAdmin && (
-          <div className="flex gap-2 overflow-x-auto rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
-            <button
-              type="button"
-              onClick={() => setActiveTab('storage')}
-              className={`inline-flex min-w-max items-center gap-2 rounded-md px-4 py-2 text-sm font-semibold ${activeTab === 'storage' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
-            >
-              <HardDrive size={16} />
-              VPS Storage
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('drive')}
-              className={`inline-flex min-w-max items-center gap-2 rounded-md px-4 py-2 text-sm font-semibold ${activeTab === 'drive' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
-            >
-              <Cloud size={16} />
-              Google Drive
-            </button>
-          </div>
+        <div className="flex gap-2 overflow-x-auto rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+          <button
+            type="button"
+            onClick={() => setActiveTab('storage')}
+            className={`inline-flex min-w-max items-center gap-2 rounded-md px-4 py-2 text-sm font-semibold ${activeTab === 'storage' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+          >
+            <HardDrive size={16} />
+            VPS Storage
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('drive')}
+            className={`inline-flex min-w-max items-center gap-2 rounded-md px-4 py-2 text-sm font-semibold ${activeTab === 'drive' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+          >
+            <Cloud size={16} />
+            Google Drive
+          </button>
+        </div>
+
+        {isSuperAdmin && (
+          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h2 className="text-sm font-bold text-slate-900">Sekolah Aktif Dikelola</h2>
+                <p className="mt-1 text-xs text-slate-500">
+                  Pilih sekolah di sini untuk mengelola kuota, cleanup, Trash, dan Google Drive tanpa kembali ke halaman Sekolah.
+                </p>
+              </div>
+              <select
+                value={selectedTenantId}
+                onChange={(event) => setSelectedTenantId(event.target.value)}
+                className="min-h-10 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 lg:max-w-md"
+              >
+                <option value="">Pilih sekolah</option>
+                {tenants.map((tenant) => (
+                  <option key={tenant.id} value={tenant.id}>
+                    {tenant.name} ({tenant.slug})
+                  </option>
+                ))}
+              </select>
+            </div>
+            {selectedTenantId && (
+              <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                <span className="rounded-full bg-indigo-50 px-3 py-1 font-semibold text-indigo-700">{selectedTenantName}</span>
+                <span className="rounded-full bg-slate-100 px-3 py-1 font-semibold text-slate-600">{tenantDetail?.tenant?.slug || selectedTenant?.slug || selectedTenantId}</span>
+                <span className="rounded-full bg-slate-100 px-3 py-1 font-semibold text-slate-600">Status: {tenantDetail?.tenant?.status || selectedTenant?.status || '-'}</span>
+              </div>
+            )}
+          </section>
         )}
 
-        {activeTab === 'drive' && !isSuperAdmin && (
+        {activeTab === 'drive' && (!isSuperAdmin || selectedTenantId) && (
           <section className="space-y-4">
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
               <StatTile icon={Cloud} label="Status Drive" value={driveStatus?.status_label || 'Belum tersambung'} hint={driveStatus?.account_email || 'Akun belum tersambung'} />
@@ -582,26 +663,30 @@ function StorageManager() {
               <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <h2 className="text-sm font-bold text-slate-900">Google Drive Sekolah</h2>
                       <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${driveBadgeClass(driveReady, driveStatus?.status)}`}>
                         {driveLoading ? 'Memuat...' : driveStatus?.status_label || 'Belum tersambung'}
                       </span>
                     </div>
                     <p className="mt-1 text-xs text-slate-500">
-                      Dokumen tugas dan media quiz dapat dialihkan ke Google Drive saat koneksi siap.
+                      {isSuperAdmin
+                        ? `Monitoring Drive untuk ${selectedTenantName}. Penyambungan akun tetap dilakukan admin sekolah.`
+                        : 'Dokumen tugas dan media quiz dapat dialihkan ke Google Drive saat koneksi siap.'}
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={handleConnectGoogleDrive}
-                      disabled={!driveProviderConfigured || driveConnecting || driveSyncing}
-                      className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
-                    >
-                      <Link2 size={16} />
-                      {driveConnecting ? 'Menyambungkan...' : driveReady ? 'Sambungkan Ulang' : 'Sambungkan'}
-                    </button>
+                    {!isSuperAdmin && (
+                      <button
+                        type="button"
+                        onClick={handleConnectGoogleDrive}
+                        disabled={!driveProviderConfigured || driveConnecting || driveSyncing}
+                        className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                      >
+                        <Link2 size={16} />
+                        {driveConnecting ? 'Menyambungkan...' : driveReady ? 'Sambungkan Ulang' : 'Sambungkan'}
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={handleSyncGoogleDrive}
@@ -622,7 +707,7 @@ function StorageManager() {
                         Folder
                       </a>
                     )}
-                    {driveStatus?.configured && (
+                    {!isSuperAdmin && driveStatus?.configured && (
                       <button
                         type="button"
                         onClick={handleDisconnectGoogleDrive}
@@ -736,7 +821,7 @@ function StorageManager() {
                   <h2 className="text-sm font-bold text-slate-900">Inventaris File Drive</h2>
                   <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
                     <FileText size={14} />
-                    {driveFilesLoading ? 'Memuat' : `${numberFormatter.format(driveVisibleFiles.length)} file`}
+                    {driveFilesLoading ? 'Memuat' : `${numberFormatter.format(driveFilesTotal || driveVisibleFiles.length)} file`}
                   </span>
                 </div>
                 <div className="mt-3 overflow-x-auto">
@@ -784,6 +869,16 @@ function StorageManager() {
           </section>
         )}
 
+        {activeTab === 'drive' && isSuperAdmin && !selectedTenantId && (
+          <section className="rounded-lg border border-slate-200 bg-white p-8 text-center shadow-sm">
+            <Cloud className="mx-auto h-10 w-10 text-slate-300" />
+            <h2 className="mt-3 text-base font-bold text-slate-900">Pilih sekolah dulu</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Google Drive dikelola per sekolah, jadi pilih tenant dari dropdown di atas untuk melihat status, quota, dan inventaris Drive.
+            </p>
+          </section>
+        )}
+
         {activeTab === 'storage' && (
           <>
         {isSuperAdmin && (
@@ -809,6 +904,7 @@ function StorageManager() {
                       <th className="py-2 pr-3">Sekolah</th>
                       <th className="py-2 pr-3">Terpakai</th>
                       <th className="py-2 pr-3">Kuota</th>
+                      <th className="py-2 pr-3">Drive</th>
                       <th className="py-2 pr-3">Kategori</th>
                     </tr>
                   </thead>
@@ -825,6 +921,11 @@ function StorageManager() {
                         </td>
                         <td className="py-3 pr-3 font-medium text-slate-700">{tenant.usage?.total_label || '0 B'}</td>
                         <td className="py-3 pr-3 text-slate-600">{tenant.quota?.quota_label || '-'}</td>
+                        <td className="py-3 pr-3">
+                          <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${driveBadgeClass(Boolean(tenant.google_drive?.ready), tenant.google_drive?.status)}`}>
+                            {tenant.google_drive?.ready ? 'Siap' : tenant.google_drive?.status_label || 'Belum'}
+                          </span>
+                        </td>
                         <td className="py-3 pr-3 text-slate-600">{tenant.top_category?.label || '-'}</td>
                       </tr>
                     ))}
@@ -890,6 +991,55 @@ function StorageManager() {
             <ProgressLine label="Pemakaian kuota sekolah" value={`${quota.percent}%`} percent={quota.percent} />
           </section>
         )}
+
+        <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900">Filter Storage</h2>
+              <p className="mt-1 text-xs text-slate-500">
+                Filter ini dipakai untuk analitik, file terbesar, uploader, rekomendasi, dan preview cleanup.
+              </p>
+            </div>
+            <div className="grid w-full gap-2 sm:grid-cols-2 lg:max-w-3xl lg:grid-cols-[1fr_150px_180px_auto_auto]">
+              <input
+                value={storageFilterDraft.tahun_ajaran}
+                onChange={(event) => setStorageFilterDraft((prev) => ({ ...prev, tahun_ajaran: event.target.value }))}
+                placeholder="Tahun ajaran"
+                className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              />
+              <select
+                value={storageFilterDraft.semester}
+                onChange={(event) => setStorageFilterDraft((prev) => ({ ...prev, semester: event.target.value }))}
+                className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              >
+                {SEMESTERS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+              </select>
+              <select
+                value={storageFilterDraft.category}
+                onChange={(event) => setStorageFilterDraft((prev) => ({ ...prev, category: event.target.value }))}
+                className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              >
+                {CATEGORIES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+              </select>
+              <button
+                type="button"
+                onClick={handleApplyStorageFilters}
+                disabled={loading}
+                className="inline-flex min-h-10 items-center justify-center rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+              >
+                Terapkan
+              </button>
+              <button
+                type="button"
+                onClick={handleResetStorageFilters}
+                disabled={loading}
+                className="inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+              >
+                Reset
+              </button>
+            </div>
+          </div>
+        </section>
 
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
           <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
