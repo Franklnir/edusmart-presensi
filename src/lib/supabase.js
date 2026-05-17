@@ -2716,7 +2716,8 @@ class RealtimePollingManager {
         parsedFilter: binding.parsedFilter || null,
         bindings: new Set(),
         snapshot: new Map(),
-        ready: false
+        ready: false,
+        blocked: false
       }
       this.entries.set(key, entry)
     }
@@ -2819,11 +2820,16 @@ class RealtimePollingManager {
     await Promise.all(entries.map((entry) => this.pollEntry(entry)))
     this.polling = false
 
-    if (this.entries.size > 0) this.schedule()
+    const hasActiveEntry = Array.from(this.entries.values()).some(
+      (entry) => entry.bindings.size > 0 && !entry.blocked
+    )
+    if (hasActiveEntry) this.schedule()
+    else this.stop()
   }
 
   async pollEntry(entry) {
     if (!entry || entry.bindings.size === 0) return
+    if (entry.blocked) return
 
     const body = {
       table: entry.table,
@@ -2843,6 +2849,14 @@ class RealtimePollingManager {
     })
 
     if (res.error) {
+      const status = Number(res.error.status || 0)
+      if (status === 401 || status === 403) {
+        entry.blocked = true
+        entry.ready = true
+        entry.snapshot = new Map()
+        this.notifyStatus(entry, 'SUBSCRIBED')
+        return
+      }
       this.notifyStatus(entry, 'CHANNEL_ERROR')
       return
     }

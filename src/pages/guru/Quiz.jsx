@@ -620,6 +620,9 @@ export default function GuruQuiz() {
       return row.essayScore == null
     }).length
   ), [detailAnswers])
+  const detailHasEssayQuestions = useMemo(() => (
+    (detailAnswers || []).some((row) => row.questionType === 'essay')
+  ), [detailAnswers])
   const detailActiveAnswer = detailAnswers[detailActiveQuestionIndex] || null
 
   const isDetailQuestionAnswered = useCallback((row) => {
@@ -1784,6 +1787,10 @@ export default function GuruQuiz() {
     if (detailSubmission?.essay_review_completed_at) {
       pushToast('success', 'Koreksi esai sudah ditandai selesai')
       handleCloseStudentDetail()
+      return
+    }
+    if (!detailHasEssayQuestions) {
+      pushToast('success', 'Quiz ini tidak memiliki soal esai')
       return
     }
     if (detailEssayPendingCount > 0) {
@@ -3082,12 +3089,16 @@ export default function GuruQuiz() {
                   <div className={`text-xs font-semibold mt-1 ${
                     detailReviewCompletedAt
                       ? 'text-emerald-700'
+                      : !detailHasEssayQuestions
+                        ? 'text-slate-600'
                       : detailEssayPendingCount > 0
                         ? 'text-amber-700'
                         : 'text-slate-600'
                   }`}>
                     {detailReviewCompletedAt
                       ? `Status koreksi: Selesai (${formatDateTime(detailReviewCompletedAt)})`
+                      : !detailHasEssayQuestions
+                        ? 'Quiz ini tidak memiliki soal esai.'
                       : detailEssayPendingCount > 0
                         ? `Pending koreksi esai: ${detailEssayPendingCount}`
                         : 'Semua nilai esai sudah terisi. Klik Selesai untuk finalisasi koreksi.'}
@@ -3095,14 +3106,16 @@ export default function GuruQuiz() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleFinishEssayCorrection}
-                  disabled={detailFinishingReview || Boolean(essaySavingQuestionId) || Boolean(detailReviewCompletedAt)}
-                  className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-semibold hover:bg-emerald-700 disabled:opacity-60"
-                >
-                  {detailReviewCompletedAt ? 'Sudah Selesai' : detailFinishingReview ? 'Menyimpan...' : 'Selesai'}
-                </button>
+                {detailHasEssayQuestions && (
+                  <button
+                    type="button"
+                    onClick={handleFinishEssayCorrection}
+                    disabled={detailFinishingReview || Boolean(essaySavingQuestionId) || Boolean(detailReviewCompletedAt)}
+                    className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-semibold hover:bg-emerald-700 disabled:opacity-60"
+                  >
+                    {detailReviewCompletedAt ? 'Sudah Selesai' : detailFinishingReview ? 'Menyimpan...' : 'Selesai'}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={handleCloseStudentDetail}

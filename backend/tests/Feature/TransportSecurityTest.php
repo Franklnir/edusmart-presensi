@@ -31,6 +31,14 @@ class TransportSecurityTest extends TestCase
         );
     }
 
+    public function test_frontend_html_allows_google_popup_window_checks(): void
+    {
+        $response = $this->get('/');
+
+        $response->assertOk();
+        $response->assertHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+    }
+
     public function test_authenticated_api_response_is_not_cacheable(): void
     {
         $tenantId = $this->defaultTenantId();

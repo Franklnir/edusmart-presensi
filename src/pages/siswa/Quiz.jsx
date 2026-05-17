@@ -1,5 +1,19 @@
 import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
+import {
+  AlertTriangle,
+  ArrowLeft,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  Expand,
+  Flag,
+  ListChecks,
+  Lock,
+  Send,
+  ShieldCheck
+} from 'lucide-react'
 import { QUIZ_MEDIA_BUCKET, supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
@@ -708,18 +722,6 @@ export default function SiswaQuiz() {
   const selectedWebAccessBlocked = Boolean(selectedWebAccessBlockMessage)
   const selectedCanStartInWeb = Boolean(selectedStatus?.canStart && !selectedWebAccessBlocked)
 
-  const sparkleItems = useMemo(
-    () =>
-      Array.from({ length: 18 }, (_, i) => ({
-        id: i,
-        left: (i * 37) % 100,
-        top: (i * 53) % 100,
-        delay: (i % 6) * 0.2,
-        icon: i % 3 === 0 ? '✨' : i % 3 === 1 ? '🎉' : '🎊'
-      })),
-    []
-  )
-
   const watermarkSeed = useMemo(
     () =>
       Array.from({ length: 20 }, (_, i) => ({
@@ -755,6 +757,19 @@ export default function SiswaQuiz() {
 
   const totalQuestions = questions.length
   const activeQuestion = questions[activeQuestionIndex] || null
+  const answeredPercent = totalQuestions > 0
+    ? Math.round((answeredCount / totalQuestions) * 100)
+    : 0
+  const unansweredCount = Math.max(0, totalQuestions - answeredCount)
+  const activeQuestionType = normalizeQuestionType(activeQuestion?.question_type)
+  const sessionTimerSeconds = remainingSeconds ?? selectedRemainingSeconds
+  const sessionTimerTone = sessionTimerSeconds != null && sessionTimerSeconds <= 60
+    ? 'border-red-200 bg-red-50 text-red-700'
+    : sessionTimerSeconds != null && sessionTimerSeconds <= 300
+      ? 'border-amber-200 bg-amber-50 text-amber-800'
+      : 'border-slate-200 bg-white text-slate-900'
+  const sessionModeLabel = isStrictSecurity ? 'Mode ketat' : 'Mode standar'
+  const sessionAccessLabel = getAccessDeviceLabel(selectedQuiz?.access_device)
 
   const normalizeQuizMediaPath = useCallback((value) => {
     const rawValue = String(value || '').trim()
@@ -1101,6 +1116,7 @@ export default function SiswaQuiz() {
   }, [user?.id, kelasId, quizRealtimeTick, period.tahunAjaran, period.semester])
 
   useEffect(() => {
+    if (isSessionPage) return undefined
     if (!user?.id || !kelasId) return undefined
 
     const channel = supabase
@@ -1145,9 +1161,10 @@ export default function SiswaQuiz() {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [user?.id, kelasId, queueQuizReload, queueQuizDetailReload])
+  }, [isSessionPage, user?.id, kelasId, queueQuizReload, queueQuizDetailReload])
 
   useEffect(() => {
+    if (isSessionPage) return undefined
     if (!selectedQuizId || !user?.id) return undefined
 
     const channel = supabase
@@ -1198,7 +1215,7 @@ export default function SiswaQuiz() {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [selectedQuizId, user?.id, queueQuizDetailReload])
+  }, [isSessionPage, selectedQuizId, user?.id, queueQuizDetailReload])
 
   const loadQuizDetails = async () => {
     const targetQuizId = selectedQuiz?.id || (isSessionPage ? sessionQuizIdParam : '')
@@ -1947,6 +1964,17 @@ export default function SiswaQuiz() {
     setSubmitConfirmOpen(true)
   }
 
+  const handleSessionBack = () => {
+    if (isTaking) {
+      triggerViolationPrompt(
+        'Yakin anda keluar quiz? Jika keluar, quiz akan langsung disubmit.',
+        'manual_exit_attempt'
+      )
+      return
+    }
+    navigate('/siswa/quiz', { replace: true })
+  }
+
   const handleCloseCelebration = () => {
     setCelebration({ open: false, score: null })
   }
@@ -1960,7 +1988,7 @@ export default function SiswaQuiz() {
     ))
 
   const sessionWarningPanel = isTaking && warningMessage && (
-    <div className="rounded-2xl bg-red-50 border border-red-200 p-4">
+    <div className="rounded-lg bg-red-50 border border-red-200 p-4">
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-base font-bold text-red-700">Peringatan Ujian</div>
@@ -1982,14 +2010,14 @@ export default function SiswaQuiz() {
           <button
             type="button"
             onClick={handleViolationCancel}
-            className="px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 text-sm font-semibold"
+            className="px-3 py-2 rounded-md border border-slate-200 bg-white text-slate-700 text-sm font-semibold"
           >
             Batal
           </button>
           <button
             type="button"
             onClick={handleViolationOk}
-            className="px-3 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-sm font-semibold"
+            className="px-3 py-2 rounded-md bg-red-600 hover:bg-red-700 text-white text-sm font-semibold"
           >
             Oke
           </button>
@@ -2000,43 +2028,26 @@ export default function SiswaQuiz() {
 
   const celebrationOverlay = celebration.open && (
     <div className="fixed inset-0 z-[1300] bg-slate-900/45 backdrop-blur-[2px] flex items-center justify-center px-4">
-      <div className="relative w-full max-w-2xl rounded-3xl border border-emerald-200 bg-gradient-to-br from-emerald-50 via-white to-teal-50 p-6 sm:p-8 shadow-2xl overflow-hidden">
-        <div className="pointer-events-none absolute inset-0">
-          {sparkleItems.map((item) => (
-            <span
-              key={item.id}
-              className="absolute text-2xl animate-bounce"
-              style={{
-                left: `${item.left}%`,
-                top: `${item.top}%`,
-                animationDelay: `${item.delay}s`,
-                animationDuration: '1.8s'
-              }}
-            >
-              {item.icon}
-            </span>
-          ))}
+      <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 text-center shadow-2xl">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-md bg-emerald-50 text-emerald-700">
+          <CheckCircle2 className="h-7 w-7" />
         </div>
-
-        <div className="relative text-center">
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-100 border border-emerald-200 text-emerald-700 text-xs font-bold uppercase tracking-wider">
-            Selamat
-          </div>
-          <h3 className="mt-4 text-3xl sm:text-4xl font-black text-slate-900">
+        <div>
+          <h3 className="mt-4 text-2xl font-bold text-slate-900">
             Quiz Selesai
           </h3>
           <p className="mt-2 text-slate-600">
-            Jawaban Anda sudah dikirim dan dinilai.
+            Jawaban Anda sudah dikirim.
           </p>
-          <div className="mt-5 inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-white border border-emerald-200 shadow-sm">
+          <div className="mt-5 inline-flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-2">
             <span className="text-sm text-slate-600">Nilai Anda</span>
-            <span className="text-2xl font-black text-emerald-700">{celebration.score ?? '-'}</span>
+            <span className="text-2xl font-bold text-emerald-700">{celebration.score ?? '-'}</span>
           </div>
           <div className="mt-6">
             <button
               type="button"
               onClick={handleCloseCelebration}
-              className="px-5 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold transition-colors"
+              className="rounded-md bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700"
             >
               Tutup Notifikasi
             </button>
@@ -2194,63 +2205,93 @@ export default function SiswaQuiz() {
             )}
           </div>
         ) : (
-          <div className="h-full w-full flex flex-col">
-            <div className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
-              <div className="w-full px-4 sm:px-6 py-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                <div>
-                  <div className="text-xl font-bold text-slate-900">{selectedQuiz.nama}</div>
-                  <div className="text-xs text-slate-500">
-                    Terjawab {answeredCount} / {totalQuestions}
-                  </div>
-                  <div className="text-xs text-slate-500 mt-1">
-                    {selectedQuiz.mapel} | Mode {getModeLabel(selectedQuiz)}
-                  </div>
-                </div>
-                <div className="flex items-center gap-3 flex-wrap">
-                  {(remainingSeconds != null || selectedRemainingSeconds != null) && (
-                    <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-indigo-800 shadow-sm">
-                      <div className="text-[11px] font-semibold uppercase tracking-wide">Timer Quiz</div>
-                      <div className="text-lg font-black leading-none mt-0.5">
-                        {formatRemaining(remainingSeconds ?? selectedRemainingSeconds)}
-                      </div>
-                    </div>
-                  )}
-                  {isStrictSecurity && !isFullscreen && isTaking && (
+          <div className="h-full w-full flex flex-col bg-slate-50 text-slate-950">
+            <header className="shrink-0 border-b border-slate-200 bg-white/95 backdrop-blur">
+              <div className="mx-auto w-full max-w-7xl px-4 py-3 sm:px-5">
+                <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+                  <div className="flex min-w-0 items-start gap-3">
                     <button
                       type="button"
-                      onClick={handleForceFullscreen}
-                      className="text-xs px-3 py-1 rounded-full bg-slate-900 text-white"
+                      onClick={handleSessionBack}
+                      className="mt-1 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                      aria-label={isTaking ? 'Keluar quiz' : 'Kembali ke daftar quiz'}
                     >
-                      Masuk Fullscreen
+                      <ArrowLeft className="h-4 w-4" />
                     </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={handleOpenSubmitConfirm}
-                    className="px-4 py-2 rounded-2xl bg-green-600 hover:bg-green-700 text-white text-sm font-semibold transition-colors disabled:opacity-60"
-                    disabled={!isTaking || isSubmitting}
-                  >
-                    Selesaikan Quiz
-                  </button>
+                    <div className="min-w-0">
+                      <div className="truncate text-lg font-bold text-slate-950 sm:text-xl">
+                        {selectedQuiz.nama}
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
+                        <span>{selectedQuiz.mapel || '-'}</span>
+                        <span className="text-slate-300">/</span>
+                        <span>{getModeLabel(selectedQuiz)}</span>
+                        <span className="text-slate-300">/</span>
+                        <span>Akses {sessionAccessLabel}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                    {sessionTimerSeconds != null && (
+                      <div className={`inline-flex h-10 items-center gap-2 rounded-md border px-3 text-sm font-semibold ${sessionTimerTone}`}>
+                        <Clock className="h-4 w-4" />
+                        <span>{formatRemaining(sessionTimerSeconds)}</span>
+                      </div>
+                    )}
+                    {isStrictSecurity && !isFullscreen && isTaking && (
+                      <button
+                        type="button"
+                        onClick={handleForceFullscreen}
+                        className="inline-flex h-10 items-center gap-2 rounded-md bg-slate-900 px-3 text-sm font-semibold text-white hover:bg-slate-800"
+                      >
+                        <Expand className="h-4 w-4" />
+                        Fullscreen
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleOpenSubmitConfirm}
+                      className="inline-flex h-10 items-center gap-2 rounded-md bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      disabled={!isTaking || isSubmitting}
+                    >
+                      <Send className="h-4 w-4" />
+                      {isSubmitting ? 'Mengirim' : 'Kirim'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-3 grid gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+                  <div>
+                    <div className="flex items-center justify-between text-xs font-medium text-slate-500">
+                      <span>Progress {answeredCount}/{totalQuestions}</span>
+                      <span>{answeredPercent}%</span>
+                    </div>
+                    <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-100">
+                      <div
+                        className="h-full rounded-full bg-indigo-600 transition-all duration-300"
+                        style={{ width: `${answeredPercent}%` }}
+                      />
+                    </div>
+                  </div>
+                  <div className={`inline-flex items-center gap-2 rounded-md border px-3 py-2 text-xs font-semibold ${
+                    isStrictSecurity
+                      ? 'border-amber-200 bg-amber-50 text-amber-800'
+                      : 'border-slate-200 bg-slate-50 text-slate-600'
+                  }`}>
+                    {isStrictSecurity ? <Lock className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
+                    <span>{sessionModeLabel}</span>
+                  </div>
                 </div>
               </div>
-              <div className={`px-4 sm:px-6 py-2 border-t text-xs ${
-                isStrictSecurity
-                  ? 'bg-amber-50 border-amber-100 text-amber-800'
-                  : 'bg-slate-50 border-slate-100 text-slate-600'
-              }`}>
-                {isStrictSecurity
-                  ? 'Mode ketat aktif: quiz wajib fullscreen, tidak boleh pindah tab/aplikasi, dan screenshot dibatasi.'
-                  : 'Mode standard aktif: jawaban tetap divalidasi server dan timer mengikuti jadwal guru.'}
-              </div>
-            </div>
+            </header>
 
-            <div className="relative flex-1 overflow-y-auto p-4 sm:p-6 select-none">
+            <main className="relative flex-1 overflow-y-auto select-none">
               <div className="pointer-events-none absolute inset-0 overflow-hidden">
                 {watermarkSeed.map((wm) => (
                   <div
                     key={wm.id}
-                    className="absolute text-[11px] text-slate-300/55 font-semibold rotate-[-20deg] whitespace-nowrap"
+                    className="absolute text-[11px] font-semibold text-slate-300/45 rotate-[-20deg] whitespace-nowrap"
                     style={{ top: `${wm.top}%`, left: `${wm.left}%` }}
                   >
                     {watermarkText}
@@ -2258,40 +2299,62 @@ export default function SiswaQuiz() {
                 ))}
               </div>
 
-              <div className="relative z-10 space-y-5">
+              <div className="relative z-10 mx-auto w-full max-w-7xl space-y-4 px-4 py-4 sm:px-5 lg:py-6">
                 {celebrationOverlay}
                 {sessionWarningPanel}
 
                 {!isTaking && (
-                  <div className="px-4 py-4 bg-gradient-to-r from-sky-50 to-cyan-50 border border-sky-200 rounded-2xl text-sm">
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-semibold text-sky-900">Sesi siap dimulai</div>
-                        <div className="text-xs text-sky-700 mt-1">
+                  <div className="mx-auto max-w-3xl rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <div className="inline-flex items-center gap-2 rounded-md border border-indigo-100 bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700">
+                          <Flag className="h-3.5 w-3.5" />
+                          Sesi quiz
+                        </div>
+                        <h2 className="mt-3 text-xl font-bold text-slate-950">Mulai pengerjaan</h2>
+                        <p className="mt-1 text-sm leading-6 text-slate-600">
                           {isStrictSecurity
                             ? sessionNeedsManualStart
-                              ? 'Browser belum memberi izin fullscreen. Klik tombol mulai, lalu pilih Izinkan pada popup browser.'
-                              : 'Klik tombol mulai untuk mengaktifkan fullscreen, lalu kerjakan quiz tanpa pindah tab.'
-                            : 'Klik mulai untuk mengerjakan quiz sesuai jadwal guru.'}
+                              ? 'Aktifkan fullscreen untuk membuka soal.'
+                              : 'Fullscreen akan aktif sebelum soal dibuka.'
+                            : 'Sesi akan memakai timer dan validasi server.'}
+                        </p>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 text-center sm:w-64">
+                        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                          <div className="text-lg font-bold text-slate-950">{totalQuestions}</div>
+                          <div className="text-[11px] text-slate-500">Soal</div>
+                        </div>
+                        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                          <div className="text-lg font-bold text-slate-950">{getModeLabel(selectedQuiz)}</div>
+                          <div className="text-[11px] text-slate-500">Mode</div>
+                        </div>
+                        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                          <div className="truncate text-lg font-bold text-slate-950">{sessionAccessLabel}</div>
+                          <div className="text-[11px] text-slate-500">Akses</div>
                         </div>
                       </div>
-                      <div className="w-full sm:max-w-xs">
-                        <label className="text-xs font-semibold text-sky-800">Kode Akses</label>
+                    </div>
+
+                    <div className="mt-5 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                      <div>
+                        <label className="text-xs font-semibold text-slate-600">Kode Akses</label>
                         <input
                           type="password"
-                          className="mt-1 w-full rounded-xl border border-sky-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
+                          className="mt-1 h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
                           value={accessCodeInput}
                           onChange={(e) => setAccessCodeInput(e.target.value)}
-                          placeholder="Isi jika diminta"
+                          placeholder="Isi jika diberikan guru"
                         />
                       </div>
                       {sessionPrepared && (
                         <button
                           type="button"
                           onClick={handleManualStartSession}
-                          className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold"
+                          className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700"
                         >
-                          {isStrictSecurity ? 'Izinkan Fullscreen & Mulai' : 'Mulai Sesi'}
+                          {isStrictSecurity ? <Expand className="h-4 w-4" /> : <Flag className="h-4 w-4" />}
+                          {isStrictSecurity ? 'Fullscreen & Mulai' : 'Mulai'}
                         </button>
                       )}
                     </div>
@@ -2299,32 +2362,36 @@ export default function SiswaQuiz() {
                 )}
 
                 {(quizDetailsLoading || quizDetailsLoadedForId !== selectedQuiz.id) && (
-                  <div className="text-sm text-slate-500">Menyiapkan soal quiz...</div>
+                  <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500 shadow-sm">
+                    Menyiapkan soal quiz...
+                  </div>
                 )}
 
                 {!!quizDetailsError && (
-                  <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-700 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                    <span>Gagal memuat soal quiz: {quizDetailsError}</span>
-                    <button
-                      type="button"
-                      onClick={retryQuizDetails}
-                      className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-semibold"
-                    >
-                      Coba Lagi
-                    </button>
+                  <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <span>Gagal memuat soal quiz: {quizDetailsError}</span>
+                      <button
+                        type="button"
+                        onClick={retryQuizDetails}
+                        className="inline-flex h-9 items-center justify-center rounded-md bg-red-600 px-3 text-xs font-semibold text-white hover:bg-red-700"
+                      >
+                        Coba Lagi
+                      </button>
+                    </div>
                   </div>
                 )}
 
                 {!quizDetailsLoading && quizDetailsLoadedForId !== selectedQuiz.id && !quizDetailsError && (
-                  <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                      <span>Detail quiz belum siap. Halaman akan memuat ulang data otomatis.</span>
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <span>Detail quiz belum siap.</span>
                       <button
                         type="button"
                         onClick={retryQuizDetails}
-                        className="px-2.5 py-1 rounded-md bg-amber-100 hover:bg-amber-200 text-amber-800 text-xs font-semibold"
+                        className="inline-flex h-8 items-center justify-center rounded-md border border-amber-200 bg-white px-3 text-xs font-semibold text-amber-800 hover:bg-amber-100"
                       >
-                        Muat Ulang Soal
+                        Muat ulang
                       </button>
                     </div>
                   </div>
@@ -2333,107 +2400,132 @@ export default function SiswaQuiz() {
                 {isTaking && quizDetailsLoadedForId === selectedQuiz.id && !quizDetailsLoading && (
                   <div className="relative">
                     {strictAnswerBlock && (
-                      <div className="absolute inset-0 z-20 rounded-2xl bg-slate-200/40 backdrop-blur-[1px] cursor-not-allowed" />
+                      <div className="absolute inset-0 z-20 rounded-lg bg-slate-200/45 backdrop-blur-[1px] cursor-not-allowed" />
                     )}
 
-                    <div className={`grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_300px] gap-5 ${strictAnswerBlock ? 'pointer-events-none' : ''}`}>
-                      <div className="space-y-5">
+                    <div className={`grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_18rem] ${strictAnswerBlock ? 'pointer-events-none' : ''}`}>
+                      <section className="min-w-0 space-y-4">
                         {!!activeQuestion && (
-                          <div className="border border-slate-200 rounded-2xl p-4 bg-white shadow-sm">
-                            <div className="flex items-center justify-between mb-2">
-                              <div className="font-semibold text-slate-900">
-                                Soal {activeQuestionIndex + 1}
-                                <span className={`ml-2 text-[11px] px-2 py-0.5 rounded-full border align-middle ${
-                                  normalizeQuestionType(activeQuestion.question_type) === 'essay'
-                                    ? 'bg-amber-50 text-amber-700 border-amber-200'
-                                    : 'bg-blue-50 text-blue-700 border-blue-200'
-                                }`}>
-                                  {normalizeQuestionType(activeQuestion.question_type) === 'essay' ? 'Esai' : 'PG'}
-                                </span>
+                          <article className="rounded-lg border border-slate-200 bg-white shadow-sm">
+                            <div className="border-b border-slate-100 px-4 py-3 sm:px-5">
+                              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-sm font-semibold text-indigo-700">
+                                      Soal {activeQuestionIndex + 1} dari {totalQuestions}
+                                    </span>
+                                    <span className={`rounded-md border px-2 py-0.5 text-[11px] font-semibold ${
+                                      activeQuestionType === 'essay'
+                                        ? 'border-amber-200 bg-amber-50 text-amber-700'
+                                        : 'border-blue-200 bg-blue-50 text-blue-700'
+                                    }`}>
+                                      {activeQuestionType === 'essay' ? 'Esai' : 'Pilihan ganda'}
+                                    </span>
+                                  </div>
+                                </div>
+                                <div className="text-sm font-semibold text-slate-600">
+                                  {activeQuestion.poin} poin
+                                </div>
                               </div>
-                              <div className="text-xs text-slate-500">{activeQuestion.poin} poin</div>
                             </div>
-                            <div className="text-sm text-slate-700 mb-4">{activeQuestion.soal}</div>
-                            {activeQuestion.image_path && (
-                              <div className="mb-4">
-                                <div className="inline-flex max-w-full flex-col rounded-2xl border border-slate-200 bg-slate-50 p-2.5">
+
+                            <div className="space-y-5 px-4 py-5 sm:px-5">
+                              <div className="whitespace-pre-line text-base leading-7 text-slate-900">
+                                {activeQuestion.soal}
+                              </div>
+
+                              {activeQuestion.image_path && (
+                                <button
+                                  type="button"
+                                  onClick={() => setPreviewMediaUrl(getQuizImageUrl(activeQuestion.image_path))}
+                                  className="block w-full rounded-lg border border-slate-200 bg-slate-50 p-3 text-left hover:border-indigo-200"
+                                  aria-label={`Perbesar gambar soal ${activeQuestionIndex + 1}`}
+                                >
                                   <img
                                     src={getQuizImageUrl(activeQuestion.image_path)}
                                     alt={`Gambar soal ${activeQuestionIndex + 1}`}
-                                    className="block max-h-[22rem] w-auto max-w-full object-contain rounded-xl cursor-zoom-in"
-                                    onClick={() => setPreviewMediaUrl(getQuizImageUrl(activeQuestion.image_path))}
+                                    className="mx-auto block max-h-[24rem] w-auto max-w-full rounded-md object-contain"
                                   />
-                                  <div className="mt-1 text-[11px] text-slate-500">
-                                    Klik gambar untuk perbesar.
+                                </button>
+                              )}
+
+                              {activeQuestionType === 'essay' ? (
+                                <div>
+                                  <textarea
+                                    rows="10"
+                                    value={String(answers[activeQuestion.id] || '')}
+                                    onChange={(e) => handleEssayChange(activeQuestion.id, e.target.value)}
+                                    onBlur={(e) => handleEssayBlur(activeQuestion.id, e.target.value)}
+                                    disabled={answerInteractionLocked}
+                                    placeholder="Tulis jawaban esai Anda di sini..."
+                                    className={`min-h-[16rem] w-full resize-y rounded-lg border px-4 py-3 text-sm leading-6 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 ${
+                                      answerInteractionLocked
+                                        ? 'border-slate-200 bg-slate-50 opacity-70 cursor-not-allowed'
+                                        : 'border-slate-300 bg-white'
+                                    }`}
+                                  />
+                                  <div className="mt-2 flex items-center gap-2 text-[11px] text-slate-500">
+                                    <CheckCircle2 className="h-3.5 w-3.5" />
+                                    Jawaban tersimpan otomatis.
                                   </div>
                                 </div>
-                              </div>
-                            )}
-                            {normalizeQuestionType(activeQuestion.question_type) === 'essay' ? (
-                              <div>
-                                <textarea
-                                  rows="6"
-                                  value={String(answers[activeQuestion.id] || '')}
-                                  onChange={(e) => handleEssayChange(activeQuestion.id, e.target.value)}
-                                  onBlur={(e) => handleEssayBlur(activeQuestion.id, e.target.value)}
-                                  disabled={answerInteractionLocked}
-                                  placeholder="Tulis jawaban esai Anda di sini..."
-                                  className={`w-full border rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-                                    answerInteractionLocked
-                                      ? 'border-slate-200 bg-slate-50 opacity-70 cursor-not-allowed'
-                                      : 'border-slate-300 bg-white'
-                                  }`}
-                                />
-                                <div className="text-[11px] text-slate-500 mt-2">
-                                  Jawaban esai dinilai manual oleh guru.
-                                </div>
-                              </div>
-                            ) : (
-                              (() => {
-                                const mcqOptions = (optionsByQuestion[activeQuestion.id] || [])
-                                  .slice()
-                                  .sort((a, b) => String(a?.label || '').localeCompare(String(b?.label || ''), 'id'))
-                                return (
-                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-start">
-                                    {mcqOptions.map((opt) => {
-                                      const selected = answers[activeQuestion.id] === opt.id
-                                      const disabled = answerInteractionLocked
-                                      return (
-                                        <div key={opt.id} className="space-y-2">
-                                          <button
-                                            type="button"
-                                            onClick={() => saveAnswer(activeQuestion.id, opt.id, 'mcq')}
-                                            disabled={disabled}
-                                            className={`w-full min-h-[52px] text-left px-4 py-3 rounded-2xl border transition ${
-                                              selected
-                                                ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
-                                                : disabled
-                                                  ? 'border-slate-200 bg-slate-50'
-                                                  : 'border-slate-200 hover:bg-slate-50'
-                                            } ${disabled ? 'opacity-70 cursor-not-allowed' : ''}`}
-                                          >
-                                            <span className="font-semibold mr-2">{opt.label}.</span>
-                                            <span>{opt.text}</span>
-                                          </button>
-                                          {!!opt.image_path && (
-                                            <div className="inline-flex max-w-full flex-col rounded-xl border border-slate-200 bg-slate-50 p-2">
-                                              <img
-                                                src={getQuizImageUrl(opt.image_path)}
-                                                alt={`Gambar opsi ${opt.label}`}
-                                                className="block max-h-56 w-auto max-w-full object-contain rounded-lg cursor-zoom-in"
+                              ) : (
+                                (() => {
+                                  const mcqOptions = (optionsByQuestion[activeQuestion.id] || [])
+                                    .slice()
+                                    .sort((a, b) => String(a?.label || '').localeCompare(String(b?.label || ''), 'id'))
+                                  return (
+                                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                                      {mcqOptions.map((opt) => {
+                                        const selected = answers[activeQuestion.id] === opt.id
+                                        const disabled = answerInteractionLocked
+                                        return (
+                                          <div key={opt.id} className="space-y-2">
+                                            <button
+                                              type="button"
+                                              onClick={() => saveAnswer(activeQuestion.id, opt.id, 'mcq')}
+                                              disabled={disabled}
+                                              className={`group flex min-h-[64px] w-full items-start gap-3 rounded-lg border px-4 py-3 text-left transition ${
+                                                selected
+                                                  ? 'border-indigo-500 bg-indigo-50 text-indigo-900 shadow-sm'
+                                                  : disabled
+                                                    ? 'border-slate-200 bg-slate-50 text-slate-500'
+                                                    : 'border-slate-200 bg-white text-slate-800 hover:border-indigo-200 hover:bg-indigo-50/40'
+                                              } ${disabled ? 'cursor-not-allowed opacity-70' : ''}`}
+                                            >
+                                              <span className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border text-sm font-bold ${
+                                                selected
+                                                  ? 'border-indigo-600 bg-indigo-600 text-white'
+                                                  : 'border-slate-300 bg-white text-slate-700'
+                                              }`}>
+                                                {opt.label}
+                                              </span>
+                                              <span className="min-w-0 flex-1 text-sm leading-6">{opt.text}</span>
+                                              {selected && <CheckCircle2 className="mt-1 h-4 w-4 shrink-0 text-indigo-600" />}
+                                            </button>
+                                            {!!opt.image_path && (
+                                              <button
+                                                type="button"
                                                 onClick={() => setPreviewMediaUrl(getQuizImageUrl(opt.image_path))}
-                                              />
-                                              <div className="mt-1 text-[11px] text-slate-500">Klik gambar untuk perbesar.</div>
-                                            </div>
-                                          )}
-                                        </div>
-                                      )
-                                    })}
-                                  </div>
-                                )
-                              })()
-                            )}
-                          </div>
+                                                className="inline-flex max-w-full flex-col rounded-lg border border-slate-200 bg-slate-50 p-2 hover:border-indigo-200"
+                                                aria-label={`Perbesar gambar opsi ${opt.label}`}
+                                              >
+                                                <img
+                                                  src={getQuizImageUrl(opt.image_path)}
+                                                  alt={`Gambar opsi ${opt.label}`}
+                                                  className="block max-h-56 w-auto max-w-full rounded-md object-contain"
+                                                />
+                                              </button>
+                                            )}
+                                          </div>
+                                        )
+                                      })}
+                                    </div>
+                                  )
+                                })()
+                              )}
+                            </div>
+                          </article>
                         )}
 
                         {!!activeQuestion && (
@@ -2442,33 +2534,38 @@ export default function SiswaQuiz() {
                               type="button"
                               onClick={() => setActiveQuestionIndex((prev) => Math.max(0, prev - 1))}
                               disabled={activeQuestionIndex <= 0 || strictAnswerBlock || isSubmitting}
-                              className="px-4 py-2 rounded-xl border border-slate-300 text-slate-700 text-sm font-semibold hover:bg-slate-50 disabled:opacity-60"
+                              className="inline-flex h-10 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                             >
-                              Soal Sebelumnya
+                              <ChevronLeft className="h-4 w-4" />
+                              Sebelumnya
                             </button>
-                            <div className="text-xs text-slate-500">
+                            <div className="hidden text-xs font-medium text-slate-500 sm:block">
                               {activeQuestionIndex + 1} / {questions.length}
                             </div>
                             <button
                               type="button"
                               onClick={() => setActiveQuestionIndex((prev) => Math.min(questions.length - 1, prev + 1))}
                               disabled={activeQuestionIndex >= questions.length - 1 || strictAnswerBlock || isSubmitting}
-                              className="px-4 py-2 rounded-xl border border-slate-300 text-slate-700 text-sm font-semibold hover:bg-slate-50 disabled:opacity-60"
+                              className="inline-flex h-10 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                             >
-                              Soal Berikutnya
+                              Berikutnya
+                              <ChevronRight className="h-4 w-4" />
                             </button>
                           </div>
                         )}
-                      </div>
+                      </section>
 
                       {!!questions.length && (
-                        <div className="lg:sticky lg:top-4 h-fit">
-                          <div className="border border-slate-200 rounded-2xl p-4 bg-white shadow-sm">
-                            <div className="flex items-center justify-between gap-2 mb-3">
-                              <div className="text-sm font-semibold text-slate-800">Navigasi Soal</div>
-                              <div className="text-[11px] text-slate-500">Hijau = sudah dijawab</div>
+                        <aside className="lg:sticky lg:top-4 h-fit space-y-4">
+                          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="inline-flex items-center gap-2 text-sm font-semibold text-slate-900">
+                                <ListChecks className="h-4 w-4 text-indigo-600" />
+                                Navigasi
+                              </div>
+                              <span className="text-xs text-slate-500">{unansweredCount} belum</span>
                             </div>
-                            <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-4 gap-2">
+                            <div className="mt-3 grid grid-cols-5 gap-2 lg:grid-cols-4">
                               {questions.map((q, index) => {
                                 const isActive = index === activeQuestionIndex
                                 const isAnswered = isQuestionAnswered(q)
@@ -2479,15 +2576,15 @@ export default function SiswaQuiz() {
                                     type="button"
                                     onClick={() => setActiveQuestionIndex(index)}
                                     disabled={strictAnswerBlock || isSubmitting}
-                                    className={`h-9 rounded-lg text-sm font-semibold border transition ${
+                                    className={`h-9 rounded-md border text-sm font-semibold transition ${
                                       isActive
-                                        ? 'border-indigo-500 bg-indigo-600 text-white'
+                                        ? 'border-indigo-600 bg-indigo-600 text-white'
                                         : isAnswered
-                                          ? 'border-emerald-300 bg-emerald-100 text-emerald-700'
-                                          : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                          : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
                                     } ${
                                       strictAnswerBlock || isSubmitting
-                                        ? 'opacity-70 cursor-not-allowed'
+                                        ? 'cursor-not-allowed opacity-70'
                                         : ''
                                     }`}
                                   >
@@ -2496,18 +2593,46 @@ export default function SiswaQuiz() {
                                 )
                               })}
                             </div>
+                            <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+                              <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-700">
+                                <div className="font-bold">{answeredCount}</div>
+                                <div>Terjawab</div>
+                              </div>
+                              <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-600">
+                                <div className="font-bold">{unansweredCount}</div>
+                                <div>Belum</div>
+                              </div>
+                            </div>
                           </div>
-                        </div>
+
+                          <div className="rounded-lg border border-slate-200 bg-white p-4 text-xs text-slate-600 shadow-sm">
+                            <div className="flex items-start gap-2">
+                              <AlertTriangle className={`mt-0.5 h-4 w-4 shrink-0 ${
+                                isStrictSecurity ? 'text-amber-600' : 'text-slate-400'
+                              }`} />
+                              <div>
+                                <div className="font-semibold text-slate-800">{sessionModeLabel}</div>
+                                <div className="mt-1 leading-5">
+                                  {isStrictSecurity
+                                    ? 'Tetap fullscreen sampai jawaban dikirim.'
+                                    : 'Jawaban tersimpan otomatis saat dipilih.'}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </aside>
                       )}
                     </div>
                   </div>
                 )}
 
                 {quizDetailsLoadedForId === selectedQuiz.id && !quizDetailsLoading && !questions.length && (
-                  <div className="text-sm text-slate-500">Quiz belum memiliki soal.</div>
+                  <div className="rounded-lg border border-slate-200 bg-white px-4 py-4 text-sm text-slate-500 shadow-sm">
+                    Quiz belum memiliki soal.
+                  </div>
                 )}
               </div>
-            </div>
+            </main>
           </div>
         )}
         {previewMediaUrl && (

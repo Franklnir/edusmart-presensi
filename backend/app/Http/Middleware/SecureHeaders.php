@@ -20,10 +20,11 @@ class SecureHeaders
         $response->headers->set('Permissions-Policy', 'geolocation=(), camera=(), microphone=(), payment=(), usb=()');
         $isGooglePopupHtml = $request->is('api/auth/google/callback')
             || $request->is('api/auth/google/finalize-login');
+        $allowsGooglePopup = $isGooglePopupHtml || ! $isApiResponse;
 
         $response->headers->set(
             'Cross-Origin-Opener-Policy',
-            $isGooglePopupHtml ? 'same-origin-allow-popups' : 'same-origin'
+            $allowsGooglePopup ? 'same-origin-allow-popups' : 'same-origin'
         );
         $response->headers->set('Cross-Origin-Resource-Policy', 'same-site');
         $response->headers->set('X-Permitted-Cross-Domain-Policies', 'none');
