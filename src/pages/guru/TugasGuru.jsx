@@ -98,23 +98,16 @@ const uploadDetailForProvider = (provider, fallback) => {
   return fallback
 }
 
-const resolveAssignmentUploadDestination = async (file) => {
-  try {
-    const { data } = await supabase.storage.from(ASSIGNMENT_BUCKET).uploadDestination({
-      filename: file?.name || '',
-      mime_type: file?.type || ''
-    })
-    return data || null
-  } catch {
-    return null
-  }
-}
-
 const MIN_UPLOAD_ANIMATION_MS = 250
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const holdUploadAnimation = async (startedAt) => {
   const remaining = MIN_UPLOAD_ANIMATION_MS - (Date.now() - startedAt)
   if (remaining > 0) await wait(remaining)
+}
+const ASSIGNMENT_FAST_UPLOAD_OPTIONS = {
+  upsert: false,
+  cacheControl: '3600',
+  skipDrive: true
 }
 
 const addCacheBuster = (url) => {
@@ -542,6 +535,7 @@ export default function TugasGuru() {
   const [photoGallery, setPhotoGallery] = useState(null)
   const [studentCommentPreview, setStudentCommentPreview] = useState(null)
   const detailLoadIdRef = useRef(0)
+  const uploadAbortRef = useRef(null)
 
   /* ---------- Derived: kelas yang guru ampu ---------- */
   const myKelasList = useMemo(() => {
@@ -575,6 +569,12 @@ export default function TugasGuru() {
       document.body.style.overflow = 'unset'
     }
   }, [selectedTugas])
+
+  useEffect(() => {
+    return () => {
+      uploadAbortRef.current?.abort()
+    }
+  }, [])
 
   /* ========== Reset months when timeRange changes ========== */
   useEffect(() => {
@@ -1088,27 +1088,29 @@ export default function TugasGuru() {
     if (!files?.length || !user?.id) return
     const file = files[0]
     const animationStartedAt = Date.now()
+    let uploadController = null
 
     try {
+      uploadAbortRef.current?.abort()
+      uploadController = new AbortController()
+      uploadAbortRef.current = uploadController
       setIsUploadingFile(true)
       setUploadProvider(null)
       setUploadPercent(null)
       setCompressionProgress('Mengkompresi file...')
 
       const compressed = await compressFileBeforeUpload(file)
-      const destination = await resolveAssignmentUploadDestination(compressed)
-      if (destination?.provider) setUploadProvider(destination.provider)
 
       const safeName = sanitizeFileName(compressed.name)
       const filePath = `tugas_lampiran/${user.id}/${Date.now()}-${safeName}`
 
-      setCompressionProgress(`Mengupload file${destination?.providerLabel ? ` ke ${destination.providerLabel}` : ''}...`)
+      setCompressionProgress('Mengupload file lewat jalur cepat...')
 
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from(ASSIGNMENT_BUCKET)
         .upload(filePath, compressed, {
-          upsert: false,
-          cacheControl: '3600',
+          ...ASSIGNMENT_FAST_UPLOAD_OPTIONS,
+          signal: uploadController.signal,
           onProgress: setUploadPercent
         })
 
@@ -1171,6 +1173,9 @@ export default function TugasGuru() {
       setIsUploadingFile(false)
       setUploadProvider(null)
       setUploadPercent(null)
+      if (uploadAbortRef.current === uploadController) {
+        uploadAbortRef.current = null
+      }
     }
   }
 
@@ -2220,8 +2225,8 @@ export default function TugasGuru() {
                 <p className="text-xs font-semibold text-slate-700 mb-2">📋 Batas Ukuran File:</p>
                 <ul className="text-xs text-slate-600 space-y-1">
                   <li>🖼️ Gambar: maks {formatFileSize(ASSIGNMENT_PHOTO_MAX_BYTES)}/foto, total sekitar {formatFileSize(ASSIGNMENT_PHOTOS_MAX_TOTAL_BYTES)}</li>
-                  <li>📄 PDF/Dokumen: Drive siap maks 3MB, VPS maks 2MB</li>
-                  <li>📊 PPT: Drive siap maks 5MB, VPS maks 2MB</li>
+                  <li>📄 PDF/Dokumen: maks 3MB per file</li>
+                  <li>📊 PPT: maks 5MB per file</li>
                 </ul>
               </div>
             </div>

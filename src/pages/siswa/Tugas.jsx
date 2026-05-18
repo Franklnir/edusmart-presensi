@@ -25,6 +25,11 @@ import {
   normalizePhotoFiles,
   parseAssignmentFileList
 } from '../../utils/assignmentFiles'
+import {
+  createAggregateProgress,
+  getResponsiveUploadConcurrency,
+  runConcurrentQueue
+} from '../../utils/uploadQueue'
 
 /* =========================
    Constants & Helpers
@@ -122,23 +127,16 @@ const uploadDetailForProvider = (provider, fallback) => {
   return fallback
 }
 
-const resolveAssignmentUploadDestination = async (file) => {
-  try {
-    const { data } = await supabase.storage.from(ASSIGNMENT_BUCKET).uploadDestination({
-      filename: file?.name || '',
-      mime_type: file?.type || ''
-    })
-    return data || null
-  } catch {
-    return null
-  }
-}
-
 const MIN_UPLOAD_ANIMATION_MS = 250
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const holdUploadAnimation = async (startedAt) => {
   const remaining = MIN_UPLOAD_ANIMATION_MS - (Date.now() - startedAt)
   if (remaining > 0) await wait(remaining)
+}
+const ASSIGNMENT_FAST_UPLOAD_OPTIONS = {
+  upsert: false,
+  cacheControl: '3600',
+  skipDrive: true
 }
 
 const looksLikeDomainUrl = (v = '') => /^[a-z0-9-]+(\.[a-z0-9-]+)+(?::\d+)?(\/|$)/i.test(String(v || '').trim())
@@ -520,6 +518,7 @@ export default function TugasSiswa() {
   const listRequestSeqRef = useRef(0)
   const mapelRequestSeqRef = useRef(0)
   const successNoticeTimerRef = useRef(null)
+  const uploadAbortRef = useRef(null)
 
   /* ---------- Derived ---------- */
   const monthOptions = useMemo(() => (
@@ -548,6 +547,7 @@ export default function TugasSiswa() {
   useEffect(() => {
     return () => {
       if (successNoticeTimerRef.current) clearTimeout(successNoticeTimerRef.current)
+      uploadAbortRef.current?.abort()
     }
   }, [])
 
@@ -941,6 +941,7 @@ export default function TugasSiswa() {
     if (!files?.length || !user?.id || !selectedTugas) return
     const file = files[0]
     const animationStartedAt = Date.now()
+    let uploadController = null
 
     // ANTI-IDOR: siswa hanya upload untuk tugas yang sedang dibuka
     const kelas = selectedKelas || kelasSiswa
@@ -956,25 +957,26 @@ export default function TugasSiswa() {
     }
 
     try {
+      uploadAbortRef.current?.abort()
+      uploadController = new AbortController()
+      uploadAbortRef.current = uploadController
       setIsUploading(true)
       setAnswerUploadProvider(null)
       setUploadPercent(null)
       setUploadProgress('Mengkompresi file...')
 
       const compressed = await compressFileBeforeUpload(file)
-      const destination = await resolveAssignmentUploadDestination(compressed)
-      if (destination?.provider) setAnswerUploadProvider(destination.provider)
 
       const safeName = sanitizeFileName(compressed.name)
       const filePath = `${selectedTugas.id}/${user.id}-${Date.now()}-${safeName}`
 
-      setUploadProgress(`Mengupload file${destination?.providerLabel ? ` ke ${destination.providerLabel}` : ''}...`)
+      setUploadProgress('Mengupload file lewat jalur cepat...')
 
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from(ASSIGNMENT_BUCKET)
         .upload(filePath, compressed, {
-          upsert: false,
-          cacheControl: '3600',
+          ...ASSIGNMENT_FAST_UPLOAD_OPTIONS,
+          signal: uploadController.signal,
           onProgress: setUploadPercent
         })
 
@@ -1025,6 +1027,9 @@ export default function TugasSiswa() {
       setIsUploading(false)
       setAnswerUploadProvider(null)
       setUploadPercent(null)
+      if (uploadAbortRef.current === uploadController) {
+        uploadAbortRef.current = null
+      }
     }
   }
 
@@ -1033,6 +1038,7 @@ export default function TugasSiswa() {
     const files = normalizePhotoFiles(inputFiles)
     const animationStartedAt = Date.now()
     let uploaded = []
+    let uploadController = null
 
     if (files.length === 0) {
       pushToast('error', 'Pilih file foto dari galeri perangkat.')
@@ -1057,42 +1063,49 @@ export default function TugasSiswa() {
     }
 
     try {
+      uploadAbortRef.current?.abort()
+      uploadController = new AbortController()
+      uploadAbortRef.current = uploadController
       setIsUploading(true)
       setAnswerUploadProvider(null)
       setUploadPercent(null)
       setUploadProgress(`Menyiapkan ${files.length} foto...`)
 
+      const concurrency = getResponsiveUploadConcurrency({ max: 3 })
+      const updateAggregateProgress = createAggregateProgress(files.length, setUploadPercent)
+      setUploadProgress(`Mengupload ${files.length} foto lewat jalur cepat...`)
+
       uploaded = []
-      for (let i = 0; i < files.length; i += 1) {
-        const file = files[i]
-        setUploadProgress(`Mengkompresi foto ${i + 1}/${files.length}...`)
+      const uploadedResults = await runConcurrentQueue(files, async (file, i) => {
         const compressed = await compressImage(file, ASSIGNMENT_PHOTO_MAX_BYTES / 1024)
-        const destination = await resolveAssignmentUploadDestination(compressed)
-        if (destination?.provider) setAnswerUploadProvider(destination.provider)
+        updateAggregateProgress(i, 8)
         const safeName = sanitizeFileName(compressed.name || `foto-${i + 1}.jpg`)
         const filePath = `${selectedTugas.id}/${user.id}-${Date.now()}-${i + 1}-${safeName}`
 
-        setUploadProgress(`Mengupload foto ${i + 1}/${files.length}${destination?.providerLabel ? ` ke ${destination.providerLabel}` : ''}...`)
         const { data: uploadData, error: uploadError } = await supabase.storage
           .from(ASSIGNMENT_BUCKET)
           .upload(filePath, compressed, {
-            upsert: false,
-            cacheControl: '3600',
-            onProgress: (progress) => {
-              const aggregate = Math.round(((i + (progress / 100)) / files.length) * 100)
-              setUploadPercent(Math.max(0, Math.min(100, aggregate)))
-            }
+            ...ASSIGNMENT_FAST_UPLOAD_OPTIONS,
+            signal: uploadController.signal,
+            onProgress: (progress) => updateAggregateProgress(i, progress)
           })
 
         if (uploadError) throw new Error(uploadError.message)
+        updateAggregateProgress(i, 100)
 
         const storedFileValue = uploadData?.path || uploadData?.fullPath || filePath
         const sizeLabel = uploadData?.uploadedSizeLabel || formatFileSize(uploadData?.uploadedSizeBytes || compressed.size)
         const storedProvider = ['google_drive', 'object_storage'].includes(uploadData?.provider)
           ? uploadData.provider
           : 'local'
-        uploaded.push({ value: storedFileValue, sizeLabel, provider: storedProvider })
-      }
+        const item = { value: storedFileValue, sizeLabel, provider: storedProvider }
+        uploaded.push(item)
+        return item
+      }, {
+        concurrency,
+        onError: () => uploadController.abort()
+      })
+      uploaded = uploadedResults.filter(Boolean)
       const hasDriveUpload = uploaded.some((item) => item.provider === 'google_drive')
       const hasObjectStorageUpload = uploaded.some((item) => item.provider === 'object_storage')
       setAnswerUploadProvider(hasDriveUpload ? 'google_drive' : hasObjectStorageUpload ? 'object_storage' : 'local')
@@ -1137,6 +1150,9 @@ export default function TugasSiswa() {
       setIsUploading(false)
       setAnswerUploadProvider(null)
       setUploadPercent(null)
+      if (uploadAbortRef.current === uploadController) {
+        uploadAbortRef.current = null
+      }
       if (galleryInputRef.current) galleryInputRef.current.value = ''
     }
   }
@@ -2161,8 +2177,8 @@ export default function TugasSiswa() {
                               <p className="text-xs font-semibold text-slate-700 mb-2">📋 Batas Ukuran File:</p>
                               <ul className="text-xs text-slate-600 space-y-1">
                                 <li>🖼️ Gambar: maks {formatFileSize(ASSIGNMENT_PHOTO_MAX_BYTES)}/foto, total sekitar {formatFileSize(ASSIGNMENT_PHOTOS_MAX_TOTAL_BYTES)}</li>
-                                <li>📄 PDF/Dokumen: Drive siap maks 3MB, VPS maks 2MB</li>
-                                <li>📊 PPT: Drive siap maks 5MB, VPS maks 2MB</li>
+                                <li>📄 PDF/Dokumen: maks 3MB per file</li>
+                                <li>📊 PPT: maks 5MB per file</li>
                               </ul>
                             </div>
                           </div>

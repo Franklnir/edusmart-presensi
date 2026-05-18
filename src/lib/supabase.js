@@ -1613,7 +1613,7 @@ class StorageBucket {
       }
     }
 
-    if (this.bucket === ASSIGNMENT_BUCKET && !options?.fastLocal) {
+    if (this.bucket === ASSIGNMENT_BUCKET && !options?.fastLocal && options?.skipDirectUpload !== true) {
       const direct = await this.directUpload(path, uploadFile, {
         ...options,
         originalFile: file
@@ -1637,7 +1637,7 @@ class StorageBucket {
     form.append('path', path)
     form.append('file', uploadFile)
     if (options?.upsert) form.append('upsert', 'true')
-    if (options?.fastLocal) form.append('fast_local', 'true')
+    if (options?.fastLocal || options?.skipDrive) form.append('fast_local', 'true')
 
     const res = typeof options?.onProgress === 'function'
       ? await apiUploadFormData('/api/storage/upload', form, {
