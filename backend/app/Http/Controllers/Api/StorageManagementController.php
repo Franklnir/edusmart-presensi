@@ -6,6 +6,7 @@ use App\Services\GoogleDrive\GoogleDriveService;
 use App\Services\Storage\StorageManagementService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 
@@ -90,7 +91,26 @@ class StorageManagementController extends ApiController
         $overview = $this->storageManagementService->superOverview();
         if (isset($overview['tenants']) && is_array($overview['tenants'])) {
             $overview['tenants'] = array_map(function (array $tenant) {
-                $tenant['google_drive'] = $this->googleDriveService->summaryForTenant((string) ($tenant['id'] ?? ''));
+                $tenantId = (string) ($tenant['id'] ?? '');
+                try {
+                    $tenant['google_drive'] = $this->googleDriveService->summaryForTenant($tenantId);
+                } catch (\Throwable $e) {
+                    Log::warning('storage_manager_drive_summary_failed', [
+                        'tenant_id' => $tenantId,
+                        'error' => $e->getMessage(),
+                    ]);
+                    $tenant['google_drive'] = [
+                        'ready' => false,
+                        'configured' => false,
+                        'provider_configured' => true,
+                        'status' => 'needs_attention',
+                        'status_label' => 'Drive perlu dicek',
+                        'quota' => ['used_label' => '0 B', 'limit_label' => 'Tidak terbatas', 'percent' => null],
+                        'today' => ['uploaded_label' => '0 B', 'files' => 0],
+                        'app_storage' => ['uploaded_label' => '0 B', 'files' => 0],
+                        'app_storage_all' => ['uploaded_label' => '0 B', 'files' => 0],
+                    ];
+                }
 
                 return $tenant;
             }, $overview['tenants']);
@@ -303,13 +323,28 @@ class StorageManagementController extends ApiController
 
     private function tenantByIdOrSlug(string $idOrSlug): ?object
     {
-        if (! Schema::hasTable('tenants')) {
+        if (! Schema::hasTable('tenants') || ! Schema::hasColumn('tenants', 'id')) {
             return null;
         }
 
-        return DB::table('tenants')
-            ->where('id', $idOrSlug)
-            ->orWhere('slug', $idOrSlug)
-            ->first(['id', 'name', 'slug', 'status']);
+        $columns = array_values(array_filter(
+            ['id', 'name', 'slug', 'status'],
+            fn ($column) => Schema::hasColumn('tenants', $column)
+        ));
+        $query = DB::table('tenants')->where('id', $idOrSlug);
+        if (Schema::hasColumn('tenants', 'slug')) {
+            $query->orWhere('slug', $idOrSlug);
+        }
+
+        $tenant = $query->first($columns);
+        if (! $tenant) {
+            return null;
+        }
+
+        $tenant->name = $tenant->name ?? $tenant->slug ?? $tenant->id;
+        $tenant->slug = $tenant->slug ?? '';
+        $tenant->status = $tenant->status ?? 'active';
+
+        return $tenant;
     }
 }

@@ -150,6 +150,7 @@ function StorageManager() {
   const { isSuperAdmin, superAdminChecked } = useAuthStore()
   const { pushToast } = useUIStore()
   const [loading, setLoading] = useState(false)
+  const [storageError, setStorageError] = useState('')
   const [activeTab, setActiveTab] = useState(activeTabFromUrl)
   const [summary, setSummary] = useState(null)
   const [superSummary, setSuperSummary] = useState(null)
@@ -354,6 +355,7 @@ function StorageManager() {
 
   const refresh = async () => {
     setLoading(true)
+    setStorageError('')
     try {
       if (isSuperAdmin) {
         await loadSuperSummary()
@@ -370,7 +372,9 @@ function StorageManager() {
         await loadAdminSummary(storageFilters)
       }
     } catch (error) {
-      pushToast('error', error?.message || 'Gagal memuat storage manager')
+      const message = error?.message || 'Gagal memuat storage manager'
+      setStorageError(message)
+      pushToast('error', message)
     } finally {
       setLoading(false)
     }
@@ -555,6 +559,7 @@ function StorageManager() {
 
   const loadStorageWithFilters = async (nextFilters) => {
     setLoading(true)
+    setStorageError('')
     try {
       setStorageFilters(nextFilters)
       setCleanupPreview(null)
@@ -575,7 +580,9 @@ function StorageManager() {
         await loadAdminSummary(nextFilters)
       }
     } catch (error) {
-      pushToast('error', error?.message || 'Gagal menerapkan filter storage')
+      const message = error?.message || 'Gagal menerapkan filter storage'
+      setStorageError(message)
+      pushToast('error', message)
     } finally {
       setLoading(false)
     }
@@ -701,6 +708,26 @@ function StorageManager() {
             Google Drive
           </button>
         </div>
+
+        {storageError && (
+          <section className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="font-bold">Storage belum bisa dimuat sempurna</p>
+                <p className="mt-1 text-amber-800">{storageError}</p>
+              </div>
+              <button
+                type="button"
+                onClick={refresh}
+                disabled={loading}
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-900 hover:bg-amber-100 disabled:opacity-60"
+              >
+                <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+                Coba lagi
+              </button>
+            </div>
+          </section>
+        )}
 
         {isSuperAdmin && (
           <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">

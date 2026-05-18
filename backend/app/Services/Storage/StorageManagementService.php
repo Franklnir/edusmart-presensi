@@ -5,6 +5,7 @@ namespace App\Services\Storage;
 use App\Support\AcademicPeriod;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -29,9 +30,9 @@ class StorageManagementService
 
     public function tablesReady(): bool
     {
-        return Schema::hasTable('tenant_storage_quotas')
-            && Schema::hasTable('storage_files')
-            && Schema::hasTable('storage_cleanup_jobs');
+        return $this->quotaTableReady()
+            && $this->storageFilesReady()
+            && $this->cleanupJobsReady();
     }
 
     public function serverCapacity(): array
@@ -61,12 +62,12 @@ class StorageManagementService
 
     public function quotaForTenant(string $tenantId): array
     {
-        $row = $this->tablesReady()
+        $row = $this->quotaTableReady()
             ? DB::table('tenant_storage_quotas')->where('tenant_id', $tenantId)->first()
             : null;
 
-        $quotaBytes = $row?->quota_bytes !== null ? (int) $row->quota_bytes : null;
-        $maxUploadBytes = $row?->max_upload_bytes !== null ? (int) $row->max_upload_bytes : null;
+        $quotaBytes = ($row->quota_bytes ?? null) !== null ? (int) $row->quota_bytes : null;
+        $maxUploadBytes = ($row->max_upload_bytes ?? null) !== null ? (int) $row->max_upload_bytes : null;
         $usedBytes = $this->tenantUsedBytes($tenantId);
         $remainingBytes = $quotaBytes !== null ? max(0, $quotaBytes - $usedBytes) : null;
 
@@ -80,7 +81,7 @@ class StorageManagementService
             'remaining_bytes' => $remainingBytes,
             'remaining_label' => $remainingBytes !== null ? $this->formatBytes($remainingBytes) : 'Tidak dibatasi',
             'percent' => $quotaBytes && $quotaBytes > 0 ? round(min(100, ($usedBytes / $quotaBytes) * 100), 2) : null,
-            'notes' => $row?->notes ?? null,
+            'notes' => $row->notes ?? null,
         ];
     }
 
@@ -192,18 +193,37 @@ class StorageManagementService
 
     public function superOverview(): array
     {
-        $tenantRows = Schema::hasTable('tenants')
-            ? DB::table('tenants')->select('id', 'name', 'slug', 'status')->orderBy('name')->get()
-            : collect();
+        $tenantRows = $this->safeSection('tenant_list', collect(), function () {
+            if (! Schema::hasTable('tenants') || ! Schema::hasColumn('tenants', 'id')) {
+                return collect();
+            }
+
+            $columns = array_values(array_filter(
+                ['id', 'name', 'slug', 'status'],
+                fn ($column) => Schema::hasColumn('tenants', $column)
+            ));
+
+            return DB::table('tenants')
+                ->select($columns)
+                ->orderBy(Schema::hasColumn('tenants', 'name') ? 'name' : 'id')
+                ->get();
+        });
 
         $tenants = $tenantRows->map(function ($tenant) {
-            $summary = $this->tenantSummary((string) $tenant->id);
+            $tenantId = (string) ($tenant->id ?? '');
+            $summary = $this->safeSection(
+                'tenant_overview',
+                $this->emptyTenantOverview(),
+                fn () => $this->tenantOverviewSummary($tenantId),
+                ['tenant_id' => $tenantId]
+            );
+            $name = (string) ($tenant->name ?? $tenant->slug ?? $tenantId);
 
             return [
-                'id' => $tenant->id,
-                'name' => $tenant->name,
-                'slug' => $tenant->slug,
-                'status' => $tenant->status,
+                'id' => $tenantId,
+                'name' => $name !== '' ? $name : 'Sekolah',
+                'slug' => (string) ($tenant->slug ?? ''),
+                'status' => (string) ($tenant->status ?? 'active'),
                 'quota' => $summary['quota'],
                 'usage' => $summary['usage'],
                 'top_category' => $summary['top_category'],
@@ -225,19 +245,20 @@ class StorageManagementService
             'tenant_count' => count($tenants),
             'tenants' => $tenants,
             'top_tenants' => $topTenants,
-            'by_category' => $this->globalCategoryStats(),
+            'by_category' => $this->safeSection('global_category_stats', [], fn () => $this->globalCategoryStats()),
             'computed_at' => now()->toIso8601String(),
         ];
     }
 
     public function tenantSummary(string $tenantId, array $filters = []): array
     {
-        $usage = $this->tenantUsage($tenantId, $filters);
-        $quota = $this->quotaForTenant($tenantId);
-        $recommendations = $this->recommendations($tenantId, $usage, $quota);
-        $largest = $this->largestFiles($tenantId, $filters);
-        $byUser = $this->byUploader($tenantId, $filters);
-        $duplicates = $this->duplicateGroups($tenantId);
+        $context = ['tenant_id' => $tenantId];
+        $usage = $this->safeSection('tenant_usage', $this->emptyUsage(), fn () => $this->tenantUsage($tenantId, $filters), $context);
+        $quota = $this->safeSection('tenant_quota', $this->emptyQuota($tenantId), fn () => $this->quotaForTenant($tenantId), $context);
+        $recommendations = $this->safeSection('tenant_recommendations', [], fn () => $this->recommendations($tenantId, $usage, $quota), $context);
+        $largest = $this->safeSection('largest_files', [], fn () => $this->largestFiles($tenantId, $filters), $context);
+        $byUser = $this->safeSection('by_uploader', [], fn () => $this->byUploader($tenantId, $filters), $context);
+        $duplicates = $this->safeSection('duplicate_groups', [], fn () => $this->duplicateGroups($tenantId), $context);
 
         return [
             'quota' => $quota,
@@ -247,36 +268,62 @@ class StorageManagementService
             'by_uploader' => $byUser,
             'duplicates' => $duplicates,
             'recommendations' => $recommendations,
-            'period_options' => $this->periodStats($tenantId),
-            'prediction' => $this->fullPrediction($tenantId, $quota),
-            'trash' => $this->trashSummary($tenantId),
-            'trash_files' => $this->trashFiles($tenantId),
-            'active_period' => $this->activePeriod($tenantId),
+            'period_options' => $this->safeSection('period_options', [], fn () => $this->periodStats($tenantId), $context),
+            'prediction' => $this->safeSection('full_prediction', $this->emptyPrediction(), fn () => $this->fullPrediction($tenantId, $quota), $context),
+            'trash' => $this->safeSection('trash_summary', $this->emptyTrash(), fn () => $this->trashSummary($tenantId), $context),
+            'trash_files' => $this->safeSection('trash_files', [], fn () => $this->trashFiles($tenantId), $context),
+            'active_period' => $this->safeSection('active_period', AcademicPeriod::current(), fn () => $this->activePeriod($tenantId), $context),
             'computed_at' => now()->toIso8601String(),
+        ];
+    }
+
+    private function tenantOverviewSummary(string $tenantId): array
+    {
+        $usage = $this->tenantUsage($tenantId, [], false);
+        $quota = $this->quotaForTenant($tenantId);
+
+        return [
+            'quota' => $quota,
+            'usage' => $usage,
+            'top_category' => $usage['by_category'][0] ?? null,
+            'prediction' => $this->fullPrediction($tenantId, $quota),
         ];
     }
 
     public function updateQuota(string $tenantId, array $payload, ?string $userId = null): array
     {
-        if (! $this->tablesReady()) {
+        if (! $this->quotaTableReady()) {
             return $this->quotaForTenant($tenantId);
         }
 
         $now = now();
         $exists = DB::table('tenant_storage_quotas')->where('tenant_id', $tenantId)->exists();
-        $values = [
-            'quota_bytes' => $this->nullableBytes($payload['quota_bytes'] ?? null),
-            'max_upload_bytes' => $this->nullableBytes($payload['max_upload_bytes'] ?? null),
-            'notes' => trim((string) ($payload['notes'] ?? '')) ?: null,
-            'updated_by_user_id' => $userId,
-            'updated_at' => $now,
-        ];
-        if (! $exists) {
+        $values = [];
+        if ($this->tableHasColumn('tenant_storage_quotas', 'quota_bytes')) {
+            $values['quota_bytes'] = $this->nullableBytes($payload['quota_bytes'] ?? null);
+        }
+        if ($this->tableHasColumn('tenant_storage_quotas', 'max_upload_bytes')) {
+            $values['max_upload_bytes'] = $this->nullableBytes($payload['max_upload_bytes'] ?? null);
+        }
+        if ($this->tableHasColumn('tenant_storage_quotas', 'notes')) {
+            $values['notes'] = trim((string) ($payload['notes'] ?? '')) ?: null;
+        }
+        if ($this->tableHasColumn('tenant_storage_quotas', 'updated_by_user_id')) {
+            $values['updated_by_user_id'] = $userId;
+        }
+        if ($this->tableHasColumn('tenant_storage_quotas', 'updated_at')) {
+            $values['updated_at'] = $now;
+        }
+        if (! $exists && $this->tableHasColumn('tenant_storage_quotas', 'id')) {
             $values['id'] = (string) ($payload['id'] ?? Str::uuid());
+        }
+        if (! $exists && $this->tableHasColumn('tenant_storage_quotas', 'created_at')) {
             $values['created_at'] = $now;
         }
 
-        DB::table('tenant_storage_quotas')->updateOrInsert(['tenant_id' => $tenantId], $values);
+        if (! empty($values)) {
+            DB::table('tenant_storage_quotas')->updateOrInsert(['tenant_id' => $tenantId], $values);
+        }
 
         return $this->quotaForTenant($tenantId);
     }
@@ -331,20 +378,28 @@ class StorageManagementService
             $affectedFiles++;
             $trashPath = $this->moveLocalFileToTrash($tenantId, $file);
 
+            $updates = ['status' => 'trash'];
+            if ($this->tableHasColumn('storage_files', 'trashed_at')) {
+                $updates['trashed_at'] = $now;
+            }
+            if ($this->tableHasColumn('storage_files', 'trash_expires_at')) {
+                $updates['trash_expires_at'] = $trashExpiresAt;
+            }
+            if ($this->tableHasColumn('storage_files', 'trash_path')) {
+                $updates['trash_path'] = $trashPath;
+            }
+            if ($this->tableHasColumn('storage_files', 'updated_at')) {
+                $updates['updated_at'] = $now;
+            }
+
             DB::table('storage_files')
                 ->where('id', $file['id'])
                 ->where('tenant_id', $tenantId)
-                ->update([
-                    'status' => 'trash',
-                    'trashed_at' => $now,
-                    'trash_expires_at' => $trashExpiresAt,
-                    'trash_path' => $trashPath,
-                    'updated_at' => $now,
-                ]);
+                ->update($updates);
         }
 
         $jobId = (string) Str::uuid();
-        DB::table('storage_cleanup_jobs')->insert([
+        $job = [
             'id' => $jobId,
             'tenant_id' => $tenantId,
             'requested_by_user_id' => $userId,
@@ -359,7 +414,15 @@ class StorageManagementService
             'executed_at' => $now,
             'created_at' => $now,
             'updated_at' => $now,
-        ]);
+        ];
+        $job = array_filter(
+            $job,
+            fn ($value, $column) => $this->tableHasColumn('storage_cleanup_jobs', (string) $column),
+            ARRAY_FILTER_USE_BOTH
+        );
+        if (! empty($job)) {
+            DB::table('storage_cleanup_jobs')->insert($job);
+        }
 
         return [
             'ok' => true,
@@ -374,7 +437,7 @@ class StorageManagementService
 
     public function restoreFile(string $tenantId, string $fileId): bool
     {
-        if (! $this->tablesReady()) {
+        if (! $this->storageFilesReady()) {
             return false;
         }
 
@@ -394,20 +457,26 @@ class StorageManagementService
             $storage->move($trashPath, $originalPath);
         }
 
-        DB::table('storage_files')->where('id', $fileId)->update([
-            'status' => 'active',
-            'trashed_at' => null,
-            'trash_expires_at' => null,
-            'trash_path' => null,
-            'updated_at' => now(),
-        ]);
+        $updates = ['status' => 'active'];
+        foreach (['trashed_at', 'trash_expires_at', 'trash_path'] as $column) {
+            if ($this->tableHasColumn('storage_files', $column)) {
+                $updates[$column] = null;
+            }
+        }
+        if ($this->tableHasColumn('storage_files', 'updated_at')) {
+            $updates['updated_at'] = now();
+        }
+        DB::table('storage_files')->where('id', $fileId)->update($updates);
 
         return true;
     }
 
     public function purgeExpiredTrash(): array
     {
-        if (! $this->tablesReady()) {
+        if (
+            ! $this->storageFilesReady()
+            || ! $this->tableHasColumn('storage_files', 'trash_expires_at')
+        ) {
             return ['files' => 0, 'bytes' => 0, 'bytes_label' => '0 B'];
         }
 
@@ -428,11 +497,14 @@ class StorageManagementService
             }
             $bytes += (int) ($row->size_bytes ?? 0);
             $files++;
-            DB::table('storage_files')->where('id', $row->id)->update([
-                'status' => 'deleted',
-                'deleted_at' => now(),
-                'updated_at' => now(),
-            ]);
+            $updates = ['status' => 'deleted'];
+            if ($this->tableHasColumn('storage_files', 'deleted_at')) {
+                $updates['deleted_at'] = now();
+            }
+            if ($this->tableHasColumn('storage_files', 'updated_at')) {
+                $updates['updated_at'] = now();
+            }
+            DB::table('storage_files')->where('id', $row->id)->update($updates);
         }
 
         return [
@@ -459,9 +531,11 @@ class StorageManagementService
         return round($size, $index === 0 ? 0 : 2).' '.$units[$index];
     }
 
-    private function tenantUsage(string $tenantId, array $filters = []): array
+    private function tenantUsage(string $tenantId, array $filters = [], bool $includePeriods = true): array
     {
-        $localRows = $this->tablesReady()
+        $localRows = $this->storageFilesReady()
+            && $this->tableHasColumn('storage_files', 'category')
+            && $this->tableHasColumn('storage_files', 'size_bytes')
             ? $this->storageRowsQuery($tenantId, $filters)
                 ->select('category')
                 ->selectRaw('coalesce(sum(size_bytes), 0) as bytes, count(*) as files')
@@ -501,7 +575,7 @@ class StorageManagementService
             'total_label' => $this->formatBytes($totalBytes),
             'total_files' => $totalFiles,
             'by_category' => $byCategory,
-            'by_period' => $this->periodStats($tenantId, $filters),
+            'by_period' => $includePeriods ? $this->periodStats($tenantId, $filters) : [],
         ];
     }
 
@@ -512,7 +586,7 @@ class StorageManagementService
         }
 
         $bytes = 0;
-        if ($this->tablesReady()) {
+        if ($this->storageFilesReady()) {
             $bytes += (int) DB::table('storage_files')
                 ->where('tenant_id', $tenantId)
                 ->whereIn('status', self::MANAGED_STATUSES)
@@ -670,7 +744,7 @@ class StorageManagementService
 
     private function largestFiles(string $tenantId, array $filters = []): array
     {
-        if (! $this->tablesReady()) {
+        if (! $this->storageFilesReady() || ! $this->tableHasColumn('storage_files', 'size_bytes')) {
             return [];
         }
 
@@ -684,23 +758,52 @@ class StorageManagementService
 
     private function byUploader(string $tenantId, array $filters = []): array
     {
-        if (! $this->tablesReady()) {
+        if (
+            ! $this->storageFilesReady()
+            || ! $this->tableHasColumn('storage_files', 'uploaded_by_user_id')
+            || ! $this->tableHasColumn('storage_files', 'size_bytes')
+        ) {
             return [];
         }
 
-        $query = $this->storageRowsQuery($tenantId, $filters)
-            ->leftJoin('profiles as p', 'p.id', '=', 'storage_files.uploaded_by_user_id')
-            ->select('storage_files.uploaded_by_user_id', 'p.nama', 'p.email', 'p.role')
+        $hasProfiles = Schema::hasTable('profiles') && Schema::hasColumn('profiles', 'id');
+        $profileColumns = [
+            'nama' => $hasProfiles && Schema::hasColumn('profiles', 'nama'),
+            'email' => $hasProfiles && Schema::hasColumn('profiles', 'email'),
+            'role' => $hasProfiles && Schema::hasColumn('profiles', 'role'),
+        ];
+        $selectColumns = ['storage_files.uploaded_by_user_id'];
+        $groupColumns = ['storage_files.uploaded_by_user_id'];
+        if ($profileColumns['nama']) {
+            $selectColumns[] = 'p.nama';
+            $groupColumns[] = 'p.nama';
+        }
+        if ($profileColumns['email']) {
+            $selectColumns[] = 'p.email';
+            $groupColumns[] = 'p.email';
+        }
+        if ($profileColumns['role']) {
+            $selectColumns[] = 'p.role';
+            $groupColumns[] = 'p.role';
+        }
+
+        $query = $this->storageRowsQuery($tenantId, $filters);
+        if ($hasProfiles) {
+            $query->leftJoin('profiles as p', 'p.id', '=', 'storage_files.uploaded_by_user_id');
+        }
+
+        $query
+            ->select($selectColumns)
             ->selectRaw('coalesce(sum(storage_files.size_bytes), 0) as bytes, count(*) as files')
-            ->groupBy('storage_files.uploaded_by_user_id', 'p.nama', 'p.email', 'p.role')
+            ->groupBy($groupColumns)
             ->orderByDesc('bytes')
             ->limit(12);
 
         return $query->get()->map(fn ($row) => [
-            'user_id' => $row->uploaded_by_user_id,
-            'nama' => $row->nama ?: 'Tidak diketahui',
-            'email' => $row->email,
-            'role' => $row->role,
+            'user_id' => $row->uploaded_by_user_id ?? null,
+            'nama' => ($row->nama ?? null) ?: 'Tidak diketahui',
+            'email' => $row->email ?? null,
+            'role' => $row->role ?? null,
             'bytes' => (int) ($row->bytes ?? 0),
             'bytes_label' => $this->formatBytes((int) ($row->bytes ?? 0)),
             'files' => (int) ($row->files ?? 0),
@@ -709,7 +812,12 @@ class StorageManagementService
 
     private function duplicateGroups(string $tenantId): array
     {
-        if (! $this->tablesReady()) {
+        if (
+            ! $this->storageFilesReady()
+            || ! $this->tableHasColumn('storage_files', 'duplicate_key')
+            || ! $this->tableHasColumn('storage_files', 'file_name')
+            || ! $this->tableHasColumn('storage_files', 'size_bytes')
+        ) {
             return [];
         }
 
@@ -736,8 +844,8 @@ class StorageManagementService
 
     private function trashSummary(string $tenantId): array
     {
-        if (! $this->tablesReady()) {
-            return ['files' => 0, 'bytes' => 0, 'bytes_label' => '0 B'];
+        if (! $this->storageFilesReady() || ! $this->tableHasColumn('storage_files', 'size_bytes')) {
+            return $this->emptyTrash();
         }
 
         $row = DB::table('storage_files')
@@ -755,15 +863,17 @@ class StorageManagementService
 
     private function trashFiles(string $tenantId): array
     {
-        if (! $this->tablesReady()) {
+        if (! $this->storageFilesReady()) {
             return [];
         }
 
-        return DB::table('storage_files')
+        $query = DB::table('storage_files')
             ->where('tenant_id', $tenantId)
             ->where('status', 'trash')
-            ->orderByDesc('trashed_at')
-            ->limit(20)
+            ->when($this->tableHasColumn('storage_files', 'trashed_at'), fn ($trashQuery) => $trashQuery->orderByDesc('trashed_at'))
+            ->limit(20);
+
+        return $query
             ->get()
             ->map(fn ($row) => [
                 ...$this->fileRowPayload($row),
@@ -818,8 +928,8 @@ class StorageManagementService
     {
         $quotaBytes = $quota['quota_bytes'] ?? null;
         $remaining = $quota['remaining_bytes'] ?? null;
-        if (! $quotaBytes || $remaining === null || ! $this->tablesReady()) {
-            return ['daily_growth_bytes' => 0, 'daily_growth_label' => '0 B', 'days_until_full' => null];
+        if (! $quotaBytes || $remaining === null || ! $this->storageFilesReady() || ! $this->tableHasColumn('storage_files', 'uploaded_at')) {
+            return $this->emptyPrediction();
         }
 
         $since = now()->subDays(30);
@@ -840,7 +950,7 @@ class StorageManagementService
 
     private function cleanupCandidates(string $tenantId, array $filters): array
     {
-        if (! $this->tablesReady()) {
+        if (! $this->storageFilesReady()) {
             return [];
         }
 
@@ -848,7 +958,12 @@ class StorageManagementService
         $active = $this->activePeriod($tenantId);
         $activeYear = $active['tahun_ajaran'] ?? null;
         $activeSemester = $active['semester'] ?? null;
-        if ($activeYear && $activeSemester) {
+        if (
+            $activeYear
+            && $activeSemester
+            && $this->tableHasColumn('storage_files', 'tahun_ajaran')
+            && $this->tableHasColumn('storage_files', 'semester')
+        ) {
             $query->where(function ($periodQuery) use ($activeYear, $activeSemester) {
                 $periodQuery
                     ->whereNull('tahun_ajaran')
@@ -859,11 +974,13 @@ class StorageManagementService
         }
 
         $olderThanDays = (int) ($filters['older_than_days'] ?? 0);
-        if ($olderThanDays > 0) {
+        if ($olderThanDays > 0 && $this->tableHasColumn('storage_files', 'uploaded_at')) {
             $query->where('uploaded_at', '<=', now()->subDays($olderThanDays));
         }
 
-        $query->orderByDesc('size_bytes');
+        if ($this->tableHasColumn('storage_files', 'size_bytes')) {
+            $query->orderByDesc('size_bytes');
+        }
         $rows = $query->limit(500)->get()->map(fn ($row) => $this->fileRowPayload($row))->all();
         $percent = max(0, min(100, (int) ($filters['largest_percent'] ?? 0)));
         if ($percent > 0 && ! empty($rows)) {
@@ -974,15 +1091,19 @@ class StorageManagementService
 
     private function fileRowPayload(object $row): array
     {
+        $category = (string) ($row->category ?? 'dokumen');
+        $path = (string) ($row->path ?? '');
+        $bucket = (string) ($row->bucket ?? '');
+
         return [
-            'id' => $row->id,
-            'bucket' => $row->bucket,
-            'path' => $row->path,
-            'provider' => $row->provider,
-            'category' => $row->category,
-            'category_label' => self::CATEGORY_LABELS[$row->category] ?? Str::title((string) $row->category),
-            'file_name' => $row->file_name ?: basename((string) $row->path),
-            'mime_type' => $row->mime_type,
+            'id' => (string) ($row->id ?? ''),
+            'bucket' => $bucket,
+            'path' => $path,
+            'provider' => (string) ($row->provider ?? 'local'),
+            'category' => $category,
+            'category_label' => self::CATEGORY_LABELS[$category] ?? Str::title($category),
+            'file_name' => ($row->file_name ?? null) ?: basename($path),
+            'mime_type' => $row->mime_type ?? null,
             'size_bytes' => (int) ($row->size_bytes ?? 0),
             'size_label' => $this->formatBytes((int) ($row->size_bytes ?? 0)),
             'uploaded_by_user_id' => $row->uploaded_by_user_id ?? null,
@@ -998,9 +1119,12 @@ class StorageManagementService
     {
         $settings = null;
         if (Schema::hasTable('settings')) {
-            $query = DB::table('settings')->orderBy('id');
+            $query = DB::table('settings');
             if (Schema::hasColumn('settings', 'tenant_id')) {
                 $query->where('tenant_id', $tenantId);
+            }
+            if (Schema::hasColumn('settings', 'id')) {
+                $query->orderBy('id');
             }
             $settings = $query->first();
         }
@@ -1063,7 +1187,11 @@ class StorageManagementService
 
     private function globalCategoryStats(): array
     {
-        if (! $this->tablesReady()) {
+        if (
+            ! $this->storageFilesReady()
+            || ! $this->tableHasColumn('storage_files', 'category')
+            || ! $this->tableHasColumn('storage_files', 'size_bytes')
+        ) {
             return [];
         }
 
@@ -1086,7 +1214,7 @@ class StorageManagementService
 
     private function allocatedQuotaBytes(): int
     {
-        if (! Schema::hasTable('tenant_storage_quotas')) {
+        if (! $this->tableHasColumn('tenant_storage_quotas', 'quota_bytes')) {
             return 0;
         }
 
@@ -1095,7 +1223,7 @@ class StorageManagementService
 
     private function profileRole(string $userId, string $tenantId): ?string
     {
-        if ($userId === '' || ! Schema::hasTable('profiles')) {
+        if ($userId === '' || ! Schema::hasTable('profiles') || ! Schema::hasColumn('profiles', 'id') || ! Schema::hasColumn('profiles', 'role')) {
             return null;
         }
 
@@ -1140,8 +1268,98 @@ class StorageManagementService
         return $bytes > 0 ? $bytes : null;
     }
 
+    private function quotaTableReady(): bool
+    {
+        return Schema::hasTable('tenant_storage_quotas')
+            && Schema::hasColumn('tenant_storage_quotas', 'tenant_id');
+    }
+
+    private function storageFilesReady(): bool
+    {
+        return Schema::hasTable('storage_files')
+            && Schema::hasColumn('storage_files', 'tenant_id')
+            && Schema::hasColumn('storage_files', 'status')
+            && Schema::hasColumn('storage_files', 'size_bytes');
+    }
+
+    private function cleanupJobsReady(): bool
+    {
+        return Schema::hasTable('storage_cleanup_jobs');
+    }
+
     private function tableHasColumn(string $table, string $column): bool
     {
         return Schema::hasTable($table) && Schema::hasColumn($table, $column);
+    }
+
+    private function safeSection(string $section, mixed $fallback, callable $callback, array $context = []): mixed
+    {
+        try {
+            return $callback();
+        } catch (\Throwable $e) {
+            Log::warning('storage_manager_section_failed', [
+                ...$context,
+                'section' => $section,
+                'error' => $this->shortError($e->getMessage()),
+            ]);
+
+            return $fallback;
+        }
+    }
+
+    private function emptyTenantOverview(): array
+    {
+        return [
+            'quota' => $this->emptyQuota(''),
+            'usage' => $this->emptyUsage(),
+            'top_category' => null,
+            'prediction' => $this->emptyPrediction(),
+        ];
+    }
+
+    private function emptyQuota(string $tenantId): array
+    {
+        $usedBytes = $this->tenantUsedBytes($tenantId);
+
+        return [
+            'quota_bytes' => null,
+            'quota_label' => 'Tidak dibatasi',
+            'max_upload_bytes' => null,
+            'max_upload_label' => 'Default sistem',
+            'used_bytes' => $usedBytes,
+            'used_label' => $this->formatBytes($usedBytes),
+            'remaining_bytes' => null,
+            'remaining_label' => 'Tidak dibatasi',
+            'percent' => null,
+            'notes' => null,
+        ];
+    }
+
+    private function emptyUsage(): array
+    {
+        return [
+            'total_bytes' => 0,
+            'total_label' => '0 B',
+            'total_files' => 0,
+            'by_category' => [],
+            'by_period' => [],
+        ];
+    }
+
+    private function emptyTrash(): array
+    {
+        return ['files' => 0, 'bytes' => 0, 'bytes_label' => '0 B'];
+    }
+
+    private function emptyPrediction(): array
+    {
+        return ['daily_growth_bytes' => 0, 'daily_growth_label' => '0 B', 'days_until_full' => null];
+    }
+
+    private function shortError(string $message): string
+    {
+        $message = trim($message);
+
+        return Str::limit($message !== '' ? $message : 'Unknown error', 300);
     }
 }

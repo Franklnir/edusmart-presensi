@@ -293,7 +293,7 @@ class GoogleDriveService
     public function filesForTenant(string $tenantId, array $filters = []): array
     {
         $tenantId = trim($tenantId);
-        if ($tenantId === '' || ! $this->tablesReady()) {
+        if ($tenantId === '' || ! $this->tablesReady() || ! $this->tableHasColumn('tenant_google_drive_files', 'tenant_id')) {
             return [
                 'rows' => [],
                 'total' => 0,
@@ -314,6 +314,10 @@ class GoogleDriveService
         $hasKelas = Schema::hasColumn('tenant_google_drive_files', 'kelas');
         $hasAngkatan = Schema::hasColumn('tenant_google_drive_files', 'angkatan');
         $hasTaskId = Schema::hasColumn('tenant_google_drive_files', 'task_id');
+        $hasDriveFileName = Schema::hasColumn('tenant_google_drive_files', 'drive_file_name');
+        $hasSourcePath = Schema::hasColumn('tenant_google_drive_files', 'source_path');
+        $hasExtension = Schema::hasColumn('tenant_google_drive_files', 'extension');
+        $hasUploadedAt = Schema::hasColumn('tenant_google_drive_files', 'uploaded_at');
 
         $query = TenantGoogleDriveFile::query()
             ->where('tenant_id', $tenantId);
@@ -335,27 +339,45 @@ class GoogleDriveService
         }
         if ($search !== '') {
             $like = '%'.str_replace(['%', '_'], ['\%', '\_'], $search).'%';
-            $query->where(function ($subQuery) use ($like, $hasKelas, $hasAngkatan, $hasTaskId) {
-                $subQuery
-                    ->where('drive_file_name', 'like', $like)
-                    ->orWhere('source_path', 'like', $like)
-                    ->orWhere('extension', 'like', $like);
+            $query->where(function ($subQuery) use ($like, $hasKelas, $hasAngkatan, $hasTaskId, $hasDriveFileName, $hasSourcePath, $hasExtension) {
+                $hasSearchColumn = false;
+                if ($hasDriveFileName) {
+                    $subQuery->where('drive_file_name', 'like', $like);
+                    $hasSearchColumn = true;
+                }
+                if ($hasSourcePath) {
+                    $hasSearchColumn
+                        ? $subQuery->orWhere('source_path', 'like', $like)
+                        : $subQuery->where('source_path', 'like', $like);
+                    $hasSearchColumn = true;
+                }
+                if ($hasExtension) {
+                    $hasSearchColumn
+                        ? $subQuery->orWhere('extension', 'like', $like)
+                        : $subQuery->where('extension', 'like', $like);
+                    $hasSearchColumn = true;
+                }
 
                 if ($hasKelas) {
-                    $subQuery->orWhere('kelas', 'like', $like);
+                    $hasSearchColumn ? $subQuery->orWhere('kelas', 'like', $like) : $subQuery->where('kelas', 'like', $like);
+                    $hasSearchColumn = true;
                 }
                 if ($hasAngkatan) {
-                    $subQuery->orWhere('angkatan', 'like', $like);
+                    $hasSearchColumn ? $subQuery->orWhere('angkatan', 'like', $like) : $subQuery->where('angkatan', 'like', $like);
+                    $hasSearchColumn = true;
                 }
                 if ($hasTaskId) {
-                    $subQuery->orWhere('task_id', 'like', $like);
+                    $hasSearchColumn ? $subQuery->orWhere('task_id', 'like', $like) : $subQuery->where('task_id', 'like', $like);
+                }
+                if (! $hasSearchColumn) {
+                    $subQuery->whereRaw('1 = 0');
                 }
             });
         }
 
         $total = (clone $query)->count();
         $rows = $query
-            ->orderByDesc('uploaded_at')
+            ->when($hasUploadedAt, fn ($orderQuery) => $orderQuery->orderByDesc('uploaded_at'))
             ->limit($limit)
             ->get()
             ->map(function (TenantGoogleDriveFile $file) {
@@ -701,15 +723,17 @@ class GoogleDriveService
         array $usageFilters = []
     ): array {
         $statsError = null;
-        try {
-            $stats = $this->driveUploadStats($tenantId, $usageFilters);
-        } catch (\Throwable $e) {
-            $stats = $this->emptyDriveUploadStats($usageFilters);
-            $statsError = $this->shortError($e->getMessage());
-            Log::warning('google_drive_usage_stats_failed', [
-                'tenant_id' => $tenantId,
-                'error' => $statsError,
-            ]);
+        $stats = $this->emptyDriveUploadStats($usageFilters);
+        if (! $summaryOnly) {
+            try {
+                $stats = $this->driveUploadStats($tenantId, $usageFilters);
+            } catch (\Throwable $e) {
+                $statsError = $this->shortError($e->getMessage());
+                Log::warning('google_drive_usage_stats_failed', [
+                    'tenant_id' => $tenantId,
+                    'error' => $statsError,
+                ]);
+            }
         }
         $configured = $config !== null
             && $config->is_enabled
@@ -1456,7 +1480,12 @@ class GoogleDriveService
 
     private function driveUploadStats(string $tenantId, array $filters = []): array
     {
-        if ($tenantId === '' || ! Schema::hasTable('tenant_google_drive_files')) {
+        if (
+            $tenantId === ''
+            || ! $this->tableHasColumn('tenant_google_drive_files', 'tenant_id')
+            || ! $this->tableHasColumn('tenant_google_drive_files', 'size_bytes')
+            || ! $this->tableHasColumn('tenant_google_drive_files', 'uploaded_at')
+        ) {
             return $this->emptyDriveUploadStats($filters);
         }
 
@@ -1653,8 +1682,13 @@ class GoogleDriveService
 
     private function tablesReady(): bool
     {
-        return Schema::hasTable('tenant_google_drive_configs')
-            && Schema::hasTable('tenant_google_drive_files');
+        return $this->tableHasColumn('tenant_google_drive_configs', 'tenant_id')
+            && $this->tableHasColumn('tenant_google_drive_files', 'tenant_id');
+    }
+
+    private function tableHasColumn(string $table, string $column): bool
+    {
+        return Schema::hasTable($table) && Schema::hasColumn($table, $column);
     }
 
     private function clientId(): string
