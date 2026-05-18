@@ -210,23 +210,35 @@ Catatan multi-tenant:
 - Gunakan URL Google frontend yang relatif (`/api/auth/google/...`) agar otomatis mengikuti host tenant aktif.
 - Pastikan `GOOGLE_REDIRECT_URI` memakai root domain publik yang sama dengan `VITE_ROOT_DOMAIN`, misalnya `https://edusmart.example.com/api/auth/google/callback`.
 
-## 3.2.1 Object Storage untuk Upload Tugas
+## 3.2.1 Object Storage untuk Upload File
 
-Untuk sekolah dengan upload tugas ramai, aktifkan signed direct upload agar file siswa/guru langsung dikirim dari browser ke bucket S3-compatible, Cloudflare R2, atau MinIO. Backend tetap mengecek role/path/ukuran file, lalu hanya menyimpan metadata jawaban.
+Untuk sekolah dengan upload ramai, aktifkan signed direct upload agar file siswa/guru/admin langsung dikirim dari browser ke bucket S3-compatible, Cloudflare R2, atau MinIO. Backend tetap mengecek role, path, tipe file, ukuran file, dan kuota sekolah sebelum membuat signed URL, lalu hanya menyimpan metadata file.
+
+Bucket direct upload default:
+
+- `assignments` untuk tugas dan lampiran tugas.
+- `quiz-media` untuk gambar quiz.
+- `certificates`, `sertifikat-files`, `certificate-templates`, `sertifikat-templates` untuk sertifikat dan template.
+
+Google Drive tetap dapat dipakai sebagai integrasi/backup, tetapi jalur upload massal sebaiknya memakai object storage agar bandwidth file tidak melewati PHP app server.
 
 Contoh env Cloudflare R2 / MinIO:
 
 ```dotenv
-ASSIGNMENT_DIRECT_UPLOAD_ENABLED=true
-ASSIGNMENT_OBJECT_STORAGE_LABEL="Cloudflare R2"
-ASSIGNMENT_OBJECT_STORAGE_ACCESS_KEY_ID=<access-key>
-ASSIGNMENT_OBJECT_STORAGE_SECRET_ACCESS_KEY=<secret-key>
-ASSIGNMENT_OBJECT_STORAGE_REGION=auto
-ASSIGNMENT_OBJECT_STORAGE_BUCKET=edusmart-assignments
-ASSIGNMENT_OBJECT_STORAGE_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
-ASSIGNMENT_OBJECT_STORAGE_USE_PATH_STYLE_ENDPOINT=true
-ASSIGNMENT_DIRECT_UPLOAD_EXPIRES_SECONDS=900
+APP_DIRECT_UPLOAD_ENABLED=true
+APP_DIRECT_UPLOAD_BUCKETS=assignments,quiz-media,certificates,sertifikat-files,certificate-templates,sertifikat-templates
+APP_OBJECT_STORAGE_LABEL="Cloudflare R2"
+APP_OBJECT_STORAGE_ACCESS_KEY_ID=<access-key>
+APP_OBJECT_STORAGE_SECRET_ACCESS_KEY=<secret-key>
+APP_OBJECT_STORAGE_REGION=auto
+APP_OBJECT_STORAGE_BUCKET=edusmart-storage
+APP_OBJECT_STORAGE_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
+APP_OBJECT_STORAGE_USE_PATH_STYLE_ENDPOINT=true
+APP_DIRECT_UPLOAD_EXPIRES_SECONDS=900
+APP_DIRECT_UPLOAD_VERIFY_OBJECTS=true
 ```
+
+Env lama `ASSIGNMENT_DIRECT_UPLOAD_*` masih didukung untuk kompatibilitas, tetapi deploy baru disarankan memakai `APP_DIRECT_UPLOAD_*`.
 
 Bucket harus private dan CORS bucket perlu mengizinkan domain sekolah:
 
@@ -234,7 +246,7 @@ Bucket harus private dan CORS bucket perlu mengizinkan domain sekolah:
 - Header: `Content-Type`
 - Origin: `https://edusmart.example.com` dan subdomain tenant yang dipakai
 
-Jika env ini belum aktif atau bucket belum siap, upload tugas otomatis memakai flow lama Google Drive/VPS.
+Jika env ini belum aktif atau bucket belum siap, upload otomatis fallback ke VPS/Google Drive sesuai fitur yang dipakai.
 
 ## 3.3 Konfigurasi RFID MQTT Bridge
 

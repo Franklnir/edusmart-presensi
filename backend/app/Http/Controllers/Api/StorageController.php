@@ -362,6 +362,12 @@ class StorageController extends ApiController
         if (! in_array($bucket, $this->allowedBuckets, true)) {
             return $this->deny('Bucket tidak diizinkan', 400);
         }
+        if ($provider !== 'object_storage') {
+            return $this->deny('Provider confirm upload tidak valid', 422);
+        }
+        if (! $this->objectStorageEnabledForBucket($bucket)) {
+            return $this->deny('Direct upload untuk bucket ini belum aktif', 422);
+        }
 
         $path = $this->sanitizePath($path);
         if (! $path) {
@@ -379,6 +385,31 @@ class StorageController extends ApiController
             return response()->json(['error' => $quotaError], 422);
         }
 
+        $objectKey = trim((string) $request->input('object_key'));
+        if ($objectKey === '') {
+            $objectKey = $this->buildStoragePath($bucket, $path);
+        }
+
+        try {
+            $verification = $this->objectStorageSigner->verifyUploadedObject($objectKey, $sizeBytes);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'error' => 'Gagal memverifikasi file object storage: '.$e->getMessage(),
+            ], 422);
+        }
+
+        if (($verification['verified'] ?? false) && ! ($verification['exists'] ?? false)) {
+            return response()->json([
+                'error' => 'File object storage belum ditemukan. Tunggu upload selesai lalu coba lagi.',
+            ], 422);
+        }
+
+        if (($verification['verified'] ?? false) && ! ($verification['size_matches'] ?? true)) {
+            return response()->json([
+                'error' => 'Ukuran file object storage tidak sesuai metadata upload.',
+            ], 422);
+        }
+
         $this->storageManagementService->registerUploadedFile($request, [
             'bucket' => $bucket,
             'path' => $path,
@@ -389,7 +420,9 @@ class StorageController extends ApiController
             'size_bytes' => $sizeBytes,
             'metadata' => [
                 'confirmed_from_client' => true,
-                'object_key' => $request->input('object_key'),
+                'object_key' => $objectKey,
+                'verified' => (bool) ($verification['verified'] ?? false),
+                'verified_size_bytes' => $verification['size_bytes'] ?? null,
             ],
         ]);
 
@@ -1407,7 +1440,7 @@ class StorageController extends ApiController
 
     private function objectStorageEnabledForBucket(string $bucket): bool
     {
-        return $bucket === 'assignments' && $this->objectStorageSigner->isEnabled();
+        return $this->objectStorageSigner->isEnabledForBucket($bucket);
     }
 
     private function resolveMetadataMime(string $fileName, string $mime): string

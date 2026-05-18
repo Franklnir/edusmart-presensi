@@ -75,26 +75,28 @@ CREATE INDEX IF NOT EXISTS tugas_jawaban_tugas_user_idx
 - Pertahankan upload file lewat storage, lalu simpan metadata jawaban secara terpisah. Request submit jawaban harus kecil dan cepat.
 - Jalankan queue worker untuk WhatsApp/Google Drive/sinkronisasi lain. Jangan kirim notifikasi atau proses file berat di request upload utama.
 - Jika 600-1000 siswa upload pada jam yang sama, batasi upload paralel di frontend dan backend. Frontend siswa saat ini mengirim foto satu per satu agar koneksi perangkat dan storage lebih stabil.
-- Untuk skala lebih besar, aktifkan signed direct upload bucket `assignments` ke object storage seperti S3-compatible/Cloudflare R2/MinIO agar bandwidth file tidak lewat PHP app server.
+- Untuk skala lebih besar, aktifkan signed direct upload untuk bucket besar (`assignments`, `quiz-media`, sertifikat/template) ke object storage seperti S3-compatible/Cloudflare R2/MinIO agar bandwidth file tidak lewat PHP app server.
 - Pantau `storage` rate limit, disk usage, queue backlog, dan error 413/429. Naikkan limit hanya setelah bandwidth/storage siap.
 
-### Env Signed Direct Upload Assignments
+### Env Signed Direct Upload Object Storage
 
-Aktifkan setelah bucket object storage siap. Untuk Cloudflare R2 dan MinIO biasanya gunakan path-style endpoint.
+Aktifkan setelah bucket object storage siap. Untuk Cloudflare R2 dan MinIO biasanya gunakan path-style endpoint. Jalur ini membuat browser upload langsung ke S3/R2/MinIO, sementara backend tetap memvalidasi izin, path, ukuran, tipe file, dan kuota sekolah sebelum membuat signed URL.
 
 ```dotenv
-ASSIGNMENT_DIRECT_UPLOAD_ENABLED=true
-ASSIGNMENT_OBJECT_STORAGE_LABEL="Cloudflare R2"
-ASSIGNMENT_OBJECT_STORAGE_ACCESS_KEY_ID=...
-ASSIGNMENT_OBJECT_STORAGE_SECRET_ACCESS_KEY=...
-ASSIGNMENT_OBJECT_STORAGE_REGION=auto
-ASSIGNMENT_OBJECT_STORAGE_BUCKET=edusmart-assignments
-ASSIGNMENT_OBJECT_STORAGE_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
-ASSIGNMENT_OBJECT_STORAGE_USE_PATH_STYLE_ENDPOINT=true
-ASSIGNMENT_DIRECT_UPLOAD_EXPIRES_SECONDS=900
+APP_DIRECT_UPLOAD_ENABLED=true
+APP_DIRECT_UPLOAD_BUCKETS=assignments,quiz-media,certificates,sertifikat-files,certificate-templates,sertifikat-templates
+APP_OBJECT_STORAGE_LABEL="Cloudflare R2"
+APP_OBJECT_STORAGE_ACCESS_KEY_ID=...
+APP_OBJECT_STORAGE_SECRET_ACCESS_KEY=...
+APP_OBJECT_STORAGE_REGION=auto
+APP_OBJECT_STORAGE_BUCKET=edusmart-storage
+APP_OBJECT_STORAGE_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
+APP_OBJECT_STORAGE_USE_PATH_STYLE_ENDPOINT=true
+APP_DIRECT_UPLOAD_EXPIRES_SECONDS=900
+APP_DIRECT_UPLOAD_VERIFY_OBJECTS=true
 ```
 
-Bucket CORS minimal perlu mengizinkan origin domain sekolah untuk method `PUT`, `GET`, dan `HEAD`, serta header `Content-Type`. Simpan object tetap private; aplikasi hanya memberi signed URL sementara setelah permission siswa/guru dicek.
+Env lama `ASSIGNMENT_DIRECT_UPLOAD_*` masih didukung untuk deploy existing, tetapi konfigurasi baru sebaiknya memakai `APP_DIRECT_UPLOAD_*`. Bucket CORS minimal perlu mengizinkan origin domain sekolah untuk method `PUT`, `GET`, dan `HEAD`, serta header `Content-Type`. Simpan object tetap private; aplikasi hanya memberi signed URL sementara setelah permission pengguna dicek.
 
 ## Catatan Lanjutan
 

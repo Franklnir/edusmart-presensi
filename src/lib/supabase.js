@@ -485,6 +485,14 @@ export const PROFILE_BUCKET = 'profile-photos'
 export const QUIZ_MEDIA_BUCKET = 'quiz-media'
 export const CERT_BUCKET = 'certificates'
 export const CERT_TEMPLATE_BUCKET = 'certificate-templates'
+const DIRECT_UPLOAD_BUCKETS = new Set([
+  ASSIGNMENT_BUCKET,
+  QUIZ_MEDIA_BUCKET,
+  CERT_BUCKET,
+  'sertifikat-files',
+  CERT_TEMPLATE_BUCKET,
+  'sertifikat-templates'
+])
 
 const PROFILE_IMAGE_MAX_BYTES = 50 * 1024
 const ASSIGNMENT_IMAGE_MAX_BYTES = 680 * 1024
@@ -1613,7 +1621,7 @@ class StorageBucket {
       }
     }
 
-    if (this.bucket === ASSIGNMENT_BUCKET && !options?.fastLocal && options?.skipDirectUpload !== true) {
+    if (DIRECT_UPLOAD_BUCKETS.has(this.bucket) && !options?.fastLocal && options?.skipDirectUpload !== true) {
       const direct = await this.directUpload(path, uploadFile, {
         ...options,
         originalFile: file
@@ -1628,7 +1636,7 @@ class StorageBucket {
       }
 
       if (direct?.attempted && direct.error && direct.canFallback) {
-        console.warn('Direct assignment upload gagal, fallback ke upload API:', direct.error)
+        console.warn('Direct storage upload gagal, fallback ke upload API:', direct.error)
       }
     }
 

@@ -84,15 +84,16 @@ class StorageSecurityTest extends TestCase
     public function test_assignment_direct_upload_returns_presigned_object_storage_url_when_enabled(): void
     {
         config([
-            'services.assignment_object_storage.enabled' => true,
-            'services.assignment_object_storage.label' => 'Cloudflare R2',
-            'services.assignment_object_storage.key' => 'test-access-key',
-            'services.assignment_object_storage.secret' => 'test-secret-key',
-            'services.assignment_object_storage.region' => 'auto',
-            'services.assignment_object_storage.bucket' => 'edusmart-assignments',
-            'services.assignment_object_storage.endpoint' => 'https://account-id.r2.cloudflarestorage.com',
-            'services.assignment_object_storage.use_path_style_endpoint' => true,
-            'services.assignment_object_storage.expires_seconds' => 900,
+            'services.object_storage.enabled' => true,
+            'services.object_storage.label' => 'Cloudflare R2',
+            'services.object_storage.key' => 'test-access-key',
+            'services.object_storage.secret' => 'test-secret-key',
+            'services.object_storage.region' => 'auto',
+            'services.object_storage.bucket' => 'edusmart-assignments',
+            'services.object_storage.endpoint' => 'https://account-id.r2.cloudflarestorage.com',
+            'services.object_storage.use_path_style_endpoint' => true,
+            'services.object_storage.expires_seconds' => 900,
+            'services.object_storage.direct_upload_buckets' => ['assignments', 'quiz-media'],
         ]);
 
         $tenantId = $this->defaultTenantId();
@@ -120,16 +121,92 @@ class StorageSecurityTest extends TestCase
         $this->assertStringNotContainsString('test-secret-key', $uploadUrl);
     }
 
+    public function test_quiz_media_direct_upload_returns_presigned_object_storage_url_when_enabled(): void
+    {
+        config([
+            'services.object_storage.enabled' => true,
+            'services.object_storage.label' => 'MinIO',
+            'services.object_storage.key' => 'test-access-key',
+            'services.object_storage.secret' => 'test-secret-key',
+            'services.object_storage.region' => 'us-east-1',
+            'services.object_storage.bucket' => 'edusmart-storage',
+            'services.object_storage.endpoint' => 'https://minio.example.test',
+            'services.object_storage.use_path_style_endpoint' => true,
+            'services.object_storage.expires_seconds' => 900,
+            'services.object_storage.direct_upload_buckets' => ['assignments', 'quiz-media'],
+        ]);
+
+        $tenantId = $this->defaultTenantId();
+        [$guru] = $this->createUserWithProfile($tenantId, 'guru', 'X-1');
+        Sanctum::actingAs($guru);
+
+        $response = $this->postJson('/api/storage/direct-upload', [
+            'bucket' => 'quiz-media',
+            'path' => 'quiz-media/'.$guru->id.'/quiz-1/question.jpg',
+            'filename' => 'question.jpg',
+            'mime_type' => 'image/jpeg',
+            'size_bytes' => 40 * 1024,
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('data.available', true);
+        $response->assertJsonPath('data.provider', 'object_storage');
+        $response->assertJsonPath('data.providerLabel', 'MinIO');
+        $response->assertJsonPath('data.upload.method', 'PUT');
+        $response->assertJsonPath('data.upload.headers.Content-Type', 'image/jpeg');
+
+        $uploadUrl = (string) $response->json('data.upload.url');
+        $this->assertStringContainsString('X-Amz-Signature=', $uploadUrl);
+        $this->assertStringContainsString('/edusmart-storage/private/quiz-media/quiz-media/'.$guru->id.'/', $uploadUrl);
+    }
+
+    public function test_confirm_direct_upload_rejects_missing_object_storage_file(): void
+    {
+        config([
+            'services.object_storage.enabled' => true,
+            'services.object_storage.key' => 'test-access-key',
+            'services.object_storage.secret' => 'test-secret-key',
+            'services.object_storage.region' => 'auto',
+            'services.object_storage.bucket' => 'edusmart-storage',
+            'services.object_storage.endpoint' => 'https://account-id.r2.cloudflarestorage.com',
+            'services.object_storage.use_path_style_endpoint' => true,
+            'services.object_storage.verify_uploads' => true,
+            'services.object_storage.direct_upload_buckets' => ['assignments'],
+        ]);
+
+        Http::fake([
+            '*' => Http::response('', 404),
+        ]);
+
+        $tenantId = $this->defaultTenantId();
+        [$user] = $this->createUserWithProfile($tenantId, 'siswa', 'X-1');
+        Sanctum::actingAs($user);
+
+        $response = $this->postJson('/api/storage/confirm-upload', [
+            'bucket' => 'assignments',
+            'path' => 'X-1/'.$user->id.'-jawaban.pdf',
+            'provider' => 'object_storage',
+            'filename' => 'jawaban.pdf',
+            'mime_type' => 'application/pdf',
+            'size_bytes' => 512 * 1024,
+            'object_key' => 'private/assignments/X-1/'.$user->id.'-jawaban.pdf',
+        ]);
+
+        $response->assertStatus(422);
+        $this->assertStringContainsString('belum ditemukan', (string) $response->json('error'));
+    }
+
     public function test_assignment_direct_upload_rejects_oversized_image_metadata(): void
     {
         config([
-            'services.assignment_object_storage.enabled' => true,
-            'services.assignment_object_storage.key' => 'test-access-key',
-            'services.assignment_object_storage.secret' => 'test-secret-key',
-            'services.assignment_object_storage.region' => 'auto',
-            'services.assignment_object_storage.bucket' => 'edusmart-assignments',
-            'services.assignment_object_storage.endpoint' => 'https://account-id.r2.cloudflarestorage.com',
-            'services.assignment_object_storage.use_path_style_endpoint' => true,
+            'services.object_storage.enabled' => true,
+            'services.object_storage.key' => 'test-access-key',
+            'services.object_storage.secret' => 'test-secret-key',
+            'services.object_storage.region' => 'auto',
+            'services.object_storage.bucket' => 'edusmart-assignments',
+            'services.object_storage.endpoint' => 'https://account-id.r2.cloudflarestorage.com',
+            'services.object_storage.use_path_style_endpoint' => true,
+            'services.object_storage.direct_upload_buckets' => ['assignments'],
         ]);
 
         $tenantId = $this->defaultTenantId();

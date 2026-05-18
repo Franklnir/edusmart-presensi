@@ -7,24 +7,38 @@ use Illuminate\Support\Facades\Http;
 
 class S3CompatibleStorageSigner
 {
+    private const DEFAULT_DIRECT_UPLOAD_BUCKETS = [
+        'assignments',
+        'quiz-media',
+        'certificates',
+        'sertifikat-files',
+        'certificate-templates',
+        'sertifikat-templates',
+    ];
+
     public function isEnabled(): bool
     {
-        return (bool) config('services.assignment_object_storage.enabled', false)
+        return $this->enabledConfig()
             && $this->accessKey() !== ''
             && $this->secretKey() !== ''
             && $this->bucket() !== '';
     }
 
+    public function isEnabledForBucket(string $bucket): bool
+    {
+        return $this->isEnabled() && in_array($bucket, $this->directUploadBuckets(), true);
+    }
+
     public function label(): string
     {
-        $label = trim((string) config('services.assignment_object_storage.label', 'Object Storage'));
+        $label = trim((string) $this->configString('label', 'Object Storage'));
 
         return $label !== '' ? $label : 'Object Storage';
     }
 
     public function expiresSeconds(): int
     {
-        $expires = (int) config('services.assignment_object_storage.expires_seconds', 900);
+        $expires = (int) $this->configValue('expires_seconds', 900);
 
         return max(60, min(3600, $expires));
     }
@@ -41,6 +55,42 @@ class S3CompatibleStorageSigner
     public function presignGet(string $objectKey, ?int $expiresSeconds = null): array
     {
         return $this->presign('GET', $objectKey, $expiresSeconds);
+    }
+
+    public function verifyUploadedObject(string $objectKey, int $expectedSizeBytes = 0): array
+    {
+        if (! $this->shouldVerifyUploads()) {
+            return [
+                'verified' => false,
+                'skipped' => true,
+                'size_matches' => true,
+                'size_bytes' => null,
+            ];
+        }
+
+        $signed = $this->presign('HEAD', $objectKey, 300);
+        $response = Http::timeout(10)->head($signed['url']);
+        if (! $response->successful()) {
+            return [
+                'verified' => true,
+                'exists' => false,
+                'status' => $response->status(),
+                'size_matches' => false,
+                'size_bytes' => null,
+            ];
+        }
+
+        $sizeHeader = $response->header('Content-Length');
+        $sizeBytes = is_numeric($sizeHeader) ? (int) $sizeHeader : null;
+        $sizeMatches = $expectedSizeBytes <= 0 || $sizeBytes === null || $sizeBytes === $expectedSizeBytes;
+
+        return [
+            'verified' => true,
+            'exists' => true,
+            'status' => $response->status(),
+            'size_matches' => $sizeMatches,
+            'size_bytes' => $sizeBytes,
+        ];
     }
 
     public function deleteObject(string $objectKey): bool
@@ -207,7 +257,7 @@ class S3CompatibleStorageSigner
 
     private function endpoint(): string
     {
-        $endpoint = trim((string) config('services.assignment_object_storage.endpoint', ''));
+        $endpoint = trim((string) $this->configString('endpoint', ''));
         if ($endpoint !== '') {
             return rtrim($endpoint, '/');
         }
@@ -217,33 +267,99 @@ class S3CompatibleStorageSigner
 
     private function usePathStyle(): bool
     {
-        return (bool) config('services.assignment_object_storage.use_path_style_endpoint', false);
+        return (bool) $this->configValue('use_path_style_endpoint', false);
     }
 
     private function accessKey(): string
     {
-        return trim((string) config('services.assignment_object_storage.key', ''));
+        return trim((string) $this->configString('key', ''));
     }
 
     private function secretKey(): string
     {
-        return trim((string) config('services.assignment_object_storage.secret', ''));
+        return trim((string) $this->configString('secret', ''));
     }
 
     private function sessionToken(): string
     {
-        return trim((string) config('services.assignment_object_storage.session_token', ''));
+        return trim((string) $this->configString('session_token', ''));
     }
 
     private function region(): string
     {
-        $region = trim((string) config('services.assignment_object_storage.region', 'us-east-1'));
+        $region = trim((string) $this->configString('region', 'us-east-1'));
 
         return $region !== '' ? $region : 'us-east-1';
     }
 
     private function bucket(): string
     {
-        return trim((string) config('services.assignment_object_storage.bucket', ''));
+        return trim((string) $this->configString('bucket', ''));
+    }
+
+    private function directUploadBuckets(): array
+    {
+        $buckets = $this->configValue('direct_upload_buckets', self::DEFAULT_DIRECT_UPLOAD_BUCKETS);
+        if (is_string($buckets)) {
+            $buckets = explode(',', $buckets);
+        }
+        if (! is_array($buckets) || empty($buckets)) {
+            $buckets = self::DEFAULT_DIRECT_UPLOAD_BUCKETS;
+        }
+
+        return array_values(array_unique(array_filter(array_map(
+            fn ($bucket) => trim((string) $bucket),
+            $buckets
+        ))));
+    }
+
+    private function shouldVerifyUploads(): bool
+    {
+        return (bool) $this->configValue('verify_uploads', true);
+    }
+
+    private function enabledConfig(): bool
+    {
+        return (bool) config('services.object_storage.enabled', false)
+            || (bool) config('services.assignment_object_storage.enabled', false);
+    }
+
+    private function configString(string $key, string $default = ''): string
+    {
+        $value = $this->configValue($key, $default);
+
+        return trim((string) $value);
+    }
+
+    private function configValue(string $key, mixed $default = null): mixed
+    {
+        $objectValue = config("services.object_storage.{$key}");
+        if ($this->filledConfigValue($objectValue)) {
+            return $objectValue;
+        }
+
+        $assignmentValue = config("services.assignment_object_storage.{$key}");
+        if ($this->filledConfigValue($assignmentValue)) {
+            return $assignmentValue;
+        }
+
+        return $default;
+    }
+
+    private function filledConfigValue(mixed $value): bool
+    {
+        if ($value === null) {
+            return false;
+        }
+
+        if (is_string($value)) {
+            return trim($value) !== '';
+        }
+
+        if (is_array($value)) {
+            return ! empty($value);
+        }
+
+        return true;
     }
 }
