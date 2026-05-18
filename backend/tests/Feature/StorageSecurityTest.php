@@ -45,7 +45,7 @@ class StorageSecurityTest extends TestCase
         $response->assertJsonPath('error', 'Ekstensi file tidak diizinkan');
     }
 
-    public function test_assignment_pdf_upload_is_limited_to_two_mb_when_drive_is_not_ready(): void
+    public function test_assignment_pdf_upload_is_limited_to_three_mb_when_drive_is_not_ready(): void
     {
         $tenantId = $this->defaultTenantId();
         [$user] = $this->createUserWithProfile($tenantId, 'siswa', 'X-1');
@@ -58,10 +58,10 @@ class StorageSecurityTest extends TestCase
         ]);
 
         $response->assertStatus(422);
-        $this->assertStringContainsString('maksimal 2 MB', (string) $response->json('error'));
+        $this->assertStringContainsString('maksimal 3 MB', (string) $response->json('error'));
     }
 
-    public function test_assignment_presentation_upload_is_limited_to_two_mb_when_drive_is_not_ready(): void
+    public function test_assignment_presentation_upload_is_limited_to_five_mb_when_drive_is_not_ready(): void
     {
         $tenantId = $this->defaultTenantId();
         [$user] = $this->createUserWithProfile($tenantId, 'siswa', 'X-1');
@@ -78,7 +78,7 @@ class StorageSecurityTest extends TestCase
         ]);
 
         $response->assertStatus(422);
-        $this->assertStringContainsString('maksimal 2 MB', (string) $response->json('error'));
+        $this->assertStringContainsString('maksimal 5 MB', (string) $response->json('error'));
     }
 
     public function test_assignment_direct_upload_returns_presigned_object_storage_url_when_enabled(): void
