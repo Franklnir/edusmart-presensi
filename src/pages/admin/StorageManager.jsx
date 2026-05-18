@@ -35,16 +35,26 @@ const CATEGORIES = [
   { value: 'arsip', label: 'Arsip' }
 ]
 
-const SEMESTERS = [
-  { value: '', label: 'Semua semester' },
-  { value: 'Ganjil', label: 'Ganjil' },
-  { value: 'Genap', label: 'Genap' }
-]
-
 const DRIVE_FILE_BUCKET_OPTIONS = [
   { value: 'all', label: 'Semua file' },
   { value: 'assignments', label: 'Tugas' },
   { value: 'quiz-media', label: 'Quiz' }
+]
+
+const CLEANUP_AGE_OPTIONS = [
+  { value: '', label: 'Semua umur file' },
+  { value: '30', label: 'Lebih dari 30 hari' },
+  { value: '90', label: 'Lebih dari 90 hari' },
+  { value: '180', label: 'Lebih dari 180 hari' },
+  { value: '365', label: 'Lebih dari 1 tahun' }
+]
+
+const CLEANUP_PERCENT_OPTIONS = [
+  { value: '', label: 'Semua ukuran' },
+  { value: '10', label: '10% file terbesar' },
+  { value: '20', label: '20% file terbesar' },
+  { value: '30', label: '30% file terbesar' },
+  { value: '50', label: '50% file terbesar' }
 ]
 
 const DRIVE_STATUS_DEFAULT = {
@@ -80,6 +90,19 @@ const selectedTenantFromUrl = () => {
 }
 const normalizeDriveStatus = (data) => data || DRIVE_STATUS_DEFAULT
 const labelOrZero = (value) => value || '0 B'
+const periodValue = (tahunAjaran, semester) => (
+  tahunAjaran && semester ? `${tahunAjaran}|${semester}` : ''
+)
+const parsePeriodValue = (value) => {
+  const [tahunAjaran = '', semester = ''] = String(value || '').split('|')
+  return { tahun_ajaran: tahunAjaran, semester }
+}
+const periodRank = (tahunAjaran, semester) => {
+  const match = String(tahunAjaran || '').match(/^(\d{4})\/\d{4}$/)
+  if (!match) return null
+  if (semester !== 'Ganjil' && semester !== 'Genap') return null
+  return (Number(match[1]) * 2) + (semester === 'Genap' ? 1 : 0)
+}
 const driveBadgeClass = (ready, status) => (
   ready
     ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
@@ -165,6 +188,7 @@ function StorageManager() {
   const quota = activeSummary?.quota || {}
   const categories = Array.isArray(usage?.by_category) ? usage.by_category : []
   const periods = Array.isArray(usage?.by_period) ? usage.by_period : []
+  const periodCatalog = Array.isArray(activeSummary?.period_options) ? activeSummary.period_options : []
   const largestFiles = Array.isArray(activeSummary?.largest_files) ? activeSummary.largest_files : []
   const uploaders = Array.isArray(activeSummary?.by_uploader) ? activeSummary.by_uploader : []
   const recommendations = Array.isArray(activeSummary?.recommendations) ? activeSummary.recommendations : []
@@ -185,7 +209,51 @@ function StorageManager() {
   ), [superSummary])
   const selectedTenant = tenants.find((tenant) => tenant.id === selectedTenantId)
   const selectedTenantName = selectedTenant?.name || tenantDetail?.tenant?.name || 'Sekolah dipilih'
-  const cleanupHasRequiredPeriod = Boolean(cleanupForm.tahun_ajaran.trim() && cleanupForm.semester)
+  const activePeriod = activeSummary?.active_period || {}
+  const periodOptions = useMemo(() => {
+    const map = new Map()
+    const addPeriod = (tahunAjaran, semester, meta = {}) => {
+      const value = periodValue(tahunAjaran, semester)
+      const rank = periodRank(tahunAjaran, semester)
+      if (!value || rank === null) return
+      const existing = map.get(value) || {
+        value,
+        tahun_ajaran: tahunAjaran,
+        semester,
+        rank,
+        bytes_label: '',
+        files: 0,
+        isActive: false
+      }
+      map.set(value, {
+        ...existing,
+        bytes_label: meta.bytes_label || meta.uploaded_label || existing.bytes_label,
+        files: Number(meta.files ?? existing.files ?? 0),
+        isActive: existing.isActive || Boolean(meta.isActive)
+      })
+    }
+
+    addPeriod(activePeriod?.tahun_ajaran, activePeriod?.semester, { isActive: true })
+    periodCatalog.forEach((item) => addPeriod(item.tahun_ajaran, item.semester, item))
+    periods.forEach((item) => addPeriod(item.tahun_ajaran, item.semester, item))
+    driveSemesterUsageRows.forEach((item) => addPeriod(item.tahun_ajaran, item.semester, item))
+
+    return Array.from(map.values()).sort((a, b) => b.rank - a.rank)
+  }, [
+    activePeriod?.semester,
+    activePeriod?.tahun_ajaran,
+    driveSemesterUsageRows,
+    periodCatalog,
+    periods
+  ])
+  const safeCleanupPeriodOptions = useMemo(() => {
+    const activeRank = periodRank(activePeriod?.tahun_ajaran, activePeriod?.semester)
+    if (activeRank === null) return []
+    return periodOptions.filter((item) => activeRank - item.rank >= 1)
+  }, [activePeriod?.semester, activePeriod?.tahun_ajaran, periodOptions])
+  const cleanupPeriodValue = periodValue(cleanupForm.tahun_ajaran, cleanupForm.semester)
+  const cleanupPeriodIsAllowed = safeCleanupPeriodOptions.some((item) => item.value === cleanupPeriodValue)
+  const cleanupHasRequiredPeriod = Boolean(cleanupPeriodValue && cleanupPeriodIsAllowed)
 
   const loadAdminSummary = async (filters = storageFilters) => {
     const { data, error } = await supabase.admin.storageManager(filters)
@@ -200,6 +268,11 @@ function StorageManager() {
     const firstTenant = data?.tenants?.[0]?.id
     const tenantIds = new Set((data?.tenants || []).map((tenant) => tenant.id).filter(Boolean))
     setSelectedTenantId((current) => (current && tenantIds.has(current) ? current : firstTenant || ''))
+  }
+
+  const updateCleanupForm = (patch) => {
+    setCleanupPreview(null)
+    setCleanupForm((prev) => ({ ...prev, ...patch }))
   }
 
   const loadDriveStatus = async ({ sync = false } = {}) => {
@@ -292,7 +365,7 @@ function StorageManager() {
           await Promise.all([loadDriveStatus(), loadDriveFiles()])
         }
       } else if (activeTab === 'drive') {
-        await Promise.all([loadDriveStatus(), loadDriveFiles()])
+        await Promise.all([loadAdminSummary(storageFilters), loadDriveStatus(), loadDriveFiles()])
       } else {
         await loadAdminSummary(storageFilters)
       }
@@ -484,6 +557,7 @@ function StorageManager() {
     setLoading(true)
     try {
       setStorageFilters(nextFilters)
+      setCleanupPreview(null)
       setCleanupForm((prev) => ({
         ...prev,
         tahun_ajaran: nextFilters.tahun_ajaran,
@@ -767,20 +841,18 @@ function StorageManager() {
               <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
                 <h2 className="text-sm font-bold text-slate-900">Filter Drive</h2>
                 <div className="mt-3 space-y-3">
-                  <input
-                    value={drivePeriod.tahun_ajaran}
-                    onChange={(event) => setDrivePeriod((prev) => ({ ...prev, tahun_ajaran: event.target.value }))}
-                    placeholder="Tahun ajaran, contoh 2025/2026"
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                  />
                   <select
-                    value={drivePeriod.semester}
-                    onChange={(event) => setDrivePeriod((prev) => ({ ...prev, semester: event.target.value }))}
+                    value={periodValue(drivePeriod.tahun_ajaran, drivePeriod.semester)}
+                    onChange={(event) => setDrivePeriod(parsePeriodValue(event.target.value))}
                     className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                   >
-                    <option value="">Semua semester</option>
-                    <option value="Ganjil">Ganjil</option>
-                    <option value="Genap">Genap</option>
+                    <option value="">Semua periode</option>
+                    {periodOptions.map((item) => (
+                      <option key={item.value} value={item.value}>
+                        {item.tahun_ajaran} - {item.semester}{item.isActive ? ' (Aktif)' : ''}
+                      </option>
+                    ))}
+                    {periodOptions.length === 0 && <option value="" disabled>Belum ada periode tercatat</option>}
                   </select>
                   <select
                     value={driveFileBucket}
@@ -1010,19 +1082,22 @@ function StorageManager() {
                 Filter ini dipakai untuk analitik, file terbesar, uploader, rekomendasi, dan preview cleanup.
               </p>
             </div>
-            <div className="grid w-full gap-2 sm:grid-cols-2 lg:max-w-3xl lg:grid-cols-[1fr_150px_180px_auto_auto]">
-              <input
-                value={storageFilterDraft.tahun_ajaran}
-                onChange={(event) => setStorageFilterDraft((prev) => ({ ...prev, tahun_ajaran: event.target.value }))}
-                placeholder="Tahun ajaran"
-                className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm"
-              />
+            <div className="grid w-full gap-2 sm:grid-cols-2 lg:max-w-3xl lg:grid-cols-[1fr_180px_auto_auto]">
               <select
-                value={storageFilterDraft.semester}
-                onChange={(event) => setStorageFilterDraft((prev) => ({ ...prev, semester: event.target.value }))}
+                value={periodValue(storageFilterDraft.tahun_ajaran, storageFilterDraft.semester)}
+                onChange={(event) => setStorageFilterDraft((prev) => ({
+                  ...prev,
+                  ...parsePeriodValue(event.target.value)
+                }))}
                 className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm"
               >
-                {SEMESTERS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                <option value="">Semua periode</option>
+                {periodOptions.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.tahun_ajaran} - {item.semester}{item.isActive ? ' (Aktif)' : ''}
+                  </option>
+                ))}
+                {periodOptions.length === 0 && <option value="" disabled>Belum ada periode tercatat</option>}
               </select>
               <select
                 value={storageFilterDraft.category}
@@ -1174,42 +1249,46 @@ function StorageManager() {
           <div className="flex flex-col gap-1">
             <h2 className="text-sm font-bold text-slate-900">Cleanup Aman ke Trash</h2>
             <p className="text-xs text-slate-500">
-              Cleanup wajib memilih tahun ajaran dan semester yang sudah lewat minimal 1 semester. File masuk Trash dulu dan otomatis dapat dipurge setelah 30 hari.
+              Cleanup memakai pilihan periode yang sudah tercatat dan hanya membuka semester yang lewat minimal 1 semester. File masuk Trash dulu dan otomatis dapat dipurge setelah 30 hari.
             </p>
           </div>
-          <div className="mt-4 grid gap-3 md:grid-cols-5">
-            <input
-              value={cleanupForm.tahun_ajaran}
-              onChange={(e) => setCleanupForm((prev) => ({ ...prev, tahun_ajaran: e.target.value }))}
-              placeholder="Tahun ajaran, contoh 2023/2024"
-              className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-            />
+          <div className="mt-4 grid gap-3 md:grid-cols-4">
             <select
-              value={cleanupForm.semester}
-              onChange={(e) => setCleanupForm((prev) => ({ ...prev, semester: e.target.value }))}
+              value={cleanupPeriodValue}
+              onChange={(event) => updateCleanupForm(parsePeriodValue(event.target.value))}
               className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
             >
-              {SEMESTERS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+              <option value="">Pilih periode lama</option>
+              {safeCleanupPeriodOptions.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.tahun_ajaran} - {item.semester}{item.bytes_label ? ` (${item.bytes_label})` : ''}
+                </option>
+              ))}
+              {safeCleanupPeriodOptions.length === 0 && (
+                <option value="" disabled>Belum ada semester lama yang aman</option>
+              )}
             </select>
             <select
               value={cleanupForm.category}
-              onChange={(e) => setCleanupForm((prev) => ({ ...prev, category: e.target.value }))}
+              onChange={(e) => updateCleanupForm({ category: e.target.value })}
               className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
             >
               {CATEGORIES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
             </select>
-            <input
+            <select
               value={cleanupForm.older_than_days}
-              onChange={(e) => setCleanupForm((prev) => ({ ...prev, older_than_days: e.target.value }))}
-              placeholder="Opsional: umur file (hari)"
+              onChange={(e) => updateCleanupForm({ older_than_days: e.target.value })}
               className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-            />
-            <input
+            >
+              {CLEANUP_AGE_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+            </select>
+            <select
               value={cleanupForm.largest_percent}
-              onChange={(e) => setCleanupForm((prev) => ({ ...prev, largest_percent: e.target.value }))}
-              placeholder="% file terbesar"
+              onChange={(e) => updateCleanupForm({ largest_percent: e.target.value })}
               className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-            />
+            >
+              {CLEANUP_PERCENT_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+            </select>
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
             <button
@@ -1232,7 +1311,7 @@ function StorageManager() {
           </div>
           {!cleanupHasRequiredPeriod && (
             <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-              Pilih tahun ajaran dan semester lama terlebih dahulu. Cleanup tidak bisa dijalankan untuk semester aktif, semester berjalan, atau data yang belum melewati minimal satu semester.
+              Pilih periode lama dari dropdown terlebih dahulu. Cleanup tidak bisa dijalankan untuk semester aktif, semester berjalan, atau data yang belum melewati minimal satu semester.
             </div>
           )}
           {cleanupPreview && (

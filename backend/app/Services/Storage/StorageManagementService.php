@@ -247,6 +247,7 @@ class StorageManagementService
             'by_uploader' => $byUser,
             'duplicates' => $duplicates,
             'recommendations' => $recommendations,
+            'period_options' => $this->periodStats($tenantId),
             'prediction' => $this->fullPrediction($tenantId, $quota),
             'trash' => $this->trashSummary($tenantId),
             'trash_files' => $this->trashFiles($tenantId),
