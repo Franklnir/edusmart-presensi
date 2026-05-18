@@ -41,10 +41,15 @@ const DRIVE_FILE_BUCKET_OPTIONS = [
   { value: 'quiz-media', label: 'Quiz' }
 ]
 
+const CLEANUP_CATEGORIES = [
+  { value: '', label: 'Tugas, quiz, lampiran' },
+  { value: 'tugas', label: 'Tugas' },
+  { value: 'kuis', label: 'Quiz' },
+  { value: 'lampiran', label: 'Lampiran tugas' }
+]
+
 const CLEANUP_AGE_OPTIONS = [
-  { value: '', label: 'Semua umur file' },
-  { value: '30', label: 'Lebih dari 30 hari' },
-  { value: '90', label: 'Lebih dari 90 hari' },
+  { value: '90', label: 'Minimal 3 bulan' },
   { value: '180', label: 'Lebih dari 180 hari' },
   { value: '365', label: 'Lebih dari 1 tahun' }
 ]
@@ -163,7 +168,7 @@ function StorageManager() {
     tahun_ajaran: '',
     semester: '',
     category: '',
-    older_than_days: '',
+    older_than_days: '90',
     largest_percent: ''
   })
   const [cleanupPreview, setCleanupPreview] = useState(null)
@@ -567,7 +572,7 @@ function StorageManager() {
         ...prev,
         tahun_ajaran: nextFilters.tahun_ajaran,
         semester: nextFilters.semester,
-        category: nextFilters.category
+        category: ['tugas', 'kuis', 'lampiran'].includes(nextFilters.category) ? nextFilters.category : ''
       }))
       if (isSuperAdmin) {
         if (selectedTenantId) {
@@ -1276,8 +1281,11 @@ function StorageManager() {
           <div className="flex flex-col gap-1">
             <h2 className="text-sm font-bold text-slate-900">Cleanup Aman ke Trash</h2>
             <p className="text-xs text-slate-500">
-              Cleanup memakai pilihan periode yang sudah tercatat dan hanya membuka semester yang lewat minimal 1 semester. File masuk Trash dulu dan otomatis dapat dipurge setelah 30 hari.
+              Cleanup hanya memindahkan file storage tugas/quiz/lampiran ke Trash. Data tugas, quiz, nilai, siswa, guru, dan record penting tidak dihapus.
             </p>
+          </div>
+          <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
+            Aturan aman: periode wajib sesuai tahun ajaran dan semester, bukan semester aktif, file harus berumur minimal 3 bulan, tipe file dibatasi ke dokumen dan gambar, serta bisa dipulihkan dari Trash sebelum purge permanen.
           </div>
           <div className="mt-4 grid gap-3 md:grid-cols-4">
             <select
@@ -1300,7 +1308,7 @@ function StorageManager() {
               onChange={(e) => updateCleanupForm({ category: e.target.value })}
               className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
             >
-              {CATEGORIES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+              {CLEANUP_CATEGORIES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
             </select>
             <select
               value={cleanupForm.older_than_days}

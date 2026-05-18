@@ -16,6 +16,17 @@ class StorageManagementService
 
     private const CLEANUP_MINIMUM_PERIOD_GAP = 1;
 
+    private const CLEANUP_MINIMUM_FILE_AGE_DAYS = 90;
+
+    private const CLEANUP_SAFE_CATEGORIES = ['tugas', 'kuis', 'lampiran'];
+
+    private const CLEANUP_SAFE_BUCKETS = ['assignments', 'quiz-media'];
+
+    private const CLEANUP_SAFE_EXTENSIONS = [
+        'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'odt', 'ods', 'odp', 'rtf',
+        'jpg', 'jpeg', 'png', 'webp', 'gif',
+    ];
+
     private const CATEGORY_LABELS = [
         'tugas' => 'Tugas',
         'kuis' => 'Kuis',
@@ -342,15 +353,19 @@ class StorageManagementService
             ];
         }
 
+        $minimumAgeDays = $this->cleanupMinimumAgeDays($filters);
         $candidates = $this->cleanupCandidates($tenantId, $filters);
         $bytes = array_sum(array_map(fn ($row) => (int) ($row['size_bytes'] ?? 0), $candidates));
 
         return [
             'allowed' => true,
-            'message' => 'Cleanup aman untuk diproses ke Trash.',
+            'message' => 'Cleanup aman untuk diproses ke Trash. Hanya file tugas/quiz/lampiran yang sesuai periode dan berumur minimal '.$minimumAgeDays.' hari yang dipilih.',
             'files' => count($candidates),
             'bytes' => $bytes,
             'bytes_label' => $this->formatBytes($bytes),
+            'minimum_age_days' => $minimumAgeDays,
+            'safe_categories' => self::CLEANUP_SAFE_CATEGORIES,
+            'safe_extensions' => self::CLEANUP_SAFE_EXTENSIONS,
             'candidates' => array_slice($candidates, 0, 50),
         ];
     }
@@ -374,9 +389,13 @@ class StorageManagementService
         $affectedFiles = 0;
 
         foreach ($candidates as $file) {
+            $trashPath = $this->moveLocalFileToTrash($tenantId, $file);
+            if ($trashPath === null) {
+                continue;
+            }
+
             $affectedBytes += (int) ($file['size_bytes'] ?? 0);
             $affectedFiles++;
-            $trashPath = $this->moveLocalFileToTrash($tenantId, $file);
 
             $updates = ['status' => 'trash'];
             if ($this->tableHasColumn('storage_files', 'trashed_at')) {
@@ -476,6 +495,7 @@ class StorageManagementService
         if (
             ! $this->storageFilesReady()
             || ! $this->tableHasColumn('storage_files', 'trash_expires_at')
+            || ! $this->tableHasColumn('storage_files', 'uploaded_at')
         ) {
             return ['files' => 0, 'bytes' => 0, 'bytes_label' => '0 B'];
         }
@@ -484,6 +504,8 @@ class StorageManagementService
             ->where('status', 'trash')
             ->whereNotNull('trash_expires_at')
             ->where('trash_expires_at', '<=', now())
+            ->whereNotNull('uploaded_at')
+            ->where('uploaded_at', '<=', now()->subDays(self::CLEANUP_MINIMUM_FILE_AGE_DAYS))
             ->limit(500)
             ->get();
 
@@ -955,6 +977,10 @@ class StorageManagementService
         }
 
         $query = $this->storageRowsQuery($tenantId, $filters)->where('status', 'active');
+        $query->whereIn('category', self::CLEANUP_SAFE_CATEGORIES);
+        $query->whereIn('bucket', self::CLEANUP_SAFE_BUCKETS);
+        $query->where('provider', 'local');
+
         $active = $this->activePeriod($tenantId);
         $activeYear = $active['tahun_ajaran'] ?? null;
         $activeSemester = $active['semester'] ?? null;
@@ -973,15 +999,25 @@ class StorageManagementService
             });
         }
 
-        $olderThanDays = (int) ($filters['older_than_days'] ?? 0);
-        if ($olderThanDays > 0 && $this->tableHasColumn('storage_files', 'uploaded_at')) {
-            $query->where('uploaded_at', '<=', now()->subDays($olderThanDays));
+        $minimumAgeDays = $this->cleanupMinimumAgeDays($filters);
+        $query
+            ->whereNotNull('uploaded_at')
+            ->where('uploaded_at', '<=', now()->subDays($minimumAgeDays));
+
+        if ($this->tableHasColumn('storage_files', 'extension')) {
+            $query->whereIn(DB::raw('lower(extension)'), self::CLEANUP_SAFE_EXTENSIONS);
         }
 
         if ($this->tableHasColumn('storage_files', 'size_bytes')) {
             $query->orderByDesc('size_bytes');
         }
-        $rows = $query->limit(500)->get()->map(fn ($row) => $this->fileRowPayload($row))->all();
+        $rows = $query
+            ->limit(500)
+            ->get()
+            ->map(fn ($row) => $this->fileRowPayload($row))
+            ->filter(fn ($row) => $this->isSafeCleanupFile($row) && $this->localCleanupFileExists($row))
+            ->values()
+            ->all();
         $percent = max(0, min(100, (int) ($filters['largest_percent'] ?? 0)));
         if ($percent > 0 && ! empty($rows)) {
             $take = max(1, (int) ceil(count($rows) * ($percent / 100)));
@@ -1003,6 +1039,17 @@ class StorageManagementService
             return 'Cleanup wajib memilih tahun ajaran dan semester tertentu. Data storage hanya boleh dihapus setelah periodenya lewat minimal 1 semester.';
         }
 
+        foreach (['id', 'bucket', 'path', 'provider', 'category', 'uploaded_at', 'tahun_ajaran', 'semester'] as $column) {
+            if (! $this->tableHasColumn('storage_files', $column)) {
+                return 'Metadata storage belum lengkap untuk cleanup aman. Jalankan migrasi storage dulu sebelum cleanup.';
+            }
+        }
+
+        $category = trim((string) ($filters['category'] ?? ''));
+        if ($category !== '' && $category !== 'all' && ! in_array($category, self::CLEANUP_SAFE_CATEGORIES, true)) {
+            return 'Cleanup hanya boleh untuk file storage tugas, quiz, atau lampiran tugas.';
+        }
+
         if (! $activeYear || ! $activeSemester) {
             return 'Periode aktif sekolah belum valid. Atur periode akademik aktif sebelum menjalankan cleanup storage.';
         }
@@ -1018,6 +1065,11 @@ class StorageManagementService
         }
 
         return null;
+    }
+
+    private function cleanupMinimumAgeDays(array $filters): int
+    {
+        return max(self::CLEANUP_MINIMUM_FILE_AGE_DAYS, (int) ($filters['older_than_days'] ?? 0));
     }
 
     private function semesterRank(?string $year, ?string $semester): ?int
@@ -1104,6 +1156,7 @@ class StorageManagementService
             'category_label' => self::CATEGORY_LABELS[$category] ?? Str::title($category),
             'file_name' => ($row->file_name ?? null) ?: basename($path),
             'mime_type' => $row->mime_type ?? null,
+            'extension' => strtolower((string) ($row->extension ?? pathinfo(($row->file_name ?? null) ?: $path, PATHINFO_EXTENSION))),
             'size_bytes' => (int) ($row->size_bytes ?? 0),
             'size_label' => $this->formatBytes((int) ($row->size_bytes ?? 0)),
             'uploaded_by_user_id' => $row->uploaded_by_user_id ?? null,
@@ -1113,6 +1166,32 @@ class StorageManagementService
             'status' => $row->status ?? 'active',
             'uploaded_at' => $row->uploaded_at ?? null,
         ];
+    }
+
+    private function isSafeCleanupFile(array $row): bool
+    {
+        $extension = strtolower(trim((string) ($row['extension'] ?? '')));
+        if ($extension === '') {
+            $extension = strtolower(pathinfo((string) (($row['file_name'] ?? '') ?: ($row['path'] ?? '')), PATHINFO_EXTENSION));
+        }
+
+        return ($row['provider'] ?? '') === 'local'
+            && in_array((string) ($row['bucket'] ?? ''), self::CLEANUP_SAFE_BUCKETS, true)
+            && in_array((string) ($row['category'] ?? ''), self::CLEANUP_SAFE_CATEGORIES, true)
+            && in_array($extension, self::CLEANUP_SAFE_EXTENSIONS, true)
+            && AcademicPeriod::normalizeAcademicYear($row['tahun_ajaran'] ?? null) !== null
+            && AcademicPeriod::normalizeSemester($row['semester'] ?? null) !== null;
+    }
+
+    private function localCleanupFileExists(array $row): bool
+    {
+        $bucket = trim((string) ($row['bucket'] ?? ''));
+        $path = ltrim((string) ($row['path'] ?? ''), '/');
+        if ($bucket === '' || $path === '') {
+            return false;
+        }
+
+        return Storage::disk('local')->exists('private/'.$bucket.'/'.$path);
     }
 
     private function activePeriod(string $tenantId): array
