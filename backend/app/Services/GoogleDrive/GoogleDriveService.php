@@ -11,6 +11,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use RuntimeException;
@@ -699,7 +700,17 @@ class GoogleDriveService
         bool $summaryOnly = false,
         array $usageFilters = []
     ): array {
-        $stats = $this->driveUploadStats($tenantId, $usageFilters);
+        $statsError = null;
+        try {
+            $stats = $this->driveUploadStats($tenantId, $usageFilters);
+        } catch (\Throwable $e) {
+            $stats = $this->emptyDriveUploadStats($usageFilters);
+            $statsError = $this->shortError($e->getMessage());
+            Log::warning('google_drive_usage_stats_failed', [
+                'tenant_id' => $tenantId,
+                'error' => $statsError,
+            ]);
+        }
         $configured = $config !== null
             && $config->is_enabled
             && $config->status === self::STATUS_CONNECTED
@@ -724,6 +735,7 @@ class GoogleDriveService
             'folder_url' => $config?->drive_folder_web_url,
             'last_checked_at' => $config?->last_checked_at?->toIso8601String(),
             'last_error' => $config?->last_error,
+            'stats_error' => $statsError,
             'quota' => [
                 'used_bytes' => $quotaUsed,
                 'used_label' => $this->formatBytes($quotaUsed),
@@ -1445,20 +1457,7 @@ class GoogleDriveService
     private function driveUploadStats(string $tenantId, array $filters = []): array
     {
         if ($tenantId === '' || ! Schema::hasTable('tenant_google_drive_files')) {
-            return [
-                'today_bytes' => 0,
-                'today_files' => 0,
-                'total_bytes' => 0,
-                'total_files' => 0,
-                'all_bytes' => 0,
-                'all_files' => 0,
-                'filter' => [
-                    'tahun_ajaran' => '',
-                    'semester' => '',
-                ],
-                'by_semester' => [],
-                'by_class' => [],
-            ];
+            return $this->emptyDriveUploadStats($filters);
         }
 
         $timezone = (string) $this->driveConfig('usage_timezone', 'Asia/Jakarta');
@@ -1514,14 +1513,20 @@ class GoogleDriveService
             && Schema::hasColumn('tenant_google_drive_files', 'tahun_ajaran')
             && Schema::hasColumn('tenant_google_drive_files', 'semester')
         ) {
+            $hasAngkatan = Schema::hasColumn('tenant_google_drive_files', 'angkatan');
             $classQuery = DB::table('tenant_google_drive_files')
                 ->where('tenant_id', $tenantId);
             $this->applyDriveUsageFilters($classQuery, $year, $semester);
 
+            $classColumns = ['tahun_ajaran', 'semester', 'kelas'];
+            if ($hasAngkatan) {
+                $classColumns[] = 'angkatan';
+            }
+
             $classRows = $classQuery
-                ->select('tahun_ajaran', 'semester', 'kelas', 'angkatan')
+                ->select($classColumns)
                 ->selectRaw('coalesce(sum(size_bytes), 0) as bytes, count(*) as files')
-                ->groupBy('tahun_ajaran', 'semester', 'kelas', 'angkatan')
+                ->groupBy($classColumns)
                 ->orderBy('kelas')
                 ->get();
 
@@ -1560,6 +1565,24 @@ class GoogleDriveService
         if ($semester !== '' && Schema::hasColumn('tenant_google_drive_files', 'semester')) {
             $query->where('semester', $semester);
         }
+    }
+
+    private function emptyDriveUploadStats(array $filters = []): array
+    {
+        return [
+            'today_bytes' => 0,
+            'today_files' => 0,
+            'total_bytes' => 0,
+            'total_files' => 0,
+            'all_bytes' => 0,
+            'all_files' => 0,
+            'filter' => [
+                'tahun_ajaran' => AcademicPeriod::normalizeAcademicYear($filters['tahun_ajaran'] ?? null) ?: '',
+                'semester' => AcademicPeriod::normalizeSemester($filters['semester'] ?? null) ?: '',
+            ],
+            'by_semester' => [],
+            'by_class' => [],
+        ];
     }
 
     private function redirectUri(Request $request): string

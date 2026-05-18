@@ -139,7 +139,7 @@ function StorageManager() {
     tahun_ajaran: '',
     semester: '',
     category: '',
-    older_than_days: '365',
+    older_than_days: '',
     largest_percent: ''
   })
   const [cleanupPreview, setCleanupPreview] = useState(null)
@@ -185,6 +185,7 @@ function StorageManager() {
   ), [superSummary])
   const selectedTenant = tenants.find((tenant) => tenant.id === selectedTenantId)
   const selectedTenantName = selectedTenant?.name || tenantDetail?.tenant?.name || 'Sekolah dipilih'
+  const cleanupHasRequiredPeriod = Boolean(cleanupForm.tahun_ajaran.trim() && cleanupForm.semester)
 
   const loadAdminSummary = async (filters = storageFilters) => {
     const { data, error } = await supabase.admin.storageManager(filters)
@@ -197,7 +198,8 @@ function StorageManager() {
     if (error) throw error
     setSuperSummary(data || null)
     const firstTenant = data?.tenants?.[0]?.id
-    setSelectedTenantId((current) => current || firstTenant || '')
+    const tenantIds = new Set((data?.tenants || []).map((tenant) => tenant.id).filter(Boolean))
+    setSelectedTenantId((current) => (current && tenantIds.has(current) ? current : firstTenant || ''))
   }
 
   const loadDriveStatus = async ({ sync = false } = {}) => {
@@ -372,6 +374,10 @@ function StorageManager() {
   }, [isSuperAdmin, selectedTenantId, pushToast])
 
   const handlePreviewCleanup = async () => {
+    if (!cleanupHasRequiredPeriod) {
+      pushToast('warning', 'Pilih tahun ajaran dan semester yang sudah lewat minimal 1 semester dulu.')
+      return
+    }
     setCleanupLoading(true)
     try {
       const api = isSuperAdmin
@@ -389,6 +395,10 @@ function StorageManager() {
   }
 
   const handleExecuteCleanup = async () => {
+    if (!cleanupHasRequiredPeriod) {
+      pushToast('warning', 'Cleanup wajib memakai tahun ajaran dan semester yang sudah lewat minimal 1 semester.')
+      return
+    }
     if (!cleanupPreview?.allowed || cleanupPreview.files <= 0) {
       pushToast('warning', 'Jalankan preview cleanup dulu')
       return
@@ -1164,14 +1174,14 @@ function StorageManager() {
           <div className="flex flex-col gap-1">
             <h2 className="text-sm font-bold text-slate-900">Cleanup Aman ke Trash</h2>
             <p className="text-xs text-slate-500">
-              Sistem menolak cleanup semester aktif. File masuk Trash dulu dan otomatis dapat dipurge setelah 30 hari.
+              Cleanup wajib memilih tahun ajaran dan semester yang sudah lewat minimal 1 semester. File masuk Trash dulu dan otomatis dapat dipurge setelah 30 hari.
             </p>
           </div>
           <div className="mt-4 grid gap-3 md:grid-cols-5">
             <input
               value={cleanupForm.tahun_ajaran}
               onChange={(e) => setCleanupForm((prev) => ({ ...prev, tahun_ajaran: e.target.value }))}
-              placeholder="2023/2024"
+              placeholder="Tahun ajaran, contoh 2023/2024"
               className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
             />
             <select
@@ -1191,7 +1201,7 @@ function StorageManager() {
             <input
               value={cleanupForm.older_than_days}
               onChange={(e) => setCleanupForm((prev) => ({ ...prev, older_than_days: e.target.value }))}
-              placeholder="Lebih dari berapa hari"
+              placeholder="Opsional: umur file (hari)"
               className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
             />
             <input
@@ -1205,7 +1215,7 @@ function StorageManager() {
             <button
               type="button"
               onClick={handlePreviewCleanup}
-              disabled={cleanupLoading || (isSuperAdmin && !selectedTenantId)}
+              disabled={cleanupLoading || !cleanupHasRequiredPeriod || (isSuperAdmin && !selectedTenantId)}
               className="inline-flex items-center gap-2 rounded-lg border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-60"
             >
               <Trash2 size={16} />
@@ -1214,12 +1224,17 @@ function StorageManager() {
             <button
               type="button"
               onClick={handleExecuteCleanup}
-              disabled={cleanupLoading || !cleanupPreview?.allowed || cleanupPreview?.files <= 0}
+              disabled={cleanupLoading || !cleanupHasRequiredPeriod || !cleanupPreview?.allowed || cleanupPreview?.files <= 0}
               className="inline-flex items-center gap-2 rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700 disabled:opacity-60"
             >
               Pindahkan ke Trash
             </button>
           </div>
+          {!cleanupHasRequiredPeriod && (
+            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              Pilih tahun ajaran dan semester lama terlebih dahulu. Cleanup tidak bisa dijalankan untuk semester aktif, semester berjalan, atau data yang belum melewati minimal satu semester.
+            </div>
+          )}
           {cleanupPreview && (
             <div className={`mt-4 rounded-lg border px-4 py-3 text-sm ${cleanupPreview.allowed ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
               {cleanupPreview.message} Kandidat: {numberFormatter.format(cleanupPreview.files || 0)} file ({cleanupPreview.bytes_label || '0 B'}).

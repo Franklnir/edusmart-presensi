@@ -13,6 +13,8 @@ class StorageManagementService
 {
     private const MANAGED_STATUSES = ['active', 'trash'];
 
+    private const CLEANUP_MINIMUM_PERIOD_GAP = 1;
+
     private const CATEGORY_LABELS = [
         'tugas' => 'Tugas',
         'kuis' => 'Kuis',
@@ -515,7 +517,7 @@ class StorageManagementService
                 ->whereIn('status', self::MANAGED_STATUSES)
                 ->sum('size_bytes');
         }
-        if (Schema::hasTable('tenant_google_drive_files')) {
+        if ($this->tableHasColumn('tenant_google_drive_files', 'size_bytes')) {
             $bytes += (int) DB::table('tenant_google_drive_files')
                 ->where('tenant_id', $tenantId)
                 ->sum('size_bytes');
@@ -532,13 +534,45 @@ class StorageManagementService
 
         foreach (['category', 'tahun_ajaran', 'semester', 'uploaded_by_user_id'] as $field) {
             $value = trim((string) ($filters[$field] ?? ''));
-            if ($value !== '' && $value !== 'all') {
+            if ($value !== '' && $value !== 'all' && $this->tableHasColumn('storage_files', $field)) {
                 $query->where($field, $value);
             }
         }
 
         $minBytes = isset($filters['min_bytes']) ? (int) $filters['min_bytes'] : 0;
-        if ($minBytes > 0) {
+        if ($minBytes > 0 && $this->tableHasColumn('storage_files', 'size_bytes')) {
+            $query->where('size_bytes', '>=', $minBytes);
+        }
+
+        return $query;
+    }
+
+    private function driveRowsQuery(string $tenantId, array $filters = [])
+    {
+        $query = DB::table('tenant_google_drive_files')
+            ->where('tenant_id', $tenantId);
+
+        foreach (['tahun_ajaran', 'semester', 'uploaded_by_user_id'] as $field) {
+            $value = trim((string) ($filters[$field] ?? ''));
+            if ($value !== '' && $value !== 'all' && $this->tableHasColumn('tenant_google_drive_files', $field)) {
+                $query->where($field, $value);
+            }
+        }
+
+        $category = trim((string) ($filters['category'] ?? ''));
+        if ($category !== '' && $category !== 'all' && $this->tableHasColumn('tenant_google_drive_files', 'bucket')) {
+            $bucket = match ($category) {
+                'kuis' => 'quiz-media',
+                'tugas', 'lampiran' => 'assignments',
+                default => '',
+            };
+            if ($bucket !== '') {
+                $query->where('bucket', $bucket);
+            }
+        }
+
+        $minBytes = isset($filters['min_bytes']) ? (int) $filters['min_bytes'] : 0;
+        if ($minBytes > 0 && $this->tableHasColumn('tenant_google_drive_files', 'size_bytes')) {
             $query->where('size_bytes', '>=', $minBytes);
         }
 
@@ -547,25 +581,15 @@ class StorageManagementService
 
     private function driveCategoryRows(string $tenantId, array $filters = [])
     {
-        if (! Schema::hasTable('tenant_google_drive_files')) {
+        if (
+            ! Schema::hasTable('tenant_google_drive_files')
+            || ! $this->tableHasColumn('tenant_google_drive_files', 'bucket')
+            || ! $this->tableHasColumn('tenant_google_drive_files', 'size_bytes')
+        ) {
             return collect();
         }
 
-        $query = DB::table('tenant_google_drive_files')
-            ->where('tenant_id', $tenantId);
-        foreach (['tahun_ajaran', 'semester', 'uploaded_by_user_id'] as $field) {
-            $value = trim((string) ($filters[$field] ?? ''));
-            if ($value !== '' && $value !== 'all' && Schema::hasColumn('tenant_google_drive_files', $field)) {
-                $query->where($field, $value);
-            }
-        }
-        $category = trim((string) ($filters['category'] ?? ''));
-        if ($category !== '' && $category !== 'all') {
-            $bucket = $category === 'kuis' ? 'quiz-media' : ($category === 'tugas' || $category === 'lampiran' ? 'assignments' : '');
-            if ($bucket !== '') {
-                $query->where('bucket', $bucket);
-            }
-        }
+        $query = $this->driveRowsQuery($tenantId, $filters);
 
         return $query
             ->select('bucket')
@@ -581,7 +605,12 @@ class StorageManagementService
 
     private function periodStats(string $tenantId, array $filters = []): array
     {
-        $rows = $this->tablesReady()
+        $rows = (
+            $this->tablesReady()
+            && $this->tableHasColumn('storage_files', 'tahun_ajaran')
+            && $this->tableHasColumn('storage_files', 'semester')
+            && $this->tableHasColumn('storage_files', 'size_bytes')
+        )
             ? $this->storageRowsQuery($tenantId, $filters)
                 ->select('tahun_ajaran', 'semester')
                 ->selectRaw('coalesce(sum(size_bytes), 0) as bytes, count(*) as files')
@@ -595,9 +624,13 @@ class StorageManagementService
                 ])
             : collect();
 
-        if (Schema::hasTable('tenant_google_drive_files')) {
-            $drive = DB::table('tenant_google_drive_files')
-                ->where('tenant_id', $tenantId)
+        if (
+            Schema::hasTable('tenant_google_drive_files')
+            && $this->tableHasColumn('tenant_google_drive_files', 'tahun_ajaran')
+            && $this->tableHasColumn('tenant_google_drive_files', 'semester')
+            && $this->tableHasColumn('tenant_google_drive_files', 'size_bytes')
+        ) {
+            $drive = $this->driveRowsQuery($tenantId, $filters)
                 ->select('tahun_ajaran', 'semester')
                 ->selectRaw('coalesce(sum(size_bytes), 0) as bytes, count(*) as files')
                 ->groupBy('tahun_ajaran', 'semester')
@@ -845,26 +878,42 @@ class StorageManagementService
         $year = AcademicPeriod::normalizeAcademicYear($filters['tahun_ajaran'] ?? null);
         $semester = AcademicPeriod::normalizeSemester($filters['semester'] ?? null);
         $active = $this->activePeriod($tenantId);
+        $activeYear = AcademicPeriod::normalizeAcademicYear($active['tahun_ajaran'] ?? null);
+        $activeSemester = AcademicPeriod::normalizeSemester($active['semester'] ?? null);
 
-        if ($year && $semester && $year === $active['tahun_ajaran'] && $semester === $active['semester']) {
-            return 'Cleanup semester aktif tidak diizinkan. Pilih semester/periode yang sudah selesai.';
-        }
-        if ($year && ! $semester && $year === $active['tahun_ajaran']) {
-            return 'Cleanup tahun ajaran aktif harus memilih semester yang sudah selesai.';
-        }
-        if (! $year && $semester && $semester === $active['semester']) {
-            return 'Cleanup semester aktif harus menyertakan tahun ajaran lama yang sudah selesai.';
+        if (! $year || ! $semester) {
+            return 'Cleanup wajib memilih tahun ajaran dan semester tertentu. Data storage hanya boleh dihapus setelah periodenya lewat minimal 1 semester.';
         }
 
-        $hasSafeScope = $year || $semester || trim((string) ($filters['category'] ?? '')) !== ''
-            || (int) ($filters['older_than_days'] ?? 0) >= 30
-            || (int) ($filters['largest_percent'] ?? 0) > 0;
+        if (! $activeYear || ! $activeSemester) {
+            return 'Periode aktif sekolah belum valid. Atur periode akademik aktif sebelum menjalankan cleanup storage.';
+        }
 
-        if (! $hasSafeScope) {
-            return 'Cleanup wajib memakai filter periode/kategori/umur file agar tidak menjadi penghapusan massal.';
+        $targetRank = $this->semesterRank($year, $semester);
+        $activeRank = $this->semesterRank($activeYear, $activeSemester);
+        if ($targetRank === null || $activeRank === null) {
+            return 'Periode cleanup tidak valid. Pilih tahun ajaran dan semester yang sudah selesai.';
+        }
+
+        if (($activeRank - $targetRank) < self::CLEANUP_MINIMUM_PERIOD_GAP) {
+            return 'Cleanup tidak diizinkan untuk semester aktif atau semester yang belum lewat minimal 1 semester.';
         }
 
         return null;
+    }
+
+    private function semesterRank(?string $year, ?string $semester): ?int
+    {
+        $normalizedYear = AcademicPeriod::normalizeAcademicYear($year);
+        $normalizedSemester = AcademicPeriod::normalizeSemester($semester);
+        if (! $normalizedYear || ! $normalizedSemester) {
+            return null;
+        }
+
+        $startYear = (int) substr($normalizedYear, 0, 4);
+        $semesterOffset = $normalizedSemester === AcademicPeriod::SEMESTER_GENAP ? 1 : 0;
+
+        return ($startYear * 2) + $semesterOffset;
     }
 
     private function createCleanupBackup(string $tenantId, array $candidates): ?string
@@ -1088,5 +1137,10 @@ class StorageManagementService
         $bytes = (int) $value;
 
         return $bytes > 0 ? $bytes : null;
+    }
+
+    private function tableHasColumn(string $table, string $column): bool
+    {
+        return Schema::hasTable($table) && Schema::hasColumn($table, $column);
     }
 }
