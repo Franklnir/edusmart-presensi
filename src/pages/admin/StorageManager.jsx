@@ -111,17 +111,17 @@ const providerBadgeClass = (enabled) => (
 
 function StatTile({ icon: Icon, label, value, hint }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+    <div className="group rounded-2xl border border-slate-100 bg-white p-5 shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:shadow-card-hover">
       <div className="flex items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
-          <p className="mt-1 text-2xl font-bold text-slate-950">{value || '-'}</p>
+          <p className="mt-1 truncate text-2xl font-extrabold text-slate-950">{value || '-'}</p>
         </div>
-        <span className="grid h-10 w-10 place-items-center rounded-lg bg-slate-100 text-slate-700">
+        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-indigo-50 text-indigo-600 transition-colors group-hover:bg-indigo-100">
           <Icon size={18} />
         </span>
       </div>
-      {hint ? <p className="mt-2 text-xs text-slate-500">{hint}</p> : null}
+      {hint ? <p className="mt-3 text-xs text-slate-500">{hint}</p> : null}
     </div>
   )
 }
@@ -155,7 +155,7 @@ function TenantStorageCard({ tenant, selected, onClick }) {
     <button
       type="button"
       onClick={onClick}
-      className={`min-h-[168px] rounded-lg border bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-indigo-300 hover:shadow-md ${selected ? 'border-indigo-400 ring-2 ring-indigo-100' : 'border-slate-200'}`}
+      className={`min-h-[176px] rounded-2xl border bg-white p-5 text-left shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-indigo-300 hover:shadow-card-hover ${selected ? 'border-indigo-400 ring-2 ring-indigo-100' : 'border-slate-100'}`}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -168,7 +168,7 @@ function TenantStorageCard({ tenant, selected, onClick }) {
       </div>
 
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+        <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
           <div className="flex items-center justify-between gap-2">
             <span className="text-xs font-bold uppercase tracking-wide text-slate-500">VPS</span>
             <span className="text-xs font-semibold text-slate-500">{vpsPercent !== null ? `${vpsPercent}%` : 'Bebas'}</span>
@@ -176,7 +176,7 @@ function TenantStorageCard({ tenant, selected, onClick }) {
           <p className="mt-1 text-sm font-bold text-slate-900">{vps.used_label || tenant.usage?.total_label || '0 B'}</p>
           <p className="mt-0.5 text-xs text-slate-500">Kuota {vps.quota_label || 'Tidak dibatasi'}</p>
         </div>
-        <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+        <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
           <div className="flex items-center justify-between gap-2">
             <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Neva S3</span>
             <span className="text-xs font-semibold text-slate-500">{nevaPercent !== null ? `${nevaPercent}%` : 'Bebas'}</span>
@@ -857,12 +857,14 @@ function StorageManager() {
   )
 
   const storageFilterSection = (
-    <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+    <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <h2 className="text-sm font-bold text-slate-900">Filter Storage</h2>
           <p className="mt-1 text-xs text-slate-500">
-            Filter ini dipakai untuk analitik, file terbesar, uploader, rekomendasi, dan preview cleanup.
+            {isSuperAdmin
+              ? 'Filter ini dipakai untuk analitik, file terbesar, uploader, rekomendasi, dan preview cleanup.'
+              : 'Filter ini dipakai untuk analitik, file terbesar, uploader, rekomendasi, dan riwayat storage sekolah.'}
           </p>
         </div>
         <div className="grid w-full gap-2 sm:grid-cols-2 lg:max-w-3xl lg:grid-cols-[1fr_180px_auto_auto]">
@@ -1130,9 +1132,211 @@ function StorageManager() {
     </div>
   ) : null
 
+  const adminMonitoringView = !isSuperAdmin ? (
+    <section className="space-y-6">
+      <div className="rounded-2xl border border-indigo-100 bg-white p-5 shadow-card">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-base font-bold text-slate-950">Monitoring Storage Sekolah</h2>
+              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                Read-only
+              </span>
+            </div>
+            <p className="mt-1 max-w-3xl text-sm text-slate-500">
+              Admin sekolah hanya memantau pemakaian VPS dan Neva Cloud S3 milik sekolah sendiri. Pengaturan kuota, cleanup, restore, dan purge tetap dikelola Super Admin.
+            </p>
+          </div>
+          <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+            Periode aktif: <span className="font-semibold text-slate-900">{activePeriod?.tahun_ajaran || '-'} {activePeriod?.semester || ''}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+        <StatTile icon={HardDrive} label="VPS Terpakai" value={vpsQuota?.used_label || vpsSummary?.usage?.total_label || '0 B'} hint={providerPercentLabel(vpsQuota)} />
+        <StatTile icon={Database} label="Kuota VPS" value={vpsQuota?.quota_label || 'Tidak dibatasi'} />
+        <StatTile icon={Archive} label="Sisa VPS" value={vpsQuota?.remaining_label || 'Tidak dibatasi'} />
+        <StatTile icon={Cloud} label="S3 Terpakai" value={nevaQuota?.used_label || nevaSummary?.usage?.total_label || '0 B'} hint={providerPercentLabel(nevaQuota)} />
+        <StatTile icon={ShieldCheck} label="Kuota S3" value={nevaQuota?.quota_label || 'Tidak dibatasi'} />
+        <StatTile icon={Trash2} label="Trash" value={activeSummary?.trash?.bytes_label || '0 B'} hint={`${numberFormatter.format(activeSummary?.trash?.files || 0)} file`} />
+      </div>
+
+      {storageFilterSection}
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
+        <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card">
+          <div className="flex flex-col gap-1">
+            <h2 className="text-sm font-bold text-slate-900">Bucket Storage Sekolah</h2>
+            <p className="text-xs text-slate-500">Pantau pemakaian bucket VPS dan Neva S3 tanpa aksi penghapusan.</p>
+          </div>
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">VPS Storage</h3>
+                <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-600">{numberFormatter.format(vpsBucketRows.length)} bucket</span>
+              </div>
+              <div className="space-y-3">
+                {vpsBucketRows.map((bucket) => (
+                  <div key={bucket.bucket} className="rounded-xl border border-slate-100 bg-white p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-slate-900">{bucket.label || NEVA_BUCKET_LABELS[bucket.bucket] || bucket.bucket}</p>
+                        <p className="text-xs text-slate-500">{numberFormatter.format(bucket.files || 0)} file</p>
+                      </div>
+                      <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-700">{bucket.bytes_label || '0 B'}</span>
+                    </div>
+                    <p className="mt-2 text-xs text-slate-500">Sisa sekolah: {bucket.remaining_after_provider_label || 'Tidak dibatasi'}</p>
+                  </div>
+                ))}
+                {vpsBucketRows.length === 0 && <p className="text-sm text-slate-500">Belum ada bucket VPS tercatat.</p>}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">Neva Cloud S3</h3>
+                <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${providerBadgeClass(nevaEnabled)}`}>
+                  {nevaEnabled ? 'Aktif' : 'Belum aktif'}
+                </span>
+              </div>
+              <div className="space-y-3">
+                {nevaBucketRows.map((bucket) => (
+                  <div key={bucket.bucket} className="rounded-xl border border-slate-100 bg-white p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-slate-900">{bucket.label || NEVA_BUCKET_LABELS[bucket.bucket] || bucket.bucket}</p>
+                        <p className="truncate text-xs text-slate-500">{bucket.physical_bucket || bucket.bucket}</p>
+                      </div>
+                      <span className="shrink-0 rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-bold text-indigo-700">{bucket.bytes_label || '0 B'}</span>
+                    </div>
+                    <p className="mt-2 text-xs text-slate-500">Sisa sekolah: {bucket.remaining_after_provider_label || 'Tidak dibatasi'}</p>
+                  </div>
+                ))}
+                {nevaBucketRows.length === 0 && <p className="text-sm text-slate-500">Belum ada bucket Neva tercatat.</p>}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card">
+          <h2 className="text-sm font-bold text-slate-900">Status Provider</h2>
+          <p className="mt-1 text-xs text-slate-500">Ringkasan jalur penyimpanan yang sedang dipakai sekolah.</p>
+          <div className="mt-4 space-y-3">
+            {[
+              ['VPS Storage', true, 'Aktif sebagai storage lokal aplikasi'],
+              ['Neva Cloud S3', nevaEnabled, nevaPlatform?.endpoint || 'Endpoint diambil dari server'],
+              ['Direct upload', nevaDirectEnabled, nevaDirectEnabled ? 'Aktif untuk upload cepat' : 'Fallback backend tetap aman'],
+              ['Verifikasi object', Boolean(nevaPlatform?.verify_objects), nevaPlatform?.verify_objects ? 'Aktif' : 'Opsional belum aktif']
+            ].map(([label, ok, detail]) => (
+              <div key={label} className="flex items-start gap-2 rounded-xl border border-slate-100 bg-slate-50 p-3">
+                {ok ? <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" /> : <XCircle className="mt-0.5 h-4 w-4 text-slate-400" />}
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-slate-900">{label}</p>
+                  <p className="truncate text-xs text-slate-500">{detail}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
+        <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card">
+          <div className="mb-4 flex items-center gap-2">
+            <BarChart3 size={18} className="text-indigo-600" />
+            <h2 className="text-sm font-bold text-slate-900">Analitik Storage</h2>
+          </div>
+          <div className="grid gap-5 lg:grid-cols-2">
+            <div className="space-y-3">
+              <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">Kategori terbesar</h3>
+              {combinedCategories.map((item) => (
+                <ProgressLine key={item.category} label={item.label} value={item.bytes_label} percent={combinedUsage.total_bytes ? (item.bytes / combinedUsage.total_bytes) * 100 : 0} />
+              ))}
+              {combinedCategories.length === 0 && <p className="text-sm text-slate-500">Belum ada metadata storage baru.</p>}
+            </div>
+            <div className="space-y-3">
+              <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">Periode terbesar</h3>
+              {combinedPeriods.slice(0, 6).map((item) => (
+                <ProgressLine key={`${item.tahun_ajaran}-${item.semester}`} label={`${item.tahun_ajaran || '-'} ${item.semester || ''}`} value={item.bytes_label} percent={combinedUsage.total_bytes ? (item.bytes / combinedUsage.total_bytes) * 100 : 0} />
+              ))}
+              {combinedPeriods.length === 0 && <p className="text-sm text-slate-500">Belum ada data periode.</p>}
+            </div>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-amber-200 bg-amber-50 p-5 shadow-card">
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={18} className="text-amber-700" />
+            <h2 className="text-sm font-bold text-slate-900">Rekomendasi</h2>
+          </div>
+          <div className="mt-3 space-y-2">
+            {recommendations.map((item, index) => (
+              <div key={`${item.type}-${index}`} className="rounded-xl border border-amber-200 bg-white px-3 py-2 text-sm text-slate-700">{item.message}</div>
+            ))}
+            {recommendations.length === 0 && <p className="text-sm text-slate-600">Belum ada rekomendasi kritikal.</p>}
+          </div>
+        </section>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-3">
+        <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card">
+          <h2 className="text-sm font-bold text-slate-900">File Terbesar</h2>
+          <div className="mt-3 space-y-2">
+            {combinedLargestFiles.slice(0, 8).map((file) => (
+              <div key={file.id} className="flex items-start justify-between gap-3 rounded-xl border border-slate-100 px-3 py-2">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-slate-900">{file.file_name}</p>
+                  <p className="text-xs text-slate-500">{file.category_label} · {file.provider} · {formatDateTime(file.uploaded_at)}</p>
+                </div>
+                <span className="shrink-0 text-sm font-bold text-slate-700">{file.size_label}</span>
+              </div>
+            ))}
+            {combinedLargestFiles.length === 0 && <p className="text-sm text-slate-500">Belum ada file tercatat.</p>}
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card">
+          <h2 className="text-sm font-bold text-slate-900">Uploader Terbesar</h2>
+          <div className="mt-3 space-y-2">
+            {combinedUploaders.slice(0, 8).map((user) => (
+              <div key={user.user_id || user.nama} className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 px-3 py-2">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-slate-900">{user.nama}</p>
+                  <p className="text-xs text-slate-500">{user.role || '-'} · {numberFormatter.format(user.files || 0)} file</p>
+                </div>
+                <span className="shrink-0 text-sm font-bold text-slate-700">{user.bytes_label}</span>
+              </div>
+            ))}
+            {combinedUploaders.length === 0 && <p className="text-sm text-slate-500">Belum ada uploader tercatat.</p>}
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-bold text-slate-900">Trash Terbaru</h2>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+              {numberFormatter.format(activeSummary?.trash?.files || 0)} file
+            </span>
+          </div>
+          <p className="mt-1 text-xs text-slate-500">Hanya monitoring. Pemulihan atau purge dilakukan Super Admin.</p>
+          <div className="mt-3 space-y-2">
+            {trashFiles.slice(0, 8).map((file) => (
+              <div key={file.id} className="rounded-xl border border-slate-100 px-3 py-2">
+                <p className="truncate text-sm font-semibold text-slate-900">{file.file_name}</p>
+                <p className="text-xs text-slate-500">{file.category_label} · {file.size_label} · kedaluwarsa {formatDateTime(file.trash_expires_at)}</p>
+              </div>
+            ))}
+            {trashFiles.length === 0 && <p className="text-sm text-slate-500">Trash masih kosong.</p>}
+          </div>
+        </section>
+      </div>
+    </section>
+  ) : null
+
   const superAdminCombinedView = isSuperAdmin ? (
     <>
-      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <h2 className="text-sm font-bold text-slate-900">Platform Storage</h2>
@@ -1144,7 +1348,7 @@ function StorageManager() {
             type="button"
             onClick={() => handleSyncObjectStorage('', { bucket: '' })}
             disabled={syncingObjectStorage || !nevaEnabled}
-            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-white px-4 py-2 text-sm font-semibold text-indigo-700 shadow-sm hover:bg-indigo-50 disabled:opacity-60"
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-white px-4 py-2 text-sm font-semibold text-indigo-700 shadow-sm transition hover:bg-indigo-50 disabled:opacity-60"
           >
             <RefreshCw size={16} className={syncingObjectStorage ? 'animate-spin' : ''} />
             {syncingObjectStorage ? 'Membaca S3...' : 'Scan Platform Neva'}
@@ -1158,7 +1362,7 @@ function StorageManager() {
         </div>
       </section>
 
-      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card">
         <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-sm font-bold text-slate-900">Sekolah</h2>
@@ -1176,7 +1380,7 @@ function StorageManager() {
             />
           ))}
           {tenants.length === 0 && (
-            <div className="rounded-lg border border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">
+            <div className="rounded-2xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">
               Belum ada sekolah yang bisa dikelola.
             </div>
           )}
@@ -1188,47 +1392,54 @@ function StorageManager() {
   ) : null
 
   if (!superAdminChecked) {
-    return <div className="p-6 text-sm text-slate-500">Memuat akses storage manager...</div>
+    return <div className="page-wrapper text-sm text-slate-500">Memuat akses storage manager...</div>
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 px-4 py-6 md:px-6">
-      <div className="mx-auto max-w-7xl space-y-5">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-wide text-indigo-600">Storage Manager</p>
-            <h1 className="text-2xl font-bold text-slate-950">
-              Storage VPS & Neva Cloud S3
-            </h1>
-            <p className="mt-1 text-sm text-slate-500">
-              Kelola kuota VPS, kuota Neva Cloud S3, inventaris file, rekomendasi cleanup, dan Trash dari satu halaman.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {isSuperAdmin && (
+    <div className="page-wrapper">
+      <div className="w-full space-y-6">
+        <section className="page-title-card">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-center gap-4">
+              <div className="grid h-12 w-12 place-items-center rounded-2xl bg-indigo-100 text-indigo-700">
+                <HardDrive size={26} />
+              </div>
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide text-indigo-600">Storage Manager</p>
+                <h1 className="page-title-heading">Storage VPS & Neva Cloud S3</h1>
+                <p className="page-title-description">
+                  {isSuperAdmin
+                    ? 'Kelola kuota, monitoring, cleanup aman, dan Trash semua sekolah dari satu halaman.'
+                    : 'Pantau pemakaian VPS dan Neva Cloud S3 sekolah secara ringkas, responsif, dan read-only.'}
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              {isSuperAdmin && (
+                <button
+                  type="button"
+                  onClick={handlePurgeExpiredTrash}
+                  disabled={purgingTrash}
+                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700 shadow-sm transition hover:bg-rose-50 disabled:opacity-60"
+                >
+                  <Trash2 size={16} />
+                  {purgingTrash ? 'Memproses...' : 'Purge Trash'}
+                </button>
+              )}
               <button
                 type="button"
-                onClick={handlePurgeExpiredTrash}
-                disabled={purgingTrash}
-                className="inline-flex items-center justify-center gap-2 rounded-lg border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700 shadow-sm hover:bg-rose-50 disabled:opacity-60"
+                onClick={refresh}
+                disabled={loading}
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-60"
               >
-                <Trash2 size={16} />
-                {purgingTrash ? 'Memproses...' : 'Purge Trash'}
+                <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+                Refresh
               </button>
-            )}
-            <button
-              type="button"
-              onClick={refresh}
-              disabled={loading}
-              className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-60"
-            >
-              <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-              Refresh
-            </button>
+            </div>
           </div>
-        </div>
+        </section>
 
-        {!isSuperAdmin && (
+        {false && !isSuperAdmin && (
           <div className="flex gap-2 overflow-x-auto rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
             <button
               type="button"
@@ -1250,7 +1461,7 @@ function StorageManager() {
         )}
 
         {storageError && (
-          <section className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 shadow-card">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
                 <p className="font-bold">Storage belum bisa dimuat sempurna</p>
@@ -1270,8 +1481,9 @@ function StorageManager() {
         )}
 
         {superAdminCombinedView}
+        {adminMonitoringView}
 
-        {activeTab === 'neva' && !isSuperAdmin && (
+        {false && activeTab === 'neva' && !isSuperAdmin && (
           <section className="space-y-4">
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
               <StatTile icon={Cloud} label="Status Neva S3" value={nevaEnabled ? 'Aktif' : 'Belum aktif'} hint={nevaPlatform?.endpoint || 'Endpoint Neva Cloud S3'} />
@@ -1442,7 +1654,7 @@ function StorageManager() {
           </section>
         )}
 
-        {activeTab === 'storage' && !isSuperAdmin && (
+        {false && activeTab === 'storage' && !isSuperAdmin && (
           <>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <StatTile icon={HardDrive} label="VPS Terpakai" value={usage.total_label || quota.used_label} hint={`${numberFormatter.format(usage.total_files || 0)} file`} />
@@ -1617,7 +1829,7 @@ function StorageManager() {
           </>
         )}
 
-        {!isSuperAdmin && canManageStorageScope && cleanupSection}
+        {false && !isSuperAdmin && canManageStorageScope && cleanupSection}
       </div>
     </div>
   )
