@@ -20,6 +20,10 @@ import {
 const normalizeEmail = (email) => email.trim().toLowerCase()
 let authInitPromise = null
 const SETTINGS_COLUMNS = 'id,nama_sekolah,admin_lock_enabled,updated_at'
+const GOOGLE_POPUP_SESSION_RETRY_ATTEMPTS = 14
+const GOOGLE_POPUP_SESSION_RETRY_DELAY_MS = 650
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const buildProfilePayload = (user) => {
   const meta = user?.user_metadata || {}
@@ -299,7 +303,7 @@ export const useAuthStore = create((set, get) => ({
     return settings
   },
 
-  refreshAuthSession: async ({ successMessage = '' } = {}) => {
+  refreshAuthSession: async ({ successMessage = '', showErrorToast = true, logErrorOnFail = true } = {}) => {
     const { pushToast } = useUIStore.getState()
 
     try {
@@ -377,10 +381,10 @@ export const useAuthStore = create((set, get) => ({
 
       return { user, profile }
     } catch (err) {
-      logError('Refresh auth session error:', err)
+      if (logErrorOnFail) logError('Refresh auth session error:', err)
       const errorMessage = err?.message || 'Gagal memuat sesi login'
       set({ error: errorMessage })
-      pushToast('error', errorMessage)
+      if (showErrorToast) pushToast('error', errorMessage)
       return { error: errorMessage }
     }
   },
@@ -639,12 +643,32 @@ export const useAuthStore = create((set, get) => ({
   },
 
   completeGooglePopupLogin: async () => {
+    const { pushToast } = useUIStore.getState()
     set({ isLoading: true, error: null })
 
     try {
-      return await get().refreshAuthSession({
-        successMessage: 'Login Google berhasil'
-      })
+      let lastResult = null
+      for (let attempt = 0; attempt < GOOGLE_POPUP_SESSION_RETRY_ATTEMPTS; attempt += 1) {
+        lastResult = await get().refreshAuthSession({
+          successMessage: attempt === 0 ? 'Login Google berhasil' : '',
+          showErrorToast: false,
+          logErrorOnFail: false
+        })
+
+        if (!lastResult?.error) {
+          if (attempt > 0) pushToast('success', 'Login Google berhasil')
+          return lastResult
+        }
+
+        if (attempt < GOOGLE_POPUP_SESSION_RETRY_ATTEMPTS - 1) {
+          await wait(GOOGLE_POPUP_SESSION_RETRY_DELAY_MS)
+        }
+      }
+
+      const errorMessage = lastResult?.error || 'Sesi login Google belum aktif. Silakan klik Masuk dengan Google lagi.'
+      set({ error: errorMessage })
+      pushToast('error', errorMessage)
+      return { error: errorMessage }
     } finally {
       set({ isLoading: false })
     }

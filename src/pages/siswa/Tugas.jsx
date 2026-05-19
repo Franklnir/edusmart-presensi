@@ -40,7 +40,8 @@ const MONTH_NAMES_ID = [
 ]
 
 const STATUS_FILTER_VALUES = new Set(['all', 'belum', 'menunggu', 'dinilai'])
-const TIME_RANGE_VALUES = new Set(['week', 'all', 'custom_months'])
+const TIME_RANGE_VALUES = new Set(['recent', 'week', 'all', 'custom_months'])
+const DEFAULT_TASK_LIST_LIMIT = 10
 const TUGAS_LIST_COLUMNS = 'id, kelas, judul, mapel, mulai, deadline, keterangan, file_url, link, created_at, updated_at'
 const TUGAS_MAPEL_COLUMNS = 'mapel'
 const TUGAS_JAWABAN_LIST_COLUMNS = 'tugas_id, user_id, nilai, status, file_url, file_urls, link_url, komentar_siswa, waktu_submit'
@@ -53,6 +54,20 @@ const normalizeStatusFilter = (value) => (
 const normalizeTimeRange = (value) => (
   TIME_RANGE_VALUES.has(value) ? value : ''
 )
+
+const parseSortTime = (value) => {
+  if (!value) return 0
+  const time = new Date(value).getTime()
+  return Number.isNaN(time) ? 0 : time
+}
+
+const compareNewestTask = (a, b) => {
+  const createdDiff = parseSortTime(b?.created_at || b?.updated_at) - parseSortTime(a?.created_at || a?.updated_at)
+  if (createdDiff !== 0) return createdDiff
+  return parseSortTime(b?.deadline) - parseSortTime(a?.deadline)
+}
+
+const sortTasksByNewest = (tasks = []) => [...tasks].sort(compareNewestTask)
 
 const normalizeMapelOptions = (rows = []) =>
   Array.from(
@@ -477,16 +492,17 @@ export default function TugasSiswa() {
   const [isListLoading, setIsListLoading] = useState(false)
 
   const [timeRange, setTimeRange] = useState(() => (
-    requestedTugasId ? 'all' : normalizeTimeRange(searchParams.get('range')) || 'week'
-  )) // week | all | custom_months
+    requestedTugasId ? 'all' : normalizeTimeRange(searchParams.get('range')) || 'recent'
+  )) // recent | week | all | custom_months
   const [selectedMonths, setSelectedMonths] = useState([])
   const [statusFilter, setStatusFilter] = useState(() => (
     normalizeStatusFilter(searchParams.get('status')) || 'all'
   )) // all | belum | menunggu | dinilai
   const [searchTerm, setSearchTerm] = useState('')
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('')
 
   useEffect(() => {
-    if (isViewingArchivePeriod && timeRange === 'week') {
+    if (isViewingArchivePeriod && ['recent', 'week'].includes(timeRange)) {
       setTimeRange('all')
     }
   }, [isViewingArchivePeriod, timeRange])
@@ -550,6 +566,23 @@ export default function TugasSiswa() {
       uploadAbortRef.current?.abort()
     }
   }, [])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm.trim())
+    }, 350)
+    return () => window.clearTimeout(timer)
+  }, [searchTerm])
+
+  const hasActiveTaskFilter = useMemo(() => (
+    Boolean(
+      selectedMapel ||
+      statusFilter !== 'all' ||
+      debouncedSearchTerm.trim() ||
+      timeRange !== 'recent' ||
+      isViewingArchivePeriod
+    )
+  ), [selectedMapel, statusFilter, debouncedSearchTerm, timeRange, isViewingArchivePeriod])
 
   useEffect(() => {
     const nextStatus = normalizeStatusFilter(searchParams.get('status'))
@@ -633,6 +666,7 @@ export default function TugasSiswa() {
       // tugas untuk kelas siswa
       let query = supabase.from('tugas').select(TUGAS_LIST_COLUMNS).eq('kelas', kelas)
       query = applyPeriodFilters(query)
+      const normalizedSearch = debouncedSearchTerm.trim().toLowerCase()
 
       if (selectedMapel) query = query.eq('mapel', selectedMapel)
 
@@ -679,11 +713,32 @@ export default function TugasSiswa() {
       }
 
       query = query.order('created_at', { ascending: false })
+      if (!hasActiveTaskFilter) query = query.limit(DEFAULT_TASK_LIST_LIMIT)
       const { data: tugasData, error } = await query
       if (error) throw error
       if (requestId !== listRequestSeqRef.current) return
 
-      const tugasArr = tugasData || []
+      let tugasArr = sortTasksByNewest(tugasData || [])
+
+      if (normalizedSearch) {
+        tugasArr = tugasArr.filter((t) => (
+          String(t.judul || '').toLowerCase().includes(normalizedSearch) ||
+          String(t.mapel || '').toLowerCase().includes(normalizedSearch) ||
+          String(t.keterangan || '').toLowerCase().includes(normalizedSearch)
+        ))
+      }
+
+      if (timeRange === 'custom_months' && selectedMonths.length > 0) {
+        const setMonths = new Set(selectedMonths)
+        tugasArr = tugasArr.filter((t) => {
+          if (!t.created_at) return false
+          const d = new Date(t.created_at)
+          if (!isValidDate(d)) return false
+          const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+          return setMonths.has(ym)
+        })
+      }
+
       if (tugasArr.length === 0) {
         setTugasList([])
         return
@@ -725,22 +780,12 @@ export default function TugasSiswa() {
         }
       })
 
-      if (timeRange === 'custom_months' && selectedMonths.length > 0) {
-        const setMonths = new Set(selectedMonths)
-        merged = merged.filter((t) => {
-          if (!t.created_at) return false
-          const d = new Date(t.created_at)
-          if (!isValidDate(d)) return false
-          const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-          return setMonths.has(ym)
-        })
-      }
-
       if (statusFilter !== 'all') {
         merged = merged.filter((t) => t.myStatus === statusFilter)
       }
 
-      setTugasList(merged)
+      merged = sortTasksByNewest(merged)
+      setTugasList(hasActiveTaskFilter ? merged : merged.slice(0, DEFAULT_TASK_LIST_LIMIT))
     } catch (error) {
       if (requestId !== listRequestSeqRef.current) return
       console.error('Error load tugas list:', error)
@@ -762,6 +807,8 @@ export default function TugasSiswa() {
     period.endsAt,
     period.startsAt,
     statusFilter,
+    debouncedSearchTerm,
+    hasActiveTaskFilter,
     pushToast
   ])
 
@@ -1473,14 +1520,14 @@ export default function TugasSiswa() {
      Dashboard Stats
 ========================= */
   const visibleTugasList = useMemo(() => {
-    const q = searchTerm.trim().toLowerCase()
+    const q = debouncedSearchTerm.trim().toLowerCase()
     if (!q) return tugasList
     return tugasList.filter((t) => (
       String(t.judul || '').toLowerCase().includes(q) ||
       String(t.mapel || '').toLowerCase().includes(q) ||
       String(t.keterangan || '').toLowerCase().includes(q)
     ))
-  }, [tugasList, searchTerm])
+  }, [tugasList, debouncedSearchTerm])
 
   const stats = useMemo(() => {
     const total = visibleTugasList.length
@@ -1650,6 +1697,7 @@ export default function TugasSiswa() {
                 value={timeRange}
                 onChange={(e) => setTimeRange(e.target.value)}
               >
+                <option value="recent">10 tugas terbaru</option>
                 <option value="week">7 hari terakhir</option>
                 <option value="all">Semua bulan periode</option>
                 <option value="custom_months">Pilih bulan</option>
@@ -1702,7 +1750,7 @@ export default function TugasSiswa() {
               onClick={() => {
                 setSelectedMapel('')
                 setStatusFilter('all')
-                setTimeRange('week')
+                setTimeRange('recent')
                 setSelectedMonths([])
                 setSearchTerm('')
                 pushToast('info', 'Filter direset')
@@ -1734,6 +1782,11 @@ export default function TugasSiswa() {
             </div>
 
             <div className="flex flex-wrap gap-2">
+              {!hasActiveTaskFilter && (
+                <span className="px-3 py-1 rounded-full bg-slate-100 text-slate-700 text-xs font-semibold">
+                  10 tugas terbaru
+                </span>
+              )}
               {selectedMapel && (
                 <span className="px-3 py-1 rounded-full bg-purple-100 text-purple-700 text-xs font-semibold">
                   Mapel: {selectedMapel}
@@ -1747,6 +1800,11 @@ export default function TugasSiswa() {
               {timeRange === 'custom_months' && selectedMonths.length > 0 && (
                 <span className="px-3 py-1 rounded-full bg-indigo-100 text-indigo-700 text-xs font-semibold">
                   {selectedMonths.length} bulan
+                </span>
+              )}
+              {debouncedSearchTerm && (
+                <span className="px-3 py-1 rounded-full bg-blue-100 text-blue-700 text-xs font-semibold">
+                  Cari: {debouncedSearchTerm}
                 </span>
               )}
             </div>
@@ -1876,8 +1934,8 @@ export default function TugasSiswa() {
               }}
             />
 
-            <div className="absolute inset-0 flex items-center justify-center p-3 sm:p-6">
-              <div className="w-full max-w-5xl bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="absolute inset-0 flex items-end justify-center p-0 sm:items-center sm:p-6">
+              <div className="flex max-h-[96vh] w-full max-w-5xl flex-col overflow-hidden rounded-t-3xl border border-slate-200 bg-white shadow-2xl sm:max-h-[94vh] sm:rounded-3xl">
                 {/* Header */}
                 <div className="p-5 sm:p-6 border-b border-slate-200 bg-gradient-to-r from-slate-50 to-purple-50/40">
                   <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
@@ -1923,12 +1981,12 @@ export default function TugasSiswa() {
                       </div>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-2 justify-end">
+                    <div className="grid w-full grid-cols-1 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:justify-end">
                       {detail?.tugas?.file_url && (
                         <button
                           type="button"
                           onClick={() => openPreview(detail.tugas.file_url)}
-                          className="px-4 py-2 rounded-2xl bg-purple-600 text-white font-semibold hover:bg-purple-700 transition-colors"
+                          className="w-full rounded-2xl bg-purple-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-purple-700 sm:w-auto"
                         >
                           📎 Lampiran Guru
                         </button>
@@ -1937,7 +1995,7 @@ export default function TugasSiswa() {
                         <button
                           type="button"
                           onClick={() => openPreview(detail.tugas.link)}
-                          className="px-4 py-2 rounded-2xl bg-indigo-600 text-white font-semibold hover:bg-indigo-700 transition-colors"
+                          className="w-full rounded-2xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-indigo-700 sm:w-auto"
                         >
                           🔗 Link Guru
                         </button>
@@ -1946,7 +2004,7 @@ export default function TugasSiswa() {
                       <button
                         type="button"
                         onClick={() => { void closeDetail() }}
-                        className="px-4 py-2 rounded-2xl bg-white border border-slate-200 text-slate-700 font-semibold hover:bg-slate-50 transition-colors"
+                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 sm:w-auto"
                       >
                         ❌ Tutup
                       </button>
@@ -1955,7 +2013,7 @@ export default function TugasSiswa() {
                 </div>
 
                 {/* Body */}
-                <div className="p-5 sm:p-6 max-h-[75vh] overflow-auto">
+                <div className="flex-1 overflow-auto p-4 sm:p-6">
                   {isLoadingDetail ? (
                     <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center">
                       <div className="w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />

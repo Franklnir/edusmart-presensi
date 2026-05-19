@@ -3,6 +3,7 @@ const ROOT_DOMAIN = String(import.meta.env.VITE_ROOT_DOMAIN || '')
   .toLowerCase()
 const EXPLICIT_BRIDGE_URL = String(import.meta.env.VITE_GOOGLE_AUTH_BRIDGE_URL || '').trim()
 const DEFAULT_BRIDGE_PATH = '/auth/google/popup'
+const POPUP_CLOSED_SUCCESS_GRACE_MS = 2500
 
 const isLocalHost = (host) => {
   const normalized = String(host || '').trim().toLowerCase()
@@ -140,11 +141,13 @@ export const openGoogleAuthPopup = ({
   return new Promise((resolve, reject) => {
     let settled = false
     let closeTimer = null
+    let closeGraceTimer = null
     let timeoutTimer = null
     const allowedOrigins = allowedPopupMessageOrigins(bridgeOrigin)
 
     const cleanup = () => {
       if (closeTimer) window.clearInterval(closeTimer)
+      if (closeGraceTimer) window.clearTimeout(closeGraceTimer)
       if (timeoutTimer) window.clearTimeout(timeoutTimer)
       window.removeEventListener('message', handleMessage)
     }
@@ -185,13 +188,43 @@ export const openGoogleAuthPopup = ({
       }
     }
 
+    const scheduleClosedFallback = () => {
+      if (closeGraceTimer || settled) return
+      closeGraceTimer = window.setTimeout(() => {
+        if (mode === 'login') {
+          finalize(() => resolve({
+            oauth: true,
+            status: 'popup_closed',
+            popupClosed: true,
+            mode
+          }))
+          return
+        }
+
+        finalize(() => reject(new Error('Proses Google dibatalkan sebelum selesai. Silakan coba lagi.')))
+      }, POPUP_CLOSED_SUCCESS_GRACE_MS)
+    }
+
     window.addEventListener('message', handleMessage)
 
     if (bridgeOrigin === window.location.origin) {
       closeTimer = window.setInterval(() => {
-        if (!popup.closed) return
+        let isClosed = false
+        try {
+          isClosed = Boolean(popup.closed)
+        } catch {
+          return
+        }
 
-        finalize(() => reject(new Error('Popup Google ditutup sebelum proses selesai.')))
+        if (!isClosed) {
+          if (closeGraceTimer) {
+            window.clearTimeout(closeGraceTimer)
+            closeGraceTimer = null
+          }
+          return
+        }
+
+        scheduleClosedFallback()
       }, 500)
     }
 

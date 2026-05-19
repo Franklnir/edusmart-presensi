@@ -47,6 +47,7 @@ const JADWAL_GURU_COLUMNS = 'id,kelas_id,mapel,guru_id,guru_nama,hari,jam_mulai,
 const TUGAS_GURU_COLUMNS = 'id,kelas,judul,mapel,mulai,deadline,keterangan,file_url,link,created_by,created_at,updated_at,tahun_ajaran,semester,angkatan'
 const TUGAS_JAWABAN_STATS_COLUMNS = 'tugas_id,user_id,nilai,status'
 const TUGAS_JAWABAN_DETAIL_COLUMNS = 'id,tugas_id,user_id,file_url,file_urls,link_url,komentar_siswa,nilai,status,waktu_submit,profiles(nama,photo_url)'
+const DEFAULT_TASK_LIST_LIMIT = 10
 
 const isHttpUrl = (v = '') => /^https?:\/\//i.test(String(v || ''))
 const looksLikeDomainUrl = (v = '') => /^[a-z0-9-]+(\.[a-z0-9-]+)+(?::\d+)?(\/|$)/i.test(String(v || '').trim())
@@ -135,6 +136,20 @@ const toDatetimeLocalValue = (isoString) => {
 }
 
 const isValidDate = (d) => d instanceof Date && !Number.isNaN(d.getTime())
+
+const parseSortTime = (value) => {
+  if (!value) return 0
+  const time = new Date(value).getTime()
+  return Number.isNaN(time) ? 0 : time
+}
+
+const compareNewestTask = (a, b) => {
+  const createdDiff = parseSortTime(b?.created_at || b?.updated_at) - parseSortTime(a?.created_at || a?.updated_at)
+  if (createdDiff !== 0) return createdDiff
+  return parseSortTime(b?.deadline) - parseSortTime(a?.deadline)
+}
+
+const sortTasksByNewest = (tasks = []) => [...tasks].sort(compareNewestTask)
 
 const getTaskWindowInfo = (mulai, deadline, stats = {}, nowRef = new Date()) => {
   const mulaiDate = mulai ? new Date(mulai) : null
@@ -501,15 +516,42 @@ export default function TugasGuru() {
   const [selectedKelasFilter, setSelectedKelasFilter] = useState('')
   const [mapelListFilter, setMapelListFilter] = useState([])
   const [selectedSubject, setSelectedSubject] = useState('')
-  const [timeRange, setTimeRange] = useState('week') // week | all | custom_months
+  const [timeRange, setTimeRange] = useState('recent') // recent | week | all | custom_months
   const [filterStatus, setFilterStatus] = useState('all') // all | active | expired
   const [selectedMonths, setSelectedMonths] = useState([])
+  const [historySearchTerm, setHistorySearchTerm] = useState('')
+  const [debouncedHistorySearchTerm, setDebouncedHistorySearchTerm] = useState('')
 
   useEffect(() => {
-    if (isViewingArchivePeriod && timeRange === 'week') {
+    if (isViewingArchivePeriod && ['recent', 'week'].includes(timeRange)) {
       setTimeRange('all')
     }
   }, [isViewingArchivePeriod, timeRange])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedHistorySearchTerm(historySearchTerm.trim())
+    }, 350)
+    return () => window.clearTimeout(timer)
+  }, [historySearchTerm])
+
+  const hasActiveHistoryFilter = useMemo(() => (
+    Boolean(
+      selectedKelasFilter ||
+      selectedSubject ||
+      filterStatus !== 'all' ||
+      debouncedHistorySearchTerm.trim() ||
+      timeRange !== 'recent' ||
+      isViewingArchivePeriod
+    )
+  ), [
+    selectedKelasFilter,
+    selectedSubject,
+    filterStatus,
+    debouncedHistorySearchTerm,
+    timeRange,
+    isViewingArchivePeriod
+  ])
 
   // Detail
   const [selectedTugas, setSelectedTugas] = useState(null)
@@ -555,6 +597,11 @@ export default function TugasGuru() {
       })
       .sort((a, b) => a.nama.localeCompare(b.nama))
   }, [jadwalAll, kelasList])
+
+  const selectedHistoryKelasName = useMemo(() => {
+    if (!selectedKelasFilter) return ''
+    return myKelasList.find((k) => k.id === selectedKelasFilter)?.nama || formatKelasDisplay(selectedKelasFilter)
+  }, [myKelasList, selectedKelasFilter])
 
   /* ---------- Access Control ---------- */
   const validateTugasAccess = useCallback(
@@ -649,7 +696,7 @@ export default function TugasGuru() {
         .sort()
 
       setMapelListFilter(mapels)
-      if (mapels.length > 0 && !mapels.includes(selectedSubject)) setSelectedSubject(mapels[0])
+      if (selectedSubject && !mapels.includes(selectedSubject)) setSelectedSubject('')
       if (mapels.length === 0) setSelectedSubject('')
     } else {
       setMapelListFilter([])
@@ -665,6 +712,7 @@ export default function TugasGuru() {
     try {
       setLoading(true)
       const now = new Date()
+      const normalizedSearch = debouncedHistorySearchTerm.trim().toLowerCase()
 
       let query = supabase.from('tugas').select(TUGAS_GURU_COLUMNS).eq('created_by', user.id)
       query = applyPeriodFilters(query)
@@ -686,13 +734,50 @@ export default function TugasGuru() {
           end.setDate(end.getDate() + 1)
           query = query.gte('created_at', start.toISOString()).lt('created_at', end.toISOString())
         }
+      } else if (timeRange === 'custom_months' && selectedMonths.length > 0) {
+        let minYear = Infinity
+        let minMonth = Infinity
+        let maxYear = -Infinity
+        let maxMonth = -Infinity
+
+        selectedMonths.forEach((ym) => {
+          const [ys, ms] = ym.split('-')
+          const y = parseInt(ys, 10)
+          const m = parseInt(ms, 10)
+          if (!Number.isNaN(y) && !Number.isNaN(m)) {
+            if (y < minYear || (y === minYear && m < minMonth)) {
+              minYear = y
+              minMonth = m
+            }
+            if (y > maxYear || (y === maxYear && m > maxMonth)) {
+              maxYear = y
+              maxMonth = m
+            }
+          }
+        })
+
+        if (minYear !== Infinity) {
+          const start = new Date(minYear, minMonth - 1, 1)
+          const end = new Date(maxYear, maxMonth, 1)
+          query = query.gte('created_at', start.toISOString()).lt('created_at', end.toISOString())
+        }
       }
 
       query = query.order('created_at', { ascending: false })
+      if (!hasActiveHistoryFilter) query = query.limit(DEFAULT_TASK_LIST_LIMIT)
       const { data: tugasRaw, error } = await query
       if (error) throw error
 
-      let tugasData = tugasRaw || []
+      let tugasData = sortTasksByNewest(tugasRaw || [])
+
+      if (normalizedSearch) {
+        tugasData = tugasData.filter((t) => (
+          String(t.judul || '').toLowerCase().includes(normalizedSearch) ||
+          String(t.mapel || '').toLowerCase().includes(normalizedSearch) ||
+          String(t.keterangan || '').toLowerCase().includes(normalizedSearch) ||
+          String(formatKelasDisplay(t.kelas) || '').toLowerCase().includes(normalizedSearch)
+        ))
+      }
 
       if (timeRange === 'custom_months') {
         if (selectedMonths.length > 0) {
@@ -705,6 +790,10 @@ export default function TugasGuru() {
             return setMonths.has(ym)
           })
         }
+      }
+
+      if (!hasActiveHistoryFilter) {
+        tugasData = tugasData.slice(0, DEFAULT_TASK_LIST_LIMIT)
       }
 
       if (tugasData.length === 0) {
@@ -785,7 +874,7 @@ export default function TugasGuru() {
         }
       })
 
-      setListTugas(formatted)
+      setListTugas(sortTasksByNewest(formatted))
     } catch (error) {
       console.error('Error loading tugas:', error)
       const parsed = parseSupabaseError(error)
@@ -801,6 +890,8 @@ export default function TugasGuru() {
     timeRange,
     filterStatus,
     selectedMonths,
+    debouncedHistorySearchTerm,
+    hasActiveHistoryFilter,
     period.endsAt,
     period.startsAt,
     setLoading,
@@ -2354,6 +2445,18 @@ export default function TugasGuru() {
 
               <div className="space-y-3">
                 <div>
+                  <label htmlFor="filter-tugas-cari" className="block text-sm font-semibold text-slate-700 mb-2">Cari tugas</label>
+                  <input
+                    id="filter-tugas-cari"
+                    name="filter_tugas_cari"
+                    className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+                    value={historySearchTerm}
+                    onChange={(e) => setHistorySearchTerm(e.target.value)}
+                    placeholder="Judul, mapel, kelas..."
+                  />
+                </div>
+
+                <div>
                   <label htmlFor="filter-tugas-kelas" className="block text-sm font-semibold text-slate-700 mb-2">Kelas</label>
                   <select
                     id="filter-tugas-kelas"
@@ -2426,6 +2529,7 @@ export default function TugasGuru() {
                     value={timeRange}
                     onChange={(e) => setTimeRange(e.target.value)}
                   >
+                    <option value="recent">10 tugas terbaru</option>
                     <option value="week">7 hari terakhir</option>
                     <option value="all">Semua bulan periode</option>
                     <option value="custom_months">Pilih bulan</option>
@@ -2472,8 +2576,9 @@ export default function TugasGuru() {
                     setSelectedKelasFilter('')
                     setSelectedSubject('')
                     setFilterStatus('all')
-                    setTimeRange('week')
+                    setTimeRange('recent')
                     setSelectedMonths([])
+                    setHistorySearchTerm('')
                     pushToast('info', 'Filter direset')
                   }}
                 >
@@ -2495,9 +2600,44 @@ export default function TugasGuru() {
                   </h3>
                   <p className="text-sm text-slate-500 mt-1">Klik salah satu tugas untuk melihat jawaban dan memberi nilai.</p>
                 </div>
+                <div className="flex flex-wrap gap-2">
+                  {!hasActiveHistoryFilter && (
+                    <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+                      10 tugas terbaru
+                    </span>
+                  )}
+                  {debouncedHistorySearchTerm && (
+                    <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-700">
+                      Cari: {debouncedHistorySearchTerm}
+                    </span>
+                  )}
+                  {selectedKelasFilter && (
+                    <span className="rounded-full bg-indigo-100 px-3 py-1 text-xs font-semibold text-indigo-700">
+                      Kelas: {selectedHistoryKelasName}
+                    </span>
+                  )}
+                  {selectedSubject && (
+                    <span className="rounded-full bg-purple-100 px-3 py-1 text-xs font-semibold text-purple-700">
+                      Mapel: {selectedSubject}
+                    </span>
+                  )}
+                  {filterStatus !== 'all' && (
+                    <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">
+                      Status: {filterStatus === 'active' ? 'Aktif' : 'Expired'}
+                    </span>
+                  )}
+                </div>
               </div>
 
-              {listTugas.length === 0 ? (
+              {loading && listTugas.length === 0 ? (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-6">
+                  <div className="space-y-3">
+                    {[0, 1, 2].map((item) => (
+                      <div key={item} className="h-24 animate-pulse rounded-2xl bg-white shadow-sm" />
+                    ))}
+                  </div>
+                </div>
+              ) : listTugas.length === 0 ? (
                 <div className="text-center py-14 text-slate-500 bg-slate-50 rounded-2xl border border-slate-200">
                   <div className="text-6xl mb-4">🗂️</div>
                   <div className="font-bold text-slate-700">Belum ada tugas</div>
@@ -2635,8 +2775,8 @@ export default function TugasGuru() {
               }}
             />
 
-            <div className="absolute inset-0 flex items-center justify-center p-2 sm:p-6">
-              <div className="flex max-h-[94vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl sm:rounded-3xl">
+            <div className="absolute inset-0 flex items-end justify-center p-0 sm:items-center sm:p-6">
+              <div className="flex max-h-[96vh] w-full max-w-6xl flex-col overflow-hidden rounded-t-3xl border border-slate-200 bg-white shadow-2xl sm:max-h-[94vh] sm:rounded-3xl">
                 {/* Header modal */}
                 <div className="shrink-0 border-b border-slate-200 bg-white px-4 py-4 sm:px-6">
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -2691,12 +2831,12 @@ export default function TugasGuru() {
                       </div>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                    <div className="grid w-full grid-cols-1 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:justify-end">
                       {selectedTugas.file_url && (
                         <button
                           type="button"
                           onClick={() => openPreviewAny(selectedTugas.file_url, 'Gagal membuka lampiran tugas')}
-                          className="rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
+                          className="w-full rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 sm:w-auto"
                         >
                           Lampiran
                         </button>
@@ -2705,7 +2845,7 @@ export default function TugasGuru() {
                         <button
                           type="button"
                           onClick={() => openPreviewAny(selectedTugas.link, 'Gagal membuka link referensi')}
-                          className="rounded-xl bg-purple-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-purple-700"
+                          className="w-full rounded-xl bg-purple-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-purple-700 sm:w-auto"
                         >
                           Link Referensi
                         </button>
@@ -2717,7 +2857,7 @@ export default function TugasGuru() {
                             type="button"
                             onClick={openEditTugas}
                             disabled={loading || isUploadingFile}
-                            className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                            className="w-full rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                           >
                             Edit
                           </button>
@@ -2725,7 +2865,7 @@ export default function TugasGuru() {
                             type="button"
                             onClick={() => hapusTugas(selectedTugas.id, selectedTugas.file_url)}
                             disabled={selectedHasGradedSubmission || loading || isUploadingFile}
-                            className="rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="w-full rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
                           >
                             {selectedHasGradedSubmission ? 'Tidak Bisa Hapus' : 'Hapus'}
                           </button>
@@ -2736,7 +2876,7 @@ export default function TugasGuru() {
                             type="button"
                             onClick={simpanEditTugas}
                             disabled={loading || isUploadingFile}
-                            className="rounded-xl bg-green-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
+                            className="w-full rounded-xl bg-green-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                           >
                             {loading ? 'Menyimpan...' : 'Simpan'}
                           </button>
@@ -2744,7 +2884,7 @@ export default function TugasGuru() {
                             type="button"
                             onClick={() => { void cancelEditTugas() }}
                             disabled={loading || isUploadingFile}
-                            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                           >
                             Batal
                           </button>
@@ -2754,7 +2894,7 @@ export default function TugasGuru() {
                       <button
                         type="button"
                         onClick={() => { void closeSelectedTugas() }}
-                        className="rounded-xl border border-slate-200 bg-white p-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-900"
+                        className="flex w-full items-center justify-center rounded-xl border border-slate-200 bg-white p-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-900 sm:w-auto"
                         aria-label="Tutup detail tugas"
                       >
                         <X className="h-5 w-5" />
