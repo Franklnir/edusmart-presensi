@@ -12,6 +12,7 @@ import {
   isEmailFormat,
   shouldForceAccountSetup
 } from '../../utils/accountSetup'
+import { completeGoogleLinkOAuthFlow } from '../../utils/googleLinking'
 import { sanitizeText } from '../../utils/sanitize'
 import { validatePassword } from '../../utils/passwordPolicy'
 
@@ -772,14 +773,16 @@ export default function EditProfile() {
 
     setLinkingGoogle(true)
     try {
-      await linkGoogleCredential(credential)
+      const result = await linkGoogleCredential(credential)
+      if (result?.error) return result
       await refreshProfile()
+      return result
     } finally {
       setLinkingGoogle(false)
     }
   }
 
-  const handleLinkGoogleOAuthSuccess = async () => {
+  const handleLinkGoogleOAuthSuccess = async (popupResult = {}) => {
     if (googleLinkBlockedReason) {
       pushToast('info', googleLinkBlockedReason)
       return
@@ -792,27 +795,19 @@ export default function EditProfile() {
 
     setLinkingGoogle(true)
     try {
-      markGoogleLinked()
+      const result = await completeGoogleLinkOAuthFlow({
+        popupResult,
+        googleLinked,
+        markGoogleLinked,
+        refreshAuthSession,
+        refreshProfile,
+        expectedEmail: email
+      })
       pushToast('success', 'Akun Google berhasil ditautkan', {
         title: 'Google Tertaut',
         duration: 5200
       })
-      const syncResult = await refreshAuthSession({
-        showErrorToast: false,
-        logErrorOnFail: false
-      })
-      if (syncResult?.error) {
-        pushToast('warning', `Tautan berhasil, tetapi sinkronisasi status tertunda: ${syncResult.error}`, {
-          title: 'Sinkronisasi Google',
-          duration: 7000
-        })
-      }
-      await refreshProfile()
-    } catch (error) {
-      pushToast('error', error?.message || 'Gagal menautkan Google', {
-        title: 'Tautkan Google Gagal',
-        duration: 6500
-      })
+      return result
     } finally {
       setLinkingGoogle(false)
     }
@@ -1010,6 +1005,7 @@ export default function EditProfile() {
                 noteClassName="text-xs text-slate-600"
                 label="Tautkan Google"
                 busyLabel="Memproses tautan Google..."
+                expectedEmail={email}
               />
             )}
             {!googleLinked && googleLinkBlockedReason && (

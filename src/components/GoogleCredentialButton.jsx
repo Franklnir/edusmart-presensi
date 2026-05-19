@@ -2,6 +2,138 @@ import React, { useMemo, useState } from 'react'
 import { openGoogleAuthPopup, getGoogleAuthBridgeUrl } from '../lib/googlePopupBridge'
 import { useUIStore } from '../store/useUIStore'
 
+const normalizeMessage = (value = '') => String(value || '').trim()
+
+const googleStatusCopy = ({ type = 'error', mode = 'login', message = '', expectedEmail = '' } = {}) => {
+  const cleanMessage = normalizeMessage(message)
+  const email = normalizeMessage(expectedEmail)
+  const isLink = mode === 'link'
+  const lower = cleanMessage.toLowerCase()
+
+  if (type === 'success') {
+    return {
+      tone: 'success',
+      title: isLink ? 'Google Berhasil Tertaut' : 'Login Google Berhasil',
+      message: isLink
+        ? 'Akun Google sudah tertaut dan bisa dipakai untuk login berikutnya.'
+        : 'Anda berhasil masuk menggunakan Google.',
+      detail: isLink ? 'Status tertaut diperbarui otomatis tanpa perlu refresh halaman.' : ''
+    }
+  }
+
+  if (lower.includes('harus sama') || lower.includes('berbeda')) {
+    return {
+      tone: 'error',
+      title: 'Akun Google Berbeda',
+      message: 'Maaf, akun Google yang dipilih berbeda dengan email akun EduSmart.',
+      detail: email
+        ? `Gunakan akun Google dengan email ${email}, atau ubah email akun EduSmart terlebih dahulu.`
+        : 'Gunakan akun Google yang emailnya sama dengan email akun EduSmart.'
+    }
+  }
+
+  if (lower.includes('email buatan sistem') || lower.includes('email aktif')) {
+    return {
+      tone: 'warning',
+      title: 'Email Akun Belum Siap',
+      message: cleanMessage || 'Email akun belum bisa ditautkan ke Google.',
+      detail: 'Ganti email akun ke email aktif yang sama dengan akun Google, lalu coba tautkan lagi.'
+    }
+  }
+
+  if (lower.includes('password') && lower.includes('terlebih dahulu')) {
+    return {
+      tone: 'warning',
+      title: 'Ganti Password Dulu',
+      message: cleanMessage,
+      detail: 'Setelah password awal diganti, tautkan Google bisa dicoba kembali.'
+    }
+  }
+
+  if (lower.includes('sudah tertaut') || lower.includes('digunakan akun lain')) {
+    return {
+      tone: 'error',
+      title: 'Google Sudah Digunakan',
+      message: cleanMessage,
+      detail: 'Pakai akun Google lain atau hubungi admin sekolah untuk mengecek akun yang terkait.'
+    }
+  }
+
+  if (lower.includes('dikonfirmasi') || lower.includes('dibatalkan') || lower.includes('ditutup')) {
+    return {
+      tone: 'warning',
+      title: isLink ? 'Tautkan Google Belum Selesai' : 'Login Google Belum Selesai',
+      message: cleanMessage || 'Kami belum menerima konfirmasi dari Google.',
+      detail: email
+        ? `Pastikan popup Google selesai dan pilih akun ${email}.`
+        : 'Pastikan popup Google selesai, lalu coba lagi.'
+    }
+  }
+
+  return {
+    tone: 'error',
+    title: isLink ? 'Tautkan Google Gagal' : 'Login Google Gagal',
+    message: cleanMessage || (isLink ? 'Tautkan Google gagal diproses.' : 'Login Google gagal diproses.'),
+    detail: 'Silakan coba lagi. Jika masih gagal, hubungi admin dengan menyertakan pesan ini.'
+  }
+}
+
+function GoogleStatusOverlay({ status, onClose }) {
+  if (!status) return null
+
+  const isSuccess = status.tone === 'success'
+  const isWarning = status.tone === 'warning'
+  const colorClass = isSuccess
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+    : isWarning
+      ? 'border-amber-200 bg-amber-50 text-amber-700'
+      : 'border-rose-200 bg-rose-50 text-rose-700'
+  const buttonClass = isSuccess
+    ? 'bg-emerald-600 hover:bg-emerald-700'
+    : isWarning
+      ? 'bg-amber-600 hover:bg-amber-700'
+      : 'bg-rose-600 hover:bg-rose-700'
+
+  return (
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/45 p-4">
+      <div
+        className="w-full max-w-md overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="google-status-title"
+      >
+        <div className="p-5">
+          <div className="flex items-start gap-4">
+            <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border ${colorClass}`}>
+              <span className="text-2xl font-black">{isSuccess ? '✓' : isWarning ? '!' : '×'}</span>
+            </div>
+            <div className="min-w-0 flex-1">
+              <h3 id="google-status-title" className="text-lg font-extrabold text-slate-950">
+                {status.title}
+              </h3>
+              <p className="mt-2 text-sm leading-6 text-slate-700">{status.message}</p>
+              {status.detail && (
+                <p className="mt-2 rounded-2xl bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
+                  {status.detail}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+        <div className="flex justify-end border-t border-slate-100 bg-slate-50 px-5 py-4">
+          <button
+            type="button"
+            onClick={onClose}
+            className={`rounded-2xl px-4 py-2 text-sm font-bold text-white transition-colors ${buttonClass}`}
+          >
+            Mengerti
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const GoogleIcon = ({ className = '' }) => (
   <span className={className} aria-hidden="true">
     <svg viewBox="0 0 24 24" fill="none">
@@ -38,10 +170,12 @@ export default function GoogleCredentialButton({
   label = '',
   busyLabel = 'Memproses Google...',
   unavailableLabel = 'Hubungi admin untuk mengaktifkan OAuth Google.',
-  busyButtonClassName = ''
+  busyButtonClassName = '',
+  expectedEmail = ''
 }) {
   const [statusMessage, setStatusMessage] = useState('')
   const [isLaunching, setIsLaunching] = useState(false)
+  const [statusOverlay, setStatusOverlay] = useState(null)
   const pushToast = useUIStore((state) => state.pushToast)
 
   const bridgeUrl = String(getGoogleAuthBridgeUrl() || '').trim()
@@ -71,8 +205,15 @@ export default function GoogleCredentialButton({
 
     try {
       const result = await openGoogleAuthPopup({ mode })
+      let callbackResult = null
       if (result?.oauth) {
-        await onOAuthSuccess?.(result)
+        callbackResult = await onOAuthSuccess?.(result)
+        if (callbackResult?.error) {
+          throw new Error(callbackResult.error)
+        }
+        if (mode === 'link') {
+          setStatusOverlay(googleStatusCopy({ type: 'success', mode, expectedEmail }))
+        }
         return
       }
 
@@ -81,12 +222,20 @@ export default function GoogleCredentialButton({
         throw new Error('Google tidak mengembalikan identitas akun yang valid.')
       }
 
-      await onCredential?.(credential)
+      callbackResult = await onCredential?.(credential)
+      if (callbackResult?.error) {
+        throw new Error(callbackResult.error)
+      }
+      if (mode === 'link') {
+        setStatusOverlay(googleStatusCopy({ type: 'success', mode, expectedEmail }))
+      }
     } catch (error) {
       const message = error?.message || 'Login Google gagal diproses.'
+      const status = googleStatusCopy({ type: 'error', mode, message, expectedEmail })
       setStatusMessage(message)
-      pushToast('error', message, {
-        title: mode === 'link' ? 'Tautkan Google Gagal' : 'Login Google Gagal',
+      setStatusOverlay(status)
+      pushToast(status.tone === 'warning' ? 'warning' : 'error', status.message, {
+        title: status.title,
         duration: 6500
       })
     } finally {
@@ -96,6 +245,8 @@ export default function GoogleCredentialButton({
 
   return (
     <div className={className}>
+      <GoogleStatusOverlay status={statusOverlay} onClose={() => setStatusOverlay(null)} />
+
       <button
         type="button"
         onClick={handleClick}

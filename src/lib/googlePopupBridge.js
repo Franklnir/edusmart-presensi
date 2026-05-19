@@ -191,17 +191,12 @@ export const openGoogleAuthPopup = ({
     const scheduleClosedFallback = () => {
       if (closeGraceTimer || settled) return
       closeGraceTimer = window.setTimeout(() => {
-        if (mode === 'login') {
-          finalize(() => resolve({
-            oauth: true,
-            status: 'popup_closed',
-            popupClosed: true,
-            mode
-          }))
-          return
-        }
-
-        finalize(() => reject(new Error('Proses Google dibatalkan sebelum selesai. Silakan coba lagi.')))
+        finalize(() => resolve({
+          oauth: true,
+          status: 'popup_closed',
+          popupClosed: true,
+          mode
+        }))
       }, POPUP_CLOSED_SUCCESS_GRACE_MS)
     }
 

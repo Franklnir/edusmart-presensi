@@ -29,6 +29,7 @@ import { useUIStore } from '../../store/useUIStore'
 import FileDropzone from '../../components/FileDropzone'
 import GoogleCredentialButton from '../../components/GoogleCredentialButton'
 import { sanitizeText, sanitizeUrl } from '../../utils/sanitize'
+import { completeGoogleLinkOAuthFlow } from '../../utils/googleLinking'
 import {
   getCurrentAcademicPeriod,
   generateAcademicYearOptions,
@@ -1461,13 +1462,14 @@ export default function APengaturan() {
 
     setLinkingGoogle(true)
     try {
-      await linkGoogleCredential(credential)
+      const result = await linkGoogleCredential(credential)
+      return result
     } finally {
       setLinkingGoogle(false)
     }
   }
 
-  async function handleLinkGoogleOAuthSuccess() {
+  async function handleLinkGoogleOAuthSuccess(popupResult = {}) {
     const providerState = supabase.auth.getProviderState?.(user || {}) || { googleLinked: false }
     const googleLinked = Boolean(user?.google_linked || providerState.googleLinked)
 
@@ -1478,27 +1480,19 @@ export default function APengaturan() {
 
     setLinkingGoogle(true)
     try {
-      markGoogleLinked()
+      const result = await completeGoogleLinkOAuthFlow({
+        popupResult,
+        googleLinked,
+        markGoogleLinked,
+        refreshAuthSession,
+        refreshProfile,
+        expectedEmail: user?.email || profile?.email || ''
+      })
       pushToast('success', 'Akun Google berhasil ditautkan', {
         title: 'Google Tertaut',
         duration: 5200
       })
-      const syncResult = await refreshAuthSession({
-        showErrorToast: false,
-        logErrorOnFail: false
-      })
-      if (syncResult?.error) {
-        pushToast('warning', `Tautan berhasil, tetapi sinkronisasi status tertunda: ${syncResult.error}`, {
-          title: 'Sinkronisasi Google',
-          duration: 7000
-        })
-      }
-      await refreshProfile?.()
-    } catch (error) {
-      pushToast('error', error?.message || 'Gagal menautkan Google', {
-        title: 'Tautkan Google Gagal',
-        duration: 6500
-      })
+      return result
     } finally {
       setLinkingGoogle(false)
     }
@@ -1631,6 +1625,7 @@ export default function APengaturan() {
   }
   const googleLinked = Boolean(user?.google_linked || providerState.googleLinked)
   const emailVerified = Boolean(user?.email_confirmed_at || user?.emailVerified || providerState.emailVerified)
+  const googleExpectedEmail = user?.email || profile?.email || ''
   const periodYearWillChange = periodForm.tahunAjaran !== persistedPeriodForm.tahunAjaran
   const activeAcademicPeriod = resolveAcademicPeriod({
     tahun_ajaran: periodForm.tahunAjaran,
@@ -2863,6 +2858,7 @@ export default function APengaturan() {
                         label="Tautkan Google"
                         busyLabel="Memproses tautan Google..."
                         unavailableLabel="Mode standby. Aktifkan `VITE_GOOGLE_AUTH_ENABLED=true`."
+                        expectedEmail={googleExpectedEmail}
                       />
                     )}
                     {googleLinked && (
