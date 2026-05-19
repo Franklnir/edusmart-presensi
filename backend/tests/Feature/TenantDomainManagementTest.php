@@ -73,6 +73,43 @@ class TenantDomainManagementTest extends TestCase
             ->assertJsonPath('error', 'Host tenant belum terdaftar. Tambahkan domain ini dari panel super admin terlebih dahulu.');
     }
 
+    public function test_auth_me_does_not_expose_super_admin_access_on_tenant_host(): void
+    {
+        config()->set('tenancy.root_domain', 'edusmart.test');
+        config()->set('tenancy.admin_subdomain', 'admin26');
+        config()->set('tenancy.admin_hosts', []);
+        config()->set('tenancy.allow_root_for_super_admin', false);
+
+        $superAdmin = $this->createSuperAdmin();
+        $tenantId = $this->createTenant('SMA Bali', 'bali');
+
+        DB::table('profiles')->insert([
+            'id' => $superAdmin->id,
+            'tenant_id' => $tenantId,
+            'email' => $superAdmin->email,
+            'nama' => 'Admin Sekolah Bali',
+            'role' => 'admin',
+            'kelas' => null,
+            'status' => 'active',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this
+            ->actingAs($superAdmin)
+            ->getJson('http://bali.edusmart.test/api/auth/me')
+            ->assertOk()
+            ->assertJsonPath('data.is_super_admin', false)
+            ->assertJsonPath('data.profile.role', 'admin')
+            ->assertJsonPath('data.profile.nama', 'Admin Sekolah Bali');
+
+        $this
+            ->actingAs($superAdmin)
+            ->getJson('http://admin26.edusmart.test/api/auth/me')
+            ->assertOk()
+            ->assertJsonPath('data.is_super_admin', true);
+    }
+
     public function test_admin_subdomain_is_reserved_even_when_reserved_env_omits_it(): void
     {
         config()->set('tenancy.root_domain', 'edusmart.test');

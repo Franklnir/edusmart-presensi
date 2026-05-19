@@ -37,9 +37,10 @@ const Navbar = () => {
   const { avatarUrl, clearAvatarUrl } = useAvatarUrl(profile)
 
   const role = profile?.role
-  const effectiveRole = isSuperAdmin ? 'admin' : role
+  const hasSuperAdminAccess = Boolean(isSuperAdmin && role === 'admin')
+  const effectiveRole = hasSuperAdminAccess ? 'admin' : role
   const isWaliKelas = useWaliKelasFlag(role, user?.id)
-  const navItems = useNavigationMenu({ effectiveRole, isSuperAdmin, isWaliKelas, role })
+  const navItems = useNavigationMenu({ effectiveRole, isSuperAdmin: hasSuperAdminAccess, isWaliKelas, role })
   const menuExpansion = useMenuExpansion(navItems, location.pathname, location.search)
   const {
     loadMonitoring,

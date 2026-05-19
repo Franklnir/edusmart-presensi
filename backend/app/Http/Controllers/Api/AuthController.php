@@ -71,12 +71,14 @@ class AuthController extends ApiController
 
         $profile = $this->profile($request);
         $isSuperAdminIdentity = $this->isSuperAdminIdentity($request);
+        $isSuperAdminForHost = $isSuperAdminIdentity
+            && $this->isAllowedSuperAdminLoginHost((string) $request->getHost());
 
-        if (! $isSuperAdminIdentity && ! $profile && $this->tenantId($request)) {
+        if (! $isSuperAdminForHost && ! $profile && $this->tenantId($request)) {
             return response()->json(['error' => 'Akses tenant ditolak'], 403);
         }
 
-        if ($isSuperAdminIdentity && ! $profile) {
+        if ($isSuperAdminForHost && ! $profile) {
             $profile = new Profile([
                 'id' => $user->id,
                 'tenant_id' => $this->tenantId($request),
@@ -92,7 +94,7 @@ class AuthController extends ApiController
                 'user' => $user,
                 'profile' => $profile,
                 'settings' => $this->bootstrapSettings($request),
-                'is_super_admin' => $isSuperAdminIdentity,
+                'is_super_admin' => $isSuperAdminForHost,
             ],
         ]);
     }
