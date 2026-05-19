@@ -287,16 +287,9 @@ function StorageManager() {
     periodCatalog,
     periods
   ])
-  const safeCleanupPeriodOptions = useMemo(() => {
-    const activeRank = periodRank(activePeriod?.tahun_ajaran, activePeriod?.semester)
-    if (activeRank === null) return []
-    return periodOptions.filter((item) => activeRank - item.rank >= 1)
-  }, [activePeriod?.semester, activePeriod?.tahun_ajaran, periodOptions])
   const cleanupPeriodValue = periodValue(cleanupForm.tahun_ajaran, cleanupForm.semester)
-  const cleanupPeriodIsAllowed = safeCleanupPeriodOptions.some((item) => item.value === cleanupPeriodValue)
-  const cleanupHasRequiredPeriod = Boolean(cleanupPeriodValue && cleanupPeriodIsAllowed)
   const cleanupHasProviderBucket = Boolean(cleanupForm.provider && cleanupForm.bucket)
-  const cleanupReady = cleanupHasRequiredPeriod && cleanupHasProviderBucket
+  const cleanupReady = cleanupHasProviderBucket
 
   const loadAdminSummary = async (filters = storageFilters) => {
     const { data, error } = await supabase.admin.storageManager(filters)
@@ -412,10 +405,6 @@ function StorageManager() {
       pushToast('warning', 'Pilih provider dan bucket storage terlebih dahulu.')
       return
     }
-    if (!cleanupHasRequiredPeriod) {
-      pushToast('warning', 'Pilih tahun ajaran dan semester yang sudah lewat minimal 1 semester dulu.')
-      return
-    }
     setCleanupLoading(true)
     try {
       const api = isSuperAdmin
@@ -435,10 +424,6 @@ function StorageManager() {
   const handleExecuteCleanup = async () => {
     if (!cleanupHasProviderBucket) {
       pushToast('warning', 'Cleanup wajib memilih provider dan bucket storage.')
-      return
-    }
-    if (!cleanupHasRequiredPeriod) {
-      pushToast('warning', 'Cleanup wajib memakai tahun ajaran dan semester yang sudah lewat minimal 1 semester.')
       return
     }
     if (!cleanupPreview?.allowed || cleanupPreview.files <= 0) {
@@ -635,22 +620,25 @@ function StorageManager() {
               </select>
             </label>
             <label className="block text-xs font-semibold text-slate-600">
-              Periode selesai
+              Periode
               <select
                 value={cleanupPeriodValue}
                 onChange={(event) => updateCleanupForm(parsePeriodValue(event.target.value))}
                 className="mt-1 min-h-10 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
               >
-                <option value="">Pilih periode lama</option>
-                {safeCleanupPeriodOptions.map((item) => (
+                <option value="">Semua periode</option>
+                {periodOptions.map((item) => (
                   <option key={item.value} value={item.value}>
-                    {item.tahun_ajaran} - {item.semester}{item.bytes_label ? ` (${item.bytes_label})` : ''}
+                    {item.tahun_ajaran} - {item.semester}{item.isActive ? ' (Aktif)' : ''}{item.bytes_label ? ` (${item.bytes_label})` : ''}
                   </option>
                 ))}
-                {safeCleanupPeriodOptions.length === 0 && (
-                  <option value="" disabled>Belum ada semester lama yang aman</option>
+                {periodOptions.length === 0 && (
+                  <option value="" disabled>Belum ada periode tercatat</option>
                 )}
               </select>
+              <span className="mt-1 block text-[11px] font-normal text-slate-500">
+                Opsional. Kosongkan untuk cleanup semua file aman yang sudah lewat minimal 3 bulan.
+              </span>
             </label>
             <label className="block text-xs font-semibold text-slate-600">
               Kategori
@@ -689,9 +677,10 @@ function StorageManager() {
           <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">Pengaman aktif</h3>
           <div className="mt-3 space-y-2 text-sm text-slate-600">
             {[
-              'Tidak bisa untuk semester aktif',
               'Tidak bisa untuk file di bawah 3 bulan',
+              'Periode opsional, termasuk semester aktif jika umur file sudah aman',
               'Hanya bucket assignments dan quiz-media',
+              'Berlaku untuk VPS Storage dan Neva Cloud S3',
               'Hanya dokumen/gambar tugas atau quiz',
               'Preview wajib sebelum pindah ke Trash'
             ].map((item) => (
@@ -727,11 +716,6 @@ function StorageManager() {
       {!cleanupHasProviderBucket && (
         <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           Pilih provider dan bucket terlebih dahulu supaya cleanup hanya menyasar lokasi storage yang benar.
-        </div>
-      )}
-      {cleanupHasProviderBucket && !cleanupHasRequiredPeriod && (
-        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          Pilih periode lama dari dropdown. Cleanup tidak bisa untuk semester aktif, semester berjalan, atau data yang belum lewat minimal satu semester.
         </div>
       )}
       {cleanupPreview && (

@@ -23,8 +23,6 @@ class StorageManagementService
         self::PROVIDER_NEVA_S3 => 'Neva Cloud S3',
     ];
 
-    private const CLEANUP_MINIMUM_PERIOD_GAP = 1;
-
     private const CLEANUP_MINIMUM_FILE_AGE_DAYS = 90;
 
     private const CLEANUP_SAFE_CATEGORIES = ['tugas', 'kuis', 'lampiran'];
@@ -1469,24 +1467,6 @@ class StorageManagementService
         $query->whereIn('category', self::CLEANUP_SAFE_CATEGORIES);
         $query->whereIn('bucket', self::CLEANUP_SAFE_BUCKETS);
 
-        $active = $this->activePeriod($tenantId);
-        $activeYear = $active['tahun_ajaran'] ?? null;
-        $activeSemester = $active['semester'] ?? null;
-        if (
-            $activeYear
-            && $activeSemester
-            && $this->tableHasColumn('storage_files', 'tahun_ajaran')
-            && $this->tableHasColumn('storage_files', 'semester')
-        ) {
-            $query->where(function ($periodQuery) use ($activeYear, $activeSemester) {
-                $periodQuery
-                    ->whereNull('tahun_ajaran')
-                    ->orWhere('tahun_ajaran', '<>', $activeYear)
-                    ->orWhereNull('semester')
-                    ->orWhere('semester', '<>', $activeSemester);
-            });
-        }
-
         $minimumAgeDays = $this->cleanupMinimumAgeDays($filters);
         $query
             ->whereNotNull('uploaded_at')
@@ -1519,17 +1499,22 @@ class StorageManagementService
     {
         $year = AcademicPeriod::normalizeAcademicYear($filters['tahun_ajaran'] ?? null);
         $semester = AcademicPeriod::normalizeSemester($filters['semester'] ?? null);
-        $active = $this->activePeriod($tenantId);
-        $activeYear = AcademicPeriod::normalizeAcademicYear($active['tahun_ajaran'] ?? null);
-        $activeSemester = AcademicPeriod::normalizeSemester($active['semester'] ?? null);
+        $hasPeriodFilter = trim((string) ($filters['tahun_ajaran'] ?? '')) !== ''
+            || trim((string) ($filters['semester'] ?? '')) !== '';
 
-        if (! $year || ! $semester) {
-            return 'Cleanup wajib memilih tahun ajaran dan semester tertentu. Data storage hanya boleh dihapus setelah periodenya lewat minimal 1 semester.';
-        }
-
-        foreach (['id', 'bucket', 'path', 'provider', 'category', 'uploaded_at', 'tahun_ajaran', 'semester'] as $column) {
+        foreach (['id', 'bucket', 'path', 'provider', 'category', 'uploaded_at'] as $column) {
             if (! $this->tableHasColumn('storage_files', $column)) {
                 return 'Metadata storage belum lengkap untuk cleanup aman. Jalankan migrasi storage dulu sebelum cleanup.';
+            }
+        }
+        if ($hasPeriodFilter) {
+            if (! $year || ! $semester) {
+                return 'Periode cleanup tidak valid. Pilih tahun ajaran dan semester lengkap, atau kosongkan periode untuk cleanup berdasarkan umur file.';
+            }
+            foreach (['tahun_ajaran', 'semester'] as $column) {
+                if (! $this->tableHasColumn('storage_files', $column)) {
+                    return 'Metadata periode storage belum lengkap. Kosongkan filter periode atau jalankan migrasi storage terlebih dahulu.';
+                }
             }
         }
 
@@ -1557,40 +1542,12 @@ class StorageManagementService
             return 'Cleanup hanya boleh untuk file storage tugas, quiz, atau lampiran tugas.';
         }
 
-        if (! $activeYear || ! $activeSemester) {
-            return 'Periode aktif sekolah belum valid. Atur periode akademik aktif sebelum menjalankan cleanup storage.';
-        }
-
-        $targetRank = $this->semesterRank($year, $semester);
-        $activeRank = $this->semesterRank($activeYear, $activeSemester);
-        if ($targetRank === null || $activeRank === null) {
-            return 'Periode cleanup tidak valid. Pilih tahun ajaran dan semester yang sudah selesai.';
-        }
-
-        if (($activeRank - $targetRank) < self::CLEANUP_MINIMUM_PERIOD_GAP) {
-            return 'Cleanup tidak diizinkan untuk semester aktif atau semester yang belum lewat minimal 1 semester.';
-        }
-
         return null;
     }
 
     private function cleanupMinimumAgeDays(array $filters): int
     {
         return max(self::CLEANUP_MINIMUM_FILE_AGE_DAYS, (int) ($filters['older_than_days'] ?? 0));
-    }
-
-    private function semesterRank(?string $year, ?string $semester): ?int
-    {
-        $normalizedYear = AcademicPeriod::normalizeAcademicYear($year);
-        $normalizedSemester = AcademicPeriod::normalizeSemester($semester);
-        if (! $normalizedYear || ! $normalizedSemester) {
-            return null;
-        }
-
-        $startYear = (int) substr($normalizedYear, 0, 4);
-        $semesterOffset = $normalizedSemester === AcademicPeriod::SEMESTER_GENAP ? 1 : 0;
-
-        return ($startYear * 2) + $semesterOffset;
     }
 
     private function createCleanupBackup(string $tenantId, array $candidates): ?string
@@ -1689,9 +1646,7 @@ class StorageManagementService
         return in_array((string) ($row['provider'] ?? ''), [self::PROVIDER_VPS, self::PROVIDER_NEVA_S3], true)
             && in_array((string) ($row['bucket'] ?? ''), self::CLEANUP_SAFE_BUCKETS, true)
             && in_array((string) ($row['category'] ?? ''), self::CLEANUP_SAFE_CATEGORIES, true)
-            && in_array($extension, self::CLEANUP_SAFE_EXTENSIONS, true)
-            && AcademicPeriod::normalizeAcademicYear($row['tahun_ajaran'] ?? null) !== null
-            && AcademicPeriod::normalizeSemester($row['semester'] ?? null) !== null;
+            && in_array($extension, self::CLEANUP_SAFE_EXTENSIONS, true);
     }
 
     private function cleanupFileIsAvailable(array $row): bool
@@ -1826,7 +1781,9 @@ class StorageManagementService
         $label = self::PROVIDER_LABELS[$provider] ?? 'Storage';
         if ($provider === self::PROVIDER_NEVA_S3) {
             $capacityBytes = $this->configuredObjectStorageCapacityBytes();
-            $column = 'neva_s3_quota_bytes';
+            $column = $this->tableHasColumn('tenant_storage_quotas', 'neva_s3_quota_bytes')
+                ? 'neva_s3_quota_bytes'
+                : null;
         } elseif ($provider === self::PROVIDER_VPS) {
             try {
                 $capacity = $this->serverCapacity();
@@ -1840,18 +1797,14 @@ class StorageManagementService
                 return;
             }
             $capacityBytes = (int) ($capacity['total_bytes'] ?? 0);
-            $column = $this->tableHasColumn('tenant_storage_quotas', 'vps_quota_bytes')
-                ? 'vps_quota_bytes'
-                : 'quota_bytes';
+            $column = $this->vpsQuotaSqlExpression();
         }
 
-        if (! $capacityBytes || $capacityBytes <= 0 || ! $column || ! $this->tableHasColumn('tenant_storage_quotas', $column)) {
+        if (! $capacityBytes || $capacityBytes <= 0 || ! $column) {
             return;
         }
 
-        $allocatedOther = (int) DB::table('tenant_storage_quotas')
-            ->where('tenant_id', '<>', $tenantId)
-            ->sum($column);
+        $allocatedOther = $this->sumQuotaExpression($column, fn ($query) => $query->where('tenant_id', '<>', $tenantId));
         $proposedTotal = $allocatedOther + $newQuotaBytes;
         if ($proposedTotal <= $capacityBytes) {
             return;
@@ -1871,25 +1824,47 @@ class StorageManagementService
 
         $provider = $provider !== null ? $this->normalizeProvider($provider) : null;
         $column = match ($provider) {
-            self::PROVIDER_VPS => $this->tableHasColumn('tenant_storage_quotas', 'vps_quota_bytes')
-                ? 'vps_quota_bytes'
-                : 'quota_bytes',
-            self::PROVIDER_NEVA_S3 => 'neva_s3_quota_bytes',
+            self::PROVIDER_VPS => $this->vpsQuotaSqlExpression(),
+            self::PROVIDER_NEVA_S3 => $this->tableHasColumn('tenant_storage_quotas', 'neva_s3_quota_bytes')
+                ? 'neva_s3_quota_bytes'
+                : null,
             default => null,
         };
 
         if ($column !== null) {
-            return $this->tableHasColumn('tenant_storage_quotas', $column)
-                ? (int) DB::table('tenant_storage_quotas')->sum($column)
-                : 0;
+            return $this->sumQuotaExpression($column);
         }
 
-        $columns = array_values(array_filter([
-            $this->tableHasColumn('tenant_storage_quotas', 'vps_quota_bytes') ? 'vps_quota_bytes' : 'quota_bytes',
-            $this->tableHasColumn('tenant_storage_quotas', 'neva_s3_quota_bytes') ? 'neva_s3_quota_bytes' : null,
-        ]));
+        return $this->allocatedQuotaBytes(self::PROVIDER_VPS) + $this->allocatedQuotaBytes(self::PROVIDER_NEVA_S3);
+    }
 
-        return array_reduce($columns, fn ($total, $quotaColumn) => $total + (int) DB::table('tenant_storage_quotas')->sum($quotaColumn), 0);
+    private function vpsQuotaSqlExpression(): ?string
+    {
+        $hasProviderQuota = $this->tableHasColumn('tenant_storage_quotas', 'vps_quota_bytes');
+        $hasLegacyQuota = $this->tableHasColumn('tenant_storage_quotas', 'quota_bytes');
+        if ($hasProviderQuota && $hasLegacyQuota) {
+            return 'coalesce(vps_quota_bytes, quota_bytes, 0)';
+        }
+        if ($hasProviderQuota) {
+            return 'coalesce(vps_quota_bytes, 0)';
+        }
+        if ($hasLegacyQuota) {
+            return 'coalesce(quota_bytes, 0)';
+        }
+
+        return null;
+    }
+
+    private function sumQuotaExpression(string $expression, ?callable $scope = null): int
+    {
+        $query = DB::table('tenant_storage_quotas');
+        if ($scope !== null) {
+            $scope($query);
+        }
+
+        return (int) ($query
+            ->selectRaw('coalesce(sum('.$expression.'), 0) as aggregate')
+            ->value('aggregate') ?? 0);
     }
 
     private function latestProviderSnapshotTotals(string $provider): array
