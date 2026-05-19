@@ -25,6 +25,61 @@ const GOOGLE_POPUP_SESSION_RETRY_DELAY_MS = 650
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
+const uniqueProviders = (...lists) => {
+  const providers = []
+  lists.forEach((list) => {
+    if (!Array.isArray(list)) return
+    list.forEach((provider) => {
+      const normalized = String(provider || '').trim().toLowerCase()
+      if (normalized) providers.push(normalized)
+    })
+  })
+  providers.push('google')
+  return Array.from(new Set(providers))
+}
+
+const withGoogleLinkedUserState = (user) => {
+  if (!user) return user
+
+  const linkedAt = user.google_linked_at || new Date().toISOString()
+  const verifiedAt =
+    user.email_verified_at ||
+    user.email_confirmed_at ||
+    user.verified_at ||
+    linkedAt
+  const userMetadata = user.user_metadata || {}
+  const appMetadata = user.app_metadata || {}
+  const providers = uniqueProviders(
+    user.providers,
+    userMetadata.providers,
+    appMetadata.providers
+  )
+
+  return {
+    ...user,
+    google_linked: true,
+    google_linked_at: linkedAt,
+    emailVerified: true,
+    email_verified: true,
+    email_verified_at: verifiedAt,
+    email_confirmed_at: verifiedAt,
+    providers,
+    user_metadata: {
+      ...userMetadata,
+      google_linked: true,
+      google_linked_at: linkedAt,
+      email_verified: true,
+      email_verified_at: verifiedAt,
+      providers
+    },
+    app_metadata: {
+      ...appMetadata,
+      google_linked: true,
+      providers
+    }
+  }
+}
+
 const buildProfilePayload = (user) => {
   const meta = user?.user_metadata || {}
   const role = meta.role || user?.app_metadata?.role
@@ -97,6 +152,18 @@ export const useAuthStore = create((set, get) => ({
   initialized: false,
   isLoading: false,
   error: null,
+
+  markGoogleLinked: () => {
+    let nextUser = null
+    set((state) => {
+      nextUser = withGoogleLinkedUserState(state.user)
+      return {
+        user: nextUser,
+        error: null
+      }
+    })
+    return nextUser
+  },
 
   /* ===========================
      INIT (dipanggil di root App)

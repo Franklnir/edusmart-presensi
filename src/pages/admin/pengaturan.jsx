@@ -501,7 +501,7 @@ export default function APengaturan() {
   const location = useLocation()
   const navigate = useNavigate()
   const { pushToast, requestConfirmation } = useUIStore()
-  const { user, profile, logout, refreshProfile, linkGoogleCredential, refreshAuthSession } = useAuthStore()
+  const { user, profile, logout, refreshProfile, linkGoogleCredential, refreshAuthSession, markGoogleLinked } = useAuthStore()
 
   const [isAuthorized, setIsAuthorized] = useState(true)
   const [passwordModalOpen, setPasswordModalOpen] = useState(false)
@@ -1478,9 +1478,26 @@ export default function APengaturan() {
 
     setLinkingGoogle(true)
     try {
-      await refreshAuthSession({
-        successMessage: 'Akun Google berhasil ditautkan',
-        successToastOptions: { title: 'Google Tertaut', duration: 5200 }
+      markGoogleLinked()
+      pushToast('success', 'Akun Google berhasil ditautkan', {
+        title: 'Google Tertaut',
+        duration: 5200
+      })
+      const syncResult = await refreshAuthSession({
+        showErrorToast: false,
+        logErrorOnFail: false
+      })
+      if (syncResult?.error) {
+        pushToast('warning', `Tautan berhasil, tetapi sinkronisasi status tertunda: ${syncResult.error}`, {
+          title: 'Sinkronisasi Google',
+          duration: 7000
+        })
+      }
+      await refreshProfile?.()
+    } catch (error) {
+      pushToast('error', error?.message || 'Gagal menautkan Google', {
+        title: 'Tautkan Google Gagal',
+        duration: 6500
       })
     } finally {
       setLinkingGoogle(false)

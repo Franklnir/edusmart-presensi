@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react'
 import { openGoogleAuthPopup, getGoogleAuthBridgeUrl } from '../lib/googlePopupBridge'
+import { useUIStore } from '../store/useUIStore'
 
 const GoogleIcon = ({ className = '' }) => (
   <span className={className} aria-hidden="true">
@@ -41,6 +42,7 @@ export default function GoogleCredentialButton({
 }) {
   const [statusMessage, setStatusMessage] = useState('')
   const [isLaunching, setIsLaunching] = useState(false)
+  const pushToast = useUIStore((state) => state.pushToast)
 
   const bridgeUrl = String(getGoogleAuthBridgeUrl() || '').trim()
 
@@ -81,7 +83,12 @@ export default function GoogleCredentialButton({
 
       await onCredential?.(credential)
     } catch (error) {
-      setStatusMessage(error?.message || 'Login Google gagal diproses.')
+      const message = error?.message || 'Login Google gagal diproses.'
+      setStatusMessage(message)
+      pushToast('error', message, {
+        title: mode === 'link' ? 'Tautkan Google Gagal' : 'Login Google Gagal',
+        duration: 6500
+      })
     } finally {
       setIsLaunching(false)
     }
