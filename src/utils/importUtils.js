@@ -91,6 +91,11 @@ export const toText = (value) => {
   return String(value).trim()
 }
 
+export const normalizeIdentifierCode = (value) =>
+  toText(value)
+    .replace(/\s+/g, '')
+    .toUpperCase()
+
 export const buildDefaultPassword = (tanggalLahir, nis) => {
   const iso = parseDateValue(tanggalLahir)
   const buildStrongPassword = (digitsSource) => {

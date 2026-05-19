@@ -63,7 +63,7 @@ class AdminController extends ApiController
 
         $role = strtolower(trim((string) ($payload['role'] ?? '')));
         $nama = trim((string) ($payload['nama'] ?? ''));
-        $nis = trim((string) ($payload['nis'] ?? ''));
+        $nis = $this->normalizeIdentifierCode($payload['nis'] ?? '');
         $email = strtolower(trim((string) ($payload['email'] ?? '')));
         $requestedId = trim((string) ($payload['id'] ?? ''));
         $syncExisting = filter_var($payload['sync_existing'] ?? false, FILTER_VALIDATE_BOOLEAN);
@@ -93,7 +93,7 @@ class AdminController extends ApiController
         if (! $existingProfile && $allowExistingUpdate && $nis !== '') {
             $existingProfile = Profile::query()
                 ->where('tenant_id', $tenantId)
-                ->where('nis', $nis)
+                ->whereRaw('lower(nis) = ?', [strtolower($nis)])
                 ->first();
         }
 
@@ -123,7 +123,7 @@ class AdminController extends ApiController
 
             if ($nis !== '' && Profile::query()
                 ->where('tenant_id', $tenantId)
-                ->where('nis', $nis)
+                ->whereRaw('lower(nis) = ?', [strtolower($nis)])
                 ->where('id', '!=', $existingProfile->id)
                 ->exists()
             ) {
@@ -141,7 +141,7 @@ class AdminController extends ApiController
             if ($nis !== '') {
                 $existingNis = Profile::query()
                     ->where('tenant_id', $tenantId)
-                    ->where('nis', $nis)
+                    ->whereRaw('lower(nis) = ?', [strtolower($nis)])
                     ->first();
                 if ($existingNis) {
                     return response()->json(['error' => 'NIS/NIP sudah terdaftar di sekolah ini'], 409);
@@ -1931,6 +1931,13 @@ class AdminController extends ApiController
         $normalized = trim((string) ($value ?? ''));
 
         return $normalized === '' ? null : $normalized;
+    }
+
+    private function normalizeIdentifierCode(mixed $value): string
+    {
+        $normalized = preg_replace('/\s+/', '', trim((string) ($value ?? '')));
+
+        return strtoupper((string) $normalized);
     }
 
     private function normalizeProfileCreatedVia(mixed $value, string $default): string

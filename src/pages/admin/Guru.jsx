@@ -16,6 +16,7 @@ import {
   mapRowByAliases,
   parseDateValue,
   normalizeGender,
+  normalizeIdentifierCode,
   toText,
   buildDefaultPassword,
   readRowsFromFile,
@@ -150,64 +151,10 @@ const formatKelasDisplay = (kelasSlug) => {
   ).join(' ');
 };
 
-const getKelasDisplayName = (kelasObj) => {
-  if (!kelasObj) return ''
-  return kelasObj.nama || formatKelasDisplay(kelasObj.id) || ''
-}
-
 const normalizePhoneSimple = (input) => {
   if (!input) return ''
   return String(input).replace(/\D/g, '')
 }
-
-const normalizeKelasKey = (value) =>
-  String(value || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '')
-
-const GRADE_ROMAN_TO_NUMBER = {
-  x: '10',
-  xi: '11',
-  xii: '12'
-}
-
-const GRADE_NUMBER_TO_ROMAN = {
-  10: 'x',
-  11: 'xi',
-  12: 'xii'
-}
-
-const buildKelasLookupKeys = (value) => {
-  const raw = String(value || '').trim().toLowerCase()
-  if (!raw) return []
-
-  const keys = new Set([normalizeKelasKey(raw)])
-  const tokens = raw.match(/[a-z]+|\d+/g) || []
-
-  if (tokens.length) {
-    const [grade, ...rest] = tokens
-    const swappedGrade = GRADE_ROMAN_TO_NUMBER[grade] || GRADE_NUMBER_TO_ROMAN[grade]
-    if (swappedGrade) {
-      keys.add(normalizeKelasKey([swappedGrade, ...rest].join(' ')))
-      keys.add(normalizeKelasKey([swappedGrade, ...rest].join('')))
-      keys.add(normalizeKelasKey([swappedGrade, ...rest].join('-')))
-    }
-
-    keys.add(normalizeKelasKey(tokens.join(' ')))
-    keys.add(normalizeKelasKey(tokens.join('')))
-    keys.add(normalizeKelasKey(tokens.join('-')))
-  }
-
-  return Array.from(keys).filter(Boolean)
-}
-
-const slugifyKelas = (value) =>
-  String(value || '')
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, '-')
-    .replace(/[^a-z0-9-]/g, '')
 
 const GURU_ALIAS_MAP = buildAliasMap({
   nama: ['nama', 'name', 'nama guru', 'nama lengkap', 'full name'],
@@ -227,7 +174,6 @@ const GURU_ALIAS_MAP = buildAliasMap({
     'teacher id',
     'teacherid'
   ],
-  kelas: ['kelas', 'class', 'rombel', 'kelas_id', 'kelas guru', 'kelas wali', 'wali kelas', 'kelas utama', 'tingkat', 'grade'],
   jk: ['jk', 'jenis kelamin', 'gender', 'kelamin', 'sex'],
   tanggal_lahir: ['tanggal lahir', 'tgl lahir', 'tgl_lahir', 'dob', 'birthdate'],
   agama: ['agama', 'religion'],
@@ -241,7 +187,6 @@ const GURU_ALIAS_MAP = buildAliasMap({
 const GURU_IMPORT_EXAMPLE_COLUMNS = [
   { key: 'nama', label: 'Nama', cellClassName: 'min-w-[180px] font-medium text-gray-800 whitespace-normal leading-5' },
   { key: 'nis', label: 'NIP/NUPTK', cellClassName: 'min-w-[120px] whitespace-nowrap' },
-  { key: 'kelas', label: 'Kelas', cellClassName: 'min-w-[112px] whitespace-normal leading-5' },
   { key: 'jk', label: 'JK', cellClassName: 'min-w-[56px] whitespace-nowrap' },
   { key: 'tanggal_lahir', label: 'Tanggal Lahir', cellClassName: 'min-w-[120px] whitespace-nowrap' },
   { key: 'agama', label: 'Agama', cellClassName: 'min-w-[92px] whitespace-nowrap' },
@@ -452,7 +397,6 @@ export default function AGuru() {
 
   const [guruRaw, setGuruRaw] = useState([])
   const [guru, setGuru] = useState([])
-  const [kelasList, setKelasList] = useState([])
   const [jadwalAll, setJadwalAll] = useState({})
   const [strukturKelasAll, setStrukturKelasAll] = useState({})
   const [strukturSekolah, setStrukturSekolah] = useState({})
@@ -515,13 +459,7 @@ export default function AGuru() {
   const [importProgress, setImportProgress] = useState({ phase: 'idle' })
   const [importSummary, setImportSummary] = useState(null)
 
-  const availableKelasNames = useMemo(
-    () => kelasList.map((kelas) => getKelasDisplayName(kelas)).filter(Boolean),
-    [kelasList]
-  )
-
   const importExampleRows = useMemo(() => {
-    const classNames = availableKelasNames.length ? availableKelasNames : ['', '', '']
     const sampleNames = [
       'Dewi Kartika Sari',
       'Ahmad Fauzan Pratama',
@@ -563,8 +501,7 @@ export default function AGuru() {
       'Jl. Teratai 6, Bandung'
     ]
 
-    return classNames.map((kelasName, index) => {
-      const sampleName = sampleNames[index] || `Contoh Guru ${index + 1}`
+    return sampleNames.slice(0, 3).map((sampleName, index) => {
       const emailSlug = sampleName
         .toLowerCase()
         .replace(/[^a-z\s]/g, '')
@@ -577,7 +514,6 @@ export default function AGuru() {
       return {
         nama: sampleName,
         nis: nip,
-        kelas: kelasName,
         jk: index % 2 === 0 ? 'P' : 'L',
         tanggal_lahir: `1987-${month}-${day}`,
         agama: sampleAgama[index] || 'Islam',
@@ -588,7 +524,7 @@ export default function AGuru() {
         status: ''
       }
     })
-  }, [availableKelasNames])
+  }, [])
 
   const getImportExampleValues = (row) => (
     GURU_IMPORT_EXAMPLE_COLUMNS.map(({ key }) => row[key] ?? '')
@@ -611,39 +547,11 @@ export default function AGuru() {
     })
   }, [importExampleRows])
 
-  const importMissingKelasErrors = useMemo(
-    () => importErrors.filter((item) => item.type === 'kelas_missing'),
-    [importErrors]
-  )
-
   const importBlockingErrorMessage = useMemo(() => {
     if (!importErrors.length) return ''
 
-    if (importMissingKelasErrors.length) {
-      const missingNames = [
-        ...new Set(importMissingKelasErrors.map((item) => item.className).filter(Boolean))
-      ]
-      const suffix = missingNames.length ? ` Kelas yang belum tersedia: ${missingNames.join(', ')}.` : ''
-      return `Ada kelas pada file import guru yang belum tersedia di website ini.${suffix} Kosongkan kolom kelas jika guru belum punya kelas wali, atau buat kelasnya terlebih dahulu.`
-    }
-
     return 'Masih ada data import guru yang belum valid. Perbaiki dulu semua error sebelum memulai import.'
-  }, [importErrors, importMissingKelasErrors])
-
-  const importedKelasNames = useMemo(
-    () =>
-      [
-        ...new Set(
-          importRows
-            .map((row) => {
-              const kelas = kelasList.find((item) => item.id === row.kelas)
-              return getKelasDisplayName(kelas) || row.kelas_raw || row.kelas
-            })
-            .filter(Boolean)
-        )
-      ],
-    [importRows, kelasList]
-  )
+  }, [importErrors])
 
   const importCanRun = Boolean(importRows.length && !importLoading)
   const importButtonText = importLoading
@@ -726,44 +634,23 @@ export default function AGuru() {
         jabatan: overrides.qJabatan ?? qJabatan
       }
 
-      const [teachersRes, kelasRes] = await Promise.all([
-        queryClient.fetchQuery({
-          queryKey: queryKeys.admin.teachers(teacherParams),
-          queryFn: async () => {
-            const { data, error } = await supabase.admin.teachers(teacherParams)
-            if (error?.code === 'REQUEST_ABORTED') {
-              const aborted = new Error('Request aborted')
-              aborted.code = 'REQUEST_ABORTED'
-              throw aborted
-            }
-            if (error) throw error
-            return data
-          },
-          staleTime: 10 * 1000,
-        }),
-        queryClient.fetchQuery({
-          queryKey: ['admin', 'teacher-page', 'classes'],
-          queryFn: async () => {
-            const { data, error } = await supabase
-              .from('kelas')
-              .select('id, nama, grade, suffix')
-              .order('grade', { ascending: true })
-              .order('suffix', { ascending: true })
-            if (error?.code === 'REQUEST_ABORTED') {
-              const aborted = new Error('Request aborted')
-              aborted.code = 'REQUEST_ABORTED'
-              throw aborted
-            }
-            if (error) throw error
-            return data || []
-          },
-          staleTime: 5 * 60 * 1000,
-        })
-      ])
+      const teachersRes = await queryClient.fetchQuery({
+        queryKey: queryKeys.admin.teachers(teacherParams),
+        queryFn: async () => {
+          const { data, error } = await supabase.admin.teachers(teacherParams)
+          if (error?.code === 'REQUEST_ABORTED') {
+            const aborted = new Error('Request aborted')
+            aborted.code = 'REQUEST_ABORTED'
+            throw aborted
+          }
+          if (error) throw error
+          return data
+        },
+        staleTime: 10 * 1000,
+      })
 
       startTransition(() => {
         setGuruRaw(teachersRes?.rows || [])
-        setKelasList(kelasRes || [])
         setJadwalAll({})
         setStrukturKelasAll({})
         setStrukturSekolah({})
@@ -790,17 +677,6 @@ export default function AGuru() {
   const loadGuruRaw = async () => {
     queryClient.invalidateQueries({ queryKey: ['admin', 'teachers'] })
     await loadAllData()
-  }
-
-  const loadKelasList = async () => {
-    const { data, error } = await supabase
-      .from('kelas')
-      .select('id, nama, grade, suffix')
-      .order('grade', { ascending: true })
-      .order('suffix', { ascending: true })
-
-    if (error) throw error
-    setKelasList(data || [])
   }
 
   const loadJadwalAll = async () => {
@@ -938,49 +814,6 @@ export default function AGuru() {
     return Array.from(mapelSet).sort()
   }, [guruProcessed, guruFilterOptions.mapel])
 
-  // Kelas list untuk filter
-  const allKelasList = useMemo(() => {
-    const kelasSet = new Set()
-    guruProcessed.forEach(g => {
-      g.kelasList.forEach(kelas => kelasSet.add(kelas))
-    })
-    return Array.from(kelasSet).sort()
-  }, [guruProcessed])
-
-  const kelasLookup = useMemo(() => {
-    const map = new Map()
-    kelasList.forEach((kelas) => {
-      const keys = [
-        kelas.id,
-        kelas.nama,
-        `${kelas.grade || ''} ${kelas.suffix || ''}`.trim(),
-        `${kelas.grade || ''}${kelas.suffix || ''}`.trim(),
-        `${kelas.grade || ''}-${kelas.suffix || ''}`.trim()
-      ]
-        .filter(Boolean)
-        .flatMap(buildKelasLookupKeys)
-
-      keys.forEach((key) => {
-        if (key) map.set(key, kelas.id)
-      })
-    })
-    return map
-  }, [kelasList])
-
-  const resolveKelasId = (value) => {
-    if (!value) return ''
-    const keys = buildKelasLookupKeys(value)
-    for (const key of keys) {
-      if (kelasLookup.has(key)) return kelasLookup.get(key)
-    }
-
-    const slug = slugifyKelas(value)
-    for (const key of buildKelasLookupKeys(slug)) {
-      if (kelasLookup.has(key)) return kelasLookup.get(key)
-    }
-    return ''
-  }
-
   const copyImportExampleToClipboard = async () => {
     if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
       pushToast('error', 'Browser ini belum mendukung fitur salin otomatis.')
@@ -998,10 +831,7 @@ export default function AGuru() {
   const downloadImportTemplateExcel = async () => {
     try {
       const stamp = new Date().toISOString().slice(0, 10)
-      const suffix = availableKelasNames.length
-        ? `${availableKelasNames.length}-kelas`
-        : 'tanpa-kelas'
-      const fileName = `template_import_guru_${suffix}_${stamp}.xlsx`
+      const fileName = `template_import_guru_akun_${stamp}.xlsx`
 
       await exportRowsToExcel({
         rows: importExampleExcelRows,
@@ -1021,15 +851,11 @@ export default function AGuru() {
     if (!hasAny) return null
 
     const telpRaw = toText(mapped.telp)
-    const kelasRaw = toText(mapped.kelas).toUpperCase()
-    const resolvedKelas = resolveKelasId(kelasRaw)
 
     return {
       __rowNum: index + 2,
       nama: toText(mapped.nama),
-      nis: toText(mapped.nis),
-      kelas: resolvedKelas,
-      kelas_raw: kelasRaw,
+      nis: normalizeIdentifierCode(mapped.nis),
       jk: normalizeGender(mapped.jk),
       tanggal_lahir: parseDateValue(mapped.tanggal_lahir),
       agama: toText(mapped.agama),
@@ -1055,16 +881,6 @@ export default function AGuru() {
         errors.push({
           row: normalized.__rowNum,
           reason: 'NIP/NUPTK dan Nama wajib diisi'
-        })
-        return
-      }
-
-      if (normalized.kelas_raw && !normalized.kelas) {
-        errors.push({
-          row: normalized.__rowNum,
-          reason: `Kelas "${normalized.kelas_raw}" belum tersedia. Buat kelasnya terlebih dahulu atau kosongkan kolom kelas untuk guru tanpa kelas wali.`,
-          type: 'kelas_missing',
-          className: normalized.kelas_raw
         })
         return
       }
@@ -1171,7 +987,7 @@ export default function AGuru() {
   }
 
   const upsertGuruRow = async (row) => {
-    const nis = row.nis
+    const nis = normalizeIdentifierCode(row.nis)
     const nama = row.nama
     const emailLower = row.email ? row.email.toLowerCase() : ''
     const hasEmail = isEmailFormat(emailLower)
@@ -1184,7 +1000,8 @@ export default function AGuru() {
     let { data: existing, error: exError } = await supabase
       .from('profiles')
       .select('id, role, email, nis, created_via')
-      .eq('nis', nis)
+      .ilike('nis', nis)
+      .limit(1)
       .maybeSingle()
 
     if (exError) throw exError
@@ -1203,9 +1020,8 @@ export default function AGuru() {
     }
 
     if (row.nama) payload.nama = row.nama
-    if (row.nis) payload.nis = row.nis
+    if (nis) payload.nis = nis
     if (row.jk) payload.jk = row.jk
-    if (row.kelas) payload.kelas = row.kelas
     if (row.tanggal_lahir) payload.tanggal_lahir = row.tanggal_lahir
     if (row.agama) payload.agama = row.agama
     if (row.alamat) payload.alamat = row.alamat
@@ -1235,8 +1051,7 @@ export default function AGuru() {
         sync_existing: true,
         created_via: 'import'
       }
-      if (row.nis) provisionPayload.nis = row.nis
-      if (row.kelas) provisionPayload.kelas = row.kelas
+      if (nis) provisionPayload.nis = nis
       if (row.jk) provisionPayload.jk = row.jk
       if (row.tanggal_lahir) provisionPayload.tanggal_lahir = row.tanggal_lahir
       if (row.agama) provisionPayload.agama = row.agama
@@ -1256,8 +1071,7 @@ export default function AGuru() {
       email: emailForAuth,
       password,
       role: 'guru',
-      nis: row.nis || '',
-      kelas: row.kelas || '',
+      nis,
       jk: row.jk || '',
       tanggal_lahir: row.tanggal_lahir || '',
       agama: row.agama || '',
@@ -1287,14 +1101,10 @@ export default function AGuru() {
       return
     }
 
-    const kelasTersedia = importedKelasNames.join(', ')
-
-    const details = [`${importRows.length} baris valid akan diproses.`]
-    if (kelasTersedia) {
-      details.push(`Kelas yang terisi: ${kelasTersedia}.`)
-    } else {
-      details.push('Kolom kelas kosong; guru tetap dibuat tanpa kelas wali.')
-    }
+    const details = [
+      `${importRows.length} baris valid akan diproses.`,
+      'Import guru hanya memproses akun dan biodata dasar. Kelas wali serta mapel tetap diatur dari menu jadwal/kelas.'
+    ]
     if (importErrors.length) {
       details.push(`${importErrors.length} baris error akan dilewati dan dicatat sebagai gagal.`)
     }
@@ -1857,30 +1667,11 @@ export default function AGuru() {
                 </div>
 
                 <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-900">
-                  <p className="font-semibold mb-1">
-                    {kelasList.length ? 'Kelas wali bersifat opsional' : 'Import guru tetap bisa tanpa kelas'}
+                  <p className="font-semibold mb-1">Import guru fokus ke akun dan biodata dasar</p>
+                  <p>
+                    Kelas wali dan mata pelajaran tidak dimasukkan dari file import. Setelah akun guru dibuat,
+                    atur kelas/mapel dari menu jadwal atau struktur kelas supaya data mengajar tetap rapi.
                   </p>
-                  {kelasList.length ? (
-                    <>
-                      <p className="mb-3">
-                        Jika kolom kelas diisi, namanya harus sesuai dengan kelas yang sudah dibuat. Jika guru belum menjadi wali kelas, kosongkan kolom kelas.
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        {availableKelasNames.map((kelasName) => (
-                          <span
-                            key={kelasName}
-                            className="inline-flex items-center rounded-full bg-white/80 px-3 py-1 text-xs font-semibold border border-indigo-200"
-                          >
-                            {kelasName}
-                          </span>
-                        ))}
-                      </div>
-                    </>
-                  ) : (
-                    <p>
-                      Belum ada kelas di sistem. Import guru tetap bisa diproses; biarkan kolom kelas kosong dan lengkapi kelas nanti jika dibutuhkan.
-                    </p>
-                  )}
                 </div>
 
                 <div className="border border-gray-200 rounded-xl overflow-hidden">
@@ -1890,9 +1681,7 @@ export default function AGuru() {
                         Contoh format {importExampleRows.length} baris
                       </p>
                       <p className="text-xs text-gray-500">
-                        {availableKelasNames.length
-                          ? 'Contoh mengikuti kelas yang sudah dibuat. Kolom kelas boleh dikosongkan jika guru belum punya kelas wali.'
-                          : 'Contoh tanpa kelas wali. Bisa dipakai untuk Excel, CSV, atau langsung dipaste ke Google Sheets.'}
+                        Template hanya berisi data akun guru. Tidak ada kolom kelas atau mata pelajaran.
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -1914,7 +1703,7 @@ export default function AGuru() {
                   </div>
 
                   <div className="max-h-64 overflow-auto">
-                    <table className="w-full min-w-[1260px] text-sm">
+                    <table className="w-full min-w-[1120px] text-sm">
                       <thead className="bg-slate-50">
                         <tr>
                           {GURU_IMPORT_EXAMPLE_COLUMNS.map((column) => (
@@ -2009,9 +1798,10 @@ export default function AGuru() {
                     <li>Kalau <b>tanggal lahir</b> kosong, login pertama memakai <b>NIP/NUPTK</b> sebagai password sementara.</li>
                     <li>Login awal guru: pakai <b>Email</b> dan password sementara di atas.</li>
                     <li>NIP/NUPTK dipakai sebagai nomor induk guru, bukan username login awal di sistem ini.</li>
-                    <li>Kolom <b>Kelas</b> opsional. Isi hanya jika guru menjadi wali/kelas utama, dan namanya harus mengarah ke kelas yang sudah dibuat di website ini.</li>
+                    <li>NIP/NUPTK otomatis dirapikan menjadi huruf besar, jadi <b>gp001</b> dan <b>GP001</b> dianggap data yang sama.</li>
+                    <li>Kelas wali dan mata pelajaran tidak diimport dari file. Atur keduanya dari menu jadwal atau struktur kelas setelah akun guru dibuat.</li>
                     <li>Kolom <b>Status</b> opsional. Kosong berarti akun baru dibuat aktif dan akun lama tidak diubah statusnya.</li>
-                    <li>Huruf besar dan kecil tidak ngaruh, jadi <b>x a mipa</b> dan <b>X A MIPA</b> akan dianggap sama.</li>
+                    <li>Huruf besar dan kecil pada header kolom serta email tidak berpengaruh.</li>
                     <li>Format upload yang didukung: <b>{SPREADSHEET_IMPORT_FORMAT_LABEL}</b>.</li>
                     <li>Setelah login, guru wajib mengganti password.</li>
                   </ul>

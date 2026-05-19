@@ -90,6 +90,37 @@ class ProfileProvisionOriginTest extends TestCase
         ]);
     }
 
+    public function test_import_provision_matches_identifier_case_insensitively(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        $admin = $this->createUserWithProfile($tenantId, 'admin', 'Admin Sekolah', 'admin-import-case@example.com');
+        $teacher = $this->createUserWithProfile($tenantId, 'guru', 'Guru Lama', 'guru.lama@example.com', [
+            'nis' => 'gp001',
+            'created_via' => 'import',
+        ]);
+
+        $response = $this->actingAs($admin)->postJson('/api/admin/users/provision', [
+            'nama' => 'Guru Baru',
+            'email' => 'guru.baru@example.com',
+            'password' => '01011990',
+            'role' => 'guru',
+            'nis' => ' GP001 ',
+            'sync_existing' => true,
+            'created_via' => 'import',
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('data.status', 'updated');
+
+        $this->assertDatabaseHas('profiles', [
+            'id' => $teacher->id,
+            'tenant_id' => $tenantId,
+            'nama' => 'Guru Baru',
+            'email' => 'guru.baru@example.com',
+            'nis' => 'GP001',
+        ]);
+    }
+
     public function test_public_registration_marks_profile_as_manual_registration(): void
     {
         $tenantId = $this->defaultTenantId();

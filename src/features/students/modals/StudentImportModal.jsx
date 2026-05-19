@@ -440,7 +440,8 @@ function StudentImportModal({
                   <li>Usia akan dihitung otomatis dari tanggal lahir yang valid.</li>
                   <li>Login awal siswa: pakai <b>NIS</b> dan password sementara di atas.</li>
                   <li>Nama kelas harus mengarah ke kelas yang sudah dibuat di website ini.</li>
-                  <li>Huruf besar dan kecil tidak ngaruh, jadi <b>x ipa 1</b> dan <b>X IPA 1</b> akan dianggap sama.</li>
+                  <li>NIS otomatis dirapikan menjadi huruf besar, jadi <b>s001</b> dan <b>S001</b> dianggap siswa yang sama.</li>
+                  <li>Huruf besar dan kecil pada nama kelas tidak ngaruh, jadi <b>x ipa 1</b> dan <b>X IPA 1</b> akan dianggap sama.</li>
                   <li>Format upload yang didukung: <b>{SPREADSHEET_IMPORT_FORMAT_LABEL}</b>.</li>
                   <li>Setelah login, siswa wajib ganti password. Email bisa dilengkapi nanti kalau memang belum ada.</li>
                 </ul>

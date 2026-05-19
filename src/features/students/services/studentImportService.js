@@ -1,6 +1,6 @@
 import { supabase } from '../../../lib/supabase'
 import { isEmailFormat } from '../../../utils/accountSetup'
-import { buildDefaultPassword } from '../../../utils/importUtils'
+import { buildDefaultPassword, normalizeIdentifierCode } from '../../../utils/importUtils'
 import { createClientUuid } from '../utils/studentFormatters'
 
 export async function fetchStudentImportHistoryItems(historyId) {
@@ -109,7 +109,7 @@ export async function persistStudentImportHistory({
 }
 
 export async function upsertImportedStudentRow(row) {
-  const nis = row.nis
+  const nis = normalizeIdentifierCode(row.nis)
   const nama = row.nama
   const emailLower = row.email ? row.email.toLowerCase() : ''
   const hasEmail = isEmailFormat(emailLower)
@@ -118,7 +118,8 @@ export async function upsertImportedStudentRow(row) {
   let { data: existing, error: exError } = await supabase
     .from('profiles')
     .select('id, role, email, nis, created_via')
-    .eq('nis', nis)
+    .ilike('nis', nis)
+    .limit(1)
     .maybeSingle()
 
   if (exError) throw exError
@@ -137,7 +138,7 @@ export async function upsertImportedStudentRow(row) {
   }
 
   if (row.nama) payload.nama = row.nama
-  if (row.nis) payload.nis = row.nis
+  if (nis) payload.nis = nis
   if (row.kelas) payload.kelas = row.kelas
   if (row.jk) payload.jk = row.jk
   if (row.tanggal_lahir) payload.tanggal_lahir = row.tanggal_lahir
@@ -175,7 +176,7 @@ export async function upsertImportedStudentRow(row) {
       sync_existing: true,
       created_via: 'import',
     }
-    if (row.nis) provisionPayload.nis = row.nis
+    if (nis) provisionPayload.nis = nis
     if (row.kelas) provisionPayload.kelas = row.kelas
     if (row.jk) provisionPayload.jk = row.jk
     if (row.tanggal_lahir) provisionPayload.tanggal_lahir = row.tanggal_lahir
@@ -200,7 +201,7 @@ export async function upsertImportedStudentRow(row) {
     email: hasEmail ? emailLower : '',
     password,
     role: 'siswa',
-    nis: row.nis || '',
+    nis,
     kelas: row.kelas || '',
     jk: row.jk || '',
     tanggal_lahir: row.tanggal_lahir || '',

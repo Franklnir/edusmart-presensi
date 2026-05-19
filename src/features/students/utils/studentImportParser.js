@@ -1,6 +1,7 @@
 import {
   mapRowByAliases,
   normalizeGender,
+  normalizeIdentifierCode,
   parseDateValue,
   toText,
 } from '../../../utils/importUtils'
@@ -60,7 +61,7 @@ export function normalizeStudentImportRow(row, index, kelasLookup) {
   return {
     __rowNum: index + 2,
     nama: toText(mapped.nama),
-    nis: toText(mapped.nis),
+    nis: normalizeIdentifierCode(mapped.nis),
     kelas: resolvedKelas,
     kelas_raw: kelasRaw,
     jk: normalizeGender(mapped.jk),
@@ -79,6 +80,8 @@ export function normalizeStudentImportRow(row, index, kelasLookup) {
 export function prepareStudentImportRows(rawRows, kelasLookup) {
   const cleaned = []
   const errors = []
+  const seenNis = new Map()
+  const seenEmail = new Map()
 
   rawRows.forEach((row, idx) => {
     const normalized = normalizeStudentImportRow(row, idx, kelasLookup)
@@ -110,6 +113,26 @@ export function prepareStudentImportRows(rawRows, kelasLookup) {
       return
     }
 
+    const nisKey = normalized.nis.toLowerCase()
+    if (seenNis.has(nisKey)) {
+      errors.push({
+        row: normalized.__rowNum,
+        reason: `NIS duplikat dengan baris ${seenNis.get(nisKey)}`,
+      })
+      return
+    }
+
+    const emailKey = normalized.email.toLowerCase()
+    if (emailKey && seenEmail.has(emailKey)) {
+      errors.push({
+        row: normalized.__rowNum,
+        reason: `Email duplikat dengan baris ${seenEmail.get(emailKey)}`,
+      })
+      return
+    }
+
+    seenNis.set(nisKey, normalized.__rowNum)
+    if (emailKey) seenEmail.set(emailKey, normalized.__rowNum)
     cleaned.push(normalized)
   })
 
