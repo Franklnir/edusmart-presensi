@@ -163,6 +163,10 @@ const hasUsableValue = (value = '') => {
   return !['null', 'undefined', '-', 'n/a'].includes(normalized)
 }
 
+const getFirstAttachmentValue = (fileUrls, fallback = '') => (
+  parseAssignmentFileList(fileUrls, fallback).find((item) => !isImageLikeFile(item)) || ''
+)
+
 const isValidDate = (d) => d instanceof Date && !Number.isNaN(d.getTime())
 
 const formatDateTime = (dateString) => {
@@ -903,18 +907,20 @@ export default function TugasSiswa() {
         myStatus
       })
 
-      // set current file key
-      const existingPhotos = parseAssignmentFileList(jawabanData?.file_urls, jawabanData?.file_url).filter(isImageLikeFile)
+      // set current answer assets; galeri foto dan lampiran biasa dipisah di UI
+      const existingFiles = parseAssignmentFileList(jawabanData?.file_urls, jawabanData?.file_url)
+      const existingPhotos = existingFiles.filter(isImageLikeFile)
+      const existingAttachment = existingFiles.find((item) => !isImageLikeFile(item)) || ''
       setJawabanPhotoValues(existingPhotos)
       setJawabanPhotoSizes(existingPhotos.map(() => `maks ${formatFileSize(ASSIGNMENT_PHOTO_MAX_BYTES)}`))
       setJawabanKomentar(jawabanData?.komentar_siswa || '')
 
-      if (jawabanData?.file_url) setJawabanFileKey(jawabanData.file_url)
+      setJawabanFileKey(existingAttachment)
 
       // fetch file size
-      if (jawabanData?.file_url) {
+      if (existingAttachment) {
         try {
-          const signed = await createSignedUrlForKey(jawabanData.file_url, 60 * 10)
+          const signed = await createSignedUrlForKey(existingAttachment, 60 * 10)
           if (signed) {
             const res = await fetch(signed)
             if (res.ok) {
@@ -1170,8 +1176,8 @@ export default function TugasSiswa() {
       const values = uploaded.map((item) => item.value)
       setJawabanPhotoValues(values)
       setJawabanPhotoSizes(uploaded.map((item) => item.sizeLabel))
-      setJawabanFileKey(values[0] || '')
-      setJawabanFileSize(`${values.length} foto`)
+      setJawabanFileKey('')
+      setJawabanFileSize('')
       setPendingJawabanFile(null)
       setPendingJawabanPhotos(uploaded)
       setUploadProgress(null)
@@ -1206,10 +1212,8 @@ export default function TugasSiswa() {
 
   const handleDeleteJawabanFile = async () => {
     if (!user?.id || !selectedTugas) return
-    const activePhotos = jawabanPhotoValues.length
-      ? jawabanPhotoValues
-      : parseAssignmentFileList(detail?.myJawaban?.file_urls, detail?.myJawaban?.file_url).filter(isImageLikeFile)
-    if (!jawabanFileKey && !detail?.myJawaban?.file_url && activePhotos.length === 0) return
+    const targetFile = currentAttachmentValue
+    if (!targetFile) return
 
     const lockReason = getSubmitLockReason(detail?.tugas, detail?.myJawaban, detail?.myStatus)
     if (lockReason) {
@@ -1221,29 +1225,19 @@ export default function TugasSiswa() {
     if (!confirm('Hapus file jawaban ini?')) return
 
     const pendingValues = Array.from(new Set([
-      pendingJawabanFile?.value,
-      ...pendingJawabanPhotos.map((item) => item?.value)
+      pendingJawabanFile?.value
     ].filter(Boolean)))
-    const isOnlyPending =
-      pendingValues.length > 0 &&
-      (activePhotos.length > 0
-        ? activePhotos.every((value) => pendingValues.includes(value))
-        : pendingValues.includes(jawabanFileKey))
+    const isOnlyPending = pendingValues.includes(targetFile)
 
     if (isOnlyPending) {
       try {
-        await Promise.all(pendingValues.map((value) => deleteJawabanFileFromStorage(value, selectedTugas.id, user.id)))
+        await deleteJawabanFileFromStorage(targetFile, selectedTugas.id, user.id)
       } catch (error) {
         console.warn('Gagal menghapus file jawaban sementara:', error)
       }
 
       setPendingJawabanFile(null)
-      setPendingJawabanPhotos([])
-      setJawabanFileKey(detail?.myJawaban?.file_url || '')
-      setJawabanPhotoValues(
-        parseAssignmentFileList(detail?.myJawaban?.file_urls, detail?.myJawaban?.file_url).filter(isImageLikeFile)
-      )
-      setJawabanPhotoSizes([])
+      setJawabanFileKey(getFirstAttachmentValue(detail?.myJawaban?.file_urls, detail?.myJawaban?.file_url))
       setJawabanFileSize('')
       pushToast('success', 'File pengganti dibatalkan')
       return
@@ -1252,12 +1246,9 @@ export default function TugasSiswa() {
     try {
       setLoading(true)
 
-      const keys = activePhotos.length > 0
-        ? activePhotos
-        : [jawabanFileKey || detail?.myJawaban?.file_url].filter(Boolean)
       let storageError = null
       try {
-        await Promise.all(keys.map((key) => deleteJawabanFileFromStorage(key, selectedTugas.id, user.id)))
+        await deleteJawabanFileFromStorage(targetFile, selectedTugas.id, user.id)
       } catch (err) {
         storageError = err
         console.warn('Delete storage error (non-blocking):', err)
@@ -1265,12 +1256,16 @@ export default function TugasSiswa() {
 
       const existing = detail?.myJawaban || null
       const currentLink = (jawabanLink || existing?.link_url || '').trim()
+      const existingPhotos = parseAssignmentFileList(existing?.file_urls).filter(isImageLikeFile)
 
       if (existing?.id) {
-        if (currentLink) {
+        if (currentLink || existingPhotos.length > 0) {
           const { error } = await supabase
             .from('tugas_jawaban')
-            .update({ file_url: null, file_urls: null })
+            .update({
+              file_url: existingPhotos[0] || null,
+              file_urls: existingPhotos.length > 0 ? existingPhotos : null
+            })
             .eq('id', existing.id)
             .eq('user_id', user.id)
 
@@ -1278,7 +1273,13 @@ export default function TugasSiswa() {
 
           setDetail((prev) => {
             if (!prev) return prev
-            const nextJawaban = prev.myJawaban ? { ...prev.myJawaban, file_url: null, file_urls: null } : null
+            const nextJawaban = prev.myJawaban
+              ? {
+                  ...prev.myJawaban,
+                  file_url: existingPhotos[0] || null,
+                  file_urls: existingPhotos.length > 0 ? existingPhotos : null
+                }
+              : null
             const nextStatus = nextJawaban?.nilai != null ? 'dinilai' : nextJawaban ? 'menunggu' : 'belum'
             return { ...prev, myJawaban: nextJawaban, myStatus: nextStatus }
           })
@@ -1297,8 +1298,6 @@ export default function TugasSiswa() {
 
       setJawabanFileKey('')
       setJawabanFileSize('')
-      setJawabanPhotoValues([])
-      setJawabanPhotoSizes([])
       if (!currentLink) setJawabanKomentar('')
       await loadTugasList()
 
@@ -1333,7 +1332,8 @@ export default function TugasSiswa() {
 
     // validasi minimal: harus ada file atau link (pilih salah satu)
     const photoValues = jawabanPhotoValues.slice(0, MAX_ASSIGNMENT_PHOTOS)
-    const hasFile = Boolean(jawabanFileKey || detail?.myJawaban?.file_url || photoValues.length > 0)
+    const attachmentValue = currentAttachmentValue
+    const hasFile = Boolean(attachmentValue || photoValues.length > 0)
     const link = (jawabanLink || '').trim()
     const hasLink = Boolean(link)
     const komentar = (jawabanKomentar || '').trim()
@@ -1374,7 +1374,7 @@ export default function TugasSiswa() {
 
       const existing = detail.myJawaban
       const existingFiles = parseAssignmentFileList(existing?.file_urls, existing?.file_url)
-      const nextFileValue = photoValues[0] || jawabanFileKey || existing?.file_url || null
+      const nextFileValue = photoValues[0] || attachmentValue || null
 
       const payload = {
         tugas_id: selectedTugas.id,
@@ -1549,6 +1549,17 @@ export default function TugasSiswa() {
       : parseAssignmentFileList(detail?.myJawaban?.file_urls, detail?.myJawaban?.file_url)
     return source.filter(isImageLikeFile).slice(0, MAX_ASSIGNMENT_PHOTOS)
   }, [jawabanPhotoValues, detail?.myJawaban?.file_urls, detail?.myJawaban?.file_url])
+
+  const currentAttachmentValue = useMemo(() => {
+    if (pendingJawabanPhotos.length > 0) return ''
+    if (jawabanFileKey && !isImageLikeFile(jawabanFileKey)) return jawabanFileKey
+    return getFirstAttachmentValue(detail?.myJawaban?.file_urls, detail?.myJawaban?.file_url)
+  }, [
+    pendingJawabanPhotos.length,
+    jawabanFileKey,
+    detail?.myJawaban?.file_urls,
+    detail?.myJawaban?.file_url
+  ])
 
   /* =========================
      Render
@@ -1829,8 +1840,9 @@ export default function TugasSiswa() {
                 const beforeStart = t.isBeforeStart
                 const nearDeadline = t.isNearDeadline
                 const doneAndGraded = t.myStatus === 'dinilai'
-                const photoCount = parseAssignmentFileList(t.myJawaban?.file_urls, t.myJawaban?.file_url)
-                  .filter(isImageLikeFile).length
+                const answerFiles = parseAssignmentFileList(t.myJawaban?.file_urls, t.myJawaban?.file_url)
+                const photoCount = answerFiles.filter(isImageLikeFile).length
+                const hasAttachment = answerFiles.some((item) => !isImageLikeFile(item))
                 const cardTone = doneAndGraded
                   ? 'border-green-200 bg-green-50/50'
                   : expired
@@ -1887,7 +1899,7 @@ export default function TugasSiswa() {
                           ✅ Sudah dinilai
                         </span>
                       )}
-                      {t.myJawaban?.file_url && (
+                      {hasAttachment && (
                         <span className="px-3 py-1 rounded-full border bg-blue-50 text-blue-700 border-blue-200 text-xs font-bold">
                           📎 Ada file
                         </span>
@@ -2162,11 +2174,11 @@ export default function TugasSiswa() {
                                 </div>
                               </div>
 
-                              {(jawabanFileKey || detail?.myJawaban?.file_url) && (
+                              {currentAttachmentValue && (
                                 <div className="grid w-full grid-cols-2 gap-2 sm:w-auto">
                                   <button
                                     type="button"
-                                    onClick={() => openPreview(jawabanFileKey || detail?.myJawaban?.file_url)}
+                                    onClick={() => openPreview(currentAttachmentValue)}
                                     className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
                                   >
                                     👁️ Preview
@@ -2190,7 +2202,7 @@ export default function TugasSiswa() {
                                 progress={uploadPercent}
                                 tone={uploadToneForProvider(answerUploadProvider)}
                               />
-                            ) : (jawabanFileKey || detail?.myJawaban?.file_url) ? (
+                            ) : currentAttachmentValue ? (
                               <div className="grid gap-3 rounded-xl border border-green-200 bg-green-50 p-4 lg:grid-cols-[minmax(0,1fr)_minmax(16rem,22rem)] lg:items-stretch">
                                 <div className="flex min-w-0 items-start gap-3">
                                   <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-green-100 text-xl text-green-700">✅</span>
