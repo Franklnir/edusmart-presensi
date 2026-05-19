@@ -471,14 +471,14 @@ export default function AGuru() {
       'Andika Saputra'
     ]
     const sampleJabatan = [
-      'Guru Matematika',
-      'Guru Bahasa Indonesia',
-      'Guru IPA',
-      'Guru IPS',
-      'Guru Bahasa Inggris',
+      'Guru Tetap',
+      'Guru Honorer',
       'Guru BK',
-      'Guru PPKn',
-      'Guru Informatika'
+      'Koordinator Guru',
+      'Pembina Ekskul',
+      'Staf Kurikulum',
+      'Staf Kesiswaan',
+      'Guru Pengganti'
     ]
     const sampleAgama = [
       'Islam',
@@ -519,7 +519,7 @@ export default function AGuru() {
         agama: sampleAgama[index] || 'Islam',
         alamat: sampleAddresses[index] || `Jl. Contoh ${index + 1}, Bandung`,
         telp: `08131${String(2345678 + index).padStart(7, '0')}`,
-        jabatan: sampleJabatan[index] || 'Guru Mata Pelajaran',
+        jabatan: sampleJabatan[index] || 'Guru',
         email: `${emailSlug || `contoh.guru.${index + 1}`}@example.com`,
         status: ''
       }
@@ -1103,7 +1103,7 @@ export default function AGuru() {
 
     const details = [
       `${importRows.length} baris valid akan diproses.`,
-      'Import guru hanya memproses akun dan biodata dasar. Kelas wali serta mapel tetap diatur dari menu jadwal/kelas.'
+      'Import guru hanya memproses akun dan biodata dasar. Wali kelas dan mata pelajaran diatur terpisah dari menu Jadwal Mengajar atau Struktur Kelas.'
     ]
     if (importErrors.length) {
       details.push(`${importErrors.length} baris error akan dilewati dan dicatat sebagai gagal.`)
@@ -1667,10 +1667,10 @@ export default function AGuru() {
                 </div>
 
                 <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-900">
-                  <p className="font-semibold mb-1">Import guru fokus ke akun dan biodata dasar</p>
+                  <p className="font-semibold mb-1">Import guru hanya untuk akun dan biodata</p>
                   <p>
-                    Kelas wali dan mata pelajaran tidak dimasukkan dari file import. Setelah akun guru dibuat,
-                    atur kelas/mapel dari menu jadwal atau struktur kelas supaya data mengajar tetap rapi.
+                    File import tidak membaca kelas wali atau mata pelajaran. Setelah akun guru dibuat,
+                    atur penugasan mengajar dari menu Jadwal Mengajar dan atur wali kelas dari Struktur Kelas.
                   </p>
                 </div>
 
@@ -1681,7 +1681,7 @@ export default function AGuru() {
                         Contoh format {importExampleRows.length} baris
                       </p>
                       <p className="text-xs text-gray-500">
-                        Template hanya berisi data akun guru. Tidak ada kolom kelas atau mata pelajaran.
+                        Template ini hanya berisi identitas guru, kontak, jabatan, email, dan status akun.
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -1799,7 +1799,8 @@ export default function AGuru() {
                     <li>Login awal guru: pakai <b>Email</b> dan password sementara di atas.</li>
                     <li>NIP/NUPTK dipakai sebagai nomor induk guru, bukan username login awal di sistem ini.</li>
                     <li>NIP/NUPTK otomatis dirapikan menjadi huruf besar, jadi <b>gp001</b> dan <b>GP001</b> dianggap data yang sama.</li>
-                    <li>Kelas wali dan mata pelajaran tidak diimport dari file. Atur keduanya dari menu jadwal atau struktur kelas setelah akun guru dibuat.</li>
+                    <li>Kolom <b>Kelas</b>, <b>Mata Pelajaran</b>, atau <b>Mapel</b> di file akan diabaikan agar penugasan guru tetap konsisten.</li>
+                    <li>Atur mata pelajaran dari menu <b>Jadwal Mengajar</b>, dan atur wali kelas dari menu <b>Struktur Kelas</b> setelah akun guru dibuat.</li>
                     <li>Kolom <b>Status</b> opsional. Kosong berarti akun baru dibuat aktif dan akun lama tidak diubah statusnya.</li>
                     <li>Huruf besar dan kecil pada header kolom serta email tidak berpengaruh.</li>
                     <li>Format upload yang didukung: <b>{SPREADSHEET_IMPORT_FORMAT_LABEL}</b>.</li>
@@ -1940,7 +1941,7 @@ export default function AGuru() {
               </div>
               <div>
                 <h1 className="page-title-heading">Manajemen Guru</h1>
-                <p className="page-title-description">Kelola data guru, mata pelajaran, dan penugasan</p>
+                <p className="page-title-description">Kelola akun guru, jadwal mengajar, dan penugasan wali kelas</p>
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
