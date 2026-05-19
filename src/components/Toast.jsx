@@ -85,7 +85,9 @@ const Toast = () => {
             `}
           >
             <div className="flex items-start gap-3 pr-7">
-              <div className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${style.icon}`}>
+              <div
+                className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${style.icon} ${type === 'success' ? 'toast-success-check' : ''}`}
+              >
                 <Icon size={18} strokeWidth={2.4} />
               </div>
 
@@ -133,6 +135,27 @@ const Toast = () => {
         @keyframes toast-progress {
           from { width: 100%; }
           to { width: 0%; }
+        }
+        .toast-success-check {
+          position: relative;
+          animation: toast-success-pop 420ms cubic-bezier(.2,.9,.2,1.25) both;
+        }
+        .toast-success-check::after {
+          content: "";
+          position: absolute;
+          inset: -5px;
+          border-radius: 999px;
+          border: 2px solid rgba(16, 185, 129, 0.45);
+          animation: toast-success-ring 780ms ease-out both;
+        }
+        @keyframes toast-success-pop {
+          0% { transform: scale(.72); opacity: .6; }
+          65% { transform: scale(1.12); opacity: 1; }
+          100% { transform: scale(1); opacity: 1; }
+        }
+        @keyframes toast-success-ring {
+          0% { transform: scale(.72); opacity: .72; }
+          100% { transform: scale(1.55); opacity: 0; }
         }
       `}</style>
     </div>

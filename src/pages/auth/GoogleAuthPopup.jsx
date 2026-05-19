@@ -3,6 +3,19 @@ import { apiFetch } from '../../lib/supabase'
 
 const VALID_MODES = new Set(['login', 'link'])
 
+const getInitialMode = () => {
+  if (typeof window === 'undefined') return 'login'
+
+  try {
+    const mode = String(new URL(window.location.href).searchParams.get('mode') || 'login')
+      .trim()
+      .toLowerCase()
+    return VALID_MODES.has(mode) ? mode : 'login'
+  } catch {
+    return 'login'
+  }
+}
+
 const GoogleBadge = () => (
   <span
     aria-hidden="true"
@@ -32,9 +45,13 @@ const GoogleBadge = () => (
 export default function GoogleAuthPopup() {
   const targetOriginRef = useRef('')
   const stateRef = useRef('')
-  const modeRef = useRef('login')
+  const initialMode = getInitialMode()
+  const modeRef = useRef(initialMode)
 
-  const [status, setStatus] = useState('Menyiapkan OAuth Google...')
+  const [mode, setMode] = useState(initialMode)
+  const [status, setStatus] = useState(
+    initialMode === 'link' ? 'Menyiapkan tautan Google...' : 'Menyiapkan OAuth Google...'
+  )
   const [error, setError] = useState('')
 
   const notifyOpener = useCallback((type, payload = {}) => {
@@ -78,6 +95,7 @@ export default function GoogleAuthPopup() {
 
         stateRef.current = requestedState
         modeRef.current = VALID_MODES.has(requestedMode) ? requestedMode : 'login'
+        setMode(modeRef.current)
         document.title =
           modeRef.current === 'link' ? 'Tautkan Google - EduSmart' : 'Masuk dengan Google - EduSmart'
 
@@ -137,7 +155,7 @@ export default function GoogleAuthPopup() {
     }
   }, [notifyOpener])
 
-  const isLinkMode = modeRef.current === 'link'
+  const isLinkMode = mode === 'link'
 
   return (
     <div className="min-h-screen bg-slate-100 px-3 py-3 text-slate-900">

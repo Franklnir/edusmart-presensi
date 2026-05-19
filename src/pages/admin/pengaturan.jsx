@@ -1478,7 +1478,10 @@ export default function APengaturan() {
 
     setLinkingGoogle(true)
     try {
-      await refreshAuthSession({ successMessage: 'Akun Google berhasil ditautkan' })
+      await refreshAuthSession({
+        successMessage: 'Akun Google berhasil ditautkan',
+        successToastOptions: { title: 'Google Tertaut', duration: 5200 }
+      })
     } finally {
       setLinkingGoogle(false)
     }
@@ -1504,7 +1507,10 @@ export default function APengaturan() {
       if (data?.user) {
         useAuthStore.setState((state) => ({ ...state, user: data.user }))
       }
-      pushToast('success', 'Tautan Google berhasil dilepas.')
+      pushToast('success', 'Tautan Google berhasil dilepas.', {
+        title: 'Google Dilepas',
+        duration: 5200
+      })
     } catch (error) {
       pushToast('error', error?.message || 'Gagal melepas tautan Google')
     } finally {

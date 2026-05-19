@@ -12,7 +12,7 @@ import {
   normalizeUserTheme
 } from './theme/userThemes'
 
-const AUTH_PATHS = ['/login', '/register', '/forgot-password', '/reset-password']
+const AUTH_PATHS = ['/login', '/auth/google/popup', '/register', '/forgot-password', '/reset-password']
 const SESSION_REVALIDATE_INTERVAL_MS = 60 * 1000
 const buildLoginRedirectPath = ({ reason = '', next = '' } = {}) => {
   const params = new URLSearchParams()

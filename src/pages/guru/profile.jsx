@@ -560,7 +560,10 @@ export default function ProfileGuru() {
 
     setLinkingGoogle(true)
     try {
-      await refreshAuthSession({ successMessage: 'Akun Google berhasil ditautkan' })
+      await refreshAuthSession({
+        successMessage: 'Akun Google berhasil ditautkan',
+        successToastOptions: { title: 'Google Tertaut', duration: 5200 }
+      })
       await refreshProfile()
     } finally {
       setLinkingGoogle(false)
@@ -586,7 +589,10 @@ export default function ProfileGuru() {
         useAuthStore.setState((state) => ({ ...state, user: data.user }))
       }
       await refreshProfile()
-      pushToast('success', 'Tautan Google berhasil dilepas.')
+      pushToast('success', 'Tautan Google berhasil dilepas.', {
+        title: 'Google Dilepas',
+        duration: 5200
+      })
     } catch (error) {
       pushToast('error', error?.message || 'Gagal melepas tautan Google')
     } finally {

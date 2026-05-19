@@ -303,7 +303,12 @@ export const useAuthStore = create((set, get) => ({
     return settings
   },
 
-  refreshAuthSession: async ({ successMessage = '', showErrorToast = true, logErrorOnFail = true } = {}) => {
+  refreshAuthSession: async ({
+    successMessage = '',
+    successToastOptions = {},
+    showErrorToast = true,
+    logErrorOnFail = true
+  } = {}) => {
     const { pushToast } = useUIStore.getState()
 
     try {
@@ -376,7 +381,7 @@ export const useAuthStore = create((set, get) => ({
       }
 
       if (successMessage) {
-        pushToast('success', successMessage)
+        pushToast('success', successMessage, successToastOptions)
       }
 
       return { user, profile }
@@ -718,7 +723,10 @@ export const useAuthStore = create((set, get) => ({
         error: null
       })
 
-      pushToast('success', 'Akun Google berhasil ditautkan')
+      pushToast('success', 'Akun Google berhasil ditautkan', {
+        title: 'Google Tertaut',
+        duration: 5200
+      })
 
       return {
         user: nextUser,
