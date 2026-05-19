@@ -318,7 +318,8 @@ class StorageController extends ApiController
             $signed = $this->objectStorageSigner->presignPut(
                 $objectKey,
                 $mime,
-                $this->objectStorageSigner->expiresSeconds()
+                $this->objectStorageSigner->expiresSeconds(),
+                $bucket
             );
         } catch (\Throwable $e) {
             return response()->json([
@@ -391,7 +392,7 @@ class StorageController extends ApiController
         }
 
         try {
-            $verification = $this->objectStorageSigner->verifyUploadedObject($objectKey, $sizeBytes);
+            $verification = $this->objectStorageSigner->verifyUploadedObject($objectKey, $sizeBytes, $bucket);
         } catch (\Throwable $e) {
             return response()->json([
                 'error' => 'Gagal memverifikasi file object storage: '.$e->getMessage(),
@@ -532,7 +533,7 @@ class StorageController extends ApiController
 
             if ($this->objectStorageEnabledForBucket($bucket)) {
                 try {
-                    if (! $this->objectStorageSigner->deleteObject($fullPath)) {
+                    if (! $this->objectStorageSigner->deleteObject($fullPath, $bucket)) {
                         return response()->json(['error' => 'Gagal menghapus file dari object storage'], 422);
                     }
                 } catch (\Throwable $e) {
@@ -579,7 +580,7 @@ class StorageController extends ApiController
         $fullPath = $this->buildStoragePath($bucket, $path);
         if ($this->objectStorageEnabledForBucket($bucket) && ! $storage->exists($fullPath)) {
             try {
-                $signed = $this->objectStorageSigner->presignGet($fullPath, $expiresIn);
+                $signed = $this->objectStorageSigner->presignGet($fullPath, $expiresIn, $bucket);
 
                 return response()->json([
                     'data' => [
@@ -658,7 +659,7 @@ class StorageController extends ApiController
         if (! $storage->exists($fullPath)) {
             if ($this->objectStorageEnabledForBucket($bucket)) {
                 try {
-                    $signed = $this->objectStorageSigner->presignGet($fullPath, $this->normalizeExpiresIn($expires));
+                    $signed = $this->objectStorageSigner->presignGet($fullPath, $this->normalizeExpiresIn($expires), $bucket);
 
                     return redirect()->away($signed['url']);
                 } catch (\Throwable $e) {

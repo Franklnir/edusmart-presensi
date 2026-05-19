@@ -212,7 +212,7 @@ Catatan multi-tenant:
 
 ## 3.2.1 Object Storage untuk Upload File
 
-Untuk sekolah dengan upload ramai, aktifkan signed direct upload agar file siswa/guru/admin langsung dikirim dari browser ke bucket S3-compatible, Cloudflare R2, atau MinIO. Backend tetap mengecek role, path, tipe file, ukuran file, dan kuota sekolah sebelum membuat signed URL, lalu hanya menyimpan metadata file.
+Untuk sekolah dengan upload ramai, aktifkan signed direct upload agar file siswa/guru/admin langsung dikirim dari browser ke bucket Nevaobjects S3 atau S3-compatible lain. Backend tetap mengecek role, path, tipe file, ukuran file, dan kuota sekolah sebelum membuat signed URL, lalu hanya menyimpan metadata file.
 
 Bucket direct upload default:
 
@@ -222,20 +222,26 @@ Bucket direct upload default:
 
 Google Drive tetap dapat dipakai sebagai integrasi/backup, tetapi jalur upload massal sebaiknya memakai object storage agar bandwidth file tidak melewati PHP app server.
 
-Contoh env Cloudflare R2 / MinIO:
+Contoh env Nevaobjects S3:
 
 ```dotenv
 APP_DIRECT_UPLOAD_ENABLED=true
 APP_DIRECT_UPLOAD_BUCKETS=assignments,quiz-media,certificates,sertifikat-files,certificate-templates,sertifikat-templates
-APP_OBJECT_STORAGE_LABEL="Cloudflare R2"
+APP_OBJECT_STORAGE_LABEL="Nevaobjects S3"
 APP_OBJECT_STORAGE_ACCESS_KEY_ID=<access-key>
 APP_OBJECT_STORAGE_SECRET_ACCESS_KEY=<secret-key>
-APP_OBJECT_STORAGE_REGION=auto
-APP_OBJECT_STORAGE_BUCKET=edusmart-storage
-APP_OBJECT_STORAGE_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
+APP_OBJECT_STORAGE_REGION=us-east-1
+APP_OBJECT_STORAGE_ENDPOINT=https://s3.nevaobjects.id
 APP_OBJECT_STORAGE_USE_PATH_STYLE_ENDPOINT=true
 APP_DIRECT_UPLOAD_EXPIRES_SECONDS=900
 APP_DIRECT_UPLOAD_VERIFY_OBJECTS=true
+
+APP_OBJECT_STORAGE_BUCKET_ASSIGNMENTS=assignments
+APP_OBJECT_STORAGE_BUCKET_QUIZ_MEDIA=quiz-media
+APP_OBJECT_STORAGE_BUCKET_CERTIFICATES=certificates
+APP_OBJECT_STORAGE_BUCKET_SERTIFIKAT_FILES=sertifikat-files
+APP_OBJECT_STORAGE_BUCKET_CERTIFICATE_TEMPLATES=certificate-templates
+APP_OBJECT_STORAGE_BUCKET_SERTIFIKAT_TEMPLATES=sertifikat-templates
 ```
 
 Env lama `ASSIGNMENT_DIRECT_UPLOAD_*` masih didukung untuk kompatibilitas, tetapi deploy baru disarankan memakai `APP_DIRECT_UPLOAD_*`.

@@ -125,12 +125,16 @@ class StorageSecurityTest extends TestCase
     {
         config([
             'services.object_storage.enabled' => true,
-            'services.object_storage.label' => 'MinIO',
+            'services.object_storage.label' => 'Nevaobjects S3',
             'services.object_storage.key' => 'test-access-key',
             'services.object_storage.secret' => 'test-secret-key',
             'services.object_storage.region' => 'us-east-1',
-            'services.object_storage.bucket' => 'edusmart-storage',
-            'services.object_storage.endpoint' => 'https://minio.example.test',
+            'services.object_storage.bucket' => '',
+            'services.object_storage.bucket_map' => [
+                'assignments' => 'assignments',
+                'quiz-media' => 'quiz-media',
+            ],
+            'services.object_storage.endpoint' => 'https://s3.nevaobjects.id',
             'services.object_storage.use_path_style_endpoint' => true,
             'services.object_storage.expires_seconds' => 900,
             'services.object_storage.direct_upload_buckets' => ['assignments', 'quiz-media'],
@@ -151,13 +155,13 @@ class StorageSecurityTest extends TestCase
         $response->assertOk();
         $response->assertJsonPath('data.available', true);
         $response->assertJsonPath('data.provider', 'object_storage');
-        $response->assertJsonPath('data.providerLabel', 'MinIO');
+        $response->assertJsonPath('data.providerLabel', 'Nevaobjects S3');
         $response->assertJsonPath('data.upload.method', 'PUT');
         $response->assertJsonPath('data.upload.headers.Content-Type', 'image/jpeg');
 
         $uploadUrl = (string) $response->json('data.upload.url');
         $this->assertStringContainsString('X-Amz-Signature=', $uploadUrl);
-        $this->assertStringContainsString('/edusmart-storage/private/quiz-media/quiz-media/'.$guru->id.'/', $uploadUrl);
+        $this->assertStringContainsString('/quiz-media/private/quiz-media/quiz-media/'.$guru->id.'/', $uploadUrl);
     }
 
     public function test_confirm_direct_upload_rejects_missing_object_storage_file(): void

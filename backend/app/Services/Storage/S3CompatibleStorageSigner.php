@@ -21,12 +21,14 @@ class S3CompatibleStorageSigner
         return $this->enabledConfig()
             && $this->accessKey() !== ''
             && $this->secretKey() !== ''
-            && $this->bucket() !== '';
+            && $this->hasBucketConfig();
     }
 
     public function isEnabledForBucket(string $bucket): bool
     {
-        return $this->isEnabled() && in_array($bucket, $this->directUploadBuckets(), true);
+        return $this->isEnabled()
+            && in_array($bucket, $this->directUploadBuckets(), true)
+            && $this->bucketFor($bucket) !== '';
     }
 
     public function label(): string
@@ -43,21 +45,21 @@ class S3CompatibleStorageSigner
         return max(60, min(3600, $expires));
     }
 
-    public function presignPut(string $objectKey, string $contentType, ?int $expiresSeconds = null): array
+    public function presignPut(string $objectKey, string $contentType, ?int $expiresSeconds = null, ?string $logicalBucket = null): array
     {
         $contentType = trim($contentType) !== '' ? trim($contentType) : 'application/octet-stream';
 
         return $this->presign('PUT', $objectKey, $expiresSeconds, [
             'content-type' => $contentType,
-        ]);
+        ], $logicalBucket);
     }
 
-    public function presignGet(string $objectKey, ?int $expiresSeconds = null): array
+    public function presignGet(string $objectKey, ?int $expiresSeconds = null, ?string $logicalBucket = null): array
     {
-        return $this->presign('GET', $objectKey, $expiresSeconds);
+        return $this->presign('GET', $objectKey, $expiresSeconds, [], $logicalBucket);
     }
 
-    public function verifyUploadedObject(string $objectKey, int $expectedSizeBytes = 0): array
+    public function verifyUploadedObject(string $objectKey, int $expectedSizeBytes = 0, ?string $logicalBucket = null): array
     {
         if (! $this->shouldVerifyUploads()) {
             return [
@@ -68,7 +70,7 @@ class S3CompatibleStorageSigner
             ];
         }
 
-        $signed = $this->presign('HEAD', $objectKey, 300);
+        $signed = $this->presign('HEAD', $objectKey, 300, [], $logicalBucket);
         $response = Http::timeout(10)->head($signed['url']);
         if (! $response->successful()) {
             return [
@@ -93,13 +95,13 @@ class S3CompatibleStorageSigner
         ];
     }
 
-    public function deleteObject(string $objectKey): bool
+    public function deleteObject(string $objectKey, ?string $logicalBucket = null): bool
     {
         if (! $this->isEnabled()) {
             return true;
         }
 
-        $signed = $this->presign('DELETE', $objectKey, 300);
+        $signed = $this->presign('DELETE', $objectKey, 300, [], $logicalBucket);
         $response = Http::timeout(20)->delete($signed['url']);
 
         return $response->successful() || $response->status() === 404;
@@ -109,7 +111,8 @@ class S3CompatibleStorageSigner
         string $method,
         string $objectKey,
         ?int $expiresSeconds = null,
-        array $headers = []
+        array $headers = [],
+        ?string $logicalBucket = null
     ): array {
         if (! $this->isEnabled()) {
             throw new \RuntimeException('Object storage belum dikonfigurasi.');
@@ -122,7 +125,7 @@ class S3CompatibleStorageSigner
         $dateStamp = $now->format('Ymd');
         $region = $this->region();
         $credentialScope = "{$dateStamp}/{$region}/s3/aws4_request";
-        $target = $this->buildTargetUrl($objectKey);
+        $target = $this->buildTargetUrl($objectKey, $logicalBucket);
 
         $signedHeaders = array_change_key_case($headers, CASE_LOWER);
         $signedHeaders['host'] = $target['host'];
@@ -185,7 +188,7 @@ class S3CompatibleStorageSigner
         ];
     }
 
-    private function buildTargetUrl(string $objectKey): array
+    private function buildTargetUrl(string $objectKey, ?string $logicalBucket = null): array
     {
         $endpoint = $this->endpoint();
         $parts = parse_url($endpoint);
@@ -200,7 +203,10 @@ class S3CompatibleStorageSigner
         }
 
         $basePath = trim((string) ($parts['path'] ?? ''), '/');
-        $bucket = $this->bucket();
+        $bucket = $this->bucketFor($logicalBucket);
+        if ($bucket === '') {
+            throw new \RuntimeException('Bucket object storage belum dikonfigurasi.');
+        }
         $segments = $this->usePathStyle()
             ? array_values(array_filter([$basePath, $bucket, $objectKey], fn ($segment) => trim((string) $segment) !== ''))
             : array_values(array_filter([$basePath, $objectKey], fn ($segment) => trim((string) $segment) !== ''));
@@ -295,6 +301,47 @@ class S3CompatibleStorageSigner
     private function bucket(): string
     {
         return trim((string) $this->configString('bucket', ''));
+    }
+
+    private function bucketFor(?string $logicalBucket = null): string
+    {
+        $logicalBucket = trim((string) $logicalBucket);
+        if ($logicalBucket !== '') {
+            $map = $this->bucketMap();
+            if (! empty($map[$logicalBucket])) {
+                return $map[$logicalBucket];
+            }
+        }
+
+        return $this->bucket();
+    }
+
+    private function bucketMap(): array
+    {
+        $map = $this->configValue('bucket_map', []);
+        if (! is_array($map)) {
+            return [];
+        }
+
+        $normalized = [];
+        foreach ($map as $logicalBucket => $physicalBucket) {
+            $logicalBucket = trim((string) $logicalBucket);
+            $physicalBucket = trim((string) $physicalBucket);
+            if ($logicalBucket !== '' && $physicalBucket !== '') {
+                $normalized[$logicalBucket] = $physicalBucket;
+            }
+        }
+
+        return $normalized;
+    }
+
+    private function hasBucketConfig(): bool
+    {
+        if ($this->bucket() !== '') {
+            return true;
+        }
+
+        return ! empty($this->bucketMap());
     }
 
     private function directUploadBuckets(): array
