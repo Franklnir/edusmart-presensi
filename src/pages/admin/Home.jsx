@@ -110,6 +110,13 @@ const defaultRegistrationDeadlineLocal = (days = 7, period = null) => {
   return toDateTimeLocalValue(clampDateToPeriodEnd(date, period).toISOString())
 }
 
+const buildEskulId = (nama, period) => {
+  const year = String(period?.tahunAjaran || '').replace(/\//g, '-')
+  const semester = String(period?.semester || '').toLowerCase()
+  const unique = Date.now().toString(36).slice(-6)
+  return [slug(nama), slug(year), slug(semester), unique].filter(Boolean).join('-')
+}
+
 // Komponen Stat Card
 const StatCard = React.memo(({ label, value, icon, color = 'blue' }) => {
   const colorMap = {
@@ -170,6 +177,7 @@ export default function AHome() {
     periodFilter: eskulPeriodFilter,
     academicYearOptions,
     semesterOptions,
+    isViewingArchivePeriod,
     setAcademicYear,
     setSemester,
     resetToActivePeriod
@@ -284,7 +292,6 @@ export default function AHome() {
         }))
       )
       setPengumumanList(data?.pengumuman?.data || [])
-      setEskulList(data?.eskul?.data || [])
 
     } catch (error) {
       pushToast('error', error?.message ? `Gagal memuat data awal: ${error.message}` : 'Gagal memuat data awal')
@@ -383,25 +390,38 @@ export default function AHome() {
     })
   }, [])
 
-  const loadStudentOptions = useCallback(async ({ force = false } = {}) => {
-    if (studentOptionsLoading) return
-    if (studentOptionsLoaded && !force) return
+  const loadStudentOptions = useCallback(async ({ force = false, all = false, kelas = '' } = {}) => {
+    if (studentOptionsLoading) return []
+    if (studentOptionsLoaded && !force && !all && !kelas) return siswaList
 
     setStudentOptionsLoading(true)
     try {
-      const { data, error } = await supabase.admin.studentOptions({
-        per_page: 200,
+      const params = {
+        per_page: all ? 10000 : 100,
         status: 'active'
-      })
+      }
+      if (all) params.all = true
+      if (kelas) params.kelas = kelas
+
+      const { data, error } = await supabase.admin.studentOptions(params)
       if (error) throw error
-      mergeSiswaOptions(data?.rows || [])
-      setStudentOptionsLoaded(true)
+      const rows = data?.rows || []
+      mergeSiswaOptions(rows)
+      if (!kelas) setStudentOptionsLoaded(true)
+      return rows.map((row) => ({
+        uid: row.uid || row.id,
+        nama: row.nama || row.email || 'Tanpa Nama',
+        kelas: row.kelas || '',
+        email: row.email || '',
+        angkatan: row.angkatan || ''
+      })).filter((row) => row.uid)
     } catch (error) {
       pushToast('error', 'Gagal memuat pilihan siswa')
+      return []
     } finally {
       setStudentOptionsLoading(false)
     }
-  }, [mergeSiswaOptions, pushToast, studentOptionsLoaded, studentOptionsLoading])
+  }, [mergeSiswaOptions, pushToast, siswaList, studentOptionsLoaded, studentOptionsLoading])
 
   const loadGuruDanSiswa = useCallback(async () => {
     try {
@@ -583,21 +603,36 @@ export default function AHome() {
   const [eskulAnggota, setEskulAnggota] = useState([])
   const [eskulAbsensiStats, setEskulAbsensiStats] = useState({})
   const [addMemberUid, setAddMemberUid] = useState('')
+  const [addMemberMode, setAddMemberMode] = useState('single')
+  const [addMemberClass, setAddMemberClass] = useState('')
   const [loadingEskul, setLoadingEskul] = useState(false)
 
   const loadEskulList = useCallback(async () => {
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('ekskul')
-        .select('id,nama,keterangan,hari,jam_mulai,jam_selesai,pembina_guru_id,registration_deadline_at,created_at,updated_at')
+        .select('id,nama,keterangan,hari,jam_mulai,jam_selesai,pembina_guru_id,registration_deadline_at,created_at,updated_at,tahun_ajaran,semester')
         .order('nama')
+      query = applySemesterPeriodFilters(query, eskulDataPeriod)
+
+      let { data, error } = await query
+      if (error && /tahun_ajaran|semester/i.test(error.message || '')) {
+        ; ({ data, error } = await supabase
+          .from('ekskul')
+          .select('id,nama,keterangan,hari,jam_mulai,jam_selesai,pembina_guru_id,registration_deadline_at,created_at,updated_at')
+          .order('nama'))
+      }
 
       if (error) throw error
-      setEskulList(data || [])
+      const rows = data || []
+      setEskulList(rows)
+      setEskulSel((current) => (
+        current && rows.some((item) => item.id === current) ? current : ''
+      ))
     } catch (error) {
       pushToast('error', 'Gagal memuat daftar eskul')
     }
-  }, [pushToast])
+  }, [eskulDataPeriod, pushToast])
 
   const loadEskulDetail = useCallback(async () => {
     if (!eskulSel) return
@@ -625,6 +660,11 @@ export default function AHome() {
       pushToast('error', 'Gagal memuat detail eskul')
     }
   }, [eskulSel, pushToast])
+
+  useEffect(() => {
+    loadEskulList()
+    setAddMemberUid('')
+  }, [loadEskulList])
 
   const loadEskulAnggota = useCallback(async () => {
     if (!eskulSel) return
@@ -753,8 +793,21 @@ export default function AHome() {
       (a, b) =>
         (a.kelas || '').localeCompare(b.kelas || '', 'id') ||
         (a.nama || '').localeCompare(b.nama || '', 'id')
-    )
+      )
   }, [eskulAnggota, siswaMap, eskulAbsensiStats])
+
+  const kelasOptions = useMemo(() => (
+    Array.from(new Set(siswaList.map((s) => s.kelas).filter(Boolean)))
+      .sort((a, b) => a.localeCompare(b, 'id'))
+  ), [siswaList])
+
+  const availableSiswaOptions = useMemo(() => (
+    siswaList.filter((s) => !addMemberClass || s.kelas === addMemberClass)
+  ), [addMemberClass, siswaList])
+
+  useEffect(() => {
+    setAddMemberUid('')
+  }, [addMemberClass, addMemberMode])
 
   // toggle hari (checkbox di dropdown)
   const handleToggleHari = useCallback((hariValue) => {
@@ -794,6 +847,11 @@ export default function AHome() {
   }, [activeEskulPeriod])
 
   const simpanEskul = useCallback(async () => {
+    if (isViewingArchivePeriod) {
+      pushToast('warning', 'Data arsip hanya untuk dilihat. Buat atau ubah ekskul dari periode aktif sekolah.')
+      return
+    }
+
     const nama = (eskulForm.nama || '').trim()
     if (!nama) {
       pushToast('error', 'Nama eskul wajib diisi.')
@@ -823,6 +881,15 @@ export default function AHome() {
       return
     }
 
+    const duplicateName = eskulList.some((item) => (
+      item.id !== eskulSel &&
+      String(item.nama || '').trim().toLowerCase() === nama.toLowerCase()
+    ))
+    if (duplicateName) {
+      pushToast('error', 'Eskul dengan nama ini sudah ada pada periode yang dipilih.')
+      return
+    }
+
     setLoadingEskul(true)
     const pembinaId = eskulForm.pembina_guru_id || ''
 
@@ -834,6 +901,8 @@ export default function AHome() {
       jam_selesai: eskulForm.jam_selesai || '',
       pembina_guru_id: pembinaId || null,
       registration_deadline_at: registrationDeadlineIso,
+      tahun_ajaran: period.tahunAjaran,
+      semester: period.semester,
       updated_at: new Date().toISOString()
     }
 
@@ -847,19 +916,7 @@ export default function AHome() {
         if (error) throw error
         pushToast('success', 'Eskul diperbarui!')
       } else {
-        const id = slug(nama)
-
-        // Check if exists
-        const { data: existing } = await supabase
-          .from('ekskul')
-          .select('id')
-          .eq('id', id)
-          .single()
-
-        if (existing) {
-          pushToast('error', 'Eskul dengan nama ini sudah ada.')
-          return
-        }
+        const id = buildEskulId(nama, period)
 
         const { error } = await supabase.from('ekskul').insert({
           ...payload,
@@ -878,10 +935,14 @@ export default function AHome() {
     } finally {
       setLoadingEskul(false)
     }
-  }, [eskulForm, eskulSel, loadCurrentAcademicPeriod, loadEskulList, loadStatistics, pushToast])
+  }, [eskulForm, eskulList, eskulSel, isViewingArchivePeriod, loadCurrentAcademicPeriod, loadEskulList, loadStatistics, pushToast])
 
   const hapusEskul = useCallback(async () => {
     if (!eskulSel) return
+    if (isViewingArchivePeriod) {
+      pushToast('warning', 'Ekskul arsip tidak bisa dihapus dari filter periode lama.')
+      return
+    }
     if (
       !confirmDelete(`Hapus eskul "${eskulForm.nama || eskulSel}" beserta anggotanya?`)
     )
@@ -911,66 +972,154 @@ export default function AHome() {
     } catch (error) {
       pushToast('error', 'Gagal menghapus eskul')
     }
-  }, [eskulSel, eskulForm.nama, loadEskulList, loadStatistics, pushToast])
+  }, [eskulSel, eskulForm.nama, isViewingArchivePeriod, loadEskulList, loadStatistics, pushToast])
+
+  const registrationDeadlineIso = toIsoFromDateTimeLocal(
+    eskulForm.registration_deadline_at
+  )
+  const registrationDeadlineLabel = formatDateTimeLabel(registrationDeadlineIso)
+  const registrationDeadlineClosed = registrationDeadlineIso
+    ? Date.now() > new Date(registrationDeadlineIso).getTime()
+    : false
+  const registrationDeadlinePastPeriod = isAfterPeriodEnd(registrationDeadlineIso, activeEskulPeriod)
+  const activePeriodEndInput = getPeriodEndDateTimeLocal(activeEskulPeriod)
+  const activePeriodEndLabel = formatDateTimeLabel(getPeriodEndDateTime(activeEskulPeriod)?.toISOString())
+  const addMemberLocked = isViewingArchivePeriod || !registrationDeadlineIso || registrationDeadlineClosed || registrationDeadlinePastPeriod
+
+  const normalizeStudentRows = useCallback((rows = []) => (
+    (rows || [])
+      .map((row) => ({
+        uid: row.uid || row.id,
+        nama: row.nama || row.email || 'Tanpa Nama',
+        kelas: row.kelas || '',
+        email: row.email || '',
+        angkatan: row.angkatan || ''
+      }))
+      .filter((row) => row.uid)
+  ), [])
 
   const tambahAnggotaEskul = useCallback(async () => {
-    if (!eskulSel || !addMemberUid) return
+    if (!eskulSel) return
+
+    if (isViewingArchivePeriod) {
+      pushToast('warning', 'Anggota hanya bisa ditambahkan pada periode aktif sekolah.')
+      return
+    }
+
+    if (!registrationDeadlineIso || registrationDeadlineClosed || registrationDeadlinePastPeriod) {
+      pushToast('warning', 'Pendaftaran ekskul sudah ditutup. Anggota baru tidak bisa ditambahkan.')
+      return
+    }
+
+    if (addMemberMode === 'single' && !addMemberUid) {
+      pushToast('warning', 'Pilih siswa terlebih dahulu.')
+      return
+    }
+
+    if (addMemberMode === 'class' && !addMemberClass) {
+      pushToast('warning', 'Pilih kelas terlebih dahulu.')
+      return
+    }
 
     try {
       const period = await loadCurrentAcademicPeriod()
-      const selectedStudent = siswaMap[addMemberUid] || {}
+      let selectedStudents = []
 
-      // Cek apakah sudah menjadi anggota
-      let existingQuery = supabase
-        .from('ekskul_anggota')
-        .select('id')
-        .eq('ekskul_id', eskulSel)
-        .eq('user_id', addMemberUid)
-      existingQuery = applySemesterPeriodFilters(existingQuery, period)
-
-      let { data: existing, error: existingError } = await existingQuery.maybeSingle()
-      if (existingError && /tahun_ajaran|semester/i.test(existingError.message || '')) {
-        ; ({ data: existing, error: existingError } = await supabase
-          .from('ekskul_anggota')
-          .select('id')
-          .eq('ekskul_id', eskulSel)
-          .eq('user_id', addMemberUid)
-          .maybeSingle())
+      if (addMemberMode === 'single') {
+        selectedStudents = normalizeStudentRows([siswaMap[addMemberUid] || siswaList.find((item) => item.uid === addMemberUid) || { uid: addMemberUid }])
+      } else if (addMemberMode === 'class') {
+        selectedStudents = await loadStudentOptions({ force: true, all: true, kelas: addMemberClass })
+      } else {
+        selectedStudents = await loadStudentOptions({ force: true, all: true })
       }
-      if (existingError) throw existingError
 
-      if (existing) {
-        pushToast('warning', 'Siswa ini sudah menjadi anggota eskul pada tahun ajaran aktif.')
+      selectedStudents = normalizeStudentRows(selectedStudents)
+      if (selectedStudents.length === 0) {
+        pushToast('warning', 'Tidak ada siswa aktif yang bisa ditambahkan.')
+        return
+      }
+
+      const existingMemberUids = new Set(eskulAnggota.map((item) => item.user_id).filter(Boolean))
+      const targetStudents = selectedStudents.filter((student) => !existingMemberUids.has(student.uid))
+
+      if (targetStudents.length === 0) {
+        pushToast('warning', 'Semua siswa yang dipilih sudah menjadi anggota ekskul pada periode aktif.')
         setAddMemberUid('')
         return
       }
 
-      const insertPayload = {
+      let existingQuery = supabase
+        .from('ekskul_anggota')
+        .select('user_id')
+        .eq('ekskul_id', eskulSel)
+        .in('user_id', targetStudents.map((student) => student.uid))
+      existingQuery = applySemesterPeriodFilters(existingQuery, period)
+
+      let { data: existing, error: existingError } = await existingQuery
+      if (existingError && /tahun_ajaran|semester/i.test(existingError.message || '')) {
+        ; ({ data: existing, error: existingError } = await supabase
+          .from('ekskul_anggota')
+          .select('user_id')
+          .eq('ekskul_id', eskulSel)
+          .in('user_id', targetStudents.map((student) => student.uid)))
+      }
+      if (existingError) throw existingError
+
+      const existingFromServer = new Set((existing || []).map((item) => item.user_id).filter(Boolean))
+      const rowsToInsert = targetStudents.filter((student) => !existingFromServer.has(student.uid))
+
+      if (rowsToInsert.length === 0) {
+        pushToast('warning', 'Semua siswa yang dipilih sudah menjadi anggota ekskul pada periode aktif.')
+        return
+      }
+
+      const insertPayload = rowsToInsert.map((student) => ({
         ekskul_id: eskulSel,
-        user_id: addMemberUid,
+        user_id: student.uid,
         tahun_ajaran: period.tahunAjaran,
         semester: period.semester,
-        angkatan: selectedStudent.angkatan || null,
+        angkatan: student.angkatan || null,
         created_at: new Date().toISOString()
-      }
+      }))
 
       let { error } = await supabase.from('ekskul_anggota').insert(insertPayload)
       if (error && /tahun_ajaran|semester|angkatan/i.test(error.message || '')) {
-        const { tahun_ajaran, semester, angkatan, ...legacyPayload } = insertPayload
+        const legacyPayload = insertPayload.map(({ tahun_ajaran, semester, angkatan, ...row }) => row)
         ; ({ error } = await supabase.from('ekskul_anggota').insert(legacyPayload))
       }
 
       if (error) throw error
-      pushToast('success', 'Anggota berhasil ditambahkan!')
+      pushToast('success', `${rowsToInsert.length} anggota berhasil ditambahkan.`)
       setAddMemberUid('')
       loadEskulAnggota()
     } catch (error) {
-      pushToast('error', 'Gagal menambah anggota')
+      pushToast('error', error?.message || 'Gagal menambah anggota')
     }
-  }, [eskulSel, addMemberUid, loadCurrentAcademicPeriod, loadEskulAnggota, pushToast, siswaMap])
+  }, [
+    addMemberClass,
+    addMemberMode,
+    addMemberUid,
+    eskulAnggota,
+    eskulSel,
+    isViewingArchivePeriod,
+    loadCurrentAcademicPeriod,
+    loadEskulAnggota,
+    loadStudentOptions,
+    normalizeStudentRows,
+    pushToast,
+    registrationDeadlineClosed,
+    registrationDeadlineIso,
+    registrationDeadlinePastPeriod,
+    siswaList,
+    siswaMap
+  ])
 
   const hapusAnggotaEskul = useCallback(async (anggotaId) => {
     if (!eskulSel) return
+    if (isViewingArchivePeriod) {
+      pushToast('warning', 'Anggota periode arsip tidak bisa dihapus dari halaman ini.')
+      return
+    }
     if (!confirmDelete('Hapus anggota ini dari eskul?')) return
 
     try {
@@ -985,18 +1134,7 @@ export default function AHome() {
     } catch (error) {
       pushToast('error', 'Gagal menghapus anggota')
     }
-  }, [eskulSel, loadEskulAnggota, pushToast])
-
-  const registrationDeadlineIso = toIsoFromDateTimeLocal(
-    eskulForm.registration_deadline_at
-  )
-  const registrationDeadlineLabel = formatDateTimeLabel(registrationDeadlineIso)
-  const registrationDeadlineClosed = registrationDeadlineIso
-    ? Date.now() > new Date(registrationDeadlineIso).getTime()
-    : false
-  const registrationDeadlinePastPeriod = isAfterPeriodEnd(registrationDeadlineIso, activeEskulPeriod)
-  const activePeriodEndInput = getPeriodEndDateTimeLocal(activeEskulPeriod)
-  const activePeriodEndLabel = formatDateTimeLabel(getPeriodEndDateTime(activeEskulPeriod)?.toISOString())
+  }, [eskulSel, isViewingArchivePeriod, loadEskulAnggota, pushToast])
 
   if (isLoading) {
     return (
@@ -1166,8 +1304,27 @@ export default function AHome() {
               </div>
 
               <div className="p-6">
-                <div className="flex items-center justify-between mb-6">
-                  <div className="flex-1">
+                <AcademicPeriodArchiveFilter
+                  activeAcademicPeriod={activeSchoolPeriod}
+                  periodFilter={eskulPeriodFilter}
+                  academicYearOptions={academicYearOptions}
+                  semesterOptions={semesterOptions}
+                  setAcademicYear={setAcademicYear}
+                  setSemester={setSemester}
+                  resetToActivePeriod={resetToActivePeriod}
+                  title="Periode Ekskul"
+                  compact
+                  className="mb-5"
+                />
+
+                {isViewingArchivePeriod && (
+                  <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+                    Mode arsip aktif. Data ekskul periode lama tetap tersimpan, tetapi pembuatan, perubahan, hapus, dan tambah anggota hanya dibuka pada periode aktif.
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 gap-4 mb-6 lg:grid-cols-[1fr_auto] lg:items-end">
+                  <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-3">
                       <span className="flex items-center gap-2">
                         <span className="w-2 h-2 bg-orange-500 rounded-full" />
@@ -1187,11 +1344,12 @@ export default function AHome() {
                       ))}
                     </select>
                   </div>
-                  <div className="flex gap-3 ml-6">
+                  <div className="flex flex-col gap-3 sm:flex-row">
                     {eskulSel && (
                       <button
-                        className="px-6 py-3 text-sm font-semibold text-red-600 bg-red-50 border-2 border-red-200 rounded-xl hover:bg-red-100 focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-all duration-200 hover:shadow-md"
+                        className="px-6 py-3 text-sm font-semibold text-red-600 bg-red-50 border-2 border-red-200 rounded-xl hover:bg-red-100 focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-all duration-200 hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
                         onClick={hapusEskul}
+                        disabled={isViewingArchivePeriod}
                       >
                         🗑️ Hapus
                       </button>
@@ -1199,7 +1357,7 @@ export default function AHome() {
                     <button
                       className="px-6 py-3 text-sm font-semibold text-white bg-gradient-to-r from-orange-600 to-amber-700 rounded-xl hover:from-orange-700 hover:to-amber-800 focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 transition-all duration-200 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
                       onClick={simpanEskul}
-                      disabled={loadingEskul}
+                      disabled={loadingEskul || isViewingArchivePeriod}
                     >
                       {loadingEskul ? (
                         <span className="flex items-center gap-2">
@@ -1486,41 +1644,97 @@ export default function AHome() {
                     className="mb-6"
                   />
 
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-semibold text-gray-700 mb-3">
-                        <span className="flex items-center gap-2">
-                          <span className="w-2 h-2 bg-emerald-500 rounded-full" />
-                          Tambah Anggota (Siswa)
-                        </span>
-                      </label>
-                      <select
-                        className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all duration-200"
-                        value={addMemberUid}
-                        onFocus={() => loadStudentOptions()}
-                        onChange={(e) => setAddMemberUid(e.target.value)}
-                      >
-                        <option value="">
-                          {studentOptionsLoading
-                            ? 'Memuat siswa...'
-                            : studentOptionsLoaded
-                              ? '— Pilih siswa —'
-                              : 'Klik untuk memuat siswa'}
-                        </option>
-                        {siswaList.map((s) => (
-                          <option key={s.uid} value={s.uid}>
-                            {s.nama} ({s.kelas || '—'})
-                          </option>
-                        ))}
-                      </select>
+                  <div className="mb-8 rounded-2xl border border-emerald-100 bg-emerald-50/50 p-4 sm:p-5">
+                    <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <h4 className="text-sm font-extrabold text-slate-900">Tambah Anggota</h4>
+                        <p className="mt-1 text-xs leading-5 text-slate-500">
+                          Pilih satu siswa, satu kelas, atau semua siswa aktif. Sistem otomatis melewati siswa yang sudah terdaftar.
+                        </p>
+                      </div>
+                      <span className={`inline-flex w-fit rounded-full px-3 py-1 text-[11px] font-bold ${addMemberLocked ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                        {addMemberLocked ? 'Terkunci' : 'Pendaftaran dibuka'}
+                      </span>
                     </div>
-                    <div className="flex items-end">
+
+                    <div className="mb-4 grid grid-cols-3 gap-2">
+                      {[
+                        ['single', 'Satu siswa'],
+                        ['class', 'Per kelas'],
+                        ['all', 'Semua siswa']
+                      ].map(([value, label]) => (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => setAddMemberMode(value)}
+                          disabled={addMemberLocked}
+                          className={`min-h-[42px] rounded-xl border px-3 text-xs font-bold transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-60 ${
+                            addMemberMode === value
+                              ? 'border-emerald-500 bg-emerald-600 text-white shadow-sm'
+                              : 'border-emerald-200 bg-white text-slate-700 hover:border-emerald-300 hover:bg-emerald-50'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_1fr_auto] lg:items-end">
+                      <div className={addMemberMode === 'all' ? 'hidden' : ''}>
+                        <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-slate-500">
+                          Kelas
+                        </label>
+                        <select
+                          className="w-full rounded-xl border-2 border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-slate-800 transition-all duration-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100"
+                          value={addMemberClass}
+                          onFocus={() => loadStudentOptions({ force: !studentOptionsLoaded, all: true })}
+                          onChange={(e) => setAddMemberClass(e.target.value)}
+                          disabled={addMemberLocked || addMemberMode === 'all'}
+                        >
+                          <option value="">Semua kelas</option>
+                          {kelasOptions.map((kelas) => (
+                            <option key={kelas} value={kelas}>{kelas}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className={addMemberMode === 'single' ? '' : 'hidden'}>
+                        <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-slate-500">
+                          Siswa
+                        </label>
+                        <select
+                          className="w-full rounded-xl border-2 border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-slate-800 transition-all duration-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100"
+                          value={addMemberUid}
+                          onFocus={() => loadStudentOptions({ force: !studentOptionsLoaded, all: true, kelas: addMemberClass })}
+                          onChange={(e) => setAddMemberUid(e.target.value)}
+                          disabled={addMemberLocked || addMemberMode !== 'single'}
+                        >
+                          <option value="">
+                            {studentOptionsLoading
+                              ? 'Memuat siswa...'
+                              : studentOptionsLoaded || availableSiswaOptions.length
+                                ? 'Pilih siswa'
+                                : 'Klik untuk memuat siswa'}
+                          </option>
+                          {availableSiswaOptions.map((s) => (
+                            <option key={s.uid} value={s.uid}>
+                              {s.nama} ({s.kelas || 'Tanpa kelas'})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
                       <button
-                        className="w-full px-6 py-3 text-sm font-semibold text-gray-700 bg-white border-2 border-gray-300 rounded-xl hover:bg-gray-50 focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 transition-all duration-200 hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="min-h-[48px] rounded-xl border-2 border-emerald-300 bg-white px-6 py-3 text-sm font-extrabold text-emerald-700 transition-all duration-200 hover:bg-emerald-50 hover:shadow-md focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                         onClick={tambahAnggotaEskul}
-                        disabled={!addMemberUid}
+                        disabled={
+                          addMemberLocked ||
+                          studentOptionsLoading ||
+                          (addMemberMode === 'single' && !addMemberUid) ||
+                          (addMemberMode === 'class' && !addMemberClass)
+                        }
                       >
-                        ➕ Tambah
+                        {studentOptionsLoading ? 'Memuat...' : addMemberMode === 'single' ? 'Tambah Siswa' : addMemberMode === 'class' ? 'Tambah Kelas' : 'Tambah Semua'}
                       </button>
                     </div>
                   </div>
@@ -1566,8 +1780,9 @@ export default function AHome() {
                             </div>
                           </div>
                           <button
-                            className="px-4 py-2 text-xs font-semibold text-red-600 bg-red-50 rounded-lg hover:bg-red-100 focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-all duration-200 hover:shadow-md"
+                            className="px-4 py-2 text-xs font-semibold text-red-600 bg-red-50 rounded-lg hover:bg-red-100 focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-all duration-200 hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
                             onClick={() => hapusAnggotaEskul(a.id)}
+                            disabled={isViewingArchivePeriod}
                           >
                             🗑️ Hapus
                           </button>

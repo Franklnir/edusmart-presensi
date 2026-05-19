@@ -944,10 +944,19 @@ export default function SHome() {
     if (!userId) return
     try {
       const period = await loadActiveAcademicPeriod()
-      const { data: eskulData, error: eskulError } = await supabase
+      let eskulQuery = supabase
         .from('ekskul')
-        .select('id, nama, keterangan, hari, jam_mulai, jam_selesai, pembina_guru_id, registration_deadline_at')
+        .select('id, nama, keterangan, hari, jam_mulai, jam_selesai, pembina_guru_id, registration_deadline_at, tahun_ajaran, semester')
         .order('nama')
+      eskulQuery = applySemesterPeriodFilters(eskulQuery, period)
+
+      let { data: eskulData, error: eskulError } = await eskulQuery
+      if (eskulError && /tahun_ajaran|semester/i.test(eskulError.message || '')) {
+        ; ({ data: eskulData, error: eskulError } = await supabase
+          .from('ekskul')
+          .select('id, nama, keterangan, hari, jam_mulai, jam_selesai, pembina_guru_id, registration_deadline_at')
+          .order('nama'))
+      }
 
       let anggotaQuery = supabase
         .from('ekskul_anggota')

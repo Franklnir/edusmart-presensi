@@ -25,6 +25,27 @@ const getNamaKelasFromList = (kelasId, kelasList) => {
 
 const HARI_JS = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']
 
+const parseEskulDays = (hariText = '') => (
+  String(hariText || '')
+    .split(',')
+    .map((day) => day.trim())
+    .filter(Boolean)
+)
+
+const toLocalDateKey = (date) => {
+  const pad = (value) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
+const normalizeDateKey = (value) => {
+  if (!value) return ''
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value)) {
+    return value.slice(0, 10)
+  }
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '' : toLocalDateKey(date)
+}
+
 const formatDateIndo = (dateStr) => {
   const date = new Date(dateStr)
   return new Intl.DateTimeFormat('id-ID', {
@@ -314,10 +335,16 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap, academicPeriod }) => {
   const [selectedMonths, setSelectedMonths] = useState(defaultSelectedMonths)
   const [viewMode, setViewMode] = useState('detail') // 'detail' atau 'rekap'
 
-  // Generate tanggal-tanggal dalam bulan-bulan yang dipilih yang sesuai dengan hari eskul
-  const getEskulDatesInMonths = () => {
+  // Generate tanggal dalam periode aktif, mulai dari tanggal ekskul dibuat.
+  const eskulDates = React.useMemo(() => {
     const dates = []
-    const hariEskulList = eskul.hari ? eskul.hari.split(',') : []
+    const hariEskulList = parseEskulDays(eskul.hari)
+    const startBoundCandidates = [
+      normalizeDateKey(academicPeriod?.startsAt || academicPeriod?.periodeMulai),
+      normalizeDateKey(eskul.created_at)
+    ].filter(Boolean)
+    const startBound = startBoundCandidates.sort()[startBoundCandidates.length - 1] || ''
+    const endBound = normalizeDateKey(academicPeriod?.endsAt || academicPeriod?.periodeSelesai)
 
     selectedMonths.forEach(monthValue => {
       const [yearText, monthText] = String(monthValue || '').split('-')
@@ -329,10 +356,15 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap, academicPeriod }) => {
       for (let day = 1; day <= daysInMonth; day++) {
         const date = new Date(selectedYear, month, day)
         const dayName = HARI_JS[date.getDay()]
-        if (hariEskulList.includes(dayName)) {
+        const dateStr = toLocalDateKey(date)
+        if (
+          hariEskulList.includes(dayName) &&
+          (!startBound || dateStr >= startBound) &&
+          (!endBound || dateStr <= endBound)
+        ) {
           dates.push({
             date: new Date(selectedYear, month, day),
-            dateStr: date.toISOString().split('T')[0],
+            dateStr,
             dayName,
             month: month,
             monthValue
@@ -342,9 +374,15 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap, academicPeriod }) => {
     })
 
     return dates.sort((a, b) => a.date - b.date)
-  }
-
-  const eskulDates = getEskulDatesInMonths()
+  }, [
+    academicPeriod?.endsAt,
+    academicPeriod?.periodeMulai,
+    academicPeriod?.periodeSelesai,
+    academicPeriod?.startsAt,
+    eskul.created_at,
+    eskul.hari,
+    selectedMonths
+  ])
   const totalPertemuan = eskulDates.length
 
   // Load anggota eskul
@@ -417,6 +455,10 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap, academicPeriod }) => {
         if (anggotaEskul.length === 0) return
 
         const dateStrs = eskulDates.map(d => d.dateStr)
+        if (dateStrs.length === 0) {
+          setAbsensiData({})
+          return
+        }
         let absensiQuery = supabase
           .from('absensi_eskul')
           .select('*')
@@ -951,7 +993,13 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap, academicPeriod }) => {
 
         {/* Content */}
         <div className="flex-1 overflow-auto p-6">
-          {anggotaEskul.length > 0 ? (
+          {totalPertemuan === 0 ? (
+            <div className="text-center py-12">
+              <div className="text-gray-300 text-6xl mb-4">📅</div>
+              <p className="text-gray-500 text-lg font-medium">Belum ada jadwal pada bulan yang dipilih</p>
+              <p className="text-gray-400 mt-2">Absensi dimulai dari tanggal ekskul dibuat dan dibatasi akhir periode akademik.</p>
+            </div>
+          ) : anggotaEskul.length > 0 ? (
             viewMode === 'detail' ? renderDetailTable() : renderRekapTable()
           ) : (
             <div className="text-center py-12">
@@ -1367,10 +1415,21 @@ export default function JadwalGuru() {
         setJadwal(jadwalData || [])
 
         // Ekskul
-        const { data: ekskulData } = await supabase
+        let ekskulQuery = supabase
           .from('ekskul')
           .select('*')
           .eq('pembina_guru_id', user.id)
+        if (activeAcademicPeriod.tahunAjaran) ekskulQuery = ekskulQuery.eq('tahun_ajaran', activeAcademicPeriod.tahunAjaran)
+        if (activeAcademicPeriod.semester) ekskulQuery = ekskulQuery.eq('semester', activeAcademicPeriod.semester)
+
+        let { data: ekskulData, error: ekskulError } = await ekskulQuery
+        if (ekskulError && /tahun_ajaran|semester/i.test(ekskulError.message || '')) {
+          ; ({ data: ekskulData, error: ekskulError } = await supabase
+            .from('ekskul')
+            .select('*')
+            .eq('pembina_guru_id', user.id))
+        }
+        if (ekskulError) throw ekskulError
 
         if (ekskulData) {
           const ekskulWithCount = await Promise.all(ekskulData.map(async (e) => {

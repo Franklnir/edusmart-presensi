@@ -56,6 +56,13 @@ class DbInsertExecutor
             }
         }
 
+        if ($table === 'ekskul_anggota') {
+            $membershipError = $callbacks['validate_ekskul_membership_rows_open']($rows, $tenantId);
+            if ($membershipError !== null) {
+                return $callbacks['deny']($membershipError['message'], $membershipError['status']);
+            }
+        }
+
         if ($table === 'settings') {
             $saved = $callbacks['save_settings_singleton_rows']($rows, $tenantId, $tenantScoped);
 

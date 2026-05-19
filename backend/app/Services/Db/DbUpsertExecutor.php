@@ -43,6 +43,13 @@ class DbUpsertExecutor
             }
         }
 
+        if ($table === 'ekskul_anggota') {
+            $membershipError = $callbacks['validate_ekskul_membership_rows_open']($rows, $tenantId);
+            if ($membershipError !== null) {
+                return $callbacks['deny']($membershipError['message'], $membershipError['status']);
+            }
+        }
+
         $beforeRows = [];
         $shouldAuditNilai = $table === 'tugas_jawaban' && $callbacks['is_nilai_audit_actor']($request);
         if ($shouldAuditNilai) {

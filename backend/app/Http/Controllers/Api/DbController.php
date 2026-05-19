@@ -75,6 +75,7 @@ class DbController extends ApiController
         'absensi_settings',
         'absensi_eskul',
         'jam_kosong',
+        'ekskul',
         'ekskul_anggota',
         'anggota_ekskul',
     ];
@@ -423,6 +424,7 @@ class DbController extends ApiController
                 return $this->prepareKelasRowsForInsert($rows, $tenantId);
             },
             'validate_ekskul_registration_deadline_rows' => fn (array $rows, ?string $tenantId, bool $requireDeadline = false): ?array => $this->validateEskulRegistrationDeadlineRows($rows, $tenantId, $requireDeadline),
+            'validate_ekskul_membership_rows_open' => fn (array $rows, ?string $tenantId): ?array => $this->validateEskulMembershipRowsOpen($rows, $tenantId),
             'save_settings_singleton_rows' => fn (array $rows, ?string $tenantId, bool $tenantScoped): array => $this->saveSettingsSingletonRows($rows, $tenantId, $tenantScoped),
             'validate_profile_rows_for_tenant_insert' => function (array &$rows, ?string $tenantId): ?array {
                 return $this->validateProfileRowsForTenantInsert($rows, $tenantId);
@@ -477,6 +479,7 @@ class DbController extends ApiController
             'normalize_json_rows_for_table' => fn (string $table, array $rows): array => $this->normalizeJsonRowsForTable($table, $rows),
             'filter_rows_to_existing_columns' => fn (string $table, array $rows): array => $this->filterRowsToExistingColumns($table, $rows),
             'validate_ekskul_registration_deadline_rows' => fn (array $rows, ?string $tenantId, bool $requireDeadline = false): ?array => $this->validateEskulRegistrationDeadlineRows($rows, $tenantId, $requireDeadline),
+            'validate_ekskul_membership_rows_open' => fn (array $rows, ?string $tenantId): ?array => $this->validateEskulMembershipRowsOpen($rows, $tenantId),
             'is_nilai_audit_actor' => fn (Request $request): bool => $this->isNilaiAuditActor($request),
             'fetch_tugas_jawaban_rows_for_payload' => fn (array $rows, ?string $tenantId): array => $this->fetchTugasJawabanRowsForPayload($rows, $tenantId),
             'save_settings_singleton_rows' => fn (array $rows, ?string $tenantId, bool $tenantScoped): array => $this->saveSettingsSingletonRows($rows, $tenantId, $tenantScoped),
@@ -2733,6 +2736,100 @@ class DbController extends ApiController
             if ($periodEnd && $deadline->greaterThan($periodEnd)) {
                 return [
                     'message' => 'Batas pendaftaran ekstrakurikuler tidak boleh melewati akhir periode aktif',
+                    'status' => 422,
+                ];
+            }
+        }
+
+        return null;
+    }
+
+    private function validateEskulMembershipRowsOpen(array $rows, ?string $tenantId): ?array
+    {
+        if (! Schema::hasTable('ekskul')) {
+            return null;
+        }
+
+        $period = $this->currentAcademicPeriodForTenant($tenantId ?: $this->currentTenantId);
+        $periodYear = AcademicPeriod::normalizeAcademicYear($period['tahun_ajaran'] ?? null);
+        $periodSemester = AcademicPeriod::normalizeSemester($period['semester'] ?? null);
+        $ekskulIds = [];
+
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+
+            $rowYear = AcademicPeriod::normalizeAcademicYear($row['tahun_ajaran'] ?? null);
+            $rowSemester = AcademicPeriod::normalizeSemester($row['semester'] ?? null);
+            if (
+                ($rowYear && $periodYear && $rowYear !== $periodYear) ||
+                ($rowSemester && $periodSemester && $rowSemester !== $periodSemester)
+            ) {
+                return [
+                    'message' => 'Anggota ekstrakurikuler hanya dapat ditambahkan pada periode aktif',
+                    'status' => 422,
+                ];
+            }
+
+            $ekskulId = trim((string) ($row['ekskul_id'] ?? ''));
+            if ($ekskulId === '') {
+                return [
+                    'message' => 'Ekstrakurikuler tidak valid',
+                    'status' => 422,
+                ];
+            }
+
+            $ekskulIds[] = $ekskulId;
+        }
+
+        $ekskulIds = array_values(array_unique($ekskulIds));
+        if (empty($ekskulIds)) {
+            return null;
+        }
+
+        $now = Carbon::now('Asia/Jakarta');
+        $periodEnd = $this->currentAcademicPeriodEndForTenant($tenantId);
+        if ($periodEnd && $now->gt($periodEnd)) {
+            return [
+                'message' => 'Periode akademik aktif sudah berakhir, anggota ekstrakurikuler tidak bisa ditambahkan',
+                'status' => 422,
+            ];
+        }
+
+        $columns = ['id'];
+        if ($this->isSelectableColumn('ekskul', 'registration_deadline_at')) {
+            $columns[] = 'registration_deadline_at';
+        }
+
+        $ekskulQuery = DB::table('ekskul')->whereIn('id', $ekskulIds);
+        $this->applyTenantFilter($ekskulQuery);
+        if ($periodYear && $this->isSelectableColumn('ekskul', 'tahun_ajaran')) {
+            $ekskulQuery->where('tahun_ajaran', $periodYear);
+        }
+        if ($periodSemester && $this->isSelectableColumn('ekskul', 'semester')) {
+            $ekskulQuery->where('semester', $periodSemester);
+        }
+
+        $ekskulRows = $ekskulQuery->get($columns);
+        $ekskulMap = [];
+        foreach ($ekskulRows as $row) {
+            $ekskulMap[(string) ($row->id ?? '')] = $row;
+        }
+
+        foreach ($ekskulIds as $ekskulId) {
+            $ekskul = $ekskulMap[$ekskulId] ?? null;
+            if (! $ekskul) {
+                return [
+                    'message' => 'Ekstrakurikuler tidak tersedia pada periode aktif',
+                    'status' => 422,
+                ];
+            }
+
+            $deadline = $this->parseEskulDateTime($ekskul->registration_deadline_at ?? null);
+            if ($deadline && $now->gt($deadline)) {
+                return [
+                    'message' => 'Pendaftaran ekstrakurikuler sudah ditutup',
                     'status' => 422,
                 ];
             }
