@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useId, useMemo, useState } from 'react'
 import { CalendarDays, X } from 'lucide-react'
 
 const normalizeSemesterOptions = (options = []) => (
@@ -31,6 +31,10 @@ export default function AcademicPeriodArchiveFilter({
 }) {
   const selectedYear = periodFilter?.tahunAjaran || activeAcademicPeriod?.tahunAjaran || ''
   const selectedSemester = periodFilter?.semester || activeAcademicPeriod?.semester || ''
+  const generatedId = useId().replace(/:/g, '')
+  const periodButtonId = `academic-period-button-${generatedId}`
+  const dialogTitleId = `academic-period-filter-title-${generatedId}`
+  const academicYearSelectId = `academic-period-year-${generatedId}`
   const isArchive =
     selectedYear !== (activeAcademicPeriod?.tahunAjaran || '') ||
     selectedSemester !== (activeAcademicPeriod?.semester || '')
@@ -95,10 +99,11 @@ export default function AcademicPeriodArchiveFilter({
   return (
     <>
       <div className={className}>
-        <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">
+        <div className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">
           {title}
-        </label>
+        </div>
         <button
+          id={periodButtonId}
           type="button"
           onClick={handleOpen}
           disabled={disabled}
@@ -140,7 +145,7 @@ export default function AcademicPeriodArchiveFilter({
             className="relative w-full max-h-[92vh] overflow-hidden rounded-t-3xl border border-slate-200 bg-white shadow-2xl sm:max-w-lg sm:rounded-2xl"
             role="dialog"
             aria-modal="true"
-            aria-labelledby="academic-period-filter-title"
+            aria-labelledby={dialogTitleId}
           >
             <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4">
               <div className="flex items-start gap-3">
@@ -148,7 +153,7 @@ export default function AcademicPeriodArchiveFilter({
                   <CalendarDays className="h-5 w-5" />
                 </div>
                 <div>
-                  <h3 id="academic-period-filter-title" className="text-base font-extrabold text-slate-900">
+                  <h3 id={dialogTitleId} className="text-base font-extrabold text-slate-900">
                     {title}
                   </h3>
                   <p className="mt-1 text-xs leading-5 text-slate-500">
@@ -189,10 +194,12 @@ export default function AcademicPeriodArchiveFilter({
 
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
-                    <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">
+                    <label htmlFor={academicYearSelectId} className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">
                       Tahun Ajaran
                     </label>
                     <select
+                      id={academicYearSelectId}
+                      name="tahun_ajaran"
                       className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-900 shadow-sm outline-none transition-all focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
                       value={draft.tahunAjaran}
                       onChange={(event) => setDraft((current) => ({
@@ -209,9 +216,9 @@ export default function AcademicPeriodArchiveFilter({
                   </div>
 
                   <div>
-                    <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">
+                    <div className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">
                       Semester
-                    </label>
+                    </div>
                     <div className="grid grid-cols-2 gap-2">
                       {normalizedSemesterOptions.map((option) => {
                         const selected = draft.semester === option.value

@@ -29,10 +29,24 @@ const cleanAcceptString = (accept) => {
   return cleaned || undefined;
 };
 
-const FileDropzone = ({ onFiles, onFileSelected, accept, maxSize, multiple = false, label = 'Drop file di sini', disabled = false, className = '' }) => {
+const FileDropzone = ({
+  onFiles,
+  onFileSelected,
+  accept,
+  maxSize,
+  multiple = false,
+  label = 'Drop file di sini',
+  disabled = false,
+  className = '',
+  id,
+  name = 'file_upload',
+  ariaLabel,
+}) => {
   
   // String untuk ditampilkan di UI (teks "Format: ...")
   const displayAccept = cleanAcceptString(accept);
+  const generatedId = React.useId();
+  const inputId = id || `file-dropzone-${generatedId.replace(/:/g, '')}`;
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     // FIX: Jika accept object, kirim langsung. Jika string, kirim hasil cleaning.
@@ -55,7 +69,9 @@ const FileDropzone = ({ onFiles, onFileSelected, accept, maxSize, multiple = fal
 
   return (
     <div
-      {...getRootProps()}
+      {...getRootProps({
+        'aria-label': ariaLabel || label,
+      })}
       className={`border-2 border-dashed rounded-xl p-6 text-center transition-colors ${
         disabled 
           ? 'bg-gray-100 border-gray-300 cursor-not-allowed opacity-60' 
@@ -64,7 +80,13 @@ const FileDropzone = ({ onFiles, onFileSelected, accept, maxSize, multiple = fal
             : 'border-slate-300 bg-slate-50 hover:bg-slate-100 cursor-pointer'
       } ${className}`}
     >
-      <input {...getInputProps()} />
+      <input
+        {...getInputProps({
+          id: inputId,
+          name,
+          'aria-label': ariaLabel || label,
+        })}
+      />
       <div className="space-y-2">
         <div className="text-3xl">📁</div>
         <p className="text-sm text-slate-600 font-medium">

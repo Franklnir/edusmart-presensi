@@ -1774,6 +1774,8 @@ export default function TugasGuru() {
                     <div className="mt-3 flex items-center gap-2">
                       <input
                         type="number"
+                        name={`nilai-${siswa.id}`}
+                        aria-label={`Nilai ${siswa.nama || 'siswa'}`}
                         min="0"
                         max="100"
                         inputMode="numeric"
@@ -1933,6 +1935,8 @@ export default function TugasGuru() {
                           <div className="flex items-center gap-2">
                             <input
                               type="number"
+                              name={`nilai-${siswa.id}`}
+                              aria-label={`Nilai ${siswa.nama || 'siswa'}`}
                               min="0"
                               max="100"
                               inputMode="numeric"
@@ -2070,8 +2074,10 @@ export default function TugasGuru() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">Kelas</label>
+              <label htmlFor="tugas-kelas" className="block text-sm font-semibold text-slate-700 mb-2">Kelas</label>
               <select
+                id="tugas-kelas"
+                name="kelas"
                 className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
                 value={kelas}
                 onChange={(e) => setKelas(e.target.value)}
@@ -2087,8 +2093,10 @@ export default function TugasGuru() {
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">Mata Pelajaran</label>
+              <label htmlFor="tugas-mapel" className="block text-sm font-semibold text-slate-700 mb-2">Mata Pelajaran</label>
               <select
+                id="tugas-mapel"
+                name="mapel"
                 className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white disabled:opacity-50 text-sm"
                 value={selectedMapel}
                 onChange={(e) => setSelectedMapel(e.target.value)}
@@ -2106,8 +2114,10 @@ export default function TugasGuru() {
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">Judul Tugas</label>
+              <label htmlFor="tugas-judul" className="block text-sm font-semibold text-slate-700 mb-2">Judul Tugas</label>
               <input
+                id="tugas-judul"
+                name="judul"
                 className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
                 value={form.judul}
                 onChange={(e) => setForm((prev) => ({ ...prev, judul: e.target.value }))}
@@ -2117,8 +2127,10 @@ export default function TugasGuru() {
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">Mulai</label>
+              <label htmlFor="tugas-mulai" className="block text-sm font-semibold text-slate-700 mb-2">Mulai</label>
               <input
+                id="tugas-mulai"
+                name="mulai"
                 type="datetime-local"
                 className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
                 value={form.mulai}
@@ -2128,8 +2140,10 @@ export default function TugasGuru() {
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">Deadline</label>
+              <label htmlFor="tugas-deadline" className="block text-sm font-semibold text-slate-700 mb-2">Deadline</label>
               <input
+                id="tugas-deadline"
+                name="deadline"
                 type="datetime-local"
                 className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
                 value={form.deadline}
@@ -2145,8 +2159,10 @@ export default function TugasGuru() {
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mt-4">
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">Keterangan Tugas</label>
+              <label htmlFor="tugas-keterangan" className="block text-sm font-semibold text-slate-700 mb-2">Keterangan Tugas</label>
               <textarea
+                id="tugas-keterangan"
+                name="keterangan"
                 rows="7"
                 className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white resize-none text-sm"
                 value={form.keterangan}
@@ -2156,8 +2172,10 @@ export default function TugasGuru() {
               />
 
               <div className="mt-4">
-                <label className="block text-sm font-semibold text-slate-700 mb-2">Link Referensi (opsional)</label>
+                <label htmlFor="tugas-link" className="block text-sm font-semibold text-slate-700 mb-2">Link Referensi (opsional)</label>
                 <input
+                  id="tugas-link"
+                  name="link"
                   className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
                   value={form.link}
                   onChange={(e) => setForm((prev) => ({ ...prev, link: e.target.value }))}
@@ -2170,7 +2188,7 @@ export default function TugasGuru() {
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">File Lampiran (opsional)</label>
+              <label htmlFor="tugas-lampiran" className="block text-sm font-semibold text-slate-700 mb-2">File Lampiran (opsional)</label>
 
               {isUploadingFile ? (
                 <UploadProgressTrain
@@ -2215,6 +2233,8 @@ export default function TugasGuru() {
                 </div>
               ) : (
                 <FileDropzone
+                  id="tugas-lampiran"
+                  name="lampiran"
                   onFiles={(files) => handleFileUpload(files, 'create')}
                   accept={ASSIGNMENT_FILE_ACCEPT}
                   label="Seret file lampiran ke sini atau klik untuk memilih"
@@ -2309,8 +2329,10 @@ export default function TugasGuru() {
 
               <div className="space-y-3">
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">Kelas</label>
+                  <label htmlFor="filter-tugas-kelas" className="block text-sm font-semibold text-slate-700 mb-2">Kelas</label>
                   <select
+                    id="filter-tugas-kelas"
+                    name="filter_kelas"
                     className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
                     value={selectedKelasFilter}
                     onChange={(e) => setSelectedKelasFilter(e.target.value)}
@@ -2325,8 +2347,10 @@ export default function TugasGuru() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">Mapel</label>
+                  <label htmlFor="filter-tugas-mapel" className="block text-sm font-semibold text-slate-700 mb-2">Mapel</label>
                   <select
+                    id="filter-tugas-mapel"
+                    name="filter_mapel"
                     className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm disabled:opacity-50"
                     value={selectedSubject}
                     onChange={(e) => setSelectedSubject(e.target.value)}
@@ -2342,8 +2366,10 @@ export default function TugasGuru() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">Status Deadline</label>
+                  <label htmlFor="filter-tugas-status" className="block text-sm font-semibold text-slate-700 mb-2">Status Deadline</label>
                   <select
+                    id="filter-tugas-status"
+                    name="filter_status"
                     className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
                     value={filterStatus}
                     onChange={(e) => setFilterStatus(e.target.value)}
@@ -2367,8 +2393,10 @@ export default function TugasGuru() {
                 />
 
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">Rentang Waktu</label>
+                  <label htmlFor="filter-tugas-rentang-waktu" className="block text-sm font-semibold text-slate-700 mb-2">Rentang Waktu</label>
                   <select
+                    id="filter-tugas-rentang-waktu"
+                    name="filter_rentang_waktu"
                     className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
                     value={timeRange}
                     onChange={(e) => setTimeRange(e.target.value)}
@@ -2385,10 +2413,14 @@ export default function TugasGuru() {
                     <div className="space-y-2 max-h-56 overflow-auto pr-1">
                       {monthOptions.map((m) => {
                         const checked = selectedMonths.includes(m.value)
+                        const monthInputId = `filter-bulan-${String(m.value).replace(/[^a-zA-Z0-9_-]/g, '-')}`
                         return (
-                          <label key={m.value} className="flex items-center gap-2 text-sm text-slate-700">
+                          <label key={m.value} htmlFor={monthInputId} className="flex items-center gap-2 text-sm text-slate-700">
                             <input
+                              id={monthInputId}
                               type="checkbox"
+                              name="filter_bulan"
+                              value={m.value}
                               checked={checked}
                               onChange={(e) => {
                                 const isOn = e.target.checked
@@ -2713,8 +2745,10 @@ export default function TugasGuru() {
                     <div className="space-y-5">
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div>
-                          <label className="block text-sm font-semibold text-slate-700 mb-2">Judul</label>
+                          <label htmlFor="edit-tugas-judul" className="block text-sm font-semibold text-slate-700 mb-2">Judul</label>
                           <input
+                            id="edit-tugas-judul"
+                            name="edit_judul"
                             className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
                             value={editForm.judul}
                             onChange={(e) => setEditForm((p) => ({ ...p, judul: e.target.value }))}
@@ -2723,8 +2757,10 @@ export default function TugasGuru() {
                         </div>
 
                         <div>
-                          <label className="block text-sm font-semibold text-slate-700 mb-2">Mulai</label>
+                          <label htmlFor="edit-tugas-mulai" className="block text-sm font-semibold text-slate-700 mb-2">Mulai</label>
                           <input
+                            id="edit-tugas-mulai"
+                            name="edit_mulai"
                             type="datetime-local"
                             className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
                             value={editForm.mulai}
@@ -2734,8 +2770,10 @@ export default function TugasGuru() {
                         </div>
 
                         <div>
-                          <label className="block text-sm font-semibold text-slate-700 mb-2">Deadline</label>
+                          <label htmlFor="edit-tugas-deadline" className="block text-sm font-semibold text-slate-700 mb-2">Deadline</label>
                           <input
+                            id="edit-tugas-deadline"
+                            name="edit_deadline"
                             type="datetime-local"
                             className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
                             value={editForm.deadline}
@@ -2745,8 +2783,10 @@ export default function TugasGuru() {
                         </div>
 
                         <div className="md:col-span-3">
-                          <label className="block text-sm font-semibold text-slate-700 mb-2">Keterangan</label>
+                          <label htmlFor="edit-tugas-keterangan" className="block text-sm font-semibold text-slate-700 mb-2">Keterangan</label>
                           <textarea
+                            id="edit-tugas-keterangan"
+                            name="edit_keterangan"
                             rows="7"
                             className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm resize-none"
                             value={editForm.keterangan}
@@ -2756,8 +2796,10 @@ export default function TugasGuru() {
                         </div>
 
                         <div className="md:col-span-3">
-                          <label className="block text-sm font-semibold text-slate-700 mb-2">Link Referensi (opsional)</label>
+                          <label htmlFor="edit-tugas-link" className="block text-sm font-semibold text-slate-700 mb-2">Link Referensi (opsional)</label>
                           <input
+                            id="edit-tugas-link"
+                            name="edit_link"
                             className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
                             value={editForm.link || ''}
                             onChange={(e) => setEditForm((p) => ({ ...p, link: e.target.value }))}
@@ -2798,6 +2840,8 @@ export default function TugasGuru() {
                           />
                         ) : (
                           <FileDropzone
+                            id="edit-tugas-lampiran"
+                            name="edit_lampiran"
                             onFiles={handleEditFileUpload}
                             accept={ASSIGNMENT_FILE_ACCEPT}
                             label={editForm.file_url ? 'Ganti file lampiran (opsional)' : 'Seret file lampiran baru ke sini atau klik untuk memilih'}
