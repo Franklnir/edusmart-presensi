@@ -452,7 +452,7 @@ function MiniCard({ title, value, icon, cls }) {
 ========================= */
 export default function TugasSiswa() {
   const { user, profile } = useAuthStore()
-  const { pushToast, setLoading } = useUIStore()
+  const { loading, pushToast, setLoading } = useUIStore()
   const {
     activeAcademicPeriod,
     period,

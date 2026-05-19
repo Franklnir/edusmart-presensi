@@ -1644,6 +1644,138 @@ export default function TugasGuru() {
     )
   }
 
+  const fileDisplayName = (value = '', fallback = 'Lampiran') => {
+    const raw = String(value || '').split('?')[0].trim()
+    const lastSegment = raw.split('/').filter(Boolean).pop()
+    if (!lastSegment) return fallback
+
+    try {
+      return decodeURIComponent(lastSegment).replace(/^[a-f0-9-]{12,}-/i, '') || fallback
+    } catch {
+      return lastSegment || fallback
+    }
+  }
+
+  const getSubmissionAssets = (jawaban) => {
+    if (!jawaban) {
+      return {
+        photos: [],
+        attachments: [],
+        link: '',
+        comment: ''
+      }
+    }
+
+    const files = parseAssignmentFileList(jawaban.file_urls, jawaban.file_url)
+    const photos = files.filter(isImageLikeFile).slice(0, MAX_ASSIGNMENT_PHOTOS)
+    const attachments = files.filter((item) => !isImageLikeFile(item))
+
+    return {
+      photos,
+      attachments,
+      link: String(jawaban.link_url || '').trim(),
+      comment: String(jawaban.komentar_siswa || '').trim()
+    }
+  }
+
+  const renderSubmissionViewer = (siswa, jawaban, options = {}) => {
+    const { compact = false } = options
+    const assets = getSubmissionAssets(jawaban)
+    const hasAnswer =
+      assets.photos.length > 0 ||
+      assets.attachments.length > 0 ||
+      hasUsableValue(assets.link) ||
+      hasUsableValue(assets.comment)
+
+    if (!hasAnswer) {
+      return (
+        <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-500">
+          Tidak ada file, foto, link, atau komentar.
+        </div>
+      )
+    }
+
+    const containerClass = compact
+      ? 'grid min-w-[260px] grid-cols-1 gap-2 xl:grid-cols-2'
+      : 'grid grid-cols-1 gap-2 sm:grid-cols-2'
+    const actionClass =
+      'group flex min-h-[58px] items-center gap-3 rounded-xl border px-3 py-2 text-left transition-all hover:-translate-y-0.5 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
+    const iconClass = 'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-base'
+    const textClass = 'min-w-0 flex-1'
+    const titleClass = 'truncate text-xs font-extrabold text-slate-900'
+    const descClass = 'mt-0.5 truncate text-[11px] font-medium text-slate-500'
+
+    return (
+      <div className={containerClass}>
+        {assets.photos.length > 0 && (
+          <button
+            type="button"
+            onClick={() => openPhotoGallery(assets.photos, 0, `Foto jawaban ${siswa.nama || 'Siswa'}`)}
+            className={`${actionClass} border-emerald-200 bg-emerald-50 hover:border-emerald-300 hover:bg-emerald-100`}
+          >
+            <span className={`${iconClass} bg-emerald-100 text-emerald-700`}>🖼️</span>
+            <span className={textClass}>
+              <span className={titleClass}>Foto jawaban</span>
+              <span className={descClass}>{assets.photos.length} foto • buka galeri</span>
+            </span>
+          </button>
+        )}
+
+        {assets.attachments.map((attachment, index) => (
+          <button
+            key={`${attachment}-${index}`}
+            type="button"
+            onClick={() => openPreviewAny(attachment, 'Gagal membuka lampiran jawaban')}
+            className={`${actionClass} border-blue-200 bg-blue-50 hover:border-blue-300 hover:bg-blue-100`}
+          >
+            <span className={`${iconClass} bg-blue-100 text-blue-700`}>📄</span>
+            <span className={textClass}>
+              <span className={titleClass}>
+                {assets.attachments.length > 1 ? `Lampiran ${index + 1}` : 'Lampiran'}
+              </span>
+              <span className={descClass}>{fileDisplayName(attachment, 'Preview file')}</span>
+            </span>
+          </button>
+        ))}
+
+        {hasUsableValue(assets.link) && (
+          <button
+            type="button"
+            onClick={() => openPreviewAny(assets.link, 'Gagal membuka link jawaban')}
+            className={`${actionClass} border-purple-200 bg-purple-50 hover:border-purple-300 hover:bg-purple-100`}
+          >
+            <span className={`${iconClass} bg-purple-100 text-purple-700`}>🔗</span>
+            <span className={textClass}>
+              <span className={titleClass}>Link jawaban</span>
+              <span className={descClass}>{assets.link}</span>
+            </span>
+          </button>
+        )}
+
+        {hasUsableValue(assets.comment) && (
+          <button
+            type="button"
+            onClick={() => setStudentCommentPreview({
+              siswa: siswa.nama || jawaban?.nama || 'Siswa',
+              kelas: siswa.kelas || '',
+              waktu: jawaban?.waktu_submit || '',
+              komentar: assets.comment
+            })}
+            className={`${actionClass} border-amber-200 bg-amber-50 hover:border-amber-300 hover:bg-amber-100`}
+          >
+            <span className={`${iconClass} bg-amber-100 text-amber-800`}>
+              <MessageSquare className="h-4 w-4" />
+            </span>
+            <span className={textClass}>
+              <span className={titleClass}>Komentar siswa</span>
+              <span className={descClass}>{assets.comment}</span>
+            </span>
+          </button>
+        )}
+      </div>
+    )
+  }
+
   const renderTabelSiswa = (siswaList, type) => {
     const typeInfo = (() => {
       switch (type) {
@@ -1697,10 +1829,6 @@ export default function TugasGuru() {
           <div className="space-y-3 md:hidden">
             {siswaList.map((siswa) => {
               const jawaban = siswa.jawaban
-              const photoValues = parseAssignmentFileList(jawaban?.file_urls, jawaban?.file_url)
-                .filter(isImageLikeFile)
-                .slice(0, MAX_ASSIGNMENT_PHOTOS)
-              const studentComment = String(jawaban?.komentar_siswa || '').trim()
 
               return (
                 <div key={siswa.id} className="rounded-xl border border-white/70 bg-white p-3 shadow-sm">
@@ -1721,52 +1849,8 @@ export default function TugasGuru() {
                   </div>
 
                   {type !== 'belum' && (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {photoValues.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => openPhotoGallery(photoValues, 0, `Galeri ${siswa.nama || 'Siswa'}`)}
-                          className="rounded-lg bg-emerald-100 px-2.5 py-1.5 text-xs font-semibold text-emerald-700"
-                        >
-                          Galeri ({photoValues.length})
-                        </button>
-                      )}
-                      {jawaban?.file_url && (
-                        <button
-                          type="button"
-                          onClick={() => openPreviewAny(jawaban.file_url, 'Gagal membuka file jawaban')}
-                          className="rounded-lg bg-blue-100 px-2.5 py-1.5 text-xs font-semibold text-blue-700"
-                        >
-                          File
-                        </button>
-                      )}
-                      {jawaban?.link_url && (
-                        <button
-                          type="button"
-                          onClick={() => setPreviewFile(jawaban.link_url)}
-                          className="rounded-lg bg-purple-100 px-2.5 py-1.5 text-xs font-semibold text-purple-700"
-                        >
-                          Link
-                        </button>
-                      )}
-                      {studentComment && (
-                        <button
-                          type="button"
-                          onClick={() => setStudentCommentPreview({
-                            siswa: siswa.nama || jawaban?.nama || 'Siswa',
-                            kelas: siswa.kelas || '',
-                            waktu: jawaban?.waktu_submit || '',
-                            komentar: studentComment
-                          })}
-                          className="inline-flex items-center gap-1 rounded-lg bg-amber-100 px-2.5 py-1.5 text-xs font-semibold text-amber-800"
-                        >
-                          <MessageSquare className="h-3.5 w-3.5" />
-                          Komentar
-                        </button>
-                      )}
-                      {!jawaban?.file_url && !jawaban?.link_url && !studentComment && (
-                        <span className="text-xs text-slate-500">Tidak ada jawaban file/link.</span>
-                      )}
+                    <div className="mt-3">
+                      {renderSubmissionViewer(siswa, jawaban)}
                     </div>
                   )}
 
@@ -1827,10 +1911,6 @@ export default function TugasGuru() {
               <tbody>
                 {siswaList.map((siswa) => {
                   const jawaban = siswa.jawaban
-                  const photoValues = parseAssignmentFileList(jawaban?.file_urls, jawaban?.file_url)
-                    .filter(isImageLikeFile)
-                    .slice(0, MAX_ASSIGNMENT_PHOTOS)
-                  const studentComment = String(jawaban?.komentar_siswa || '').trim()
                   return (
                     <tr key={siswa.id} className="border-b border-slate-100 hover:bg-white/60 transition-colors">
                       <td className="py-3 px-2">
@@ -1847,62 +1927,7 @@ export default function TugasGuru() {
                         {type === 'belum' ? (
                           <span className="text-xs text-slate-500">-</span>
                         ) : (
-                          <div className="flex flex-wrap gap-2">
-                            {photoValues.length > 0 && (
-                              <button
-                                type="button"
-                                onClick={() => openPhotoGallery(photoValues, 0, `Galeri ${siswa.nama || 'Siswa'}`)}
-                                className="inline-flex items-center gap-1 px-2 py-1 bg-emerald-100 text-emerald-700 rounded-lg text-xs hover:bg-emerald-200 transition-colors"
-                              >
-                                Galeri ({photoValues.length})
-                              </button>
-                            )}
-                            {jawaban?.file_url && (
-                              <button
-                                type="button"
-                                onClick={async () => {
-                                  try {
-                                    const signed = await createSignedUrlForAssignment(jawaban.file_url, 60 * 30)
-                                    setPreviewFile(signed)
-                                  } catch (e) {
-                                    console.error(e)
-                                    const parsed = parseSupabaseError(e)
-                                    pushToast('error', `Gagal membuka file jawaban: ${parsed.message}`)
-                                  }
-                                }}
-                                className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-700 rounded-lg text-xs hover:bg-blue-200 transition-colors"
-                              >
-                                File
-                              </button>
-                            )}
-                            {jawaban?.link_url && (
-                              <button
-                                type="button"
-                                onClick={() => setPreviewFile(jawaban.link_url)}
-                                className="inline-flex items-center gap-1 px-2 py-1 bg-purple-100 text-purple-700 rounded-lg text-xs hover:bg-purple-200 transition-colors"
-                              >
-                                Link
-                              </button>
-                            )}
-                            {studentComment && (
-                              <button
-                                type="button"
-                                onClick={() => setStudentCommentPreview({
-                                  siswa: siswa.nama || jawaban?.nama || 'Siswa',
-                                  kelas: siswa.kelas || '',
-                                  waktu: jawaban?.waktu_submit || '',
-                                  komentar: studentComment
-                                })}
-                                className="inline-flex items-center gap-1 px-2 py-1 bg-amber-100 text-amber-800 rounded-lg text-xs font-semibold hover:bg-amber-200 transition-colors"
-                              >
-                                <MessageSquare className="h-3.5 w-3.5" />
-                                Komentar
-                              </button>
-                            )}
-                            {!jawaban?.file_url && !jawaban?.link_url && !studentComment && (
-                              <span className="text-xs text-slate-500">-</span>
-                            )}
-                          </div>
+                          renderSubmissionViewer(siswa, jawaban, { compact: true })
                         )}
                       </td>
 
