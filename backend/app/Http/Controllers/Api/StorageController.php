@@ -128,6 +128,7 @@ class StorageController extends ApiController
         $file = $request->file('file');
         $upsert = filter_var($request->input('upsert', false), FILTER_VALIDATE_BOOLEAN);
         $fastLocal = filter_var($request->input('fast_local', false), FILTER_VALIDATE_BOOLEAN);
+        $objectStorageRelayError = null;
 
         if (! $bucket || ! $path || ! $file) {
             return $this->deny('Bucket, path, dan file wajib diisi', 422);
@@ -183,6 +184,14 @@ class StorageController extends ApiController
             return $imageRuleError;
         }
 
+        if ($fastLocal && $this->objectStorageEnabledForBucket($bucket)) {
+            try {
+                return $this->uploadObjectStorageViaServer($request, $bucket, $path, $file);
+            } catch (\Throwable $e) {
+                $objectStorageRelayError = $e->getMessage();
+            }
+        }
+
         if (! $fastLocal) {
             try {
                 $driveUpload = $this->googleDriveService->uploadStorageFileIfAvailable(
@@ -234,6 +243,10 @@ class StorageController extends ApiController
             'mime_type' => $file->getMimeType() ?: $file->getClientMimeType(),
             'extension' => $this->normalizeExtension($file),
             'size_bytes' => $uploadedSizeBytes,
+            'metadata' => array_filter([
+                'object_storage_relay_failed' => $objectStorageRelayError !== null,
+                'object_storage_relay_error' => $objectStorageRelayError,
+            ]),
         ]);
 
         return response()->json([
@@ -245,6 +258,74 @@ class StorageController extends ApiController
                 'providerLabel' => 'VPS',
                 'uploadedSizeBytes' => $uploadedSizeBytes,
                 'uploadedSizeLabel' => $this->formatBytes($uploadedSizeBytes),
+                'fallbackReason' => $objectStorageRelayError ? 'object_storage_relay_failed' : null,
+            ],
+        ]);
+    }
+
+    private function uploadObjectStorageViaServer(
+        Request $request,
+        string $bucket,
+        string $path,
+        UploadedFile $file
+    ): JsonResponse {
+        $fileName = $file->getClientOriginalName() ?: basename($path);
+        $mime = $this->resolveMetadataMime(
+            $fileName,
+            $file->getMimeType() ?: $file->getClientMimeType() ?: ''
+        );
+        $objectKey = $this->buildStoragePath($bucket, $path);
+        $uploadedSizeBytes = (int) ($file->getSize() ?: 0);
+
+        $putResult = $this->objectStorageSigner->putObjectFromFile(
+            $objectKey,
+            $file->getRealPath(),
+            $mime,
+            $bucket
+        );
+
+        $verification = $this->objectStorageSigner->verifyUploadedObject(
+            $objectKey,
+            $uploadedSizeBytes,
+            $bucket
+        );
+
+        if (($verification['verified'] ?? false) && ! ($verification['exists'] ?? false)) {
+            throw new \RuntimeException('File object storage belum ditemukan setelah upload server-side.');
+        }
+
+        if (($verification['verified'] ?? false) && ! ($verification['size_matches'] ?? true)) {
+            throw new \RuntimeException('Ukuran file object storage tidak sesuai setelah upload server-side.');
+        }
+
+        $this->storageManagementService->registerUploadedFile($request, [
+            'bucket' => $bucket,
+            'path' => $path,
+            'provider' => 'object_storage',
+            'file_name' => $fileName,
+            'mime_type' => $mime,
+            'extension' => $this->normalizeExtension($file),
+            'size_bytes' => $uploadedSizeBytes,
+            'metadata' => [
+                'server_relay' => true,
+                'object_key' => $objectKey,
+                'etag' => $putResult['etag'] ?? null,
+                'verified' => (bool) ($verification['verified'] ?? false),
+                'verified_size_bytes' => $verification['size_bytes'] ?? null,
+            ],
+        ]);
+
+        return response()->json([
+            'data' => [
+                'path' => $path,
+                'fullPath' => $path,
+                'bucket' => $bucket,
+                'objectKey' => $objectKey,
+                'provider' => 'object_storage',
+                'providerLabel' => $this->objectStorageSigner->label(),
+                'uploadedSizeBytes' => $uploadedSizeBytes,
+                'uploadedSizeLabel' => $this->formatBytes($uploadedSizeBytes),
+                'serverRelay' => true,
             ],
         ]);
     }

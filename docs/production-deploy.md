@@ -249,10 +249,11 @@ Env lama `ASSIGNMENT_DIRECT_UPLOAD_*` masih didukung untuk kompatibilitas, tetap
 Bucket harus private dan CORS bucket perlu mengizinkan domain sekolah:
 
 - Method: `PUT`, `GET`, `HEAD`
-- Header: `Content-Type`
-- Origin: `https://edusmart.example.com` dan subdomain tenant yang dipakai
+- Header: `Content-Type` atau `*`
+- Origin: root domain dan subdomain tenant yang dipakai, misalnya `https://sismu.biz.id`, `https://admin26.sismu.biz.id`, dan `https://*.sismu.biz.id`
+- Expose header: `ETag`, `Content-Length`
 
-Jika env ini belum aktif atau bucket belum siap, upload otomatis fallback ke VPS/Google Drive sesuai fitur yang dipakai.
+Jika bucket CORS belum siap, browser akan menolak preflight `OPTIONS` ke Nevaobjects. Aplikasi tetap menyediakan fallback aman lewat backend: file dikirim ke API terlebih dahulu, lalu backend meneruskan ke object storage jika konfigurasi S3 aktif. Jalur tercepat tetap signed direct upload, jadi CORS bucket tetap perlu dibereskan untuk performa terbaik saat banyak siswa upload bersamaan.
 
 ## 3.3 Konfigurasi RFID MQTT Bridge
 

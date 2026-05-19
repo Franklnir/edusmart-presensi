@@ -165,6 +165,76 @@ class StorageSecurityTest extends TestCase
         $this->assertStringContainsString('/quiz-media/private/quiz-media/quiz-media/'.$guru->id.'/', $uploadUrl);
     }
 
+    public function test_api_upload_relays_to_object_storage_when_direct_upload_needs_backend_fallback(): void
+    {
+        Storage::fake('local');
+        config([
+            'services.object_storage.enabled' => true,
+            'services.object_storage.label' => 'Nevaobjects S3',
+            'services.object_storage.key' => 'test-access-key',
+            'services.object_storage.secret' => 'test-secret-key',
+            'services.object_storage.region' => 'us-east-1',
+            'services.object_storage.bucket' => '',
+            'services.object_storage.bucket_map' => [
+                'assignments' => 'assignments',
+            ],
+            'services.object_storage.endpoint' => 'https://s3.nevaobjects.id',
+            'services.object_storage.use_path_style_endpoint' => true,
+            'services.object_storage.verify_uploads' => true,
+            'services.object_storage.direct_upload_buckets' => ['assignments'],
+        ]);
+
+        $tenantId = $this->defaultTenantId();
+        [$user] = $this->createUserWithProfile($tenantId, 'siswa', 'X-1');
+        Sanctum::actingAs($user);
+
+        $expectedBytes = 512 * 1024;
+        $putSeen = false;
+        $headSeen = false;
+        Http::fake(function ($request) use (&$putSeen, &$headSeen, $expectedBytes, $user) {
+            if ($request->method() === 'PUT') {
+                $putSeen = true;
+                $this->assertStringContainsString(
+                    '/assignments/private/assignments/X-1/'.$user->id.'-jawaban.pdf',
+                    $request->url()
+                );
+
+                return Http::response('', 200, ['ETag' => '"object-etag"']);
+            }
+
+            if ($request->method() === 'HEAD') {
+                $headSeen = true;
+
+                return Http::response('', 200, ['Content-Length' => (string) $expectedBytes]);
+            }
+
+            return Http::response('Unexpected storage request', 500);
+        });
+
+        $path = 'X-1/'.$user->id.'-jawaban.pdf';
+        $response = $this->post('/api/storage/upload', [
+            'bucket' => 'assignments',
+            'path' => $path,
+            'fast_local' => 'true',
+            'file' => UploadedFile::fake()->create('jawaban.pdf', 512, 'application/pdf'),
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('data.provider', 'object_storage');
+        $response->assertJsonPath('data.providerLabel', 'Nevaobjects S3');
+        $response->assertJsonPath('data.serverRelay', true);
+        $this->assertTrue($putSeen, 'Server-side object storage PUT tidak terpanggil.');
+        $this->assertTrue($headSeen, 'Verifikasi HEAD object storage tidak terpanggil.');
+        Storage::disk('local')->assertMissing('private/assignments/'.$path);
+        $this->assertDatabaseHas('storage_files', [
+            'tenant_id' => $tenantId,
+            'bucket' => 'assignments',
+            'path' => $path,
+            'provider' => 'object_storage',
+            'size_bytes' => $expectedBytes,
+        ]);
+    }
+
     public function test_confirm_direct_upload_rejects_missing_object_storage_file(): void
     {
         config([

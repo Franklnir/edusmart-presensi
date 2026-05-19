@@ -493,6 +493,52 @@ const DIRECT_UPLOAD_BUCKETS = new Set([
   CERT_TEMPLATE_BUCKET,
   'sertifikat-templates'
 ])
+const DIRECT_UPLOAD_COOLDOWN_MS = 10 * 60 * 1000
+const DIRECT_UPLOAD_COOLDOWN_PREFIX = 'edusmart:direct-upload-cooldown:'
+
+const directUploadCooldownKey = (bucket) => {
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'server'
+  return `${DIRECT_UPLOAD_COOLDOWN_PREFIX}${encodeURIComponent(origin)}:${bucket}`
+}
+
+const directUploadCooldownUntil = (bucket) => {
+  if (typeof window === 'undefined') return 0
+  try {
+    return Number(window.sessionStorage.getItem(directUploadCooldownKey(bucket)) || 0)
+  } catch {
+    return 0
+  }
+}
+
+const isDirectUploadCoolingDown = (bucket) => {
+  const until = directUploadCooldownUntil(bucket)
+  return Number.isFinite(until) && until > Date.now()
+}
+
+const markDirectUploadCooldown = (bucket) => {
+  if (typeof window === 'undefined') return
+  try {
+    window.sessionStorage.setItem(
+      directUploadCooldownKey(bucket),
+      String(Date.now() + DIRECT_UPLOAD_COOLDOWN_MS)
+    )
+  } catch {
+    // Jika sessionStorage diblokir, fallback upload tetap berjalan tanpa cache cooldown.
+  }
+}
+
+const clearDirectUploadCooldown = (bucket) => {
+  if (typeof window === 'undefined') return
+  try {
+    window.sessionStorage.removeItem(directUploadCooldownKey(bucket))
+  } catch {
+    // no-op
+  }
+}
+
+const shouldCooldownDirectUploadError = (error) => (
+  error?.code === 'DIRECT_UPLOAD_NETWORK_ERROR'
+)
 
 const PROFILE_IMAGE_MAX_BYTES = 50 * 1024
 const ASSIGNMENT_IMAGE_MAX_BYTES = 680 * 1024
@@ -1621,13 +1667,19 @@ class StorageBucket {
       }
     }
 
-    if (DIRECT_UPLOAD_BUCKETS.has(this.bucket) && !options?.fastLocal && options?.skipDirectUpload !== true) {
+    if (
+      DIRECT_UPLOAD_BUCKETS.has(this.bucket) &&
+      !options?.fastLocal &&
+      options?.skipDirectUpload !== true &&
+      !isDirectUploadCoolingDown(this.bucket)
+    ) {
       const direct = await this.directUpload(path, uploadFile, {
         ...options,
         originalFile: file
       })
 
       if (direct?.attempted && !direct.error) {
+        clearDirectUploadCooldown(this.bucket)
         return { data: direct.data, error: null }
       }
 
@@ -1636,6 +1688,9 @@ class StorageBucket {
       }
 
       if (direct?.attempted && direct.error && direct.canFallback) {
+        if (shouldCooldownDirectUploadError(direct.error)) {
+          markDirectUploadCooldown(this.bucket)
+        }
         console.warn('Direct storage upload gagal, fallback ke upload API:', direct.error)
       }
     }

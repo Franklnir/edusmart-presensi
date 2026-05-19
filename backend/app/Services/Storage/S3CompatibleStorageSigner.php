@@ -107,6 +107,42 @@ class S3CompatibleStorageSigner
         return $response->successful() || $response->status() === 404;
     }
 
+    public function putObjectFromFile(string $objectKey, string $sourcePath, string $contentType, ?string $logicalBucket = null): array
+    {
+        if (! is_readable($sourcePath)) {
+            throw new \RuntimeException('File sumber upload tidak bisa dibaca.');
+        }
+
+        $contentType = trim($contentType) !== '' ? trim($contentType) : 'application/octet-stream';
+        $signed = $this->presignPut($objectKey, $contentType, $this->expiresSeconds(), $logicalBucket);
+        $stream = fopen($sourcePath, 'rb');
+        if (! is_resource($stream)) {
+            throw new \RuntimeException('Stream file upload tidak bisa dibuka.');
+        }
+
+        try {
+            $response = Http::withHeaders($signed['headers'])
+                ->timeout(120)
+                ->connectTimeout(10)
+                ->withOptions(['body' => $stream])
+                ->send($signed['method'], $signed['url']);
+        } finally {
+            if (is_resource($stream)) {
+                fclose($stream);
+            }
+        }
+
+        if (! $response->successful()) {
+            throw new \RuntimeException('Object storage menolak upload server-side (HTTP '.$response->status().').');
+        }
+
+        return [
+            'status' => $response->status(),
+            'etag' => $response->header('ETag'),
+            'object_key' => $objectKey,
+        ];
+    }
+
     private function presign(
         string $method,
         string $objectKey,

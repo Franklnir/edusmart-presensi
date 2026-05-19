@@ -1512,13 +1512,15 @@ export default function TugasSiswa() {
         <div className="fixed left-1/2 top-6 z-[80] w-[calc(100%-2rem)] max-w-md -translate-x-1/2">
           <div
             key={uploadSuccessNotice.id}
-            className="relative overflow-hidden rounded-2xl border border-emerald-200 bg-white px-4 py-3 shadow-2xl shadow-emerald-900/10"
+            className="assignment-success-toast relative overflow-hidden rounded-2xl border border-emerald-200 bg-white px-4 py-3 shadow-2xl shadow-emerald-900/10"
+            role="status"
+            aria-live="polite"
           >
             <div className="absolute left-0 top-0 h-1 w-full bg-emerald-500" />
             <div className="flex items-center gap-3">
-              <div className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-300 opacity-30" />
-                <CheckCircle2 className="relative h-6 w-6 animate-bounce" />
+              <div className="assignment-success-toast__mark relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+                <span className="assignment-success-toast__pulse absolute inline-flex h-full w-full rounded-full bg-emerald-300 opacity-30" />
+                <CheckCircle2 className="assignment-success-toast__icon relative h-6 w-6" />
               </div>
               <div className="min-w-0">
                 <div className="text-sm font-extrabold text-emerald-900">{uploadSuccessNotice.title}</div>
