@@ -37,6 +37,17 @@ const CLEANUP_CATEGORIES = [
   { value: 'lampiran', label: 'Lampiran tugas' }
 ]
 
+const CLEANUP_PROVIDER_OPTIONS = [
+  { value: 'local', label: 'VPS Storage' },
+  { value: 'object_storage', label: 'Neva Cloud S3' }
+]
+
+const CLEANUP_BUCKET_OPTIONS = [
+  { value: '', label: 'Pilih bucket storage' },
+  { value: 'assignments', label: 'Tugas / Assignments' },
+  { value: 'quiz-media', label: 'Media Quiz' }
+]
+
 const CLEANUP_AGE_OPTIONS = [
   { value: '90', label: 'Minimal 3 bulan' },
   { value: '180', label: 'Lebih dari 180 hari' },
@@ -157,6 +168,8 @@ function StorageManager() {
   const [storageFilters, setStorageFilters] = useState({ tahun_ajaran: '', semester: '', category: '' })
   const [storageFilterDraft, setStorageFilterDraft] = useState({ tahun_ajaran: '', semester: '', category: '' })
   const [cleanupForm, setCleanupForm] = useState({
+    provider: 'local',
+    bucket: '',
     tahun_ajaran: '',
     semester: '',
     category: '',
@@ -166,6 +179,7 @@ function StorageManager() {
   const [cleanupPreview, setCleanupPreview] = useState(null)
   const [savingQuota, setSavingQuota] = useState(false)
   const [cleanupLoading, setCleanupLoading] = useState(false)
+  const [syncingObjectStorage, setSyncingObjectStorage] = useState(false)
   const [restoringTrashId, setRestoringTrashId] = useState('')
   const [purgingTrash, setPurgingTrash] = useState(false)
 
@@ -200,10 +214,48 @@ function StorageManager() {
   const nevaBucketMap = nevaPlatform?.bucket_map && typeof nevaPlatform.bucket_map === 'object'
     ? nevaPlatform.bucket_map
     : {}
+  const activeBucketRows = Array.isArray(activeProviderSummary?.bucket_usage) ? activeProviderSummary.bucket_usage : []
+  const nevaBucketUsage = Array.isArray(nevaSummary?.bucket_usage) ? nevaSummary.bucket_usage : []
+  const nevaBucketSnapshots = Array.isArray(nevaPlatform?.bucket_snapshots) ? nevaPlatform.bucket_snapshots : []
 
   const tenants = useMemo(() => (
     Array.isArray(superSummary?.tenants) ? superSummary.tenants : []
   ), [superSummary])
+  const nevaBucketSnapshotMap = useMemo(() => new Map(
+    nevaBucketSnapshots.map((item) => [item.logical_bucket, item])
+  ), [nevaBucketSnapshots])
+  const nevaBucketRows = useMemo(() => {
+    const usageRows = nevaBucketUsage.length > 0
+      ? nevaBucketUsage
+      : Object.keys(nevaBucketMap).map((bucket) => ({
+        bucket,
+        label: NEVA_BUCKET_LABELS[bucket] || bucket,
+        bytes: 0,
+        bytes_label: '0 B',
+        files: 0,
+        quota_label: nevaQuota?.quota_label || 'Tidak dibatasi',
+        remaining_after_bucket_label: nevaQuota?.quota_label || 'Tidak dibatasi',
+        remaining_after_provider_label: nevaQuota?.remaining_label || 'Tidak dibatasi',
+        percent: null
+      }))
+
+    return usageRows.map((row) => {
+      const snapshot = nevaBucketSnapshotMap.get(row.bucket) || {}
+      return {
+        ...row,
+        physical_bucket: nevaBucketMap[row.bucket] || snapshot.physical_bucket || row.bucket,
+        snapshot_total_label: snapshot.total_label || null,
+        snapshot_untracked_label: snapshot.untracked_label || null,
+        snapshot_scanned_at: snapshot.scanned_at || null
+      }
+    })
+  }, [
+    nevaBucketMap,
+    nevaBucketSnapshotMap,
+    nevaBucketUsage,
+    nevaQuota?.quota_label,
+    nevaQuota?.remaining_label
+  ])
   const selectedTenant = tenants.find((tenant) => tenant.id === selectedTenantId)
   const selectedTenantName = selectedTenant?.name || tenantDetail?.tenant?.name || 'Sekolah dipilih'
   const activePeriod = activeSummary?.active_period || {}
@@ -249,6 +301,8 @@ function StorageManager() {
   const cleanupPeriodValue = periodValue(cleanupForm.tahun_ajaran, cleanupForm.semester)
   const cleanupPeriodIsAllowed = safeCleanupPeriodOptions.some((item) => item.value === cleanupPeriodValue)
   const cleanupHasRequiredPeriod = Boolean(cleanupPeriodValue && cleanupPeriodIsAllowed)
+  const cleanupHasProviderBucket = Boolean(cleanupForm.provider && cleanupForm.bucket)
+  const cleanupReady = cleanupHasRequiredPeriod && cleanupHasProviderBucket
 
   const loadAdminSummary = async (filters = storageFilters) => {
     const { data, error } = await supabase.admin.storageManager(filters)
@@ -342,6 +396,14 @@ function StorageManager() {
   }, [activeTab, selectedTenantId])
 
   useEffect(() => {
+    setCleanupPreview(null)
+    setCleanupForm((prev) => ({
+      ...prev,
+      provider: activeTab === 'neva' ? 'object_storage' : 'local'
+    }))
+  }, [activeTab])
+
+  useEffect(() => {
     if (!isSuperAdmin || !selectedTenantId) return
     let alive = true
     fetchTenantDetail(selectedTenantId, storageFilters)
@@ -354,6 +416,10 @@ function StorageManager() {
   }, [isSuperAdmin, selectedTenantId, pushToast])
 
   const handlePreviewCleanup = async () => {
+    if (!cleanupHasProviderBucket) {
+      pushToast('warning', 'Pilih provider dan bucket storage terlebih dahulu.')
+      return
+    }
     if (!cleanupHasRequiredPeriod) {
       pushToast('warning', 'Pilih tahun ajaran dan semester yang sudah lewat minimal 1 semester dulu.')
       return
@@ -375,6 +441,10 @@ function StorageManager() {
   }
 
   const handleExecuteCleanup = async () => {
+    if (!cleanupHasProviderBucket) {
+      pushToast('warning', 'Cleanup wajib memilih provider dan bucket storage.')
+      return
+    }
     if (!cleanupHasRequiredPeriod) {
       pushToast('warning', 'Cleanup wajib memakai tahun ajaran dan semester yang sudah lewat minimal 1 semester.')
       return
@@ -401,6 +471,35 @@ function StorageManager() {
       pushToast('error', error?.message || 'Cleanup gagal')
     } finally {
       setCleanupLoading(false)
+    }
+  }
+
+  const handleSyncObjectStorage = async () => {
+    setSyncingObjectStorage(true)
+    try {
+      const payload = {
+        bucket: cleanupForm.bucket || '',
+        max_pages: isSuperAdmin ? 10 : 5
+      }
+      const api = isSuperAdmin
+        ? selectedTenantId
+          ? supabase.super.syncTenantObjectStorage(selectedTenantId, payload)
+          : supabase.super.syncObjectStorage(payload)
+        : supabase.admin.syncObjectStorage(payload)
+      const { data, error } = await api
+      if (error) throw error
+
+      pushToast(
+        data?.ok === false ? 'warning' : 'success',
+        data?.message
+          ? `${data.message} Terbaca ${data.total_label || '0 B'}, belum terlacak ${data.untracked_label || '0 B'}.`
+          : 'Sync Neva S3 selesai'
+      )
+      await reloadActiveStorage()
+    } catch (error) {
+      pushToast('error', error?.message || 'Gagal sync inventaris Neva S3')
+    } finally {
+      setSyncingObjectStorage(false)
     }
   }
 
@@ -506,6 +605,106 @@ function StorageManager() {
     setStorageFilterDraft(next)
     loadStorageWithFilters(next)
   }
+
+  const cleanupSection = (
+    <section className="rounded-lg border border-rose-200 bg-white p-4 shadow-sm">
+      <div className="flex flex-col gap-1">
+        <h2 className="text-sm font-bold text-slate-900">Cleanup Aman ke Trash</h2>
+        <p className="text-xs text-slate-500">
+          Pilih provider, bucket, dan periode lama terlebih dahulu. Cleanup hanya memindahkan file storage tugas/quiz/lampiran ke Trash; data tugas, quiz, nilai, siswa, guru, dan record penting tidak dihapus.
+        </p>
+      </div>
+      <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
+        Aturan aman: wajib pilih VPS atau Neva S3, wajib pilih bucket, periode tidak boleh semester aktif, file minimal berumur 3 bulan, tipe file dibatasi dokumen/gambar, dan semua masih bisa dipulihkan dari Trash sebelum purge permanen.
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+        <select
+          value={cleanupForm.provider}
+          onChange={(event) => updateCleanupForm({ provider: event.target.value })}
+          className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+        >
+          {CLEANUP_PROVIDER_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+        </select>
+        <select
+          value={cleanupForm.bucket}
+          onChange={(event) => updateCleanupForm({ bucket: event.target.value })}
+          className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+        >
+          {CLEANUP_BUCKET_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+        </select>
+        <select
+          value={cleanupPeriodValue}
+          onChange={(event) => updateCleanupForm(parsePeriodValue(event.target.value))}
+          className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+        >
+          <option value="">Pilih periode lama</option>
+          {safeCleanupPeriodOptions.map((item) => (
+            <option key={item.value} value={item.value}>
+              {item.tahun_ajaran} - {item.semester}{item.bytes_label ? ` (${item.bytes_label})` : ''}
+            </option>
+          ))}
+          {safeCleanupPeriodOptions.length === 0 && (
+            <option value="" disabled>Belum ada semester lama yang aman</option>
+          )}
+        </select>
+        <select
+          value={cleanupForm.category}
+          onChange={(e) => updateCleanupForm({ category: e.target.value })}
+          className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+        >
+          {CLEANUP_CATEGORIES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+        </select>
+        <select
+          value={cleanupForm.older_than_days}
+          onChange={(e) => updateCleanupForm({ older_than_days: e.target.value })}
+          className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+        >
+          {CLEANUP_AGE_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+        </select>
+        <select
+          value={cleanupForm.largest_percent}
+          onChange={(e) => updateCleanupForm({ largest_percent: e.target.value })}
+          className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+        >
+          {CLEANUP_PERCENT_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+        </select>
+      </div>
+      <div className="mt-4 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={handlePreviewCleanup}
+          disabled={cleanupLoading || !cleanupReady || (isSuperAdmin && !selectedTenantId)}
+          className="inline-flex items-center gap-2 rounded-lg border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-60"
+        >
+          <Trash2 size={16} />
+          {cleanupLoading ? 'Memproses...' : 'Preview Cleanup'}
+        </button>
+        <button
+          type="button"
+          onClick={handleExecuteCleanup}
+          disabled={cleanupLoading || !cleanupReady || !cleanupPreview?.allowed || cleanupPreview?.files <= 0}
+          className="inline-flex items-center gap-2 rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700 disabled:opacity-60"
+        >
+          Pindahkan ke Trash
+        </button>
+      </div>
+      {!cleanupHasProviderBucket && (
+        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Pilih provider dan bucket terlebih dahulu supaya cleanup hanya menyasar lokasi storage yang benar.
+        </div>
+      )}
+      {cleanupHasProviderBucket && !cleanupHasRequiredPeriod && (
+        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Pilih periode lama dari dropdown terlebih dahulu. Cleanup tidak bisa dijalankan untuk semester aktif, semester berjalan, atau data yang belum melewati minimal satu semester.
+        </div>
+      )}
+      {cleanupPreview && (
+        <div className={`mt-4 rounded-lg border px-4 py-3 text-sm ${cleanupPreview.allowed ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
+          {cleanupPreview.message} Kandidat: {numberFormatter.format(cleanupPreview.files || 0)} file ({cleanupPreview.bytes_label || '0 B'}).
+        </div>
+      )}
+    </section>
+  )
 
   if (!superAdminChecked) {
     return <div className="p-6 text-sm text-slate-500">Memuat akses storage manager...</div>
@@ -655,7 +854,21 @@ function StorageManager() {
                     <p className="mt-1 text-xs text-slate-500">
                       Upload harian tugas, media quiz, dan file sertifikat diarahkan ke Neva Cloud S3. Arsip dan backup bisa dikelola terpisah dari jalur upload cepat.
                     </p>
+                    {nevaPlatform?.last_scanned_at && (
+                      <p className="mt-1 text-xs text-slate-400">
+                        Scan platform terakhir: {formatDateTime(nevaPlatform.last_scanned_at)}
+                      </p>
+                    )}
                   </div>
+                  <button
+                    type="button"
+                    onClick={handleSyncObjectStorage}
+                    disabled={syncingObjectStorage || !nevaEnabled}
+                    className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-white px-4 py-2 text-sm font-semibold text-indigo-700 shadow-sm hover:bg-indigo-50 disabled:opacity-60"
+                  >
+                    <RefreshCw size={16} className={syncingObjectStorage ? 'animate-spin' : ''} />
+                    {syncingObjectStorage ? 'Membaca S3...' : selectedTenantId ? 'Scan S3 Sekolah' : 'Scan S3 Platform'}
+                  </button>
                 </div>
 
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -684,17 +897,44 @@ function StorageManager() {
 
               <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
                 <h2 className="text-sm font-bold text-slate-900">Bucket Neva Aktif</h2>
-                <p className="mt-1 text-xs text-slate-500">Bucket dipakai berdasarkan jenis file agar monitoring dan cleanup tetap mudah.</p>
-                <div className="mt-3 space-y-2">
-                  {(Object.keys(nevaBucketMap).length > 0 ? Object.entries(nevaBucketMap) : Object.entries(NEVA_BUCKET_LABELS)).map(([key, bucket]) => (
-                    <div key={key} className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 px-3 py-2">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-slate-900">{NEVA_BUCKET_LABELS[key] || key}</p>
-                        <p className="truncate text-xs text-slate-500">{bucket || key}</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Setiap bucket memakai kuota Neva S3 sekolah. Sisa kuota dihitung dari jatah Neva sekolah, bukan dari VPS.
+                </p>
+                <div className="mt-3 space-y-3">
+                  {nevaBucketRows.map((bucket) => (
+                    <div key={bucket.bucket} className="rounded-lg border border-slate-100 p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-slate-900">{bucket.label || NEVA_BUCKET_LABELS[bucket.bucket] || bucket.bucket}</p>
+                          <p className="truncate text-xs text-slate-500">{bucket.physical_bucket || bucket.bucket}</p>
+                        </div>
+                        <span className="shrink-0 rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-bold text-indigo-700">
+                          {bucket.bytes_label || '0 B'}
+                        </span>
                       </div>
-                      <Cloud size={16} className="shrink-0 text-slate-400" />
+                      <div className="mt-3 grid gap-2 text-xs text-slate-600 sm:grid-cols-2">
+                        <span>{numberFormatter.format(bucket.files || 0)} file sekolah</span>
+                        <span>Sisa sekolah: {bucket.remaining_after_provider_label || 'Tidak dibatasi'}</span>
+                        <span>Kuota sekolah: {bucket.quota_label || 'Tidak dibatasi'}</span>
+                        <span>Sisa jika bucket ini saja: {bucket.remaining_after_bucket_label || 'Tidak dibatasi'}</span>
+                      </div>
+                      {bucket.percent !== null && bucket.percent !== undefined && (
+                        <div className="mt-3">
+                          <ProgressLine label="Porsi bucket terhadap kuota sekolah" value={`${bucket.percent}%`} percent={bucket.percent} />
+                        </div>
+                      )}
+                      {(bucket.snapshot_total_label || bucket.snapshot_untracked_label) && (
+                        <p className="mt-3 text-xs text-slate-400">
+                          Scan Neva: total {bucket.snapshot_total_label || '0 B'}, belum terlacak {bucket.snapshot_untracked_label || '0 B'}.
+                        </p>
+                      )}
                     </div>
                   ))}
+                  {nevaBucketRows.length === 0 && (
+                    <p className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-sm text-slate-500">
+                      Bucket Neva belum terbaca. Jalankan scan S3 setelah konfigurasi ENV aktif.
+                    </p>
+                  )}
                 </div>
               </section>
             </div>
@@ -758,6 +998,8 @@ function StorageManager() {
           </section>
         )}
 
+        {activeTab === 'neva' && (!isSuperAdmin || selectedTenantId) && cleanupSection}
+
         {activeTab === 'neva' && isSuperAdmin && !selectedTenantId && (
           <section className="rounded-lg border border-slate-200 bg-white p-8 text-center shadow-sm">
             <Cloud className="mx-auto h-10 w-10 text-slate-300" />
@@ -765,6 +1007,15 @@ function StorageManager() {
             <p className="mt-1 text-sm text-slate-500">
               Neva Cloud S3 dikelola per sekolah. Pilih tenant dari dropdown di atas untuk melihat kuota, pemakaian, kategori, dan file terbesar.
             </p>
+            <button
+              type="button"
+              onClick={handleSyncObjectStorage}
+              disabled={syncingObjectStorage || !nevaEnabled}
+              className="mx-auto mt-4 inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-white px-4 py-2 text-sm font-semibold text-indigo-700 shadow-sm hover:bg-indigo-50 disabled:opacity-60"
+            >
+              <RefreshCw size={16} className={syncingObjectStorage ? 'animate-spin' : ''} />
+              {syncingObjectStorage ? 'Membaca S3...' : 'Scan Semua Bucket Neva'}
+            </button>
           </section>
         )}
 
@@ -835,6 +1086,9 @@ function StorageManager() {
 	              <p className="mt-1 text-xs text-slate-500">
 	                {selectedTenant?.name || 'Pilih sekolah dari tabel.'} Kuota VPS dan Neva S3 dipisah agar sekolah bisa punya jatah file harian yang jelas.
 	              </p>
+	              <p className="mt-1 text-xs text-indigo-600">
+	                Contoh: paket Neva platform 100 GB, sekolah ini bisa diberi 40 GB. Sisa paket platform otomatis terlihat di kartu Neva S3.
+	              </p>
 	              <div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-1">
 	                <label className="block text-xs font-semibold text-slate-600">
 	                  Kuota VPS (GB)
@@ -871,6 +1125,9 @@ function StorageManager() {
 	                    placeholder="contoh: 40"
 	                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
 	                  />
+	                  <span className="mt-1 block text-[11px] font-normal text-slate-500">
+	                    Ini jatah Neva S3 sekolah untuk file tugas, media quiz, sertifikat, dan bucket object storage lain.
+	                  </span>
 	                </label>
 	                <label className="block text-xs font-semibold text-slate-600">
 	                  Maks upload per file Neva S3 (MB)
@@ -883,6 +1140,9 @@ function StorageManager() {
 	                    placeholder="contoh: 50"
 	                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
 	                  />
+	                  <span className="mt-1 block text-[11px] font-normal text-slate-500">
+	                    Batas ukuran satu file sekali upload ke Neva S3, bukan total kuota sekolah.
+	                  </span>
 	                </label>
 	                <label className="block text-xs font-semibold text-slate-600">
 	                  Catatan
@@ -919,6 +1179,42 @@ function StorageManager() {
 	            <ProgressLine label="Pemakaian kuota VPS sekolah" value={`${quota.percent}%`} percent={quota.percent} />
 	          </section>
 	        )}
+
+        {activeBucketRows.length > 0 && (
+          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-col gap-1">
+              <h2 className="text-sm font-bold text-slate-900">Bucket VPS Sekolah</h2>
+              <p className="text-xs text-slate-500">
+                Bucket ini memakai kuota VPS sekolah. Cleanup aman hanya tersedia untuk bucket tugas dan media quiz.
+              </p>
+            </div>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              {activeBucketRows.map((bucket) => (
+                <div key={bucket.bucket} className="rounded-lg border border-slate-100 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-slate-900">{bucket.label || NEVA_BUCKET_LABELS[bucket.bucket] || bucket.bucket}</p>
+                      <p className="text-xs text-slate-500">{numberFormatter.format(bucket.files || 0)} file</p>
+                    </div>
+                    <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-700">
+                      {bucket.bytes_label || '0 B'}
+                    </span>
+                  </div>
+                  <div className="mt-3 grid gap-2 text-xs text-slate-600 sm:grid-cols-2">
+                    <span>Kuota sekolah: {bucket.quota_label || 'Tidak dibatasi'}</span>
+                    <span>Sisa sekolah: {bucket.remaining_after_provider_label || 'Tidak dibatasi'}</span>
+                    <span>Sisa jika bucket ini saja: {bucket.remaining_after_bucket_label || 'Tidak dibatasi'}</span>
+                  </div>
+                  {bucket.percent !== null && bucket.percent !== undefined && (
+                    <div className="mt-3">
+                      <ProgressLine label="Porsi bucket terhadap kuota sekolah" value={`${bucket.percent}%`} percent={bucket.percent} />
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
@@ -1091,84 +1387,7 @@ function StorageManager() {
           </div>
         </section>
 
-        <section className="rounded-lg border border-rose-200 bg-white p-4 shadow-sm">
-          <div className="flex flex-col gap-1">
-            <h2 className="text-sm font-bold text-slate-900">Cleanup Aman ke Trash</h2>
-            <p className="text-xs text-slate-500">
-              Cleanup hanya memindahkan file storage tugas/quiz/lampiran ke Trash. Data tugas, quiz, nilai, siswa, guru, dan record penting tidak dihapus.
-            </p>
-          </div>
-          <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
-            Aturan aman: periode wajib sesuai tahun ajaran dan semester, bukan semester aktif, file harus berumur minimal 3 bulan, tipe file dibatasi ke dokumen dan gambar, serta bisa dipulihkan dari Trash sebelum purge permanen.
-          </div>
-          <div className="mt-4 grid gap-3 md:grid-cols-4">
-            <select
-              value={cleanupPeriodValue}
-              onChange={(event) => updateCleanupForm(parsePeriodValue(event.target.value))}
-              className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-            >
-              <option value="">Pilih periode lama</option>
-              {safeCleanupPeriodOptions.map((item) => (
-                <option key={item.value} value={item.value}>
-                  {item.tahun_ajaran} - {item.semester}{item.bytes_label ? ` (${item.bytes_label})` : ''}
-                </option>
-              ))}
-              {safeCleanupPeriodOptions.length === 0 && (
-                <option value="" disabled>Belum ada semester lama yang aman</option>
-              )}
-            </select>
-            <select
-              value={cleanupForm.category}
-              onChange={(e) => updateCleanupForm({ category: e.target.value })}
-              className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-            >
-              {CLEANUP_CATEGORIES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-            </select>
-            <select
-              value={cleanupForm.older_than_days}
-              onChange={(e) => updateCleanupForm({ older_than_days: e.target.value })}
-              className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-            >
-              {CLEANUP_AGE_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-            </select>
-            <select
-              value={cleanupForm.largest_percent}
-              onChange={(e) => updateCleanupForm({ largest_percent: e.target.value })}
-              className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-            >
-              {CLEANUP_PERCENT_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-            </select>
-          </div>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={handlePreviewCleanup}
-              disabled={cleanupLoading || !cleanupHasRequiredPeriod || (isSuperAdmin && !selectedTenantId)}
-              className="inline-flex items-center gap-2 rounded-lg border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-60"
-            >
-              <Trash2 size={16} />
-              {cleanupLoading ? 'Memproses...' : 'Preview Cleanup'}
-            </button>
-            <button
-              type="button"
-              onClick={handleExecuteCleanup}
-              disabled={cleanupLoading || !cleanupHasRequiredPeriod || !cleanupPreview?.allowed || cleanupPreview?.files <= 0}
-              className="inline-flex items-center gap-2 rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700 disabled:opacity-60"
-            >
-              Pindahkan ke Trash
-            </button>
-          </div>
-          {!cleanupHasRequiredPeriod && (
-            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-              Pilih periode lama dari dropdown terlebih dahulu. Cleanup tidak bisa dijalankan untuk semester aktif, semester berjalan, atau data yang belum melewati minimal satu semester.
-            </div>
-          )}
-          {cleanupPreview && (
-            <div className={`mt-4 rounded-lg border px-4 py-3 text-sm ${cleanupPreview.allowed ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
-              {cleanupPreview.message} Kandidat: {numberFormatter.format(cleanupPreview.files || 0)} file ({cleanupPreview.bytes_label || '0 B'}).
-            </div>
-          )}
-        </section>
+        {cleanupSection}
           </>
         )}
       </div>

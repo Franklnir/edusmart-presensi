@@ -214,6 +214,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'throttle:api'])->group(func
     Route::post('/google-drive/sync', [GoogleDriveController::class, 'sync']);
     Route::post('/google-drive/disconnect', [GoogleDriveController::class, 'disconnect']);
     Route::get('/storage-manager', [StorageManagementController::class, 'adminSummary']);
+    Route::post('/storage-manager/object-storage/sync', [StorageManagementController::class, 'adminObjectStorageSync']);
     Route::post('/storage-manager/cleanup/preview', [StorageManagementController::class, 'adminCleanupPreview']);
     Route::post('/storage-manager/cleanup/execute', [StorageManagementController::class, 'adminCleanupExecute']);
     Route::post('/storage-manager/trash/{fileId}/restore', [StorageManagementController::class, 'restoreTrashFile']);
@@ -241,9 +242,11 @@ Route::middleware(['auth:sanctum', 'throttle:super', 'super.domain'])->group(fun
     Route::post('/super/tenants', [SuperAdminController::class, 'store']);
     Route::get('/super/tenants/{id}', [SuperAdminController::class, 'showTenant']);
     Route::get('/super/storage', [StorageManagementController::class, 'superOverview']);
+    Route::post('/super/storage/object-storage/sync', [StorageManagementController::class, 'superObjectStorageSync']);
     Route::post('/super/storage/trash/purge-expired', [StorageManagementController::class, 'superPurgeExpiredTrash']);
     Route::get('/super/tenants/{tenantId}/storage', [StorageManagementController::class, 'superTenantSummary']);
     Route::patch('/super/tenants/{tenantId}/storage/quota', [StorageManagementController::class, 'superUpdateQuota']);
+    Route::post('/super/tenants/{tenantId}/storage/object-storage/sync', [StorageManagementController::class, 'superTenantObjectStorageSync']);
     Route::post('/super/tenants/{tenantId}/storage/cleanup/preview', [StorageManagementController::class, 'superCleanupPreview']);
     Route::post('/super/tenants/{tenantId}/storage/cleanup/execute', [StorageManagementController::class, 'superCleanupExecute']);
     Route::post('/super/tenants/{tenantId}/storage/trash/{fileId}/restore', [StorageManagementController::class, 'superRestoreTrashFile']);

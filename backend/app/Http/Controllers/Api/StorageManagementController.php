@@ -67,6 +67,23 @@ class StorageManagementController extends ApiController
             : response()->json(['error' => $result['message'] ?? 'Cleanup gagal', 'data' => $result], 422);
     }
 
+    public function adminObjectStorageSync(Request $request)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = (string) ($this->tenantId($request) ?? '');
+        if ($tenantId === '') {
+            return $this->deny('Tenant tidak ditemukan', 422);
+        }
+
+        return $this->ok($this->storageManagementService->syncObjectStorageInventory($tenantId, [
+            'bucket' => $request->input('bucket', $request->query('bucket')),
+            'max_pages' => $request->input('max_pages', $request->query('max_pages', 5)),
+        ]));
+    }
+
     public function restoreTrashFile(Request $request, string $fileId)
     {
         if (! $this->isAdmin($request)) {
@@ -131,11 +148,15 @@ class StorageManagementController extends ApiController
             return response()->json(['error' => $validator->errors()->first()], 422);
         }
 
-        return $this->ok($this->storageManagementService->updateQuota(
-            (string) $tenant->id,
-            $validator->validated(),
-            (string) ($request->user()?->id ?? '')
-        ));
+        try {
+            return $this->ok($this->storageManagementService->updateQuota(
+                (string) $tenant->id,
+                $validator->validated(),
+                (string) ($request->user()?->id ?? '')
+            ));
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
     }
 
     public function superCleanupPreview(Request $request, string $tenantId)
@@ -173,6 +194,35 @@ class StorageManagementController extends ApiController
         return ($result['ok'] ?? false)
             ? $this->ok($result)
             : response()->json(['error' => $result['message'] ?? 'Cleanup gagal', 'data' => $result], 422);
+    }
+
+    public function superObjectStorageSync(Request $request)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
+        }
+
+        return $this->ok($this->storageManagementService->syncObjectStorageInventory(null, [
+            'bucket' => $request->input('bucket', $request->query('bucket')),
+            'max_pages' => $request->input('max_pages', $request->query('max_pages', 10)),
+        ]));
+    }
+
+    public function superTenantObjectStorageSync(Request $request, string $tenantId)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenant = $this->tenantByIdOrSlug($tenantId);
+        if (! $tenant) {
+            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+        }
+
+        return $this->ok($this->storageManagementService->syncObjectStorageInventory((string) $tenant->id, [
+            'bucket' => $request->input('bucket', $request->query('bucket')),
+            'max_pages' => $request->input('max_pages', $request->query('max_pages', 5)),
+        ]));
     }
 
     public function superRestoreTrashFile(Request $request, string $tenantId, string $fileId)
@@ -261,6 +311,8 @@ class StorageManagementController extends ApiController
             'tahun_ajaran' => $request->query('tahun_ajaran', $request->input('tahun_ajaran')),
             'semester' => $request->query('semester', $request->input('semester')),
             'category' => $request->query('category', $request->input('category')),
+            'provider' => $request->query('provider', $request->input('provider')),
+            'bucket' => $request->query('bucket', $request->input('bucket')),
             'uploaded_by_user_id' => $request->query('uploaded_by_user_id', $request->input('uploaded_by_user_id')),
             'min_bytes' => $request->query('min_bytes', $request->input('min_bytes')),
         ];

@@ -113,6 +113,53 @@ class S3CompatibleStorageSigner
         return $response->successful() || $response->status() === 404;
     }
 
+    public function configuredBuckets(): array
+    {
+        $map = $this->bucketMap();
+        if (! empty($map)) {
+            return $map;
+        }
+
+        $bucket = $this->bucket();
+
+        return $bucket !== '' ? ['default' => $bucket] : [];
+    }
+
+    public function listObjects(
+        string $logicalBucket,
+        string $prefix = '',
+        ?string $continuationToken = null,
+        int $maxKeys = 1000
+    ): array {
+        if (! $this->isEnabledForBucket($logicalBucket)) {
+            throw new \RuntimeException('Object storage belum aktif untuk bucket '.$logicalBucket.'.');
+        }
+
+        $query = [
+            'list-type' => '2',
+            'max-keys' => (string) max(1, min(1000, $maxKeys)),
+        ];
+        $prefix = ltrim($prefix, '/');
+        if ($prefix !== '') {
+            $query['prefix'] = $prefix;
+        }
+        if ($continuationToken !== null && $continuationToken !== '') {
+            $query['continuation-token'] = $continuationToken;
+        }
+
+        $signed = $this->signedRequest('GET', '', $query, [], $logicalBucket);
+        $response = Http::withHeaders($signed['headers'])
+            ->timeout(30)
+            ->connectTimeout(10)
+            ->get($signed['url']);
+
+        if (! $response->successful()) {
+            throw new \RuntimeException('Gagal membaca inventaris object storage (HTTP '.$response->status().').');
+        }
+
+        return $this->parseListObjectsResponse((string) $response->body());
+    }
+
     public function putObjectFromFile(string $objectKey, string $sourcePath, string $contentType, ?string $logicalBucket = null): array
     {
         if (! is_readable($sourcePath)) {
@@ -147,6 +194,114 @@ class S3CompatibleStorageSigner
             'etag' => $response->header('ETag'),
             'object_key' => $objectKey,
         ];
+    }
+
+    private function signedRequest(
+        string $method,
+        string $objectKey,
+        array $query = [],
+        array $headers = [],
+        ?string $logicalBucket = null
+    ): array {
+        if (! $this->isEnabled()) {
+            throw new \RuntimeException('Object storage belum dikonfigurasi.');
+        }
+
+        $method = strtoupper($method);
+        $now = Carbon::now('UTC');
+        $amzDate = $now->format('Ymd\THis\Z');
+        $dateStamp = $now->format('Ymd');
+        $region = $this->region();
+        $credentialScope = "{$dateStamp}/{$region}/s3/aws4_request";
+        $target = $this->buildTargetUrl($objectKey, $logicalBucket);
+
+        $signedHeaders = array_change_key_case($headers, CASE_LOWER);
+        $signedHeaders['host'] = $target['host'];
+        $signedHeaders['x-amz-content-sha256'] = 'UNSIGNED-PAYLOAD';
+        $signedHeaders['x-amz-date'] = $amzDate;
+        $sessionToken = $this->sessionToken();
+        if ($sessionToken !== '') {
+            $signedHeaders['x-amz-security-token'] = $sessionToken;
+        }
+        ksort($signedHeaders);
+
+        $signedHeaderNames = implode(';', array_keys($signedHeaders));
+        $canonicalQuery = $this->canonicalQuery($query);
+        $canonicalHeaders = '';
+        foreach ($signedHeaders as $name => $value) {
+            $canonicalHeaders .= strtolower($name).':'.$this->normalizeHeaderValue((string) $value)."\n";
+        }
+
+        $canonicalRequest = implode("\n", [
+            $method,
+            $target['canonical_uri'],
+            $canonicalQuery,
+            $canonicalHeaders,
+            $signedHeaderNames,
+            'UNSIGNED-PAYLOAD',
+        ]);
+
+        $stringToSign = implode("\n", [
+            'AWS4-HMAC-SHA256',
+            $amzDate,
+            $credentialScope,
+            hash('sha256', $canonicalRequest),
+        ]);
+
+        $signature = hash_hmac('sha256', $stringToSign, $this->signingKey($dateStamp, $region));
+        $authorization = 'AWS4-HMAC-SHA256 '
+            .'Credential='.$this->accessKey().'/'.$credentialScope.', '
+            .'SignedHeaders='.$signedHeaderNames.', '
+            .'Signature='.$signature;
+
+        $clientHeaders = ['Authorization' => $authorization];
+        foreach ($signedHeaders as $name => $value) {
+            if ($name === 'host') {
+                continue;
+            }
+            $clientHeaders[$this->headerCase($name)] = $value;
+        }
+
+        return [
+            'method' => $method,
+            'url' => $target['base_url'].($canonicalQuery !== '' ? '?'.$canonicalQuery : ''),
+            'headers' => $clientHeaders,
+        ];
+    }
+
+    private function parseListObjectsResponse(string $xmlBody): array
+    {
+        $xml = @simplexml_load_string($xmlBody);
+        if (! $xml) {
+            throw new \RuntimeException('Response inventory object storage tidak valid.');
+        }
+
+        $contents = $xml->xpath('//*[local-name()="Contents"]') ?: [];
+        $objects = [];
+        foreach ($contents as $content) {
+            $objects[] = [
+                'key' => $this->xmlString($content, 'Key'),
+                'size' => (int) $this->xmlString($content, 'Size'),
+                'last_modified' => $this->xmlString($content, 'LastModified'),
+                'etag' => trim($this->xmlString($content, 'ETag'), '"'),
+            ];
+        }
+
+        return [
+            'objects' => $objects,
+            'is_truncated' => strtolower($this->xmlString($xml, 'IsTruncated')) === 'true',
+            'next_continuation_token' => $this->xmlString($xml, 'NextContinuationToken') ?: null,
+        ];
+    }
+
+    private function xmlString(\SimpleXMLElement $element, string $name): string
+    {
+        $values = $element->xpath('./*[local-name()="'.$name.'"]') ?: [];
+        if (isset($values[0])) {
+            return trim((string) $values[0]);
+        }
+
+        return '';
     }
 
     private function presign(

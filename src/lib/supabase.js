@@ -2660,6 +2660,15 @@ const auth = {
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
+    async syncObjectStorage(payload = {}) {
+      const res = await apiFetch('/api/admin/storage-manager/object-storage/sync', {
+        method: 'POST',
+        body: payload,
+        cacheTtlMs: 0,
+        timeoutMs: 120000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
     async restoreStorageTrash(fileId) {
       const res = await apiFetch(`/api/admin/storage-manager/trash/${fileId}/restore`, {
         method: 'POST',
@@ -2829,6 +2838,24 @@ const auth = {
         method: 'PATCH',
         body: payload,
         cacheTtlMs: 0
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async syncObjectStorage(payload = {}) {
+      const res = await apiFetch('/api/super/storage/object-storage/sync', {
+        method: 'POST',
+        body: payload,
+        cacheTtlMs: 0,
+        timeoutMs: 180000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async syncTenantObjectStorage(id, payload = {}) {
+      const res = await apiFetch(`/api/super/tenants/${id}/storage/object-storage/sync`, {
+        method: 'POST',
+        body: payload,
+        cacheTtlMs: 0,
+        timeoutMs: 120000
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },

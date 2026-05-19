@@ -260,6 +260,13 @@ Schedule::call(function (StorageManagementService $storageManagementService) {
     ->dailyAt('02:20')
     ->withoutOverlapping();
 
+Schedule::call(function (StorageManagementService $storageManagementService) {
+    $storageManagementService->syncObjectStorageInventory(null, ['max_pages' => 10]);
+})
+    ->name('storage:sync-object-storage')
+    ->hourly()
+    ->withoutOverlapping();
+
 Artisan::command('storage:purge-expired-trash', function (StorageManagementService $storageManagementService) {
     $result = $storageManagementService->purgeExpiredTrash();
 
@@ -269,6 +276,30 @@ Artisan::command('storage:purge-expired-trash', function (StorageManagementServi
 
     return 0;
 })->purpose('Hapus permanen file storage yang sudah lebih dari 30 hari di Trash');
+
+Artisan::command('storage:sync-object-storage {--bucket= : Batasi scan ke logical bucket tertentu} {--max-pages=10 : Maksimal halaman per bucket}', function (StorageManagementService $storageManagementService) {
+    $result = $storageManagementService->syncObjectStorageInventory(null, [
+        'bucket' => $this->option('bucket'),
+        'max_pages' => (int) $this->option('max-pages'),
+    ]);
+
+    if (! ($result['ok'] ?? false)) {
+        $this->warn($result['message'] ?? 'Sync Neva Cloud S3 gagal.');
+
+        return 1;
+    }
+
+    $this->info('Sync Neva Cloud S3 selesai.');
+    $this->line('Total      : '.($result['total_label'] ?? '0 B').' / '.($result['total_files'] ?? 0).' object');
+    $this->line('Terlacak   : '.($result['tracked_label'] ?? '0 B').' / '.($result['tracked_files'] ?? 0).' object');
+    $this->line('Belum track: '.($result['untracked_label'] ?? '0 B').' / '.($result['untracked_files'] ?? 0).' object');
+
+    foreach (($result['buckets'] ?? []) as $bucket) {
+        $this->line('- '.$bucket['logical_bucket'].': '.$bucket['total_label'].' (untracked '.$bucket['untracked_label'].')');
+    }
+
+    return 0;
+})->purpose('Baca bucket Neva Cloud S3 dan simpan snapshot inventory platform');
 
 Artisan::command('rfid:mqtt-bridge {--once : Jalankan sekali lalu keluar} {--tenant=* : Batasi publish mode ke tenant slug tertentu}', function (MqttBridgeService $bridge) {
     $once = (bool) $this->option('once');

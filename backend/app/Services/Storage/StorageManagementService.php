@@ -48,6 +48,10 @@ class StorageManagementService
         'sertifikat' => 'Sertifikat',
     ];
 
+    public function __construct(
+        private readonly S3CompatibleStorageSigner $objectStorageSigner
+    ) {}
+
     public function tablesReady(): bool
     {
         return $this->quotaTableReady()
@@ -83,7 +87,8 @@ class StorageManagementService
     public function objectStorageCapacity(): array
     {
         $capacityBytes = $this->configuredObjectStorageCapacityBytes();
-        $usedBytes = $this->providerUsedBytes(self::PROVIDER_NEVA_S3);
+        $snapshotTotals = $this->latestProviderSnapshotTotals(self::PROVIDER_NEVA_S3);
+        $usedBytes = $snapshotTotals['total_bytes'] ?? $this->providerUsedBytes(self::PROVIDER_NEVA_S3);
         $allocatedBytes = $this->allocatedQuotaBytes(self::PROVIDER_NEVA_S3);
         $remainingBytes = $capacityBytes !== null ? max(0, $capacityBytes - $usedBytes) : null;
         $remainingAfterAllocatedBytes = $capacityBytes !== null ? max(0, $capacityBytes - $allocatedBytes) : null;
@@ -101,6 +106,15 @@ class StorageManagementService
             'remaining_after_allocated_bytes' => $remainingAfterAllocatedBytes,
             'remaining_after_allocated_label' => $remainingAfterAllocatedBytes !== null ? $this->formatBytes($remainingAfterAllocatedBytes) : 'Belum diset',
             'percent' => $capacityBytes && $capacityBytes > 0 ? round(min(100, ($usedBytes / $capacityBytes) * 100), 2) : null,
+            'tracked_bytes' => $snapshotTotals['tracked_bytes'] ?? $usedBytes,
+            'tracked_label' => $this->formatBytes((int) ($snapshotTotals['tracked_bytes'] ?? $usedBytes)),
+            'untracked_bytes' => $snapshotTotals['untracked_bytes'] ?? 0,
+            'untracked_label' => $this->formatBytes((int) ($snapshotTotals['untracked_bytes'] ?? 0)),
+            'total_files' => $snapshotTotals['total_files'] ?? null,
+            'tracked_files' => $snapshotTotals['tracked_files'] ?? null,
+            'untracked_files' => $snapshotTotals['untracked_files'] ?? 0,
+            'last_scanned_at' => $snapshotTotals['last_scanned_at'] ?? null,
+            'bucket_snapshots' => $this->latestProviderBucketSnapshots(self::PROVIDER_NEVA_S3),
         ];
     }
 
@@ -379,23 +393,31 @@ class StorageManagementService
         $vpsMaxUpload = $payload['vps_max_upload_bytes'] ?? $payload['max_upload_bytes'] ?? null;
         $nevaQuota = $payload['neva_s3_quota_bytes'] ?? null;
         $nevaMaxUpload = $payload['neva_s3_max_upload_bytes'] ?? null;
+        $normalizedVpsQuota = $this->nullableBytes($vpsQuota);
+        $normalizedVpsMaxUpload = $this->nullableBytes($vpsMaxUpload);
+        $normalizedNevaQuota = $this->nullableBytes($nevaQuota);
+        $normalizedNevaMaxUpload = $this->nullableBytes($nevaMaxUpload);
+
+        $this->assertQuotaAllocationWithinCapacity($tenantId, self::PROVIDER_VPS, $normalizedVpsQuota);
+        $this->assertQuotaAllocationWithinCapacity($tenantId, self::PROVIDER_NEVA_S3, $normalizedNevaQuota);
+
         if ($this->tableHasColumn('tenant_storage_quotas', 'quota_bytes')) {
-            $values['quota_bytes'] = $this->nullableBytes($vpsQuota);
+            $values['quota_bytes'] = $normalizedVpsQuota;
         }
         if ($this->tableHasColumn('tenant_storage_quotas', 'max_upload_bytes')) {
-            $values['max_upload_bytes'] = $this->nullableBytes($vpsMaxUpload);
+            $values['max_upload_bytes'] = $normalizedVpsMaxUpload;
         }
         if ($this->tableHasColumn('tenant_storage_quotas', 'vps_quota_bytes')) {
-            $values['vps_quota_bytes'] = $this->nullableBytes($vpsQuota);
+            $values['vps_quota_bytes'] = $normalizedVpsQuota;
         }
         if ($this->tableHasColumn('tenant_storage_quotas', 'vps_max_upload_bytes')) {
-            $values['vps_max_upload_bytes'] = $this->nullableBytes($vpsMaxUpload);
+            $values['vps_max_upload_bytes'] = $normalizedVpsMaxUpload;
         }
         if ($this->tableHasColumn('tenant_storage_quotas', 'neva_s3_quota_bytes')) {
-            $values['neva_s3_quota_bytes'] = $this->nullableBytes($nevaQuota);
+            $values['neva_s3_quota_bytes'] = $normalizedNevaQuota;
         }
         if ($this->tableHasColumn('tenant_storage_quotas', 'neva_s3_max_upload_bytes')) {
-            $values['neva_s3_max_upload_bytes'] = $this->nullableBytes($nevaMaxUpload);
+            $values['neva_s3_max_upload_bytes'] = $normalizedNevaMaxUpload;
         }
         if ($this->tableHasColumn('tenant_storage_quotas', 'notes')) {
             $values['notes'] = trim((string) ($payload['notes'] ?? '')) ?: null;
@@ -489,6 +511,170 @@ class StorageManagementService
             'top_category' => $usage['by_category'][0] ?? null,
             'largest_files' => $this->largestFiles($tenantId, $providerFilters),
             'by_uploader' => $this->byUploader($tenantId, $providerFilters),
+            'bucket_usage' => $this->bucketUsage($tenantId, $provider, $providerFilters, $quota),
+        ];
+    }
+
+    public function syncObjectStorageInventory(?string $tenantId = null, array $options = []): array
+    {
+        if (! $this->objectStorageSigner->isEnabled()) {
+            return [
+                'ok' => false,
+                'message' => 'Neva Cloud S3 belum aktif atau credential belum lengkap.',
+                'buckets' => [],
+            ];
+        }
+        if (! $this->storageFilesReady()) {
+            return [
+                'ok' => false,
+                'message' => 'Metadata storage belum siap. Jalankan migrasi storage terlebih dahulu.',
+                'buckets' => [],
+            ];
+        }
+
+        $bucketFilter = trim((string) ($options['bucket'] ?? ''));
+        $maxPages = max(1, min(50, (int) ($options['max_pages'] ?? 10)));
+        $tenantScoped = $tenantId !== null && $tenantId !== '';
+        $buckets = $this->objectStorageSigner->configuredBuckets();
+        if ($bucketFilter !== '' && $bucketFilter !== 'all') {
+            $buckets = array_filter(
+                $buckets,
+                fn ($physicalBucket, $logicalBucket) => (string) $logicalBucket === $bucketFilter,
+                ARRAY_FILTER_USE_BOTH
+            );
+        }
+        $buckets = array_filter(
+            $buckets,
+            fn ($physicalBucket, $logicalBucket) => $this->objectStorageSigner->isEnabledForBucket((string) $logicalBucket),
+            ARRAY_FILTER_USE_BOTH
+        );
+        if (empty($buckets)) {
+            return [
+                'ok' => false,
+                'message' => $bucketFilter !== ''
+                    ? 'Bucket Neva Cloud S3 belum aktif atau tidak ditemukan: '.$bucketFilter.'.'
+                    : 'Belum ada bucket Neva Cloud S3 yang aktif untuk discan.',
+                'buckets' => [],
+            ];
+        }
+
+        $results = [];
+        $totalBytes = 0;
+        $totalFiles = 0;
+        $trackedBytes = 0;
+        $trackedFiles = 0;
+        $untrackedBytes = 0;
+        $untrackedFiles = 0;
+
+        foreach ($buckets as $logicalBucket => $physicalBucket) {
+            $logicalBucket = (string) $logicalBucket;
+            $physicalBucket = (string) $physicalBucket;
+            $prefix = 'private/'.$logicalBucket.'/';
+            $token = null;
+            $pages = 0;
+            $bucketTotalBytes = 0;
+            $bucketTotalFiles = 0;
+            $bucketTrackedBytes = 0;
+            $bucketTrackedFiles = 0;
+            $bucketUntrackedBytes = 0;
+            $bucketUntrackedFiles = 0;
+            $truncated = false;
+            $error = null;
+
+            do {
+                try {
+                    $page = $this->objectStorageSigner->listObjects($logicalBucket, $prefix, $token);
+                    $pages++;
+                } catch (\Throwable $e) {
+                    $error = $this->shortError($e->getMessage());
+                    Log::warning('object_storage_inventory_scan_failed', [
+                        'tenant_id' => $tenantId,
+                        'logical_bucket' => $logicalBucket,
+                        'physical_bucket' => $physicalBucket,
+                        'error' => $error,
+                    ]);
+                    break;
+                }
+                foreach (($page['objects'] ?? []) as $object) {
+                    $key = (string) ($object['key'] ?? '');
+                    if ($key === '' || ! str_starts_with($key, $prefix)) {
+                        continue;
+                    }
+
+                    $path = substr($key, strlen($prefix));
+                    if ($path === '') {
+                        continue;
+                    }
+
+                    $sizeBytes = max(0, (int) ($object['size'] ?? 0));
+                    $matchedRows = $this->syncObjectStorageMetadataRow($tenantId, $logicalBucket, $path, $object);
+                    if ($matchedRows > 0) {
+                        $bucketTotalBytes += $sizeBytes;
+                        $bucketTotalFiles++;
+                        $bucketTrackedBytes += $sizeBytes;
+                        $bucketTrackedFiles++;
+                    } elseif (! $tenantScoped) {
+                        $bucketTotalBytes += $sizeBytes;
+                        $bucketTotalFiles++;
+                        $bucketUntrackedBytes += $sizeBytes;
+                        $bucketUntrackedFiles++;
+                    }
+                }
+
+                $truncated = (bool) ($page['is_truncated'] ?? false);
+                $token = $page['next_continuation_token'] ?? null;
+            } while ($truncated && $token && $pages < $maxPages);
+
+            $result = [
+                'logical_bucket' => $logicalBucket,
+                'physical_bucket' => $physicalBucket,
+                'total_bytes' => $bucketTotalBytes,
+                'total_label' => $this->formatBytes($bucketTotalBytes),
+                'total_files' => $bucketTotalFiles,
+                'tracked_bytes' => $bucketTrackedBytes,
+                'tracked_label' => $this->formatBytes($bucketTrackedBytes),
+                'tracked_files' => $bucketTrackedFiles,
+                'untracked_bytes' => $bucketUntrackedBytes,
+                'untracked_label' => $this->formatBytes($bucketUntrackedBytes),
+                'untracked_files' => $bucketUntrackedFiles,
+                'pages' => $pages,
+                'truncated' => $truncated,
+                'error' => $error,
+                'scanned_at' => now()->toIso8601String(),
+            ];
+
+            if (($tenantId === null || $tenantId === '') && $error === null) {
+                $this->saveObjectStorageSnapshot($result);
+            }
+
+            $results[] = $result;
+            $totalBytes += $bucketTotalBytes;
+            $totalFiles += $bucketTotalFiles;
+            $trackedBytes += $bucketTrackedBytes;
+            $trackedFiles += $bucketTrackedFiles;
+            $untrackedBytes += $bucketUntrackedBytes;
+            $untrackedFiles += $bucketUntrackedFiles;
+        }
+
+        $failedBuckets = array_values(array_filter($results, fn ($bucket) => ! empty($bucket['error'])));
+
+        return [
+            'ok' => count($failedBuckets) === 0,
+            'message' => count($failedBuckets) > 0
+                ? 'Sync Neva Cloud S3 selesai sebagian. Ada bucket yang belum bisa dibaca.'
+                : 'Sync Neva Cloud S3 selesai.',
+            'tenant_id' => $tenantId,
+            'total_bytes' => $totalBytes,
+            'total_label' => $this->formatBytes($totalBytes),
+            'total_files' => $totalFiles,
+            'tracked_bytes' => $trackedBytes,
+            'tracked_label' => $this->formatBytes($trackedBytes),
+            'tracked_files' => $trackedFiles,
+            'untracked_bytes' => $untrackedBytes,
+            'untracked_label' => $this->formatBytes($untrackedBytes),
+            'untracked_files' => $untrackedFiles,
+            'buckets' => $results,
+            'failed_buckets' => $failedBuckets,
         ];
     }
 
@@ -509,10 +695,13 @@ class StorageManagementService
         $minimumAgeDays = $this->cleanupMinimumAgeDays($filters);
         $candidates = $this->cleanupCandidates($tenantId, $filters);
         $bytes = array_sum(array_map(fn ($row) => (int) ($row['size_bytes'] ?? 0), $candidates));
+        $provider = $this->normalizeProvider((string) ($filters['provider'] ?? self::PROVIDER_VPS));
+        $providerLabel = self::PROVIDER_LABELS[$provider] ?? 'Storage';
+        $bucket = trim((string) ($filters['bucket'] ?? ''));
 
         return [
             'allowed' => true,
-            'message' => 'Cleanup aman untuk diproses ke Trash. Hanya file tugas/quiz/lampiran yang sesuai periode dan berumur minimal '.$minimumAgeDays.' hari yang dipilih.',
+            'message' => 'Cleanup aman untuk '.$providerLabel.' bucket '.$bucket.'. Hanya file tugas/quiz/lampiran yang sesuai periode dan berumur minimal '.$minimumAgeDays.' hari yang dipilih.',
             'files' => count($candidates),
             'bytes' => $bytes,
             'bytes_label' => $this->formatBytes($bytes),
@@ -542,7 +731,7 @@ class StorageManagementService
         $affectedFiles = 0;
 
         foreach ($candidates as $file) {
-            $trashPath = $this->moveLocalFileToTrash($tenantId, $file);
+            $trashPath = $this->moveCleanupFileToTrash($tenantId, $file);
             if ($trashPath === null) {
                 continue;
             }
@@ -666,9 +855,20 @@ class StorageManagementService
         $files = 0;
         $bytes = 0;
         foreach ($rows as $row) {
-            $trashPath = trim((string) ($row->trash_path ?? ''));
-            if ($trashPath !== '' && $storage->exists($trashPath)) {
-                $storage->delete($trashPath);
+            $provider = (string) ($row->provider ?? self::PROVIDER_VPS);
+            if ($provider === self::PROVIDER_NEVA_S3) {
+                $deleted = $this->objectStorageSigner->deleteObject(
+                    $this->objectKeyForFile($row),
+                    (string) ($row->bucket ?? '')
+                );
+                if (! $deleted) {
+                    continue;
+                }
+            } else {
+                $trashPath = trim((string) ($row->trash_path ?? ''));
+                if ($trashPath !== '' && $storage->exists($trashPath)) {
+                    $storage->delete($trashPath);
+                }
             }
             $bytes += (int) ($row->size_bytes ?? 0);
             $files++;
@@ -793,7 +993,7 @@ class StorageManagementService
             ->where('tenant_id', $tenantId)
             ->whereIn('status', self::MANAGED_STATUSES);
 
-        foreach (['category', 'tahun_ajaran', 'semester', 'uploaded_by_user_id', 'provider'] as $field) {
+        foreach (['category', 'tahun_ajaran', 'semester', 'uploaded_by_user_id', 'provider', 'bucket'] as $field) {
             $value = trim((string) ($filters[$field] ?? ''));
             if ($value !== '' && $value !== 'all' && $this->tableHasColumn('storage_files', $field)) {
                 $query->where($field, $field === 'provider' ? $this->normalizeProvider($value) : $value);
@@ -806,6 +1006,158 @@ class StorageManagementService
         }
 
         return $query;
+    }
+
+    private function bucketUsage(string $tenantId, string $provider, array $filters = [], array $quota = []): array
+    {
+        if (
+            ! $this->storageFilesReady()
+            || ! $this->tableHasColumn('storage_files', 'bucket')
+            || ! $this->tableHasColumn('storage_files', 'size_bytes')
+        ) {
+            return [];
+        }
+
+        $provider = $this->normalizeProvider($provider);
+        $rows = $this->storageRowsQuery($tenantId, [
+            ...$filters,
+            'provider' => $provider,
+        ])
+            ->select('bucket')
+            ->selectRaw('coalesce(sum(size_bytes), 0) as bytes, count(*) as files')
+            ->groupBy('bucket')
+            ->get()
+            ->keyBy(fn ($row) => (string) ($row->bucket ?? ''));
+
+        $knownBuckets = $provider === self::PROVIDER_NEVA_S3
+            ? array_keys($this->objectStorageSigner->configuredBuckets())
+            : self::CLEANUP_SAFE_BUCKETS;
+        $knownBuckets = array_values(array_unique(array_filter([
+            ...$knownBuckets,
+            ...$rows->keys()->all(),
+        ])));
+
+        $quotaBytes = $quota['quota_bytes'] ?? null;
+        $providerUsedBytes = (int) ($quota['used_bytes'] ?? 0);
+
+        return collect($knownBuckets)
+            ->map(function (string $bucket) use ($rows, $quotaBytes, $providerUsedBytes) {
+                $row = $rows->get($bucket);
+                $bytes = (int) ($row->bytes ?? 0);
+                $files = (int) ($row->files ?? 0);
+                $remainingAfterBucket = $quotaBytes !== null ? max(0, (int) $quotaBytes - $bytes) : null;
+                $remainingAfterProvider = $quotaBytes !== null ? max(0, (int) $quotaBytes - $providerUsedBytes) : null;
+
+                return [
+                    'bucket' => $bucket,
+                    'label' => $this->bucketLabel($bucket),
+                    'bytes' => $bytes,
+                    'bytes_label' => $this->formatBytes($bytes),
+                    'files' => $files,
+                    'remaining_after_bucket_bytes' => $remainingAfterBucket,
+                    'remaining_after_bucket_label' => $remainingAfterBucket !== null ? $this->formatBytes($remainingAfterBucket) : 'Tidak dibatasi',
+                    'remaining_after_provider_bytes' => $remainingAfterProvider,
+                    'remaining_after_provider_label' => $remainingAfterProvider !== null ? $this->formatBytes($remainingAfterProvider) : 'Tidak dibatasi',
+                    'quota_bytes' => $quotaBytes,
+                    'quota_label' => $quotaBytes !== null ? $this->formatBytes((int) $quotaBytes) : 'Tidak dibatasi',
+                    'percent' => $quotaBytes && $quotaBytes > 0 ? round(min(100, ($bytes / $quotaBytes) * 100), 2) : null,
+                ];
+            })
+            ->sortByDesc('bytes')
+            ->values()
+            ->all();
+    }
+
+    private function syncObjectStorageMetadataRow(?string $tenantId, string $bucket, string $path, array $object): int
+    {
+        $query = DB::table('storage_files')
+            ->where('bucket', $bucket)
+            ->where('path_hash', $this->pathHash($path))
+            ->where('provider', self::PROVIDER_NEVA_S3);
+
+        if ($tenantId !== null && $tenantId !== '') {
+            $query->where('tenant_id', $tenantId);
+        }
+
+        $rows = $query->limit(20)->get();
+        if ($rows->isEmpty()) {
+            return 0;
+        }
+
+        $now = now();
+        foreach ($rows as $row) {
+            $metadata = json_decode((string) ($row->metadata ?? '{}'), true);
+            if (! is_array($metadata)) {
+                $metadata = [];
+            }
+            $metadata['s3_synced_at'] = $now->toIso8601String();
+            $metadata['s3_last_modified'] = $object['last_modified'] ?? null;
+            $metadata['s3_etag'] = $object['etag'] ?? null;
+            $metadata['object_key'] = 'private/'.$bucket.'/'.ltrim($path, '/');
+
+            $updates = [
+                'size_bytes' => max(0, (int) ($object['size'] ?? 0)),
+                'metadata' => json_encode($metadata, JSON_UNESCAPED_SLASHES),
+            ];
+            if ($this->tableHasColumn('storage_files', 'updated_at')) {
+                $updates['updated_at'] = $now;
+            }
+            if (
+                $this->tableHasColumn('storage_files', 'uploaded_at')
+                && empty($row->uploaded_at)
+                && ! empty($object['last_modified'])
+            ) {
+                $updates['uploaded_at'] = $object['last_modified'];
+            }
+
+            DB::table('storage_files')->where('id', $row->id)->update($updates);
+        }
+
+        return $rows->count();
+    }
+
+    private function saveObjectStorageSnapshot(array $snapshot): void
+    {
+        if (! Schema::hasTable('storage_provider_snapshots')) {
+            return;
+        }
+
+        $now = now();
+        $values = [
+            'provider' => self::PROVIDER_NEVA_S3,
+            'logical_bucket' => (string) ($snapshot['logical_bucket'] ?? ''),
+            'physical_bucket' => (string) ($snapshot['physical_bucket'] ?? ''),
+            'total_bytes' => max(0, (int) ($snapshot['total_bytes'] ?? 0)),
+            'total_files' => max(0, (int) ($snapshot['total_files'] ?? 0)),
+            'tracked_bytes' => max(0, (int) ($snapshot['tracked_bytes'] ?? 0)),
+            'tracked_files' => max(0, (int) ($snapshot['tracked_files'] ?? 0)),
+            'untracked_bytes' => max(0, (int) ($snapshot['untracked_bytes'] ?? 0)),
+            'untracked_files' => max(0, (int) ($snapshot['untracked_files'] ?? 0)),
+            'scanned_at' => $now,
+            'metadata' => json_encode([
+                'pages' => $snapshot['pages'] ?? 0,
+                'truncated' => (bool) ($snapshot['truncated'] ?? false),
+            ], JSON_UNESCAPED_SLASHES),
+            'updated_at' => $now,
+        ];
+
+        $existing = DB::table('storage_provider_snapshots')
+            ->where('provider', self::PROVIDER_NEVA_S3)
+            ->where('logical_bucket', $values['logical_bucket'])
+            ->exists();
+
+        if (! $existing) {
+            $values['id'] = (string) Str::uuid();
+            $values['created_at'] = $now;
+        }
+
+        DB::table('storage_provider_snapshots')->updateOrInsert(
+            [
+                'provider' => self::PROVIDER_NEVA_S3,
+                'logical_bucket' => $values['logical_bucket'],
+            ],
+            $values
+        );
     }
 
     private function driveRowsQuery(string $tenantId, array $filters = [])
@@ -1120,10 +1472,16 @@ class StorageManagementService
             return [];
         }
 
-        $query = $this->storageRowsQuery($tenantId, $filters)->where('status', 'active');
+        $provider = $this->normalizeProvider((string) ($filters['provider'] ?? self::PROVIDER_VPS));
+        $bucket = trim((string) ($filters['bucket'] ?? ''));
+
+        $query = $this->storageRowsQuery($tenantId, [
+            ...$filters,
+            'provider' => $provider,
+            'bucket' => $bucket,
+        ])->where('status', 'active');
         $query->whereIn('category', self::CLEANUP_SAFE_CATEGORIES);
         $query->whereIn('bucket', self::CLEANUP_SAFE_BUCKETS);
-        $query->where('provider', 'local');
 
         $active = $this->activePeriod($tenantId);
         $activeYear = $active['tahun_ajaran'] ?? null;
@@ -1159,7 +1517,7 @@ class StorageManagementService
             ->limit(500)
             ->get()
             ->map(fn ($row) => $this->fileRowPayload($row))
-            ->filter(fn ($row) => $this->isSafeCleanupFile($row) && $this->localCleanupFileExists($row))
+            ->filter(fn ($row) => $this->isSafeCleanupFile($row) && $this->cleanupFileIsAvailable($row))
             ->values()
             ->all();
         $percent = max(0, min(100, (int) ($filters['largest_percent'] ?? 0)));
@@ -1187,6 +1545,25 @@ class StorageManagementService
             if (! $this->tableHasColumn('storage_files', $column)) {
                 return 'Metadata storage belum lengkap untuk cleanup aman. Jalankan migrasi storage dulu sebelum cleanup.';
             }
+        }
+
+        $rawProvider = trim((string) ($filters['provider'] ?? ''));
+        if ($rawProvider === '') {
+            return 'Pilih provider storage terlebih dahulu sebelum cleanup.';
+        }
+
+        if (! in_array(strtolower($rawProvider), ['local', 'vps', 'neva', 'neva_s3', 's3', 'object-storage', 'object_storage'], true)) {
+            return 'Pilih provider storage yang valid sebelum cleanup.';
+        }
+
+        $provider = $this->normalizeProvider($rawProvider);
+        if (! in_array($provider, [self::PROVIDER_VPS, self::PROVIDER_NEVA_S3], true)) {
+            return 'Pilih provider storage yang valid sebelum cleanup.';
+        }
+
+        $bucket = trim((string) ($filters['bucket'] ?? ''));
+        if ($bucket === '' || $bucket === 'all' || ! in_array($bucket, self::CLEANUP_SAFE_BUCKETS, true)) {
+            return 'Pilih bucket yang aman untuk cleanup: assignments atau quiz-media.';
         }
 
         $category = trim((string) ($filters['category'] ?? ''));
@@ -1267,8 +1644,12 @@ class StorageManagementService
         return $backupPath;
     }
 
-    private function moveLocalFileToTrash(string $tenantId, array $file): ?string
+    private function moveCleanupFileToTrash(string $tenantId, array $file): ?string
     {
+        if (($file['provider'] ?? 'local') === self::PROVIDER_NEVA_S3) {
+            return 's3://'.$file['bucket'].'/'.$this->objectKeyForFile($file);
+        }
+
         if (($file['provider'] ?? 'local') !== 'local') {
             return null;
         }
@@ -1319,7 +1700,7 @@ class StorageManagementService
             $extension = strtolower(pathinfo((string) (($row['file_name'] ?? '') ?: ($row['path'] ?? '')), PATHINFO_EXTENSION));
         }
 
-        return ($row['provider'] ?? '') === 'local'
+        return in_array((string) ($row['provider'] ?? ''), [self::PROVIDER_VPS, self::PROVIDER_NEVA_S3], true)
             && in_array((string) ($row['bucket'] ?? ''), self::CLEANUP_SAFE_BUCKETS, true)
             && in_array((string) ($row['category'] ?? ''), self::CLEANUP_SAFE_CATEGORIES, true)
             && in_array($extension, self::CLEANUP_SAFE_EXTENSIONS, true)
@@ -1327,8 +1708,12 @@ class StorageManagementService
             && AcademicPeriod::normalizeSemester($row['semester'] ?? null) !== null;
     }
 
-    private function localCleanupFileExists(array $row): bool
+    private function cleanupFileIsAvailable(array $row): bool
     {
+        if (($row['provider'] ?? 'local') === self::PROVIDER_NEVA_S3) {
+            return $this->objectStorageSigner->isEnabledForBucket((string) ($row['bucket'] ?? ''));
+        }
+
         $bucket = trim((string) ($row['bucket'] ?? ''));
         $path = ltrim((string) ($row['path'] ?? ''), '/');
         if ($bucket === '' || $path === '') {
@@ -1336,6 +1721,14 @@ class StorageManagementService
         }
 
         return Storage::disk('local')->exists('private/'.$bucket.'/'.$path);
+    }
+
+    private function objectKeyForFile(array|object $file): string
+    {
+        $bucket = is_array($file) ? ($file['bucket'] ?? '') : ($file->bucket ?? '');
+        $path = is_array($file) ? ($file['path'] ?? '') : ($file->path ?? '');
+
+        return 'private/'.trim((string) $bucket, '/').'/'.ltrim((string) $path, '/');
     }
 
     private function activePeriod(string $tenantId): array
@@ -1435,6 +1828,45 @@ class StorageManagementService
             ->all();
     }
 
+    private function assertQuotaAllocationWithinCapacity(string $tenantId, string $provider, ?int $newQuotaBytes): void
+    {
+        if (! $this->quotaTableReady() || $newQuotaBytes === null) {
+            return;
+        }
+
+        $provider = $this->normalizeProvider($provider);
+        $capacityBytes = null;
+        $column = null;
+        $label = self::PROVIDER_LABELS[$provider] ?? 'Storage';
+        if ($provider === self::PROVIDER_NEVA_S3) {
+            $capacityBytes = $this->configuredObjectStorageCapacityBytes();
+            $column = 'neva_s3_quota_bytes';
+        } elseif ($provider === self::PROVIDER_VPS) {
+            $capacity = $this->serverCapacity();
+            $capacityBytes = (int) ($capacity['total_bytes'] ?? 0);
+            $column = $this->tableHasColumn('tenant_storage_quotas', 'vps_quota_bytes')
+                ? 'vps_quota_bytes'
+                : 'quota_bytes';
+        }
+
+        if (! $capacityBytes || $capacityBytes <= 0 || ! $column || ! $this->tableHasColumn('tenant_storage_quotas', $column)) {
+            return;
+        }
+
+        $allocatedOther = (int) DB::table('tenant_storage_quotas')
+            ->where('tenant_id', '<>', $tenantId)
+            ->sum($column);
+        $proposedTotal = $allocatedOther + $newQuotaBytes;
+        if ($proposedTotal <= $capacityBytes) {
+            return;
+        }
+
+        $remainingForTenant = max(0, $capacityBytes - $allocatedOther);
+        throw new \InvalidArgumentException(
+            'Kuota '.$label.' melebihi kapasitas platform. Maksimal tambahan untuk sekolah ini '.$this->formatBytes($remainingForTenant).'.'
+        );
+    }
+
     private function allocatedQuotaBytes(?string $provider = null): int
     {
         if (! $this->quotaTableReady()) {
@@ -1462,6 +1894,70 @@ class StorageManagementService
         ]));
 
         return array_reduce($columns, fn ($total, $quotaColumn) => $total + (int) DB::table('tenant_storage_quotas')->sum($quotaColumn), 0);
+    }
+
+    private function latestProviderSnapshotTotals(string $provider): array
+    {
+        if (! Schema::hasTable('storage_provider_snapshots')) {
+            return [];
+        }
+
+        $rows = DB::table('storage_provider_snapshots')
+            ->where('provider', $this->normalizeProvider($provider))
+            ->get();
+        if ($rows->isEmpty()) {
+            return [];
+        }
+
+        return [
+            'total_bytes' => (int) $rows->sum('total_bytes'),
+            'total_files' => (int) $rows->sum('total_files'),
+            'tracked_bytes' => (int) $rows->sum('tracked_bytes'),
+            'tracked_files' => (int) $rows->sum('tracked_files'),
+            'untracked_bytes' => (int) $rows->sum('untracked_bytes'),
+            'untracked_files' => (int) $rows->sum('untracked_files'),
+            'last_scanned_at' => $rows->max('scanned_at'),
+        ];
+    }
+
+    private function latestProviderBucketSnapshots(string $provider): array
+    {
+        if (! Schema::hasTable('storage_provider_snapshots')) {
+            return [];
+        }
+
+        return DB::table('storage_provider_snapshots')
+            ->where('provider', $this->normalizeProvider($provider))
+            ->orderBy('logical_bucket')
+            ->get()
+            ->map(fn ($row) => [
+                'logical_bucket' => (string) ($row->logical_bucket ?? ''),
+                'label' => $this->bucketLabel((string) ($row->logical_bucket ?? '')),
+                'physical_bucket' => (string) ($row->physical_bucket ?? ''),
+                'total_bytes' => (int) ($row->total_bytes ?? 0),
+                'total_label' => $this->formatBytes((int) ($row->total_bytes ?? 0)),
+                'total_files' => (int) ($row->total_files ?? 0),
+                'tracked_bytes' => (int) ($row->tracked_bytes ?? 0),
+                'tracked_label' => $this->formatBytes((int) ($row->tracked_bytes ?? 0)),
+                'tracked_files' => (int) ($row->tracked_files ?? 0),
+                'untracked_bytes' => (int) ($row->untracked_bytes ?? 0),
+                'untracked_label' => $this->formatBytes((int) ($row->untracked_bytes ?? 0)),
+                'untracked_files' => (int) ($row->untracked_files ?? 0),
+                'scanned_at' => $row->scanned_at ?? null,
+            ])
+            ->all();
+    }
+
+    private function bucketLabel(string $bucket): string
+    {
+        return match ($bucket) {
+            'assignments' => 'Tugas',
+            'quiz-media' => 'Media Quiz',
+            'certificates' => 'Sertifikat',
+            'sertifikat-files' => 'File Sertifikat',
+            'certificate-templates', 'sertifikat-templates' => 'Template Sertifikat',
+            default => Str::title(str_replace(['-', '_'], ' ', $bucket)),
+        };
     }
 
     private function profileRole(string $userId, string $tenantId): ?string
@@ -1554,6 +2050,7 @@ class StorageManagementService
 
         return match ($provider) {
             'neva', 'neva_s3', 's3', 'object-storage', 'object_storage' => self::PROVIDER_NEVA_S3,
+            'local', 'vps' => self::PROVIDER_VPS,
             default => self::PROVIDER_VPS,
         };
     }
