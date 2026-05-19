@@ -12,6 +12,7 @@ import {
   Save,
   ShieldCheck,
   Trash2,
+  X,
   XCircle
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
@@ -143,6 +144,56 @@ function ProgressLine({ label, value, percent }) {
   )
 }
 
+function TenantStorageCard({ tenant, selected, onClick }) {
+  const providers = tenant.providers || tenant.quota?.providers || {}
+  const vps = providers.vps || {}
+  const neva = providers.neva_s3 || {}
+  const vpsPercent = vps.percent !== null && vps.percent !== undefined ? Number(vps.percent) : null
+  const nevaPercent = neva.percent !== null && neva.percent !== undefined ? Number(neva.percent) : null
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`min-h-[168px] rounded-lg border bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-indigo-300 hover:shadow-md ${selected ? 'border-indigo-400 ring-2 ring-indigo-100' : 'border-slate-200'}`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate text-base font-bold text-slate-950">{tenant.name || 'Sekolah'}</p>
+          <p className="mt-1 truncate text-xs font-medium text-slate-500">{tenant.slug || tenant.id}</p>
+        </div>
+        <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${tenant.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
+          {tenant.status || 'active'}
+        </span>
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-bold uppercase tracking-wide text-slate-500">VPS</span>
+            <span className="text-xs font-semibold text-slate-500">{vpsPercent !== null ? `${vpsPercent}%` : 'Bebas'}</span>
+          </div>
+          <p className="mt-1 text-sm font-bold text-slate-900">{vps.used_label || tenant.usage?.total_label || '0 B'}</p>
+          <p className="mt-0.5 text-xs text-slate-500">Kuota {vps.quota_label || 'Tidak dibatasi'}</p>
+        </div>
+        <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Neva S3</span>
+            <span className="text-xs font-semibold text-slate-500">{nevaPercent !== null ? `${nevaPercent}%` : 'Bebas'}</span>
+          </div>
+          <p className="mt-1 text-sm font-bold text-slate-900">{neva.used_label || '0 B'}</p>
+          <p className="mt-0.5 text-xs text-slate-500">Kuota {neva.quota_label || 'Tidak dibatasi'}</p>
+        </div>
+      </div>
+
+      <div className="mt-3 flex items-center justify-between gap-3 text-xs text-slate-500">
+        <span className="truncate">Kategori terbesar: {tenant.top_category?.label || '-'}</span>
+        <span className="shrink-0 font-semibold text-indigo-600">Kelola</span>
+      </div>
+    </button>
+  )
+}
+
 function StorageManager() {
   const { isSuperAdmin, superAdminChecked } = useAuthStore()
   const { pushToast } = useUIStore()
@@ -152,6 +203,7 @@ function StorageManager() {
   const [summary, setSummary] = useState(null)
   const [superSummary, setSuperSummary] = useState(null)
   const [selectedTenantId, setSelectedTenantId] = useState(selectedTenantFromUrl)
+  const [storageOverlayOpen, setStorageOverlayOpen] = useState(() => Boolean(selectedTenantFromUrl()))
   const [tenantDetail, setTenantDetail] = useState(null)
   const [quotaForm, setQuotaForm] = useState({
     vpsQuotaGb: '',
@@ -249,6 +301,12 @@ function StorageManager() {
     nevaQuota?.quota_label,
     nevaQuota?.remaining_label
   ])
+  const vpsBucketRows = Array.isArray(vpsSummary?.bucket_usage) ? vpsSummary.bucket_usage : []
+  const combinedUsage = activeSummary?.usage || {}
+  const combinedCategories = Array.isArray(combinedUsage?.by_category) ? combinedUsage.by_category : []
+  const combinedPeriods = Array.isArray(combinedUsage?.by_period) ? combinedUsage.by_period : []
+  const combinedLargestFiles = Array.isArray(activeSummary?.largest_files) ? activeSummary.largest_files : []
+  const combinedUploaders = Array.isArray(activeSummary?.by_uploader) ? activeSummary.by_uploader : []
   const selectedTenant = tenants.find((tenant) => tenant.id === selectedTenantId)
   const selectedTenantName = selectedTenant?.name || tenantDetail?.tenant?.name || 'Sekolah dipilih'
   const canManageStorageScope = !isSuperAdmin || Boolean(selectedTenantId)
@@ -301,9 +359,8 @@ function StorageManager() {
     const { data, error } = await supabase.super.storageOverview()
     if (error) throw error
     setSuperSummary(data || null)
-    const firstTenant = data?.tenants?.[0]?.id
     const tenantIds = new Set((data?.tenants || []).map((tenant) => tenant.id).filter(Boolean))
-    setSelectedTenantId((current) => (current && tenantIds.has(current) ? current : firstTenant || ''))
+    setSelectedTenantId((current) => (current && tenantIds.has(current) ? current : ''))
   }
 
   const updateCleanupForm = (patch) => {
@@ -327,6 +384,23 @@ function StorageManager() {
       nevaQuotaGb: bytesToGbInput(neva?.quota_bytes),
       notes: data?.quota?.notes || ''
     })
+  }
+
+  const openTenantStorage = (tenantId) => {
+    if (!tenantId) return
+    if (tenantId !== selectedTenantId) {
+      setTenantDetail(null)
+    }
+    setSelectedTenantId(tenantId)
+    setStorageOverlayOpen(true)
+    setCleanupPreview(null)
+  }
+
+  const closeTenantStorage = () => {
+    setStorageOverlayOpen(false)
+    setSelectedTenantId('')
+    setTenantDetail(null)
+    setCleanupPreview(null)
   }
 
   const reloadActiveStorage = async () => {
@@ -726,6 +800,393 @@ function StorageManager() {
     </section>
   )
 
+  const quotaSection = (
+    <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <h2 className="text-sm font-bold text-slate-900">Pembagian Kuota Sekolah</h2>
+      <p className="mt-1 text-xs text-slate-500">
+        {selectedTenant?.name || tenantDetail?.tenant?.name || 'Sekolah dipilih'} mendapat jatah VPS dan Neva S3 secara terpisah, tapi dikelola dari panel yang sama.
+      </p>
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <label className="block text-xs font-semibold text-slate-600">
+          Kuota VPS (GB)
+          <input
+            type="number"
+            min="0"
+            step="0.1"
+            value={quotaForm.vpsQuotaGb}
+            onChange={(e) => setQuotaForm((prev) => ({ ...prev, vpsQuotaGb: e.target.value }))}
+            placeholder="contoh: 20"
+            className="mt-1 min-h-10 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+        </label>
+        <label className="block text-xs font-semibold text-slate-600">
+          Kuota Neva S3 (GB)
+          <input
+            type="number"
+            min="0"
+            step="0.1"
+            value={quotaForm.nevaQuotaGb}
+            onChange={(e) => setQuotaForm((prev) => ({ ...prev, nevaQuotaGb: e.target.value }))}
+            placeholder="contoh: 40"
+            className="mt-1 min-h-10 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+        </label>
+      </div>
+      <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+        Storage Manager tidak memasang batas ukuran per-file. Pengaman kapasitas berjalan dari total kuota sekolah.
+      </div>
+      <label className="mt-3 block text-xs font-semibold text-slate-600">
+        Catatan
+        <textarea
+          value={quotaForm.notes}
+          onChange={(e) => setQuotaForm((prev) => ({ ...prev, notes: e.target.value }))}
+          rows={3}
+          className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+        />
+      </label>
+      <button
+        type="button"
+        disabled={!selectedTenantId || savingQuota}
+        onClick={handleSaveQuota}
+        className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
+      >
+        <Save size={16} />
+        {savingQuota ? 'Menyimpan...' : 'Simpan Kuota'}
+      </button>
+    </section>
+  )
+
+  const storageFilterSection = (
+    <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <h2 className="text-sm font-bold text-slate-900">Filter Storage</h2>
+          <p className="mt-1 text-xs text-slate-500">
+            Filter ini dipakai untuk analitik, file terbesar, uploader, rekomendasi, dan preview cleanup.
+          </p>
+        </div>
+        <div className="grid w-full gap-2 sm:grid-cols-2 lg:max-w-3xl lg:grid-cols-[1fr_180px_auto_auto]">
+          <select
+            value={periodValue(storageFilterDraft.tahun_ajaran, storageFilterDraft.semester)}
+            onChange={(event) => setStorageFilterDraft((prev) => ({
+              ...prev,
+              ...parsePeriodValue(event.target.value)
+            }))}
+            className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+          >
+            <option value="">Semua periode</option>
+            {periodOptions.map((item) => (
+              <option key={item.value} value={item.value}>
+                {item.tahun_ajaran} - {item.semester}{item.isActive ? ' (Aktif)' : ''}
+              </option>
+            ))}
+            {periodOptions.length === 0 && <option value="" disabled>Belum ada periode tercatat</option>}
+          </select>
+          <select
+            value={storageFilterDraft.category}
+            onChange={(event) => setStorageFilterDraft((prev) => ({ ...prev, category: event.target.value }))}
+            className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+          >
+            {CATEGORIES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+          </select>
+          <button
+            type="button"
+            onClick={handleApplyStorageFilters}
+            disabled={loading}
+            className="inline-flex min-h-10 items-center justify-center rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+          >
+            Terapkan
+          </button>
+          <button
+            type="button"
+            onClick={handleResetStorageFilters}
+            disabled={loading}
+            className="inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+          >
+            Reset
+          </button>
+        </div>
+      </div>
+    </section>
+  )
+
+  const tenantStorageOverlay = storageOverlayOpen && selectedTenantId ? (
+    <div className="fixed inset-0 z-50 bg-slate-950/50 p-3 backdrop-blur-sm sm:p-6">
+      <section className="mx-auto flex h-full max-w-7xl flex-col overflow-hidden rounded-lg bg-slate-50 shadow-2xl">
+        <div className="border-b border-slate-200 bg-white px-4 py-4 sm:px-6">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <p className="text-xs font-bold uppercase tracking-wide text-indigo-600">Kelola Storage Sekolah</p>
+              <h2 className="truncate text-xl font-bold text-slate-950">{selectedTenantName}</h2>
+              <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                <span className="rounded-full bg-slate-100 px-3 py-1 font-semibold text-slate-600">{tenantDetail?.tenant?.slug || selectedTenant?.slug || selectedTenantId}</span>
+                <span className="rounded-full bg-slate-100 px-3 py-1 font-semibold text-slate-600">Status: {tenantDetail?.tenant?.status || selectedTenant?.status || '-'}</span>
+              </div>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <button
+                type="button"
+                onClick={() => handleSyncObjectStorage(selectedTenantId, { bucket: '' })}
+                disabled={syncingObjectStorage || !nevaEnabled}
+                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-white px-4 py-2 text-sm font-semibold text-indigo-700 shadow-sm hover:bg-indigo-50 disabled:opacity-60"
+              >
+                <RefreshCw size={16} className={syncingObjectStorage ? 'animate-spin' : ''} />
+                {syncingObjectStorage ? 'Membaca S3...' : 'Scan Neva S3'}
+              </button>
+              <button
+                type="button"
+                onClick={closeTenantStorage}
+                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+              >
+                <X size={16} />
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-6">
+          {!tenantDetail ? (
+            <div className="rounded-lg border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">
+              Memuat detail storage sekolah...
+            </div>
+          ) : (
+            <div className="space-y-5">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+                <StatTile icon={HardDrive} label="VPS Terpakai" value={vpsQuota?.used_label || '0 B'} hint={providerPercentLabel(vpsQuota)} />
+                <StatTile icon={Database} label="Kuota VPS" value={vpsQuota?.quota_label || 'Tidak dibatasi'} />
+                <StatTile icon={Archive} label="Sisa VPS" value={vpsQuota?.remaining_label || 'Tidak dibatasi'} />
+                <StatTile icon={Cloud} label="S3 Terpakai" value={nevaQuota?.used_label || '0 B'} hint={providerPercentLabel(nevaQuota)} />
+                <StatTile icon={ShieldCheck} label="Kuota S3" value={nevaQuota?.quota_label || 'Tidak dibatasi'} />
+                <StatTile icon={Trash2} label="Trash" value={activeSummary?.trash?.bytes_label || '0 B'} hint={`${numberFormatter.format(activeSummary?.trash?.files || 0)} file`} />
+              </div>
+
+              <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
+                {quotaSection}
+                <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                  <h2 className="text-sm font-bold text-slate-900">Status Neva S3</h2>
+                  <p className="mt-1 text-xs text-slate-500">Provider cepat untuk upload harian tugas, media quiz, dan sertifikat.</p>
+                  <div className="mt-3 space-y-2">
+                    {[
+                      ['Provider S3', nevaEnabled, nevaPlatform?.label || 'Neva Cloud S3'],
+                      ['Endpoint', Boolean(nevaPlatform?.endpoint), nevaPlatform?.endpoint || 'Endpoint diambil dari ENV server'],
+                      ['Direct upload browser', nevaDirectEnabled, nevaDirectEnabled ? 'Aktif' : 'Fallback backend tetap aman'],
+                      ['Verifikasi object', Boolean(nevaPlatform?.verify_objects), nevaPlatform?.verify_objects ? 'Aktif' : 'Opsional belum aktif']
+                    ].map(([label, ok, detail]) => (
+                      <div key={label} className="flex items-start gap-2 rounded-lg border border-slate-100 bg-slate-50 p-3">
+                        {ok ? <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" /> : <XCircle className="mt-0.5 h-4 w-4 text-slate-400" />}
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-slate-900">{label}</p>
+                          <p className="truncate text-xs text-slate-500">{detail}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              </div>
+
+              {storageFilterSection}
+
+              <div className="grid gap-4 xl:grid-cols-2">
+                <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                  <h2 className="text-sm font-bold text-slate-900">Bucket VPS</h2>
+                  <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    {vpsBucketRows.map((bucket) => (
+                      <div key={bucket.bucket} className="rounded-lg border border-slate-100 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-slate-900">{bucket.label || NEVA_BUCKET_LABELS[bucket.bucket] || bucket.bucket}</p>
+                            <p className="text-xs text-slate-500">{numberFormatter.format(bucket.files || 0)} file</p>
+                          </div>
+                          <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-700">{bucket.bytes_label || '0 B'}</span>
+                        </div>
+                        <p className="mt-2 text-xs text-slate-500">Sisa sekolah: {bucket.remaining_after_provider_label || 'Tidak dibatasi'}</p>
+                      </div>
+                    ))}
+                    {vpsBucketRows.length === 0 && <p className="text-sm text-slate-500">Belum ada bucket VPS tercatat.</p>}
+                  </div>
+                </section>
+
+                <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                  <h2 className="text-sm font-bold text-slate-900">Bucket Neva S3</h2>
+                  <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    {nevaBucketRows.map((bucket) => (
+                      <div key={bucket.bucket} className="rounded-lg border border-slate-100 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-slate-900">{bucket.label || NEVA_BUCKET_LABELS[bucket.bucket] || bucket.bucket}</p>
+                            <p className="truncate text-xs text-slate-500">{bucket.physical_bucket || bucket.bucket}</p>
+                          </div>
+                          <span className="shrink-0 rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-bold text-indigo-700">{bucket.bytes_label || '0 B'}</span>
+                        </div>
+                        <p className="mt-2 text-xs text-slate-500">Sisa sekolah: {bucket.remaining_after_provider_label || 'Tidak dibatasi'}</p>
+                      </div>
+                    ))}
+                    {nevaBucketRows.length === 0 && <p className="text-sm text-slate-500">Belum ada bucket Neva tercatat.</p>}
+                  </div>
+                </section>
+              </div>
+
+              {cleanupSection}
+
+              <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
+                <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="mb-4 flex items-center gap-2">
+                    <BarChart3 size={18} className="text-indigo-600" />
+                    <h2 className="text-sm font-bold text-slate-900">Analitik Gabungan</h2>
+                  </div>
+                  <div className="grid gap-5 lg:grid-cols-2">
+                    <div className="space-y-3">
+                      <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">Kategori terbesar</h3>
+                      {combinedCategories.map((item) => (
+                        <ProgressLine key={item.category} label={item.label} value={item.bytes_label} percent={combinedUsage.total_bytes ? (item.bytes / combinedUsage.total_bytes) * 100 : 0} />
+                      ))}
+                      {combinedCategories.length === 0 && <p className="text-sm text-slate-500">Belum ada metadata storage baru.</p>}
+                    </div>
+                    <div className="space-y-3">
+                      <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">Periode terbesar</h3>
+                      {combinedPeriods.slice(0, 6).map((item) => (
+                        <ProgressLine key={`${item.tahun_ajaran}-${item.semester}`} label={`${item.tahun_ajaran || '-'} ${item.semester || ''}`} value={item.bytes_label} percent={combinedUsage.total_bytes ? (item.bytes / combinedUsage.total_bytes) * 100 : 0} />
+                      ))}
+                      {combinedPeriods.length === 0 && <p className="text-sm text-slate-500">Belum ada data periode.</p>}
+                    </div>
+                  </div>
+                </section>
+
+                <section className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle size={18} className="text-amber-700" />
+                    <h2 className="text-sm font-bold text-slate-900">Rekomendasi</h2>
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {recommendations.map((item, index) => (
+                      <div key={`${item.type}-${index}`} className="rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm text-slate-700">{item.message}</div>
+                    ))}
+                    {recommendations.length === 0 && <p className="text-sm text-slate-600">Belum ada rekomendasi kritikal.</p>}
+                  </div>
+                </section>
+              </div>
+
+              <div className="grid gap-4 xl:grid-cols-3">
+                <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                  <h2 className="text-sm font-bold text-slate-900">File Terbesar</h2>
+                  <div className="mt-3 space-y-2">
+                    {combinedLargestFiles.slice(0, 8).map((file) => (
+                      <div key={file.id} className="flex items-start justify-between gap-3 rounded-lg border border-slate-100 px-3 py-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-slate-900">{file.file_name}</p>
+                          <p className="text-xs text-slate-500">{file.category_label} · {file.provider}</p>
+                        </div>
+                        <span className="shrink-0 text-sm font-bold text-slate-700">{file.size_label}</span>
+                      </div>
+                    ))}
+                    {combinedLargestFiles.length === 0 && <p className="text-sm text-slate-500">Belum ada file tercatat.</p>}
+                  </div>
+                </section>
+
+                <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                  <h2 className="text-sm font-bold text-slate-900">Uploader Terbesar</h2>
+                  <div className="mt-3 space-y-2">
+                    {combinedUploaders.slice(0, 8).map((user) => (
+                      <div key={user.user_id || user.nama} className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 px-3 py-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-slate-900">{user.nama}</p>
+                          <p className="text-xs text-slate-500">{user.role || '-'} · {numberFormatter.format(user.files || 0)} file</p>
+                        </div>
+                        <span className="shrink-0 text-sm font-bold text-slate-700">{user.bytes_label}</span>
+                      </div>
+                    ))}
+                    {combinedUploaders.length === 0 && <p className="text-sm text-slate-500">Belum ada uploader tercatat.</p>}
+                  </div>
+                </section>
+
+                <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                  <h2 className="text-sm font-bold text-slate-900">Trash Terbaru</h2>
+                  <div className="mt-3 space-y-2">
+                    {trashFiles.slice(0, 8).map((file) => (
+                      <div key={file.id} className="flex items-start justify-between gap-3 rounded-lg border border-slate-100 px-3 py-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-slate-900">{file.file_name}</p>
+                          <p className="text-xs text-slate-500">{file.category_label} · {file.size_label}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleRestoreTrashFile(file.id)}
+                          disabled={restoringTrashId === file.id}
+                          className="shrink-0 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                        >
+                          {restoringTrashId === file.id ? '...' : 'Restore'}
+                        </button>
+                      </div>
+                    ))}
+                    {trashFiles.length === 0 && <p className="text-sm text-slate-500">Trash masih kosong.</p>}
+                  </div>
+                </section>
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
+    </div>
+  ) : null
+
+  const superAdminCombinedView = isSuperAdmin ? (
+    <>
+      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h2 className="text-sm font-bold text-slate-900">Platform Storage</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              VPS dan Neva Cloud S3 digabung di satu dashboard. Klik kartu sekolah untuk pengaturan, monitoring, dan cleanup.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => handleSyncObjectStorage('', { bucket: '' })}
+            disabled={syncingObjectStorage || !nevaEnabled}
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-white px-4 py-2 text-sm font-semibold text-indigo-700 shadow-sm hover:bg-indigo-50 disabled:opacity-60"
+          >
+            <RefreshCw size={16} className={syncingObjectStorage ? 'animate-spin' : ''} />
+            {syncingObjectStorage ? 'Membaca S3...' : 'Scan Platform Neva'}
+          </button>
+        </div>
+        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <StatTile icon={HardDrive} label="Total VPS" value={superSummary?.server?.total_label} hint={`${superSummary?.server?.disk_percent || 0}% disk`} />
+          <StatTile icon={ShieldCheck} label="Kuota VPS Dibagikan" value={superSummary?.server?.allocated_quota_label} hint={`Sisa ${superSummary?.server?.remaining_after_allocated_label || '0 B'}`} />
+          <StatTile icon={Cloud} label="Total Neva S3" value={nevaPlatform?.capacity_label || 'Belum diset'} hint={nevaPlatform?.endpoint || 'Neva Cloud S3'} />
+          <StatTile icon={Archive} label="Kuota S3 Dibagikan" value={nevaPlatform?.allocated_quota_label || '0 B'} hint={`Sisa ${nevaPlatform?.remaining_after_allocated_label || 'Belum diset'}`} />
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-sm font-bold text-slate-900">Sekolah</h2>
+            <p className="mt-1 text-xs text-slate-500">Tiga kartu per baris di desktop. Sekolah baru otomatis turun ke baris berikutnya.</p>
+          </div>
+          <span className="text-xs font-semibold text-slate-500">{numberFormatter.format(tenants.length)} sekolah</span>
+        </div>
+        <div className="grid gap-4 lg:grid-cols-3">
+          {tenants.map((tenant) => (
+            <TenantStorageCard
+              key={tenant.id}
+              tenant={tenant}
+              selected={tenant.id === selectedTenantId}
+              onClick={() => openTenantStorage(tenant.id)}
+            />
+          ))}
+          {tenants.length === 0 && (
+            <div className="rounded-lg border border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">
+              Belum ada sekolah yang bisa dikelola.
+            </div>
+          )}
+        </div>
+      </section>
+
+      {tenantStorageOverlay}
+    </>
+  ) : null
+
   if (!superAdminChecked) {
     return <div className="p-6 text-sm text-slate-500">Memuat akses storage manager...</div>
   }
@@ -767,24 +1228,26 @@ function StorageManager() {
           </div>
         </div>
 
-        <div className="flex gap-2 overflow-x-auto rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
-          <button
-            type="button"
-            onClick={() => setActiveTab('storage')}
-            className={`inline-flex min-w-max items-center gap-2 rounded-md px-4 py-2 text-sm font-semibold ${activeTab === 'storage' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
-          >
-            <HardDrive size={16} />
-            VPS Storage
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('neva')}
-            className={`inline-flex min-w-max items-center gap-2 rounded-md px-4 py-2 text-sm font-semibold ${activeTab === 'neva' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
-          >
-            <Cloud size={16} />
-            Neva Cloud S3
-          </button>
-        </div>
+        {!isSuperAdmin && (
+          <div className="flex gap-2 overflow-x-auto rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+            <button
+              type="button"
+              onClick={() => setActiveTab('storage')}
+              className={`inline-flex min-w-max items-center gap-2 rounded-md px-4 py-2 text-sm font-semibold ${activeTab === 'storage' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+            >
+              <HardDrive size={16} />
+              VPS Storage
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('neva')}
+              className={`inline-flex min-w-max items-center gap-2 rounded-md px-4 py-2 text-sm font-semibold ${activeTab === 'neva' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+            >
+              <Cloud size={16} />
+              Neva Cloud S3
+            </button>
+          </div>
+        )}
 
         {storageError && (
           <section className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
@@ -806,80 +1269,9 @@ function StorageManager() {
           </section>
         )}
 
-        {isSuperAdmin && (
-          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <h2 className="text-sm font-bold text-slate-900">Sekolah Aktif Dikelola</h2>
-                <p className="mt-1 text-xs text-slate-500">
-                  Pilih sekolah di sini untuk mengelola kuota VPS, kuota Neva S3, cleanup, dan Trash tanpa kembali ke halaman Sekolah.
-                </p>
-              </div>
-              <select
-                value={selectedTenantId}
-                onChange={(event) => setSelectedTenantId(event.target.value)}
-                className="min-h-10 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 lg:max-w-md"
-              >
-                <option value="">Pilih sekolah</option>
-                {tenants.map((tenant) => (
-                  <option key={tenant.id} value={tenant.id}>
-                    {tenant.name} ({tenant.slug})
-                  </option>
-                ))}
-              </select>
-            </div>
-            {selectedTenantId && (
-              <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                <span className="rounded-full bg-indigo-50 px-3 py-1 font-semibold text-indigo-700">{selectedTenantName}</span>
-                <span className="rounded-full bg-slate-100 px-3 py-1 font-semibold text-slate-600">{tenantDetail?.tenant?.slug || selectedTenant?.slug || selectedTenantId}</span>
-                <span className="rounded-full bg-slate-100 px-3 py-1 font-semibold text-slate-600">Status: {tenantDetail?.tenant?.status || selectedTenant?.status || '-'}</span>
-              </div>
-            )}
-          </section>
-        )}
+        {superAdminCombinedView}
 
-        {activeTab === 'neva' && isSuperAdmin && (
-          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-              <div>
-                <h2 className="text-sm font-bold text-slate-900">Platform Neva Cloud S3</h2>
-                <p className="mt-1 text-xs text-slate-500">
-                  Total paket Neva diambil dari ENV server. Setelah sekolah dipilih, Super Admin membagi jatah sekolah lewat field Kuota Neva S3.
-                </p>
-                {nevaPlatform?.last_scanned_at && (
-                  <p className="mt-1 text-xs text-slate-400">Scan terakhir: {formatDateTime(nevaPlatform.last_scanned_at)}</p>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={() => handleSyncObjectStorage('', { bucket: '' })}
-                disabled={syncingObjectStorage || !nevaEnabled}
-                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-white px-4 py-2 text-sm font-semibold text-indigo-700 shadow-sm hover:bg-indigo-50 disabled:opacity-60"
-              >
-                <RefreshCw size={16} className={syncingObjectStorage ? 'animate-spin' : ''} />
-                {syncingObjectStorage ? 'Membaca S3...' : 'Scan Platform'}
-              </button>
-            </div>
-            <div className="mt-4 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-              <StatTile icon={Cloud} label="Total Paket Neva S3" value={nevaPlatform?.capacity_label || 'Belum diset'} hint="APP_OBJECT_STORAGE_CAPACITY_GB" />
-              <StatTile icon={Database} label="Terpakai Platform" value={nevaPlatform?.used_label || '0 B'} hint={nevaPlatform?.percent !== null && nevaPlatform?.percent !== undefined ? `${nevaPlatform.percent}% paket` : 'Menunggu scan bucket'} />
-              <StatTile icon={ShieldCheck} label="Kuota S3 Dibagikan" value={nevaPlatform?.allocated_quota_label || '0 B'} />
-              <StatTile icon={Archive} label="Sisa Setelah Kuota" value={nevaPlatform?.remaining_after_allocated_label || 'Belum diset'} />
-            </div>
-            {(nevaPlatform?.tracked_label || nevaPlatform?.untracked_label) && (
-              <div className="mt-4 grid gap-3 md:grid-cols-2">
-                <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-                  Terlacak aplikasi: <span className="font-bold">{nevaPlatform.tracked_label || '0 B'}</span>
-                </div>
-                <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                  Belum terlacak metadata: <span className="font-bold">{nevaPlatform.untracked_label || '0 B'}</span>
-                </div>
-              </div>
-            )}
-          </section>
-        )}
-
-        {activeTab === 'neva' && (!isSuperAdmin || selectedTenantId) && (
+        {activeTab === 'neva' && !isSuperAdmin && (
           <section className="space-y-4">
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
               <StatTile icon={Cloud} label="Status Neva S3" value={nevaEnabled ? 'Aktif' : 'Belum aktif'} hint={nevaPlatform?.endpoint || 'Endpoint Neva Cloud S3'} />
@@ -1050,163 +1442,20 @@ function StorageManager() {
           </section>
         )}
 
-        {activeTab === 'neva' && isSuperAdmin && !selectedTenantId && (
-          <section className="rounded-lg border border-slate-200 bg-white p-8 text-center shadow-sm">
-            <Cloud className="mx-auto h-10 w-10 text-slate-300" />
-            <h2 className="mt-3 text-base font-bold text-slate-900">Pilih sekolah dulu</h2>
-            <p className="mt-1 text-sm text-slate-500">
-              Neva Cloud S3 dikelola per sekolah. Pilih tenant dari dropdown di atas untuk melihat kuota, pemakaian, kategori, dan file terbesar.
-            </p>
-            <button
-              type="button"
-              onClick={handleSyncObjectStorage}
-              disabled={syncingObjectStorage || !nevaEnabled}
-              className="mx-auto mt-4 inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-white px-4 py-2 text-sm font-semibold text-indigo-700 shadow-sm hover:bg-indigo-50 disabled:opacity-60"
-            >
-              <RefreshCw size={16} className={syncingObjectStorage ? 'animate-spin' : ''} />
-              {syncingObjectStorage ? 'Membaca S3...' : 'Scan Semua Bucket Neva'}
-            </button>
+        {activeTab === 'storage' && !isSuperAdmin && (
+          <>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <StatTile icon={HardDrive} label="VPS Terpakai" value={usage.total_label || quota.used_label} hint={`${numberFormatter.format(usage.total_files || 0)} file`} />
+          <StatTile icon={Database} label="Kuota VPS" value={quota.quota_label} hint={quota.percent !== null && quota.percent !== undefined ? `${quota.percent}% terpakai` : 'Belum dibatasi'} />
+          <StatTile icon={Archive} label="Sisa VPS" value={quota.remaining_label} />
+          <StatTile icon={Trash2} label="Trash" value={activeSummary?.trash?.bytes_label || '0 B'} hint={`${numberFormatter.format(activeSummary?.trash?.files || 0)} file`} />
+        </div>
+
+        {quota.percent !== null && quota.percent !== undefined && (
+          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <ProgressLine label="Pemakaian kuota VPS sekolah" value={`${quota.percent}%`} percent={quota.percent} />
           </section>
         )}
-
-        {activeTab === 'storage' && (
-          <>
-        {isSuperAdmin && (
-          <div className="grid gap-4 lg:grid-cols-4">
-            <StatTile icon={HardDrive} label="Total VPS" value={superSummary?.server?.total_label} />
-            <StatTile icon={Database} label="Terpakai VPS" value={superSummary?.server?.used_label} hint={`${superSummary?.server?.disk_percent || 0}% disk`} />
-            <StatTile icon={ShieldCheck} label="Kuota Dibagikan" value={superSummary?.server?.allocated_quota_label} />
-            <StatTile icon={Archive} label="Sisa Setelah Kuota" value={superSummary?.server?.remaining_after_allocated_label} />
-          </div>
-        )}
-
-        {isSuperAdmin && (
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
-            <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-              <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-sm font-bold text-slate-900">Monitoring Semua Sekolah</h2>
-                <span className="text-xs text-slate-500">{numberFormatter.format(tenants.length)} sekolah</span>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-sm">
-	                  <thead className="text-left text-xs uppercase tracking-wide text-slate-500">
-	                    <tr>
-	                      <th className="py-2 pr-3">Sekolah</th>
-	                      <th className="py-2 pr-3">VPS</th>
-	                      <th className="py-2 pr-3">Neva S3</th>
-	                      <th className="py-2 pr-3">Kuota</th>
-	                      <th className="py-2 pr-3">Kategori</th>
-	                    </tr>
-	                  </thead>
-		                  <tbody>
-		                    {tenants.map((tenant) => {
-		                      const tenantProviders = tenant.providers || tenant.quota?.providers || {}
-		                      const tenantVps = tenantProviders.vps || {}
-		                      const tenantNeva = tenantProviders.neva_s3 || {}
-	                      return (
-	                        <tr
-	                          key={tenant.id}
-	                          onClick={() => setSelectedTenantId(tenant.id)}
-	                          className={`cursor-pointer border-t border-slate-100 ${selectedTenantId === tenant.id ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}
-	                        >
-	                          <td className="py-3 pr-3">
-	                            <p className="font-semibold text-slate-900">{tenant.name}</p>
-	                            <p className="text-xs text-slate-500">{tenant.slug}</p>
-	                          </td>
-	                          <td className="py-3 pr-3">
-	                            <p className="font-medium text-slate-700">{tenantVps.used_label || tenant.usage?.total_label || '0 B'}</p>
-	                            <p className="text-xs text-slate-500">{tenantVps.quota_label || 'Tanpa batas'}</p>
-	                          </td>
-	                          <td className="py-3 pr-3">
-	                            <p className="font-medium text-slate-700">{tenantNeva.used_label || '0 B'}</p>
-	                            <p className="text-xs text-slate-500">{tenantNeva.quota_label || 'Tanpa batas'}</p>
-	                          </td>
-	                          <td className="py-3 pr-3 text-slate-600">{tenant.quota?.quota_label || tenantVps.quota_label || '-'}</td>
-	                          <td className="py-3 pr-3 text-slate-600">{tenant.top_category?.label || '-'}</td>
-	                        </tr>
-	                      )
-	                    })}
-	                  </tbody>
-	                </table>
-              </div>
-            </section>
-
-	            <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-	              <h2 className="text-sm font-bold text-slate-900">Kuota Sekolah</h2>
-	              <p className="mt-1 text-xs text-slate-500">
-	                {selectedTenant?.name || 'Pilih sekolah dari tabel.'} Kuota VPS dan Neva S3 dikelola sebagai total jatah sekolah. Upload per-file tidak dibatasi dari panel ini.
-	              </p>
-	              <p className="mt-1 text-xs text-indigo-600">
-	                Contoh: paket Neva platform 100 GB, sekolah ini diberi 40 GB. Sisa platform otomatis terlihat di kartu Neva S3.
-	              </p>
-	              <div className="mt-4 grid gap-3">
-	                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-	                  <label className="block text-xs font-semibold text-slate-600">
-	                    Kuota VPS (GB)
-	                    <input
-	                      type="number"
-	                      min="0"
-	                      step="0.1"
-	                      value={quotaForm.vpsQuotaGb}
-	                      onChange={(e) => setQuotaForm((prev) => ({ ...prev, vpsQuotaGb: e.target.value }))}
-	                      placeholder="contoh: 20"
-	                      className="mt-1 min-h-10 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-	                    />
-	                  </label>
-	                  <label className="block text-xs font-semibold text-slate-600">
-	                    Kuota Neva S3 (GB)
-	                    <input
-	                      type="number"
-	                      min="0"
-	                      step="0.1"
-	                      value={quotaForm.nevaQuotaGb}
-	                      onChange={(e) => setQuotaForm((prev) => ({ ...prev, nevaQuotaGb: e.target.value }))}
-	                      placeholder="contoh: 40"
-	                      className="mt-1 min-h-10 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-	                    />
-	                    <span className="mt-1 block text-[11px] font-normal text-slate-500">
-	                      Dipakai untuk tugas, media quiz, sertifikat, dan bucket object storage lain.
-	                    </span>
-	                  </label>
-	                </div>
-	                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-	                  Storage Manager tidak memasang batas ukuran per-file. Pengaman kapasitas hanya berjalan berdasarkan total kuota sekolah.
-	                </div>
-	                <label className="block text-xs font-semibold text-slate-600">
-	                  Catatan
-	                  <textarea
-	                    value={quotaForm.notes}
-	                    onChange={(e) => setQuotaForm((prev) => ({ ...prev, notes: e.target.value }))}
-	                    rows={3}
-	                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-	                  />
-	                </label>
-	                <button
-	                  type="button"
-	                  disabled={!selectedTenantId || savingQuota}
-	                  onClick={handleSaveQuota}
-	                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
-	                >
-	                  <Save size={16} />
-	                  {savingQuota ? 'Menyimpan...' : 'Simpan Kuota'}
-	                </button>
-	              </div>
-	            </section>
-          </div>
-        )}
-
-	        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-	          <StatTile icon={HardDrive} label="VPS Terpakai" value={usage.total_label || quota.used_label} hint={`${numberFormatter.format(usage.total_files || 0)} file`} />
-	          <StatTile icon={Database} label="Kuota VPS" value={quota.quota_label} hint={quota.percent !== null && quota.percent !== undefined ? `${quota.percent}% terpakai` : 'Belum dibatasi'} />
-	          <StatTile icon={Archive} label="Sisa VPS" value={quota.remaining_label} />
-	          <StatTile icon={Trash2} label="Trash" value={activeSummary?.trash?.bytes_label || '0 B'} hint={`${numberFormatter.format(activeSummary?.trash?.files || 0)} file`} />
-	        </div>
-
-	        {quota.percent !== null && quota.percent !== undefined && (
-	          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-	            <ProgressLine label="Pemakaian kuota VPS sekolah" value={`${quota.percent}%`} percent={quota.percent} />
-	          </section>
-	        )}
 
         {activeBucketRows.length > 0 && (
           <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -1244,57 +1493,7 @@ function StorageManager() {
           </section>
         )}
 
-        <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <h2 className="text-sm font-bold text-slate-900">Filter Storage</h2>
-              <p className="mt-1 text-xs text-slate-500">
-                Filter ini dipakai untuk analitik, file terbesar, uploader, rekomendasi, dan preview cleanup.
-              </p>
-            </div>
-            <div className="grid w-full gap-2 sm:grid-cols-2 lg:max-w-3xl lg:grid-cols-[1fr_180px_auto_auto]">
-              <select
-                value={periodValue(storageFilterDraft.tahun_ajaran, storageFilterDraft.semester)}
-                onChange={(event) => setStorageFilterDraft((prev) => ({
-                  ...prev,
-                  ...parsePeriodValue(event.target.value)
-                }))}
-                className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm"
-              >
-                <option value="">Semua periode</option>
-                {periodOptions.map((item) => (
-                  <option key={item.value} value={item.value}>
-                    {item.tahun_ajaran} - {item.semester}{item.isActive ? ' (Aktif)' : ''}
-                  </option>
-                ))}
-                {periodOptions.length === 0 && <option value="" disabled>Belum ada periode tercatat</option>}
-              </select>
-              <select
-                value={storageFilterDraft.category}
-                onChange={(event) => setStorageFilterDraft((prev) => ({ ...prev, category: event.target.value }))}
-                className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm"
-              >
-                {CATEGORIES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-              </select>
-              <button
-                type="button"
-                onClick={handleApplyStorageFilters}
-                disabled={loading}
-                className="inline-flex min-h-10 items-center justify-center rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
-              >
-                Terapkan
-              </button>
-              <button
-                type="button"
-                onClick={handleResetStorageFilters}
-                disabled={loading}
-                className="inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-              >
-                Reset
-              </button>
-            </div>
-          </div>
-        </section>
+        {storageFilterSection}
 
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
           <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -1418,7 +1617,7 @@ function StorageManager() {
           </>
         )}
 
-        {canManageStorageScope && cleanupSection}
+        {!isSuperAdmin && canManageStorageScope && cleanupSection}
       </div>
     </div>
   )
