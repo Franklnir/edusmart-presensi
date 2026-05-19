@@ -46,6 +46,12 @@ const normalizeDateKey = (value) => {
   return Number.isNaN(date.getTime()) ? '' : toLocalDateKey(date)
 }
 
+const semesterForDateKey = (dateKey, fallbackSemester = '') => {
+  const month = Number(String(dateKey || '').slice(5, 7))
+  if (!Number.isFinite(month) || month < 1 || month > 12) return fallbackSemester || null
+  return month >= 7 ? 'Ganjil' : 'Genap'
+}
+
 const formatDateIndo = (dateStr) => {
   const date = new Date(dateStr)
   return new Intl.DateTimeFormat('id-ID', {
@@ -327,24 +333,41 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap, academicPeriod }) => {
   const { pushToast, setLoading } = useUIStore()
   const [anggotaEskul, setAnggotaEskul] = useState([])
   const [absensiData, setAbsensiData] = useState({})
-  const periodMonths = academicPeriod?.months?.length ? academicPeriod.months : resolveAcademicPeriod().months
+  const fallbackAcademicPeriod = React.useMemo(() => resolveAcademicPeriod(), [])
+  const periodMonths = academicPeriod?.academicYearMonths?.length
+    ? academicPeriod.academicYearMonths
+    : (academicPeriod?.months?.length ? academicPeriod.months : fallbackAcademicPeriod.academicYearMonths || fallbackAcademicPeriod.months)
   const currentMonthValue = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`
   const defaultSelectedMonths = periodMonths.some((month) => month.value === currentMonthValue)
     ? [currentMonthValue]
     : (periodMonths[0]?.value ? [periodMonths[0].value] : [])
   const [selectedMonths, setSelectedMonths] = useState(defaultSelectedMonths)
   const [viewMode, setViewMode] = useState('detail') // 'detail' atau 'rekap'
+  const periodScopeLabel = academicPeriod?.academicYearRangeLabel || academicPeriod?.rangeLabel || 'Periode akademik'
+
+  useEffect(() => {
+    const validMonthValues = new Set(periodMonths.map((month) => month.value).filter(Boolean))
+    if (validMonthValues.size === 0) return
+
+    setSelectedMonths((current) => {
+      const next = current.filter((value) => validMonthValues.has(value))
+      if (next.length > 0) return next
+      return validMonthValues.has(currentMonthValue)
+        ? [currentMonthValue]
+        : [periodMonths[0].value]
+    })
+  }, [currentMonthValue, periodMonths])
 
   // Generate tanggal dalam periode aktif, mulai dari tanggal ekskul dibuat.
   const eskulDates = React.useMemo(() => {
     const dates = []
     const hariEskulList = parseEskulDays(eskul.hari)
     const startBoundCandidates = [
-      normalizeDateKey(academicPeriod?.startsAt || academicPeriod?.periodeMulai),
+      normalizeDateKey(academicPeriod?.academicYearStartsAt || academicPeriod?.startsAt || academicPeriod?.periodeMulai),
       normalizeDateKey(eskul.created_at)
     ].filter(Boolean)
     const startBound = startBoundCandidates.sort()[startBoundCandidates.length - 1] || ''
-    const endBound = normalizeDateKey(academicPeriod?.endsAt || academicPeriod?.periodeSelesai)
+    const endBound = normalizeDateKey(academicPeriod?.academicYearEndsAt || academicPeriod?.endsAt || academicPeriod?.periodeSelesai)
 
     selectedMonths.forEach(monthValue => {
       const [yearText, monthText] = String(monthValue || '').split('-')
@@ -375,6 +398,8 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap, academicPeriod }) => {
 
     return dates.sort((a, b) => a.date - b.date)
   }, [
+    academicPeriod?.academicYearEndsAt,
+    academicPeriod?.academicYearStartsAt,
     academicPeriod?.endsAt,
     academicPeriod?.periodeMulai,
     academicPeriod?.periodeSelesai,
@@ -395,7 +420,6 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap, academicPeriod }) => {
           .select('*')
           .eq('ekskul_id', eskul.id)
         if (academicPeriod?.tahunAjaran) anggotaQuery = anggotaQuery.eq('tahun_ajaran', academicPeriod.tahunAjaran)
-        if (academicPeriod?.semester) anggotaQuery = anggotaQuery.eq('semester', academicPeriod.semester)
         const { data, error } = await anggotaQuery
 
         if (error) throw error
@@ -465,7 +489,6 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap, academicPeriod }) => {
           .in('ekskul_id', [eskul.id])
           .in('tanggal', dateStrs)
         if (academicPeriod?.tahunAjaran) absensiQuery = absensiQuery.eq('tahun_ajaran', academicPeriod.tahunAjaran)
-        if (academicPeriod?.semester) absensiQuery = absensiQuery.eq('semester', academicPeriod.semester)
         const { data, error } = await absensiQuery
 
         if (error) throw error
@@ -515,18 +538,37 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap, academicPeriod }) => {
       setLoading(true)
       const key = `${userId}_${tanggal}`
 
-      // Cek apakah sudah ada data
-      const { data: existing } = await supabase
+      // Cek apakah sudah ada data. Klik status yang sama akan mengosongkan absensi.
+      const { data: existing, error: existingError } = await supabase
         .from('absensi_eskul')
-        .select('id')
+        .select('id,status')
         .eq('ekskul_id', eskul.id)
         .eq('user_id', userId)
         .eq('tanggal', tanggal)
         .eq('tahun_ajaran', academicPeriod?.tahunAjaran || '')
-        .eq('semester', academicPeriod?.semester || '')
-        .single()
+        .maybeSingle()
+
+      if (existingError) throw existingError
 
       if (existing) {
+        if (existing.status === status) {
+          const { error } = await supabase
+            .from('absensi_eskul')
+            .delete()
+            .eq('id', existing.id)
+
+          if (error) throw error
+
+          setAbsensiData(prev => {
+            const next = { ...prev }
+            delete next[key]
+            return next
+          })
+
+          pushToast('success', 'Status absensi dikosongkan')
+          return
+        }
+
         // Update existing
         const { error } = await supabase
           .from('absensi_eskul')
@@ -547,7 +589,7 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap, academicPeriod }) => {
             tanggal,
             status,
             tahun_ajaran: academicPeriod?.tahunAjaran || null,
-            semester: academicPeriod?.semester || null,
+            semester: semesterForDateKey(tanggal, academicPeriod?.semester),
             angkatan: anggotaEskul.find((anggota) => anggota.user_id === userId)?.angkatan || null,
             created_at: new Date().toISOString()
           })
@@ -837,7 +879,7 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap, academicPeriod }) => {
                                 ? 'bg-green-500 text-white'
                                 : 'bg-gray-100 text-gray-600 hover:bg-green-100'
                             }`}
-                            title="Hadir"
+                            title={status === 'Hadir' ? 'Klik lagi untuk kosongkan' : 'Hadir'}
                           >
                             H
                           </button>
@@ -848,7 +890,7 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap, academicPeriod }) => {
                                 ? 'bg-yellow-500 text-white'
                                 : 'bg-gray-100 text-gray-600 hover:bg-yellow-100'
                             }`}
-                            title="Izin"
+                            title={status === 'Izin' ? 'Klik lagi untuk kosongkan' : 'Izin'}
                           >
                             I
                           </button>
@@ -859,7 +901,7 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap, academicPeriod }) => {
                                 ? 'bg-red-500 text-white'
                                 : 'bg-gray-100 text-gray-600 hover:bg-red-100'
                             }`}
-                            title="Alpha"
+                            title={status === 'Alpha' ? 'Klik lagi untuk kosongkan' : 'Alpha'}
                           >
                             A
                           </button>
@@ -916,6 +958,9 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap, academicPeriod }) => {
               <p className="text-purple-100 mt-1">
                 {eskul.hari} • {eskul.jam_mulai} - {eskul.jam_selesai}
               </p>
+              <p className="text-purple-200 text-xs mt-1">
+                Periode: {periodScopeLabel}
+              </p>
             </div>
             <button
               onClick={onClose}
@@ -929,7 +974,7 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap, academicPeriod }) => {
           <div className="flex items-center gap-4 mt-4 flex-wrap">
             {/* Pilihan Bulan Multiple */}
             <div className="flex items-center gap-2">
-              <span className="text-purple-100 text-sm font-medium">Bulan:</span>
+              <span className="text-purple-100 text-sm font-medium">Bulan periode:</span>
               <div className="flex flex-wrap gap-1">
                 {periodMonths.map((month) => (
                   <button
@@ -997,7 +1042,7 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap, academicPeriod }) => {
             <div className="text-center py-12">
               <div className="text-gray-300 text-6xl mb-4">📅</div>
               <p className="text-gray-500 text-lg font-medium">Belum ada jadwal pada bulan yang dipilih</p>
-              <p className="text-gray-400 mt-2">Absensi dimulai dari tanggal ekskul dibuat dan dibatasi akhir periode akademik.</p>
+              <p className="text-gray-400 mt-2">Absensi dimulai dari tanggal ekskul dibuat dan dibatasi akhir {periodScopeLabel}.</p>
             </div>
           ) : anggotaEskul.length > 0 ? (
             viewMode === 'detail' ? renderDetailTable() : renderRekapTable()
@@ -1420,7 +1465,6 @@ export default function JadwalGuru() {
           .select('*')
           .eq('pembina_guru_id', user.id)
         if (activeAcademicPeriod.tahunAjaran) ekskulQuery = ekskulQuery.eq('tahun_ajaran', activeAcademicPeriod.tahunAjaran)
-        if (activeAcademicPeriod.semester) ekskulQuery = ekskulQuery.eq('semester', activeAcademicPeriod.semester)
 
         let { data: ekskulData, error: ekskulError } = await ekskulQuery
         if (ekskulError && /tahun_ajaran|semester/i.test(ekskulError.message || '')) {
@@ -1438,7 +1482,6 @@ export default function JadwalGuru() {
               .select('*', { count: 'exact', head: true })
               .eq('ekskul_id', e.id)
             if (activeAcademicPeriod.tahunAjaran) countQuery = countQuery.eq('tahun_ajaran', activeAcademicPeriod.tahunAjaran)
-            if (activeAcademicPeriod.semester) countQuery = countQuery.eq('semester', activeAcademicPeriod.semester)
             const { count } = await countQuery
             return { ...e, jumlah_anggota: count || 0 }
           }))
