@@ -77,7 +77,15 @@ return [
 
     'object_storage' => [
         'enabled' => filter_var(
-            env('APP_DIRECT_UPLOAD_ENABLED', env('ASSIGNMENT_DIRECT_UPLOAD_ENABLED', false)),
+            env('APP_OBJECT_STORAGE_ENABLED') !== null && env('APP_OBJECT_STORAGE_ENABLED') !== ''
+                ? env('APP_OBJECT_STORAGE_ENABLED')
+                : env('APP_DIRECT_UPLOAD_ENABLED', env('ASSIGNMENT_DIRECT_UPLOAD_ENABLED', false)),
+            FILTER_VALIDATE_BOOL
+        ),
+        'browser_direct_enabled' => filter_var(
+            env('APP_DIRECT_UPLOAD_BROWSER_ENABLED') !== null && env('APP_DIRECT_UPLOAD_BROWSER_ENABLED') !== ''
+                ? env('APP_DIRECT_UPLOAD_BROWSER_ENABLED')
+                : env('APP_DIRECT_UPLOAD_ENABLED', env('ASSIGNMENT_DIRECT_UPLOAD_ENABLED', false)),
             FILTER_VALIDATE_BOOL
         ),
         'label' => env('APP_OBJECT_STORAGE_LABEL', env('ASSIGNMENT_OBJECT_STORAGE_LABEL', 'Object Storage')),

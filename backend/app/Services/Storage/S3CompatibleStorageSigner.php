@@ -31,6 +31,12 @@ class S3CompatibleStorageSigner
             && $this->bucketFor($bucket) !== '';
     }
 
+    public function isBrowserDirectEnabledForBucket(string $bucket): bool
+    {
+        return $this->isEnabledForBucket($bucket)
+            && (bool) $this->configValue('browser_direct_enabled', true);
+    }
+
     public function label(): string
     {
         $label = trim((string) $this->configString('label', 'Object Storage'));

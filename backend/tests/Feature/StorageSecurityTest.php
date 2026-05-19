@@ -85,6 +85,7 @@ class StorageSecurityTest extends TestCase
     {
         config([
             'services.object_storage.enabled' => true,
+            'services.object_storage.browser_direct_enabled' => true,
             'services.object_storage.label' => 'Cloudflare R2',
             'services.object_storage.key' => 'test-access-key',
             'services.object_storage.secret' => 'test-secret-key',
@@ -126,6 +127,7 @@ class StorageSecurityTest extends TestCase
     {
         config([
             'services.object_storage.enabled' => true,
+            'services.object_storage.browser_direct_enabled' => true,
             'services.object_storage.label' => 'Nevaobjects S3',
             'services.object_storage.key' => 'test-access-key',
             'services.object_storage.secret' => 'test-secret-key',
@@ -235,10 +237,46 @@ class StorageSecurityTest extends TestCase
         ]);
     }
 
+    public function test_direct_upload_can_be_disabled_while_object_storage_relay_stays_enabled(): void
+    {
+        config([
+            'services.object_storage.enabled' => true,
+            'services.object_storage.browser_direct_enabled' => false,
+            'services.object_storage.label' => 'Nevaobjects S3',
+            'services.object_storage.key' => 'test-access-key',
+            'services.object_storage.secret' => 'test-secret-key',
+            'services.object_storage.region' => 'us-east-1',
+            'services.object_storage.bucket' => '',
+            'services.object_storage.bucket_map' => [
+                'assignments' => 'assignments',
+            ],
+            'services.object_storage.endpoint' => 'https://s3.nevaobjects.id',
+            'services.object_storage.use_path_style_endpoint' => true,
+            'services.object_storage.direct_upload_buckets' => ['assignments'],
+        ]);
+
+        $tenantId = $this->defaultTenantId();
+        [$user] = $this->createUserWithProfile($tenantId, 'siswa', 'X-1');
+        Sanctum::actingAs($user);
+
+        $response = $this->postJson('/api/storage/direct-upload', [
+            'bucket' => 'assignments',
+            'path' => 'X-1/'.$user->id.'-jawaban.pdf',
+            'filename' => 'jawaban.pdf',
+            'mime_type' => 'application/pdf',
+            'size_bytes' => 512 * 1024,
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('data.available', false);
+        $response->assertJsonPath('data.provider', 'api');
+    }
+
     public function test_confirm_direct_upload_rejects_missing_object_storage_file(): void
     {
         config([
             'services.object_storage.enabled' => true,
+            'services.object_storage.browser_direct_enabled' => true,
             'services.object_storage.key' => 'test-access-key',
             'services.object_storage.secret' => 'test-secret-key',
             'services.object_storage.region' => 'auto',
@@ -276,6 +314,7 @@ class StorageSecurityTest extends TestCase
     {
         config([
             'services.object_storage.enabled' => true,
+            'services.object_storage.browser_direct_enabled' => true,
             'services.object_storage.key' => 'test-access-key',
             'services.object_storage.secret' => 'test-secret-key',
             'services.object_storage.region' => 'auto',

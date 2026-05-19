@@ -225,7 +225,9 @@ Google Drive tetap dapat dipakai sebagai integrasi/backup, tetapi jalur upload m
 Contoh env Nevaobjects S3:
 
 ```dotenv
+APP_OBJECT_STORAGE_ENABLED=true
 APP_DIRECT_UPLOAD_ENABLED=true
+APP_DIRECT_UPLOAD_BROWSER_ENABLED=true
 APP_DIRECT_UPLOAD_BUCKETS=assignments,quiz-media,certificates,sertifikat-files,certificate-templates,sertifikat-templates
 APP_OBJECT_STORAGE_LABEL="Nevaobjects S3"
 APP_OBJECT_STORAGE_ACCESS_KEY_ID=<access-key>
@@ -245,6 +247,16 @@ APP_OBJECT_STORAGE_BUCKET_SERTIFIKAT_TEMPLATES=sertifikat-templates
 ```
 
 Env lama `ASSIGNMENT_DIRECT_UPLOAD_*` masih didukung untuk kompatibilitas, tetapi deploy baru disarankan memakai `APP_DIRECT_UPLOAD_*`.
+
+Jika provider/panel object storage tidak menyediakan CORS bucket, gunakan mode relay backend agar file tetap masuk Nevaobjects tanpa error CORS di browser:
+
+```dotenv
+APP_OBJECT_STORAGE_ENABLED=true
+APP_DIRECT_UPLOAD_ENABLED=false
+APP_DIRECT_UPLOAD_BROWSER_ENABLED=false
+```
+
+Mode ini sedikit lebih berat untuk backend dibanding signed direct upload, tetapi lebih rapi daripada membiarkan browser gagal preflight CORS. Setelah CORS bucket tersedia, ubah `APP_DIRECT_UPLOAD_ENABLED=true` dan `APP_DIRECT_UPLOAD_BROWSER_ENABLED=true`.
 
 Bucket harus private dan CORS bucket perlu mengizinkan domain sekolah:
 

@@ -346,7 +346,7 @@ class StorageController extends ApiController
             return $this->deny('Bucket tidak diizinkan', 400);
         }
 
-        if (! $this->objectStorageEnabledForBucket($bucket)) {
+        if (! $this->objectStorageBrowserDirectEnabledForBucket($bucket)) {
             return response()->json([
                 'data' => [
                     'available' => false,
@@ -1523,6 +1523,11 @@ class StorageController extends ApiController
     private function objectStorageEnabledForBucket(string $bucket): bool
     {
         return $this->objectStorageSigner->isEnabledForBucket($bucket);
+    }
+
+    private function objectStorageBrowserDirectEnabledForBucket(string $bucket): bool
+    {
+        return $this->objectStorageSigner->isBrowserDirectEnabledForBucket($bucket);
     }
 
     private function resolveMetadataMime(string $fileName, string $mime): string
