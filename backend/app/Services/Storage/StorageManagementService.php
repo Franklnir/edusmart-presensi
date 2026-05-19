@@ -2057,21 +2057,67 @@ class StorageManagementService
 
     private function configuredObjectStorageCapacityBytes(): ?int
     {
-        $bytes = config('services.object_storage.capacity_bytes');
-        if ($bytes !== null && $bytes !== '') {
-            $value = (int) $bytes;
-
-            return $value > 0 ? $value : null;
+        $bytes = $this->firstFilledValue(
+            config('services.object_storage.capacity_bytes'),
+            getenv('APP_OBJECT_STORAGE_CAPACITY_BYTES') ?: null,
+            $_ENV['APP_OBJECT_STORAGE_CAPACITY_BYTES'] ?? null,
+            $_SERVER['APP_OBJECT_STORAGE_CAPACITY_BYTES'] ?? null
+        );
+        if ($bytes !== null) {
+            $value = $this->parseStorageCapacityBytes($bytes, 1);
+            if ($value !== null) {
+                return $value;
+            }
         }
 
-        $gb = config('services.object_storage.capacity_gb');
-        if ($gb !== null && $gb !== '') {
-            $value = (float) $gb;
-
-            return $value > 0 ? (int) round($value * 1024 * 1024 * 1024) : null;
+        $gb = $this->firstFilledValue(
+            config('services.object_storage.capacity_gb'),
+            getenv('APP_OBJECT_STORAGE_CAPACITY_GB') ?: null,
+            $_ENV['APP_OBJECT_STORAGE_CAPACITY_GB'] ?? null,
+            $_SERVER['APP_OBJECT_STORAGE_CAPACITY_GB'] ?? null
+        );
+        if ($gb !== null) {
+            $value = $this->parseStorageCapacityBytes($gb, 1024 * 1024 * 1024);
+            if ($value !== null) {
+                return $value;
+            }
         }
 
         return null;
+    }
+
+    private function firstFilledValue(mixed ...$values): mixed
+    {
+        foreach ($values as $value) {
+            if ($value === null) {
+                continue;
+            }
+            if (is_string($value) && trim($value) === '') {
+                continue;
+            }
+
+            return $value;
+        }
+
+        return null;
+    }
+
+    private function parseStorageCapacityBytes(mixed $value, int $multiplier): ?int
+    {
+        $raw = trim((string) $value);
+        if ($raw === '') {
+            return null;
+        }
+
+        $normalized = preg_replace('/[^0-9.,]/', '', $raw) ?? '';
+        $normalized = str_replace(',', '.', $normalized);
+        if ($normalized === '' || ! is_numeric($normalized)) {
+            return null;
+        }
+
+        $number = (float) $normalized;
+
+        return $number > 0 ? (int) round($number * $multiplier) : null;
     }
 
     private function quotaTableReady(): bool

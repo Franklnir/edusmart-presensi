@@ -498,6 +498,11 @@ DEPLOY_PHASE="clear_cache"
 echo "[7/9] Clear optimize cache..."
 compose exec -T backend php artisan optimize:clear >/dev/null
 
+echo "[7/9] Sync inventory Neva S3 best-effort..."
+if ! compose exec -T backend php artisan storage:sync-object-storage --max-pages="${DEPLOY_OBJECT_STORAGE_SYNC_MAX_PAGES:-10}"; then
+  echo "[warn] Sync inventory Neva S3 dilewati/gagal. Deploy tetap lanjut; scheduler akan mencoba lagi berkala." >&2
+fi
+
 DEPLOY_PHASE="health_check"
 echo "[8/9] Health check internal..."
 run_internal_health_checks

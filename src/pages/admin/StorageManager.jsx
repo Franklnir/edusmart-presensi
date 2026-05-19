@@ -258,6 +258,7 @@ function StorageManager() {
   ])
   const selectedTenant = tenants.find((tenant) => tenant.id === selectedTenantId)
   const selectedTenantName = selectedTenant?.name || tenantDetail?.tenant?.name || 'Sekolah dipilih'
+  const canManageStorageScope = !isSuperAdmin || Boolean(selectedTenantId)
   const activePeriod = activeSummary?.active_period || {}
   const periodOptions = useMemo(() => {
     const map = new Map()
@@ -474,16 +475,17 @@ function StorageManager() {
     }
   }
 
-  const handleSyncObjectStorage = async () => {
+  const handleSyncObjectStorage = async (tenantIdOverride = selectedTenantId, options = {}) => {
+    const syncTenantId = tenantIdOverride || ''
     setSyncingObjectStorage(true)
     try {
       const payload = {
-        bucket: cleanupForm.bucket || '',
+        bucket: options.bucket ?? cleanupForm.bucket ?? '',
         max_pages: isSuperAdmin ? 10 : 5
       }
       const api = isSuperAdmin
-        ? selectedTenantId
-          ? supabase.super.syncTenantObjectStorage(selectedTenantId, payload)
+        ? syncTenantId
+          ? supabase.super.syncTenantObjectStorage(syncTenantId, payload)
           : supabase.super.syncObjectStorage(payload)
         : supabase.admin.syncObjectStorage(payload)
       const { data, error } = await api
@@ -818,6 +820,47 @@ function StorageManager() {
           </section>
         )}
 
+        {activeTab === 'neva' && isSuperAdmin && (
+          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <h2 className="text-sm font-bold text-slate-900">Platform Neva Cloud S3</h2>
+                <p className="mt-1 text-xs text-slate-500">
+                  Total paket Neva diambil dari ENV server. Setelah sekolah dipilih, Super Admin membagi jatah sekolah lewat field Kuota Neva S3.
+                </p>
+                {nevaPlatform?.last_scanned_at && (
+                  <p className="mt-1 text-xs text-slate-400">Scan terakhir: {formatDateTime(nevaPlatform.last_scanned_at)}</p>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => handleSyncObjectStorage('', { bucket: '' })}
+                disabled={syncingObjectStorage || !nevaEnabled}
+                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-white px-4 py-2 text-sm font-semibold text-indigo-700 shadow-sm hover:bg-indigo-50 disabled:opacity-60"
+              >
+                <RefreshCw size={16} className={syncingObjectStorage ? 'animate-spin' : ''} />
+                {syncingObjectStorage ? 'Membaca S3...' : 'Scan Platform'}
+              </button>
+            </div>
+            <div className="mt-4 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+              <StatTile icon={Cloud} label="Total Paket Neva S3" value={nevaPlatform?.capacity_label || 'Belum diset'} hint="APP_OBJECT_STORAGE_CAPACITY_GB" />
+              <StatTile icon={Database} label="Terpakai Platform" value={nevaPlatform?.used_label || '0 B'} hint={nevaPlatform?.percent !== null && nevaPlatform?.percent !== undefined ? `${nevaPlatform.percent}% paket` : 'Menunggu scan bucket'} />
+              <StatTile icon={ShieldCheck} label="Kuota S3 Dibagikan" value={nevaPlatform?.allocated_quota_label || '0 B'} />
+              <StatTile icon={Archive} label="Sisa Setelah Kuota" value={nevaPlatform?.remaining_after_allocated_label || 'Belum diset'} />
+            </div>
+            {(nevaPlatform?.tracked_label || nevaPlatform?.untracked_label) && (
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                  Terlacak aplikasi: <span className="font-bold">{nevaPlatform.tracked_label || '0 B'}</span>
+                </div>
+                <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  Belum terlacak metadata: <span className="font-bold">{nevaPlatform.untracked_label || '0 B'}</span>
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+
         {activeTab === 'neva' && (!isSuperAdmin || selectedTenantId) && (
           <section className="space-y-4">
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -826,15 +869,6 @@ function StorageManager() {
               <StatTile icon={ShieldCheck} label="Kuota S3 Sekolah" value={nevaQuota?.quota_label || 'Tidak dibatasi'} hint={providerPercentLabel(nevaQuota)} />
               <StatTile icon={Archive} label="Sisa S3 Sekolah" value={nevaQuota?.remaining_label || 'Tidak dibatasi'} />
             </div>
-
-            {isSuperAdmin && (
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                <StatTile icon={Cloud} label="Total Paket Neva S3" value={nevaPlatform?.capacity_label || 'Belum diset'} hint="Set APP_OBJECT_STORAGE_CAPACITY_GB di VPS" />
-                <StatTile icon={Database} label="Terpakai Platform" value={nevaPlatform?.used_label || '0 B'} hint={nevaPlatform?.percent !== null && nevaPlatform?.percent !== undefined ? `${nevaPlatform.percent}% paket` : 'Berdasarkan metadata upload'} />
-                <StatTile icon={ShieldCheck} label="Kuota S3 Dibagikan" value={nevaPlatform?.allocated_quota_label || '0 B'} />
-                <StatTile icon={Archive} label="Sisa Setelah Kuota" value={nevaPlatform?.remaining_after_allocated_label || 'Belum diset'} />
-              </div>
-            )}
 
             <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
               <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -997,8 +1031,6 @@ function StorageManager() {
             </div>
           </section>
         )}
-
-        {activeTab === 'neva' && (!isSuperAdmin || selectedTenantId) && cleanupSection}
 
         {activeTab === 'neva' && isSuperAdmin && !selectedTenantId && (
           <section className="rounded-lg border border-slate-200 bg-white p-8 text-center shadow-sm">
@@ -1387,9 +1419,10 @@ function StorageManager() {
           </div>
         </section>
 
-        {cleanupSection}
           </>
         )}
+
+        {canManageStorageScope && cleanupSection}
       </div>
     </div>
   )
