@@ -2020,29 +2020,15 @@ export default function TugasSiswa() {
                       <div className="text-slate-600 font-semibold">Memuat detail...</div>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+                    <div className="grid grid-cols-1 gap-5">
                       {/* Instruksi */}
-                      <div className="lg:col-span-2 space-y-4">
+                      <div className="space-y-4">
                         <div className="bg-white border border-slate-200 rounded-2xl p-4">
                           <div className="text-sm font-bold text-slate-800 mb-2">📌 Instruksi</div>
                           <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">
                             {detail?.tugas?.keterangan || 'Tidak ada instruksi.'}
                           </div>
                         </div>
-
-                        {detail?.tugas?.link && (
-                          <div className="bg-white border border-slate-200 rounded-2xl p-4">
-                            <div className="text-sm font-bold text-slate-800 mb-2">🔗 Link Referensi Guru</div>
-                            <div className="text-xs text-slate-500 break-all mb-3">{detail.tugas.link}</div>
-                            <button
-                              type="button"
-                              onClick={() => openPreview(detail.tugas.link)}
-                              className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 transition-colors"
-                            >
-                              👁️ Preview Link
-                            </button>
-                          </div>
-                        )}
 
                         {/* Jawaban saya */}
                         <div className="bg-white border border-slate-200 rounded-2xl p-4">
@@ -2167,28 +2153,28 @@ export default function TugasSiswa() {
                           </div>
 
                           {/* File upload */}
-                          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
-                            <div className="flex items-center justify-between gap-3 mb-3">
+                          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                            <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                               <div>
                                 <div className="font-bold text-slate-800">📎 File jawaban (opsional)</div>
-                                <div className="text-xs text-slate-500">
-                                  Disimpan ke folder <b>{selectedTugas.id}/</b> dengan prefix <b>{user.id}-</b> (anti-IDOR).
+                                <div className="mt-1 text-xs text-slate-500">
+                                  Gunakan untuk PDF, dokumen, spreadsheet, presentasi, atau gambar tunggal.
                                 </div>
                               </div>
 
                               {(jawabanFileKey || detail?.myJawaban?.file_url) && (
-                                <div className="flex flex-wrap gap-2 justify-end">
+                                <div className="grid w-full grid-cols-2 gap-2 sm:w-auto">
                                   <button
                                     type="button"
                                     onClick={() => openPreview(jawabanFileKey || detail?.myJawaban?.file_url)}
-                                    className="px-4 py-2 rounded-2xl bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors"
+                                    className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
                                   >
                                     👁️ Preview
                                   </button>
                                   <button
                                     type="button"
                                     onClick={handleDeleteJawabanFile}
-                                    className="px-4 py-2 rounded-2xl bg-red-600 text-white font-semibold hover:bg-red-700 transition-colors"
+                                    className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
                                     disabled={isSubmissionLocked}
                                   >
                                     🗑️ Hapus
@@ -2205,24 +2191,31 @@ export default function TugasSiswa() {
                                 tone={uploadToneForProvider(answerUploadProvider)}
                               />
                             ) : (jawabanFileKey || detail?.myJawaban?.file_url) ? (
-                              <div className="p-4 bg-green-50 border border-green-200 rounded-xl flex items-center justify-between gap-3">
-                                <div className="flex items-center gap-3">
-                                  <span className="text-green-600 text-xl">✅</span>
-                                  <div>
-                                    <div className="text-sm font-bold text-green-800">File siap</div>
-                                    <div className="text-xs text-green-600">
-                                      {jawabanFileSize || 'Ukuran akan tampil'} • {isSubmissionLocked ? 'Sudah terkunci' : 'Bisa diganti selama periode pengumpulan'}
+                              <div className="grid gap-3 rounded-xl border border-green-200 bg-green-50 p-4 lg:grid-cols-[minmax(0,1fr)_minmax(16rem,22rem)] lg:items-stretch">
+                                <div className="flex min-w-0 items-start gap-3">
+                                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-green-100 text-xl text-green-700">✅</span>
+                                  <div className="min-w-0">
+                                    <div className="text-sm font-bold text-green-900">File siap dikirim</div>
+                                    <div className="mt-1 text-xs leading-5 text-green-700">
+                                      <span className="font-semibold">{jawabanFileSize || 'Ukuran akan tampil'}</span>
+                                      <span className="mx-1">•</span>
+                                      {isSubmissionLocked ? 'Jawaban sudah terkunci' : 'Masih bisa diganti sebelum dikirim atau dinilai'}
                                     </div>
                                   </div>
                                 </div>
 
-                                <FileDropzone
-                                  onFiles={handleUploadJawabanFile}
-                                  accept={ASSIGNMENT_FILE_ACCEPT}
-                                  label="Ganti file"
-                                  disabled={isSubmissionLocked || isUploading}
-                                  small
-                                />
+                                {!isSubmissionLocked && (
+                                  <div className="min-w-0">
+                                    <FileDropzone
+                                      onFiles={handleUploadJawabanFile}
+                                      accept={ASSIGNMENT_FILE_ACCEPT}
+                                      label="Ganti file"
+                                      disabled={isSubmissionLocked || isUploading}
+                                      className="h-full p-4"
+                                      small
+                                    />
+                                  </div>
+                                )}
                               </div>
                             ) : (
                               <FileDropzone
@@ -2272,52 +2265,6 @@ export default function TugasSiswa() {
                         </div>
                       </div>
 
-                      {/* Sidebar info */}
-                      <div className="space-y-4">
-                        <div className="bg-white border border-slate-200 rounded-2xl p-4">
-                          <div className="text-sm font-bold text-slate-800 mb-2">🧠 Status</div>
-                          <div className="flex flex-wrap gap-2">
-                            <StatusBadge status={detail?.myStatus} />
-                            <ScoreBadge nilai={detail?.myJawaban?.nilai} />
-                          </div>
-                          <div className="text-xs text-slate-500 mt-2">
-                            {detail?.myStatus === 'dinilai'
-                              ? 'Jawaban Anda sudah dinilai.'
-                              : detail?.myStatus === 'menunggu'
-                              ? 'Jawaban terkirim dan menunggu penilaian.'
-                              : 'Anda belum mengumpulkan.'}
-                          </div>
-                        </div>
-
-                        {detail?.tugas?.file_url && (
-                          <div className="bg-white border border-slate-200 rounded-2xl p-4">
-                            <div className="text-sm font-bold text-slate-800 mb-2">📎 Lampiran Guru</div>
-                            <button
-                              type="button"
-                              onClick={() => openPreview(detail.tugas.file_url)}
-                              className="w-full px-4 py-3 rounded-2xl bg-purple-600 text-white font-bold hover:bg-purple-700 transition-colors"
-                            >
-                              👁️ Preview Lampiran
-                            </button>
-                            <div className="text-[11px] text-slate-500 mt-2">
-                              Jika bucket private, preview akan sukses hanya jika policy storage mengizinkan.
-                            </div>
-                          </div>
-                        )}
-
-                        {detail?.tugas?.link && (
-                          <div className="bg-white border border-slate-200 rounded-2xl p-4">
-                            <div className="text-sm font-bold text-slate-800 mb-2">🔗 Link Referensi Guru</div>
-                            <button
-                              type="button"
-                              onClick={() => openPreview(detail.tugas.link)}
-                              className="w-full px-4 py-3 rounded-2xl bg-indigo-600 text-white font-bold hover:bg-indigo-700 transition-colors"
-                            >
-                              👁️ Preview Link
-                            </button>
-                          </div>
-                        )}
-                      </div>
                     </div>
                   )}
                 </div>

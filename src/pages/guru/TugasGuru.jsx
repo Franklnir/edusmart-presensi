@@ -2818,16 +2818,6 @@ export default function TugasGuru() {
                         >
                           Deadline: {formatDateTime(selectedTugas.deadline)}
                         </span>
-                        {selectedTugas.file_url && (
-                          <span className="rounded-full bg-blue-100 px-3 py-1 font-semibold text-blue-700">
-                            Ada Lampiran
-                          </span>
-                        )}
-                        {selectedTugas.link && (
-                          <span className="rounded-full bg-purple-100 px-3 py-1 font-semibold text-purple-700">
-                            Ada Link
-                          </span>
-                        )}
                       </div>
                     </div>
 
@@ -2980,7 +2970,7 @@ export default function TugasGuru() {
                         <div className="flex items-center justify-between gap-3 mb-3">
                           <div>
                             <div className="font-bold text-slate-800">File Lampiran</div>
-                            <div className="text-xs text-slate-500">File disimpan di folder guru (anti-IDOR).</div>
+                            <div className="text-xs text-slate-500">Lampiran tersimpan aman di storage sekolah.</div>
                           </div>
                           {editForm.file_url && (
                             <div className="flex items-center gap-2">
@@ -3031,20 +3021,6 @@ export default function TugasGuru() {
                             </div>
                           )}
 
-                          {selectedTugas.link && (
-                            <div className="rounded-xl border border-slate-200 bg-white p-4">
-                              <div className="mb-2 text-sm font-bold text-slate-900">Link Referensi</div>
-                              <div className="mb-3 break-all text-xs text-slate-500">{selectedTugas.link}</div>
-                              <button
-                                type="button"
-                                onClick={() => openPreviewAny(selectedTugas.link, 'Gagal membuka link referensi')}
-                                className="rounded-lg bg-purple-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-purple-700"
-                              >
-                                Preview Link
-                              </button>
-                            </div>
-                          )}
-
                           {isLoadingDetail ? (
                             <div className="rounded-xl border border-slate-200 bg-white p-10 text-center">
                               <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
@@ -3083,34 +3059,9 @@ export default function TugasGuru() {
                             </div>
 
                             <div className="mt-4 text-xs text-slate-500">
-                              Nilai tersimpan akan otomatis ter-update di kartu riwayat dan sidebar.
+                              Nilai tersimpan akan otomatis ter-update di kartu riwayat siswa.
                             </div>
                           </div>
-
-                          {selectedTugas.file_url && (
-                            <div className="rounded-xl border border-slate-200 bg-white p-4">
-                              <div className="mb-2 text-sm font-bold text-slate-900">Lampiran</div>
-                              <div className="flex flex-wrap gap-2">
-                                {renderFileButton(selectedTugas.file_url, 'Preview Lampiran')}
-                              </div>
-                              <div className="mt-2 text-[11px] text-slate-500">
-                                Preview butuh policy storage SELECT + signed URL.
-                              </div>
-                            </div>
-                          )}
-
-                          {selectedTugas.link && (
-                            <div className="rounded-xl border border-slate-200 bg-white p-4">
-                              <div className="mb-2 text-sm font-bold text-slate-900">Link Referensi</div>
-                              <button
-                                type="button"
-                                onClick={() => openPreviewAny(selectedTugas.link, 'Gagal membuka link referensi')}
-                                className="w-full rounded-xl bg-purple-600 px-4 py-3 font-bold text-white transition-colors hover:bg-purple-700"
-                              >
-                                Preview Link
-                              </button>
-                            </div>
-                          )}
 
                         </div>
                       </div>
