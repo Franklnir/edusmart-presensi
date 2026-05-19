@@ -493,11 +493,18 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap, academicPeriod }) => {
 
         if (error) throw error
 
-        // Format data absensi
+        // Format data absensi. Jika ada data lama/duplikat, prioritaskan semester sesuai tanggal.
         const absensiMap = {}
+        const priorityMap = {}
         data?.forEach(record => {
           const key = `${record.user_id}_${record.tanggal}`
-          absensiMap[key] = record.status
+          const expectedSemester = semesterForDateKey(record.tanggal, academicPeriod?.semester)
+          const rowSemester = record.semester || ''
+          const priority = rowSemester === expectedSemester ? 3 : rowSemester ? 1 : 2
+          if (!priorityMap[key] || priority >= priorityMap[key]) {
+            priorityMap[key] = priority
+            absensiMap[key] = record.status
+          }
         })
 
         setAbsensiData(absensiMap)
@@ -538,24 +545,34 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap, academicPeriod }) => {
       setLoading(true)
       const key = `${userId}_${tanggal}`
 
-      // Cek apakah sudah ada data. Klik status yang sama akan mengosongkan absensi.
-      const { data: existing, error: existingError } = await supabase
+      const targetSemester = semesterForDateKey(tanggal, academicPeriod?.semester)
+
+      // Ambil semua baris yang cocok. Ini tahan terhadap data lama yang terduplikat.
+      const { data: existingRows, error: existingError } = await supabase
         .from('absensi_eskul')
-        .select('id,status')
+        .select('id,status,semester,updated_at,created_at')
         .eq('ekskul_id', eskul.id)
         .eq('user_id', userId)
         .eq('tanggal', tanggal)
         .eq('tahun_ajaran', academicPeriod?.tahunAjaran || '')
-        .maybeSingle()
+        .order('updated_at', { ascending: false })
 
       if (existingError) throw existingError
 
-      if (existing) {
-        if (existing.status === status) {
+      const rows = Array.isArray(existingRows) ? existingRows : []
+      const exactRows = rows.filter((row) => row.semester === targetSemester)
+      const candidateRows = exactRows.length > 0 ? exactRows : rows
+      const primaryRow = candidateRows[0] || null
+
+      if (primaryRow) {
+        const rowIds = candidateRows.map((row) => row.id).filter(Boolean)
+
+        if (primaryRow.status === status) {
           const { error } = await supabase
             .from('absensi_eskul')
             .delete()
-            .eq('id', existing.id)
+            .in('id', rowIds)
+            .eq('tahun_ajaran', academicPeriod?.tahunAjaran || '')
 
           if (error) throw error
 
@@ -576,7 +593,8 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap, academicPeriod }) => {
             status,
             updated_at: new Date().toISOString()
           })
-          .eq('id', existing.id)
+          .in('id', rowIds)
+          .eq('tahun_ajaran', academicPeriod?.tahunAjaran || '')
 
         if (error) throw error
       } else {
@@ -589,7 +607,7 @@ const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap, academicPeriod }) => {
             tanggal,
             status,
             tahun_ajaran: academicPeriod?.tahunAjaran || null,
-            semester: semesterForDateKey(tanggal, academicPeriod?.semester),
+            semester: targetSemester,
             angkatan: anggotaEskul.find((anggota) => anggota.user_id === userId)?.angkatan || null,
             created_at: new Date().toISOString()
           })
