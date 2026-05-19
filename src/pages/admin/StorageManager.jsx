@@ -6,23 +6,18 @@ import {
   CheckCircle2,
   Cloud,
   Database,
-  ExternalLink,
   FileText,
-  FolderOpen,
   HardDrive,
-  Link2,
   RefreshCw,
   Save,
   ShieldCheck,
   Trash2,
-  Unplug,
   XCircle
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import { formatDateTime } from '../../lib/time'
-import useDebounce from '../../hooks/useDebounce'
 
 const CATEGORIES = [
   { value: '', label: 'Semua kategori' },
@@ -33,12 +28,6 @@ const CATEGORIES = [
   { value: 'dokumen', label: 'Dokumen' },
   { value: 'lampiran', label: 'Lampiran' },
   { value: 'arsip', label: 'Arsip' }
-]
-
-const DRIVE_FILE_BUCKET_OPTIONS = [
-  { value: 'all', label: 'Semua file' },
-  { value: 'assignments', label: 'Tugas' },
-  { value: 'quiz-media', label: 'Quiz' }
 ]
 
 const CLEANUP_CATEGORIES = [
@@ -62,16 +51,13 @@ const CLEANUP_PERCENT_OPTIONS = [
   { value: '50', label: '50% file terbesar' }
 ]
 
-const DRIVE_STATUS_DEFAULT = {
-  ready: false,
-  configured: false,
-  provider_configured: true,
-  status: 'not_connected',
-  status_label: 'Belum tersambung',
-  quota: { used_label: '0 B', limit_label: 'Tidak terbatas', percent: null },
-  today: { uploaded_label: '0 B', files: 0 },
-  app_storage: { uploaded_label: '0 B', files: 0 },
-  app_storage_all: { uploaded_label: '0 B', files: 0 }
+const NEVA_BUCKET_LABELS = {
+  assignments: 'Tugas',
+  'quiz-media': 'Media Quiz',
+  certificates: 'Sertifikat',
+  'sertifikat-files': 'File Sertifikat',
+  'certificate-templates': 'Template Sertifikat',
+  'sertifikat-templates': 'Template Sertifikat'
 }
 
 const numberFormatter = new Intl.NumberFormat('id-ID')
@@ -87,14 +73,12 @@ const bytesToGbInput = (bytes) => bytes ? String(Math.round((Number(bytes) / 102
 const bytesToMbInput = (bytes) => bytes ? String(Math.round((Number(bytes) / 1024 / 1024) * 100) / 100) : ''
 const activeTabFromUrl = () => {
   if (typeof window === 'undefined') return 'storage'
-  return new URLSearchParams(window.location.search).get('tab') === 'drive' ? 'drive' : 'storage'
+  return new URLSearchParams(window.location.search).get('tab') === 'neva' ? 'neva' : 'storage'
 }
 const selectedTenantFromUrl = () => {
   if (typeof window === 'undefined') return ''
   return new URLSearchParams(window.location.search).get('tenant') || ''
 }
-const normalizeDriveStatus = (data) => data || DRIVE_STATUS_DEFAULT
-const labelOrZero = (value) => value || '0 B'
 const periodValue = (tahunAjaran, semester) => (
   tahunAjaran && semester ? `${tahunAjaran}|${semester}` : ''
 )
@@ -108,12 +92,14 @@ const periodRank = (tahunAjaran, semester) => {
   if (semester !== 'Ganjil' && semester !== 'Genap') return null
   return (Number(match[1]) * 2) + (semester === 'Genap' ? 1 : 0)
 }
-const driveBadgeClass = (ready, status) => (
-  ready
+const providerPercentLabel = (quota) => (
+  quota?.percent !== null && quota?.percent !== undefined ? `${quota.percent}%` : 'Belum dibatasi'
+)
+
+const providerBadgeClass = (enabled) => (
+  enabled
     ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
-    : status === 'needs_attention'
-      ? 'bg-amber-100 text-amber-800 border-amber-200'
-      : 'bg-slate-100 text-slate-600 border-slate-200'
+    : 'bg-amber-100 text-amber-800 border-amber-200'
 )
 
 function StatTile({ icon: Icon, label, value, hint }) {
@@ -161,7 +147,13 @@ function StorageManager() {
   const [superSummary, setSuperSummary] = useState(null)
   const [selectedTenantId, setSelectedTenantId] = useState(selectedTenantFromUrl)
   const [tenantDetail, setTenantDetail] = useState(null)
-  const [quotaForm, setQuotaForm] = useState({ quotaGb: '', maxUploadMb: '', notes: '' })
+  const [quotaForm, setQuotaForm] = useState({
+    vpsQuotaGb: '',
+    vpsMaxUploadMb: '',
+    nevaQuotaGb: '',
+    nevaMaxUploadMb: '',
+    notes: ''
+  })
   const [storageFilters, setStorageFilters] = useState({ tahun_ajaran: '', semester: '', category: '' })
   const [storageFilterDraft, setStorageFilterDraft] = useState({ tahun_ajaran: '', semester: '', category: '' })
   const [cleanupForm, setCleanupForm] = useState({
@@ -176,39 +168,38 @@ function StorageManager() {
   const [cleanupLoading, setCleanupLoading] = useState(false)
   const [restoringTrashId, setRestoringTrashId] = useState('')
   const [purgingTrash, setPurgingTrash] = useState(false)
-  const [driveStatus, setDriveStatus] = useState(DRIVE_STATUS_DEFAULT)
-  const [driveFiles, setDriveFiles] = useState([])
-  const [driveLoading, setDriveLoading] = useState(false)
-  const [driveFilesLoading, setDriveFilesLoading] = useState(false)
-  const [driveConnecting, setDriveConnecting] = useState(false)
-  const [driveSyncing, setDriveSyncing] = useState(false)
-  const [driveDisconnecting, setDriveDisconnecting] = useState(false)
-  const [driveFileBucket, setDriveFileBucket] = useState('all')
-  const [driveFileSearch, setDriveFileSearch] = useState('')
-  const [drivePeriod, setDrivePeriod] = useState({ tahun_ajaran: '', semester: '' })
-  const [driveFilesTotal, setDriveFilesTotal] = useState(0)
-  const debouncedDriveFileSearch = useDebounce(driveFileSearch, 350)
 
   const activeSummary = tenantDetail || summary || {}
-  const usage = activeSummary?.usage || {}
-  const quota = activeSummary?.quota || {}
+  const providerSummaries = activeSummary?.provider_summaries || {}
+  const vpsSummary = providerSummaries?.vps || {}
+  const nevaSummary = providerSummaries?.neva_s3 || activeSummary?.object_storage || {}
+  const activeProviderSummary = activeTab === 'neva' ? nevaSummary : vpsSummary
+  const usage = activeProviderSummary?.usage || activeSummary?.usage || {}
+  const quota = activeProviderSummary?.quota || activeSummary?.quota || {}
+  const allQuota = activeSummary?.quota || {}
+  const vpsQuota = activeSummary?.providers?.vps || allQuota?.providers?.vps || vpsSummary?.quota || {}
+  const nevaQuota = activeSummary?.providers?.neva_s3 || allQuota?.providers?.neva_s3 || nevaSummary?.quota || {}
   const categories = Array.isArray(usage?.by_category) ? usage.by_category : []
   const periods = Array.isArray(usage?.by_period) ? usage.by_period : []
   const periodCatalog = Array.isArray(activeSummary?.period_options) ? activeSummary.period_options : []
-  const largestFiles = Array.isArray(activeSummary?.largest_files) ? activeSummary.largest_files : []
-  const uploaders = Array.isArray(activeSummary?.by_uploader) ? activeSummary.by_uploader : []
+  const largestFiles = Array.isArray(activeProviderSummary?.largest_files)
+    ? activeProviderSummary.largest_files
+    : Array.isArray(activeSummary?.largest_files)
+      ? activeSummary.largest_files
+      : []
+  const uploaders = Array.isArray(activeProviderSummary?.by_uploader)
+    ? activeProviderSummary.by_uploader
+    : Array.isArray(activeSummary?.by_uploader)
+      ? activeSummary.by_uploader
+      : []
   const recommendations = Array.isArray(activeSummary?.recommendations) ? activeSummary.recommendations : []
   const trashFiles = Array.isArray(activeSummary?.trash_files) ? activeSummary.trash_files : []
-  const driveReady = Boolean(driveStatus?.ready)
-  const driveProviderConfigured = driveStatus?.provider_configured !== false
-  const driveQuotaPercent = Number(driveStatus?.quota?.percent)
-  const driveQuotaPercentLabel = Number.isFinite(driveQuotaPercent) ? `${driveQuotaPercent.toLocaleString('id-ID')}%` : 'Tidak terbatas'
-  const driveQuotaBarWidth = Number.isFinite(driveQuotaPercent) ? Math.max(0, Math.min(100, driveQuotaPercent)) : 0
-  const driveFilteredStorage = driveStatus?.app_storage || DRIVE_STATUS_DEFAULT.app_storage
-  const driveAllStorage = driveStatus?.app_storage_all || driveStatus?.app_storage || DRIVE_STATUS_DEFAULT.app_storage
-  const driveClassUsageRows = Array.isArray(driveStatus?.usage_by_class) ? driveStatus.usage_by_class : []
-  const driveSemesterUsageRows = Array.isArray(driveStatus?.usage_by_semester) ? driveStatus.usage_by_semester : []
-  const driveVisibleFiles = driveFiles
+  const nevaPlatform = superSummary?.object_storage || activeSummary?.object_storage_status || {}
+  const nevaEnabled = nevaPlatform?.enabled !== undefined ? nevaPlatform.enabled !== false : true
+  const nevaDirectEnabled = Boolean(nevaPlatform?.browser_direct_enabled)
+  const nevaBucketMap = nevaPlatform?.bucket_map && typeof nevaPlatform.bucket_map === 'object'
+    ? nevaPlatform.bucket_map
+    : {}
 
   const tenants = useMemo(() => (
     Array.isArray(superSummary?.tenants) ? superSummary.tenants : []
@@ -242,13 +233,11 @@ function StorageManager() {
     addPeriod(activePeriod?.tahun_ajaran, activePeriod?.semester, { isActive: true })
     periodCatalog.forEach((item) => addPeriod(item.tahun_ajaran, item.semester, item))
     periods.forEach((item) => addPeriod(item.tahun_ajaran, item.semester, item))
-    driveSemesterUsageRows.forEach((item) => addPeriod(item.tahun_ajaran, item.semester, item))
 
     return Array.from(map.values()).sort((a, b) => b.rank - a.rank)
   }, [
     activePeriod?.semester,
     activePeriod?.tahun_ajaran,
-    driveSemesterUsageRows,
     periodCatalog,
     periods
   ])
@@ -281,55 +270,6 @@ function StorageManager() {
     setCleanupForm((prev) => ({ ...prev, ...patch }))
   }
 
-  const loadDriveStatus = async ({ sync = false } = {}) => {
-    if (isSuperAdmin && !selectedTenantId) return
-    setDriveLoading(true)
-    try {
-      const params = {
-        tahun_ajaran: drivePeriod.tahun_ajaran,
-        semester: drivePeriod.semester
-      }
-      const api = isSuperAdmin
-        ? (sync ? supabase.super.syncTenantGoogleDrive(selectedTenantId, params) : supabase.super.tenantGoogleDrive(selectedTenantId, params))
-        : (sync ? supabase.admin.syncGoogleDrive(params) : supabase.admin.googleDrive(params))
-      const { data, error } = await api
-      if (error) throw error
-      setDriveStatus(normalizeDriveStatus(data))
-    } catch (error) {
-      setDriveStatus(DRIVE_STATUS_DEFAULT)
-      pushToast('error', error?.message || 'Gagal memuat status Google Drive')
-    } finally {
-      setDriveLoading(false)
-    }
-  }
-
-  const loadDriveFiles = async () => {
-    if (isSuperAdmin && !selectedTenantId) return
-    setDriveFilesLoading(true)
-    try {
-      const params = {
-        tahun_ajaran: drivePeriod.tahun_ajaran,
-        semester: drivePeriod.semester,
-        q: debouncedDriveFileSearch.trim(),
-        limit: 50
-      }
-      if (driveFileBucket !== 'all') params.bucket = driveFileBucket
-      const api = isSuperAdmin
-        ? supabase.super.tenantGoogleDriveFiles(selectedTenantId, params)
-        : supabase.admin.googleDriveFiles(params)
-      const { data, error } = await api
-      if (error) throw error
-      setDriveFiles(Array.isArray(data?.rows) ? data.rows : [])
-      setDriveFilesTotal(Number(data?.total || 0))
-    } catch (error) {
-      setDriveFiles([])
-      setDriveFilesTotal(0)
-      pushToast('error', error?.message || 'Gagal memuat file Google Drive')
-    } finally {
-      setDriveFilesLoading(false)
-    }
-  }
-
   const fetchTenantDetail = async (tenantId, filters = storageFilters) => {
     const { data, error } = await supabase.super.tenantStorage(tenantId, filters)
     if (error) throw error
@@ -338,9 +278,14 @@ function StorageManager() {
 
   const applyTenantDetail = (data) => {
     setTenantDetail(data || null)
+    const providerQuotas = data?.quota?.providers || data?.providers || {}
+    const vps = providerQuotas?.vps || {}
+    const neva = providerQuotas?.neva_s3 || {}
     setQuotaForm({
-      quotaGb: bytesToGbInput(data?.quota?.quota_bytes),
-      maxUploadMb: bytesToMbInput(data?.quota?.max_upload_bytes),
+      vpsQuotaGb: bytesToGbInput(vps?.quota_bytes ?? data?.quota?.quota_bytes),
+      vpsMaxUploadMb: bytesToMbInput(vps?.max_upload_bytes ?? data?.quota?.max_upload_bytes),
+      nevaQuotaGb: bytesToGbInput(neva?.quota_bytes),
+      nevaMaxUploadMb: bytesToMbInput(neva?.max_upload_bytes),
       notes: data?.quota?.notes || ''
     })
   }
@@ -368,11 +313,6 @@ function StorageManager() {
           const data = await fetchTenantDetail(selectedTenantId, storageFilters)
           applyTenantDetail(data)
         }
-        if (activeTab === 'drive' && selectedTenantId) {
-          await Promise.all([loadDriveStatus(), loadDriveFiles()])
-        }
-      } else if (activeTab === 'drive') {
-        await Promise.all([loadAdminSummary(storageFilters), loadDriveStatus(), loadDriveFiles()])
       } else {
         await loadAdminSummary(storageFilters)
       }
@@ -394,21 +334,7 @@ function StorageManager() {
   useEffect(() => {
     if (typeof window === 'undefined') return
     const url = new URL(window.location.href)
-    const driveState = String(url.searchParams.get('drive') || '').trim()
-    const driveError = String(url.searchParams.get('drive_error') || '').trim()
-    if (!driveState && !driveError) return
-
-    if (driveState === 'connected') pushToast('success', 'Google Drive sekolah berhasil tersambung.')
-    if (driveState === 'failed') pushToast('error', driveError || 'Gagal menyambungkan Google Drive sekolah.')
-    url.searchParams.delete('drive')
-    url.searchParams.delete('drive_error')
-    window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`)
-  }, [pushToast])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    const url = new URL(window.location.href)
-    if (activeTab === 'drive') url.searchParams.set('tab', 'drive')
+    if (activeTab === 'neva') url.searchParams.set('tab', 'neva')
     else url.searchParams.delete('tab')
     if (selectedTenantId) url.searchParams.set('tenant', selectedTenantId)
     else url.searchParams.delete('tenant')
@@ -416,35 +342,7 @@ function StorageManager() {
   }, [activeTab, selectedTenantId])
 
   useEffect(() => {
-    const activePeriod = (isSuperAdmin ? tenantDetail : summary)?.active_period || {}
-    if (drivePeriod.tahun_ajaran || !activePeriod?.tahun_ajaran) return
-    setDrivePeriod({
-      tahun_ajaran: activePeriod.tahun_ajaran || '',
-      semester: activePeriod.semester || ''
-    })
-  }, [drivePeriod.tahun_ajaran, isSuperAdmin, summary?.active_period, tenantDetail?.active_period])
-
-  useEffect(() => {
-    if (!superAdminChecked || activeTab !== 'drive') return
-    if (isSuperAdmin && !selectedTenantId) return
-    let alive = true
-    ;(async () => {
-      await Promise.all([loadDriveStatus(), loadDriveFiles()])
-    })().catch(() => {
-      if (alive) {
-        setDriveStatus(DRIVE_STATUS_DEFAULT)
-        setDriveFiles([])
-      }
-    })
-    return () => { alive = false }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, debouncedDriveFileSearch, driveFileBucket, drivePeriod.semester, drivePeriod.tahun_ajaran, isSuperAdmin, selectedTenantId, superAdminChecked])
-
-  useEffect(() => {
     if (!isSuperAdmin || !selectedTenantId) return
-    setDriveStatus(DRIVE_STATUS_DEFAULT)
-    setDriveFiles([])
-    setDriveFilesTotal(0)
     let alive = true
     fetchTenantDetail(selectedTenantId, storageFilters)
       .then((data) => {
@@ -510,9 +408,15 @@ function StorageManager() {
     if (!selectedTenantId) return
     setSavingQuota(true)
     try {
+      const vpsQuotaBytes = toBytesFromGb(quotaForm.vpsQuotaGb)
+      const vpsMaxUploadBytes = toBytesFromMb(quotaForm.vpsMaxUploadMb)
       const payload = {
-        quota_bytes: toBytesFromGb(quotaForm.quotaGb),
-        max_upload_bytes: toBytesFromMb(quotaForm.maxUploadMb),
+        quota_bytes: vpsQuotaBytes,
+        max_upload_bytes: vpsMaxUploadBytes,
+        vps_quota_bytes: vpsQuotaBytes,
+        vps_max_upload_bytes: vpsMaxUploadBytes,
+        neva_s3_quota_bytes: toBytesFromGb(quotaForm.nevaQuotaGb),
+        neva_s3_max_upload_bytes: toBytesFromMb(quotaForm.nevaMaxUploadMb),
         notes: quotaForm.notes
       }
       const { error } = await supabase.super.updateTenantStorageQuota(selectedTenantId, payload)
@@ -603,57 +507,6 @@ function StorageManager() {
     loadStorageWithFilters(next)
   }
 
-  const handleConnectGoogleDrive = async () => {
-    if (isSuperAdmin) return
-    setDriveConnecting(true)
-    try {
-      const returnUrl = (() => {
-        if (typeof window === 'undefined') return '/admin/storage?tab=drive'
-        const url = new URL(window.location.href)
-        url.searchParams.set('tab', 'drive')
-        url.hash = ''
-        return `${url.origin}${url.pathname}${url.search}`
-      })()
-      const { data, error } = await supabase.admin.googleDriveConnectUrl({ return_url: returnUrl })
-      if (error) throw error
-      if (!data?.authorization_url) throw new Error('URL otorisasi Google Drive tidak tersedia')
-      window.location.assign(data.authorization_url)
-    } catch (error) {
-      pushToast('error', error?.message || 'Gagal menyiapkan sambungan Google Drive')
-      setDriveConnecting(false)
-    }
-  }
-
-  const handleSyncGoogleDrive = async () => {
-    setDriveSyncing(true)
-    try {
-      await loadDriveStatus({ sync: true })
-      await loadDriveFiles()
-      pushToast('success', 'Status Google Drive sekolah berhasil dicek')
-    } finally {
-      setDriveSyncing(false)
-    }
-  }
-
-  const handleDisconnectGoogleDrive = async () => {
-    if (isSuperAdmin) return
-    const confirmed = window.confirm('Putuskan Google Drive sekolah? Upload berikutnya akan kembali ke storage VPS/object storage sampai disambungkan lagi.')
-    if (!confirmed) return
-
-    setDriveDisconnecting(true)
-    try {
-      const { data, error } = await supabase.admin.disconnectGoogleDrive()
-      if (error) throw error
-      setDriveStatus(normalizeDriveStatus(data))
-      await loadDriveFiles()
-      pushToast('success', 'Google Drive sekolah berhasil diputuskan')
-    } catch (error) {
-      pushToast('error', error?.message || 'Gagal memutuskan Google Drive')
-    } finally {
-      setDriveDisconnecting(false)
-    }
-  }
-
   if (!superAdminChecked) {
     return <div className="p-6 text-sm text-slate-500">Memuat akses storage manager...</div>
   }
@@ -665,10 +518,10 @@ function StorageManager() {
           <div>
             <p className="text-xs font-bold uppercase tracking-wide text-indigo-600">Storage Manager</p>
             <h1 className="text-2xl font-bold text-slate-950">
-              {isSuperAdmin ? 'Storage VPS Platform' : 'Storage & Google Drive'}
+              Storage VPS & Neva Cloud S3
             </h1>
             <p className="mt-1 text-sm text-slate-500">
-              Kelola kuota sekolah, VPS/object storage, Google Drive, inventaris file, rekomendasi cleanup, dan Trash dari satu halaman.
+              Kelola kuota VPS, kuota Neva Cloud S3, inventaris file, rekomendasi cleanup, dan Trash dari satu halaman.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -706,11 +559,11 @@ function StorageManager() {
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab('drive')}
-            className={`inline-flex min-w-max items-center gap-2 rounded-md px-4 py-2 text-sm font-semibold ${activeTab === 'drive' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+            onClick={() => setActiveTab('neva')}
+            className={`inline-flex min-w-max items-center gap-2 rounded-md px-4 py-2 text-sm font-semibold ${activeTab === 'neva' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
           >
             <Cloud size={16} />
-            Google Drive
+            Neva Cloud S3
           </button>
         </div>
 
@@ -740,7 +593,7 @@ function StorageManager() {
               <div>
                 <h2 className="text-sm font-bold text-slate-900">Sekolah Aktif Dikelola</h2>
                 <p className="mt-1 text-xs text-slate-500">
-                  Pilih sekolah di sini untuk mengelola kuota, cleanup, Trash, dan Google Drive tanpa kembali ke halaman Sekolah.
+                  Pilih sekolah di sini untuk mengelola kuota VPS, kuota Neva S3, cleanup, dan Trash tanpa kembali ke halaman Sekolah.
                 </p>
               </div>
               <select
@@ -766,94 +619,51 @@ function StorageManager() {
           </section>
         )}
 
-        {activeTab === 'drive' && (!isSuperAdmin || selectedTenantId) && (
+        {activeTab === 'neva' && (!isSuperAdmin || selectedTenantId) && (
           <section className="space-y-4">
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-              <StatTile icon={Cloud} label="Status Drive" value={driveStatus?.status_label || 'Belum tersambung'} hint={driveStatus?.account_email || 'Akun belum tersambung'} />
-              <StatTile icon={Database} label="Storage Periode" value={labelOrZero(driveFilteredStorage.uploaded_label)} hint={`${numberFormatter.format(driveFilteredStorage.files || 0)} file`} />
-              <StatTile icon={Archive} label="Total EduSmart" value={labelOrZero(driveAllStorage.uploaded_label)} hint={`${numberFormatter.format(driveAllStorage.files || 0)} file`} />
-              <StatTile icon={ShieldCheck} label="Quota Drive" value={driveQuotaPercentLabel} hint={`${driveStatus?.quota?.used_label || '0 B'} terpakai`} />
+              <StatTile icon={Cloud} label="Status Neva S3" value={nevaEnabled ? 'Aktif' : 'Belum aktif'} hint={nevaPlatform?.endpoint || 'Endpoint Neva Cloud S3'} />
+              <StatTile icon={Database} label="Terpakai S3 Sekolah" value={nevaQuota?.used_label || nevaSummary?.usage?.total_label || '0 B'} hint={`${numberFormatter.format(nevaSummary?.usage?.total_files || 0)} file`} />
+              <StatTile icon={ShieldCheck} label="Kuota S3 Sekolah" value={nevaQuota?.quota_label || 'Tidak dibatasi'} hint={providerPercentLabel(nevaQuota)} />
+              <StatTile icon={Archive} label="Sisa S3 Sekolah" value={nevaQuota?.remaining_label || 'Tidak dibatasi'} />
             </div>
+
+            {isSuperAdmin && (
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                <StatTile icon={Cloud} label="Total Paket Neva S3" value={nevaPlatform?.capacity_label || 'Belum diset'} hint="Set APP_OBJECT_STORAGE_CAPACITY_GB di VPS" />
+                <StatTile icon={Database} label="Terpakai Platform" value={nevaPlatform?.used_label || '0 B'} hint={nevaPlatform?.percent !== null && nevaPlatform?.percent !== undefined ? `${nevaPlatform.percent}% paket` : 'Berdasarkan metadata upload'} />
+                <StatTile icon={ShieldCheck} label="Kuota S3 Dibagikan" value={nevaPlatform?.allocated_quota_label || '0 B'} />
+                <StatTile icon={Archive} label="Sisa Setelah Kuota" value={nevaPlatform?.remaining_after_allocated_label || 'Belum diset'} />
+              </div>
+            )}
 
             <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
               <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="text-sm font-bold text-slate-900">Google Drive Sekolah</h2>
-                      <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${driveBadgeClass(driveReady, driveStatus?.status)}`}>
-                        {driveLoading ? 'Memuat...' : driveStatus?.status_label || 'Belum tersambung'}
+                      <h2 className="text-sm font-bold text-slate-900">Monitoring Neva Cloud S3</h2>
+                      <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${providerBadgeClass(nevaEnabled)}`}>
+                        {nevaEnabled ? 'Provider aktif' : 'Provider belum aktif'}
                       </span>
+                      {nevaDirectEnabled && (
+                        <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+                          Direct upload aktif
+                        </span>
+                      )}
                     </div>
                     <p className="mt-1 text-xs text-slate-500">
-                      {isSuperAdmin
-                        ? `Monitoring Drive untuk ${selectedTenantName}. Penyambungan akun tetap dilakukan admin sekolah.`
-                        : 'Dokumen tugas dan media quiz dapat dialihkan ke Google Drive saat koneksi siap.'}
+                      Upload harian tugas, media quiz, dan file sertifikat diarahkan ke Neva Cloud S3. Arsip dan backup bisa dikelola terpisah dari jalur upload cepat.
                     </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {!isSuperAdmin && (
-                      <button
-                        type="button"
-                        onClick={handleConnectGoogleDrive}
-                        disabled={!driveProviderConfigured || driveConnecting || driveSyncing}
-                        className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
-                      >
-                        <Link2 size={16} />
-                        {driveConnecting ? 'Menyambungkan...' : driveReady ? 'Sambungkan Ulang' : 'Sambungkan'}
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={handleSyncGoogleDrive}
-                      disabled={!driveProviderConfigured || driveSyncing || driveConnecting}
-                      className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-                    >
-                      <RefreshCw size={16} className={driveSyncing ? 'animate-spin' : ''} />
-                      Cek
-                    </button>
-                    {driveStatus?.folder_url && (
-                      <a
-                        href={driveStatus.folder_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100"
-                      >
-                        <FolderOpen size={16} />
-                        Folder
-                      </a>
-                    )}
-                    {!isSuperAdmin && driveStatus?.configured && (
-                      <button
-                        type="button"
-                        onClick={handleDisconnectGoogleDrive}
-                        disabled={driveDisconnecting || driveConnecting}
-                        className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-60"
-                      >
-                        <Unplug size={16} />
-                        {driveDisconnecting ? 'Memutuskan...' : 'Putuskan'}
-                      </button>
-                    )}
                   </div>
                 </div>
 
-                {!driveProviderConfigured && (
-                  <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                    Credential Google Drive server belum lengkap.
-                  </div>
-                )}
-                {driveStatus?.last_error && (
-                  <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                    {driveStatus.last_error}
-                  </div>
-                )}
-
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   {[
-                    ['Provider server', driveProviderConfigured, driveProviderConfigured ? 'Credential tersedia' : 'Credential belum lengkap'],
-                    ['Akun sekolah', Boolean(driveStatus?.configured), driveStatus?.account_email || 'Belum tersambung'],
-                    ['Folder root', driveReady, driveStatus?.folder_name || 'Folder belum dibuat'],
-                    ['Berbagi link', Boolean(driveStatus?.share_uploaded_files), driveStatus?.share_uploaded_files ? 'Link file otomatis siap dibuka' : 'Berbagi link dimatikan']
+                    ['Provider S3', nevaEnabled, nevaPlatform?.label || 'Neva Cloud S3'],
+                    ['Endpoint', Boolean(nevaPlatform?.endpoint), nevaPlatform?.endpoint || 'Endpoint diambil dari ENV server'],
+                    ['Direct upload browser', nevaDirectEnabled, nevaDirectEnabled ? 'File langsung ke S3 saat CORS bucket siap' : 'Fallback backend tetap aman'],
+                    ['Verifikasi object', Boolean(nevaPlatform?.verify_objects), nevaPlatform?.verify_objects ? 'Object diverifikasi setelah upload' : 'Verifikasi opsional belum aktif']
                   ].map(([label, ok, detail]) => (
                     <div key={label} className="flex items-start gap-2 rounded-lg border border-slate-100 bg-slate-50 p-3">
                       {ok ? <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" /> : <XCircle className="mt-0.5 h-4 w-4 text-slate-400" />}
@@ -865,130 +675,95 @@ function StorageManager() {
                   ))}
                 </div>
 
-                <div className="mt-4">
-                  <ProgressLine label="Pemakaian quota Google Drive" value={driveQuotaPercentLabel} percent={driveQuotaBarWidth} />
-                </div>
-              </section>
-
-              <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                <h2 className="text-sm font-bold text-slate-900">Filter Drive</h2>
-                <div className="mt-3 space-y-3">
-                  <select
-                    value={periodValue(drivePeriod.tahun_ajaran, drivePeriod.semester)}
-                    onChange={(event) => setDrivePeriod(parsePeriodValue(event.target.value))}
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                  >
-                    <option value="">Semua periode</option>
-                    {periodOptions.map((item) => (
-                      <option key={item.value} value={item.value}>
-                        {item.tahun_ajaran} - {item.semester}{item.isActive ? ' (Aktif)' : ''}
-                      </option>
-                    ))}
-                    {periodOptions.length === 0 && <option value="" disabled>Belum ada periode tercatat</option>}
-                  </select>
-                  <select
-                    value={driveFileBucket}
-                    onChange={(event) => setDriveFileBucket(event.target.value)}
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                  >
-                    {DRIVE_FILE_BUCKET_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-                  </select>
-                  <input
-                    type="search"
-                    value={driveFileSearch}
-                    onChange={(event) => setDriveFileSearch(event.target.value)}
-                    placeholder="Cari file, kelas, periode"
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                  />
-                </div>
-              </section>
-            </div>
-
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
-              <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                <h2 className="text-sm font-bold text-slate-900">Pemakaian Per Kelas</h2>
-                <div className="mt-3 space-y-2">
-                  {driveClassUsageRows.slice(0, 10).map((row, index) => (
-                    <div key={`${row.kelas || 'kelas'}-${index}`} className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 px-3 py-2">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-slate-900">{row.kelas || 'Tanpa kelas'}</p>
-                        <p className="text-xs text-slate-500">{numberFormatter.format(row.files || 0)} file · Angkatan {row.angkatan || '-'}</p>
-                      </div>
-                      <span className="text-sm font-bold text-slate-700">{row.uploaded_label || '0 B'}</span>
-                    </div>
-                  ))}
-                  {driveClassUsageRows.length === 0 && <p className="text-sm text-slate-500">Belum ada upload Drive pada filter ini.</p>}
-                </div>
-                {driveSemesterUsageRows.length > 0 && (
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {driveSemesterUsageRows.slice(0, 6).map((row, index) => (
-                      <span key={`${row.tahun_ajaran}-${row.semester}-${index}`} className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
-                        {row.tahun_ajaran || '-'} {row.semester || '-'}: {row.uploaded_label || '0 B'}
-                      </span>
-                    ))}
+                {nevaQuota?.percent !== null && nevaQuota?.percent !== undefined && (
+                  <div className="mt-4">
+                    <ProgressLine label={`Pemakaian kuota S3 ${selectedTenantName}`} value={`${nevaQuota.percent}%`} percent={nevaQuota.percent} />
                   </div>
                 )}
               </section>
 
               <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                <h2 className="text-sm font-bold text-slate-900">Bucket Neva Aktif</h2>
+                <p className="mt-1 text-xs text-slate-500">Bucket dipakai berdasarkan jenis file agar monitoring dan cleanup tetap mudah.</p>
+                <div className="mt-3 space-y-2">
+                  {(Object.keys(nevaBucketMap).length > 0 ? Object.entries(nevaBucketMap) : Object.entries(NEVA_BUCKET_LABELS)).map(([key, bucket]) => (
+                    <div key={key} className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 px-3 py-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-slate-900">{NEVA_BUCKET_LABELS[key] || key}</p>
+                        <p className="truncate text-xs text-slate-500">{bucket || key}</p>
+                      </div>
+                      <Cloud size={16} className="shrink-0 text-slate-400" />
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="mb-4 flex items-center gap-2">
+                  <BarChart3 size={18} className="text-indigo-600" />
+                  <h2 className="text-sm font-bold text-slate-900">Analitik Neva S3</h2>
+                </div>
+                <div className="space-y-4">
+                  <div className="space-y-3">
+                    <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">Kategori terbesar</h3>
+                    {categories.map((item) => (
+                      <ProgressLine
+                        key={item.category}
+                        label={item.label}
+                        value={item.bytes_label}
+                        percent={usage.total_bytes ? (item.bytes / usage.total_bytes) * 100 : 0}
+                      />
+                    ))}
+                    {categories.length === 0 && <p className="text-sm text-slate-500">Belum ada file S3 pada filter ini.</p>}
+                  </div>
+                  <div className="space-y-3">
+                    <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">Periode terbesar</h3>
+                    {periods.slice(0, 6).map((item) => (
+                      <ProgressLine
+                        key={`${item.tahun_ajaran}-${item.semester}`}
+                        label={`${item.tahun_ajaran || '-'} ${item.semester || ''}`}
+                        value={item.bytes_label}
+                        percent={usage.total_bytes ? (item.bytes / usage.total_bytes) * 100 : 0}
+                      />
+                    ))}
+                    {periods.length === 0 && <p className="text-sm text-slate-500">Belum ada data periode S3.</p>}
+                  </div>
+                </div>
+              </section>
+
+              <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="flex items-center justify-between gap-3">
-                  <h2 className="text-sm font-bold text-slate-900">Inventaris File Drive</h2>
+                  <h2 className="text-sm font-bold text-slate-900">File Terbesar di Neva S3</h2>
                   <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
                     <FileText size={14} />
-                    {driveFilesLoading ? 'Memuat' : `${numberFormatter.format(driveFilesTotal || driveVisibleFiles.length)} file`}
+                    {numberFormatter.format(largestFiles.length)} file
                   </span>
                 </div>
-                <div className="mt-3 overflow-x-auto">
-                  <table className="min-w-full text-sm">
-                    <thead className="text-left text-xs uppercase tracking-wide text-slate-500">
-                      <tr>
-                        <th className="py-2 pr-3">File</th>
-                        <th className="py-2 pr-3">Konteks</th>
-                        <th className="py-2 pr-3 text-right">Ukuran</th>
-                        <th className="py-2 pr-3 text-right">Aksi</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {driveVisibleFiles.map((file) => (
-                        <tr key={file.id} className="border-t border-slate-100">
-                          <td className="py-3 pr-3">
-                            <p className="max-w-[260px] truncate font-semibold text-slate-900">{file.drive_file_name || 'Tanpa nama'}</p>
-                            <p className="text-xs text-slate-500">{file.module_label || file.bucket || 'File'} {file.extension ? `.${file.extension}` : ''}</p>
-                          </td>
-                          <td className="py-3 pr-3 text-xs text-slate-600">
-                            <p>{file.tahun_ajaran || '-'} / {file.semester || '-'}</p>
-                            <p>{file.kelas || 'Tanpa kelas'}</p>
-                          </td>
-                          <td className="py-3 pr-3 text-right font-semibold text-slate-900">{file.size_label || '0 B'}</td>
-                          <td className="py-3 pr-3 text-right">
-                            {file.drive_web_view_link ? (
-                              <a href={file.drive_web_view_link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-100">
-                                <ExternalLink size={14} />
-                                Buka
-                              </a>
-                            ) : <span className="text-xs text-slate-400">-</span>}
-                          </td>
-                        </tr>
-                      ))}
-                      {!driveFilesLoading && driveVisibleFiles.length === 0 && (
-                        <tr>
-                          <td className="py-8 text-center text-slate-500" colSpan={4}>Belum ada file Google Drive pada filter ini.</td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
+                <div className="mt-3 space-y-2">
+                  {largestFiles.map((file) => (
+                    <div key={file.id} className="flex items-start justify-between gap-3 rounded-lg border border-slate-100 px-3 py-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-slate-900">{file.file_name}</p>
+                        <p className="text-xs text-slate-500">{file.category_label} · {formatDateTime(file.uploaded_at)}</p>
+                      </div>
+                      <span className="shrink-0 text-sm font-bold text-slate-700">{file.size_label}</span>
+                    </div>
+                  ))}
+                  {largestFiles.length === 0 && <p className="text-sm text-slate-500">Belum ada file S3 tercatat.</p>}
                 </div>
               </section>
             </div>
           </section>
         )}
 
-        {activeTab === 'drive' && isSuperAdmin && !selectedTenantId && (
+        {activeTab === 'neva' && isSuperAdmin && !selectedTenantId && (
           <section className="rounded-lg border border-slate-200 bg-white p-8 text-center shadow-sm">
             <Cloud className="mx-auto h-10 w-10 text-slate-300" />
             <h2 className="mt-3 text-base font-bold text-slate-900">Pilih sekolah dulu</h2>
             <p className="mt-1 text-sm text-slate-500">
-              Google Drive dikelola per sekolah, jadi pilih tenant dari dropdown di atas untuk melihat status, quota, dan inventaris Drive.
+              Neva Cloud S3 dikelola per sekolah. Pilih tenant dari dropdown di atas untuk melihat kuota, pemakaian, kategori, dan file terbesar.
             </p>
           </section>
         )}
@@ -1013,72 +788,111 @@ function StorageManager() {
               </div>
               <div className="overflow-x-auto">
                 <table className="min-w-full text-sm">
-                  <thead className="text-left text-xs uppercase tracking-wide text-slate-500">
-                    <tr>
-                      <th className="py-2 pr-3">Sekolah</th>
-                      <th className="py-2 pr-3">Terpakai</th>
-                      <th className="py-2 pr-3">Kuota</th>
-                      <th className="py-2 pr-3">Drive</th>
-                      <th className="py-2 pr-3">Kategori</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {tenants.map((tenant) => (
-                      <tr
-                        key={tenant.id}
-                        onClick={() => setSelectedTenantId(tenant.id)}
-                        className={`cursor-pointer border-t border-slate-100 ${selectedTenantId === tenant.id ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}
-                      >
-                        <td className="py-3 pr-3">
-                          <p className="font-semibold text-slate-900">{tenant.name}</p>
-                          <p className="text-xs text-slate-500">{tenant.slug}</p>
-                        </td>
-                        <td className="py-3 pr-3 font-medium text-slate-700">{tenant.usage?.total_label || '0 B'}</td>
-                        <td className="py-3 pr-3 text-slate-600">{tenant.quota?.quota_label || '-'}</td>
-                        <td className="py-3 pr-3">
-                          <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${driveBadgeClass(Boolean(tenant.google_drive?.ready), tenant.google_drive?.status)}`}>
-                            {tenant.google_drive?.ready ? 'Siap' : tenant.google_drive?.status_label || 'Belum'}
-                          </span>
-                        </td>
-                        <td className="py-3 pr-3 text-slate-600">{tenant.top_category?.label || '-'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+	                  <thead className="text-left text-xs uppercase tracking-wide text-slate-500">
+	                    <tr>
+	                      <th className="py-2 pr-3">Sekolah</th>
+	                      <th className="py-2 pr-3">VPS</th>
+	                      <th className="py-2 pr-3">Neva S3</th>
+	                      <th className="py-2 pr-3">Kuota</th>
+	                      <th className="py-2 pr-3">Kategori</th>
+	                    </tr>
+	                  </thead>
+		                  <tbody>
+		                    {tenants.map((tenant) => {
+		                      const tenantProviders = tenant.providers || tenant.quota?.providers || {}
+		                      const tenantVps = tenantProviders.vps || {}
+		                      const tenantNeva = tenantProviders.neva_s3 || {}
+	                      return (
+	                        <tr
+	                          key={tenant.id}
+	                          onClick={() => setSelectedTenantId(tenant.id)}
+	                          className={`cursor-pointer border-t border-slate-100 ${selectedTenantId === tenant.id ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}
+	                        >
+	                          <td className="py-3 pr-3">
+	                            <p className="font-semibold text-slate-900">{tenant.name}</p>
+	                            <p className="text-xs text-slate-500">{tenant.slug}</p>
+	                          </td>
+	                          <td className="py-3 pr-3">
+	                            <p className="font-medium text-slate-700">{tenantVps.used_label || tenant.usage?.total_label || '0 B'}</p>
+	                            <p className="text-xs text-slate-500">{tenantVps.quota_label || 'Tanpa batas'}</p>
+	                          </td>
+	                          <td className="py-3 pr-3">
+	                            <p className="font-medium text-slate-700">{tenantNeva.used_label || '0 B'}</p>
+	                            <p className="text-xs text-slate-500">{tenantNeva.quota_label || 'Tanpa batas'}</p>
+	                          </td>
+	                          <td className="py-3 pr-3 text-slate-600">{tenant.quota?.quota_label || tenantVps.quota_label || '-'}</td>
+	                          <td className="py-3 pr-3 text-slate-600">{tenant.top_category?.label || '-'}</td>
+	                        </tr>
+	                      )
+	                    })}
+	                  </tbody>
+	                </table>
               </div>
             </section>
 
-            <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-              <h2 className="text-sm font-bold text-slate-900">Kuota Sekolah</h2>
-              <p className="mt-1 text-xs text-slate-500">{selectedTenant?.name || 'Pilih sekolah dari tabel.'}</p>
-              <div className="mt-4 space-y-3">
-                <label className="block text-xs font-semibold text-slate-600">
-                  Kuota sekolah (GB)
-                  <input
-                    value={quotaForm.quotaGb}
-                    onChange={(e) => setQuotaForm((prev) => ({ ...prev, quotaGb: e.target.value }))}
-                    placeholder="contoh: 30"
-                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </label>
-                <label className="block text-xs font-semibold text-slate-600">
-                  Maks upload per file (MB)
-                  <input
-                    value={quotaForm.maxUploadMb}
-                    onChange={(e) => setQuotaForm((prev) => ({ ...prev, maxUploadMb: e.target.value }))}
-                    placeholder="contoh: 15"
-                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </label>
-                <label className="block text-xs font-semibold text-slate-600">
-                  Catatan
-                  <textarea
-                    value={quotaForm.notes}
-                    onChange={(e) => setQuotaForm((prev) => ({ ...prev, notes: e.target.value }))}
-                    rows={3}
-                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </label>
+	            <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+	              <h2 className="text-sm font-bold text-slate-900">Kuota Sekolah</h2>
+	              <p className="mt-1 text-xs text-slate-500">
+	                {selectedTenant?.name || 'Pilih sekolah dari tabel.'} Kuota VPS dan Neva S3 dipisah agar sekolah bisa punya jatah file harian yang jelas.
+	              </p>
+	              <div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-1">
+	                <label className="block text-xs font-semibold text-slate-600">
+	                  Kuota VPS (GB)
+	                  <input
+	                    type="number"
+	                    min="0"
+	                    step="0.1"
+	                    value={quotaForm.vpsQuotaGb}
+	                    onChange={(e) => setQuotaForm((prev) => ({ ...prev, vpsQuotaGb: e.target.value }))}
+	                    placeholder="contoh: 20"
+	                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+	                  />
+	                </label>
+	                <label className="block text-xs font-semibold text-slate-600">
+	                  Maks upload per file VPS (MB)
+	                  <input
+	                    type="number"
+	                    min="0"
+	                    step="1"
+	                    value={quotaForm.vpsMaxUploadMb}
+	                    onChange={(e) => setQuotaForm((prev) => ({ ...prev, vpsMaxUploadMb: e.target.value }))}
+	                    placeholder="contoh: 15"
+	                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+	                  />
+	                </label>
+	                <label className="block text-xs font-semibold text-slate-600">
+	                  Kuota Neva S3 (GB)
+	                  <input
+	                    type="number"
+	                    min="0"
+	                    step="0.1"
+	                    value={quotaForm.nevaQuotaGb}
+	                    onChange={(e) => setQuotaForm((prev) => ({ ...prev, nevaQuotaGb: e.target.value }))}
+	                    placeholder="contoh: 40"
+	                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+	                  />
+	                </label>
+	                <label className="block text-xs font-semibold text-slate-600">
+	                  Maks upload per file Neva S3 (MB)
+	                  <input
+	                    type="number"
+	                    min="0"
+	                    step="1"
+	                    value={quotaForm.nevaMaxUploadMb}
+	                    onChange={(e) => setQuotaForm((prev) => ({ ...prev, nevaMaxUploadMb: e.target.value }))}
+	                    placeholder="contoh: 50"
+	                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+	                  />
+	                </label>
+	                <label className="block text-xs font-semibold text-slate-600">
+	                  Catatan
+	                  <textarea
+	                    value={quotaForm.notes}
+	                    onChange={(e) => setQuotaForm((prev) => ({ ...prev, notes: e.target.value }))}
+	                    rows={3}
+	                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+	                  />
+	                </label>
                 <button
                   type="button"
                   disabled={!selectedTenantId || savingQuota}
@@ -1093,18 +907,18 @@ function StorageManager() {
           </div>
         )}
 
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <StatTile icon={HardDrive} label="Storage Terpakai" value={usage.total_label || quota.used_label} hint={`${numberFormatter.format(usage.total_files || 0)} file`} />
-          <StatTile icon={Database} label="Kuota" value={quota.quota_label} hint={quota.percent !== null && quota.percent !== undefined ? `${quota.percent}% terpakai` : 'Belum dibatasi'} />
-          <StatTile icon={Archive} label="Sisa Storage" value={quota.remaining_label} />
-          <StatTile icon={Trash2} label="Trash" value={activeSummary?.trash?.bytes_label || '0 B'} hint={`${numberFormatter.format(activeSummary?.trash?.files || 0)} file`} />
-        </div>
+	        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+	          <StatTile icon={HardDrive} label="VPS Terpakai" value={usage.total_label || quota.used_label} hint={`${numberFormatter.format(usage.total_files || 0)} file`} />
+	          <StatTile icon={Database} label="Kuota VPS" value={quota.quota_label} hint={quota.percent !== null && quota.percent !== undefined ? `${quota.percent}% terpakai` : 'Belum dibatasi'} />
+	          <StatTile icon={Archive} label="Sisa VPS" value={quota.remaining_label} />
+	          <StatTile icon={Trash2} label="Trash" value={activeSummary?.trash?.bytes_label || '0 B'} hint={`${numberFormatter.format(activeSummary?.trash?.files || 0)} file`} />
+	        </div>
 
-        {quota.percent !== null && quota.percent !== undefined && (
-          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-            <ProgressLine label="Pemakaian kuota sekolah" value={`${quota.percent}%`} percent={quota.percent} />
-          </section>
-        )}
+	        {quota.percent !== null && quota.percent !== undefined && (
+	          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+	            <ProgressLine label="Pemakaian kuota VPS sekolah" value={`${quota.percent}%`} percent={quota.percent} />
+	          </section>
+	        )}
 
         <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">

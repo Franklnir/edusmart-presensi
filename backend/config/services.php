@@ -114,6 +114,8 @@ return [
             FILTER_VALIDATE_BOOL
         ),
         'expires_seconds' => (int) env('APP_DIRECT_UPLOAD_EXPIRES_SECONDS', env('ASSIGNMENT_DIRECT_UPLOAD_EXPIRES_SECONDS', 900)),
+        'capacity_bytes' => env('APP_OBJECT_STORAGE_CAPACITY_BYTES'),
+        'capacity_gb' => env('APP_OBJECT_STORAGE_CAPACITY_GB'),
         'verify_uploads' => filter_var(env('APP_DIRECT_UPLOAD_VERIFY_OBJECTS', true), FILTER_VALIDATE_BOOL),
         'direct_upload_buckets' => array_values(array_filter(array_map(
             'trim',

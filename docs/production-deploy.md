@@ -235,6 +235,7 @@ APP_OBJECT_STORAGE_SECRET_ACCESS_KEY=<secret-key>
 APP_OBJECT_STORAGE_REGION=us-east-1
 APP_OBJECT_STORAGE_ENDPOINT=https://s3.nevaobjects.id
 APP_OBJECT_STORAGE_USE_PATH_STYLE_ENDPOINT=true
+APP_OBJECT_STORAGE_CAPACITY_GB=100
 APP_DIRECT_UPLOAD_EXPIRES_SECONDS=900
 APP_DIRECT_UPLOAD_VERIFY_OBJECTS=true
 
@@ -245,6 +246,8 @@ APP_OBJECT_STORAGE_BUCKET_SERTIFIKAT_FILES=sertifikat-files
 APP_OBJECT_STORAGE_BUCKET_CERTIFICATE_TEMPLATES=certificate-templates
 APP_OBJECT_STORAGE_BUCKET_SERTIFIKAT_TEMPLATES=sertifikat-templates
 ```
+
+`APP_OBJECT_STORAGE_CAPACITY_GB` dipakai Storage Manager Super Admin untuk menampilkan total paket Nevaobjects S3, sisa kapasitas setelah kuota dibagikan, dan monitoring penggunaan platform.
 
 Env lama `ASSIGNMENT_DIRECT_UPLOAD_*` masih didukung untuk kompatibilitas, tetapi deploy baru disarankan memakai `APP_DIRECT_UPLOAD_*`.
 

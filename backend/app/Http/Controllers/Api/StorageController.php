@@ -171,20 +171,21 @@ class StorageController extends ApiController
             return $assignmentFileSizeError;
         }
 
-        $quotaError = $this->storageManagementService->assertUploadAllowed(
-            (string) ($this->tenantId($request) ?? ''),
-            (int) ($file->getSize() ?: 0)
-        );
-        if ($quotaError) {
-            return response()->json(['error' => $quotaError], 422);
-        }
-
         $imageRuleError = $this->validateImageSizePolicy($bucket, $path, $file);
         if ($imageRuleError) {
             return $imageRuleError;
         }
 
         if ($fastLocal && $this->objectStorageEnabledForBucket($bucket)) {
+            $quotaError = $this->storageManagementService->assertUploadAllowed(
+                (string) ($this->tenantId($request) ?? ''),
+                (int) ($file->getSize() ?: 0),
+                'object_storage'
+            );
+            if ($quotaError) {
+                return response()->json(['error' => $quotaError], 422);
+            }
+
             try {
                 return $this->uploadObjectStorageViaServer($request, $bucket, $path, $file);
             } catch (\Throwable $e) {
@@ -214,6 +215,15 @@ class StorageController extends ApiController
                     return $localLimitError;
                 }
             }
+        }
+
+        $quotaError = $this->storageManagementService->assertUploadAllowed(
+            (string) ($this->tenantId($request) ?? ''),
+            (int) ($file->getSize() ?: 0),
+            'local'
+        );
+        if ($quotaError) {
+            return response()->json(['error' => $quotaError], 422);
         }
 
         $storage = Storage::disk('local');
@@ -276,6 +286,15 @@ class StorageController extends ApiController
         );
         $objectKey = $this->buildStoragePath($bucket, $path);
         $uploadedSizeBytes = (int) ($file->getSize() ?: 0);
+
+        $quotaError = $this->storageManagementService->assertUploadAllowed(
+            (string) ($this->tenantId($request) ?? ''),
+            $uploadedSizeBytes,
+            'object_storage'
+        );
+        if ($quotaError) {
+            throw new \RuntimeException($quotaError);
+        }
 
         $putResult = $this->objectStorageSigner->putObjectFromFile(
             $objectKey,
@@ -388,7 +407,8 @@ class StorageController extends ApiController
 
         $quotaError = $this->storageManagementService->assertUploadAllowed(
             (string) ($this->tenantId($request) ?? ''),
-            $sizeBytes
+            $sizeBytes,
+            'object_storage'
         );
         if ($quotaError) {
             return response()->json(['error' => $quotaError], 422);
@@ -461,7 +481,8 @@ class StorageController extends ApiController
 
         $quotaError = $this->storageManagementService->assertUploadAllowed(
             (string) ($this->tenantId($request) ?? ''),
-            $sizeBytes
+            $sizeBytes,
+            'object_storage'
         );
         if ($quotaError) {
             return response()->json(['error' => $quotaError], 422);

@@ -14,6 +14,15 @@ class StorageManagementService
 {
     private const MANAGED_STATUSES = ['active', 'trash'];
 
+    private const PROVIDER_VPS = 'local';
+
+    private const PROVIDER_NEVA_S3 = 'object_storage';
+
+    private const PROVIDER_LABELS = [
+        self::PROVIDER_VPS => 'VPS',
+        self::PROVIDER_NEVA_S3 => 'Neva Cloud S3',
+    ];
+
     private const CLEANUP_MINIMUM_PERIOD_GAP = 1;
 
     private const CLEANUP_MINIMUM_FILE_AGE_DAYS = 90;
@@ -54,7 +63,7 @@ class StorageManagementService
         $totalBytes = is_numeric($total) ? (int) $total : 0;
         $freeBytes = is_numeric($free) ? (int) $free : 0;
         $usedBytes = max(0, $totalBytes - $freeBytes);
-        $allocatedBytes = $this->allocatedQuotaBytes();
+        $allocatedBytes = $this->allocatedQuotaBytes(self::PROVIDER_VPS);
 
         return [
             'total_bytes' => $totalBytes,
@@ -71,14 +80,57 @@ class StorageManagementService
         ];
     }
 
+    public function objectStorageCapacity(): array
+    {
+        $capacityBytes = $this->configuredObjectStorageCapacityBytes();
+        $usedBytes = $this->providerUsedBytes(self::PROVIDER_NEVA_S3);
+        $allocatedBytes = $this->allocatedQuotaBytes(self::PROVIDER_NEVA_S3);
+        $remainingBytes = $capacityBytes !== null ? max(0, $capacityBytes - $usedBytes) : null;
+        $remainingAfterAllocatedBytes = $capacityBytes !== null ? max(0, $capacityBytes - $allocatedBytes) : null;
+
+        return [
+            ...$this->objectStorageStatus(),
+            'capacity_bytes' => $capacityBytes,
+            'capacity_label' => $capacityBytes !== null ? $this->formatBytes($capacityBytes) : 'Belum diset',
+            'used_bytes' => $usedBytes,
+            'used_label' => $this->formatBytes($usedBytes),
+            'allocated_quota_bytes' => $allocatedBytes,
+            'allocated_quota_label' => $this->formatBytes($allocatedBytes),
+            'remaining_bytes' => $remainingBytes,
+            'remaining_label' => $remainingBytes !== null ? $this->formatBytes($remainingBytes) : 'Belum diset',
+            'remaining_after_allocated_bytes' => $remainingAfterAllocatedBytes,
+            'remaining_after_allocated_label' => $remainingAfterAllocatedBytes !== null ? $this->formatBytes($remainingAfterAllocatedBytes) : 'Belum diset',
+            'percent' => $capacityBytes && $capacityBytes > 0 ? round(min(100, ($usedBytes / $capacityBytes) * 100), 2) : null,
+        ];
+    }
+
+    private function objectStorageStatus(): array
+    {
+        $bucketMap = config('services.object_storage.bucket_map', []);
+        if (! is_array($bucketMap)) {
+            $bucketMap = [];
+        }
+
+        return [
+            'provider' => self::PROVIDER_NEVA_S3,
+            'label' => (string) config('services.object_storage.label', 'Neva Cloud S3'),
+            'enabled' => (bool) config('services.object_storage.enabled', false),
+            'browser_direct_enabled' => (bool) config('services.object_storage.browser_direct_enabled', false),
+            'verify_objects' => (bool) config('services.object_storage.verify_uploads', true),
+            'endpoint' => (string) config('services.object_storage.endpoint', ''),
+            'bucket_map' => array_filter($bucketMap),
+        ];
+    }
+
     public function quotaForTenant(string $tenantId): array
     {
         $row = $this->quotaTableReady()
             ? DB::table('tenant_storage_quotas')->where('tenant_id', $tenantId)->first()
             : null;
 
-        $quotaBytes = ($row->quota_bytes ?? null) !== null ? (int) $row->quota_bytes : null;
-        $maxUploadBytes = ($row->max_upload_bytes ?? null) !== null ? (int) $row->max_upload_bytes : null;
+        $providers = $this->providerQuotasForTenant($tenantId, $row);
+        $quotaBytes = $this->sumNullableBytes(array_column($providers, 'quota_bytes'));
+        $maxUploadBytes = $this->maxNullableBytes(array_column($providers, 'max_upload_bytes'));
         $usedBytes = $this->tenantUsedBytes($tenantId);
         $remainingBytes = $quotaBytes !== null ? max(0, $quotaBytes - $usedBytes) : null;
 
@@ -93,24 +145,26 @@ class StorageManagementService
             'remaining_label' => $remainingBytes !== null ? $this->formatBytes($remainingBytes) : 'Tidak dibatasi',
             'percent' => $quotaBytes && $quotaBytes > 0 ? round(min(100, ($usedBytes / $quotaBytes) * 100), 2) : null,
             'notes' => $row->notes ?? null,
+            'providers' => $providers,
         ];
     }
 
-    public function assertUploadAllowed(string $tenantId, int $incomingBytes): ?string
+    public function assertUploadAllowed(string $tenantId, int $incomingBytes, string $provider = self::PROVIDER_VPS): ?string
     {
         if ($tenantId === '' || $incomingBytes <= 0 || ! $this->tablesReady()) {
             return null;
         }
 
-        $quota = $this->quotaForTenant($tenantId);
+        $quota = $this->providerQuotaForTenant($tenantId, $provider);
+        $providerLabel = (string) ($quota['label'] ?? 'storage');
         $maxUploadBytes = $quota['max_upload_bytes'];
         if ($maxUploadBytes !== null && $incomingBytes > $maxUploadBytes) {
-            return 'Ukuran file melebihi batas upload sekolah (maksimal '.$this->formatBytes($maxUploadBytes).').';
+            return 'Ukuran file melebihi batas upload '.$providerLabel.' sekolah (maksimal '.$this->formatBytes($maxUploadBytes).').';
         }
 
         $quotaBytes = $quota['quota_bytes'];
         if ($quotaBytes !== null && ($quota['used_bytes'] + $incomingBytes) > $quotaBytes) {
-            return 'Kuota storage sekolah penuh. Sisa kuota '.$quota['remaining_label'].'.';
+            return 'Kuota '.$providerLabel.' sekolah penuh. Sisa kuota '.$quota['remaining_label'].'.';
         }
 
         return null;
@@ -236,6 +290,7 @@ class StorageManagementService
                 'slug' => (string) ($tenant->slug ?? ''),
                 'status' => (string) ($tenant->status ?? 'active'),
                 'quota' => $summary['quota'],
+                'providers' => $summary['providers'] ?? ($summary['quota']['providers'] ?? []),
                 'usage' => $summary['usage'],
                 'top_category' => $summary['top_category'],
                 'prediction' => $summary['prediction'],
@@ -251,6 +306,7 @@ class StorageManagementService
 
         return [
             'server' => $this->serverCapacity(),
+            'object_storage' => $this->objectStorageCapacity(),
             'total_used_bytes' => $totalUsed,
             'total_used_label' => $this->formatBytes($totalUsed),
             'tenant_count' => count($tenants),
@@ -270,10 +326,18 @@ class StorageManagementService
         $largest = $this->safeSection('largest_files', [], fn () => $this->largestFiles($tenantId, $filters), $context);
         $byUser = $this->safeSection('by_uploader', [], fn () => $this->byUploader($tenantId, $filters), $context);
         $duplicates = $this->safeSection('duplicate_groups', [], fn () => $this->duplicateGroups($tenantId), $context);
+        $providerSummaries = $this->safeSection('provider_summaries', $this->emptyProviderSummaries($tenantId), fn () => [
+            'vps' => $this->providerSummary($tenantId, self::PROVIDER_VPS, $filters),
+            'neva_s3' => $this->providerSummary($tenantId, self::PROVIDER_NEVA_S3, $filters),
+        ], $context);
 
         return [
             'quota' => $quota,
             'usage' => $usage,
+            'providers' => $quota['providers'] ?? [],
+            'provider_summaries' => $providerSummaries,
+            'object_storage' => $providerSummaries['neva_s3'] ?? $this->providerSummary($tenantId, self::PROVIDER_NEVA_S3, $filters),
+            'object_storage_status' => $this->objectStorageStatus(),
             'top_category' => $usage['by_category'][0] ?? null,
             'largest_files' => $largest,
             'by_uploader' => $byUser,
@@ -295,6 +359,7 @@ class StorageManagementService
 
         return [
             'quota' => $quota,
+            'providers' => $quota['providers'] ?? [],
             'usage' => $usage,
             'top_category' => $usage['by_category'][0] ?? null,
             'prediction' => $this->fullPrediction($tenantId, $quota),
@@ -310,11 +375,27 @@ class StorageManagementService
         $now = now();
         $exists = DB::table('tenant_storage_quotas')->where('tenant_id', $tenantId)->exists();
         $values = [];
+        $vpsQuota = $payload['vps_quota_bytes'] ?? $payload['quota_bytes'] ?? null;
+        $vpsMaxUpload = $payload['vps_max_upload_bytes'] ?? $payload['max_upload_bytes'] ?? null;
+        $nevaQuota = $payload['neva_s3_quota_bytes'] ?? null;
+        $nevaMaxUpload = $payload['neva_s3_max_upload_bytes'] ?? null;
         if ($this->tableHasColumn('tenant_storage_quotas', 'quota_bytes')) {
-            $values['quota_bytes'] = $this->nullableBytes($payload['quota_bytes'] ?? null);
+            $values['quota_bytes'] = $this->nullableBytes($vpsQuota);
         }
         if ($this->tableHasColumn('tenant_storage_quotas', 'max_upload_bytes')) {
-            $values['max_upload_bytes'] = $this->nullableBytes($payload['max_upload_bytes'] ?? null);
+            $values['max_upload_bytes'] = $this->nullableBytes($vpsMaxUpload);
+        }
+        if ($this->tableHasColumn('tenant_storage_quotas', 'vps_quota_bytes')) {
+            $values['vps_quota_bytes'] = $this->nullableBytes($vpsQuota);
+        }
+        if ($this->tableHasColumn('tenant_storage_quotas', 'vps_max_upload_bytes')) {
+            $values['vps_max_upload_bytes'] = $this->nullableBytes($vpsMaxUpload);
+        }
+        if ($this->tableHasColumn('tenant_storage_quotas', 'neva_s3_quota_bytes')) {
+            $values['neva_s3_quota_bytes'] = $this->nullableBytes($nevaQuota);
+        }
+        if ($this->tableHasColumn('tenant_storage_quotas', 'neva_s3_max_upload_bytes')) {
+            $values['neva_s3_max_upload_bytes'] = $this->nullableBytes($nevaMaxUpload);
         }
         if ($this->tableHasColumn('tenant_storage_quotas', 'notes')) {
             $values['notes'] = trim((string) ($payload['notes'] ?? '')) ?: null;
@@ -337,6 +418,78 @@ class StorageManagementService
         }
 
         return $this->quotaForTenant($tenantId);
+    }
+
+    private function providerQuotasForTenant(string $tenantId, ?object $row = null): array
+    {
+        return [
+            'vps' => $this->providerQuotaForTenant($tenantId, self::PROVIDER_VPS, $row),
+            'neva_s3' => $this->providerQuotaForTenant($tenantId, self::PROVIDER_NEVA_S3, $row),
+        ];
+    }
+
+    private function providerQuotaForTenant(string $tenantId, string $provider, ?object $row = null): array
+    {
+        $provider = $this->normalizeProvider($provider);
+        if ($row === null && $this->quotaTableReady()) {
+            $row = DB::table('tenant_storage_quotas')->where('tenant_id', $tenantId)->first();
+        }
+
+        if ($provider === self::PROVIDER_NEVA_S3) {
+            $quotaBytes = $this->rowNullableInt($row, 'neva_s3_quota_bytes');
+            $maxUploadBytes = $this->rowNullableInt($row, 'neva_s3_max_upload_bytes');
+            $key = 'neva_s3';
+        } else {
+            $quotaBytes = $this->rowNullableInt($row, 'vps_quota_bytes');
+            $maxUploadBytes = $this->rowNullableInt($row, 'vps_max_upload_bytes');
+
+            if ($quotaBytes === null) {
+                $quotaBytes = $this->rowNullableInt($row, 'quota_bytes');
+            }
+            if ($maxUploadBytes === null) {
+                $maxUploadBytes = $this->rowNullableInt($row, 'max_upload_bytes');
+            }
+            $key = 'vps';
+        }
+
+        $usedBytes = $this->tenantUsedBytes($tenantId, $provider);
+        $remainingBytes = $quotaBytes !== null ? max(0, $quotaBytes - $usedBytes) : null;
+
+        return [
+            'key' => $key,
+            'provider' => $provider,
+            'label' => self::PROVIDER_LABELS[$provider] ?? Str::title(str_replace('_', ' ', $provider)),
+            'quota_bytes' => $quotaBytes,
+            'quota_label' => $quotaBytes !== null ? $this->formatBytes($quotaBytes) : 'Tidak dibatasi',
+            'max_upload_bytes' => $maxUploadBytes,
+            'max_upload_label' => $maxUploadBytes !== null ? $this->formatBytes($maxUploadBytes) : 'Default sistem',
+            'used_bytes' => $usedBytes,
+            'used_label' => $this->formatBytes($usedBytes),
+            'remaining_bytes' => $remainingBytes,
+            'remaining_label' => $remainingBytes !== null ? $this->formatBytes($remainingBytes) : 'Tidak dibatasi',
+            'percent' => $quotaBytes && $quotaBytes > 0 ? round(min(100, ($usedBytes / $quotaBytes) * 100), 2) : null,
+        ];
+    }
+
+    private function providerSummary(string $tenantId, string $provider, array $filters = []): array
+    {
+        $provider = $this->normalizeProvider($provider);
+        $providerFilters = [
+            ...$filters,
+            'provider' => $provider,
+        ];
+        $quota = $this->providerQuotaForTenant($tenantId, $provider);
+        $usage = $this->tenantUsage($tenantId, $providerFilters);
+
+        return [
+            'provider' => $provider,
+            'label' => self::PROVIDER_LABELS[$provider] ?? Str::title(str_replace('_', ' ', $provider)),
+            'quota' => $quota,
+            'usage' => $usage,
+            'top_category' => $usage['by_category'][0] ?? null,
+            'largest_files' => $this->largestFiles($tenantId, $providerFilters),
+            'by_uploader' => $this->byUploader($tenantId, $providerFilters),
+        ];
     }
 
     public function cleanupPreview(string $tenantId, array $filters = []): array
@@ -570,9 +723,8 @@ class StorageManagementService
                 ])
             : collect();
 
-        $driveRows = $this->driveCategoryRows($tenantId, $filters);
         $merged = [];
-        foreach ($localRows->merge($driveRows) as $row) {
+        foreach ($localRows as $row) {
             $category = $row['category'] ?: 'dokumen';
             $merged[$category] ??= ['category' => $category, 'bytes' => 0, 'files' => 0];
             $merged[$category]['bytes'] += (int) $row['bytes'];
@@ -601,7 +753,7 @@ class StorageManagementService
         ];
     }
 
-    private function tenantUsedBytes(string $tenantId): int
+    private function tenantUsedBytes(string $tenantId, ?string $provider = null): int
     {
         if ($tenantId === '') {
             return 0;
@@ -609,18 +761,30 @@ class StorageManagementService
 
         $bytes = 0;
         if ($this->storageFilesReady()) {
-            $bytes += (int) DB::table('storage_files')
+            $query = DB::table('storage_files')
                 ->where('tenant_id', $tenantId)
-                ->whereIn('status', self::MANAGED_STATUSES)
-                ->sum('size_bytes');
-        }
-        if ($this->tableHasColumn('tenant_google_drive_files', 'size_bytes')) {
-            $bytes += (int) DB::table('tenant_google_drive_files')
-                ->where('tenant_id', $tenantId)
-                ->sum('size_bytes');
+                ->whereIn('status', self::MANAGED_STATUSES);
+
+            if ($provider !== null && $this->tableHasColumn('storage_files', 'provider')) {
+                $query->where('provider', $this->normalizeProvider($provider));
+            }
+
+            $bytes += (int) $query->sum('size_bytes');
         }
 
         return $bytes;
+    }
+
+    private function providerUsedBytes(string $provider): int
+    {
+        if (! $this->storageFilesReady() || ! $this->tableHasColumn('storage_files', 'provider')) {
+            return 0;
+        }
+
+        return (int) DB::table('storage_files')
+            ->whereIn('status', self::MANAGED_STATUSES)
+            ->where('provider', $this->normalizeProvider($provider))
+            ->sum('size_bytes');
     }
 
     private function storageRowsQuery(string $tenantId, array $filters = [])
@@ -629,10 +793,10 @@ class StorageManagementService
             ->where('tenant_id', $tenantId)
             ->whereIn('status', self::MANAGED_STATUSES);
 
-        foreach (['category', 'tahun_ajaran', 'semester', 'uploaded_by_user_id'] as $field) {
+        foreach (['category', 'tahun_ajaran', 'semester', 'uploaded_by_user_id', 'provider'] as $field) {
             $value = trim((string) ($filters[$field] ?? ''));
             if ($value !== '' && $value !== 'all' && $this->tableHasColumn('storage_files', $field)) {
-                $query->where($field, $value);
+                $query->where($field, $field === 'provider' ? $this->normalizeProvider($value) : $value);
             }
         }
 
@@ -720,26 +884,6 @@ class StorageManagementService
                     'files' => (int) ($row->files ?? 0),
                 ])
             : collect();
-
-        if (
-            Schema::hasTable('tenant_google_drive_files')
-            && $this->tableHasColumn('tenant_google_drive_files', 'tahun_ajaran')
-            && $this->tableHasColumn('tenant_google_drive_files', 'semester')
-            && $this->tableHasColumn('tenant_google_drive_files', 'size_bytes')
-        ) {
-            $drive = $this->driveRowsQuery($tenantId, $filters)
-                ->select('tahun_ajaran', 'semester')
-                ->selectRaw('coalesce(sum(size_bytes), 0) as bytes, count(*) as files')
-                ->groupBy('tahun_ajaran', 'semester')
-                ->get()
-                ->map(fn ($row) => [
-                    'tahun_ajaran' => (string) ($row->tahun_ajaran ?? ''),
-                    'semester' => (string) ($row->semester ?? ''),
-                    'bytes' => (int) ($row->bytes ?? 0),
-                    'files' => (int) ($row->files ?? 0),
-                ]);
-            $rows = $rows->merge($drive);
-        }
 
         $merged = [];
         foreach ($rows as $row) {
@@ -1291,13 +1435,33 @@ class StorageManagementService
             ->all();
     }
 
-    private function allocatedQuotaBytes(): int
+    private function allocatedQuotaBytes(?string $provider = null): int
     {
-        if (! $this->tableHasColumn('tenant_storage_quotas', 'quota_bytes')) {
+        if (! $this->quotaTableReady()) {
             return 0;
         }
 
-        return (int) DB::table('tenant_storage_quotas')->sum('quota_bytes');
+        $provider = $provider !== null ? $this->normalizeProvider($provider) : null;
+        $column = match ($provider) {
+            self::PROVIDER_VPS => $this->tableHasColumn('tenant_storage_quotas', 'vps_quota_bytes')
+                ? 'vps_quota_bytes'
+                : 'quota_bytes',
+            self::PROVIDER_NEVA_S3 => 'neva_s3_quota_bytes',
+            default => null,
+        };
+
+        if ($column !== null) {
+            return $this->tableHasColumn('tenant_storage_quotas', $column)
+                ? (int) DB::table('tenant_storage_quotas')->sum($column)
+                : 0;
+        }
+
+        $columns = array_values(array_filter([
+            $this->tableHasColumn('tenant_storage_quotas', 'vps_quota_bytes') ? 'vps_quota_bytes' : 'quota_bytes',
+            $this->tableHasColumn('tenant_storage_quotas', 'neva_s3_quota_bytes') ? 'neva_s3_quota_bytes' : null,
+        ]));
+
+        return array_reduce($columns, fn ($total, $quotaColumn) => $total + (int) DB::table('tenant_storage_quotas')->sum($quotaColumn), 0);
     }
 
     private function profileRole(string $userId, string $tenantId): ?string
@@ -1347,6 +1511,72 @@ class StorageManagementService
         return $bytes > 0 ? $bytes : null;
     }
 
+    private function rowNullableInt(?object $row, string $key): ?int
+    {
+        if (! $row || ! property_exists($row, $key) || $row->{$key} === null || $row->{$key} === '') {
+            return null;
+        }
+
+        $value = (int) $row->{$key};
+
+        return $value > 0 ? $value : null;
+    }
+
+    private function sumNullableBytes(array $values): ?int
+    {
+        $filtered = array_values(array_filter(
+            $values,
+            fn ($value) => $value !== null && $value !== ''
+        ));
+        if (empty($filtered)) {
+            return null;
+        }
+
+        return array_sum(array_map(fn ($value) => max(0, (int) $value), $filtered));
+    }
+
+    private function maxNullableBytes(array $values): ?int
+    {
+        $filtered = array_values(array_filter(
+            $values,
+            fn ($value) => $value !== null && $value !== ''
+        ));
+        if (empty($filtered)) {
+            return null;
+        }
+
+        return max(array_map(fn ($value) => max(0, (int) $value), $filtered));
+    }
+
+    private function normalizeProvider(string $provider): string
+    {
+        $provider = strtolower(trim($provider));
+
+        return match ($provider) {
+            'neva', 'neva_s3', 's3', 'object-storage', 'object_storage' => self::PROVIDER_NEVA_S3,
+            default => self::PROVIDER_VPS,
+        };
+    }
+
+    private function configuredObjectStorageCapacityBytes(): ?int
+    {
+        $bytes = config('services.object_storage.capacity_bytes');
+        if ($bytes !== null && $bytes !== '') {
+            $value = (int) $bytes;
+
+            return $value > 0 ? $value : null;
+        }
+
+        $gb = config('services.object_storage.capacity_gb');
+        if ($gb !== null && $gb !== '') {
+            $value = (float) $gb;
+
+            return $value > 0 ? (int) round($value * 1024 * 1024 * 1024) : null;
+        }
+
+        return null;
+    }
+
     private function quotaTableReady(): bool
     {
         return Schema::hasTable('tenant_storage_quotas')
@@ -1390,6 +1620,7 @@ class StorageManagementService
     {
         return [
             'quota' => $this->emptyQuota(''),
+            'providers' => $this->emptyProviderQuotas(''),
             'usage' => $this->emptyUsage(),
             'top_category' => null,
             'prediction' => $this->emptyPrediction(),
@@ -1411,6 +1642,59 @@ class StorageManagementService
             'remaining_label' => 'Tidak dibatasi',
             'percent' => null,
             'notes' => null,
+            'providers' => $this->emptyProviderQuotas($tenantId),
+        ];
+    }
+
+    private function emptyProviderQuotas(string $tenantId): array
+    {
+        return [
+            'vps' => $this->emptyProviderQuota($tenantId, self::PROVIDER_VPS, 'vps'),
+            'neva_s3' => $this->emptyProviderQuota($tenantId, self::PROVIDER_NEVA_S3, 'neva_s3'),
+        ];
+    }
+
+    private function emptyProviderQuota(string $tenantId, string $provider, string $key): array
+    {
+        $usedBytes = $this->tenantUsedBytes($tenantId, $provider);
+
+        return [
+            'key' => $key,
+            'provider' => $provider,
+            'label' => self::PROVIDER_LABELS[$provider] ?? Str::title(str_replace('_', ' ', $provider)),
+            'quota_bytes' => null,
+            'quota_label' => 'Tidak dibatasi',
+            'max_upload_bytes' => null,
+            'max_upload_label' => 'Default sistem',
+            'used_bytes' => $usedBytes,
+            'used_label' => $this->formatBytes($usedBytes),
+            'remaining_bytes' => null,
+            'remaining_label' => 'Tidak dibatasi',
+            'percent' => null,
+        ];
+    }
+
+    private function emptyProviderSummaries(string $tenantId): array
+    {
+        return [
+            'vps' => [
+                'provider' => self::PROVIDER_VPS,
+                'label' => self::PROVIDER_LABELS[self::PROVIDER_VPS],
+                'quota' => $this->emptyProviderQuota($tenantId, self::PROVIDER_VPS, 'vps'),
+                'usage' => $this->emptyUsage(),
+                'top_category' => null,
+                'largest_files' => [],
+                'by_uploader' => [],
+            ],
+            'neva_s3' => [
+                'provider' => self::PROVIDER_NEVA_S3,
+                'label' => self::PROVIDER_LABELS[self::PROVIDER_NEVA_S3],
+                'quota' => $this->emptyProviderQuota($tenantId, self::PROVIDER_NEVA_S3, 'neva_s3'),
+                'usage' => $this->emptyUsage(),
+                'top_category' => null,
+                'largest_files' => [],
+                'by_uploader' => [],
+            ],
         ];
     }
 

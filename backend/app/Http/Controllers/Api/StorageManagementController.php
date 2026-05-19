@@ -6,7 +6,6 @@ use App\Services\GoogleDrive\GoogleDriveService;
 use App\Services\Storage\StorageManagementService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 
@@ -88,35 +87,7 @@ class StorageManagementController extends ApiController
             return $this->deny();
         }
 
-        $overview = $this->storageManagementService->superOverview();
-        if (isset($overview['tenants']) && is_array($overview['tenants'])) {
-            $overview['tenants'] = array_map(function (array $tenant) {
-                $tenantId = (string) ($tenant['id'] ?? '');
-                try {
-                    $tenant['google_drive'] = $this->googleDriveService->summaryForTenant($tenantId);
-                } catch (\Throwable $e) {
-                    Log::warning('storage_manager_drive_summary_failed', [
-                        'tenant_id' => $tenantId,
-                        'error' => $e->getMessage(),
-                    ]);
-                    $tenant['google_drive'] = [
-                        'ready' => false,
-                        'configured' => false,
-                        'provider_configured' => true,
-                        'status' => 'needs_attention',
-                        'status_label' => 'Drive perlu dicek',
-                        'quota' => ['used_label' => '0 B', 'limit_label' => 'Tidak terbatas', 'percent' => null],
-                        'today' => ['uploaded_label' => '0 B', 'files' => 0],
-                        'app_storage' => ['uploaded_label' => '0 B', 'files' => 0],
-                        'app_storage_all' => ['uploaded_label' => '0 B', 'files' => 0],
-                    ];
-                }
-
-                return $tenant;
-            }, $overview['tenants']);
-        }
-
-        return $this->ok($overview);
+        return $this->ok($this->storageManagementService->superOverview());
     }
 
     public function superTenantSummary(Request $request, string $tenantId)
@@ -150,6 +121,10 @@ class StorageManagementController extends ApiController
         $validator = Validator::make($request->all(), [
             'quota_bytes' => ['nullable', 'integer', 'min:0'],
             'max_upload_bytes' => ['nullable', 'integer', 'min:0'],
+            'vps_quota_bytes' => ['nullable', 'integer', 'min:0'],
+            'vps_max_upload_bytes' => ['nullable', 'integer', 'min:0'],
+            'neva_s3_quota_bytes' => ['nullable', 'integer', 'min:0'],
+            'neva_s3_max_upload_bytes' => ['nullable', 'integer', 'min:0'],
             'notes' => ['nullable', 'string', 'max:1000'],
         ]);
         if ($validator->fails()) {
