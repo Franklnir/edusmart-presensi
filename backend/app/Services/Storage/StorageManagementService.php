@@ -144,15 +144,14 @@ class StorageManagementService
 
         $providers = $this->providerQuotasForTenant($tenantId, $row);
         $quotaBytes = $this->sumNullableBytes(array_column($providers, 'quota_bytes'));
-        $maxUploadBytes = $this->maxNullableBytes(array_column($providers, 'max_upload_bytes'));
         $usedBytes = $this->tenantUsedBytes($tenantId);
         $remainingBytes = $quotaBytes !== null ? max(0, $quotaBytes - $usedBytes) : null;
 
         return [
             'quota_bytes' => $quotaBytes,
             'quota_label' => $quotaBytes !== null ? $this->formatBytes($quotaBytes) : 'Tidak dibatasi',
-            'max_upload_bytes' => $maxUploadBytes,
-            'max_upload_label' => $maxUploadBytes !== null ? $this->formatBytes($maxUploadBytes) : 'Default sistem',
+            'max_upload_bytes' => null,
+            'max_upload_label' => 'Tidak dibatasi',
             'used_bytes' => $usedBytes,
             'used_label' => $this->formatBytes($usedBytes),
             'remaining_bytes' => $remainingBytes,
@@ -171,10 +170,6 @@ class StorageManagementService
 
         $quota = $this->providerQuotaForTenant($tenantId, $provider);
         $providerLabel = (string) ($quota['label'] ?? 'storage');
-        $maxUploadBytes = $quota['max_upload_bytes'];
-        if ($maxUploadBytes !== null && $incomingBytes > $maxUploadBytes) {
-            return 'Ukuran file melebihi batas upload '.$providerLabel.' sekolah (maksimal '.$this->formatBytes($maxUploadBytes).').';
-        }
 
         $quotaBytes = $quota['quota_bytes'];
         if ($quotaBytes !== null && ($quota['used_bytes'] + $incomingBytes) > $quotaBytes) {
@@ -319,8 +314,8 @@ class StorageManagementService
             ->all();
 
         return [
-            'server' => $this->serverCapacity(),
-            'object_storage' => $this->objectStorageCapacity(),
+            'server' => $this->safeSection('server_capacity', $this->emptyServerCapacity(), fn () => $this->serverCapacity()),
+            'object_storage' => $this->safeSection('object_storage_capacity', $this->emptyObjectStorageCapacity(), fn () => $this->objectStorageCapacity()),
             'total_used_bytes' => $totalUsed,
             'total_used_label' => $this->formatBytes($totalUsed),
             'tenant_count' => count($tenants),
@@ -390,13 +385,9 @@ class StorageManagementService
         $exists = DB::table('tenant_storage_quotas')->where('tenant_id', $tenantId)->exists();
         $values = [];
         $vpsQuota = $payload['vps_quota_bytes'] ?? $payload['quota_bytes'] ?? null;
-        $vpsMaxUpload = $payload['vps_max_upload_bytes'] ?? $payload['max_upload_bytes'] ?? null;
         $nevaQuota = $payload['neva_s3_quota_bytes'] ?? null;
-        $nevaMaxUpload = $payload['neva_s3_max_upload_bytes'] ?? null;
         $normalizedVpsQuota = $this->nullableBytes($vpsQuota);
-        $normalizedVpsMaxUpload = $this->nullableBytes($vpsMaxUpload);
         $normalizedNevaQuota = $this->nullableBytes($nevaQuota);
-        $normalizedNevaMaxUpload = $this->nullableBytes($nevaMaxUpload);
 
         $this->assertQuotaAllocationWithinCapacity($tenantId, self::PROVIDER_VPS, $normalizedVpsQuota);
         $this->assertQuotaAllocationWithinCapacity($tenantId, self::PROVIDER_NEVA_S3, $normalizedNevaQuota);
@@ -405,19 +396,19 @@ class StorageManagementService
             $values['quota_bytes'] = $normalizedVpsQuota;
         }
         if ($this->tableHasColumn('tenant_storage_quotas', 'max_upload_bytes')) {
-            $values['max_upload_bytes'] = $normalizedVpsMaxUpload;
+            $values['max_upload_bytes'] = null;
         }
         if ($this->tableHasColumn('tenant_storage_quotas', 'vps_quota_bytes')) {
             $values['vps_quota_bytes'] = $normalizedVpsQuota;
         }
         if ($this->tableHasColumn('tenant_storage_quotas', 'vps_max_upload_bytes')) {
-            $values['vps_max_upload_bytes'] = $normalizedVpsMaxUpload;
+            $values['vps_max_upload_bytes'] = null;
         }
         if ($this->tableHasColumn('tenant_storage_quotas', 'neva_s3_quota_bytes')) {
             $values['neva_s3_quota_bytes'] = $normalizedNevaQuota;
         }
         if ($this->tableHasColumn('tenant_storage_quotas', 'neva_s3_max_upload_bytes')) {
-            $values['neva_s3_max_upload_bytes'] = $normalizedNevaMaxUpload;
+            $values['neva_s3_max_upload_bytes'] = null;
         }
         if ($this->tableHasColumn('tenant_storage_quotas', 'notes')) {
             $values['notes'] = trim((string) ($payload['notes'] ?? '')) ?: null;
@@ -459,17 +450,12 @@ class StorageManagementService
 
         if ($provider === self::PROVIDER_NEVA_S3) {
             $quotaBytes = $this->rowNullableInt($row, 'neva_s3_quota_bytes');
-            $maxUploadBytes = $this->rowNullableInt($row, 'neva_s3_max_upload_bytes');
             $key = 'neva_s3';
         } else {
             $quotaBytes = $this->rowNullableInt($row, 'vps_quota_bytes');
-            $maxUploadBytes = $this->rowNullableInt($row, 'vps_max_upload_bytes');
 
             if ($quotaBytes === null) {
                 $quotaBytes = $this->rowNullableInt($row, 'quota_bytes');
-            }
-            if ($maxUploadBytes === null) {
-                $maxUploadBytes = $this->rowNullableInt($row, 'max_upload_bytes');
             }
             $key = 'vps';
         }
@@ -483,8 +469,8 @@ class StorageManagementService
             'label' => self::PROVIDER_LABELS[$provider] ?? Str::title(str_replace('_', ' ', $provider)),
             'quota_bytes' => $quotaBytes,
             'quota_label' => $quotaBytes !== null ? $this->formatBytes($quotaBytes) : 'Tidak dibatasi',
-            'max_upload_bytes' => $maxUploadBytes,
-            'max_upload_label' => $maxUploadBytes !== null ? $this->formatBytes($maxUploadBytes) : 'Default sistem',
+            'max_upload_bytes' => null,
+            'max_upload_label' => 'Tidak dibatasi',
             'used_bytes' => $usedBytes,
             'used_label' => $this->formatBytes($usedBytes),
             'remaining_bytes' => $remainingBytes,
@@ -1118,7 +1104,7 @@ class StorageManagementService
 
     private function saveObjectStorageSnapshot(array $snapshot): void
     {
-        if (! Schema::hasTable('storage_provider_snapshots')) {
+        if (! $this->providerSnapshotsReady()) {
             return;
         }
 
@@ -1842,7 +1828,17 @@ class StorageManagementService
             $capacityBytes = $this->configuredObjectStorageCapacityBytes();
             $column = 'neva_s3_quota_bytes';
         } elseif ($provider === self::PROVIDER_VPS) {
-            $capacity = $this->serverCapacity();
+            try {
+                $capacity = $this->serverCapacity();
+            } catch (\Throwable $e) {
+                Log::warning('storage_manager_capacity_check_failed', [
+                    'tenant_id' => $tenantId,
+                    'provider' => $provider,
+                    'error' => $this->shortError($e->getMessage()),
+                ]);
+
+                return;
+            }
             $capacityBytes = (int) ($capacity['total_bytes'] ?? 0);
             $column = $this->tableHasColumn('tenant_storage_quotas', 'vps_quota_bytes')
                 ? 'vps_quota_bytes'
@@ -1898,7 +1894,7 @@ class StorageManagementService
 
     private function latestProviderSnapshotTotals(string $provider): array
     {
-        if (! Schema::hasTable('storage_provider_snapshots')) {
+        if (! $this->providerSnapshotsReady()) {
             return [];
         }
 
@@ -1922,7 +1918,7 @@ class StorageManagementService
 
     private function latestProviderBucketSnapshots(string $provider): array
     {
-        if (! Schema::hasTable('storage_provider_snapshots')) {
+        if (! $this->providerSnapshotsReady()) {
             return [];
         }
 
@@ -2139,6 +2135,24 @@ class StorageManagementService
         return Schema::hasTable('storage_cleanup_jobs');
     }
 
+    private function providerSnapshotsReady(): bool
+    {
+        return Schema::hasTable('storage_provider_snapshots')
+            && Schema::hasColumn('storage_provider_snapshots', 'provider')
+            && Schema::hasColumn('storage_provider_snapshots', 'logical_bucket')
+            && Schema::hasColumn('storage_provider_snapshots', 'physical_bucket')
+            && Schema::hasColumn('storage_provider_snapshots', 'total_bytes')
+            && Schema::hasColumn('storage_provider_snapshots', 'total_files')
+            && Schema::hasColumn('storage_provider_snapshots', 'tracked_bytes')
+            && Schema::hasColumn('storage_provider_snapshots', 'tracked_files')
+            && Schema::hasColumn('storage_provider_snapshots', 'untracked_bytes')
+            && Schema::hasColumn('storage_provider_snapshots', 'untracked_files')
+            && Schema::hasColumn('storage_provider_snapshots', 'scanned_at')
+            && Schema::hasColumn('storage_provider_snapshots', 'metadata')
+            && Schema::hasColumn('storage_provider_snapshots', 'created_at')
+            && Schema::hasColumn('storage_provider_snapshots', 'updated_at');
+    }
+
     private function tableHasColumn(string $table, string $column): bool
     {
         return Schema::hasTable($table) && Schema::hasColumn($table, $column);
@@ -2170,6 +2184,50 @@ class StorageManagementService
         ];
     }
 
+    private function emptyServerCapacity(): array
+    {
+        return [
+            'total_bytes' => 0,
+            'total_label' => '0 B',
+            'used_bytes' => 0,
+            'used_label' => '0 B',
+            'free_bytes' => 0,
+            'free_label' => '0 B',
+            'allocated_quota_bytes' => 0,
+            'allocated_quota_label' => '0 B',
+            'remaining_after_allocated_bytes' => 0,
+            'remaining_after_allocated_label' => '0 B',
+            'disk_percent' => 0,
+        ];
+    }
+
+    private function emptyObjectStorageCapacity(): array
+    {
+        return [
+            ...$this->objectStorageStatus(),
+            'capacity_bytes' => null,
+            'capacity_label' => 'Belum diset',
+            'used_bytes' => 0,
+            'used_label' => '0 B',
+            'allocated_quota_bytes' => 0,
+            'allocated_quota_label' => '0 B',
+            'remaining_bytes' => null,
+            'remaining_label' => 'Belum diset',
+            'remaining_after_allocated_bytes' => null,
+            'remaining_after_allocated_label' => 'Belum diset',
+            'percent' => null,
+            'tracked_bytes' => 0,
+            'tracked_label' => '0 B',
+            'untracked_bytes' => 0,
+            'untracked_label' => '0 B',
+            'total_files' => null,
+            'tracked_files' => null,
+            'untracked_files' => 0,
+            'last_scanned_at' => null,
+            'bucket_snapshots' => [],
+        ];
+    }
+
     private function emptyQuota(string $tenantId): array
     {
         $usedBytes = $this->tenantUsedBytes($tenantId);
@@ -2178,7 +2236,7 @@ class StorageManagementService
             'quota_bytes' => null,
             'quota_label' => 'Tidak dibatasi',
             'max_upload_bytes' => null,
-            'max_upload_label' => 'Default sistem',
+            'max_upload_label' => 'Tidak dibatasi',
             'used_bytes' => $usedBytes,
             'used_label' => $this->formatBytes($usedBytes),
             'remaining_bytes' => null,
@@ -2208,7 +2266,7 @@ class StorageManagementService
             'quota_bytes' => null,
             'quota_label' => 'Tidak dibatasi',
             'max_upload_bytes' => null,
-            'max_upload_label' => 'Default sistem',
+            'max_upload_label' => 'Tidak dibatasi',
             'used_bytes' => $usedBytes,
             'used_label' => $this->formatBytes($usedBytes),
             'remaining_bytes' => null,

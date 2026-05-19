@@ -137,11 +137,8 @@ class StorageManagementController extends ApiController
 
         $validator = Validator::make($request->all(), [
             'quota_bytes' => ['nullable', 'integer', 'min:0'],
-            'max_upload_bytes' => ['nullable', 'integer', 'min:0'],
             'vps_quota_bytes' => ['nullable', 'integer', 'min:0'],
-            'vps_max_upload_bytes' => ['nullable', 'integer', 'min:0'],
             'neva_s3_quota_bytes' => ['nullable', 'integer', 'min:0'],
-            'neva_s3_max_upload_bytes' => ['nullable', 'integer', 'min:0'],
             'notes' => ['nullable', 'string', 'max:1000'],
         ]);
         if ($validator->fails()) {
