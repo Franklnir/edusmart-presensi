@@ -46,6 +46,8 @@ class WhatsAppNotificationService
         match ($table) {
             'absensi' => $this->handleAttendanceMutation($tenantId, $afterRows),
             'profiles' => $this->handleProfileMutation($tenantId, $action, $beforeRows, $afterRows),
+            'tugas_jawaban' => $this->handleAssignmentMutation($tenantId, $action, $beforeRows, $afterRows),
+            'quiz_submissions' => $this->handleQuizSubmissionMutation($tenantId, $action, $beforeRows, $afterRows),
             'absensi_eskul', 'ekskul_anggota' => $this->handleExtracurricularMutation($tenantId, $table, $action, $afterRows),
             default => null,
         };

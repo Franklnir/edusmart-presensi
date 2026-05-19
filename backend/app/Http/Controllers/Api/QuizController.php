@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Services\Quiz\QuizScoringService;
+use App\Services\WhatsApp\WhatsAppNotificationService;
 use App\Support\AcademicPeriod;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -16,7 +17,8 @@ class QuizController extends ApiController
     private const DEFAULT_QUIZ_TIMEZONE = 'Asia/Jakarta';
 
     public function __construct(
-        private readonly QuizScoringService $scoringService
+        private readonly QuizScoringService $scoringService,
+        private readonly WhatsAppNotificationService $whatsAppNotificationService
     ) {}
 
     public function dashboard(Request $request)
@@ -378,7 +380,7 @@ class QuizController extends ApiController
         }
 
         if ($submission && $submission->status === 'finished') {
-            $result = $this->scoringService->finalizeSubmission($tenantId, (string) $submission->id, $now, 'finished');
+            $result = $this->finalizeQuizSubmissionWithNotifications($tenantId, $submission, $now, 'finished');
 
             return response()->json([
                 'data' => [
@@ -398,7 +400,7 @@ class QuizController extends ApiController
         $availability = $this->quizAvailabilityForStudent($quiz, $now);
         if (! $availability['ok']) {
             if ($submission && in_array((string) ($availability['reason'] ?? ''), ['closed', 'ended'], true)) {
-                $result = $this->scoringService->finalizeSubmission($tenantId, (string) $submission->id, $now, 'finished');
+                $result = $this->finalizeQuizSubmissionWithNotifications($tenantId, $submission, $now, 'finished');
 
                 return response()->json([
                     'data' => [
@@ -463,7 +465,7 @@ class QuizController extends ApiController
             }
         }
 
-        $result = $this->scoringService->finalizeSubmission($tenantId, $submissionId, $now, 'finished');
+        $result = $this->finalizeQuizSubmissionWithNotifications($tenantId, $submission, $now, 'finished');
         if (! $result) {
             return response()->json(['error' => 'Gagal menyelesaikan quiz'], 500);
         }
@@ -1122,8 +1124,12 @@ class QuizController extends ApiController
             'poin' => $answer->poin !== null ? (int) $answer->poin : null,
         ];
         $oldSubmissionData = [
+            'id' => (string) $submission->id,
+            'quiz_id' => (string) $submission->quiz_id,
+            'siswa_id' => (string) $submission->siswa_id,
             'score' => $submission->score !== null ? (int) $submission->score : null,
             'total_points' => $submission->total_points !== null ? (int) $submission->total_points : null,
+            'status' => $submission->status ?? null,
             'essay_review_completed_at' => $submission->essay_review_completed_at ?? null,
             'essay_review_completed_by' => $submission->essay_review_completed_by ?? null,
         ];
@@ -1165,8 +1171,11 @@ class QuizController extends ApiController
             ->where('tenant_id', $tenantId)
             ->first([
                 'id',
+                'quiz_id',
+                'siswa_id',
                 'score',
                 'total_points',
+                'status',
                 'essay_review_completed_at',
                 'essay_review_completed_by',
             ]);
@@ -1197,6 +1206,13 @@ class QuizController extends ApiController
                 'essay_review_completed_by' => $submissionFresh?->essay_review_completed_by ?? null,
             ],
             $tenantId
+        );
+
+        $this->notifyQuizSubmissionMutation(
+            $tenantId,
+            'update',
+            [$oldSubmissionData],
+            $submissionFresh ? [(array) $submissionFresh] : []
         );
 
         return response()->json([
@@ -1302,6 +1318,12 @@ class QuizController extends ApiController
         }
 
         $oldSubmissionData = [
+            'id' => (string) $submission->id,
+            'quiz_id' => (string) $submission->quiz_id,
+            'siswa_id' => (string) $submission->siswa_id,
+            'score' => $submission->score !== null ? (int) $submission->score : null,
+            'total_points' => $submission->total_points !== null ? (int) $submission->total_points : null,
+            'status' => $submission->status ?? null,
             'essay_review_completed_at' => $submission->essay_review_completed_at ?? null,
             'essay_review_completed_by' => $submission->essay_review_completed_by ?? null,
         ];
@@ -1323,7 +1345,7 @@ class QuizController extends ApiController
         $submissionFresh = DB::table('quiz_submissions')
             ->where('id', $submission->id)
             ->where('tenant_id', $tenantId)
-            ->first(['id', 'quiz_id', 'siswa_id', 'essay_review_completed_at', 'essay_review_completed_by', 'score', 'total_points']);
+            ->first(['id', 'quiz_id', 'siswa_id', 'essay_review_completed_at', 'essay_review_completed_by', 'score', 'total_points', 'status']);
 
         $this->logAudit(
             $request,
@@ -1338,6 +1360,13 @@ class QuizController extends ApiController
                 'total_points' => $submissionFresh->total_points !== null ? (int) $submissionFresh->total_points : null,
             ],
             $tenantId
+        );
+
+        $this->notifyQuizSubmissionMutation(
+            $tenantId,
+            'update',
+            [$oldSubmissionData],
+            $submissionFresh ? [(array) $submissionFresh] : []
         );
 
         return response()->json([
@@ -1786,6 +1815,42 @@ class QuizController extends ApiController
         }
 
         return $query;
+    }
+
+    private function finalizeQuizSubmissionWithNotifications(string $tenantId, object $submission, Carbon $now, string $status): ?array
+    {
+        $beforeRows = [(array) $submission];
+        $result = $this->scoringService->finalizeSubmission($tenantId, (string) $submission->id, $now, $status);
+        if (! $result) {
+            return null;
+        }
+
+        $fresh = $this->quizTenantTable('quiz_submissions', $tenantId)
+            ->where('id', (string) ($result['submission_id'] ?? $submission->id))
+            ->first();
+
+        $this->notifyQuizSubmissionMutation($tenantId, 'update', $beforeRows, $fresh ? [(array) $fresh] : []);
+
+        return $result;
+    }
+
+    private function notifyQuizSubmissionMutation(string $tenantId, string $action, array $beforeRows, array $afterRows): void
+    {
+        if ($tenantId === '') {
+            return;
+        }
+
+        try {
+            $this->whatsAppNotificationService->handleTableMutation(
+                $tenantId,
+                'quiz_submissions',
+                $action,
+                $beforeRows,
+                $afterRows
+            );
+        } catch (\Throwable) {
+            // Notifikasi WhatsApp tidak boleh mengganggu proses submit atau penilaian quiz.
+        }
     }
 
     private function selectExistingQuizColumns(string $table, array $columns): array

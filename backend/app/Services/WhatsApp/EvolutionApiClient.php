@@ -27,7 +27,7 @@ class EvolutionApiClient
     public function fetchAllInstances(): array
     {
         $response = $this->send('GET', '/instance/fetchInstances');
-        $items = is_array($response) ? $response : [];
+        $items = $this->extractInstanceItems($response);
 
         return array_values(array_filter(array_map(
             fn ($item) => $this->normalizeInstanceRecord($item),
@@ -52,8 +52,7 @@ class EvolutionApiClient
             throw new RuntimeException($this->buildErrorMessage($response));
         }
 
-        $items = $response->json();
-        $items = is_array($items) ? $items : [];
+        $items = $this->extractInstanceItems($response->json());
         foreach ($items as $item) {
             $record = $this->normalizeInstanceRecord($item);
             if (! empty($record['instanceName']) && $record['instanceName'] === $instanceName) {
@@ -153,6 +152,54 @@ class EvolutionApiClient
         }
 
         return [];
+    }
+
+    private function extractInstanceItems($payload): array
+    {
+        if (! is_array($payload)) {
+            return [];
+        }
+
+        if ($this->looksLikeInstanceRecord($payload)) {
+            return [$payload];
+        }
+
+        if (array_is_list($payload)) {
+            return $payload;
+        }
+
+        foreach (['instances', 'data', 'response', 'result'] as $key) {
+            $value = $payload[$key] ?? null;
+            if (! is_array($value)) {
+                continue;
+            }
+
+            if ($this->looksLikeInstanceRecord($value)) {
+                return [$value];
+            }
+
+            if (array_is_list($value)) {
+                return $value;
+            }
+
+            $nested = $this->extractInstanceItems($value);
+            if (! empty($nested)) {
+                return $nested;
+            }
+        }
+
+        return [];
+    }
+
+    private function looksLikeInstanceRecord(array $item): bool
+    {
+        if (isset($item['instance']) && is_array($item['instance'])) {
+            return true;
+        }
+
+        return isset($item['instanceName'])
+            || isset($item['name'])
+            || isset($item['connectionStatus']);
     }
 
     private function buildErrorMessage(Response $response): string

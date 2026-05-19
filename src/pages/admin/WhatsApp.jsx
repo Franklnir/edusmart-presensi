@@ -42,6 +42,16 @@ const CATEGORY_OPTIONS = [
     description: 'Kirim ringkasan perubahan identitas atau data penting siswa.'
   },
   {
+    key: 'send_assignment_updates',
+    title: 'Tugas Dikumpulkan',
+    description: 'Kirim notifikasi saat siswa mengumpulkan tugas atau memperbarui jawaban.'
+  },
+  {
+    key: 'send_grade_updates',
+    title: 'Nilai Tugas & Quiz',
+    description: 'Kirim pemberitahuan saat nilai tugas atau quiz sudah diperbarui.'
+  },
+  {
     key: 'send_extracurricular_updates',
     title: 'Ekstrakurikuler',
     description: 'Kirim update keikutsertaan atau absensi kegiatan ekskul.'
@@ -61,6 +71,8 @@ const categoryLabel = (value = '') => {
   if (normalized === 'attendance_problem') return 'Peringatan Presensi'
   if (normalized === 'attendance') return 'Absensi'
   if (normalized === 'profile_update') return 'Perubahan Data'
+  if (normalized === 'assignment') return 'Tugas'
+  if (normalized === 'grade') return 'Nilai'
   if (normalized === 'extracurricular') return 'Ekstrakurikuler'
   if (normalized === 'test') return 'Tes'
   return value || 'Log'
@@ -102,7 +114,9 @@ export default function WhatsApp() {
     is_enabled: true,
     send_attendance: true,
     send_profile_updates: true,
+    send_assignment_updates: false,
     send_extracurricular_updates: false,
+    send_grade_updates: false,
     recipient_mode: 'wali'
   })
   const [testForm, setTestForm] = useState({ number: '', message: '' })
@@ -124,10 +138,11 @@ export default function WhatsApp() {
     : (integration?.qr_code || integration?.pairing_code || currentStatus === 'awaiting_qr')
       ? 'Refresh QR'
       : 'Generate QR'
+  const configuredEvolutionUrl = String(payload.provider?.public_url || '').trim().replace(/\/+$/, '')
   const evolutionManagerHost = getEvolutionManagerHost()
   const evolutionPublicUrl = integration?.instance_name
-    ? `https://${evolutionManagerHost}/manager/instance/${integration.instance_name}`
-    : `https://${evolutionManagerHost}`
+    ? `${configuredEvolutionUrl || `https://${evolutionManagerHost}`}/manager/instance/${integration.instance_name}`
+    : (configuredEvolutionUrl || `https://${evolutionManagerHost}`)
 
   const applyPayload = useCallback((nextData) => {
     const nextPayload = nextData || {
@@ -145,7 +160,9 @@ export default function WhatsApp() {
         is_enabled: Boolean(nextSettings.is_enabled),
         send_attendance: Boolean(nextSettings.send_attendance),
         send_profile_updates: Boolean(nextSettings.send_profile_updates),
+        send_assignment_updates: Boolean(nextSettings.send_assignment_updates),
         send_extracurricular_updates: Boolean(nextSettings.send_extracurricular_updates),
+        send_grade_updates: Boolean(nextSettings.send_grade_updates),
         recipient_mode: nextSettings.recipient_mode || 'wali'
       })
     }
@@ -213,18 +230,25 @@ export default function WhatsApp() {
 
     let cancelled = false
     const poll = async () => {
+      if (document.hidden) return
       const { data, error } = await supabase.admin.syncWhatsApp()
       if (cancelled || error) return
       applyPayload(data)
     }
 
-    const intervalMs = currentStatus === 'awaiting_qr' ? 30000 : 15000
+    const warmupTimer = currentStatus === 'awaiting_qr'
+      ? setTimeout(() => {
+          poll()
+        }, 5000)
+      : null
+    const intervalMs = currentStatus === 'awaiting_qr' ? 10000 : 30000
     const timer = setInterval(() => {
       poll()
     }, intervalMs)
 
     return () => {
       cancelled = true
+      if (warmupTimer) clearTimeout(warmupTimer)
       clearInterval(timer)
     }
   }, [applyPayload, currentStatus, providerConfigured])
@@ -314,11 +338,7 @@ export default function WhatsApp() {
 
   const handleSaveSettings = async () => {
     setSaving(true)
-    const { data, error } = await supabase.admin.updateWhatsAppSettings({
-      ...settingsForm,
-      send_assignment_updates: false,
-      send_grade_updates: false
-    })
+    const { data, error } = await supabase.admin.updateWhatsAppSettings(settingsForm)
     setSaving(false)
 
     if (error) {
@@ -334,6 +354,11 @@ export default function WhatsApp() {
     event.preventDefault()
     if (!testForm.number.trim()) {
       pushToast('error', 'Nomor tujuan tes wajib diisi')
+      return
+    }
+
+    if (!providerConfigured || currentStatus !== 'connected') {
+      pushToast('warning', 'Hubungkan WhatsApp sampai status Terhubung sebelum kirim pesan tes.')
       return
     }
 
@@ -629,12 +654,18 @@ export default function WhatsApp() {
 
                   <button
                     type="submit"
-                    disabled={sendingTest}
+                    disabled={sendingTest || !providerConfigured || currentStatus !== 'connected'}
                     className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {sendingTest ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                     Kirim Tes
                   </button>
+
+                  {currentStatus !== 'connected' && (
+                    <p className="text-xs text-slate-500">
+                      Pesan tes aktif setelah QR berhasil dipindai dan status berubah menjadi Terhubung.
+                    </p>
+                  )}
                 </form>
               </section>
 

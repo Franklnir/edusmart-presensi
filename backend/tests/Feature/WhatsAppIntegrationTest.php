@@ -373,6 +373,90 @@ class WhatsAppIntegrationTest extends TestCase
         $response->assertJsonPath('data.integration.connected_name', 'Tenant Demo');
     }
 
+    public function test_sync_accepts_nested_evolution_instance_response_shape(): void
+    {
+        config()->set('services.evolution_api.base_url', 'https://evolution.test');
+        config()->set('services.evolution_api.api_key', 'secret-key');
+
+        $tenantId = $this->defaultTenantId();
+        $user = $this->createUserWithProfile($tenantId, 'admin', 'admin-sync-nested@example.com');
+
+        DB::table('whatsapp_integrations')->insert([
+            'id' => (string) Str::uuid(),
+            'tenant_id' => $tenantId,
+            'provider' => 'evolution',
+            'instance_name' => 'edusmart-default',
+            'status' => 'disconnected',
+            'connection_state' => 'close',
+            'webhook_secret' => 'secret-webhook-token-sync-nested',
+            'is_enabled' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        Http::fake([
+            'https://evolution.test/instance/fetchInstances*' => Http::response([
+                'data' => [
+                    [
+                        'instance' => [
+                            'instanceName' => 'edusmart-default',
+                            'connectionStatus' => 'open',
+                            'ownerJid' => '6281234567891@s.whatsapp.net',
+                            'profileName' => 'Tenant Nested',
+                        ],
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $response = $this->postJson('/api/admin/whatsapp/sync');
+
+        $response->assertOk();
+        $response->assertJsonPath('data.integration.status', 'connected');
+        $response->assertJsonPath('data.integration.connected_phone', '6281234567891');
+        $response->assertJsonPath('data.integration.connected_name', 'Tenant Nested');
+    }
+
+    public function test_webhook_accepts_dotted_event_payload_names(): void
+    {
+        $tenantId = $this->defaultTenantId();
+
+        DB::table('whatsapp_integrations')->insert([
+            'id' => (string) Str::uuid(),
+            'tenant_id' => $tenantId,
+            'provider' => 'evolution',
+            'instance_name' => 'edusmart-default',
+            'status' => 'awaiting_qr',
+            'connection_state' => 'connecting',
+            'webhook_secret' => 'secret-webhook-token-dot-event',
+            'is_enabled' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $response = $this->postJson('/api/whatsapp/webhook/secret-webhook-token-dot-event', [
+            'event' => 'connection.update',
+            'data' => [
+                'name' => 'edusmart-default',
+                'connectionStatus' => 'open',
+                'number' => '6281234567892',
+                'profileName' => 'Tenant Dot Event',
+            ],
+        ]);
+
+        $response->assertOk();
+
+        $this->assertDatabaseHas('whatsapp_integrations', [
+            'tenant_id' => $tenantId,
+            'status' => 'connected',
+            'connection_state' => 'open',
+            'connected_phone' => '6281234567892',
+            'connected_name' => 'Tenant Dot Event',
+        ]);
+    }
+
     public function test_webhook_accepts_evolution_v211_connection_payload_shape(): void
     {
         $tenantId = $this->defaultTenantId();

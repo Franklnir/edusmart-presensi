@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Jobs\SendWhatsAppMessageJob;
+use App\Services\WhatsApp\WhatsAppIntegrationService;
 use App\Services\WhatsApp\WhatsAppNotificationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -195,6 +196,97 @@ class WhatsAppAttendanceProblemNotificationTest extends TestCase
         Queue::assertPushed(SendWhatsAppMessageJob::class, 1);
     }
 
+    public function test_whatsapp_assignment_notification_can_be_enabled(): void
+    {
+        Queue::fake();
+
+        $tenant = $this->createTenant('sma-tugas');
+        $student = $this->createStudent($tenant->id, 'Siswa Tugas', 'XI-D', '081234567894');
+        $this->enableNotificationFlags($tenant->id, [
+            'send_assignment_updates' => true,
+        ]);
+
+        DB::table('tugas')->insert([
+            'id' => 1001,
+            'tenant_id' => $tenant->id,
+            'kelas' => 'XI-D',
+            'judul' => 'Laporan Praktikum',
+            'mapel' => 'Biologi',
+            'deadline' => '2026-05-21T10:00:00+07:00',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        app(WhatsAppNotificationService::class)->handleTableMutation($tenant->id, 'tugas_jawaban', 'insert', [], [[
+            'id' => 2001,
+            'tenant_id' => $tenant->id,
+            'tugas_id' => 1001,
+            'user_id' => $student->id,
+            'file_url' => 'https://example.test/laporan.pdf',
+            'status' => 'terkirim',
+            'waktu_submit' => '2026-05-20T09:30:00+07:00',
+        ]]);
+
+        $this->assertDatabaseHas('whatsapp_message_logs', [
+            'tenant_id' => $tenant->id,
+            'category' => 'assignment',
+            'source_table' => 'tugas_jawaban',
+            'normalized_phone' => '6281234567894',
+            'status' => 'queued',
+        ]);
+
+        $log = DB::table('whatsapp_message_logs')->where('tenant_id', $tenant->id)->first();
+        $this->assertStringContainsString('Laporan Praktikum', $log->message_text);
+        $this->assertStringContainsString('Biologi', $log->message_text);
+        Queue::assertPushed(SendWhatsAppMessageJob::class, 1);
+    }
+
+    public function test_whatsapp_quiz_grade_notification_can_be_enabled(): void
+    {
+        Queue::fake();
+
+        $tenant = $this->createTenant('sma-quiz-wa');
+        $student = $this->createStudent($tenant->id, 'Siswa Quiz', 'XI-E', '081234567895');
+        $this->enableNotificationFlags($tenant->id, [
+            'send_grade_updates' => true,
+        ]);
+
+        DB::table('quizzes')->insert([
+            'id' => 'quiz-wa-1',
+            'tenant_id' => $tenant->id,
+            'guru_id' => $student->id,
+            'kelas_id' => 'XI-E',
+            'mapel' => 'Matematika',
+            'nama' => 'Quiz Persamaan Linear',
+            'deadline_at' => '2026-05-21T10:00:00+07:00',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        app(WhatsAppNotificationService::class)->handleTableMutation($tenant->id, 'quiz_submissions', 'insert', [], [[
+            'id' => 'submission-wa-1',
+            'tenant_id' => $tenant->id,
+            'quiz_id' => 'quiz-wa-1',
+            'siswa_id' => $student->id,
+            'score' => 88,
+            'status' => 'finished',
+            'updated_at' => '2026-05-20T11:00:00+07:00',
+        ]]);
+
+        $this->assertDatabaseHas('whatsapp_message_logs', [
+            'tenant_id' => $tenant->id,
+            'category' => 'grade',
+            'source_table' => 'quiz_submissions',
+            'normalized_phone' => '6281234567895',
+            'status' => 'queued',
+        ]);
+
+        $log = DB::table('whatsapp_message_logs')->where('tenant_id', $tenant->id)->first();
+        $this->assertStringContainsString('Quiz Persamaan Linear', $log->message_text);
+        $this->assertStringContainsString('Nilai: 88', $log->message_text);
+        Queue::assertPushed(SendWhatsAppMessageJob::class, 1);
+    }
+
     private function createTenant(string $slug): object
     {
         $id = (string) Str::uuid();
@@ -245,5 +337,18 @@ class WhatsAppAttendanceProblemNotificationTest extends TestCase
             'nama' => $name,
             'kelas' => $class,
         ];
+    }
+
+    private function enableNotificationFlags(string $tenantId, array $flags): void
+    {
+        $integrationService = app(WhatsAppIntegrationService::class);
+        $integration = $integrationService->getOrCreateIntegration($tenantId);
+        $settings = $integrationService->getOrCreateNotificationSettings($tenantId, $integration);
+
+        $settings->fill(array_merge([
+            'is_enabled' => true,
+            'recipient_mode' => 'wali',
+        ], $flags));
+        $settings->save();
     }
 }

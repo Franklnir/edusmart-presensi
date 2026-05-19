@@ -55,7 +55,7 @@ class WhatsAppIntegrationService
     ): WhatsAppNotificationSetting {
         $integration = $integration ?: $this->getOrCreateIntegration($tenantId);
 
-        return WhatsAppNotificationSetting::query()->firstOrCreate(
+        $settings = WhatsAppNotificationSetting::query()->firstOrCreate(
             ['tenant_id' => $tenantId],
             [
                 'id' => (string) Str::uuid(),
@@ -69,6 +69,13 @@ class WhatsAppIntegrationService
                 'recipient_mode' => 'wali',
             ]
         );
+
+        if ($settings->integration_id !== $integration->id) {
+            $settings->integration_id = $integration->id;
+            $settings->save();
+        }
+
+        return $settings;
     }
 
     public function overview(string $tenantId): array
@@ -90,6 +97,7 @@ class WhatsAppIntegrationService
             'provider' => [
                 'configured' => $this->providerConfigured(),
                 'name' => 'Evolution API',
+                'public_url' => trim((string) config('services.evolution_api.public_url', '')) ?: null,
             ],
             'school' => $school,
         ];
@@ -105,9 +113,9 @@ class WhatsAppIntegrationService
             'is_enabled' => (bool) ($payload['is_enabled'] ?? $settings->is_enabled),
             'send_attendance' => (bool) ($payload['send_attendance'] ?? $settings->send_attendance),
             'send_profile_updates' => (bool) ($payload['send_profile_updates'] ?? $settings->send_profile_updates),
-            'send_assignment_updates' => false,
+            'send_assignment_updates' => (bool) ($payload['send_assignment_updates'] ?? $settings->send_assignment_updates),
             'send_extracurricular_updates' => (bool) ($payload['send_extracurricular_updates'] ?? $settings->send_extracurricular_updates),
-            'send_grade_updates' => false,
+            'send_grade_updates' => (bool) ($payload['send_grade_updates'] ?? $settings->send_grade_updates),
             'recipient_mode' => $this->normalizeRecipientMode($payload['recipient_mode'] ?? $settings->recipient_mode),
         ]);
         $settings->save();
@@ -709,15 +717,20 @@ class WhatsAppIntegrationService
     private function resolveEventName(?string $eventSlug, array $payload): string
     {
         if ($eventSlug && trim($eventSlug) !== '') {
-            return Str::upper(str_replace('-', '_', trim($eventSlug)));
+            return $this->normalizeEventName(trim($eventSlug));
         }
 
         $event = $this->extractFirstString($payload, ['event', 'type', 'data.event']);
         if ($event !== '') {
-            return Str::upper(str_replace('-', '_', $event));
+            return $this->normalizeEventName($event);
         }
 
         return 'UNKNOWN';
+    }
+
+    private function normalizeEventName(string $event): string
+    {
+        return Str::upper(str_replace(['-', '.', ' '], '_', trim($event)));
     }
 
     private function extractQrCode(array $payload): string
