@@ -6,6 +6,8 @@ use Illuminate\Support\Carbon;
 
 class WhatsAppMessageBuilder
 {
+    private const SCHOOL_TIMEZONE = 'Asia/Jakarta';
+
     public function buildAttendanceMessage(array $school, array $student, array $attendance): string
     {
         $schoolName = $this->schoolName($school);
@@ -144,7 +146,9 @@ class WhatsAppMessageBuilder
         }
 
         try {
-            return Carbon::parse($value)->format('d-m-Y');
+            return Carbon::parse($value, self::SCHOOL_TIMEZONE)
+                ->setTimezone(self::SCHOOL_TIMEZONE)
+                ->format('d-m-Y');
         } catch (\Throwable $e) {
             return (string) $value;
         }
@@ -157,7 +161,9 @@ class WhatsAppMessageBuilder
         }
 
         try {
-            return Carbon::parse($value)->timezone('Asia/Jakarta')->format($format);
+            return Carbon::parse($value, self::SCHOOL_TIMEZONE)
+                ->setTimezone(self::SCHOOL_TIMEZONE)
+                ->format($format);
         } catch (\Throwable $e) {
             return (string) $value;
         }

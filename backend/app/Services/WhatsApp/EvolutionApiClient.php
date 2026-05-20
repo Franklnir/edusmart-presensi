@@ -2,6 +2,7 @@
 
 namespace App\Services\WhatsApp;
 
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Arr;
@@ -12,7 +13,7 @@ class EvolutionApiClient
 {
     public function isConfigured(): bool
     {
-        return $this->baseUrl() !== '' && $this->apiKey() !== '';
+        return ! empty($this->baseUrls()) && $this->apiKey() !== '';
     }
 
     public function assertConfigured(): void
@@ -42,14 +43,31 @@ class EvolutionApiClient
             return null;
         }
 
-        $response = $this->request()->get('/instance/fetchInstances', [
-            'instanceName' => $instanceName,
-        ]);
-        if ($response->status() === 404) {
-            return null;
+        $response = null;
+        $lastConnectionException = null;
+        foreach ($this->baseUrls() as $baseUrl) {
+            try {
+                $response = $this->request($baseUrl)->get('/instance/fetchInstances', [
+                    'instanceName' => $instanceName,
+                ]);
+            } catch (ConnectionException $e) {
+                $lastConnectionException = $e;
+
+                continue;
+            }
+
+            if ($response->status() === 404) {
+                return null;
+            }
+            if (! $response->successful()) {
+                throw new RuntimeException($this->buildErrorMessage($response));
+            }
+
+            break;
         }
-        if (! $response->successful()) {
-            throw new RuntimeException($this->buildErrorMessage($response));
+
+        if (! $response instanceof Response) {
+            throw new RuntimeException($this->buildConnectionErrorMessage($lastConnectionException));
         }
 
         $items = $this->extractInstanceItems($response->json());
@@ -114,9 +132,11 @@ class EvolutionApiClient
         ]);
     }
 
-    private function request(): PendingRequest
+    private function request(?string $baseUrl = null): PendingRequest
     {
-        return Http::baseUrl($this->baseUrl())
+        $url = $baseUrl ?: ($this->baseUrls()[0] ?? '');
+
+        return Http::baseUrl($url)
             ->acceptJson()
             ->asJson()
             ->timeout((int) config('services.evolution_api.timeout', 20))
@@ -141,17 +161,29 @@ class EvolutionApiClient
             $options['json'] = $payload;
         }
 
-        $response = $this->request()->send($method, $uri, $options);
-        if (! $response->successful()) {
-            throw new RuntimeException($this->buildErrorMessage($response));
+        $lastConnectionException = null;
+        foreach ($this->baseUrls() as $baseUrl) {
+            try {
+                $response = $this->request($baseUrl)->send($method, $uri, $options);
+            } catch (ConnectionException $e) {
+                $lastConnectionException = $e;
+
+                continue;
+            }
+
+            if (! $response->successful()) {
+                throw new RuntimeException($this->buildErrorMessage($response));
+            }
+
+            $decoded = $response->json();
+            if (is_array($decoded)) {
+                return $decoded;
+            }
+
+            return [];
         }
 
-        $decoded = $response->json();
-        if (is_array($decoded)) {
-            return $decoded;
-        }
-
-        return [];
+        throw new RuntimeException($this->buildConnectionErrorMessage($lastConnectionException));
     }
 
     private function extractInstanceItems($payload): array
@@ -216,6 +248,19 @@ class EvolutionApiClient
         return 'Evolution API error HTTP '.$response->status();
     }
 
+    private function buildConnectionErrorMessage(?ConnectionException $exception): string
+    {
+        $detail = trim((string) ($exception?->getMessage() ?? ''));
+        if ($detail !== '') {
+            $host = $this->failedHostFromMessage($detail);
+            if ($host !== '') {
+                return "Evolution API tidak bisa dijangkau dari backend. Host {$host} tidak merespons atau tidak bisa di-resolve. Pastikan service Evolution aktif dan EVOLUTION_PUBLIC_URL/EVOLUTION_API_BASE_URL benar.";
+            }
+        }
+
+        return 'Evolution API tidak bisa dijangkau dari backend. Pastikan service Evolution aktif dan konfigurasi host Evolution benar.';
+    }
+
     private function normalizeInstanceRecord($item): array
     {
         if (! is_array($item)) {
@@ -248,9 +293,31 @@ class EvolutionApiClient
         return $record;
     }
 
-    private function baseUrl(): string
+    private function baseUrls(): array
     {
-        return rtrim((string) config('services.evolution_api.base_url', ''), '/');
+        $urls = [
+            config('services.evolution_api.base_url', ''),
+            config('services.evolution_api.public_url', ''),
+        ];
+
+        $normalized = [];
+        foreach ($urls as $url) {
+            $url = rtrim(trim((string) $url), '/');
+            if ($url !== '') {
+                $normalized[$url] = $url;
+            }
+        }
+
+        return array_values($normalized);
+    }
+
+    private function failedHostFromMessage(string $message): string
+    {
+        if (preg_match('/Could not resolve host:\s*([^)\s]+)/i', $message, $matches)) {
+            return trim($matches[1]);
+        }
+
+        return '';
     }
 
     private function apiKey(): string

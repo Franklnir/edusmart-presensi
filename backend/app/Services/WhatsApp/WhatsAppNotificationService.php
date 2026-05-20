@@ -11,6 +11,8 @@ use Illuminate\Support\Str;
 
 class WhatsAppNotificationService
 {
+    private const SCHOOL_TIMEZONE = 'Asia/Jakarta';
+
     private const PROFILE_FIELDS = [
         'nama' => 'Nama',
         'nis' => 'NIS',
@@ -206,10 +208,36 @@ class WhatsAppNotificationService
             'tanggal' => $date,
             'status' => $attendance['status'] ?? null,
             'mapel' => $attendance['mapel'] ?? null,
-            'detected_at' => $attendance['waktu'] ?? Carbon::parse($date)->endOfDay()->toIso8601String(),
+            'detected_at' => $this->attendanceDetectedAt($attendance, $date),
             'scan_masuk_at' => $scans['masuk_at'] ?? null,
             'scan_pulang_at' => $scans['pulang_at'] ?? null,
         ];
+    }
+
+    private function attendanceDetectedAt(array $attendance, string $date): string
+    {
+        foreach (['waktu', 'updated_at', 'created_at'] as $key) {
+            $value = $attendance[$key] ?? null;
+            if (! $value) {
+                continue;
+            }
+
+            try {
+                return Carbon::parse($value, self::SCHOOL_TIMEZONE)
+                    ->setTimezone(self::SCHOOL_TIMEZONE)
+                    ->toIso8601String();
+            } catch (\Throwable $e) {
+                // Try the next available timestamp below.
+            }
+        }
+
+        try {
+            return Carbon::parse($date, self::SCHOOL_TIMEZONE)
+                ->endOfDay()
+                ->toIso8601String();
+        } catch (\Throwable $e) {
+            return Carbon::now(self::SCHOOL_TIMEZONE)->toIso8601String();
+        }
     }
 
     private function scanSummaryForAttendance(string $tenantId, string $studentId, string $date): array
