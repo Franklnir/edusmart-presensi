@@ -14,6 +14,7 @@ RUN_EXTERNAL_SMOKE_CHECK="false"
 APP_SERVICES=(backend worker scheduler rfid_bridge nginx caddy)
 IMAGE_SERVICES=(backend nginx)
 CORE_HEALTH_SERVICES=(postgres redis backend worker scheduler nginx caddy)
+OPTIONAL_APP_SERVICES=()
 OPTIONAL_HEALTH_SERVICES=()
 COMPOSE_FILES=()
 PREV_FULL_REF=""
@@ -153,11 +154,11 @@ configure_optional_evolution_services() {
     return 0
   fi
 
-  append_unique IMAGE_SERVICES evolution_api
-  append_unique APP_SERVICES evolution_postgres evolution_redis evolution_api
-  append_unique CORE_HEALTH_SERVICES evolution_postgres evolution_redis
-  remove_items CORE_HEALTH_SERVICES evolution_api
-  append_unique OPTIONAL_HEALTH_SERVICES evolution_api
+  remove_items IMAGE_SERVICES evolution_api evolution_postgres evolution_redis
+  remove_items APP_SERVICES evolution_postgres evolution_redis evolution_api
+  remove_items CORE_HEALTH_SERVICES evolution_postgres evolution_redis evolution_api
+  append_unique OPTIONAL_APP_SERVICES evolution_postgres evolution_redis evolution_api
+  append_unique OPTIONAL_HEALTH_SERVICES evolution_postgres evolution_redis evolution_api
   echo "[info] Evolution API aktif: service evolution_postgres/evolution_redis/evolution_api akan ikut dideploy."
 }
 
@@ -334,6 +335,22 @@ run_optional_health_checks() {
     compose ps "$service" >&2 || true
     compose logs --tail="${DEPLOY_OPTIONAL_LOG_TAIL:-80}" "$service" >&2 || true
   done
+}
+
+start_optional_services() {
+  if [[ "${#OPTIONAL_APP_SERVICES[@]}" -eq 0 ]]; then
+    return 0
+  fi
+
+  echo "      - deploy service opsional"
+  if compose up -d --no-build "${OPTIONAL_APP_SERVICES[@]}"; then
+    return 0
+  fi
+
+  echo "[warn] service opsional gagal start. Aplikasi utama tetap lanjut." >&2
+  echo "[warn] Cek konfigurasi/image service opsional berikut: ${OPTIONAL_APP_SERVICES[*]}" >&2
+  compose ps "${OPTIONAL_APP_SERVICES[@]}" >&2 || true
+  compose logs --tail="${DEPLOY_OPTIONAL_LOG_TAIL:-80}" "${OPTIONAL_APP_SERVICES[@]}" >&2 || true
 }
 
 run_internal_health_checks() {
@@ -598,6 +615,7 @@ DEPLOY_PHASE="restart_services"
 echo "[5/9] Deploy service tanpa build lokal..."
 compose up -d --no-build \
   "${APP_SERVICES[@]}"
+start_optional_services
 
 DEPLOY_PHASE="migrate"
 echo "[6/9] Jalankan migrasi..."
