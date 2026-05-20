@@ -8,6 +8,7 @@ use App\Services\Rfid\RfidDeviceService;
 use App\Services\Rfid\TenantMqttConfigService;
 use App\Services\Storage\StorageManagementService;
 use App\Services\WhatsApp\WhatsAppIntegrationService;
+use App\Services\WhatsApp\WhatsAppNotificationService;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
@@ -252,6 +253,26 @@ Schedule::call(function (WhatsAppIntegrationService $integrationService) {
     ->name('whatsapp:sync-integrations')
     ->everyMinute()
     ->withoutOverlapping();
+
+Schedule::call(function (WhatsAppNotificationService $notificationService) {
+    $notificationService->queueClosedAssignmentWarnings();
+})
+    ->name('whatsapp:assignment-missing-warnings')
+    ->everyMinute()
+    ->withoutOverlapping();
+
+Artisan::command('whatsapp:assignment-missing-warnings {--tenant= : Batasi tenant tertentu}', function (WhatsAppNotificationService $notificationService) {
+    $summary = $notificationService->queueClosedAssignmentWarnings($this->option('tenant') ?: null);
+
+    $this->info('Cek peringatan tugas tertutup selesai.');
+    $this->line('Tenant          : '.($summary['tenants'] ?? 0));
+    $this->line('Tugas dicek     : '.($summary['tasks_checked'] ?? 0));
+    $this->line('Siswa dicek     : '.($summary['students_checked'] ?? 0));
+    $this->line('Antrean baru    : '.($summary['queued'] ?? 0));
+    $this->line('Dilewati/dedupe : '.($summary['skipped'] ?? 0));
+
+    return 0;
+})->purpose('Kirim peringatan WhatsApp untuk siswa yang belum mengerjakan tugas saat deadline lewat');
 
 Schedule::call(function (StorageManagementService $storageManagementService) {
     $storageManagementService->purgeExpiredTrash();

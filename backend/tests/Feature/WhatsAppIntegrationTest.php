@@ -3,10 +3,13 @@
 namespace Tests\Feature;
 
 use App\Models\User;
+use App\Services\WhatsApp\WhatsAppIntegrationService;
+use App\Services\WhatsApp\WhatsAppNotificationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -632,6 +635,147 @@ class WhatsAppIntegrationTest extends TestCase
         ]);
     }
 
+    public function test_overview_uses_current_platform_domain_for_evolution_public_url(): void
+    {
+        config()->set('app.url', 'https://sismu.biz.id');
+        config()->set('tenancy.public_scheme', 'https');
+        config()->set('services.evolution_api.public_url', 'https://wa.xiaozhiscig.biz.id');
+
+        $tenantId = $this->defaultTenantId();
+        $service = app(WhatsAppIntegrationService::class);
+
+        $overview = $service->overview($tenantId, 'sman3bogor.sismu.biz.id');
+
+        $this->assertSame('https://wa.sismu.biz.id', $overview['provider']['public_url']);
+    }
+
+    public function test_generate_qr_returns_clear_gateway_error_without_server_error(): void
+    {
+        config()->set('services.evolution_api.base_url', 'https://evolution.test');
+        config()->set('services.evolution_api.api_key', 'secret-key');
+        config()->set('services.evolution_api.webhook_base_url', 'https://edusmart.example.com');
+
+        $tenantId = $this->defaultTenantId();
+        $user = $this->createUserWithProfile($tenantId, 'admin', 'admin-provider-failure@example.com');
+
+        Http::fake([
+            'https://evolution.test/instance/fetchInstances*' => Http::response([
+                'message' => 'Evolution API error HTTP 502',
+            ], 502),
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $response = $this->postJson('/api/admin/whatsapp/connect');
+
+        $response->assertOk();
+        $response->assertJsonPath('data.integration.status', 'disconnected');
+        $response->assertJsonPath('data.integration.last_error', 'Evolution API error HTTP 502');
+    }
+
+    public function test_assignment_submission_mutation_does_not_send_whatsapp_anymore(): void
+    {
+        Queue::fake();
+
+        $tenantId = $this->defaultTenantId();
+        $student = $this->createUserWithProfile($tenantId, 'siswa', 'student-submit@example.com', [
+            'kelas' => 'x-a-mipa',
+            'no_hp_wali' => '081234567890',
+        ]);
+        $this->createConnectedWhatsApp($tenantId, [
+            'send_assignment_updates' => true,
+        ]);
+
+        $taskId = 9101;
+        DB::table('tugas')->insert([
+            'id' => $taskId,
+            'tenant_id' => $tenantId,
+            'kelas' => 'x-a-mipa',
+            'judul' => 'Latihan submit',
+            'mapel' => 'BIOLOGI',
+            'deadline' => now()->addHour(),
+            'created_by' => null,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        app(WhatsAppNotificationService::class)->handleTableMutation($tenantId, 'tugas_jawaban', 'insert', [], [[
+            'id' => 9901,
+            'tenant_id' => $tenantId,
+            'tugas_id' => $taskId,
+            'user_id' => $student->id,
+            'status' => 'menunggu',
+            'waktu_submit' => now(),
+        ]]);
+
+        $this->assertDatabaseCount('whatsapp_message_logs', 0);
+    }
+
+    public function test_closed_assignment_warning_queues_only_missing_students_once(): void
+    {
+        Queue::fake();
+
+        config()->set('services.evolution_api.base_url', 'https://evolution.test');
+        config()->set('services.evolution_api.api_key', 'secret-key');
+        config()->set('services.whatsapp.assignment_missing_lookback_minutes', 180);
+
+        $tenantId = $this->defaultTenantId();
+        $missing = $this->createUserWithProfile($tenantId, 'siswa', 'student-missing@example.com', [
+            'nama' => 'Siswa Belum',
+            'kelas' => 'x-a-mipa',
+            'no_hp_wali' => '081234567890',
+        ]);
+        $submitted = $this->createUserWithProfile($tenantId, 'siswa', 'student-done@example.com', [
+            'nama' => 'Siswa Selesai',
+            'kelas' => 'x-a-mipa',
+            'no_hp_wali' => '081111111111',
+        ]);
+        $this->createConnectedWhatsApp($tenantId, [
+            'send_assignment_updates' => true,
+        ]);
+
+        $taskId = 9102;
+        DB::table('tugas')->insert([
+            'id' => $taskId,
+            'tenant_id' => $tenantId,
+            'kelas' => 'x-a-mipa',
+            'judul' => 'Latihan deadline',
+            'mapel' => 'BIOLOGI',
+            'deadline' => now()->subMinute(),
+            'created_by' => null,
+            'created_at' => now()->subDay(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('tugas_jawaban')->insert([
+            'tenant_id' => $tenantId,
+            'tugas_id' => $taskId,
+            'user_id' => $submitted->id,
+            'status' => 'menunggu',
+            'waktu_submit' => now()->subMinutes(5),
+        ]);
+
+        $service = app(WhatsAppNotificationService::class);
+
+        $first = $service->queueClosedAssignmentWarnings($tenantId);
+        $second = $service->queueClosedAssignmentWarnings($tenantId);
+
+        $this->assertSame(1, $first['queued']);
+        $this->assertSame(0, $second['queued']);
+        $this->assertDatabaseHas('whatsapp_message_logs', [
+            'tenant_id' => $tenantId,
+            'category' => 'assignment_missing',
+            'event_key' => 'assignment-missing:'.$taskId.':'.$missing->id,
+            'normalized_phone' => '6281234567890',
+            'target_profile_id' => $missing->id,
+            'status' => 'queued',
+        ]);
+        $this->assertDatabaseMissing('whatsapp_message_logs', [
+            'tenant_id' => $tenantId,
+            'event_key' => 'assignment-missing:'.$taskId.':'.$submitted->id,
+        ]);
+    }
+
     private function defaultTenantId(): string
     {
         $tenantId = (string) DB::table('tenants')
@@ -643,16 +787,16 @@ class WhatsAppIntegrationTest extends TestCase
         return $tenantId;
     }
 
-    private function createUserWithProfile(string $tenantId, string $role, string $email): User
+    private function createUserWithProfile(string $tenantId, string $role, string $email, array $profileOverrides = []): User
     {
         $user = User::query()->create([
             'id' => (string) Str::uuid(),
-            'name' => $role.' test',
+            'name' => (string) ($profileOverrides['nama'] ?? $role.' test'),
             'email' => $email,
             'password' => Hash::make('password123'),
         ]);
 
-        DB::table('profiles')->insert([
+        DB::table('profiles')->insert(array_merge([
             'id' => $user->id,
             'tenant_id' => $tenantId,
             'email' => $user->email,
@@ -662,8 +806,43 @@ class WhatsAppIntegrationTest extends TestCase
             'status' => 'active',
             'created_at' => now(),
             'updated_at' => now(),
-        ]);
+        ], $profileOverrides));
 
         return $user;
+    }
+
+    private function createConnectedWhatsApp(string $tenantId, array $settingsOverrides = []): void
+    {
+        $integrationId = (string) Str::uuid();
+
+        DB::table('whatsapp_integrations')->insert([
+            'id' => $integrationId,
+            'tenant_id' => $tenantId,
+            'provider' => 'evolution',
+            'instance_name' => 'edusmart-default',
+            'status' => 'connected',
+            'connection_state' => 'open',
+            'connected_phone' => '628999999999',
+            'connected_name' => 'Admin Device',
+            'webhook_secret' => 'secret-webhook-token-'.$integrationId,
+            'is_enabled' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('whatsapp_notification_settings')->insert(array_merge([
+            'id' => (string) Str::uuid(),
+            'tenant_id' => $tenantId,
+            'integration_id' => $integrationId,
+            'is_enabled' => true,
+            'send_attendance' => true,
+            'send_profile_updates' => false,
+            'send_assignment_updates' => false,
+            'send_extracurricular_updates' => false,
+            'send_grade_updates' => false,
+            'recipient_mode' => 'wali',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ], $settingsOverrides));
     }
 }

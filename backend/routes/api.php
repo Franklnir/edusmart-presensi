@@ -208,6 +208,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'throttle:api'])->group(func
     Route::post('/whatsapp/logout', [WhatsAppController::class, 'logout']);
     Route::patch('/whatsapp/settings', [WhatsAppController::class, 'updateSettings']);
     Route::post('/whatsapp/test', [WhatsAppController::class, 'sendTest']);
+    Route::post('/whatsapp/assignment-warnings/run', [WhatsAppController::class, 'runAssignmentWarnings']);
     Route::get('/google-drive', [GoogleDriveController::class, 'show']);
     Route::get('/google-drive/files', [GoogleDriveController::class, 'files']);
     Route::post('/google-drive/connect-url', [GoogleDriveController::class, 'connectUrl']);

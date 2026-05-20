@@ -87,6 +87,25 @@ class WhatsAppMessageBuilder
         ]));
     }
 
+    public function buildAssignmentMissingMessage(array $school, array $student, array $task): string
+    {
+        $schoolName = $this->schoolName($school);
+
+        return trim(implode("\n", [
+            "Halo orang tua/wali dari {$this->value($student, 'nama', 'siswa')},",
+            '',
+            "Peringatan tugas dari {$schoolName}:",
+            "Nama: {$this->value($student, 'nama', '-')}",
+            "Kelas: {$this->value($student, 'kelas', '-')}",
+            "Tugas: {$this->value($task, 'judul', '-')}",
+            "Mapel: {$this->value($task, 'mapel', '-')}",
+            "Deadline: {$this->formatDateTime($task['deadline'] ?? null, 'd-m-Y H:i')}",
+            'Status: belum mengumpulkan sampai tugas ditutup.',
+            '',
+            'Silakan konfirmasi ke siswa atau guru mata pelajaran bila sudah ada kendala teknis.',
+        ]));
+    }
+
     public function buildExtracurricularMessage(array $school, array $student, array $activity): string
     {
         $schoolName = $this->schoolName($school);

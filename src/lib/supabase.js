@@ -2586,6 +2586,13 @@ const auth = {
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
+    async runWhatsAppAssignmentWarnings() {
+      const res = await apiFetch('/api/admin/whatsapp/assignment-warnings/run', {
+        method: 'POST',
+        body: {}
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
     async googleDrive(params = {}) {
       const query = new URLSearchParams()
       Object.entries(params || {}).forEach(([key, value]) => {

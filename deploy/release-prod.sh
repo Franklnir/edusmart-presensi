@@ -272,6 +272,30 @@ git_status_for_release() {
     ':!.env.production'
 }
 
+stash_release_blocking_changes() {
+  local changes
+  local stash_ref
+  local timestamp
+
+  changes="$(git_status_for_release)"
+  if [[ -z "$changes" ]]; then
+    return 0
+  fi
+
+  timestamp="$(date +%Y%m%d-%H%M%S)"
+  stash_ref="pre-release-local-changes-${timestamp}"
+
+  echo "[info] Ada perubahan lokal di VPS yang bisa menghalangi release; disimpan ke git stash: ${stash_ref}"
+  printf '%s\n' "$changes"
+
+  git stash push --message "$stash_ref" -- . \
+    ':!deploy/mosquitto/generated' \
+    ':!backups' \
+    ':!.env.production' >/dev/null
+
+  echo "[info] File env, backup, generated Mosquitto, dan file ignored lain tetap dipertahankan."
+}
+
 check_compose_service() {
   local service="$1"
   local container_id
@@ -531,6 +555,9 @@ if [[ "${#COMPOSE_FILES[@]}" -eq 0 ]]; then
     COMPOSE_FILES=("${SPLIT_PATHS_RESULT[@]}")
   else
     COMPOSE_FILES=("$COMPOSE_FILE")
+    if [[ -f "docker-compose.prod.4gb.yml" ]] || git cat-file -e "$TARGET_REF:docker-compose.prod.4gb.yml" 2>/dev/null; then
+      COMPOSE_FILES+=("docker-compose.prod.4gb.yml")
+    fi
   fi
 fi
 
@@ -552,6 +579,7 @@ if [[ -n "$ENV_CORE_HEALTH_SERVICES" ]]; then
 fi
 
 configure_optional_evolution_services
+stash_release_blocking_changes
 
 WORKTREE_CHANGES="$(git_status_for_release)"
 if [[ -n "$WORKTREE_CHANGES" ]]; then

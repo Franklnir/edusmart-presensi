@@ -37,24 +37,9 @@ const CATEGORY_OPTIONS = [
     description: 'Kirim hanya kasus bermasalah: tidak scan masuk, scan pulang tanpa masuk, masuk tanpa pulang, dan Alpha.'
   },
   {
-    key: 'send_profile_updates',
-    title: 'Perubahan Data Siswa',
-    description: 'Kirim ringkasan perubahan identitas atau data penting siswa.'
-  },
-  {
     key: 'send_assignment_updates',
-    title: 'Tugas Dikumpulkan',
-    description: 'Kirim notifikasi saat siswa mengumpulkan tugas atau memperbarui jawaban.'
-  },
-  {
-    key: 'send_grade_updates',
-    title: 'Nilai Tugas & Quiz',
-    description: 'Kirim pemberitahuan saat nilai tugas atau quiz sudah diperbarui.'
-  },
-  {
-    key: 'send_extracurricular_updates',
-    title: 'Ekstrakurikuler',
-    description: 'Kirim update keikutsertaan atau absensi kegiatan ekskul.'
+    title: 'Tugas Belum Dikerjakan',
+    description: 'Kirim saat tugas sudah ditutup dan siswa belum mengumpulkan jawaban.'
   }
 ]
 
@@ -71,6 +56,7 @@ const categoryLabel = (value = '') => {
   if (normalized === 'attendance_problem') return 'Peringatan Presensi'
   if (normalized === 'attendance') return 'Absensi'
   if (normalized === 'profile_update') return 'Perubahan Data'
+  if (normalized === 'assignment_missing') return 'Tugas Belum Dikerjakan'
   if (normalized === 'assignment') return 'Tugas'
   if (normalized === 'grade') return 'Nilai'
   if (normalized === 'extracurricular') return 'Ekstrakurikuler'
@@ -87,11 +73,15 @@ const logStatusClass = (status = '') => {
 }
 
 const getEvolutionManagerHost = () => {
+  const browserRootDomain = getRootDomainFromCurrentHost()
+  if (browserRootDomain && browserRootDomain !== 'localhost' && !/^\d{1,3}(?:\.\d{1,3}){3}$/.test(browserRootDomain)) {
+    return `wa.${browserRootDomain}`
+  }
+
   const rootDomain = String(import.meta.env.VITE_ROOT_DOMAIN || '').trim().toLowerCase()
   if (rootDomain) return `wa.${rootDomain}`
 
-  const browserRootDomain = getRootDomainFromCurrentHost()
-  return browserRootDomain ? `wa.${browserRootDomain}` : ''
+  return ''
 }
 
 const getRootDomainFromCurrentHost = () => {
@@ -143,7 +133,7 @@ export default function WhatsApp() {
   const [settingsForm, setSettingsForm] = useState({
     is_enabled: true,
     send_attendance: true,
-    send_profile_updates: true,
+    send_profile_updates: false,
     send_assignment_updates: false,
     send_extracurricular_updates: false,
     send_grade_updates: false,
@@ -157,6 +147,7 @@ export default function WhatsApp() {
   const [syncing, setSyncing] = useState(false)
   const [loggingOut, setLoggingOut] = useState(false)
   const [sendingTest, setSendingTest] = useState(false)
+  const [runningAssignmentCheck, setRunningAssignmentCheck] = useState(false)
 
   const integration = payload.integration
   const providerConfigured = Boolean(payload.provider?.configured)
@@ -378,6 +369,32 @@ export default function WhatsApp() {
 
     setPayload((prev) => ({ ...prev, settings: data?.settings || prev.settings }))
     pushToast('success', 'Pengaturan notifikasi WhatsApp tersimpan')
+  }
+
+  const handleRunAssignmentWarnings = async () => {
+    if (!providerConfigured || currentStatus !== 'connected') {
+      pushToast('warning', 'Hubungkan WhatsApp sampai status Terhubung sebelum cek tugas tertutup.')
+      return
+    }
+
+    setRunningAssignmentCheck(true)
+    const { data, error } = await supabase.admin.runWhatsAppAssignmentWarnings()
+    setRunningAssignmentCheck(false)
+
+    if (error) {
+      pushToast('error', error.message || 'Gagal mengecek tugas tertutup')
+      return
+    }
+
+    if (data?.overview) {
+      applyPayload(data.overview)
+    }
+
+    const summary = data?.summary || {}
+    pushToast(
+      'success',
+      `Cek tugas tertutup selesai. ${summary.queued || 0} peringatan baru masuk antrean.`
+    )
   }
 
   const handleSendTest = async (event) => {
@@ -638,6 +655,26 @@ export default function WhatsApp() {
                       </div>
                     </div>
                   </label>
+                </div>
+
+                <div className="mt-6 rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <div className="font-semibold text-emerald-900">Cek tugas tertutup sekarang</div>
+                      <p className="mt-1 text-sm text-emerald-800">
+                        Sistem scheduler otomatis mengecek tugas baru tutup. Tombol ini dipakai admin bila ingin sinkron manual.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleRunAssignmentWarnings}
+                      disabled={runningAssignmentCheck || !providerConfigured || currentStatus !== 'connected'}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {runningAssignmentCheck ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+                      Cek Tugas
+                    </button>
+                  </div>
                 </div>
               </section>
             </div>

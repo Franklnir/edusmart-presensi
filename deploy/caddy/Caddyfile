@@ -19,7 +19,9 @@ wa.localhost {
 	tls internal
 
 	encode zstd gzip
-	reverse_proxy evolution_api:8080
+	reverse_proxy evolution_api:8080 {
+		header_up Origin "https://{host}"
+	}
 }
 
 {$CADDY_EVOLUTION_HOST} {
@@ -28,7 +30,9 @@ wa.localhost {
 	}
 
 	encode zstd gzip
-	reverse_proxy evolution_api:8080
+	reverse_proxy evolution_api:8080 {
+		header_up Origin "https://{host}"
+	}
 }
 
 :80 {

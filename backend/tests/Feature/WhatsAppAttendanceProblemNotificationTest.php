@@ -196,7 +196,7 @@ class WhatsAppAttendanceProblemNotificationTest extends TestCase
         Queue::assertPushed(SendWhatsAppMessageJob::class, 1);
     }
 
-    public function test_whatsapp_assignment_notification_can_be_enabled(): void
+    public function test_whatsapp_assignment_submission_notification_is_not_sent(): void
     {
         Queue::fake();
 
@@ -227,21 +227,11 @@ class WhatsAppAttendanceProblemNotificationTest extends TestCase
             'waktu_submit' => '2026-05-20T09:30:00+07:00',
         ]]);
 
-        $this->assertDatabaseHas('whatsapp_message_logs', [
-            'tenant_id' => $tenant->id,
-            'category' => 'assignment',
-            'source_table' => 'tugas_jawaban',
-            'normalized_phone' => '6281234567894',
-            'status' => 'queued',
-        ]);
-
-        $log = DB::table('whatsapp_message_logs')->where('tenant_id', $tenant->id)->first();
-        $this->assertStringContainsString('Laporan Praktikum', $log->message_text);
-        $this->assertStringContainsString('Biologi', $log->message_text);
-        Queue::assertPushed(SendWhatsAppMessageJob::class, 1);
+        $this->assertDatabaseCount('whatsapp_message_logs', 0);
+        Queue::assertNothingPushed();
     }
 
-    public function test_whatsapp_quiz_grade_notification_can_be_enabled(): void
+    public function test_whatsapp_quiz_grade_notification_is_not_sent(): void
     {
         Queue::fake();
 
@@ -273,18 +263,8 @@ class WhatsAppAttendanceProblemNotificationTest extends TestCase
             'updated_at' => '2026-05-20T11:00:00+07:00',
         ]]);
 
-        $this->assertDatabaseHas('whatsapp_message_logs', [
-            'tenant_id' => $tenant->id,
-            'category' => 'grade',
-            'source_table' => 'quiz_submissions',
-            'normalized_phone' => '6281234567895',
-            'status' => 'queued',
-        ]);
-
-        $log = DB::table('whatsapp_message_logs')->where('tenant_id', $tenant->id)->first();
-        $this->assertStringContainsString('Quiz Persamaan Linear', $log->message_text);
-        $this->assertStringContainsString('Nilai: 88', $log->message_text);
-        Queue::assertPushed(SendWhatsAppMessageJob::class, 1);
+        $this->assertDatabaseCount('whatsapp_message_logs', 0);
+        Queue::assertNothingPushed();
     }
 
     private function createTenant(string $slug): object

@@ -143,6 +143,11 @@ return [
         'verify_ssl' => filter_var(env('EVOLUTION_API_VERIFY_SSL', true), FILTER_VALIDATE_BOOL),
     ],
 
+    'whatsapp' => [
+        'assignment_missing_lookback_minutes' => (int) env('WHATSAPP_ASSIGNMENT_MISSING_LOOKBACK_MINUTES', 180),
+        'assignment_missing_batch_size' => (int) env('WHATSAPP_ASSIGNMENT_MISSING_BATCH_SIZE', 100),
+    ],
+
     'caddy' => [
         'ask_secret' => env('CADDY_ASK_SECRET'),
         'acme_email' => env('CADDY_ACME_EMAIL'),

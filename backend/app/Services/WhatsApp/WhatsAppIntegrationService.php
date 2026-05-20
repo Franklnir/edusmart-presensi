@@ -62,7 +62,7 @@ class WhatsAppIntegrationService
                 'integration_id' => $integration->id,
                 'is_enabled' => true,
                 'send_attendance' => true,
-                'send_profile_updates' => true,
+                'send_profile_updates' => false,
                 'send_assignment_updates' => false,
                 'send_extracurricular_updates' => false,
                 'send_grade_updates' => false,
@@ -75,10 +75,12 @@ class WhatsAppIntegrationService
             $settings->save();
         }
 
+        $this->enforceNotificationPolicy($settings);
+
         return $settings;
     }
 
-    public function overview(string $tenantId): array
+    public function overview(string $tenantId, ?string $requestHost = null): array
     {
         $integration = $this->getOrCreateIntegration($tenantId)->fresh();
         $settings = $this->getOrCreateNotificationSettings($tenantId, $integration)->fresh();
@@ -97,7 +99,7 @@ class WhatsAppIntegrationService
             'provider' => [
                 'configured' => $this->providerConfigured(),
                 'name' => 'Evolution API',
-                'public_url' => trim((string) config('services.evolution_api.public_url', '')) ?: null,
+                'public_url' => $this->evolutionPublicUrl($requestHost),
             ],
             'school' => $school,
         ];
@@ -112,10 +114,10 @@ class WhatsAppIntegrationService
             'integration_id' => $integration->id,
             'is_enabled' => (bool) ($payload['is_enabled'] ?? $settings->is_enabled),
             'send_attendance' => (bool) ($payload['send_attendance'] ?? $settings->send_attendance),
-            'send_profile_updates' => (bool) ($payload['send_profile_updates'] ?? $settings->send_profile_updates),
+            'send_profile_updates' => false,
             'send_assignment_updates' => (bool) ($payload['send_assignment_updates'] ?? $settings->send_assignment_updates),
-            'send_extracurricular_updates' => (bool) ($payload['send_extracurricular_updates'] ?? $settings->send_extracurricular_updates),
-            'send_grade_updates' => (bool) ($payload['send_grade_updates'] ?? $settings->send_grade_updates),
+            'send_extracurricular_updates' => false,
+            'send_grade_updates' => false,
             'recipient_mode' => $this->normalizeRecipientMode($payload['recipient_mode'] ?? $settings->recipient_mode),
         ]);
         $settings->save();
@@ -123,100 +125,110 @@ class WhatsAppIntegrationService
         return $settings->fresh();
     }
 
-    public function requestQr(string $tenantId): array
+    public function requestQr(string $tenantId, ?string $requestHost = null): array
     {
         $this->evolutionApiClient->assertConfigured();
 
         $integration = $this->getOrCreateIntegration($tenantId);
         $this->getOrCreateNotificationSettings($tenantId, $integration);
 
-        $remote = $this->evolutionApiClient->fetchInstance($integration->instance_name);
-        if ($remote && $this->normalizeConnectionState((string) ($remote['status'] ?? $remote['connectionStatus'] ?? '')) === 'open') {
-            $this->evolutionApiClient->setWebhook(
-                $integration->instance_name,
-                $this->webhookUrl($integration),
-                self::WEBHOOK_EVENTS
-            );
-
-            $this->applyRemoteSnapshot($integration, $remote);
-            $integration->fill([
-                'last_error' => 'WhatsApp sudah terhubung. Logout dulu jika ingin membuat QR baru.',
-                'last_synced_at' => now(),
-            ]);
-            $integration->save();
-
-            return $this->overview($tenantId);
-        }
-
-        $created = [];
-        $connect = [];
-        if (! $remote) {
-            $created = $this->createInstanceForQr($integration);
-            $this->evolutionApiClient->setWebhook(
-                $integration->instance_name,
-                $this->webhookUrl($integration),
-                self::WEBHOOK_EVENTS
-            );
-        } else {
-            $this->applyRemoteSnapshot($integration, $remote);
-
-            $this->evolutionApiClient->setWebhook(
-                $integration->instance_name,
-                $this->webhookUrl($integration),
-                self::WEBHOOK_EVENTS
-            );
-
-            ['response' => $connect, 'error' => $connectError] = $this->attemptQrConnect($integration->instance_name);
-            if (! $this->hasQrPayload($connect) && $this->shouldRecreateRemoteInstance($remote)) {
-                $created = $this->recreateInstanceForQr($integration);
+        try {
+            $remote = $this->evolutionApiClient->fetchInstance($integration->instance_name);
+            if ($remote && $this->normalizeConnectionState((string) ($remote['status'] ?? $remote['connectionStatus'] ?? '')) === 'open') {
                 $this->evolutionApiClient->setWebhook(
                     $integration->instance_name,
                     $this->webhookUrl($integration),
                     self::WEBHOOK_EVENTS
                 );
-                $connect = [];
-                $connectError = null;
+
+                $this->applyRemoteSnapshot($integration, $remote);
+                $integration->fill([
+                    'last_error' => 'WhatsApp sudah terhubung. Logout dulu jika ingin membuat QR baru.',
+                    'last_synced_at' => now(),
+                ]);
+                $integration->save();
+
+                return $this->overview($tenantId, $requestHost);
             }
+
+            $created = [];
+            $connect = [];
+            if (! $remote) {
+                $created = $this->createInstanceForQr($integration);
+                $this->evolutionApiClient->setWebhook(
+                    $integration->instance_name,
+                    $this->webhookUrl($integration),
+                    self::WEBHOOK_EVENTS
+                );
+            } else {
+                $this->applyRemoteSnapshot($integration, $remote);
+
+                $this->evolutionApiClient->setWebhook(
+                    $integration->instance_name,
+                    $this->webhookUrl($integration),
+                    self::WEBHOOK_EVENTS
+                );
+
+                ['response' => $connect, 'error' => $connectError] = $this->attemptQrConnect($integration->instance_name);
+                if (! $this->hasQrPayload($connect) && $this->shouldRecreateRemoteInstance($remote)) {
+                    $created = $this->recreateInstanceForQr($integration);
+                    $this->evolutionApiClient->setWebhook(
+                        $integration->instance_name,
+                        $this->webhookUrl($integration),
+                        self::WEBHOOK_EVENTS
+                    );
+                    $connect = [];
+                    $connectError = null;
+                }
+            }
+
+            $connectError = $connectError ?? null;
+            $qrCode = $this->extractQrCode($created);
+            $pairingCode = $this->extractPairingCode($created);
+
+            if ($qrCode === '' && $pairingCode === '') {
+                $qrCode = $this->extractQrCode($connect);
+                $pairingCode = $this->extractPairingCode($connect);
+            }
+
+            if ($qrCode === '' && $pairingCode === '') {
+                ['response' => $connect, 'error' => $connectError] = $this->attemptQrConnect($integration->instance_name);
+                $qrCode = $this->extractQrCode($connect);
+                $pairingCode = $this->extractPairingCode($connect);
+            }
+
+            $hasFreshQr = $qrCode !== '' || $pairingCode !== '';
+
+            $integration->fill([
+                // Evolution v2 may deliver the QR via webhook instead of connect response.
+                'status' => 'awaiting_qr',
+                'connection_state' => 'connecting',
+                'qr_code' => $qrCode !== '' ? $qrCode : null,
+                'pairing_code' => $pairingCode ?: null,
+                'qr_updated_at' => $hasFreshQr ? now() : null,
+                'last_synced_at' => now(),
+                'last_error' => $connectError,
+            ]);
+            $integration->save();
+        } catch (\Throwable $e) {
+            $integration->fill([
+                'status' => $integration->status ?: 'disconnected',
+                'connection_state' => $integration->connection_state ?: 'close',
+                'last_synced_at' => now(),
+                'last_error' => $this->normalizeProviderErrorMessage($e->getMessage()),
+            ]);
+            $integration->save();
         }
 
-        $connectError = $connectError ?? null;
-        $qrCode = $this->extractQrCode($created);
-        $pairingCode = $this->extractPairingCode($created);
-
-        if ($qrCode === '' && $pairingCode === '') {
-            $qrCode = $this->extractQrCode($connect);
-            $pairingCode = $this->extractPairingCode($connect);
-        }
-
-        if ($qrCode === '' && $pairingCode === '') {
-            ['response' => $connect, 'error' => $connectError] = $this->attemptQrConnect($integration->instance_name);
-            $qrCode = $this->extractQrCode($connect);
-            $pairingCode = $this->extractPairingCode($connect);
-        }
-
-        $hasFreshQr = $qrCode !== '' || $pairingCode !== '';
-
-        $integration->fill([
-            // Evolution v2 may deliver the QR via webhook instead of connect response.
-            'status' => 'awaiting_qr',
-            'connection_state' => 'connecting',
-            'qr_code' => $qrCode !== '' ? $qrCode : null,
-            'pairing_code' => $pairingCode ?: null,
-            'qr_updated_at' => $hasFreshQr ? now() : null,
-            'last_synced_at' => now(),
-            'last_error' => $connectError,
-        ]);
-        $integration->save();
-
-        return $this->overview($tenantId);
+        return $this->overview($tenantId, $requestHost);
     }
 
-    public function synchronize(string $tenantId): array
+    public function synchronize(string $tenantId, ?string $requestHost = null): array
     {
         $integration = $this->getOrCreateIntegration($tenantId);
         $this->syncIntegration($integration, true);
 
-        return $this->overview($tenantId);
+        return $this->overview($tenantId, $requestHost);
     }
 
     public function syncIntegration(WhatsAppIntegration $integration, bool $refreshPendingQr = false): WhatsAppIntegration
@@ -309,7 +321,7 @@ class WhatsAppIntegrationService
         return $count;
     }
 
-    public function logout(string $tenantId): array
+    public function logout(string $tenantId, ?string $requestHost = null): array
     {
         $integration = $this->getOrCreateIntegration($tenantId);
 
@@ -334,7 +346,7 @@ class WhatsAppIntegrationService
         ]);
         $integration->save();
 
-        return $this->overview($tenantId);
+        return $this->overview($tenantId, $requestHost);
     }
 
     public function handleWebhook(string $secret, ?string $eventSlug, array $payload): ?WhatsAppIntegration
@@ -585,6 +597,97 @@ class WhatsAppIntegrationService
         return $message !== '' ? $message : 'Evolution API belum mengembalikan QR.';
     }
 
+    private function evolutionPublicUrl(?string $requestHost = null): ?string
+    {
+        $configured = $this->normalizeUrl((string) config('services.evolution_api.public_url', ''));
+        $fallbackHost = $this->normalizeHost((string) config('services.caddy.evolution_host', ''));
+        $requestRoot = $this->rootDomainFromHost($requestHost);
+
+        if ($requestRoot !== '') {
+            $configuredRoot = $this->rootDomainFromHost($configured);
+            if ($configured === '' || ($configuredRoot !== '' && $configuredRoot !== $requestRoot)) {
+                return $this->publicScheme().'://wa.'.$requestRoot;
+            }
+        }
+
+        if ($configured !== '') {
+            return $configured;
+        }
+
+        if ($fallbackHost !== '') {
+            return $this->publicScheme().'://'.$fallbackHost;
+        }
+
+        $rootDomain = $this->normalizeHost((string) config('tenancy.root_domain', ''));
+
+        return $rootDomain !== '' ? $this->publicScheme().'://wa.'.$rootDomain : null;
+    }
+
+    private function normalizeUrl(string $url): string
+    {
+        $value = rtrim(trim($url), '/');
+        if ($value === '') {
+            return '';
+        }
+
+        if (! str_contains($value, '://')) {
+            $value = $this->publicScheme().'://'.$value;
+        }
+
+        $host = $this->normalizeHost($value);
+
+        return $host !== '' ? $value : '';
+    }
+
+    private function normalizeHost(?string $host): string
+    {
+        $value = strtolower(trim((string) $host));
+        if ($value === '') {
+            return '';
+        }
+
+        if (str_contains($value, '://')) {
+            $value = strtolower(trim((string) parse_url($value, PHP_URL_HOST)));
+        } else {
+            $value = preg_replace('#/.*$#', '', $value) ?: $value;
+            $value = preg_replace('/:\d+$/', '', $value) ?: $value;
+        }
+
+        return trim($value, '.');
+    }
+
+    private function rootDomainFromHost(?string $host): string
+    {
+        $normalized = $this->normalizeHost($host);
+        if ($normalized === '' || $normalized === 'localhost' || filter_var($normalized, FILTER_VALIDATE_IP)) {
+            return '';
+        }
+
+        $parts = array_values(array_filter(explode('.', $normalized)));
+        if (count($parts) <= 2) {
+            return $normalized;
+        }
+
+        $lastTwo = implode('.', array_slice($parts, -2));
+        $publicSuffixes = ['ac.id', 'biz.id', 'co.id', 'go.id', 'my.id', 'or.id', 'sch.id', 'web.id'];
+
+        return in_array($lastTwo, $publicSuffixes, true)
+            ? implode('.', array_slice($parts, -3))
+            : implode('.', array_slice($parts, -2));
+    }
+
+    private function publicScheme(): string
+    {
+        $scheme = strtolower(trim((string) config('tenancy.public_scheme', '')));
+        if (in_array($scheme, ['http', 'https'], true)) {
+            return $scheme;
+        }
+
+        $appScheme = strtolower(trim((string) parse_url((string) config('app.url', ''), PHP_URL_SCHEME)));
+
+        return in_array($appScheme, ['http', 'https'], true) ? $appScheme : 'https';
+    }
+
     private function webhookUrl(WhatsAppIntegration $integration): string
     {
         $baseUrl = trim((string) config('services.evolution_api.webhook_base_url', ''));
@@ -712,6 +815,21 @@ class WhatsAppIntegrationService
         $tenantSlug = Str::slug($tenantSlug !== '' ? $tenantSlug : substr($tenantId, 0, 12), '-');
 
         return trim(Str::lower($prefix.'-'.$tenantSlug), '-');
+    }
+
+    private function enforceNotificationPolicy(WhatsAppNotificationSetting $settings): void
+    {
+        if (
+            $settings->send_profile_updates
+            || $settings->send_extracurricular_updates
+            || $settings->send_grade_updates
+        ) {
+            $settings->forceFill([
+                'send_profile_updates' => false,
+                'send_extracurricular_updates' => false,
+                'send_grade_updates' => false,
+            ])->save();
+        }
     }
 
     private function resolveEventName(?string $eventSlug, array $payload): string

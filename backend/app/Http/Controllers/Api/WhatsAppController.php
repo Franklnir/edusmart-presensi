@@ -20,9 +20,13 @@ class WhatsAppController extends ApiController
             return $this->deny();
         }
 
-        return response()->json([
-            'data' => $this->whatsAppIntegrationService->overview($tenantId),
-        ]);
+        try {
+            $data = $this->whatsAppIntegrationService->overview($tenantId, $request->getHost());
+        } catch (\Throwable $e) {
+            return $this->deny($this->gatewayErrorMessage($e), 422);
+        }
+
+        return response()->json(['data' => $data]);
     }
 
     public function connect(Request $request)
@@ -33,9 +37,9 @@ class WhatsAppController extends ApiController
         }
 
         try {
-            $data = $this->whatsAppIntegrationService->requestQr($tenantId);
+            $data = $this->whatsAppIntegrationService->requestQr($tenantId, $request->getHost());
         } catch (\Throwable $e) {
-            return $this->deny($e->getMessage(), 422);
+            return $this->deny($this->gatewayErrorMessage($e), 422);
         }
 
         return response()->json(['data' => $data]);
@@ -49,9 +53,9 @@ class WhatsAppController extends ApiController
         }
 
         try {
-            $data = $this->whatsAppIntegrationService->synchronize($tenantId);
+            $data = $this->whatsAppIntegrationService->synchronize($tenantId, $request->getHost());
         } catch (\Throwable $e) {
-            return $this->deny($e->getMessage(), 422);
+            return $this->deny($this->gatewayErrorMessage($e), 422);
         }
 
         return response()->json(['data' => $data]);
@@ -64,7 +68,11 @@ class WhatsAppController extends ApiController
             return $this->deny();
         }
 
-        $data = $this->whatsAppIntegrationService->logout($tenantId);
+        try {
+            $data = $this->whatsAppIntegrationService->logout($tenantId, $request->getHost());
+        } catch (\Throwable $e) {
+            return $this->deny($this->gatewayErrorMessage($e), 422);
+        }
 
         return response()->json(['data' => $data]);
     }
@@ -125,6 +133,28 @@ class WhatsAppController extends ApiController
         ]);
     }
 
+    public function runAssignmentWarnings(Request $request)
+    {
+        $tenantId = $this->validatedTenantAdmin($request);
+        if (! $tenantId) {
+            return $this->deny();
+        }
+
+        try {
+            $summary = $this->whatsAppNotificationService->queueClosedAssignmentWarnings($tenantId);
+            $overview = $this->whatsAppIntegrationService->overview($tenantId, $request->getHost());
+        } catch (\Throwable $e) {
+            return $this->deny($this->gatewayErrorMessage($e), 422);
+        }
+
+        return response()->json([
+            'data' => [
+                'summary' => $summary,
+                'overview' => $overview,
+            ],
+        ]);
+    }
+
     private function validatedTenantAdmin(Request $request): ?string
     {
         if (! $this->isAdmin($request)) {
@@ -137,5 +167,14 @@ class WhatsAppController extends ApiController
         }
 
         return $tenantId;
+    }
+
+    private function gatewayErrorMessage(\Throwable $e): string
+    {
+        $message = trim($e->getMessage());
+
+        return $message !== ''
+            ? $message
+            : 'Gateway WhatsApp belum siap. Cek service Evolution API, Redis, dan koneksi tenant.';
     }
 }

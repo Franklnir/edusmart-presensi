@@ -215,9 +215,26 @@ jobs:
           chmod 600 ~/.ssh/edusmart_deploy_key
           ssh-keyscan -p "$port" "$VPS_HOST" >> ~/.ssh/known_hosts
 
+      - name: Verify SSH access
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          port="${VPS_PORT:-22}"
+          ssh -i ~/.ssh/edusmart_deploy_key -p "$port" \
+            -o BatchMode=yes \
+            -o ConnectTimeout=15 \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            "$VPS_USER@$VPS_HOST" \
+            "printf 'SSH_OK\n'"
+
       - name: Deploy release on VPS
         env:
           RELEASE_REF: ${{ github.sha }}
+          RELEASE_BRANCH: ${{ github.ref_name }}
           EDUSMART_BACKEND_IMAGE: ${{ needs.build-production-images.outputs.backend_image }}
           EDUSMART_NGINX_IMAGE: ${{ needs.build-production-images.outputs.nginx_image }}
           GHCR_USERNAME: ${{ github.actor }}
@@ -234,18 +251,35 @@ jobs:
             printf 'set -Eeuo pipefail\n'
             printf 'REMOTE_DIR=%q\n' "$VPS_APP_DIR"
             printf 'RELEASE_REF=%q\n' "$RELEASE_REF"
+            printf 'RELEASE_BRANCH=%q\n' "$RELEASE_BRANCH"
             printf 'BACKEND_IMAGE=%q\n' "$EDUSMART_BACKEND_IMAGE"
             printf 'NGINX_IMAGE=%q\n' "$EDUSMART_NGINX_IMAGE"
             printf 'GHCR_USERNAME=%q\n' "${GHCR_USERNAME:-}"
             printf 'GHCR_TOKEN=%q\n' "${GHCR_TOKEN:-}"
             printf '%s\n' \
               'cd "$REMOTE_DIR"' \
+              'diagnose_remote_failure() {' \
+              '  status="$?"' \
+              '  echo "[diagnostic] Remote deploy gagal dengan exit ${status}."' \
+              '  git status --short -- . ":!deploy/mosquitto/generated" ":!backups" ":!.env.production" || true' \
+              '  df -h / || true' \
+              '  docker system df || true' \
+              '  exit "$status"' \
+              '}' \
+              'trap diagnose_remote_failure ERR' \
               'if [ -n "$GHCR_USERNAME" ] && [ -n "$GHCR_TOKEN" ]; then' \
               '  printf "%s" "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin' \
               'fi' \
               'unset GHCR_TOKEN' \
-              'git fetch --all --tags --prune' \
-              'git rev-parse --verify "$RELEASE_REF" >/dev/null' \
+              'if [ -n "$RELEASE_BRANCH" ]; then' \
+              '  git fetch origin "+refs/heads/${RELEASE_BRANCH}:refs/remotes/origin/${RELEASE_BRANCH}" --tags --prune || git fetch --all --tags --prune' \
+              'else' \
+              '  git fetch --all --tags --prune' \
+              'fi' \
+              'if ! git cat-file -e "${RELEASE_REF}^{commit}" 2>/dev/null; then' \
+              '  git fetch origin "$RELEASE_REF" || true' \
+              'fi' \
+              'git rev-parse --verify "${RELEASE_REF}^{commit}" >/dev/null' \
               'tmp_script="$(mktemp)"' \
               'trap '"'"'rm -f "$tmp_script"'"'"' EXIT' \
               'git show "$RELEASE_REF":deploy/release-prod.sh > "$tmp_script"' \

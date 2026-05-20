@@ -7,6 +7,7 @@ use App\Models\WhatsAppMessageLog;
 use App\Models\WhatsAppNotificationSetting;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 class WhatsAppNotificationService
@@ -45,14 +46,9 @@ class WhatsAppNotificationService
         $table = strtolower(trim($table));
         $action = strtolower(trim($action));
 
-        match ($table) {
-            'absensi' => $this->handleAttendanceMutation($tenantId, $afterRows),
-            'profiles' => $this->handleProfileMutation($tenantId, $action, $beforeRows, $afterRows),
-            'tugas_jawaban' => $this->handleAssignmentMutation($tenantId, $action, $beforeRows, $afterRows),
-            'quiz_submissions' => $this->handleQuizSubmissionMutation($tenantId, $action, $beforeRows, $afterRows),
-            'absensi_eskul', 'ekskul_anggota' => $this->handleExtracurricularMutation($tenantId, $table, $action, $afterRows),
-            default => null,
-        };
+        if ($table === 'absensi') {
+            $this->handleAttendanceMutation($tenantId, $afterRows);
+        }
     }
 
     public function handleRfidAttendanceResult(string $tenantId, array $rfidResult): void
@@ -106,6 +102,72 @@ class WhatsAppNotificationService
                 'normalized_phone' => $normalizedPhone,
             ]
         );
+    }
+
+    public function queueClosedAssignmentWarnings(?string $tenantId = null, ?int $limit = null): array
+    {
+        $emptySummary = [
+            'tenants' => 0,
+            'tasks_checked' => 0,
+            'students_checked' => 0,
+            'queued' => 0,
+            'skipped' => 0,
+        ];
+
+        if (! $this->integrationService->providerConfigured()) {
+            return $emptySummary;
+        }
+
+        if (
+            ! Schema::hasTable('tugas')
+            || ! Schema::hasTable('tugas_jawaban')
+            || ! Schema::hasTable('profiles')
+            || ! Schema::hasTable('whatsapp_notification_settings')
+        ) {
+            return $emptySummary;
+        }
+
+        $settingsQuery = WhatsAppNotificationSetting::query()
+            ->where('is_enabled', true)
+            ->where('send_assignment_updates', true);
+
+        $tenantId = trim((string) $tenantId);
+        if ($tenantId !== '') {
+            $settingsQuery->where('tenant_id', $tenantId);
+        }
+
+        $summary = $emptySummary;
+
+        $batchSize = max(1, min((int) ($limit ?: config('services.whatsapp.assignment_missing_batch_size', 100)), 500));
+
+        $settingsQuery->orderBy('tenant_id')->chunk(50, function ($settingsRows) use (&$summary, $batchSize) {
+            foreach ($settingsRows as $settings) {
+                $summary['tenants']++;
+                $context = $this->notificationContext((string) $settings->tenant_id);
+                if (! $context || ! $context['settings']->send_assignment_updates || ! $context['integration']->isConnected()) {
+                    $summary['skipped']++;
+
+                    continue;
+                }
+
+                $tasks = $this->recentlyClosedTasks((string) $settings->tenant_id, $batchSize);
+                $summary['tasks_checked'] += count($tasks);
+
+                foreach ($tasks as $task) {
+                    $result = $this->queueMissingAssignmentForTask(
+                        (string) $settings->tenant_id,
+                        $context,
+                        (array) $task
+                    );
+
+                    $summary['students_checked'] += $result['students_checked'];
+                    $summary['queued'] += $result['queued'];
+                    $summary['skipped'] += $result['skipped'];
+                }
+            }
+        });
+
+        return $summary;
     }
 
     private function handleAttendanceMutation(string $tenantId, array $rows): void
@@ -182,6 +244,9 @@ class WhatsAppNotificationService
         if (! $hasMasuk && $hasPulang) {
             $type = 'no_checkin';
             $title = 'Scan pulang tanpa scan masuk';
+        } elseif ($status === 'hadir' && ! $hasMasuk) {
+            $type = 'no_checkin';
+            $title = 'Tidak scan masuk';
         } elseif ($status === 'alpha') {
             if (! $hasMasuk) {
                 $type = 'no_checkin';
@@ -212,6 +277,183 @@ class WhatsAppNotificationService
             'scan_masuk_at' => $scans['masuk_at'] ?? null,
             'scan_pulang_at' => $scans['pulang_at'] ?? null,
         ];
+    }
+
+    private function recentlyClosedTasks(string $tenantId, int $limit): array
+    {
+        $now = now();
+        $lookbackMinutes = max(5, min((int) config('services.whatsapp.assignment_missing_lookback_minutes', 180), 1440));
+        $since = $now->copy()->subMinutes($lookbackMinutes);
+
+        $columns = $this->existingColumns('tugas', [
+            'id',
+            'tenant_id',
+            'kelas',
+            'judul',
+            'mapel',
+            'deadline',
+            'created_by',
+            'tahun_ajaran',
+            'semester',
+            'angkatan',
+            'created_at',
+        ]);
+
+        $query = DB::table('tugas')
+            ->whereNotNull('deadline')
+            ->where('deadline', '<=', $now)
+            ->where('deadline', '>=', $since)
+            ->orderBy('deadline')
+            ->limit($limit);
+
+        $this->applyTenantFilter($query, 'tugas', $tenantId);
+
+        return $query->get($columns)->all();
+    }
+
+    private function queueMissingAssignmentForTask(string $tenantId, array $context, array $task): array
+    {
+        $result = [
+            'students_checked' => 0,
+            'queued' => 0,
+            'skipped' => 0,
+        ];
+
+        $taskId = trim((string) ($task['id'] ?? ''));
+        $kelas = trim((string) ($task['kelas'] ?? ''));
+        if ($taskId === '' || $kelas === '') {
+            $result['skipped']++;
+
+            return $result;
+        }
+
+        $submittedIds = $this->submittedStudentIdsForTask($tenantId, $taskId);
+        $students = $this->activeStudentsForClass($tenantId, $kelas);
+
+        foreach ($students as $student) {
+            $student = (array) $student;
+            $studentId = trim((string) ($student['id'] ?? ''));
+            if ($studentId === '') {
+                $result['skipped']++;
+
+                continue;
+            }
+
+            $result['students_checked']++;
+            if (isset($submittedIds[$studentId])) {
+                continue;
+            }
+
+            $message = $this->messageBuilder->buildAssignmentMissingMessage(
+                $context['school'],
+                $student,
+                $task
+            );
+
+            $queueResult = $this->queueForRecipients(
+                $context['integration']->tenant_id,
+                $context['integration']->id,
+                $context['settings'],
+                $student,
+                'assignment_missing',
+                'assignment-missing:'.$taskId.':'.$studentId,
+                $message,
+                'tugas',
+                $taskId
+            );
+
+            $result['queued'] += $queueResult['queued'];
+            $result['skipped'] += $queueResult['skipped'];
+        }
+
+        return $result;
+    }
+
+    private function submittedStudentIdsForTask(string $tenantId, string $taskId): array
+    {
+        $query = DB::table('tugas_jawaban')
+            ->where('tugas_id', $taskId)
+            ->whereNotNull('user_id');
+
+        $this->applyTenantFilter($query, 'tugas_jawaban', $tenantId);
+
+        return $query
+            ->pluck('user_id')
+            ->mapWithKeys(fn ($id) => [(string) $id => true])
+            ->all();
+    }
+
+    private function activeStudentsForClass(string $tenantId, string $kelas): array
+    {
+        $classValues = $this->classLookupValues($kelas);
+        if (empty($classValues)) {
+            return [];
+        }
+
+        $columns = $this->existingColumns('profiles', [
+            'id',
+            'tenant_id',
+            'nama',
+            'kelas',
+            'nis',
+            'no_hp_siswa',
+            'no_hp_wali',
+            'telp',
+            'status',
+        ]);
+
+        $query = DB::table('profiles')
+            ->where('role', 'siswa')
+            ->whereIn('kelas', $classValues)
+            ->where(function ($statusQuery) {
+                $statusQuery
+                    ->whereNull('status')
+                    ->orWhereRaw("LOWER(COALESCE(status, 'active')) IN ('active', 'aktif')");
+            })
+            ->orderBy('nama');
+
+        $this->applyTenantFilter($query, 'profiles', $tenantId);
+
+        return $query->get($columns)->all();
+    }
+
+    private function classLookupValues(string $kelas): array
+    {
+        $normalized = trim($kelas);
+        if ($normalized === '') {
+            return [];
+        }
+
+        $label = Str::of($normalized)
+            ->replace(['-', '_'], ' ')
+            ->squish()
+            ->upper()
+            ->toString();
+
+        return array_values(array_unique(array_filter([
+            $normalized,
+            strtolower($normalized),
+            strtoupper($normalized),
+            $label,
+            Str::slug($label, '-'),
+        ])));
+    }
+
+    private function existingColumns(string $table, array $columns): array
+    {
+        $existing = array_values(array_filter(
+            $columns,
+            fn ($column) => Schema::hasColumn($table, $column)
+        ));
+
+        return ! empty($existing) ? $existing : ['*'];
+    }
+
+    private function applyTenantFilter($query, string $table, string $tenantId): void
+    {
+        if ($tenantId !== '' && Schema::hasColumn($table, 'tenant_id')) {
+            $query->where('tenant_id', $tenantId);
+        }
     }
 
     private function attendanceDetectedAt(array $attendance, string $date): string
@@ -551,7 +793,7 @@ class WhatsAppNotificationService
         string $message,
         string $sourceTable,
         string $sourceRecordId
-    ): void {
+    ): array {
         $recipients = $this->recipientsForStudent($student, $settings);
         if (empty($recipients)) {
             $this->createQueuedLog(
@@ -573,11 +815,19 @@ class WhatsAppNotificationService
                 false
             );
 
-            return;
+            return [
+                'queued' => 0,
+                'skipped' => 1,
+            ];
         }
 
+        $summary = [
+            'queued' => 0,
+            'skipped' => 0,
+        ];
+
         foreach ($recipients as $recipient) {
-            $this->createQueuedLog(
+            $log = $this->createQueuedLog(
                 $tenantId,
                 $integrationId,
                 $category,
@@ -592,7 +842,15 @@ class WhatsAppNotificationService
                     'normalized_phone' => $recipient['normalized'],
                 ]
             );
+
+            if ($log->wasRecentlyCreated && $log->status === 'queued') {
+                $summary['queued']++;
+            } else {
+                $summary['skipped']++;
+            }
         }
+
+        return $summary;
     }
 
     private function createQueuedLog(

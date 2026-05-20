@@ -1,4 +1,4 @@
-# Override untuk VPS kecil 4 core / 4 GB RAM.
+# Override untuk VPS kecil 1-4 vCPU / 4 GB RAM.
 # Pakai bersama docker-compose.prod.yml, bukan sebagai compose file tunggal.
 
 services:
@@ -43,7 +43,7 @@ services:
 
   backend:
     mem_limit: 900m
-    cpus: "1.50"
+    cpus: "0.80"
     pids_limit: 256
 
   worker:
