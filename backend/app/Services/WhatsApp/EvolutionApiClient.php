@@ -254,11 +254,13 @@ class EvolutionApiClient
         if ($detail !== '') {
             $host = $this->failedHostFromMessage($detail);
             if ($host !== '') {
-                return "Evolution API tidak bisa dijangkau dari backend. Host {$host} tidak merespons atau tidak bisa di-resolve. Pastikan service Evolution aktif dan EVOLUTION_PUBLIC_URL/EVOLUTION_API_BASE_URL benar.";
+                return "Evolution API tidak bisa dijangkau dari backend. Host {$host} tidak merespons atau tidak bisa di-resolve. "
+                    .'Pastikan service Evolution aktif dan EVOLUTION_PUBLIC_URL/EVOLUTION_API_BASE_URL benar.';
             }
         }
 
-        return 'Evolution API tidak bisa dijangkau dari backend. Pastikan service Evolution aktif dan konfigurasi host Evolution benar.';
+        return 'Evolution API tidak bisa dijangkau dari backend. '
+            .'Pastikan service Evolution aktif dan konfigurasi host Evolution benar.';
     }
 
     private function normalizeInstanceRecord($item): array

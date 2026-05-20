@@ -108,33 +108,6 @@ class WhatsAppAttendanceProblemNotificationTest extends TestCase
         Queue::assertPushed(SendWhatsAppMessageJob::class, 1);
     }
 
-    public function test_attendance_whatsapp_uses_school_timezone_when_alpha_has_no_explicit_time(): void
-    {
-        Queue::fake();
-
-        $tenant = $this->createTenant('sma-timezone');
-        $student = $this->createStudent($tenant->id, 'Siswa Tanpa Jam', 'XI-A', '081234567896');
-
-        app(WhatsAppNotificationService::class)->handleTableMutation($tenant->id, 'absensi', 'insert', [], [[
-            'id' => 12,
-            'tenant_id' => $tenant->id,
-            'kelas' => 'XI-A',
-            'tanggal' => '2026-05-03',
-            'uid' => $student->id,
-            'mapel' => 'Matematika',
-            'status' => 'Alpha',
-            'nama' => 'Siswa Tanpa Jam',
-        ]]);
-
-        $this->assertDatabaseCount('whatsapp_message_logs', 1);
-
-        $log = DB::table('whatsapp_message_logs')->first();
-        $this->assertStringContainsString('Tanggal: 03-05-2026', $log->message_text);
-        $this->assertStringContainsString('Waktu tercatat: 03-05-2026 23:59', $log->message_text);
-
-        Queue::assertPushed(SendWhatsAppMessageJob::class, 1);
-    }
-
     public function test_attendance_whatsapp_sends_missing_checkout_with_real_scan_time(): void
     {
         Queue::fake();

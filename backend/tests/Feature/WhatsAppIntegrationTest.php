@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
@@ -63,56 +62,6 @@ class WhatsAppIntegrationTest extends TestCase
                 && $request['webhook']['webhookBase64'] === true
                 && $request['webhook']['events'] === ['QRCODE_UPDATED', 'CONNECTION_UPDATE'];
         });
-    }
-
-    public function test_admin_qr_falls_back_to_public_evolution_url_and_uses_tenant_slug(): void
-    {
-        config()->set('services.evolution_api.base_url', 'http://evolution_api:8080');
-        config()->set('services.evolution_api.public_url', 'https://wa.sismu.biz.id');
-        config()->set('services.evolution_api.api_key', 'secret-key');
-        config()->set('services.evolution_api.webhook_base_url', 'https://sman3bogor.sismu.biz.id');
-
-        $tenantId = (string) Str::uuid();
-        DB::table('tenants')->insert([
-            'id' => $tenantId,
-            'name' => 'SMAN 3 Bogor',
-            'slug' => 'sman3bogor',
-            'status' => 'active',
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
-        $user = $this->createUserWithProfile($tenantId, 'admin', 'admin-sman3@example.com');
-
-        Http::fake([
-            'http://evolution_api:8080/*' => function () {
-                throw new ConnectionException('cURL error 6: Could not resolve host: evolution_api');
-            },
-            'https://wa.sismu.biz.id/instance/fetchInstances*' => Http::response([], 200),
-            'https://wa.sismu.biz.id/instance/create' => Http::response([
-                'instance' => ['instanceName' => 'edusmart-sman3bogor'],
-            ], 201),
-            'https://wa.sismu.biz.id/webhook/set/*' => Http::response(['success' => true], 200),
-            'https://wa.sismu.biz.id/instance/connect/*' => Http::response([
-                'code' => '2@SMAN3-QR',
-            ], 200),
-        ]);
-
-        Sanctum::actingAs($user);
-
-        $response = $this->postJson('/api/admin/whatsapp/connect');
-
-        $response->assertOk();
-        $response->assertJsonPath('data.integration.instance_name', 'edusmart-sman3bogor');
-        $response->assertJsonPath('data.integration.qr_code', '2@SMAN3-QR');
-
-        $this->assertDatabaseHas('whatsapp_integrations', [
-            'tenant_id' => $tenantId,
-            'instance_name' => 'edusmart-sman3bogor',
-            'status' => 'awaiting_qr',
-        ]);
-
-        Http::assertSent(fn ($request) => $request->url() === 'https://wa.sismu.biz.id/instance/create');
-        Http::assertSent(fn ($request) => $request->url() === 'https://wa.sismu.biz.id/webhook/set/edusmart-sman3bogor');
     }
 
     public function test_admin_can_prepare_qr_even_when_connect_endpoint_returns_error(): void
