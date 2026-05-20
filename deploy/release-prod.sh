@@ -14,6 +14,7 @@ RUN_EXTERNAL_SMOKE_CHECK="false"
 APP_SERVICES=(backend worker scheduler rfid_bridge nginx caddy)
 IMAGE_SERVICES=(backend nginx)
 CORE_HEALTH_SERVICES=(postgres redis backend worker scheduler nginx caddy)
+OPTIONAL_HEALTH_SERVICES=()
 COMPOSE_FILES=()
 PREV_FULL_REF=""
 PREV_REF=""
@@ -127,8 +128,9 @@ configure_optional_evolution_services() {
 
   append_unique IMAGE_SERVICES evolution_api
   append_unique APP_SERVICES evolution_postgres evolution_redis evolution_api
-  append_unique CORE_HEALTH_SERVICES evolution_postgres evolution_redis evolution_api
-  echo "[info] Evolution API aktif: service evolution_postgres/evolution_redis/evolution_api akan ikut dideploy dan dicek."
+  append_unique CORE_HEALTH_SERVICES evolution_postgres evolution_redis
+  append_unique OPTIONAL_HEALTH_SERVICES evolution_api
+  echo "[info] Evolution API aktif: service evolution_postgres/evolution_redis/evolution_api akan ikut dideploy."
 }
 
 split_colon_paths() {
@@ -250,7 +252,7 @@ check_compose_service() {
   local timeout
   local last_state
 
-  timeout="${DEPLOY_HEALTH_WAIT_SECONDS:-180}"
+  timeout="${2:-${DEPLOY_HEALTH_WAIT_SECONDS:-180}}"
   start_ts="$(date +%s)"
   last_state=""
 
@@ -284,6 +286,28 @@ check_compose_service() {
   done
 }
 
+run_optional_health_checks() {
+  local timeout
+  local service
+
+  if [[ "${#OPTIONAL_HEALTH_SERVICES[@]}" -eq 0 ]]; then
+    return 0
+  fi
+
+  timeout="${DEPLOY_OPTIONAL_HEALTH_WAIT_SECONDS:-45}"
+  echo "      - cek service opsional"
+  for service in "${OPTIONAL_HEALTH_SERVICES[@]}"; do
+    if check_compose_service "$service" "$timeout"; then
+      continue
+    fi
+
+    echo "[warn] service opsional $service belum sehat setelah ${timeout}s." >&2
+    echo "[warn] Aplikasi utama tetap lanjut; cek log $service untuk memastikan gateway WhatsApp siap." >&2
+    compose ps "$service" >&2 || true
+    compose logs --tail="${DEPLOY_OPTIONAL_LOG_TAIL:-80}" "$service" >&2 || true
+  done
+}
+
 run_internal_health_checks() {
   local response
   local start_ts
@@ -313,6 +337,8 @@ run_internal_health_checks() {
   echo "      - cek koneksi Laravel ke database"
   compose exec -T backend php artisan migrate:status --no-interaction >/dev/null
   echo "[ok] Laravel migrate:status sukses"
+
+  run_optional_health_checks
 }
 
 rollback_application() {
