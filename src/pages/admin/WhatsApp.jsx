@@ -89,7 +89,37 @@ const logStatusClass = (status = '') => {
 const getEvolutionManagerHost = () => {
   const rootDomain = String(import.meta.env.VITE_ROOT_DOMAIN || '').trim().toLowerCase()
   if (rootDomain) return `wa.${rootDomain}`
-  return 'wa.xiaozhiscig.biz.id'
+
+  const browserRootDomain = getRootDomainFromCurrentHost()
+  return browserRootDomain ? `wa.${browserRootDomain}` : ''
+}
+
+const getRootDomainFromCurrentHost = () => {
+  if (typeof window === 'undefined') return ''
+
+  const host = String(window.location.hostname || '').trim().toLowerCase()
+  if (!host || host === 'localhost' || /^\d{1,3}(?:\.\d{1,3}){3}$/.test(host)) {
+    return host
+  }
+
+  const parts = host.split('.').filter(Boolean)
+  if (parts.length <= 2) return host
+
+  const lastTwo = parts.slice(-2).join('.')
+  const publicSuffixes = new Set([
+    'ac.id',
+    'biz.id',
+    'co.id',
+    'go.id',
+    'my.id',
+    'or.id',
+    'sch.id',
+    'web.id'
+  ])
+
+  return publicSuffixes.has(lastTwo)
+    ? parts.slice(-3).join('.')
+    : parts.slice(-2).join('.')
 }
 
 let qrCodePromise = null
