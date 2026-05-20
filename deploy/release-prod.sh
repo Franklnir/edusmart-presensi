@@ -78,6 +78,59 @@ split_words() {
   SPLIT_WORDS_RESULT=($value)
 }
 
+append_unique() {
+  local array_name="$1"
+  shift
+
+  local -n target_array="$array_name"
+  local item
+  local existing
+  local found
+
+  for item in "$@"; do
+    found="false"
+    for existing in "${target_array[@]}"; do
+      if [[ "$existing" == "$item" ]]; then
+        found="true"
+        break
+      fi
+    done
+
+    if [[ "$found" != "true" ]]; then
+      target_array+=("$item")
+    fi
+  done
+}
+
+configure_optional_evolution_services() {
+  local required_vars=(
+    EVOLUTION_API_KEY
+    EVOLUTION_PUBLIC_URL
+    EVOLUTION_DB_PASSWORD
+    EVOLUTION_REDIS_PASSWORD
+    EVOLUTION_CORS_ORIGIN
+    CADDY_EVOLUTION_HOST
+  )
+  local missing=()
+  local name
+
+  for name in "${required_vars[@]}"; do
+    if [[ -z "$(read_env_var "$name" "$ENV_FILE")" ]]; then
+      missing+=("$name")
+    fi
+  done
+
+  if [[ "${#missing[@]}" -gt 0 ]]; then
+    echo "[info] Evolution API tidak diaktifkan otomatis; env belum lengkap: ${missing[*]}"
+    return 0
+  fi
+
+  append_unique IMAGE_SERVICES evolution_api
+  append_unique APP_SERVICES evolution_postgres evolution_redis evolution_api
+  append_unique CORE_HEALTH_SERVICES evolution_postgres evolution_redis evolution_api
+  echo "[info] Evolution API aktif: service evolution_postgres/evolution_redis/evolution_api akan ikut dideploy dan dicek."
+}
+
 split_colon_paths() {
   local value="$1"
   local old_ifs="$IFS"
@@ -421,6 +474,8 @@ if [[ -n "$ENV_CORE_HEALTH_SERVICES" ]]; then
   split_words "$ENV_CORE_HEALTH_SERVICES"
   CORE_HEALTH_SERVICES=("${SPLIT_WORDS_RESULT[@]}")
 fi
+
+configure_optional_evolution_services
 
 WORKTREE_CHANGES="$(git_status_for_release)"
 if [[ -n "$WORKTREE_CHANGES" ]]; then
