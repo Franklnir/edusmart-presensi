@@ -344,6 +344,11 @@ start_optional_services() {
 
   echo "      - deploy service opsional"
   if compose up -d --no-build "${OPTIONAL_APP_SERVICES[@]}"; then
+    if [[ " ${APP_SERVICES[*]} " == *" caddy "* ]]; then
+      echo "      - refresh proxy publik setelah service opsional"
+      compose restart caddy >/dev/null || true
+    fi
+
     return 0
   fi
 
