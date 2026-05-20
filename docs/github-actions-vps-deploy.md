@@ -102,13 +102,13 @@ Untuk VPS 4 core / 4 GB, isi tambahan ini di `.env.production` VPS agar GitHub A
 EDUSMART_COMPOSE_FILES=docker-compose.prod.yml:docker-compose.prod.4gb.yml
 COMPOSE_PROFILES=rfid,whatsapp
 EDUSMART_APP_SERVICES="backend worker scheduler mosquitto mosquitto_reloader rfid_bridge evolution_postgres evolution_redis evolution_api nginx caddy"
-EDUSMART_CORE_HEALTH_SERVICES="postgres redis backend worker scheduler mosquitto rfid_bridge evolution_postgres evolution_redis evolution_api nginx caddy"
+EDUSMART_CORE_HEALTH_SERVICES="postgres redis backend worker scheduler mosquitto rfid_bridge evolution_postgres evolution_redis nginx caddy"
 REDIS_MAXMEMORY=384mb
 PHP_FPM_PM_MAX_CHILDREN=12
 AUTH_IP_RATE_LIMIT_PER_MINUTE=180
 ```
 
-Script deploy membaca nilai itu dari `.env.production`, jadi tidak perlu menambahkan argumen khusus di workflow GitHub.
+Script deploy membaca nilai itu dari `.env.production`, jadi tidak perlu menambahkan argumen khusus di workflow GitHub. `evolution_api` sengaja tidak masuk health check inti karena gateway WhatsApp bisa lebih lama booting; deploy tetap menyalakan service ini dan menampilkan log diagnostik bila belum sehat.
 
 ## Alur Setelah Aktif
 

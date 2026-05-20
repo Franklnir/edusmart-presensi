@@ -103,6 +103,33 @@ append_unique() {
   done
 }
 
+remove_items() {
+  local array_name="$1"
+  shift
+
+  local -n target_array="$array_name"
+  local kept=()
+  local item
+  local remove
+  local should_remove
+
+  for item in "${target_array[@]}"; do
+    should_remove="false"
+    for remove in "$@"; do
+      if [[ "$item" == "$remove" ]]; then
+        should_remove="true"
+        break
+      fi
+    done
+
+    if [[ "$should_remove" != "true" ]]; then
+      kept+=("$item")
+    fi
+  done
+
+  target_array=("${kept[@]}")
+}
+
 configure_optional_evolution_services() {
   local required_vars=(
     EVOLUTION_API_KEY
@@ -129,6 +156,7 @@ configure_optional_evolution_services() {
   append_unique IMAGE_SERVICES evolution_api
   append_unique APP_SERVICES evolution_postgres evolution_redis evolution_api
   append_unique CORE_HEALTH_SERVICES evolution_postgres evolution_redis
+  remove_items CORE_HEALTH_SERVICES evolution_api
   append_unique OPTIONAL_HEALTH_SERVICES evolution_api
   echo "[info] Evolution API aktif: service evolution_postgres/evolution_redis/evolution_api akan ikut dideploy."
 }
