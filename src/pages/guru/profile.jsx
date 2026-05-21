@@ -121,27 +121,13 @@ async function createSignedUrlOrThrow(path) {
  * Prioritas: photo_path (kalau ada), fallback: photo_url (isi tetap path).
  */
 async function savePhotoPathToProfile(uid, filePath) {
-  // coba update photo_path + photo_url dulu
-  const payloadA = {
+  if (!uid) throw new Error('User tidak valid')
+
+  const { error } = await supabase.profile.updateMe({
     photo_path: filePath,
-    photo_url: filePath,
-    updated_at: new Date().toISOString()
-  }
-
-  const { error: errA } = await supabase.from('profiles').update(payloadA).eq('id', uid)
-  if (!errA) return
-
-  // kalau kolom photo_path tidak ada, fallback photo_url saja
-  const msg = (errA?.message || '').toLowerCase()
-  const looksLikeMissingColumn = msg.includes('column') && msg.includes('photo_path')
-  if (!looksLikeMissingColumn) throw errA
-
-  const payloadB = {
-    photo_url: filePath,
-    updated_at: new Date().toISOString()
-  }
-  const { error: errB } = await supabase.from('profiles').update(payloadB).eq('id', uid)
-  if (errB) throw errB
+    photo_url: filePath
+  })
+  if (error) throw error
 }
 
 export default function ProfileGuru() {
@@ -503,19 +489,14 @@ export default function ProfileGuru() {
 
     setSaving(true)
     try {
-      // Anti-IDOR: update selalu untuk auth.uid() (user.id), tanpa menerima id dari UI/route
-      const { error } = await supabase
-        .from('profiles')
-        .update({
-          nama: form.nama.trim(),
-          jk: form.jk,
-          agama: form.agama || null,
-          telp: form.telp || null,
-          alamat: form.alamat || null,
-          tanggal_lahir: form.tanggal_lahir || null,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', user.id)
+      const { error } = await supabase.profile.updateMe({
+        nama: form.nama.trim(),
+        jk: form.jk,
+        agama: form.agama || null,
+        telp: form.telp || null,
+        alamat: form.alamat || null,
+        tanggal_lahir: form.tanggal_lahir || null
+      })
 
       if (error) throw error
 

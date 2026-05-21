@@ -2397,6 +2397,14 @@ const auth = {
       if (!res.error) invalidateDbSelectCache()
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
+    async updateTeacherProfile(userId, payload = {}) {
+      const res = await apiFetch(`/api/admin/teachers/${userId}/profile`, {
+        method: 'PATCH',
+        body: payload
+      })
+      if (!res.error) invalidateDbSelectCache()
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
     async dashboardSummary() {
       const res = await apiFetch('/api/admin/dashboard-summary', {
         method: 'GET',
@@ -3636,6 +3644,16 @@ export const supabase = {
         method: 'PATCH',
         body: payload
       })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    }
+  },
+  profile: {
+    async updateMe(payload = {}) {
+      const res = await apiFetch('/api/profile/me', {
+        method: 'PATCH',
+        body: payload
+      })
+      if (!res.error) invalidateDbSelectCache()
       return { data: res.raw?.data ?? res.data, error: res.error }
     }
   },

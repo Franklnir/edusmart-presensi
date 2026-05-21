@@ -29,6 +29,10 @@ import { getProfileSourceMeta } from '../../utils/profileSource'
 const STRONG_PASSWORD_MESSAGE = 'Password minimal 12 karakter dan wajib ada huruf besar, huruf kecil, angka, serta simbol'
 const isStrongPassword = (value = '') =>
   /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{12,}$/.test(value)
+const toDateInputValue = (value = '') => {
+  if (!value) return ''
+  return String(value).slice(0, 10)
+}
 
 /* ===== Password Modal Component ===== */
 function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Password", loading = false }) {
@@ -179,7 +183,6 @@ const GURU_ALIAS_MAP = buildAliasMap({
   agama: ['agama', 'religion'],
   alamat: ['alamat', 'address'],
   telp: ['telp', 'telepon', 'phone', 'no hp', 'nomor hp', 'nohp', 'hp', 'wa', 'whatsapp', 'no hp guru'],
-  jabatan: ['jabatan', 'position', 'role', 'jabatan guru'],
   email: ['email', 'email guru', 'alamat email', 'email aktif'],
   status: ['status', 'status guru', 'status akun']
 })
@@ -192,7 +195,6 @@ const GURU_IMPORT_EXAMPLE_COLUMNS = [
   { key: 'agama', label: 'Agama', cellClassName: 'min-w-[92px] whitespace-nowrap' },
   { key: 'alamat', label: 'Alamat', cellClassName: 'min-w-[220px] whitespace-normal leading-5' },
   { key: 'telp', label: 'No HP', cellClassName: 'min-w-[136px] whitespace-nowrap' },
-  { key: 'jabatan', label: 'Jabatan', cellClassName: 'min-w-[156px] whitespace-normal leading-5' },
   { key: 'email', label: 'Email', cellClassName: 'min-w-[220px] whitespace-nowrap' },
   { key: 'status', label: 'Status', cellClassName: 'min-w-[96px] whitespace-nowrap' }
 ]
@@ -431,6 +433,19 @@ export default function AGuru() {
     currentName: '',
     email: ''
   })
+  const [editProfileOpen, setEditProfileOpen] = useState(false)
+  const [savingTeacherProfile, setSavingTeacherProfile] = useState(false)
+  const [teacherProfileEdit, setTeacherProfileEdit] = useState({
+    id: '',
+    nama: '',
+    nis: '',
+    email: '',
+    jk: '',
+    agama: '',
+    telp: '',
+    alamat: '',
+    tanggal_lahir: ''
+  })
 
   // Form tambah guru
   const [form, setForm] = useState({
@@ -469,16 +484,6 @@ export default function AGuru() {
       'Rizal Hidayat',
       'Lina Marlina',
       'Andika Saputra'
-    ]
-    const sampleJabatan = [
-      'Guru Tetap',
-      'Guru Honorer',
-      'Guru BK',
-      'Koordinator Guru',
-      'Pembina Ekskul',
-      'Staf Kurikulum',
-      'Staf Kesiswaan',
-      'Guru Pengganti'
     ]
     const sampleAgama = [
       'Islam',
@@ -519,7 +524,6 @@ export default function AGuru() {
         agama: sampleAgama[index] || 'Islam',
         alamat: sampleAddresses[index] || `Jl. Contoh ${index + 1}, Bandung`,
         telp: `08131${String(2345678 + index).padStart(7, '0')}`,
-        jabatan: sampleJabatan[index] || 'Guru',
         email: `${emailSlug || `contoh.guru.${index + 1}`}@example.com`,
         status: ''
       }
@@ -861,7 +865,6 @@ export default function AGuru() {
       agama: toText(mapped.agama),
       alamat: toText(mapped.alamat),
       telp: telpRaw ? normalizePhoneSimple(telpRaw) : '',
-      jabatan: toText(mapped.jabatan),
       email: toText(mapped.email).toLowerCase(),
       status: normalizeStatusValue(mapped.status)
     }
@@ -1026,7 +1029,6 @@ export default function AGuru() {
     if (row.agama) payload.agama = row.agama
     if (row.alamat) payload.alamat = row.alamat
     if (row.telp) payload.telp = row.telp
-    if (row.jabatan) payload.jabatan = row.jabatan
     if (row.status) payload.status = row.status
 
     if (existing?.id) {
@@ -1057,7 +1059,6 @@ export default function AGuru() {
       if (row.agama) provisionPayload.agama = row.agama
       if (row.alamat) provisionPayload.alamat = row.alamat
       if (row.telp) provisionPayload.telp = row.telp
-      if (row.jabatan) provisionPayload.jabatan = row.jabatan
       if (payload.status) provisionPayload.status = payload.status
 
       const { error } = await supabase.admin.provisionUser(provisionPayload)
@@ -1077,7 +1078,6 @@ export default function AGuru() {
       agama: row.agama || '',
       alamat: row.alamat || '',
       telp: row.telp || '',
-      jabatan: row.jabatan || '',
       status: payload.status || 'active',
       must_change_password: true,
       created_via: 'import'
@@ -1489,6 +1489,7 @@ export default function AGuru() {
   function closeDetailModal() {
     setSelectedGuru(null)
     setDetailModalOpen(false)
+    if (editProfileOpen) closeEditProfileModal()
   }
 
   function openEditNameModal(guru) {
@@ -1515,6 +1516,40 @@ export default function AGuru() {
     })
   }
 
+  function openEditProfileModal(guru) {
+    if (!guru) return
+
+    setTeacherProfileEdit({
+      id: guru.id,
+      nama: guru.nama || '',
+      nis: guru.nis || '',
+      email: guru.email || '',
+      jk: guru.jk || '',
+      agama: guru.agama || '',
+      telp: guru.telp || '',
+      alamat: guru.alamat || '',
+      tanggal_lahir: toDateInputValue(guru.tanggal_lahir)
+    })
+    setEditProfileOpen(true)
+  }
+
+  function closeEditProfileModal() {
+    if (savingTeacherProfile) return
+
+    setEditProfileOpen(false)
+    setTeacherProfileEdit({
+      id: '',
+      nama: '',
+      nis: '',
+      email: '',
+      jk: '',
+      agama: '',
+      telp: '',
+      alamat: '',
+      tanggal_lahir: ''
+    })
+  }
+
   function applyTeacherNameUpdate(id, profile, fallbackName) {
     const nextName = profile?.nama || fallbackName
     if (!id || !nextName) return
@@ -1528,6 +1563,20 @@ export default function AGuru() {
     setGuruRaw(prev => prev.map(mergeName))
     setGuru(prev => prev.map(mergeName))
     setSelectedGuru(prev => (prev?.id === id ? mergeName(prev) : prev))
+  }
+
+  function applyTeacherProfileUpdate(id, profile) {
+    if (!id || !profile) return
+
+    const mergeProfile = (item) => (
+      item?.id === id
+        ? { ...item, ...profile }
+        : item
+    )
+
+    setGuruRaw(prev => prev.map(mergeProfile))
+    setGuru(prev => prev.map(mergeProfile))
+    setSelectedGuru(prev => (prev?.id === id ? mergeProfile(prev) : prev))
   }
 
   const submitTeacherNameEdit = (event) => {
@@ -1577,6 +1626,55 @@ export default function AGuru() {
           await loadAllData()
         } finally {
           setSavingTeacherName(false)
+        }
+      }
+    )
+  }
+
+  const submitTeacherProfileEdit = (event) => {
+    event.preventDefault()
+
+    const payload = {
+      nama: String(teacherProfileEdit.nama || '').trim().replace(/\s+/g, ' '),
+      nis: String(teacherProfileEdit.nis || '').trim(),
+      jk: teacherProfileEdit.jk || null,
+      agama: String(teacherProfileEdit.agama || '').trim(),
+      telp: String(teacherProfileEdit.telp || '').trim(),
+      alamat: String(teacherProfileEdit.alamat || '').trim(),
+      tanggal_lahir: teacherProfileEdit.tanggal_lahir || null
+    }
+
+    if (!teacherProfileEdit.id) {
+      pushToast('error', 'Guru tidak valid')
+      return
+    }
+
+    if (!payload.nama) {
+      pushToast('error', 'Nama guru wajib diisi')
+      return
+    }
+
+    if (payload.nama.length > 120) {
+      pushToast('error', 'Nama guru maksimal 120 karakter')
+      return
+    }
+
+    openPasswordModal(
+      'Konfirmasi Edit Profil Guru',
+      async () => {
+        setSavingTeacherProfile(true)
+
+        try {
+          const { data, error } = await supabase.admin.updateTeacherProfile(teacherProfileEdit.id, payload)
+          if (error) throw error
+
+          applyTeacherProfileUpdate(teacherProfileEdit.id, data?.profile)
+          closeEditProfileModal()
+          pushToast('success', 'Profil guru berhasil diperbarui')
+
+          await loadAllData()
+        } finally {
+          setSavingTeacherProfile(false)
         }
       }
     )
@@ -1681,7 +1779,7 @@ export default function AGuru() {
                         Contoh format {importExampleRows.length} baris
                       </p>
                       <p className="text-xs text-gray-500">
-                        Template ini hanya berisi identitas guru, kontak, jabatan, email, dan status akun.
+                        Template ini hanya berisi identitas guru, kontak, email, dan status akun.
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -2138,7 +2236,7 @@ export default function AGuru() {
                         <td className="px-4 py-4 whitespace-nowrap text-right">
                           <div className="flex items-center justify-end gap-1">
                             <button onClick={() => openDetailModal(g)} className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-all">Detail</button>
-                            <button onClick={() => openEditNameModal(g)} className="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-800 text-white text-xs font-semibold transition-all">Edit Nama</button>
+                            <button onClick={() => openEditProfileModal(g)} className="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-800 text-white text-xs font-semibold transition-all">Edit Profil</button>
                             {g.status === 'active' ? (
                               <button onClick={() => openNonaktif(g)} className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold transition-all">Nonaktif</button>
                             ) : (
@@ -2278,6 +2376,131 @@ export default function AGuru() {
           </div>
         )}
 
+        {/* Modal Edit Profil Guru */}
+        {editProfileOpen && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+            <form
+              onSubmit={submitTeacherProfileEdit}
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] border border-slate-200 overflow-hidden flex flex-col"
+            >
+              <div className="flex items-start justify-between gap-3 p-6 border-b border-slate-100 bg-slate-50/80">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center"><span className="text-xl">👤</span></div>
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-900">Edit Profil Guru</h3>
+                    <p className="text-slate-500 text-sm">{teacherProfileEdit.email || 'Email login tetap aman dan tidak ikut diubah'}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeEditProfileModal}
+                  disabled={savingTeacherProfile}
+                  className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-colors disabled:opacity-50"
+                  aria-label="Tutup edit profil guru"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+              </div>
+
+              <div className="p-6 space-y-4 overflow-y-auto">
+                <div className="rounded-2xl border border-blue-100 bg-blue-50/60 px-4 py-3 text-sm text-blue-800">
+                  Admin hanya dapat mengubah biodata profil. Email login, role, status akun, RFID, tenant, password, dan jabatan tetap dikunci dari form ini.
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Input
+                    label="Nama Guru *"
+                    value={teacherProfileEdit.nama}
+                    onChange={(e) => setTeacherProfileEdit(prev => ({ ...prev, nama: e.target.value }))}
+                    placeholder="Nama lengkap guru"
+                    maxLength={120}
+                    required
+                    autoFocus
+                    disabled={savingTeacherProfile}
+                  />
+                  <Input
+                    label="NIP/NUPTK"
+                    value={teacherProfileEdit.nis}
+                    onChange={(e) => setTeacherProfileEdit(prev => ({ ...prev, nis: e.target.value }))}
+                    placeholder="Nomor induk guru"
+                    maxLength={64}
+                    disabled={savingTeacherProfile}
+                  />
+                  <Select
+                    label="Jenis Kelamin"
+                    value={teacherProfileEdit.jk}
+                    onChange={(e) => setTeacherProfileEdit(prev => ({ ...prev, jk: e.target.value }))}
+                    disabled={savingTeacherProfile}
+                    options={[
+                      { value: '', label: 'Belum diisi' },
+                      { value: 'L', label: 'Laki-laki' },
+                      { value: 'P', label: 'Perempuan' }
+                    ]}
+                  />
+                  <Input
+                    label="Tanggal Lahir"
+                    type="date"
+                    value={teacherProfileEdit.tanggal_lahir}
+                    onChange={(e) => setTeacherProfileEdit(prev => ({ ...prev, tanggal_lahir: e.target.value }))}
+                    disabled={savingTeacherProfile}
+                  />
+                  <Input
+                    label="Agama"
+                    value={teacherProfileEdit.agama}
+                    onChange={(e) => setTeacherProfileEdit(prev => ({ ...prev, agama: e.target.value }))}
+                    placeholder="Agama"
+                    maxLength={50}
+                    disabled={savingTeacherProfile}
+                  />
+                  <Input
+                    label="No HP"
+                    value={teacherProfileEdit.telp}
+                    onChange={(e) => setTeacherProfileEdit(prev => ({ ...prev, telp: e.target.value }))}
+                    placeholder="08xxxxxxxxxx"
+                    maxLength={32}
+                    disabled={savingTeacherProfile}
+                  />
+                  <Input
+                    label="Email Login"
+                    value={teacherProfileEdit.email}
+                    readOnly
+                    className="bg-slate-50 text-slate-500"
+                  />
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Alamat</label>
+                    <textarea
+                      value={teacherProfileEdit.alamat}
+                      onChange={(e) => setTeacherProfileEdit(prev => ({ ...prev, alamat: e.target.value }))}
+                      placeholder="Alamat lengkap"
+                      maxLength={1000}
+                      disabled={savingTeacherProfile}
+                      className="block w-full min-h-[96px] px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 disabled:bg-slate-50 disabled:text-slate-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50/60">
+                <button
+                  type="button"
+                  onClick={closeEditProfileModal}
+                  disabled={savingTeacherProfile}
+                  className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-semibold text-sm hover:bg-slate-50 transition-all disabled:opacity-50"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingTeacherProfile || !teacherProfileEdit.nama.trim()}
+                  className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm disabled:opacity-50 transition-all"
+                >
+                  {savingTeacherProfile ? 'Menyimpan...' : 'Simpan Profil'}
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
         {/* Modal Mutasi Guru */}
         {mutasiGuruOpen && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -2388,7 +2611,7 @@ export default function AGuru() {
               {/* Footer */}
               <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-3">
                 <button onClick={closeDetailModal} className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-semibold text-sm hover:bg-slate-100 transition-all">✕ Tutup</button>
-                <button onClick={() => openEditNameModal(selectedGuru)} className="px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-800 text-white font-semibold text-sm transition-all">Edit Nama</button>
+                <button onClick={() => openEditProfileModal(selectedGuru)} className="px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-800 text-white font-semibold text-sm transition-all">Edit Profil</button>
                 {selectedGuru.status === 'active' ? (
                   <button onClick={() => openNonaktif(selectedGuru)} className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-semibold text-sm transition-all">Nonaktif</button>
                 ) : (

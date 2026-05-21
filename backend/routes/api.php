@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\GoogleDriveController;
 use App\Http\Controllers\Api\InfrastructureController;
 use App\Http\Controllers\Api\MobileDirectoryController;
 use App\Http\Controllers\Api\PresenceController;
+use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\QuizController;
 use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\RfidController;
@@ -96,6 +97,8 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout']);
     Route::post('/auth/update-password', [AuthController::class, 'updatePassword']);
     Route::post('/auth/update-account', [AuthController::class, 'updateAccount']);
+    Route::get('/profile/me', [ProfileController::class, 'me']);
+    Route::patch('/profile/me', [ProfileController::class, 'updateMe']);
     Route::post('/auth/verify-email/resend', [AuthController::class, 'resendVerificationEmail']);
     Route::post('/auth/google/credential-link', [AuthController::class, 'googleCredentialLink']);
     Route::post('/auth/google/unlink', [AuthController::class, 'googleUnlink']);
@@ -194,6 +197,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'throttle:api'])->group(func
     Route::post('/classes/deleted-history/{id}/restore', [ClassHistoryController::class, 'restore']);
     Route::post('/users/provision', [AdminController::class, 'provisionUser']);
     Route::patch('/teachers/{id}/name', [AdminController::class, 'updateTeacherName']);
+    Route::patch('/teachers/{id}/profile', [AdminController::class, 'updateTeacherProfile']);
     Route::get('/monitoring', [AdminController::class, 'monitoring']);
     Route::get('/scan-settings', [SettingsController::class, 'scanShow']);
     Route::patch('/scan-settings', [SettingsController::class, 'scanUpdate']);

@@ -1640,6 +1640,155 @@ class AdminController extends ApiController
         ]);
     }
 
+    public function updateTeacherProfile(Request $request, string $id)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'nama' => ['required', 'string', 'max:120'],
+            'nis' => ['nullable', 'string', 'max:64'],
+            'jk' => ['nullable', 'string', 'max:20'],
+            'agama' => ['nullable', 'string', 'max:50'],
+            'telp' => ['nullable', 'string', 'max:32'],
+            'alamat' => ['nullable', 'string', 'max:1000'],
+            'tanggal_lahir' => ['nullable', 'date'],
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['error' => $validator->errors()->first()], 422);
+        }
+
+        $profile = DB::table('profiles')
+            ->where('id', $id)
+            ->where('tenant_id', $tenantId)
+            ->first();
+        if (! $profile) {
+            return $this->deny('Guru tidak ditemukan', 404);
+        }
+
+        $role = strtolower((string) ($profile->role ?? ''));
+        if (! in_array($role, ['guru', 'teacher'], true)) {
+            return $this->deny('Hanya profil guru yang bisa diubah dari form ini.', 409);
+        }
+
+        $validated = $validator->validated();
+        $data = [];
+        foreach (['nama', 'nis', 'jk', 'agama', 'telp', 'alamat', 'tanggal_lahir'] as $key) {
+            if (! array_key_exists($key, $validated) || ! Schema::hasColumn('profiles', $key)) {
+                continue;
+            }
+
+            $value = $validated[$key];
+            if (is_string($value)) {
+                $value = preg_replace('/\s+/', ' ', trim($value)) ?? '';
+            }
+
+            if ($key === 'nis') {
+                $value = $this->normalizeIdentifierCode($value);
+            }
+            if ($key === 'jk' && $value !== '') {
+                $gender = strtoupper((string) $value);
+                $value = in_array($gender, ['L', 'P'], true) ? $gender : $value;
+            }
+
+            $data[$key] = $value === '' ? null : $value;
+        }
+
+        $newName = (string) ($data['nama'] ?? '');
+        if ($newName === '') {
+            return $this->deny('Nama guru wajib diisi.', 422);
+        }
+
+        $oldProfile = (array) $profile;
+        $now = now();
+        $syncedSnapshots = [
+            'jadwal' => 0,
+            'kelas_struktur' => 0,
+            'struktur_sekolah' => 0,
+            'organisasi' => 0,
+            'absensi_ajuan' => 0,
+        ];
+
+        DB::transaction(function () use ($id, $tenantId, $data, $newName, $profile, $now, &$syncedSnapshots) {
+            DB::table('profiles')
+                ->where('id', $id)
+                ->where('tenant_id', $tenantId)
+                ->update(array_merge($data, ['updated_at' => $now]));
+
+            if ((string) ($profile->nama ?? '') !== $newName) {
+                DB::table('users')
+                    ->where('id', $id)
+                    ->update([
+                        'name' => $newName,
+                        'updated_at' => $now,
+                    ]);
+
+                $syncedSnapshots = $this->syncTeacherDisplayNameSnapshots($tenantId, $id, $newName, $now);
+            }
+        });
+
+        $fresh = Profile::query()
+            ->where('id', $id)
+            ->where('tenant_id', $tenantId)
+            ->first();
+
+        $editor = $this->profile($request);
+        $this->logAudit(
+            $request,
+            'profiles',
+            $id,
+            'UPDATE',
+            [
+                'id' => $id,
+                'tenant_id' => $tenantId,
+                'role' => $role,
+                'email' => $oldProfile['email'] ?? null,
+                'nama' => $oldProfile['nama'] ?? null,
+                'nis' => $oldProfile['nis'] ?? null,
+                'jk' => $oldProfile['jk'] ?? null,
+                'agama' => $oldProfile['agama'] ?? null,
+                'telp' => $oldProfile['telp'] ?? null,
+                'alamat' => $oldProfile['alamat'] ?? null,
+                'tanggal_lahir' => $oldProfile['tanggal_lahir'] ?? null,
+            ],
+            [
+                'id' => $id,
+                'tenant_id' => $tenantId,
+                'role' => $role,
+                'email' => $fresh?->email,
+                'nama' => $fresh?->nama,
+                'nis' => $fresh?->nis,
+                'jk' => $fresh?->jk,
+                'agama' => $fresh?->agama,
+                'telp' => $fresh?->telp,
+                'alamat' => $fresh?->alamat,
+                'tanggal_lahir' => $fresh?->tanggal_lahir,
+                'synced_snapshots' => $syncedSnapshots,
+                'edited_by' => [
+                    'id' => $editor?->id ?? $request->user()?->id,
+                    'nama' => $editor?->nama ?? $request->user()?->name,
+                    'email' => $editor?->email ?? $request->user()?->email,
+                    'role' => $editor?->role,
+                ],
+                'edited_at' => $now->toISOString(),
+            ],
+            $tenantId
+        );
+
+        return response()->json([
+            'data' => [
+                'profile' => $fresh,
+                'synced_snapshots' => $syncedSnapshots,
+            ],
+        ]);
+    }
+
     public function updateStudentAdditionalInfo(Request $request, string $id)
     {
         if (! $this->isAdmin($request) && ! $this->isGuru($request)) {

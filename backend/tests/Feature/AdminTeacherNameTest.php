@@ -134,6 +134,111 @@ class AdminTeacherNameTest extends TestCase
         $this->assertSame('rina.lama@example.com', $newData['email'] ?? null);
     }
 
+    public function test_admin_can_update_teacher_profile_without_opening_sensitive_fields(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        $admin = $this->createUserWithProfile($tenantId, 'admin', 'Admin Sekolah', 'admin2@example.com');
+        $teacher = $this->createUserWithProfile($tenantId, 'guru', 'Pak Dedi Lama', 'dedi@example.com', [
+            'nis' => 'NIP-LAMA',
+            'jk' => 'L',
+            'agama' => 'Islam',
+            'telp' => '080000',
+            'alamat' => 'Alamat lama',
+            'jabatan' => 'Guru Tetap',
+            'status' => 'active',
+            'tanggal_lahir' => '1980-01-01',
+        ]);
+
+        $response = $this->actingAs($admin)->patchJson("/api/admin/teachers/{$teacher->id}/profile", [
+            'nama' => '  Pak Dedi Baru  ',
+            'nis' => ' NIP BARU ',
+            'jk' => 'P',
+            'agama' => 'Kristen',
+            'telp' => '08123456789',
+            'alamat' => 'Alamat baru',
+            'tanggal_lahir' => '1981-02-03',
+            'email' => 'tidak-boleh-berubah@example.com',
+            'role' => 'admin',
+            'status' => 'nonaktif',
+            'jabatan' => 'Kepala Sekolah',
+            'rfid_uid' => 'RFID-TERBUKA',
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('data.profile.nama', 'Pak Dedi Baru');
+        $response->assertJsonPath('data.profile.email', 'dedi@example.com');
+
+        $this->assertDatabaseHas('profiles', [
+            'id' => $teacher->id,
+            'tenant_id' => $tenantId,
+            'nama' => 'Pak Dedi Baru',
+            'nis' => 'NIPBARU',
+            'jk' => 'P',
+            'agama' => 'Kristen',
+            'telp' => '08123456789',
+            'alamat' => 'Alamat baru',
+            'email' => 'dedi@example.com',
+            'role' => 'guru',
+            'status' => 'active',
+            'jabatan' => 'Guru Tetap',
+        ]);
+        $this->assertDatabaseHas('users', [
+            'id' => $teacher->id,
+            'name' => 'Pak Dedi Baru',
+            'email' => 'dedi@example.com',
+        ]);
+    }
+
+    public function test_teacher_can_update_own_profile_without_sensitive_fields(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        $teacher = $this->createUserWithProfile($tenantId, 'guru', 'Bu Maya Lama', 'maya@example.com', [
+            'nis' => 'NIP-MAYA',
+            'jk' => 'P',
+            'agama' => 'Islam',
+            'telp' => '080000',
+            'alamat' => 'Alamat lama',
+            'jabatan' => 'Guru Tetap',
+            'status' => 'active',
+            'rfid_uid' => 'RFID-LAMA',
+            'tanggal_lahir' => '1985-04-05',
+        ]);
+
+        $response = $this->actingAs($teacher)->patchJson('/api/profile/me', [
+            'nama' => 'Bu Maya Baru',
+            'jk' => 'P',
+            'agama' => 'Hindu',
+            'telp' => '089999',
+            'alamat' => 'Alamat baru',
+            'tanggal_lahir' => '1986-06-07',
+            'email' => 'maya-baru@example.com',
+            'role' => 'admin',
+            'status' => 'nonaktif',
+            'jabatan' => 'Kepala Sekolah',
+            'rfid_uid' => 'RFID-BARU',
+            'nis' => 'NIP-BARU',
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('data.nama', 'Bu Maya Baru');
+        $response->assertJsonPath('data.email', 'maya@example.com');
+
+        $this->assertDatabaseHas('profiles', [
+            'id' => $teacher->id,
+            'tenant_id' => $tenantId,
+            'nama' => 'Bu Maya Baru',
+            'email' => 'maya@example.com',
+            'role' => 'guru',
+            'status' => 'active',
+            'jabatan' => 'Guru Tetap',
+            'rfid_uid' => 'RFID-LAMA',
+            'nis' => 'NIP-MAYA',
+            'agama' => 'Hindu',
+            'telp' => '089999',
+            'alamat' => 'Alamat baru',
+        ]);
+    }
+
     private function defaultTenantId(): string
     {
         return (string) DB::table('tenants')
@@ -141,7 +246,7 @@ class AdminTeacherNameTest extends TestCase
             ->value('id');
     }
 
-    private function createUserWithProfile(string $tenantId, string $role, string $name, string $email): User
+    private function createUserWithProfile(string $tenantId, string $role, string $name, string $email, array $profileOverrides = []): User
     {
         $user = User::query()->create([
             'id' => (string) Str::uuid(),
@@ -150,7 +255,7 @@ class AdminTeacherNameTest extends TestCase
             'password' => Hash::make('password123'),
         ]);
 
-        DB::table('profiles')->insert([
+        DB::table('profiles')->insert(array_merge([
             'id' => $user->id,
             'tenant_id' => $tenantId,
             'email' => $email,
@@ -159,7 +264,7 @@ class AdminTeacherNameTest extends TestCase
             'status' => 'active',
             'created_at' => now(),
             'updated_at' => now(),
-        ]);
+        ], $profileOverrides));
 
         return $user;
     }
