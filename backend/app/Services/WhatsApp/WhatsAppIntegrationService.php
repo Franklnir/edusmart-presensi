@@ -701,7 +701,7 @@ class WhatsAppIntegrationService
         }
     }
 
-    private function createInstanceForQr(WhatsAppIntegration $integration): array
+    private function createInstanceForQr(WhatsAppIntegration $integration, bool $allowReset = true): array
     {
         $payload = [
             'instanceName' => $integration->instance_name,
@@ -712,14 +712,34 @@ class WhatsAppIntegrationService
         try {
             return $this->evolutionApiClient->createInstance($payload);
         } catch (\Throwable $e) {
-            $message = Str::lower($e->getMessage());
+            $providerMessage = $this->normalizeProviderErrorMessage($e->getMessage());
+            $message = Str::lower($providerMessage);
             if (! Str::contains($message, ['already in use', 'already exists'])) {
-                throw $e;
+                if ($allowReset && $this->isRecoverableInstanceError($providerMessage)) {
+                    ['response' => $connect] = $this->attemptQrConnect($integration->instance_name);
+                    if ($this->hasQrPayload($connect)) {
+                        return $connect;
+                    }
+
+                    $this->forgetRemoteInstance($integration->instance_name);
+                    $this->waitForRemoteInstanceAbsence($integration->instance_name, 3, 350);
+
+                    try {
+                        return $this->createInstanceForQr($integration, false);
+                    } catch (\Throwable $resetException) {
+                        throw new RuntimeException(
+                            'Evolution gagal membuat instance WhatsApp setelah reset state: '
+                            .$this->normalizeProviderErrorMessage($resetException->getMessage())
+                        );
+                    }
+                }
+
+                throw new RuntimeException('Evolution gagal membuat instance WhatsApp: '.$providerMessage);
             }
 
             $remote = $this->evolutionApiClient->fetchInstance($integration->instance_name);
             if (! $remote) {
-                throw $e;
+                throw new RuntimeException('Evolution menganggap instance sudah ada, tetapi instance tidak ditemukan saat dicek ulang.');
             }
 
             ['response' => $connect] = $this->attemptQrConnect($integration->instance_name);
@@ -727,7 +747,7 @@ class WhatsAppIntegrationService
                 return $connect;
             }
 
-            throw $e;
+            throw new RuntimeException('Evolution instance sudah ada, tetapi QR belum bisa dibuat: '.$providerMessage);
         }
     }
 
@@ -735,6 +755,21 @@ class WhatsAppIntegrationService
     {
         $instanceName = $integration->instance_name;
 
+        $this->forgetRemoteInstance($instanceName);
+
+        $remote = $this->waitForRemoteInstanceAbsence($instanceName);
+        if ($remote) {
+            ['response' => $connect] = $this->attemptQrConnect($instanceName);
+            if ($this->hasQrPayload($connect)) {
+                return $connect;
+            }
+        }
+
+        return $this->createInstanceForQr($integration);
+    }
+
+    private function forgetRemoteInstance(string $instanceName): void
+    {
         try {
             $this->evolutionApiClient->logoutInstance($instanceName);
         } catch (\Throwable $e) {
@@ -746,16 +781,6 @@ class WhatsAppIntegrationService
         } catch (\Throwable $e) {
             // A stale instance may still be recoverable through connect below.
         }
-
-        $remote = $this->waitForRemoteInstanceAbsence($instanceName);
-        if ($remote) {
-            ['response' => $connect] = $this->attemptQrConnect($instanceName);
-            if ($this->hasQrPayload($connect)) {
-                return $connect;
-            }
-        }
-
-        return $this->createInstanceForQr($integration);
     }
 
     private function waitForRemoteInstanceAbsence(string $instanceName, int $attempts = 6, int $sleepMilliseconds = 250): ?array
@@ -784,9 +809,27 @@ class WhatsAppIntegrationService
         } catch (\Throwable $e) {
             return [
                 'response' => [],
-                'error' => $this->normalizeProviderErrorMessage($e->getMessage()),
+                'error' => 'Evolution gagal membuat QR untuk instance: '
+                    .$this->normalizeProviderErrorMessage($e->getMessage()),
             ];
         }
+    }
+
+    private function isRecoverableInstanceError(string $message): bool
+    {
+        $message = Str::lower($message);
+
+        return Str::contains($message, [
+            'internal server error',
+            'http 500',
+            'http 502',
+            'http 503',
+            'http 504',
+            'instance',
+            'database',
+            'prisma',
+            'session',
+        ]);
     }
 
     private function extractPairingCode(array $payload): string

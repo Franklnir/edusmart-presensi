@@ -95,7 +95,7 @@ class WhatsAppIntegrationTest extends TestCase
         $response->assertJsonPath('data.integration.status', 'awaiting_qr');
         $response->assertJsonPath('data.integration.connection_state', 'connecting');
         $response->assertJsonPath('data.integration.qr_code', null);
-        $response->assertJsonPath('data.integration.last_error', 'Gateway timeout');
+        $response->assertJsonPath('data.integration.last_error', 'Evolution gagal membuat QR untuk instance: Gateway timeout');
     }
 
     public function test_admin_can_generate_qr_even_when_webhook_setup_fails(): void
@@ -131,6 +131,42 @@ class WhatsAppIntegrationTest extends TestCase
             'QR tetap diproses',
             (string) $response->json('data.integration.last_error')
         );
+    }
+
+    public function test_admin_generate_qr_resets_stale_state_when_create_returns_server_error(): void
+    {
+        config()->set('services.evolution_api.base_url', 'https://evolution.test');
+        config()->set('services.evolution_api.api_key', 'secret-key');
+        config()->set('services.evolution_api.webhook_base_url', 'https://edusmart.example.com');
+
+        $tenantId = $this->defaultTenantId();
+        $user = $this->createUserWithProfile($tenantId, 'admin', 'admin-create-500@example.com');
+
+        Http::fake([
+            'https://evolution.test/instance/fetchInstances*' => Http::sequence()
+                ->push([], 200)
+                ->push([], 200),
+            'https://evolution.test/instance/create' => Http::sequence()
+                ->push(['message' => 'Internal Server Error'], 500)
+                ->push([
+                    'instance' => ['instanceName' => 'edusmart-default'],
+                    'base64' => 'data:image/png;base64,QR-AFTER-RESET',
+                ], 201),
+            'https://evolution.test/instance/connect/*' => Http::response([
+                'message' => 'The "edusmart-default" instance does not exist',
+            ], 404),
+            'https://evolution.test/instance/logout/*' => Http::response(['success' => true], 200),
+            'https://evolution.test/instance/delete/*' => Http::response(['success' => true], 200),
+            'https://evolution.test/webhook/set/*' => Http::response(['success' => true], 200),
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $response = $this->postJson('/api/admin/whatsapp/connect');
+
+        $response->assertOk();
+        $response->assertJsonPath('data.integration.status', 'awaiting_qr');
+        $response->assertJsonPath('data.integration.qr_code', 'data:image/png;base64,QR-AFTER-RESET');
     }
 
     public function test_admin_can_generate_qr_when_provider_fetch_returns_not_found(): void
