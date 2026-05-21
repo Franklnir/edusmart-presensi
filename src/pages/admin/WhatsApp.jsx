@@ -303,13 +303,18 @@ export default function WhatsApp() {
     applyPayload(data)
     const nextIntegration = data?.integration
 
-    if (nextIntegration?.last_error) {
-      pushToast('warning', nextIntegration.last_error)
+    if (nextIntegration?.qr_code || nextIntegration?.pairing_code) {
+      pushToast('success', 'QR WhatsApp siap dipindai oleh admin sekolah')
+      if (nextIntegration?.last_error) {
+        window.setTimeout(() => {
+          pushToast('warning', nextIntegration.last_error)
+        }, 350)
+      }
       return
     }
 
-    if (nextIntegration?.qr_code || nextIntegration?.pairing_code) {
-      pushToast('success', 'QR WhatsApp siap dipindai oleh admin sekolah')
+    if (nextIntegration?.last_error) {
+      pushToast('warning', nextIntegration.last_error)
       return
     }
 

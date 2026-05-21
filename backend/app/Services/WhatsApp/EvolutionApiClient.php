@@ -242,7 +242,13 @@ class EvolutionApiClient
             ?: Arr::get($json, 'response.message');
 
         if (is_string($message) && trim($message) !== '') {
-            return trim($message);
+            $message = trim($message);
+            if ($response->status() >= 500 && strcasecmp($message, 'Internal Server Error') === 0) {
+                return 'Evolution API sedang gagal memproses request instance (HTTP '
+                    .$response->status().'). Service publik hidup, tetapi operasi QR/instance belum siap.';
+            }
+
+            return $message;
         }
 
         return 'Evolution API error HTTP '.$response->status();

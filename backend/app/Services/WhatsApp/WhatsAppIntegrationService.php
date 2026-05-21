@@ -131,19 +131,16 @@ class WhatsAppIntegrationService
 
         $integration = $this->getOrCreateIntegration($tenantId);
         $this->getOrCreateNotificationSettings($tenantId, $integration);
+        $webhookError = null;
 
         try {
             $remote = $this->evolutionApiClient->fetchInstance($integration->instance_name);
             if ($remote && $this->normalizeConnectionState((string) ($remote['status'] ?? $remote['connectionStatus'] ?? '')) === 'open') {
-                $this->evolutionApiClient->setWebhook(
-                    $integration->instance_name,
-                    $this->webhookUrl($integration),
-                    self::WEBHOOK_EVENTS
-                );
+                $webhookError = $this->safeSetWebhook($integration);
 
                 $this->applyRemoteSnapshot($integration, $remote);
                 $integration->fill([
-                    'last_error' => 'WhatsApp sudah terhubung. Logout dulu jika ingin membuat QR baru.',
+                    'last_error' => $webhookError ?: 'WhatsApp sudah terhubung. Logout dulu jika ingin membuat QR baru.',
                     'last_synced_at' => now(),
                 ]);
                 $integration->save();
@@ -155,28 +152,16 @@ class WhatsAppIntegrationService
             $connect = [];
             if (! $remote) {
                 $created = $this->createInstanceForQr($integration);
-                $this->evolutionApiClient->setWebhook(
-                    $integration->instance_name,
-                    $this->webhookUrl($integration),
-                    self::WEBHOOK_EVENTS
-                );
+                $webhookError = $this->safeSetWebhook($integration);
             } else {
                 $this->applyRemoteSnapshot($integration, $remote);
 
-                $this->evolutionApiClient->setWebhook(
-                    $integration->instance_name,
-                    $this->webhookUrl($integration),
-                    self::WEBHOOK_EVENTS
-                );
+                $webhookError = $this->safeSetWebhook($integration);
 
                 ['response' => $connect, 'error' => $connectError] = $this->attemptQrConnect($integration->instance_name);
                 if (! $this->hasQrPayload($connect) && $this->shouldRecreateRemoteInstance($remote)) {
                     $created = $this->recreateInstanceForQr($integration);
-                    $this->evolutionApiClient->setWebhook(
-                        $integration->instance_name,
-                        $this->webhookUrl($integration),
-                        self::WEBHOOK_EVENTS
-                    );
+                    $webhookError = $this->safeSetWebhook($integration);
                     $connect = [];
                     $connectError = null;
                 }
@@ -198,6 +183,7 @@ class WhatsAppIntegrationService
             }
 
             $hasFreshQr = $qrCode !== '' || $pairingCode !== '';
+            $lastError = $connectError ?: $webhookError;
 
             $integration->fill([
                 // Evolution v2 may deliver the QR via webhook instead of connect response.
@@ -207,7 +193,7 @@ class WhatsAppIntegrationService
                 'pairing_code' => $pairingCode ?: null,
                 'qr_updated_at' => $hasFreshQr ? now() : null,
                 'last_synced_at' => now(),
-                'last_error' => $connectError,
+                'last_error' => $lastError,
             ]);
             $integration->save();
         } catch (\Throwable $e) {
@@ -699,19 +685,28 @@ class WhatsAppIntegrationService
         return $baseUrl.'/api/whatsapp/webhook/'.$integration->webhook_secret;
     }
 
+    private function safeSetWebhook(WhatsAppIntegration $integration): ?string
+    {
+        try {
+            $this->evolutionApiClient->setWebhook(
+                $integration->instance_name,
+                $this->webhookUrl($integration),
+                self::WEBHOOK_EVENTS
+            );
+
+            return null;
+        } catch (\Throwable $e) {
+            return 'QR tetap diproses, tetapi webhook Evolution belum aktif: '
+                .$this->normalizeProviderErrorMessage($e->getMessage());
+        }
+    }
+
     private function createInstanceForQr(WhatsAppIntegration $integration): array
     {
         $payload = [
             'instanceName' => $integration->instance_name,
             'qrcode' => true,
             'integration' => (string) config('services.evolution_api.integration', 'WHATSAPP-BAILEYS'),
-            'webhook' => [
-                'url' => $this->webhookUrl($integration),
-                'enabled' => true,
-                'byEvents' => true,
-                'base64' => true,
-                'events' => self::WEBHOOK_EVENTS,
-            ],
         ];
 
         try {
