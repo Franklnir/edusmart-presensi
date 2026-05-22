@@ -47,6 +47,8 @@ class DbTableRegistry
         'user_presence',
         'import_siswa_histories',
         'import_siswa_history_items',
+        'import_guru_histories',
+        'import_guru_history_items',
     ];
 
     private const TENANT_SCOPED_TABLES = [
@@ -92,6 +94,8 @@ class DbTableRegistry
         'user_presence',
         'import_siswa_histories',
         'import_siswa_history_items',
+        'import_guru_histories',
+        'import_guru_history_items',
     ];
 
     public function isAllowed(string $table): bool

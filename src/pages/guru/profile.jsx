@@ -14,6 +14,7 @@ import {
 } from '../../utils/accountSetup'
 import { completeGoogleLinkOAuthFlow } from '../../utils/googleLinking'
 import { validatePassword } from '../../utils/passwordPolicy'
+import { religionSelectOptions } from '../../constants/religionOptions'
 
 /** Signed URL expire (detik) */
 const SIGNED_URL_EXPIRES_IN = 60 * 60 * 24 * 7 // 7 hari
@@ -934,13 +935,11 @@ export default function ProfileGuru() {
                     value={form.agama}
                     onChange={(e) => handleFieldChange('agama', e.target.value)}
                   >
-                    <option value="">Pilih Agama</option>
-                    <option value="Islam">Islam</option>
-                    <option value="Kristen">Kristen</option>
-                    <option value="Katolik">Katolik</option>
-                    <option value="Hindu">Hindu</option>
-                    <option value="Buddha">Buddha</option>
-                    <option value="Konghucu">Konghucu</option>
+                    {religionSelectOptions(form.agama).map((option) => (
+                      <option key={option.value || 'empty'} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
 

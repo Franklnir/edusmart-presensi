@@ -893,6 +893,8 @@ class DbController extends ApiController
             'anggota_ekskul',
             'import_siswa_histories',
             'import_siswa_history_items',
+            'import_guru_histories',
+            'import_guru_history_items',
         ];
 
         if (in_array($table, $adminOnlyTables, true)) {

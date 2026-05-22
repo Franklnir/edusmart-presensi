@@ -91,6 +91,8 @@ class SuperAdminController extends ApiController
         'anggota_ekskul',
         'import_siswa_histories',
         'import_siswa_history_items',
+        'import_guru_histories',
+        'import_guru_history_items',
     ];
 
     public function __construct(

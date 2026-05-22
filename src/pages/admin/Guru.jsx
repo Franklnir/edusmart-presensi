@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase'
 import { queryClient, queryKeys } from '../../lib/queryClient'
 import { formatDate } from '../../lib/time'
 import { useUIStore } from '../../store/useUIStore'
+import { useAuthStore } from '../../store/useAuthStore'
 import ProfileAvatar from '../../components/ProfileAvatar'
 import PasswordInput from '../../components/PasswordInput'
 import {
@@ -25,6 +26,7 @@ import {
 } from '../../utils/importUtils'
 import { isEmailFormat } from '../../utils/accountSetup'
 import { getProfileSourceMeta } from '../../utils/profileSource'
+import { religionSelectOptions } from '../../constants/religionOptions'
 
 const STRONG_PASSWORD_MESSAGE = 'Password minimal 12 karakter dan wajib ada huruf besar, huruf kecil, angka, serta simbol'
 const isStrongPassword = (value = '') =>
@@ -32,6 +34,20 @@ const isStrongPassword = (value = '') =>
 const toDateInputValue = (value = '') => {
   if (!value) return ''
   return String(value).slice(0, 10)
+}
+const IMPORT_SOURCE_LABEL = {
+  file: 'Upload File',
+  sheet: 'Google Sheets'
+}
+const createClientUuid = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
+    const random = Math.floor(Math.random() * 16)
+    const value = char === 'x' ? random : ((random & 0x3) | 0x8)
+    return value.toString(16)
+  })
 }
 
 /* ===== Password Modal Component ===== */
@@ -387,6 +403,7 @@ function Select({ label, error, options = [], className = '', ...props }) {
 
 export default function AGuru() {
   const { pushToast, requestConfirmation } = useUIStore()
+  const { user } = useAuthStore()
   const [loadingInit, setLoadingInit] = useState(true)
 
   /* ===== Password Modal State ===== */
@@ -473,6 +490,12 @@ export default function AGuru() {
   const [importLoading, setImportLoading] = useState(false)
   const [importProgress, setImportProgress] = useState({ phase: 'idle' })
   const [importSummary, setImportSummary] = useState(null)
+  const [importHistories, setImportHistories] = useState([])
+  const [importHistoryItems, setImportHistoryItems] = useState([])
+  const [selectedImportHistory, setSelectedImportHistory] = useState(null)
+  const [importHistoryLoading, setImportHistoryLoading] = useState(false)
+  const [importHistoryDetailLoading, setImportHistoryDetailLoading] = useState(false)
+  const [importHistoryActionLoading, setImportHistoryActionLoading] = useState(false)
 
   const importExampleRows = useMemo(() => {
     const sampleNames = [
@@ -591,7 +614,9 @@ export default function AGuru() {
     0,
     importProgressSteps.findIndex(([key]) => key === importProgress.phase)
   )
-  const showImportProgress = importLoading || ['reading', 'ready', 'processing', 'history', 'done'].includes(importProgress.phase)
+  const showImportProgress = importSource !== 'history' && (
+    importLoading || ['reading', 'ready', 'processing', 'history', 'done'].includes(importProgress.phase)
+  )
 
   /* ===== Password Modal Functions ===== */
   const openPasswordModal = (title, action) => {
@@ -986,7 +1011,190 @@ export default function AGuru() {
     setImportErrors([])
     setImportSummary(null)
     setImportProgress({ phase: 'idle' })
+    setImportHistories([])
+    setImportHistoryItems([])
+    setSelectedImportHistory(null)
+    setImportHistoryLoading(false)
+    setImportHistoryDetailLoading(false)
+    setImportHistoryActionLoading(false)
     setImportSource('file')
+  }
+
+  const loadImportHistoryItems = async (historyId) => {
+    if (!historyId) {
+      setImportHistoryItems([])
+      return []
+    }
+
+    setImportHistoryDetailLoading(true)
+    try {
+      const { data, error } = await supabase
+        .from('import_guru_history_items')
+        .select('*')
+        .eq('history_id', historyId)
+        .order('id', { ascending: true })
+      if (error) throw error
+      setImportHistoryItems(data || [])
+      return data || []
+    } catch (error) {
+      console.error('Error loading guru import history detail:', error)
+      pushToast('error', `Gagal memuat detail riwayat guru: ${error?.message || 'Unknown error'}`)
+      setImportHistoryItems([])
+      return []
+    } finally {
+      setImportHistoryDetailLoading(false)
+    }
+  }
+
+  const loadImportHistories = async (preferredId = null) => {
+    setImportHistoryLoading(true)
+    try {
+      const { data, error } = await supabase
+        .from('import_guru_histories')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(50)
+      if (error) throw error
+
+      const rows = data || []
+      setImportHistories(rows)
+
+      const target =
+        rows.find((item) => item.id === preferredId) ||
+        rows.find((item) => item.id === selectedImportHistory?.id) ||
+        rows[0] ||
+        null
+
+      setSelectedImportHistory(target)
+      if (target?.id) {
+        await loadImportHistoryItems(target.id)
+      } else {
+        setImportHistoryItems([])
+      }
+    } catch (error) {
+      console.error('Error loading guru import histories:', error)
+      pushToast('error', `Gagal memuat riwayat import guru: ${error?.message || 'Unknown error'}`)
+    } finally {
+      setImportHistoryLoading(false)
+    }
+  }
+
+  const switchImportSource = async (nextSource) => {
+    setImportSource(nextSource)
+    if (nextSource === 'history') {
+      await loadImportHistories()
+    }
+  }
+
+  const openImportHistory = async (history) => {
+    if (!history?.id) return
+    setSelectedImportHistory(history)
+    await loadImportHistoryItems(history.id)
+  }
+
+  const saveSelectedImportHistory = async () => {
+    if (!selectedImportHistory?.id) return
+
+    setImportHistoryActionLoading(true)
+    try {
+      const now = new Date().toISOString()
+      const { error } = await supabase
+        .from('import_guru_histories')
+        .update({
+          status: 'saved',
+          saved_at: now,
+          updated_at: now
+        })
+        .eq('id', selectedImportHistory.id)
+      if (error) throw error
+
+      pushToast('success', 'Riwayat import guru disimpan')
+      await loadImportHistories(selectedImportHistory.id)
+    } catch (error) {
+      console.error('Error saving guru import history:', error)
+      pushToast('error', `Gagal menyimpan riwayat guru: ${error?.message || 'Unknown error'}`)
+    } finally {
+      setImportHistoryActionLoading(false)
+    }
+  }
+
+  const deleteSelectedImportHistory = async () => {
+    if (!selectedImportHistory?.id) return
+
+    const confirmed = await requestConfirmation({
+      title: 'Hapus riwayat import guru?',
+      message: 'Riwayat import akan dihapus. Akun guru yang sudah dibuat atau diperbarui tetap tersimpan.',
+      confirmText: 'Hapus Riwayat',
+      cancelText: 'Batal',
+      tone: 'danger'
+    })
+    if (!confirmed) return
+
+    setImportHistoryActionLoading(true)
+    try {
+      const { error: itemError } = await supabase
+        .from('import_guru_history_items')
+        .delete()
+        .eq('history_id', selectedImportHistory.id)
+      if (itemError) throw itemError
+
+      const { error: historyError } = await supabase
+        .from('import_guru_histories')
+        .delete()
+        .eq('id', selectedImportHistory.id)
+      if (historyError) throw historyError
+
+      pushToast('success', 'Riwayat import guru dihapus. Data guru tetap tersimpan.')
+      await loadImportHistories()
+    } catch (error) {
+      console.error('Error deleting guru import history:', error)
+      pushToast('error', `Gagal menghapus riwayat guru: ${error?.message || 'Unknown error'}`)
+    } finally {
+      setImportHistoryActionLoading(false)
+    }
+  }
+
+  const persistGuruImportHistory = async ({ summary, itemRows }) => {
+    const now = new Date().toISOString()
+    const historyId = createClientUuid()
+    const historyPayload = {
+      id: historyId,
+      admin_id: user?.id || null,
+      source: importSource === 'sheet' ? 'sheet' : 'file',
+      file_name: importSource === 'file' ? (importFile?.name || null) : null,
+      sheet_url: importSource === 'sheet' ? (String(sheetUrl || '').trim() || null) : null,
+      status: 'pending',
+      total_rows: importRows.length + importErrors.length,
+      success_rows: summary.created + summary.updated + summary.skipped,
+      created_rows: summary.created,
+      updated_rows: summary.updated,
+      skipped_rows: summary.skipped,
+      failed_rows: summary.failed,
+      saved_at: null,
+      created_at: now,
+      updated_at: now
+    }
+
+    const { error: historyError } = await supabase
+      .from('import_guru_histories')
+      .insert(historyPayload)
+    if (historyError) throw historyError
+
+    if (itemRows.length) {
+      const rows = itemRows.map((item) => ({
+        ...item,
+        history_id: historyId,
+        imported_at: item.imported_at || now,
+        created_at: now,
+        updated_at: now
+      }))
+      const { error: itemError } = await supabase
+        .from('import_guru_history_items')
+        .insert(rows)
+      if (itemError) throw itemError
+    }
+
+    return historyId
   }
 
   const upsertGuruRow = async (row) => {
@@ -1042,7 +1250,12 @@ export default function AGuru() {
       }
 
       const updateKeys = Object.keys(payload).filter((k) => k !== 'updated_at')
-      if (!updateKeys.length && existing.created_via) return 'skipped'
+      if (!updateKeys.length && existing.created_via) {
+        return {
+          status: 'skipped',
+          profileId: existing.id
+        }
+      }
 
       const provisionPayload = {
         id: existing.id,
@@ -1064,7 +1277,10 @@ export default function AGuru() {
       const { error } = await supabase.admin.provisionUser(provisionPayload)
 
       if (error) throw error
-      return 'updated'
+      return {
+        status: 'updated',
+        profileId: existing.id
+      }
     }
 
     const { data: provisionData, error: provisionError } = await supabase.admin.provisionUser({
@@ -1087,7 +1303,10 @@ export default function AGuru() {
     const userId = provisionData?.user?.id || provisionData?.profile?.id
     if (!userId) throw new Error('User gagal dibuat')
 
-    return 'created'
+    return {
+      status: 'created',
+      profileId: userId
+    }
   }
 
   const handleRunImport = async () => {
@@ -1133,6 +1352,17 @@ export default function AGuru() {
         reason: error.reason
       }))
     }
+    const historyItems = importErrors.map((error) => ({
+      profile_id: null,
+      row_number: error.row || null,
+      status: 'failed',
+      created_user: false,
+      nis: null,
+      nama: null,
+      email: null,
+      error_message: error.reason || 'Validasi gagal',
+      imported_at: new Date().toISOString()
+    }))
     const totalRows = importRows.length
     let processedRows = 0
     setImportProgress({
@@ -1150,14 +1380,38 @@ export default function AGuru() {
       try {
         // eslint-disable-next-line no-await-in-loop
         const result = await upsertGuruRow(row)
-        if (result === 'created') summary.created += 1
-        else if (result === 'updated') summary.updated += 1
+        if (result?.status === 'created') summary.created += 1
+        else if (result?.status === 'updated') summary.updated += 1
         else summary.skipped += 1
+
+        historyItems.push({
+          profile_id: result?.profileId || null,
+          row_number: row.__rowNum || null,
+          status: result?.status || 'skipped',
+          created_user: result?.status === 'created',
+          nis: row.nis || null,
+          nama: row.nama || null,
+          email: row.email || null,
+          error_message: null,
+          imported_at: new Date().toISOString()
+        })
       } catch (error) {
         summary.failed += 1
+        const reason = error?.message || 'Gagal memproses'
         summary.errors.push({
           row: row.__rowNum,
-          reason: error?.message || 'Gagal memproses'
+          reason
+        })
+        historyItems.push({
+          profile_id: null,
+          row_number: row.__rowNum || null,
+          status: 'failed',
+          created_user: false,
+          nis: row.nis || null,
+          nama: row.nama || null,
+          email: row.email || null,
+          error_message: reason,
+          imported_at: new Date().toISOString()
         })
       } finally {
         processedRows += 1
@@ -1178,7 +1432,28 @@ export default function AGuru() {
       }
     }
 
-    setImportSummary(summary)
+    let historyId = null
+    try {
+      setImportProgress({
+        phase: 'history',
+        current: totalRows,
+        total: totalRows,
+        created: summary.created,
+        updated: summary.updated,
+        skipped: summary.skipped,
+        failed: summary.failed,
+        message: 'Menyimpan riwayat import guru...'
+      })
+      historyId = await persistGuruImportHistory({ summary, itemRows: historyItems })
+    } catch (error) {
+      console.error('Error saving guru import history:', error)
+      pushToast('warning', `Import selesai, tapi gagal menyimpan riwayat: ${error?.message || 'Unknown error'}`)
+    }
+
+    setImportSummary({
+      ...summary,
+      historyId
+    })
     setImportProgress({
       phase: 'done',
       current: totalRows,
@@ -1192,6 +1467,10 @@ export default function AGuru() {
     pushToast('success', `Import guru selesai: ${summary.created} baru, ${summary.updated} update, ${summary.skipped} lewati, ${summary.failed} gagal.`)
     setImportLoading(false)
     await loadGuruRaw()
+    if (historyId) {
+      setImportSource('history')
+      await loadImportHistories(historyId)
+    }
   }
 
   const exportGuruToExcel = async () => {
@@ -1748,7 +2027,7 @@ export default function AGuru() {
                       ? 'bg-blue-600 text-white border-blue-600'
                       : 'bg-white text-gray-700 border-gray-200'
                       }`}
-                    onClick={() => setImportSource('file')}
+                    onClick={() => switchImportSource('file')}
                   >
                     📁 Upload File
                   </button>
@@ -1758,12 +2037,172 @@ export default function AGuru() {
                       ? 'bg-blue-600 text-white border-blue-600'
                       : 'bg-white text-gray-700 border-gray-200'
                       }`}
-                    onClick={() => setImportSource('sheet')}
+                    onClick={() => switchImportSource('sheet')}
                   >
                     📊 Google Sheets
                   </button>
+                  <button
+                    type="button"
+                    className={`px-4 py-2 rounded-lg text-sm font-medium border ${importSource === 'history'
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white text-gray-700 border-gray-200'
+                      }`}
+                    onClick={() => switchImportSource('history')}
+                  >
+                    🕘 Riwayat Import
+                  </button>
                 </div>
 
+                {importSource === 'history' ? (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div className="border border-gray-200 rounded-xl overflow-hidden">
+                      <div className="px-4 py-3 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
+                        <p className="text-sm font-semibold text-gray-900">Daftar Riwayat Guru</p>
+                        <button
+                          type="button"
+                          onClick={() => loadImportHistories(selectedImportHistory?.id || null)}
+                          className="text-xs px-3 py-1 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+                          disabled={importHistoryLoading || importHistoryActionLoading}
+                        >
+                          Refresh
+                        </button>
+                      </div>
+
+                      <div className="max-h-80 overflow-auto divide-y divide-gray-100">
+                        {importHistoryLoading ? (
+                          <div className="p-4 text-sm text-gray-500">Memuat riwayat...</div>
+                        ) : importHistories.length ? (
+                          importHistories.map((history) => {
+                            const isActive = selectedImportHistory?.id === history.id
+                            const title = history.file_name || (history.source === 'sheet' ? 'Google Sheets' : 'Tanpa nama file')
+                            const sourceLabel = IMPORT_SOURCE_LABEL[history.source] || history.source || 'Unknown'
+                            const statusLabel = history.status === 'saved' ? 'Tersimpan' : 'Draft'
+                            const statusClass = history.status === 'saved'
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : 'bg-amber-100 text-amber-700'
+
+                            return (
+                              <button
+                                key={history.id}
+                                type="button"
+                                onClick={() => openImportHistory(history)}
+                                className={`w-full text-left px-4 py-3 transition-colors ${isActive ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <p className="text-sm font-semibold text-gray-900 truncate">{title}</p>
+                                    <p className="text-xs text-gray-500">
+                                      {sourceLabel} • {formatDate(history.created_at)}
+                                    </p>
+                                    <p className="text-xs text-gray-600 mt-1">
+                                      Baru {history.created_rows || 0} • Update {history.updated_rows || 0} • Gagal {history.failed_rows || 0}
+                                    </p>
+                                  </div>
+                                  <span className={`text-[10px] px-2 py-1 rounded-full font-semibold ${statusClass}`}>
+                                    {statusLabel}
+                                  </span>
+                                </div>
+                              </button>
+                            )
+                          })
+                        ) : (
+                          <div className="p-4 text-sm text-gray-500">Belum ada riwayat import guru.</div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="border border-gray-200 rounded-xl overflow-hidden">
+                      <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
+                        <p className="text-sm font-semibold text-gray-900">Detail Import Guru</p>
+                      </div>
+
+                      {!selectedImportHistory ? (
+                        <div className="p-4 text-sm text-gray-500">
+                          Pilih salah satu riwayat untuk melihat detail.
+                        </div>
+                      ) : (
+                        <div className="p-4 space-y-3">
+                          <div className="text-sm text-gray-700 space-y-1">
+                            <p><span className="font-semibold">Sumber:</span> {IMPORT_SOURCE_LABEL[selectedImportHistory.source] || selectedImportHistory.source || 'Unknown'}</p>
+                            <p><span className="font-semibold">File:</span> {selectedImportHistory.file_name || '—'}</p>
+                            <p><span className="font-semibold">Dibuat:</span> {formatDate(selectedImportHistory.created_at)}</p>
+                            <p><span className="font-semibold">Hasil:</span> Baru {selectedImportHistory.created_rows || 0} • Update {selectedImportHistory.updated_rows || 0} • Lewati {selectedImportHistory.skipped_rows || 0} • Gagal {selectedImportHistory.failed_rows || 0}</p>
+                          </div>
+
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={saveSelectedImportHistory}
+                              disabled={importHistoryActionLoading || selectedImportHistory.status === 'saved'}
+                              className="px-3 py-2 text-sm rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                            >
+                              Simpan
+                            </button>
+                            <button
+                              type="button"
+                              onClick={deleteSelectedImportHistory}
+                              disabled={importHistoryActionLoading}
+                              className="px-3 py-2 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+                            >
+                              Hapus Riwayat
+                            </button>
+                          </div>
+
+                          <div className="text-xs text-gray-500">
+                            Data guru yang sudah masuk tetap tersimpan. Riwayat ini hanya catatan batch import.
+                          </div>
+
+                          <div className="border border-gray-200 rounded-lg overflow-hidden">
+                            <div className="max-h-44 overflow-auto">
+                              <table className="w-full text-xs">
+                                <thead className="bg-gray-50">
+                                  <tr>
+                                    <th className="px-2 py-2 text-left font-semibold text-gray-600">Baris</th>
+                                    <th className="px-2 py-2 text-left font-semibold text-gray-600">NIP/NUPTK</th>
+                                    <th className="px-2 py-2 text-left font-semibold text-gray-600">Nama</th>
+                                    <th className="px-2 py-2 text-left font-semibold text-gray-600">Email</th>
+                                    <th className="px-2 py-2 text-left font-semibold text-gray-600">Status</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {importHistoryDetailLoading ? (
+                                    <tr>
+                                      <td colSpan="5" className="px-2 py-3 text-center text-gray-500">
+                                        Memuat detail...
+                                      </td>
+                                    </tr>
+                                  ) : importHistoryItems.length ? (
+                                    importHistoryItems.map((item) => (
+                                      <tr key={item.id} className="border-t border-gray-100">
+                                        <td className="px-2 py-2">{item.row_number || '—'}</td>
+                                        <td className="px-2 py-2">{item.nis || '—'}</td>
+                                        <td className="px-2 py-2">{item.nama || '—'}</td>
+                                        <td className="px-2 py-2">{item.email || '—'}</td>
+                                        <td className="px-2 py-2">
+                                          <span className="font-semibold">{item.status}</span>
+                                          {item.error_message ? (
+                                            <p className="text-red-600 mt-0.5">{item.error_message}</p>
+                                          ) : null}
+                                        </td>
+                                      </tr>
+                                    ))
+                                  ) : (
+                                    <tr>
+                                      <td colSpan="5" className="px-2 py-3 text-center text-gray-500">
+                                        Tidak ada detail item.
+                                      </td>
+                                    </tr>
+                                  )}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <>
                 <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-900">
                   <p className="font-semibold mb-1">Import guru hanya untuk akun dan biodata</p>
                   <p>
@@ -2001,6 +2440,8 @@ export default function AGuru() {
                     ) : null}
                   </div>
                 )}
+                  </>
+                )}
               </div>
 
               <div className="px-6 py-4 border-t border-gray-200 flex flex-wrap justify-end gap-2">
@@ -2014,15 +2455,17 @@ export default function AGuru() {
                 >
                   Tutup
                 </button>
-                <button
-                  type="button"
-                  onClick={handleRunImport}
-                  disabled={!importCanRun}
-                  className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-60"
-                >
-                  {importButtonText}
-                </button>
-                {importButtonHint ? (
+                {importSource !== 'history' && (
+                  <button
+                    type="button"
+                    onClick={handleRunImport}
+                    disabled={!importCanRun}
+                    className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-60"
+                  >
+                    {importButtonText}
+                  </button>
+                )}
+                {importSource !== 'history' && importButtonHint ? (
                   <p className="basis-full text-right text-xs text-gray-500">{importButtonHint}</p>
                 ) : null}
               </div>
@@ -2444,13 +2887,12 @@ export default function AGuru() {
                     onChange={(e) => setTeacherProfileEdit(prev => ({ ...prev, tanggal_lahir: e.target.value }))}
                     disabled={savingTeacherProfile}
                   />
-                  <Input
+                  <Select
                     label="Agama"
                     value={teacherProfileEdit.agama}
                     onChange={(e) => setTeacherProfileEdit(prev => ({ ...prev, agama: e.target.value }))}
-                    placeholder="Agama"
-                    maxLength={50}
                     disabled={savingTeacherProfile}
+                    options={religionSelectOptions(teacherProfileEdit.agama)}
                   />
                   <Input
                     label="No HP"
