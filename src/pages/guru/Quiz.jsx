@@ -507,7 +507,11 @@ export default function GuruQuiz() {
     const objectPath = `quiz-media/${user.id}/${selectedQuizId}/${scope}-${Date.now()}-${Math.random().toString(16).slice(2, 10)}.${ext}`
     const { data, error } = await supabase.storage
       .from(QUIZ_MEDIA_BUCKET)
-      .upload(objectPath, file, { upsert: true })
+      .upload(objectPath, file, {
+        upsert: true,
+        skipDrive: true,
+        preferServerRelayForSmallFiles: true
+      })
 
     if (error) {
       throw new Error(error?.message || 'Gagal upload gambar')

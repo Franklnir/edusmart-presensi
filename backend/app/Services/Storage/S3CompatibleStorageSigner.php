@@ -181,6 +181,11 @@ class S3CompatibleStorageSigner
         return $bucket !== '' ? ['default' => $bucket] : [];
     }
 
+    public function physicalBucketFor(?string $logicalBucket = null): string
+    {
+        return $this->bucketFor($logicalBucket);
+    }
+
     public function listObjects(
         string $logicalBucket,
         string $prefix = '',

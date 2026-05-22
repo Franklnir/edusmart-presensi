@@ -495,7 +495,12 @@ const DIRECT_UPLOAD_BUCKETS = new Set([
 ])
 const DIRECT_UPLOAD_COOLDOWN_MS = 10 * 60 * 1000
 const DIRECT_UPLOAD_COOLDOWN_PREFIX = 'edusmart:direct-upload-cooldown:'
-const DIRECT_UPLOAD_CONFIRM_RETRY_DELAYS_MS = [0, 1200, 2500]
+const DIRECT_UPLOAD_CONFIRM_RETRY_DELAYS_MS = [0, 600]
+const DIRECT_UPLOAD_SMALL_FILE_RELAY_BYTES = Number(import.meta.env.VITE_DIRECT_UPLOAD_SMALL_FILE_RELAY_BYTES || 1024 * 1024)
+const DIRECT_UPLOAD_OBJECT_TIMEOUT_MS = Number(import.meta.env.VITE_DIRECT_UPLOAD_OBJECT_TIMEOUT_MS || 120000)
+const directUploadObjectTimeoutMs = Number.isFinite(DIRECT_UPLOAD_OBJECT_TIMEOUT_MS)
+  ? Math.max(15000, DIRECT_UPLOAD_OBJECT_TIMEOUT_MS)
+  : 120000
 
 const directUploadCooldownKey = (bucket) => {
   const origin = typeof window !== 'undefined' ? window.location.origin : 'server'
@@ -538,7 +543,8 @@ const clearDirectUploadCooldown = (bucket) => {
 }
 
 const shouldCooldownDirectUploadError = (error) => (
-  error?.code === 'DIRECT_UPLOAD_NETWORK_ERROR'
+  error?.code === 'DIRECT_UPLOAD_NETWORK_ERROR' ||
+  error?.code === 'DIRECT_UPLOAD_TIMEOUT'
 )
 
 const isDirectUploadVerificationError = (error) => (
@@ -578,6 +584,18 @@ const waitForDirectUploadRetry = (delayMs, signal) => new Promise((resolve) => {
 
   if (signal) signal.addEventListener('abort', abortHandler, { once: true })
 })
+
+const shouldUseServerRelayForSmallUpload = (bucket, file, options = {}) => {
+  if (!DIRECT_UPLOAD_BUCKETS.has(bucket)) return false
+  if (options?.fastLocal || options?.skipDirectUpload || options?.forceBrowserDirectUpload) return false
+  if (options?.preferServerRelayForSmallFiles !== true && options?.skipDrive !== true) return false
+
+  const size = Number(file?.size || 0)
+  const threshold = Number.isFinite(DIRECT_UPLOAD_SMALL_FILE_RELAY_BYTES)
+    ? Math.max(0, DIRECT_UPLOAD_SMALL_FILE_RELAY_BYTES)
+    : 1024 * 1024
+  return threshold > 0 && size > 0 && size <= threshold
+}
 
 const PROFILE_IMAGE_MAX_BYTES = 50 * 1024
 const ASSIGNMENT_IMAGE_MAX_BYTES = 680 * 1024
@@ -1222,6 +1240,7 @@ const apiUploadDirectObject = async (upload, file, options = {}) => new Promise(
   const xhr = new XMLHttpRequest()
   xhr.open(upload.method || 'PUT', upload.url)
   xhr.withCredentials = false
+  xhr.timeout = directUploadObjectTimeoutMs
 
   Object.entries(upload.headers || {}).forEach(([key, value]) => {
     if (value !== undefined && value !== null && String(value) !== '') {
@@ -1286,6 +1305,19 @@ const apiUploadDirectObject = async (upload, file, options = {}) => new Promise(
         'Upload langsung ke object storage gagal. Periksa koneksi atau konfigurasi CORS bucket.',
         502,
         'DIRECT_UPLOAD_NETWORK_ERROR'
+      ),
+      raw: null
+    })
+  }
+
+  xhr.ontimeout = () => {
+    cleanup()
+    resolve({
+      data: null,
+      error: makeError(
+        'Upload langsung ke object storage terlalu lama. Sistem akan mencoba jalur server.',
+        504,
+        'DIRECT_UPLOAD_TIMEOUT'
       ),
       raw: null
     })
@@ -1711,6 +1743,7 @@ class StorageBucket {
       DIRECT_UPLOAD_BUCKETS.has(this.bucket) &&
       !options?.fastLocal &&
       options?.skipDirectUpload !== true &&
+      !shouldUseServerRelayForSmallUpload(this.bucket, uploadFile, options) &&
       !isDirectUploadCoolingDown(this.bucket)
     ) {
       const direct = await this.directUpload(path, uploadFile, {
@@ -1734,6 +1767,8 @@ class StorageBucket {
         forceServerObjectRelay = true
         console.warn('Direct storage upload gagal, fallback ke upload API:', direct.error)
       }
+    } else if (shouldUseServerRelayForSmallUpload(this.bucket, uploadFile, options)) {
+      forceServerObjectRelay = true
     }
 
     const form = new FormData()
@@ -1861,9 +1896,11 @@ class StorageBucket {
         path: directData.path || path,
         fullPath: directData.fullPath || directData.path || path,
         bucket: this.bucket,
+        physicalBucket: directData.physicalBucket || '',
         objectKey: directData.objectKey || '',
         provider: 'object_storage',
         providerLabel: directData.providerLabel || 'Object Storage',
+        browserDirect: true,
         uploadedSizeBytes: uploadedSize,
         uploadedSizeLabel: formatBytesLabel(uploadedSize),
         originalSizeBytes: originalSize,

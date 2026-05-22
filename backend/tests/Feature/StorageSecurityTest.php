@@ -239,6 +239,65 @@ class StorageSecurityTest extends TestCase
         ]);
     }
 
+    public function test_server_relay_keeps_object_storage_when_head_is_not_ready_after_put(): void
+    {
+        Storage::fake('local');
+        config([
+            'services.object_storage.enabled' => true,
+            'services.object_storage.label' => 'Nevaobjects S3',
+            'services.object_storage.key' => 'test-access-key',
+            'services.object_storage.secret' => 'test-secret-key',
+            'services.object_storage.region' => 'us-east-1',
+            'services.object_storage.bucket' => '',
+            'services.object_storage.bucket_map' => [
+                'assignments' => 'assignments',
+            ],
+            'services.object_storage.endpoint' => 'https://s3.nevaobjects.id',
+            'services.object_storage.use_path_style_endpoint' => true,
+            'services.object_storage.verify_uploads' => true,
+            'services.object_storage.verify_attempts' => 1,
+            'services.object_storage.verify_retry_delay_ms' => 0,
+            'services.object_storage.direct_upload_buckets' => ['assignments'],
+        ]);
+
+        Http::fake(function ($request) {
+            if ($request->method() === 'PUT') {
+                return Http::response('', 200, ['ETag' => '"object-etag"']);
+            }
+
+            if ($request->method() === 'HEAD') {
+                return Http::response('', 404);
+            }
+
+            return Http::response('Unexpected storage request', 500);
+        });
+
+        $tenantId = $this->defaultTenantId();
+        [$user] = $this->createUserWithProfile($tenantId, 'siswa', 'X-1');
+        Sanctum::actingAs($user);
+
+        $path = 'X-1/'.$user->id.'-jawaban.pdf';
+        $response = $this->post('/api/storage/upload', [
+            'bucket' => 'assignments',
+            'path' => $path,
+            'fast_local' => 'true',
+            'file' => UploadedFile::fake()->create('jawaban.pdf', 512, 'application/pdf'),
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('data.provider', 'object_storage');
+        $response->assertJsonPath('data.physicalBucket', 'assignments');
+        $response->assertJsonPath('data.serverRelay', true);
+        $response->assertJsonPath('data.verificationWarning', 'object_not_ready_after_server_put');
+        Storage::disk('local')->assertMissing('private/assignments/'.$path);
+        $this->assertDatabaseHas('storage_files', [
+            'tenant_id' => $tenantId,
+            'bucket' => 'assignments',
+            'path' => $path,
+            'provider' => 'object_storage',
+        ]);
+    }
+
     public function test_direct_upload_can_be_disabled_while_object_storage_relay_stays_enabled(): void
     {
         config([

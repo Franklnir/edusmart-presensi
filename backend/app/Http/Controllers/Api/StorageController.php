@@ -308,12 +308,15 @@ class StorageController extends ApiController
             $uploadedSizeBytes,
             $bucket
         );
+        $verificationWarning = null;
 
         if (($verification['verified'] ?? false) && ! ($verification['exists'] ?? false)) {
-            throw new \RuntimeException('File object storage belum ditemukan setelah upload server-side.');
+            // PUT server-side sudah sukses. Pada S3-compatible storage tertentu, HEAD bisa terlambat
+            // beberapa ratus milidetik; jangan jatuhkan upload kecil ke VPS hanya karena propagasi HEAD.
+            $verificationWarning = 'object_not_ready_after_server_put';
         }
 
-        if (($verification['verified'] ?? false) && ! ($verification['size_matches'] ?? true)) {
+        if (($verification['verified'] ?? false) && ($verification['exists'] ?? false) && ! ($verification['size_matches'] ?? true)) {
             throw new \RuntimeException('Ukuran file object storage tidak sesuai setelah upload server-side.');
         }
 
@@ -330,6 +333,7 @@ class StorageController extends ApiController
                 'object_key' => $objectKey,
                 'etag' => $putResult['etag'] ?? null,
                 'verified' => (bool) ($verification['verified'] ?? false),
+                'verification_warning' => $verificationWarning,
                 'verified_size_bytes' => $verification['size_bytes'] ?? null,
             ],
         ]);
@@ -339,12 +343,14 @@ class StorageController extends ApiController
                 'path' => $path,
                 'fullPath' => $path,
                 'bucket' => $bucket,
+                'physicalBucket' => $this->objectStorageSigner->physicalBucketFor($bucket),
                 'objectKey' => $objectKey,
                 'provider' => 'object_storage',
                 'providerLabel' => $this->objectStorageSigner->label(),
                 'uploadedSizeBytes' => $uploadedSizeBytes,
                 'uploadedSizeLabel' => $this->formatBytes($uploadedSizeBytes),
                 'serverRelay' => true,
+                'verificationWarning' => $verificationWarning,
             ],
         ]);
     }
@@ -370,8 +376,12 @@ class StorageController extends ApiController
                 'data' => [
                     'available' => false,
                     'bucket' => $bucket,
+                    'physicalBucket' => $this->objectStorageEnabledForBucket($bucket)
+                        ? $this->objectStorageSigner->physicalBucketFor($bucket)
+                        : null,
                     'provider' => 'api',
                     'providerLabel' => 'Server',
+                    'browserDirect' => false,
                 ],
             ]);
         }
@@ -432,11 +442,13 @@ class StorageController extends ApiController
             'data' => [
                 'available' => true,
                 'bucket' => $bucket,
+                'physicalBucket' => $this->objectStorageSigner->physicalBucketFor($bucket),
                 'path' => $path,
                 'fullPath' => $path,
                 'objectKey' => $objectKey,
                 'provider' => 'object_storage',
                 'providerLabel' => $this->objectStorageSigner->label(),
+                'browserDirect' => true,
                 'contentType' => $mime,
                 'maxBytes' => $this->maxUploadBytesForBucket($bucket),
                 'upload' => [
@@ -543,6 +555,7 @@ class StorageController extends ApiController
         return response()->json([
             'data' => [
                 'bucket' => $bucket,
+                'physicalBucket' => $this->objectStorageSigner->physicalBucketFor($bucket),
                 'path' => $path,
                 'provider' => $provider,
                 'uploadedSizeBytes' => $sizeBytes,
@@ -570,8 +583,10 @@ class StorageController extends ApiController
             return response()->json([
                 'data' => [
                     'bucket' => $bucket,
+                    'physicalBucket' => $this->objectStorageSigner->physicalBucketFor($bucket),
                     'provider' => 'object_storage',
                     'providerLabel' => $this->objectStorageSigner->label(),
+                    'browserDirect' => $this->objectStorageBrowserDirectEnabledForBucket($bucket),
                 ],
             ]);
         }
