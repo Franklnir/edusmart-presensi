@@ -189,6 +189,42 @@ const getWebAccessBlockMessage = (quiz) => (
     : ''
 )
 
+const TEXT_EDITABLE_INPUT_TYPES = new Set([
+  '',
+  'date',
+  'datetime-local',
+  'email',
+  'month',
+  'number',
+  'password',
+  'search',
+  'tel',
+  'text',
+  'time',
+  'url',
+  'week'
+])
+
+const getTextEditableElement = (target) => {
+  if (!target) return null
+  const element = target.nodeType === 1 ? target : target.parentElement
+  const editable = element?.closest?.('textarea,input,[contenteditable="true"],[contenteditable="plaintext-only"]')
+  if (!editable) return null
+  if (editable.disabled || editable.readOnly) return null
+
+  const tagName = String(editable.tagName || '').toLowerCase()
+  if (tagName === 'textarea') return editable
+  if (tagName === 'input') {
+    const type = String(editable.getAttribute('type') || editable.type || '').toLowerCase()
+    return TEXT_EDITABLE_INPUT_TYPES.has(type) ? editable : null
+  }
+  return editable.isContentEditable ? editable : null
+}
+
+const getActiveTextEditableElement = () => (
+  typeof document === 'undefined' ? null : getTextEditableElement(document.activeElement)
+)
+
 const getQuizStatus = (quiz, submission, now = new Date()) => {
   const startsAt = safeDate(quiz?.starts_at)
   const deadline = safeDate(quiz?.deadline_at)
@@ -428,6 +464,7 @@ export default function SiswaQuiz() {
   const [submitConfirmOpen, setSubmitConfirmOpen] = useState(false)
   const [remainingSeconds, setRemainingSeconds] = useState(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [textInputFocused, setTextInputFocused] = useState(false)
   const [sessionPrepared, setSessionPrepared] = useState(false)
   const [sessionNeedsManualStart, setSessionNeedsManualStart] = useState(false)
   const [sessionQuizFallback, setSessionQuizFallback] = useState(null)
@@ -705,10 +742,11 @@ export default function SiswaQuiz() {
     ? Boolean(document.fullscreenElement)
     : isFullscreen
   const isStrictSecurity = selectedQuiz?.security_mode === 'strict'
+  const strictTextInputGrace = isStrictSecurity && textInputFocused
   const strictSecurityLocked = isTaking && isStrictSecurity && (
     privacyShield.open
     || violationPrompt.open
-    || !fullscreenActive
+    || (!fullscreenActive && !strictTextInputGrace)
   )
   const answerInteractionLocked = (
     !isTaking
@@ -1592,6 +1630,58 @@ export default function SiswaQuiz() {
   useEffect(() => {
     if (!isTaking || !isStrictSecurity) return
 
+    let editableBlurTimer = null
+    let lastTextEditableInteractionAt = getActiveTextEditableElement() ? Date.now() : 0
+
+    const clearEditableBlurTimer = () => {
+      if (editableBlurTimer) {
+        clearTimeout(editableBlurTimer)
+        editableBlurTimer = null
+      }
+    }
+
+    const markTextEditableInteraction = (target = document.activeElement) => {
+      const editable = getTextEditableElement(target)
+      if (!editable) return false
+      lastTextEditableInteractionAt = Date.now()
+      clearEditableBlurTimer()
+      setTextInputFocused(true)
+      return true
+    }
+
+    const isTextInputActiveOrRecent = () => (
+      Boolean(getActiveTextEditableElement())
+      || Date.now() - lastTextEditableInteractionAt < 2500
+    )
+
+    const schedulePostInputFullscreenCheck = () => {
+      clearEditableBlurTimer()
+      editableBlurTimer = setTimeout(() => {
+        editableBlurTimer = null
+        const stillEditing = Boolean(getActiveTextEditableElement())
+        setTextInputFocused(stillEditing)
+        if (!stillEditing && !document.fullscreenElement) {
+          lockStrictSession(
+            'Fullscreen wajib aktif setelah selesai mengetik jawaban.',
+            'fullscreen_exit_after_input'
+          )
+        }
+      }, 700)
+    }
+
+    const handleEditableFocusIn = (event) => {
+      markTextEditableInteraction(event.target)
+    }
+
+    const handleEditableFocusOut = (event) => {
+      if (!getTextEditableElement(event.target)) return
+      schedulePostInputFullscreenCheck()
+    }
+
+    const handleEditablePointer = (event) => {
+      markTextEditableInteraction(event.target)
+    }
+
     const markScreenshotViolation = async () => {
       lockStrictSession(
         'Percobaan screenshot terdeteksi. Tampilan quiz dikunci untuk menjaga keamanan.',
@@ -1640,6 +1730,7 @@ export default function SiswaQuiz() {
 
     const handleBlur = () => {
       if (document.hidden) return
+      if (isTextInputActiveOrRecent()) return
       lockStrictSession(
         'Fokus keluar dari halaman quiz. Tampilan dikunci sampai Anda kembali fullscreen.',
         'window_blur'
@@ -1652,6 +1743,10 @@ export default function SiswaQuiz() {
       if (active) {
         lockKeyboardShortcuts()
       } else {
+        if (isTextInputActiveOrRecent()) {
+          schedulePostInputFullscreenCheck()
+          return
+        }
         lockStrictSession(
           'Fullscreen ditutup. Quiz dikunci sampai Anda masuk fullscreen lagi.',
           'fullscreen_exit'
@@ -1661,10 +1756,30 @@ export default function SiswaQuiz() {
 
     const handleKeydownCapture = (event) => {
       const key = String(event.key || '').toLowerCase()
+      const isEditableTarget = Boolean(getTextEditableElement(event.target))
       if (key === 'printscreen') {
         event.preventDefault()
         event.stopPropagation()
         markScreenshotViolation()
+        return
+      }
+
+      const withCmd = event.ctrlKey || event.metaKey
+      const blockedComboKeys = ['t', 'n', 'w', 'l', 'r', 'p', 'j', 'k']
+      const isBlockedCombo = withCmd && blockedComboKeys.includes(key)
+      const isBlockedSingle = key === 'f11' || key === 'f12'
+
+      if (isEditableTarget) {
+        markTextEditableInteraction(event.target)
+        if (key === 'tab' || key === 'escape' || isBlockedCombo || isBlockedSingle) {
+          event.preventDefault()
+          event.stopPropagation()
+          lockStrictSession(
+            'Shortcut browser dinonaktifkan saat quiz berlangsung.',
+            'blocked_shortcut',
+            { key: event.key }
+          )
+        }
         return
       }
 
@@ -1681,10 +1796,6 @@ export default function SiswaQuiz() {
         return
       }
 
-      const withCmd = event.ctrlKey || event.metaKey
-      const blockedComboKeys = ['t', 'n', 'w', 'l', 'r', 'p', 'j', 'k']
-      const isBlockedCombo = withCmd && blockedComboKeys.includes(key)
-      const isBlockedSingle = key === 'f11' || key === 'f12'
       if (isBlockedCombo || isBlockedSingle) {
         event.preventDefault()
         event.stopPropagation()
@@ -1706,6 +1817,11 @@ export default function SiswaQuiz() {
     }
 
     const blockClipboardAndContext = (event) => {
+      const isEditableTarget = Boolean(getTextEditableElement(event.target))
+      if ((event.type === 'selectstart' || event.type === 'selectionchange') && isEditableTarget) {
+        markTextEditableInteraction(event.target)
+        return
+      }
       event.preventDefault()
       event.stopPropagation()
       if (event.type === 'selectstart') {
@@ -1717,6 +1833,7 @@ export default function SiswaQuiz() {
     }
 
     const clearTextSelection = () => {
+      if (getActiveTextEditableElement()) return
       try {
         window.getSelection()?.removeAllRanges()
       } catch {}
@@ -1729,6 +1846,7 @@ export default function SiswaQuiz() {
 
     const focusGuard = setInterval(() => {
       if (!document.hasFocus()) {
+        if (isTextInputActiveOrRecent()) return
         lockStrictSession(
           'Fokus browser hilang. Tampilan quiz dikunci untuk mencegah kecurangan.',
           'focus_lost'
@@ -1739,6 +1857,10 @@ export default function SiswaQuiz() {
     document.documentElement.classList.add('quiz-strict-active')
     document.body.classList.add('quiz-strict-active')
     document.addEventListener('visibilitychange', handleVisibility)
+    document.addEventListener('focusin', handleEditableFocusIn, true)
+    document.addEventListener('focusout', handleEditableFocusOut, true)
+    document.addEventListener('pointerdown', handleEditablePointer, true)
+    document.addEventListener('touchstart', handleEditablePointer, true)
     window.addEventListener('blur', handleBlur)
     window.addEventListener('pagehide', handlePageLeaving)
     document.addEventListener('freeze', handlePageLeaving)
@@ -1756,10 +1878,16 @@ export default function SiswaQuiz() {
     lockKeyboardShortcuts()
 
     return () => {
+      clearEditableBlurTimer()
+      setTextInputFocused(false)
       clearInterval(focusGuard)
       document.documentElement.classList.remove('quiz-strict-active')
       document.body.classList.remove('quiz-strict-active')
       document.removeEventListener('visibilitychange', handleVisibility)
+      document.removeEventListener('focusin', handleEditableFocusIn, true)
+      document.removeEventListener('focusout', handleEditableFocusOut, true)
+      document.removeEventListener('pointerdown', handleEditablePointer, true)
+      document.removeEventListener('touchstart', handleEditablePointer, true)
       window.removeEventListener('blur', handleBlur)
       window.removeEventListener('pagehide', handlePageLeaving)
       document.removeEventListener('freeze', handlePageLeaving)
