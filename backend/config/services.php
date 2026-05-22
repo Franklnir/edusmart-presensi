@@ -117,6 +117,8 @@ return [
         'capacity_bytes' => env('APP_OBJECT_STORAGE_CAPACITY_BYTES'),
         'capacity_gb' => env('APP_OBJECT_STORAGE_CAPACITY_GB'),
         'verify_uploads' => filter_var(env('APP_DIRECT_UPLOAD_VERIFY_OBJECTS', true), FILTER_VALIDATE_BOOL),
+        'verify_attempts' => (int) env('APP_DIRECT_UPLOAD_VERIFY_ATTEMPTS', 4),
+        'verify_retry_delay_ms' => (int) env('APP_DIRECT_UPLOAD_VERIFY_RETRY_MS', 300),
         'direct_upload_buckets' => array_values(array_filter(array_map(
             'trim',
             explode(

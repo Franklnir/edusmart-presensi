@@ -76,28 +76,84 @@ class S3CompatibleStorageSigner
             ];
         }
 
-        $signed = $this->presign('HEAD', $objectKey, 300, [], $logicalBucket);
-        $response = Http::timeout(10)->head($signed['url']);
-        if (! $response->successful()) {
-            return [
+        $attempts = $this->verifyAttempts();
+        $lastResult = null;
+        for ($attempt = 1; $attempt <= $attempts; $attempt++) {
+            $signed = $this->presign('HEAD', $objectKey, 300, [], $logicalBucket);
+            try {
+                $response = Http::timeout(10)->head($signed['url']);
+            } catch (\Throwable $e) {
+                $lastResult = [
+                    'verified' => true,
+                    'exists' => false,
+                    'status' => null,
+                    'size_matches' => false,
+                    'size_bytes' => null,
+                    'attempts' => $attempt,
+                    'retryable' => $attempt < $attempts,
+                    'error' => $e->getMessage(),
+                ];
+
+                if ($attempt < $attempts) {
+                    $this->sleepBeforeVerificationRetry($attempt);
+
+                    continue;
+                }
+
+                throw $e;
+            }
+
+            if (! $response->successful()) {
+                $lastResult = [
+                    'verified' => true,
+                    'exists' => false,
+                    'status' => $response->status(),
+                    'size_matches' => false,
+                    'size_bytes' => null,
+                    'attempts' => $attempt,
+                    'retryable' => $this->shouldRetryVerificationStatus($response->status()),
+                ];
+
+                if ($attempt < $attempts && $this->shouldRetryVerificationStatus($response->status())) {
+                    $this->sleepBeforeVerificationRetry($attempt);
+
+                    continue;
+                }
+
+                return $lastResult;
+            }
+
+            $sizeHeader = $response->header('Content-Length');
+            $sizeBytes = is_numeric($sizeHeader) ? (int) $sizeHeader : null;
+            $sizeMatches = $expectedSizeBytes <= 0 || $sizeBytes === null || $sizeBytes === $expectedSizeBytes;
+
+            $lastResult = [
                 'verified' => true,
-                'exists' => false,
+                'exists' => true,
                 'status' => $response->status(),
-                'size_matches' => false,
-                'size_bytes' => null,
+                'size_matches' => $sizeMatches,
+                'size_bytes' => $sizeBytes,
+                'attempts' => $attempt,
+                'retryable' => ! $sizeMatches,
             ];
+
+            if (! $sizeMatches && $attempt < $attempts) {
+                $this->sleepBeforeVerificationRetry($attempt);
+
+                continue;
+            }
+
+            return $lastResult;
         }
 
-        $sizeHeader = $response->header('Content-Length');
-        $sizeBytes = is_numeric($sizeHeader) ? (int) $sizeHeader : null;
-        $sizeMatches = $expectedSizeBytes <= 0 || $sizeBytes === null || $sizeBytes === $expectedSizeBytes;
-
-        return [
+        return $lastResult ?? [
             'verified' => true,
-            'exists' => true,
-            'status' => $response->status(),
-            'size_matches' => $sizeMatches,
-            'size_bytes' => $sizeBytes,
+            'exists' => false,
+            'status' => null,
+            'size_matches' => false,
+            'size_bytes' => null,
+            'attempts' => $attempts,
+            'retryable' => false,
         ];
     }
 
@@ -560,6 +616,32 @@ class S3CompatibleStorageSigner
     private function shouldVerifyUploads(): bool
     {
         return (bool) $this->configValue('verify_uploads', true);
+    }
+
+    private function verifyAttempts(): int
+    {
+        return max(1, min(8, (int) $this->configValue('verify_attempts', 4)));
+    }
+
+    private function verifyRetryDelayMs(): int
+    {
+        return max(0, min(2000, (int) $this->configValue('verify_retry_delay_ms', 300)));
+    }
+
+    private function shouldRetryVerificationStatus(int $status): bool
+    {
+        return in_array($status, [404, 409, 425, 429, 500, 502, 503, 504], true);
+    }
+
+    private function sleepBeforeVerificationRetry(int $attempt): void
+    {
+        $baseDelayMs = $this->verifyRetryDelayMs();
+        if ($baseDelayMs <= 0) {
+            return;
+        }
+
+        $delayMs = min(2500, $baseDelayMs * (2 ** max(0, $attempt - 1)));
+        usleep($delayMs * 1000);
     }
 
     private function enabledConfig(): bool

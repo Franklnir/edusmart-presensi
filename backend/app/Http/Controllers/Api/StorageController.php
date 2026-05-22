@@ -498,18 +498,29 @@ class StorageController extends ApiController
         } catch (\Throwable $e) {
             return response()->json([
                 'error' => 'Gagal memverifikasi file object storage: '.$e->getMessage(),
+                'code' => 'OBJECT_STORAGE_VERIFY_FAILED',
+                'retryable' => true,
             ], 422);
         }
 
         if (($verification['verified'] ?? false) && ! ($verification['exists'] ?? false)) {
             return response()->json([
                 'error' => 'File object storage belum ditemukan. Tunggu upload selesai lalu coba lagi.',
+                'code' => 'OBJECT_STORAGE_NOT_READY',
+                'retryable' => true,
+                'attempts' => $verification['attempts'] ?? null,
+                'status' => $verification['status'] ?? null,
             ], 422);
         }
 
         if (($verification['verified'] ?? false) && ! ($verification['size_matches'] ?? true)) {
             return response()->json([
                 'error' => 'Ukuran file object storage tidak sesuai metadata upload.',
+                'code' => 'OBJECT_STORAGE_SIZE_MISMATCH',
+                'retryable' => false,
+                'attempts' => $verification['attempts'] ?? null,
+                'expectedSizeBytes' => $sizeBytes,
+                'actualSizeBytes' => $verification['size_bytes'] ?? null,
             ], 422);
         }
 
@@ -536,6 +547,7 @@ class StorageController extends ApiController
                 'provider' => $provider,
                 'uploadedSizeBytes' => $sizeBytes,
                 'uploadedSizeLabel' => $this->formatBytes($sizeBytes),
+                'objectKey' => $objectKey,
             ],
         ]);
     }

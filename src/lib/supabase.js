@@ -495,6 +495,7 @@ const DIRECT_UPLOAD_BUCKETS = new Set([
 ])
 const DIRECT_UPLOAD_COOLDOWN_MS = 10 * 60 * 1000
 const DIRECT_UPLOAD_COOLDOWN_PREFIX = 'edusmart:direct-upload-cooldown:'
+const DIRECT_UPLOAD_CONFIRM_RETRY_DELAYS_MS = [0, 1200, 2500]
 
 const directUploadCooldownKey = (bucket) => {
   const origin = typeof window !== 'undefined' ? window.location.origin : 'server'
@@ -539,6 +540,44 @@ const clearDirectUploadCooldown = (bucket) => {
 const shouldCooldownDirectUploadError = (error) => (
   error?.code === 'DIRECT_UPLOAD_NETWORK_ERROR'
 )
+
+const isDirectUploadVerificationError = (error) => (
+  ['OBJECT_STORAGE_NOT_READY', 'OBJECT_STORAGE_VERIFY_FAILED', 'OBJECT_STORAGE_SIZE_MISMATCH'].includes(error?.code) ||
+  /object storage/i.test(String(error?.message || ''))
+)
+
+const shouldRetryDirectUploadConfirm = (response) => (
+  response?.raw?.retryable === true ||
+  ['OBJECT_STORAGE_NOT_READY', 'OBJECT_STORAGE_VERIFY_FAILED'].includes(response?.error?.code)
+)
+
+const waitForDirectUploadRetry = (delayMs, signal) => new Promise((resolve) => {
+  if (!delayMs) {
+    resolve(!signal?.aborted)
+    return
+  }
+  if (signal?.aborted) {
+    resolve(false)
+    return
+  }
+
+  let settled = false
+  let timer = null
+  let abortHandler = null
+  const finish = (value) => {
+    if (settled) return
+    settled = true
+    if (signal && abortHandler) signal.removeEventListener('abort', abortHandler)
+    resolve(value)
+  }
+  timer = setTimeout(() => finish(true), delayMs)
+  abortHandler = () => {
+    clearTimeout(timer)
+    finish(false)
+  }
+
+  if (signal) signal.addEventListener('abort', abortHandler, { once: true })
+})
 
 const PROFILE_IMAGE_MAX_BYTES = 50 * 1024
 const ASSIGNMENT_IMAGE_MAX_BYTES = 680 * 1024
@@ -1649,6 +1688,7 @@ class StorageBucket {
 
   async upload(path, file, options = {}) {
     let uploadFile = file
+    let forceServerObjectRelay = false
     const maxImageBytes = resolveImageUploadLimitBytes(this.bucket, path, file)
 
     if (maxImageBytes) {
@@ -1691,6 +1731,7 @@ class StorageBucket {
         if (shouldCooldownDirectUploadError(direct.error)) {
           markDirectUploadCooldown(this.bucket)
         }
+        forceServerObjectRelay = true
         console.warn('Direct storage upload gagal, fallback ke upload API:', direct.error)
       }
     }
@@ -1700,7 +1741,7 @@ class StorageBucket {
     form.append('path', path)
     form.append('file', uploadFile)
     if (options?.upsert) form.append('upsert', 'true')
-    if (options?.fastLocal || options?.skipDrive) form.append('fast_local', 'true')
+    if (options?.fastLocal || options?.skipDrive || forceServerObjectRelay) form.append('fast_local', 'true')
 
     const res = typeof options?.onProgress === 'function'
       ? await apiUploadFormData('/api/storage/upload', form, {
@@ -1768,24 +1809,43 @@ class StorageBucket {
       }
     }
 
-    const confirm = await apiFetch('/api/storage/confirm-upload', {
-      method: 'POST',
-      body: {
-        bucket: this.bucket,
-        path: directData.path || path,
-        provider: 'object_storage',
-        filename: file?.name || path.split('/').pop() || 'file',
-        mime_type: directData.contentType || file?.type || '',
-        size_bytes: Number(file?.size || 0),
-        object_key: directData.objectKey || ''
-      },
-      cacheTtlMs: 0,
-      signal: options.signal
-    })
+    const confirmBody = {
+      bucket: this.bucket,
+      path: directData.path || path,
+      provider: 'object_storage',
+      filename: file?.name || path.split('/').pop() || 'file',
+      mime_type: directData.contentType || file?.type || '',
+      size_bytes: Number(file?.size || 0),
+      object_key: directData.objectKey || ''
+    }
+    let confirm = null
+    for (const delayMs of DIRECT_UPLOAD_CONFIRM_RETRY_DELAYS_MS) {
+      const shouldContinue = await waitForDirectUploadRetry(delayMs, options.signal)
+      if (!shouldContinue) {
+        return {
+          attempted: true,
+          canFallback: false,
+          data: null,
+          error: makeError('Request dibatalkan', 0, 'REQUEST_ABORTED')
+        }
+      }
+
+      confirm = await apiFetch('/api/storage/confirm-upload', {
+        method: 'POST',
+        body: confirmBody,
+        cacheTtlMs: 0,
+        signal: options.signal
+      })
+
+      if (!confirm.error || !shouldRetryDirectUploadConfirm(confirm)) {
+        break
+      }
+    }
+
     if (confirm.error) {
       return {
         attempted: true,
-        canFallback: false,
+        canFallback: isDirectUploadVerificationError(confirm.error),
         data: null,
         error: confirm.error
       }

@@ -183,6 +183,8 @@ class StorageSecurityTest extends TestCase
             'services.object_storage.endpoint' => 'https://s3.nevaobjects.id',
             'services.object_storage.use_path_style_endpoint' => true,
             'services.object_storage.verify_uploads' => true,
+            'services.object_storage.verify_attempts' => 2,
+            'services.object_storage.verify_retry_delay_ms' => 0,
             'services.object_storage.direct_upload_buckets' => ['assignments'],
         ]);
 
@@ -285,6 +287,8 @@ class StorageSecurityTest extends TestCase
             'services.object_storage.endpoint' => 'https://account-id.r2.cloudflarestorage.com',
             'services.object_storage.use_path_style_endpoint' => true,
             'services.object_storage.verify_uploads' => true,
+            'services.object_storage.verify_attempts' => 2,
+            'services.object_storage.verify_retry_delay_ms' => 0,
             'services.object_storage.direct_upload_buckets' => ['assignments'],
         ]);
 
@@ -307,7 +311,69 @@ class StorageSecurityTest extends TestCase
         ]);
 
         $response->assertStatus(422);
+        $response->assertJsonPath('code', 'OBJECT_STORAGE_NOT_READY');
+        $response->assertJsonPath('retryable', true);
         $this->assertStringContainsString('belum ditemukan', (string) $response->json('error'));
+    }
+
+    public function test_confirm_direct_upload_waits_for_eventually_available_object_storage_file(): void
+    {
+        config([
+            'services.object_storage.enabled' => true,
+            'services.object_storage.browser_direct_enabled' => true,
+            'services.object_storage.key' => 'test-access-key',
+            'services.object_storage.secret' => 'test-secret-key',
+            'services.object_storage.region' => 'auto',
+            'services.object_storage.bucket' => 'edusmart-storage',
+            'services.object_storage.bucket_map' => [],
+            'services.object_storage.endpoint' => 'https://account-id.r2.cloudflarestorage.com',
+            'services.object_storage.use_path_style_endpoint' => true,
+            'services.object_storage.verify_uploads' => true,
+            'services.object_storage.verify_attempts' => 3,
+            'services.object_storage.verify_retry_delay_ms' => 0,
+            'services.object_storage.direct_upload_buckets' => ['assignments'],
+        ]);
+
+        $expectedBytes = 512 * 1024;
+        $headAttempts = 0;
+        Http::fake(function ($request) use (&$headAttempts, $expectedBytes) {
+            if ($request->method() === 'HEAD') {
+                $headAttempts++;
+
+                return $headAttempts < 2
+                    ? Http::response('', 404)
+                    : Http::response('', 200, ['Content-Length' => (string) $expectedBytes]);
+            }
+
+            return Http::response('Unexpected storage request', 500);
+        });
+
+        $tenantId = $this->defaultTenantId();
+        [$user] = $this->createUserWithProfile($tenantId, 'siswa', 'X-1');
+        Sanctum::actingAs($user);
+
+        $path = 'X-1/'.$user->id.'-jawaban.pdf';
+        $response = $this->postJson('/api/storage/confirm-upload', [
+            'bucket' => 'assignments',
+            'path' => $path,
+            'provider' => 'object_storage',
+            'filename' => 'jawaban.pdf',
+            'mime_type' => 'application/pdf',
+            'size_bytes' => $expectedBytes,
+            'object_key' => 'private/assignments/'.$path,
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('data.provider', 'object_storage');
+        $response->assertJsonPath('data.objectKey', 'private/assignments/'.$path);
+        $this->assertSame(2, $headAttempts);
+        $this->assertDatabaseHas('storage_files', [
+            'tenant_id' => $tenantId,
+            'bucket' => 'assignments',
+            'path' => $path,
+            'provider' => 'object_storage',
+            'size_bytes' => $expectedBytes,
+        ]);
     }
 
     public function test_assignment_direct_upload_rejects_oversized_image_metadata(): void
