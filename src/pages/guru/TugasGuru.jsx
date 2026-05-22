@@ -507,6 +507,7 @@ export default function TugasGuru() {
   })
   const [isUploadingFile, setIsUploadingFile] = useState(false)
   const [uploadedFileSizeCreate, setUploadedFileSizeCreate] = useState('')
+  const [pendingCreateFile, setPendingCreateFile] = useState(null)
   const [compressionProgress, setCompressionProgress] = useState(null)
   const [uploadProvider, setUploadProvider] = useState(null)
   const [uploadPercent, setUploadPercent] = useState(null)
@@ -578,6 +579,8 @@ export default function TugasGuru() {
   const [studentCommentPreview, setStudentCommentPreview] = useState(null)
   const detailLoadIdRef = useRef(0)
   const uploadAbortRef = useRef(null)
+  const pendingCreateFileRef = useRef(null)
+  const userIdRef = useRef('')
 
   /* ---------- Derived: kelas yang guru ampu ---------- */
   const myKelasList = useMemo(() => {
@@ -618,8 +621,23 @@ export default function TugasGuru() {
   }, [selectedTugas])
 
   useEffect(() => {
+    pendingCreateFileRef.current = pendingCreateFile
+  }, [pendingCreateFile])
+
+  useEffect(() => {
+    userIdRef.current = user?.id || ''
+  }, [user?.id])
+
+  useEffect(() => {
     return () => {
       uploadAbortRef.current?.abort()
+      const pendingValue = pendingCreateFileRef.current?.value
+      const teacherId = userIdRef.current
+      if (pendingValue && teacherId) {
+        void deleteTeacherAttachment(pendingValue, teacherId).catch((error) => {
+          console.warn('Gagal membersihkan lampiran tugas sementara:', error)
+        })
+      }
     }
   }, [])
 
@@ -1241,7 +1259,10 @@ export default function TugasGuru() {
           }
         }
 
+        const nextPendingFile = { value: storedFileValue, sizeLabel, provider: storedProvider }
         setForm((prev) => ({ ...prev, file_url: storedFileValue }))
+        pendingCreateFileRef.current = nextPendingFile
+        setPendingCreateFile(nextPendingFile)
         setUploadedFileSizeCreate(sizeLabel)
       }
 
@@ -1271,6 +1292,34 @@ export default function TugasGuru() {
   }
 
   const handleEditFileUpload = async (files) => handleFileUpload(files, 'edit')
+
+  const discardPendingCreateFile = useCallback(async () => {
+    const pendingValue = pendingCreateFile?.value
+    if (!pendingValue || !user?.id) return
+
+    try {
+      await deleteTeacherAttachment(pendingValue, user.id)
+    } catch (error) {
+      console.warn('Gagal menghapus file create sementara:', error)
+    } finally {
+      pendingCreateFileRef.current = null
+      setPendingCreateFile(null)
+    }
+  }, [pendingCreateFile?.value, user?.id])
+
+  const resetCreateFormState = useCallback(() => {
+    const nowLocal = getNowDateTimeLocal()
+    setForm({ judul: '', keterangan: '', link: '', mulai: nowLocal, deadline: nowLocal, file_url: '' })
+    setUploadedFileSizeCreate('')
+    pendingCreateFileRef.current = null
+    setPendingCreateFile(null)
+  }, [])
+
+  const cancelCreateTugas = useCallback(async () => {
+    await discardPendingCreateFile()
+    resetCreateFormState()
+    pushToast('info', 'Pembuatan tugas dibatalkan')
+  }, [discardPendingCreateFile, pushToast, resetCreateFormState])
 
   const discardPendingEditFile = useCallback(async () => {
     const pendingValue = pendingEditFile?.value
@@ -1402,9 +1451,7 @@ export default function TugasGuru() {
       if (error) throw error
 
       pushToast('success', 'Tugas berhasil ditambahkan')
-      const nowLocal = getNowDateTimeLocal()
-      setForm({ judul: '', keterangan: '', link: '', mulai: nowLocal, deadline: nowLocal, file_url: '' })
-      setUploadedFileSizeCreate('')
+      resetCreateFormState()
 
       await loadTugas()
       await loadTugasPerluDinilai()
@@ -2335,6 +2382,8 @@ export default function TugasGuru() {
                             await deleteTeacherAttachment(form.file_url, user.id)
                             setForm((prev) => ({ ...prev, file_url: '' }))
                             setUploadedFileSizeCreate('')
+                            pendingCreateFileRef.current = null
+                            setPendingCreateFile(null)
                             pushToast('success', 'File berhasil dihapus')
                           } catch (error) {
                             pushToast('error', `Gagal menghapus file: ${error?.message || 'Unknown error'}`)
@@ -2368,14 +2417,24 @@ export default function TugasGuru() {
             </div>
           </div>
 
-          <button
-            className="w-full mt-6 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-bold py-4 px-6 rounded-2xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3 text-base shadow-lg"
-            onClick={tambahTugas}
-            disabled={loading || isUploadingFile || !kelas || !selectedMapel || !form.judul || !form.mulai || !form.deadline}
-            type="button"
-          >
-            <span>{loading ? 'Menyimpan...' : 'Simpan Tugas Baru'}</span>
-          </button>
+          <div className="mt-6 flex flex-col sm:flex-row gap-3">
+            <button
+              className="sm:w-auto rounded-2xl border border-slate-300 bg-white px-6 py-4 text-base font-bold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => { void cancelCreateTugas() }}
+              disabled={loading || isUploadingFile || (!form.file_url && !form.judul && !form.keterangan && !form.link)}
+              type="button"
+            >
+              Batal
+            </button>
+            <button
+              className="flex flex-1 items-center justify-center gap-3 rounded-2xl bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4 text-base font-bold text-white shadow-lg transition-all hover:from-blue-700 hover:to-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={tambahTugas}
+              disabled={loading || isUploadingFile || !kelas || !selectedMapel || !form.judul || !form.mulai || !form.deadline}
+              type="button"
+            >
+              <span>{loading ? 'Menyimpan...' : 'Simpan Tugas Baru'}</span>
+            </button>
+          </div>
         </div>
 
         {/* GRID: SIDEBAR + MAIN */}

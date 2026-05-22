@@ -178,6 +178,7 @@ export default function GuruQuiz() {
   const [imageSizeLoadingByPath, setImageSizeLoadingByPath] = useState({})
   const imageSizeByPathRef = useRef({})
   const imageSizeLoadingRef = useRef(new Set())
+  const questionMediaUploading = questionImageUploading || Object.values(optionImageUploading).some(Boolean)
 
   const orderedQuizList = useMemo(() => (
     sortQuizzesByPriority(quizList, nowTick)
@@ -445,6 +446,50 @@ export default function GuruQuiz() {
       // Abaikan error hapus file agar flow form tidak terganggu.
     }
   }, [normalizeQuizMediaPath])
+
+  const collectQuestionFormImagePaths = useCallback((formValue = questionForm) => {
+    const paths = new Set()
+    const questionImagePath = normalizeQuizMediaPath(formValue?.image_path || '')
+    if (questionImagePath) paths.add(questionImagePath)
+    Object.values(formValue?.option_images || {}).forEach((value) => {
+      const optionImagePath = normalizeQuizMediaPath(value)
+      if (optionImagePath) paths.add(optionImagePath)
+    })
+    return paths
+  }, [normalizeQuizMediaPath, questionForm])
+
+  const collectEditingQuestionImagePaths = useCallback(() => {
+    const paths = new Set()
+    if (!editingQuestion?.id) return paths
+
+    const questionImagePath = normalizeQuizMediaPath(editingQuestion.image_path || '')
+    if (questionImagePath) paths.add(questionImagePath)
+    ;(optionsByQuestion[editingQuestion.id] || []).forEach((option) => {
+      const optionImagePath = normalizeQuizMediaPath(option?.image_path || '')
+      if (optionImagePath) paths.add(optionImagePath)
+    })
+
+    return paths
+  }, [editingQuestion?.id, editingQuestion?.image_path, normalizeQuizMediaPath, optionsByQuestion])
+
+  const cleanupUnsavedQuestionImages = useCallback(async () => {
+    const currentPaths = collectQuestionFormImagePaths(questionForm)
+    if (!currentPaths.size) return
+
+    const originalPaths = collectEditingQuestionImagePaths()
+    const stalePaths = [...currentPaths].filter((path) => !originalPaths.has(path))
+    if (!stalePaths.length) return
+
+    await Promise.all(stalePaths.map((path) => removeQuizImageIfExists(path)))
+  }, [collectEditingQuestionImagePaths, collectQuestionFormImagePaths, questionForm, removeQuizImageIfExists])
+
+  const closeQuestionFormSafely = useCallback(async () => {
+    if (questionMediaUploading) return
+    await cleanupUnsavedQuestionImages()
+    setShowQuestionForm(false)
+    setQuestionImageUploading(false)
+    setOptionImageUploading({})
+  }, [cleanupUnsavedQuestionImages, questionMediaUploading])
 
   const uploadQuizImage = useCallback(async (file, scope = 'question') => {
     if (!user?.id || !selectedQuizId) {
@@ -1521,13 +1566,14 @@ export default function GuruQuiz() {
     try {
       setQuestionImageUploading(true)
       const oldPath = questionForm.image_path || ''
+      const originalPaths = collectEditingQuestionImagePaths()
       const uploaded = await uploadQuizImage(file, 'question')
       const uploadedPath = uploaded?.path || ''
       setQuestionForm((prev) => ({ ...prev, image_path: uploadedPath }))
       if (uploadedPath) {
         void ensureQuizImageSize(uploadedPath, uploaded?.uploadedSizeBytes || 0)
       }
-      if (oldPath && oldPath !== uploadedPath) {
+      if (oldPath && oldPath !== uploadedPath && !originalPaths.has(normalizeQuizMediaPath(oldPath))) {
         await removeQuizImageIfExists(oldPath)
       }
       pushToast('success', `Gambar soal berhasil diunggah (${uploaded?.uploadedSizeLabel || '-'})`)
@@ -1552,6 +1598,7 @@ export default function GuruQuiz() {
     try {
       setOptionImageUploading((prev) => ({ ...prev, [label]: true }))
       const oldPath = questionForm.option_images?.[label] || ''
+      const originalPaths = collectEditingQuestionImagePaths()
       const uploaded = await uploadQuizImage(file, `option-${label.toLowerCase()}`)
       const uploadedPath = uploaded?.path || ''
       setQuestionForm((prev) => ({
@@ -1564,7 +1611,7 @@ export default function GuruQuiz() {
       if (uploadedPath) {
         void ensureQuizImageSize(uploadedPath, uploaded?.uploadedSizeBytes || 0)
       }
-      if (oldPath && oldPath !== uploadedPath) {
+      if (oldPath && oldPath !== uploadedPath && !originalPaths.has(normalizeQuizMediaPath(oldPath))) {
         await removeQuizImageIfExists(oldPath)
       }
       pushToast('success', `Gambar opsi ${label} berhasil diunggah (${uploaded?.uploadedSizeLabel || '-'})`)
@@ -1579,7 +1626,10 @@ export default function GuruQuiz() {
     const currentPath = questionForm.image_path || ''
     if (!currentPath) return
     setQuestionForm((prev) => ({ ...prev, image_path: '' }))
-    await removeQuizImageIfExists(currentPath)
+    const originalPaths = collectEditingQuestionImagePaths()
+    if (!originalPaths.has(normalizeQuizMediaPath(currentPath))) {
+      await removeQuizImageIfExists(currentPath)
+    }
   }
 
   const handleRemoveOptionImage = async (label) => {
@@ -1592,7 +1642,10 @@ export default function GuruQuiz() {
       }
     }))
     if (currentPath) {
-      await removeQuizImageIfExists(currentPath)
+      const originalPaths = collectEditingQuestionImagePaths()
+      if (!originalPaths.has(normalizeQuizMediaPath(currentPath))) {
+        await removeQuizImageIfExists(currentPath)
+      }
     }
   }
 
@@ -1640,9 +1693,19 @@ export default function GuruQuiz() {
     try {
       setLoading(true)
       let questionId = editingQuestion?.id
+      const prevQuestionImagePath = questionId ? editingQuestion?.image_path || '' : ''
       const prevOptionImagePaths = questionId
         ? (optionsByQuestion[questionId] || []).map((opt) => opt.image_path).filter(Boolean)
         : []
+      const previousImagePaths = new Set(
+        [prevQuestionImagePath, ...prevOptionImagePaths]
+          .map((path) => normalizeQuizMediaPath(path))
+          .filter(Boolean)
+      )
+      const nextImagePaths = collectQuestionFormImagePaths({
+        ...questionForm,
+        option_images: questionType === 'mcq' ? questionForm.option_images : {}
+      })
       if (!questionId) {
         questionId = makeId()
         const nextNomor = questions.length + 1
@@ -1686,8 +1749,11 @@ export default function GuruQuiz() {
         }))
         const { error: optError } = await supabase.from('quiz_options').insert(optionRows)
         if (optError) throw optError
-      } else if (prevOptionImagePaths.length) {
-        await Promise.all(prevOptionImagePaths.map((path) => removeQuizImageIfExists(path)))
+      }
+
+      const staleImagePaths = [...previousImagePaths].filter((path) => !nextImagePaths.has(path))
+      if (staleImagePaths.length) {
+        await Promise.all(staleImagePaths.map((path) => removeQuizImageIfExists(path)))
       }
 
       pushToast('success', 'Soal berhasil disimpan')
@@ -3833,10 +3899,11 @@ export default function GuruQuiz() {
             <div className="flex justify-end gap-2">
               <button
                 type="button"
-                onClick={() => setShowQuestionForm(false)}
-                className="px-4 py-2.5 rounded-xl border border-slate-300 text-slate-600 hover:bg-slate-50"
+                onClick={() => { void closeQuestionFormSafely() }}
+                disabled={questionMediaUploading}
+                className="px-4 py-2.5 rounded-xl border border-slate-300 text-slate-600 hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                Batal
+                {questionMediaUploading ? 'Menunggu Upload...' : 'Batal'}
               </button>
               <button
                 type="button"
