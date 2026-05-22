@@ -81,6 +81,20 @@ const getCurrentMonthValue = () => {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
 }
 
+const getQuizSpecialLabel = (quiz) => {
+  const mode = normalizeQuizMode(quiz)
+  const name = String(quiz?.nama || quiz?.judul || quiz?.title || '').trim().toLowerCase()
+
+  if (mode === 'uas' || /\b(uas|pas)\b|ujian akhir semester/.test(name)) return 'UAS'
+  if (mode === 'uts' || /\b(uts|pts)\b|ujian tengah semester/.test(name)) return 'UTS'
+  return ''
+}
+
+const getQuizColumnLabel = (quiz, index) => {
+  const specialLabel = getQuizSpecialLabel(quiz)
+  return specialLabel ? `Q${index + 1} ${specialLabel}` : `Q${index + 1}`
+}
+
 // ==============================
 // ===== MAIN COMPONENT =========
 // ==============================
@@ -90,6 +104,7 @@ export default function LaporanRekap() {
 
   // -- UI State --
   const [activeTab, setActiveTab] = useState('absensi')
+  const isRekapTab = activeTab === 'rekap' || activeTab === 'rekap_eskul'
   const [showBulanDropdown, setShowBulanDropdown] = useState(false)
   const dropdownRef = useRef(null)
 
@@ -159,7 +174,7 @@ export default function LaporanRekap() {
     [selectedWaliKelas, waliKelasList]
   )
 
-  const selectedFilterKelasMeta = activeTab === 'rekap' ? selectedWaliKelasMeta : selectedKelasMeta
+  const selectedFilterKelasMeta = isRekapTab ? selectedWaliKelasMeta : selectedKelasMeta
 
   const reportPeriodLabel = `${reportPeriod.tahunAjaran} - Tahun Ajaran`
   const isActiveReportPeriod = !isViewingArchivePeriod
@@ -1673,7 +1688,7 @@ export default function LaporanRekap() {
 
   // REALTIME TRIGGER
   useEffect(() => {
-    if (activeTab === 'rekap') {
+    if (isRekapTab) {
       loadRekapWali()
       return
     }
@@ -1690,6 +1705,7 @@ export default function LaporanRekap() {
     else if (activeTab === 'quiz') loadRekapQuiz()
   }, [
     activeTab,
+    isRekapTab,
     loadRekapAbsensi,
     loadRekapQuiz,
     loadRekapTugas,
@@ -3097,7 +3113,7 @@ export default function LaporanRekap() {
           </div>
 
           {/* Mapel (tidak dipakai untuk tab Rekap Wali Kelas) */}
-          {activeTab !== 'rekap' && (
+          {!isRekapTab && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Mapel
@@ -3234,7 +3250,7 @@ export default function LaporanRekap() {
                 if (activeTab === 'absensi') loadRekapAbsensi()
                 else if (activeTab === 'tugas') loadRekapTugas()
                 else if (activeTab === 'quiz') loadRekapQuiz()
-                else if (activeTab === 'rekap') loadRekapWali()
+                else if (isRekapTab) loadRekapWali()
               }}
             >
               <span>🔄</span> Muat Ulang
@@ -3242,7 +3258,7 @@ export default function LaporanRekap() {
           </div>
         </div>
 
-        {activeTab !== 'rekap' && (
+        {!isRekapTab && (
           <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200/60 print:hidden">
           <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
             <div>
@@ -3407,15 +3423,26 @@ export default function LaporanRekap() {
             Nilai Quiz
           </button>
           {waliKelasList.length > 0 && (
-            <button
-              className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${activeTab === 'rekap'
-                ? 'bg-white shadow text-blue-700'
-                : 'text-gray-600 hover:bg-slate-300'
-                }`}
-              onClick={() => setActiveTab('rekap')}
-            >
-              Rekap Wali Kelas
-            </button>
+            <>
+              <button
+                className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${activeTab === 'rekap'
+                  ? 'bg-white shadow text-blue-700'
+                  : 'text-gray-600 hover:bg-slate-300'
+                  }`}
+                onClick={() => setActiveTab('rekap')}
+              >
+                Rekap Wali Kelas
+              </button>
+              <button
+                className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${activeTab === 'rekap_eskul'
+                  ? 'bg-white shadow text-blue-700'
+                  : 'text-gray-600 hover:bg-slate-300'
+                  }`}
+                onClick={() => setActiveTab('rekap_eskul')}
+              >
+                Rekap Ekstrakurikuler Siswa
+              </button>
+            </>
           )}
         </div>
 
@@ -3441,10 +3468,10 @@ export default function LaporanRekap() {
             </p>
           </div>
         )}
-        {!rekapWaliData && activeTab === 'rekap' && (
+        {!rekapWaliData && isRekapTab && (
           <div className="text-center py-12 bg-white rounded-2xl border border-dashed border-slate-300">
             <p className="text-gray-500">
-              Silakan pilih Bulan untuk melihat rekap wali kelas.
+              Silakan pilih Bulan untuk melihat {activeTab === 'rekap_eskul' ? 'rekap ekstrakurikuler siswa' : 'rekap wali kelas'}.
             </p>
           </div>
         )}
@@ -3945,18 +3972,28 @@ export default function LaporanRekap() {
                   <tr>
                     <th className="px-4 py-3 w-10">No</th>
                     <th className="px-4 py-3 min-w-[200px]">Nama</th>
-                    {quizData.quizzes.map((q, i) => (
-                      <th
-                        key={q.id}
-                        className="px-2 py-3 text-center min-w-[60px]"
-                        title={q.nama}
-                      >
-                        <span className="block">Q{i + 1}</span>
-                        <span className="block mt-0.5 text-[10px] leading-tight font-medium normal-case tracking-normal text-slate-500">
-                          {formatMiniDate(q.starts_at || q.deadline_at || q.created_at)}
-                        </span>
-                      </th>
-                    ))}
+                    {quizData.quizzes.map((q, i) => {
+                      const specialLabel = getQuizSpecialLabel(q)
+                      const isSpecialQuiz = Boolean(specialLabel)
+                      return (
+                        <th
+                          key={q.id}
+                          className={`px-2 py-3 text-center min-w-[72px] ${
+                            isSpecialQuiz
+                              ? 'bg-orange-100 text-orange-800'
+                              : ''
+                          }`}
+                          title={q.nama || getQuizColumnLabel(q, i)}
+                        >
+                          <span className="block">{getQuizColumnLabel(q, i)}</span>
+                          <span className={`block mt-0.5 text-[10px] leading-tight font-medium normal-case tracking-normal ${
+                            isSpecialQuiz ? 'text-orange-700' : 'text-slate-500'
+                          }`}>
+                            {formatMiniDate(q.starts_at || q.deadline_at || q.created_at)}
+                          </span>
+                        </th>
+                      )
+                    })}
                     <th className="px-4 py-3 text-center bg-blue-50">Rata</th>
                     <th className="px-4 py-3 text-center bg-purple-50">
                       Grade
@@ -3978,6 +4015,7 @@ export default function LaporanRekap() {
                       <td className="px-4 py-2 font-medium">{s.nama}</td>
                       {quizData.quizzes.map((q) => {
                         const nilaiSiswa = s.nilaiQuiz[q.id]?.nilai
+                        const isSpecialQuiz = Boolean(getQuizSpecialLabel(q))
                         const isNilaiRendah =
                           nilaiSiswa !== null &&
                           nilaiSiswa !== undefined &&
@@ -3985,7 +4023,10 @@ export default function LaporanRekap() {
                           !Number.isNaN(Number(nilaiSiswa)) &&
                           Number(nilaiSiswa) < 70
                         return (
-                          <td key={q.id} className="px-1 py-1 text-center">
+                          <td
+                            key={q.id}
+                            className={`px-1 py-1 text-center ${isSpecialQuiz ? 'bg-orange-50/70' : ''}`}
+                          >
                             {editingQuizNilai?.siswaId === s.id &&
                             editingQuizNilai?.quizId === q.id ? (
                               <input
@@ -4300,104 +4341,145 @@ export default function LaporanRekap() {
               </table>
             </div>
 
-            <div className="border-t border-slate-200 bg-slate-50/50 p-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h4 className="text-sm font-bold text-slate-700">
-                    Rekap Ekstrakurikuler Siswa
-                  </h4>
-                  <p className="text-xs text-slate-500 mt-1">
-                    Hanya menampilkan siswa kelas wali{' '}
-                    {getNamaKelasFromList(selectedWaliKelas, waliKelasList)}.
-                  </p>
-                </div>
-                <div className="text-[11px] text-slate-500">
-                  Periode: {rekapWaliData.periode}
-                </div>
-              </div>
+          </div>
+        )}
 
-              <div className="mt-3 flex flex-wrap gap-2">
-                <span className="px-2.5 py-1 rounded-full text-[11px] bg-violet-50 text-violet-700 border border-violet-200">
-                  Total Ekskul Aktif: {rekapWaliData.eskul?.summary?.totalEkskul || 0}
-                </span>
-                <span className="px-2.5 py-1 rounded-full text-[11px] bg-emerald-50 text-emerald-700 border border-emerald-200">
-                  Siswa ikut ekskul: {rekapWaliData.eskul?.summary?.siswaIkutEskul || 0}
-                </span>
-                <span className="px-2.5 py-1 rounded-full text-[11px] bg-amber-50 text-amber-700 border border-amber-200">
-                  Siswa tanpa ekskul: {rekapWaliData.eskul?.summary?.siswaTanpaEskul || 0}
-                </span>
-                <span className="px-2.5 py-1 rounded-full text-[11px] bg-sky-50 text-sky-700 border border-sky-200">
+        {activeTab === 'rekap_eskul' && rekapWaliData && (
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 overflow-hidden">
+            <div className="p-4 border-b border-slate-200 flex flex-wrap gap-3 justify-between items-center bg-slate-50 print:bg-white">
+              <div>
+                <h3 className="font-bold text-gray-700">
+                  Rekap Ekstrakurikuler Siswa - {getNamaKelasFromList(selectedWaliKelas, waliKelasList)}
+                </h3>
+                <div className="text-xs text-gray-500">
+                  Periode: {rekapWaliData.periode} • Total Ekskul Aktif: {rekapWaliData.eskul?.summary?.totalEkskul || 0} •
                   Total keanggotaan: {rekapWaliData.eskul?.summary?.totalKeanggotaanEskul || 0}
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2 print:hidden">
+                <button
+                  onClick={exportRekapEskulToExcel}
+                  className="text-xs bg-emerald-600 text-white px-3 py-2 rounded hover:bg-emerald-700"
+                >
+                  Excel Ekskul
+                </button>
+                <button
+                  onClick={() => exportToGoogleSheets('rekap_eskul')}
+                  className="text-xs bg-sky-600 text-white px-3 py-2 rounded hover:bg-sky-700"
+                >
+                  Sheets Ekskul
+                </button>
+                <button
+                  onClick={handlePrint}
+                  className="text-xs bg-gray-700 text-white px-3 py-2 rounded hover:bg-gray-800"
+                >
+                  Cetak
+                </button>
+              </div>
+            </div>
+
+            {waliKelasList.length > 1 && (
+              <div className="px-4 py-3 border-b border-gray-100 bg-white">
+                <label className="text-xs font-semibold text-gray-600 mr-2">Pilih Kelas Wali:</label>
+                <select
+                  value={selectedWaliKelas}
+                  onChange={(e) => setSelectedWaliKelas(e.target.value)}
+                  className="border border-slate-300 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {waliKelasList.map((k) => (
+                    <option key={k.id} value={k.id}>
+                      {getNamaKelasFromList(k.id, waliKelasList)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div className="px-4 py-4 border-b border-gray-100 bg-white grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+              <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-violet-700">Total Ekskul Aktif</div>
+                <div className="mt-1 text-2xl font-bold text-violet-900">{rekapWaliData.eskul?.summary?.totalEkskul || 0}</div>
+              </div>
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">Siswa Ikut Ekskul</div>
+                <div className="mt-1 text-2xl font-bold text-emerald-900">{rekapWaliData.eskul?.summary?.siswaIkutEskul || 0}</div>
+              </div>
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">Siswa Tanpa Ekskul</div>
+                <div className="mt-1 text-2xl font-bold text-amber-900">{rekapWaliData.eskul?.summary?.siswaTanpaEskul || 0}</div>
+              </div>
+              <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-sky-700">Total Keanggotaan</div>
+                <div className="mt-1 text-2xl font-bold text-sky-900">{rekapWaliData.eskul?.summary?.totalKeanggotaanEskul || 0}</div>
+              </div>
+            </div>
+
+            <div className="px-4 py-3 border-b border-gray-100 bg-white flex flex-wrap items-center gap-3 print:hidden">
+              <div className="text-sm text-gray-600">Cari rekap ekskul (Nama / NIS / Ekskul):</div>
+              <input
+                type="text"
+                value={searchRekapEskul}
+                onChange={(e) => setSearchRekapEskul(e.target.value)}
+                placeholder="Ketik nama, NIS, atau nama ekskul..."
+                className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm w-full sm:w-80 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+              {searchRekapEskul && !filteredRekapEskulSiswa.length && (
+                <span className="text-xs text-red-500">
+                  Tidak ada data ekskul yang cocok dengan "{searchRekapEskul}"
                 </span>
-              </div>
+              )}
+            </div>
 
-              <div className="mt-3 bg-white rounded-xl border border-slate-200 px-3 py-2 flex flex-wrap items-center gap-3 print:hidden">
-                <div className="text-sm text-gray-600">Cari rekap ekskul (Nama / NIS / Ekskul):</div>
-                <input
-                  type="text"
-                  value={searchRekapEskul}
-                  onChange={(e) => setSearchRekapEskul(e.target.value)}
-                  placeholder="Ketik nama, NIS, atau nama ekskul..."
-                  className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm w-full sm:w-80 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
-                {searchRekapEskul && !filteredRekapEskulSiswa.length && (
-                  <span className="text-xs text-red-500">
-                    Tidak ada data ekskul yang cocok dengan "{searchRekapEskul}"
-                  </span>
-                )}
-              </div>
-
-              <div className="overflow-x-auto mt-3 bg-white rounded-xl border border-slate-200">
-                <table className="w-full text-sm text-left">
-                  <thead className="bg-gray-100 text-gray-700 uppercase font-bold text-xs">
-                    <tr>
-                      <th className="px-3 py-2 w-10">No</th>
-                      <th className="px-3 py-2 min-w-[180px]">Nama</th>
-                      <th className="px-3 py-2">NIS</th>
-                      <th className="px-3 py-2 text-center">Jml Ekskul</th>
-                      <th className="px-3 py-2 min-w-[240px]">Daftar Ekskul</th>
-                      <th className="px-3 py-2 text-center">H</th>
-                      <th className="px-3 py-2 text-center">I</th>
-                      <th className="px-3 py-2 text-center">S</th>
-                      <th className="px-3 py-2 text-center">A</th>
-                      <th className="px-3 py-2 text-center">Total</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {filteredRekapEskulSiswa.map((s, idx) => {
-                      const daftarEkskul = (s.eskul?.eskulList || []).join(', ') || '-'
-                      const isRowSelected = selectedEskulRowId === s.id
-                      return (
-                        <tr
-                          key={`${s.id}-ekskul`}
-                          onClick={() =>
-                            setSelectedEskulRowId((prev) => (prev === s.id ? null : s.id))
-                          }
-                          className={buildSelectableRowClass(isRowSelected, 'hover:bg-slate-50')}
-                        >
-                          <td className="px-3 py-2 text-center">{idx + 1}</td>
-                          <td className="px-3 py-2 font-medium">{s.nama}</td>
-                          <td className="px-3 py-2">{s.nis}</td>
-                          <td className="px-3 py-2 text-center">{s.eskul?.jumlahEkskul || 0}</td>
-                          <td className="px-3 py-2">{daftarEkskul}</td>
-                          <td className="px-3 py-2 text-center">{s.eskul?.totalAbsensi?.Hadir || 0}</td>
-                          <td className="px-3 py-2 text-center">{s.eskul?.totalAbsensi?.Izin || 0}</td>
-                          <td className="px-3 py-2 text-center">{s.eskul?.totalAbsensi?.Sakit || 0}</td>
-                          <td className="px-3 py-2 text-center">{s.eskul?.totalAbsensi?.Alpha || 0}</td>
-                          <td className="px-3 py-2 text-center font-semibold">{s.eskul?.totalAbsensi?.total || 0}</td>
-                        </tr>
-                      )
-                    })}
-                    {!filteredRekapEskulSiswa.length && (
-                      <tr>
-                        <td colSpan={10} className="px-3 py-6 text-center text-sm text-slate-500">
-                          Tidak ada data ekstrakurikuler pada hasil pencarian.
-                        </td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm text-left">
+                <thead className="bg-gray-100 text-gray-700 uppercase font-bold text-xs">
+                  <tr>
+                    <th className="px-3 py-3 w-10">No</th>
+                    <th className="px-3 py-3 min-w-[200px]">Nama</th>
+                    <th className="px-3 py-3 min-w-[120px]">NIS</th>
+                    <th className="px-3 py-3 text-center min-w-[110px]">Jml Ekskul</th>
+                    <th className="px-3 py-3 min-w-[280px]">Daftar Ekskul</th>
+                    <th className="px-3 py-3 text-center min-w-[60px]">H</th>
+                    <th className="px-3 py-3 text-center min-w-[60px]">I</th>
+                    <th className="px-3 py-3 text-center min-w-[60px]">S</th>
+                    <th className="px-3 py-3 text-center min-w-[60px]">A</th>
+                    <th className="px-3 py-3 text-center min-w-[80px]">Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {filteredRekapEskulSiswa.map((s, idx) => {
+                    const daftarEkskul = (s.eskul?.eskulList || []).join(', ') || '-'
+                    const isRowSelected = selectedEskulRowId === s.id
+                    return (
+                      <tr
+                        key={`${s.id}-ekskul`}
+                        onClick={() =>
+                          setSelectedEskulRowId((prev) => (prev === s.id ? null : s.id))
+                        }
+                        className={buildSelectableRowClass(isRowSelected, 'hover:bg-slate-50')}
+                      >
+                        <td className="px-3 py-2 text-center">{idx + 1}</td>
+                        <td className="px-3 py-2 font-medium">{s.nama}</td>
+                        <td className="px-3 py-2 whitespace-nowrap">{s.nis}</td>
+                        <td className="px-3 py-2 text-center">{s.eskul?.jumlahEkskul || 0}</td>
+                        <td className="px-3 py-2">{daftarEkskul}</td>
+                        <td className="px-3 py-2 text-center">{s.eskul?.totalAbsensi?.Hadir || 0}</td>
+                        <td className="px-3 py-2 text-center">{s.eskul?.totalAbsensi?.Izin || 0}</td>
+                        <td className="px-3 py-2 text-center">{s.eskul?.totalAbsensi?.Sakit || 0}</td>
+                        <td className="px-3 py-2 text-center">{s.eskul?.totalAbsensi?.Alpha || 0}</td>
+                        <td className="px-3 py-2 text-center font-semibold">{s.eskul?.totalAbsensi?.total || 0}</td>
                       </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                    )
+                  })}
+                  {!filteredRekapEskulSiswa.length && (
+                    <tr>
+                      <td colSpan={10} className="px-3 py-6 text-center text-sm text-slate-500">
+                        Tidak ada data ekstrakurikuler pada hasil pencarian.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
         )}
