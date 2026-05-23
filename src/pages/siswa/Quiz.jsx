@@ -2564,6 +2564,8 @@ export default function SiswaQuiz() {
                       <div>
                         <label className="text-xs font-semibold text-slate-600">Kode Akses</label>
                         <input
+                          name="quiz_access_code"
+                          aria-label="Kode akses quiz"
                           type="password"
                           className="mt-1 h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
                           value={accessCodeInput}
@@ -2682,6 +2684,8 @@ export default function SiswaQuiz() {
                               {activeQuestionType === 'essay' ? (
                                 <div>
                                   <textarea
+                                    name="quiz_essay_answer"
+                                    aria-label={`Jawaban esai soal ${activeQuestionIndex + 1}`}
                                     rows="10"
                                     value={String(answers[activeQuestion.id] || '')}
                                     onChange={(e) => handleEssayChange(activeQuestion.id, e.target.value)}
@@ -2917,6 +2921,8 @@ export default function SiswaQuiz() {
                 compact
               />
               <select
+                name="quiz_mapel_filter"
+                aria-label="Filter mapel quiz"
                 className="border border-slate-200 rounded-2xl px-4 py-3 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 value={selectedMapel}
                 onChange={(e) => setSelectedMapel(e.target.value)}
@@ -2929,6 +2935,8 @@ export default function SiswaQuiz() {
                 ))}
               </select>
               <select
+                name="quiz_month_filter"
+                aria-label="Filter bulan quiz"
                 className="border border-slate-200 rounded-2xl px-4 py-3 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 value={selectedMonth}
                 onChange={(e) => setSelectedMonth(e.target.value)}
@@ -3149,6 +3157,8 @@ export default function SiswaQuiz() {
                       <div className="mt-3 max-w-sm">
                         <label className="text-xs font-semibold text-slate-600">Kode Akses</label>
                         <input
+                          name="quiz_access_code_inline"
+                          aria-label="Kode akses quiz"
                           type="password"
                           className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
                           value={accessCodeInput}

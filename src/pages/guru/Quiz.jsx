@@ -412,7 +412,7 @@ export default function GuruQuiz() {
     imageSizeLoadingRef.current.add(key)
     setImageSizeLoading(key, true)
     try {
-      const response = await fetch(imageUrl, { credentials: 'include' })
+      const response = await fetch(imageUrl, { credentials: 'same-origin' })
       if (!response.ok) return
       const blob = await response.blob()
       setImageSizeValue(key, Number(blob.size || 0))
@@ -2206,6 +2206,8 @@ export default function GuruQuiz() {
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-2">Kelas</label>
               <select
+                name="quiz_class_filter"
+                aria-label="Filter kelas quiz"
                 className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white text-sm shadow-sm"
                 value={selectedKelas}
                 onChange={(e) => setSelectedKelas(e.target.value)}
@@ -2220,6 +2222,8 @@ export default function GuruQuiz() {
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-2">Mata Pelajaran</label>
               <select
+                name="quiz_mapel_filter"
+                aria-label="Filter mata pelajaran quiz"
                 className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white text-sm shadow-sm"
                 value={selectedMapel}
                 onChange={(e) => setSelectedMapel(e.target.value)}
@@ -2234,6 +2238,8 @@ export default function GuruQuiz() {
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-2">Bulan</label>
               <select
+                name="quiz_month_filter"
+                aria-label="Filter bulan quiz"
                 className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white text-sm shadow-sm"
                 value={selectedMonth}
                 onChange={(e) => setSelectedMonth(e.target.value)}
@@ -2483,6 +2489,8 @@ export default function GuruQuiz() {
                   <div>
                     <label className="text-sm font-semibold text-slate-600">Tanggal Mulai</label>
                     <input
+                      name="quiz_starts_at"
+                      aria-label="Tanggal mulai quiz"
                       type="datetime-local"
                       className="mt-1 w-full rounded-lg border border-slate-300 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                       min={startInputMin}
@@ -2495,6 +2503,8 @@ export default function GuruQuiz() {
                   <div>
                     <label className="text-sm font-semibold text-slate-600">Tanggal Selesai</label>
                     <input
+                      name="quiz_deadline_at"
+                      aria-label="Tanggal selesai quiz"
                       type="datetime-local"
                       className="mt-1 w-full rounded-lg border border-slate-300 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                       min={deadlineInputMin}
@@ -2562,6 +2572,8 @@ export default function GuruQuiz() {
                   <label className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
                     <span className="text-sm font-semibold text-slate-700">Acak urutan soal</span>
                     <input
+                      name="quiz_shuffle_questions"
+                      aria-label="Acak urutan soal"
                       type="checkbox"
                       className="h-5 w-5 rounded border-slate-300 text-slate-800 focus:ring-slate-500"
                       checked={securityForm.shuffle_questions}
@@ -2572,6 +2584,8 @@ export default function GuruQuiz() {
                   <label className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
                     <span className="text-sm font-semibold text-slate-700">Acak opsi jawaban</span>
                     <input
+                      name="quiz_shuffle_options"
+                      aria-label="Acak opsi jawaban"
                       type="checkbox"
                       className="h-5 w-5 rounded border-slate-300 text-slate-800 focus:ring-slate-500"
                       checked={securityForm.shuffle_options}
@@ -2582,6 +2596,8 @@ export default function GuruQuiz() {
                   <div>
                     <label className="text-sm font-semibold text-slate-600">Batas Percobaan</label>
                     <select
+                      name="quiz_max_attempts"
+                      aria-label="Batas percobaan quiz"
                       className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-4 py-3 focus:outline-none focus:ring-2 focus:ring-slate-500"
                       value={securityForm.max_attempts}
                       onChange={(e) => setSecurityForm((prev) => ({ ...prev, max_attempts: e.target.value }))}
@@ -2598,6 +2614,8 @@ export default function GuruQuiz() {
                   <div>
                     <label className="text-sm font-semibold text-slate-600">Mode Keamanan</label>
                     <select
+                      name="quiz_security_mode"
+                      aria-label="Mode keamanan quiz"
                       className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-4 py-3 focus:outline-none focus:ring-2 focus:ring-slate-500"
                       value={securityForm.security_mode}
                       onChange={(e) => setSecurityForm((prev) => ({ ...prev, security_mode: e.target.value }))}
@@ -2610,6 +2628,8 @@ export default function GuruQuiz() {
                   <div className="md:col-span-2">
                     <label className="text-sm font-semibold text-slate-600">Akses Perangkat Quiz</label>
                     <select
+                      name="quiz_access_device"
+                      aria-label="Akses perangkat quiz"
                       className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-4 py-3 focus:outline-none focus:ring-2 focus:ring-slate-500"
                       value={securityForm.access_device}
                       onChange={(e) => setSecurityForm((prev) => ({ ...prev, access_device: e.target.value }))}
@@ -2637,6 +2657,8 @@ export default function GuruQuiz() {
                       </span>
                     </label>
                     <input
+                      name="quiz_access_code"
+                      aria-label="Kode akses baru quiz"
                       type="password"
                       className="mt-1 w-full rounded-lg border border-slate-300 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-slate-500"
                       value={securityForm.access_code}
@@ -3352,12 +3374,14 @@ export default function GuruQuiz() {
                             <div className="flex flex-col sm:flex-row sm:items-end gap-2">
                               <div>
                                 <label className={`text-xs font-semibold ${hasDraftScore || hasSavedEssayScore ? 'text-emerald-700' : 'text-slate-600'}`}>
-                                  Nilai Esai (min {answerText ? 1 : 0}, max {row.poin})
+                                  Nilai Esai (0 - {row.poin})
                                   {isDraftSyncedWithSaved ? ' • Tersimpan' : hasDraftScore ? ' • Sudah diisi' : ''}
                                 </label>
                                 <input
+                                  name={`essay_score_${row.questionId}`}
+                                  aria-label={`Nilai esai soal ${detailActiveQuestionIndex + 1}`}
                                   type="number"
-                                  min={answerText ? 1 : 0}
+                                  min={0}
                                   max={row.poin}
                                   className={`mt-1 w-40 border rounded-xl px-3 py-2 text-sm ${
                                     hasDraftScore || hasSavedEssayScore
@@ -3423,6 +3447,8 @@ export default function GuruQuiz() {
             <div>
               <label className="text-sm font-semibold text-slate-600">Nama Quiz</label>
               <input
+                name="quiz_name"
+                aria-label="Nama quiz"
                 className="mt-1 w-full border border-slate-300 rounded-xl px-4 py-3"
                 value={quizForm.nama}
                 onChange={(e) => setQuizForm((prev) => ({ ...prev, nama: e.target.value }))}
@@ -3445,6 +3471,8 @@ export default function GuruQuiz() {
               <div>
                 <label className="text-sm font-semibold text-slate-600">Mode</label>
                 <select
+                  name="quiz_mode"
+                  aria-label="Mode quiz"
                   className="mt-1 w-full border border-slate-300 rounded-xl px-4 py-3"
                   value={quizForm.mode}
                   onChange={(e) => setQuizForm((prev) => ({ ...prev, mode: e.target.value }))}
@@ -3654,6 +3682,8 @@ export default function GuruQuiz() {
             <div>
               <label className="text-sm font-semibold text-slate-600">Jenis Soal</label>
               <select
+                name="quiz_question_type"
+                aria-label="Jenis soal quiz"
                 className="mt-1 w-full border border-slate-300 rounded-xl px-4 py-3"
                 value={questionForm.question_type}
                 onChange={(e) => setQuestionForm((prev) => ({ ...prev, question_type: e.target.value }))}
@@ -3665,6 +3695,8 @@ export default function GuruQuiz() {
             <div>
               <label className="text-sm font-semibold text-slate-600">Soal</label>
               <textarea
+                name="quiz_question_text"
+                aria-label="Teks soal quiz"
                 rows="3"
                 className="mt-1 w-full border border-slate-300 rounded-xl px-4 py-3"
                 value={questionForm.soal}
@@ -3677,6 +3709,8 @@ export default function GuruQuiz() {
               </label>
               <div className="flex flex-wrap items-center gap-2">
                 <input
+                  name="quiz_question_image"
+                  aria-label="Upload gambar soal"
                   type="file"
                   accept=".jpg,.jpeg,.png,image/jpeg,image/png"
                   onChange={(e) => {
@@ -3719,6 +3753,8 @@ export default function GuruQuiz() {
             <div>
               <label className="text-sm font-semibold text-slate-600">Poin Soal</label>
               <select
+                name="quiz_question_points"
+                aria-label="Poin soal quiz"
                 className="mt-1 w-full border border-slate-300 rounded-xl px-4 py-3"
                 value={questionForm.poin}
                 onChange={(e) => setQuestionForm((prev) => ({ ...prev, poin: Number(e.target.value) }))}
@@ -3743,6 +3779,8 @@ export default function GuruQuiz() {
                     <div key={label}>
                       <label className="text-xs font-semibold text-slate-500">Pilihan {label}</label>
                       <input
+                        name={`quiz_option_${label}`}
+                        aria-label={`Pilihan jawaban ${label}`}
                         className={`mt-1 w-full border rounded-xl px-4 py-3 ${
                           questionForm.correct === label ? 'border-green-400 bg-green-50' : 'border-slate-200'
                         }`}
@@ -3756,6 +3794,8 @@ export default function GuruQuiz() {
                       />
                       <div className="mt-2 flex flex-wrap items-center gap-2">
                         <input
+                          name={`quiz_option_image_${label}`}
+                          aria-label={`Upload gambar opsi ${label}`}
                           type="file"
                           accept=".jpg,.jpeg,.png,image/jpeg,image/png"
                           onChange={(e) => {
@@ -3800,6 +3840,8 @@ export default function GuruQuiz() {
                 <div>
                   <label className="text-sm font-semibold text-slate-600">Jawaban Benar</label>
                   <select
+                    name="quiz_correct_answer"
+                    aria-label="Jawaban benar"
                     className="mt-1 w-full border border-slate-300 rounded-xl px-4 py-3"
                     value={questionForm.correct}
                     onChange={(e) => setQuestionForm((prev) => ({ ...prev, correct: e.target.value }))}
@@ -3854,6 +3896,8 @@ export default function GuruQuiz() {
                 {normalizeQuestionType(questionForm.question_type) === 'essay' ? (
                   <div>
                     <textarea
+                      name="quiz_essay_preview"
+                      aria-label="Preview jawaban esai"
                       rows="4"
                       disabled
                       placeholder="Tulis jawaban esai Anda di sini..."

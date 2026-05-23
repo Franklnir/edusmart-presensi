@@ -1976,7 +1976,7 @@ class StorageBucket {
     const normalized = extractObjectPath(this.bucket, path) || path
     const url = `${API_URL}/api/storage/object?bucket=${encodeURIComponent(this.bucket)}&path=${encodeURIComponent(normalized)}`
     try {
-      const response = await fetch(url, { credentials: 'include' })
+      const response = await fetch(url, { credentials: 'same-origin' })
       if (!response.ok) {
         if (isSessionExpiredStatus(response.status)) {
           notifySessionExpired({
