@@ -674,21 +674,11 @@ export default function ProfileGuru() {
     { label: 'NIP/NUPTK', value: displayValue(profile?.nis) },
     { label: 'Jabatan', value: displayValue(profile?.jabatan) },
     { label: 'Role Akun', value: roleLabel(profile?.role) },
-    { label: 'Status Akun', value: statusLabel(profile?.status) },
-    { label: 'Jenis Kelamin', value: genderLabel(profile?.jk) },
-    { label: 'Agama', value: displayValue(profile?.agama) },
-    { label: 'Telepon', value: displayValue(profile?.telp) },
-    { label: 'Tanggal Lahir', value: formatDateLabel(profile?.tanggal_lahir) },
     { label: 'Terakhir Sinkron', value: formatDateTimeLabel(profile?.updated_at) }
   ]), [
-    profile?.agama,
     profile?.jabatan,
-    profile?.jk,
     profile?.nis,
     profile?.role,
-    profile?.status,
-    profile?.tanggal_lahir,
-    profile?.telp,
     profile?.updated_at
   ])
 
@@ -985,44 +975,31 @@ export default function ProfileGuru() {
 
           {/* ========== FORM EDIT PROFIL ========== */}
           <div className="lg:col-span-3 space-y-6">
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-6 sm:p-8">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-8">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between mb-6">
                 <div>
-                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-600">Identitas Guru</p>
-                  <h3 className="mt-2 text-2xl font-bold text-slate-900">Data Profil Tersinkron</h3>
-                  <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-                    Data ini memakai profil yang sama dengan admin sekolah. Jika admin memperbarui identitas guru, halaman ini ikut tersinkron otomatis tanpa menunggu refresh manual.
+                  <h3 className="text-2xl font-bold text-gray-900">Informasi Pribadi</h3>
+                  <p className="text-gray-600 mt-1">
+                    Data ini sinkron dengan profil guru di admin sekolah. Field identitas admin tampil sebagai referensi, sedangkan data pribadi bisa Anda perbarui di form ini.
                   </p>
                 </div>
-                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
-                  {statusLabel(profile?.status)}
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">
+                    {statusLabel(profile?.status)}
+                  </span>
+                  <span className="rounded-xl bg-gray-50 px-3 py-2 text-xs text-gray-500">
+                    Foto maks. 100KB
+                  </span>
                 </div>
               </div>
 
-              <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="mb-8 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 {identityRows.map((item) => (
                   <div key={item.label} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                     <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{item.label}</div>
                     <div className="mt-1 break-words text-sm font-semibold text-slate-900">{item.value}</div>
                   </div>
                 ))}
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 sm:col-span-2 xl:col-span-3">
-                  <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Email Login</div>
-                  <div className="mt-1 break-all text-sm font-semibold text-slate-900">{displayValue(email)}</div>
-                </div>
-              </div>
-            </div>
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-8">
-              <div className="flex items-center justify-between mb-8">
-                <div>
-                  <h3 className="text-2xl font-bold text-gray-900">Informasi Pribadi</h3>
-                  <p className="text-gray-600 mt-1">Perbarui data profil Anda</p>
-                </div>
-                <div className="text-right">
-                  <div className="text-xs text-gray-500 bg-gray-50 px-3 py-1.5 rounded-lg">
-                    Foto maks. 100KB
-                  </div>
-                </div>
               </div>
 
               <div className="grid md:grid-cols-2 gap-8">
