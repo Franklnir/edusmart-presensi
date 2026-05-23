@@ -1702,7 +1702,22 @@ export default function JadwalGuru() {
       if (!silent) setLoading(true)
       const { data, error } = await supabase
         .from('jam_kosong')
-        .select(`*, profiles!jam_kosong_created_by_fkey ( nama )`)
+        .select(`
+          id,
+          tanggal,
+          kelas,
+          mapel,
+          jam_mulai,
+          jam_selesai,
+          alasan,
+          guru_pengganti,
+          created_by,
+          created_at,
+          updated_at,
+          tahun_ajaran,
+          semester,
+          profiles!jam_kosong_created_by_fkey ( nama )
+        `)
         .eq('tanggal', todayStr)
         .order('jam_mulai', { ascending: true })
 
