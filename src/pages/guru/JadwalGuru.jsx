@@ -1,6 +1,6 @@
 // src/pages/guru/JadwalGuru.jsx
 import React, { useState, useEffect } from 'react'
-import { supabase } from '../../lib/supabase'
+import { apiFetch, supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import {
@@ -1951,27 +1951,18 @@ export default function JadwalGuru() {
         }
       }
 
-      const newValue = isCanceling ? null : currentTeacherName
-      let query = supabase
-        .from('jam_kosong')
-        .update({
-          guru_pengganti: newValue,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', item.id)
-
-      query = isCanceling
-        ? query.eq('guru_pengganti', item.guru_pengganti)
-        : query.is('guru_pengganti', null)
-
-      const { data, error } = await query
-
+      const { data, error } = await apiFetch(
+        `/api/guru/jam-kosong/${encodeURIComponent(item.id)}/replacement`,
+        {
+          method: 'POST',
+          body: {
+            action: isCanceling ? 'cancel' : 'take'
+          }
+        }
+      )
       if (error) throw error
-      if (Number(data || 0) < 1) {
-        throw new Error(isCanceling
-          ? 'Jam kosong ini sudah berubah. Data akan diperbarui.'
-          : 'Jam kosong sudah diambil guru lain atau tidak tersedia lagi.')
-      }
+
+      const newValue = data?.guru_pengganti ?? (isCanceling ? null : currentTeacherName)
 
       setJamKosongHariIni((prev) =>
         prev.map((jam) =>

@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\ClassHistoryController;
 use App\Http\Controllers\Api\DbController;
 use App\Http\Controllers\Api\GoogleDriveController;
 use App\Http\Controllers\Api\InfrastructureController;
+use App\Http\Controllers\Api\JadwalController;
 use App\Http\Controllers\Api\MobileDirectoryController;
 use App\Http\Controllers\Api\PresenceController;
 use App\Http\Controllers\Api\ProfileController;
@@ -103,6 +104,7 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::post('/auth/google/credential-link', [AuthController::class, 'googleCredentialLink']);
     Route::post('/auth/google/unlink', [AuthController::class, 'googleUnlink']);
     Route::post('/presence/ping', [PresenceController::class, 'ping']);
+    Route::post('/guru/jam-kosong/{id}/replacement', [JadwalController::class, 'updateJamKosongReplacement']);
     Route::post('/attendance-qr/session', [AttendanceQrController::class, 'session']);
     Route::post('/attendance-qr/scan', [AttendanceQrController::class, 'scan']);
     Route::patch('/students/{id}/additional-info', [AdminController::class, 'updateStudentAdditionalInfo']);
