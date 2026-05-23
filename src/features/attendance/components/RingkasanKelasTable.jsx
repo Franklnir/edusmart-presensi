@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import ProfileAvatar from '../../../components/ProfileAvatar'
 import { supabase } from '../../../lib/supabase'
 
@@ -188,6 +188,102 @@ export default function RingkasanKelasTable({
     })
   }
 
+  const statusSummary = useMemo(() => {
+    return (dataSiswa || []).reduce(
+      (acc, siswa) => {
+        const status = siswa?.status || 'Belum Absen'
+        if (status === 'Hadir') acc.Hadir += 1
+        else if (status === 'Izin') acc.Izin += 1
+        else if (status === 'Sakit') acc.Sakit += 1
+        else if (status === 'Alpha') acc.Alpha += 1
+        else acc.Belum += 1
+        acc.Total += 1
+        return acc
+      },
+      { Hadir: 0, Izin: 0, Sakit: 0, Alpha: 0, Belum: 0, Total: 0 }
+    )
+  }, [dataSiswa])
+
+  const summaryItems = [
+    {
+      key: 'Hadir',
+      label: 'Hadir',
+      value: statusSummary.Hadir,
+      className: 'border-green-200 bg-green-50 text-green-700'
+    },
+    {
+      key: 'Izin',
+      label: 'Izin',
+      value: statusSummary.Izin,
+      className: 'border-yellow-200 bg-yellow-50 text-yellow-700'
+    },
+    {
+      key: 'Sakit',
+      label: 'Sakit',
+      value: statusSummary.Sakit,
+      className: 'border-blue-200 bg-blue-50 text-blue-700'
+    },
+    {
+      key: 'Alpha',
+      label: 'Alpha',
+      value: statusSummary.Alpha,
+      className: 'border-red-200 bg-red-50 text-red-700'
+    },
+    {
+      key: 'Belum',
+      label: 'Belum Absen',
+      value: statusSummary.Belum,
+      className: 'border-slate-200 bg-slate-50 text-slate-700'
+    }
+  ]
+
+  const renderAction = (siswa, hasStatus) => {
+    const isSelf = siswa.id === selfUserId
+    if (!isSelf) {
+      return <span className="text-[11px] text-slate-400">-</span>
+    }
+
+    if (hasStatus) {
+      return (
+        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+          Selesai
+        </span>
+      )
+    }
+
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={onHadir}
+          disabled={!canClickHadir}
+          className={`min-h-9 px-4 py-2 rounded-xl text-xs font-bold leading-none whitespace-nowrap shadow-sm transition-all ${!canClickHadir
+            ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+            : 'bg-green-600 hover:bg-green-700 text-white shadow-green-100'
+            }`}
+        >
+          Hadir
+        </button>
+        <button
+          type="button"
+          onClick={onIzin}
+          disabled={!canClickIzin}
+          title={
+            canClickIzin
+              ? 'Ajukan izin'
+              : izinDisabledReason || 'Ajukan izin tidak tersedia'
+          }
+          className={`min-h-9 px-4 py-2 rounded-xl text-xs font-bold leading-none whitespace-nowrap shadow-sm transition-all ${!canClickIzin
+            ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+            : 'bg-yellow-500 hover:bg-yellow-600 text-white shadow-yellow-100'
+            }`}
+        >
+          Ajukan Izin
+        </button>
+      </div>
+    )
+  }
+
   if (isLoading) {
     return (
       <div className="text-center py-6">
@@ -206,8 +302,37 @@ export default function RingkasanKelasTable({
   }
 
   return (
-    <div className="mt-3">
-      <div className="overflow-x-auto rounded-2xl border border-slate-200/80 bg-white shadow-sm">
+    <div className="mt-3 space-y-3">
+      <div className="rounded-2xl border border-slate-200/80 bg-white p-3 shadow-sm">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h4 className="text-sm font-bold text-slate-900">
+              Ringkasan Status Mapel Ini
+            </h4>
+            <p className="text-[11px] text-slate-500">
+              {mapel
+                ? `${mapel} • ${tanggal}`
+                : 'Pilih mapel untuk melihat status sesuai sesi.'}
+            </p>
+          </div>
+          <span className="inline-flex w-fit items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-semibold text-slate-700">
+            Total {statusSummary.Total} siswa
+          </span>
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+          {summaryItems.map((item) => (
+            <div
+              key={item.key}
+              className={`rounded-2xl border px-3 py-2.5 ${item.className}`}
+            >
+              <div className="text-[11px] font-semibold">{item.label}</div>
+              <div className="mt-1 text-2xl font-bold">{item.value}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="hidden overflow-x-auto rounded-2xl border border-slate-200/80 bg-white shadow-sm md:block">
         <table className="w-full text-xs">
           <thead>
             <tr className="bg-slate-50/90 border-b border-slate-200">
@@ -274,51 +399,72 @@ export default function RingkasanKelasTable({
                     </span>
                   </td>
                   <td className="px-3 py-2.5 min-w-[190px]">
-                    {isSelf ? (
-                      hasStatus ? (
-                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
-                          Selesai
-                        </span>
-                      ) : (
-                        <div className="flex flex-wrap items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={onHadir}
-                            disabled={!canClickHadir}
-                            className={`min-h-9 px-4 py-2 rounded-xl text-xs font-bold leading-none whitespace-nowrap shadow-sm transition-all ${!canClickHadir
-                              ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
-                              : 'bg-green-600 hover:bg-green-700 text-white shadow-green-100'
-                              }`}
-                          >
-                            Hadir
-                          </button>
-                          <button
-                            type="button"
-                            onClick={onIzin}
-                            disabled={!canClickIzin}
-                            title={
-                              canClickIzin
-                                ? 'Ajukan izin'
-                                : izinDisabledReason || 'Ajukan izin tidak tersedia'
-                            }
-                            className={`min-h-9 px-4 py-2 rounded-xl text-xs font-bold leading-none whitespace-nowrap shadow-sm transition-all ${!canClickIzin
-                              ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
-                              : 'bg-yellow-500 hover:bg-yellow-600 text-white shadow-yellow-100'
-                              }`}
-                          >
-                            Ajukan Izin
-                          </button>
-                        </div>
-                      )
-                    ) : (
-                      <span className="text-[11px] text-slate-400">-</span>
-                    )}
+                    {renderAction(siswa, hasStatus)}
                   </td>
                 </tr>
               )
             })}
           </tbody>
         </table>
+      </div>
+      <div className="space-y-2 md:hidden">
+        {dataSiswa.map((siswa, idx) => {
+          const isSelf = siswa.id === selfUserId
+          const hasStatus = !!siswa.status
+          return (
+            <div
+              key={siswa.id}
+              className={`rounded-2xl border border-slate-200 bg-white p-3 shadow-sm ${getStatusColor(
+                siswa.status
+              )} ${isSelf ? 'ring-1 ring-blue-200' : ''}`}
+            >
+              <div className="flex items-start gap-3">
+                <div className="pt-1 text-xs font-bold text-slate-500">{idx + 1}</div>
+                <ProfileAvatar
+                  src={siswa.foto}
+                  name={siswa.nama}
+                  size={36}
+                  className="border-slate-300"
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-semibold text-slate-900">{siswa.nama}</span>
+                    {isSelf && (
+                      <span className="inline-flex items-center rounded-full border border-blue-200 bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700">
+                        Anda
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-0.5 text-[11px] text-slate-500">
+                    NIS: {siswa.nis || '-'}
+                  </div>
+                </div>
+                <span
+                  className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold ${getStatusBadgeClass(
+                    siswa.status
+                  )}`}
+                >
+                  {!mapel ? 'Pilih Mapel' : siswa.status || 'Belum Absen'}
+                </span>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
+                <div className="rounded-xl border border-slate-200 bg-white/70 p-2">
+                  <div className="font-semibold text-slate-500">Jam</div>
+                  <div className="font-bold text-slate-800">
+                    {siswa.status === 'Hadir' ? getJamStatus(siswa.waktu) : '-'}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white/70 p-2">
+                  <div className="font-semibold text-slate-500">Detail</div>
+                  <div className="font-bold text-slate-800">{getDetailAbsensi(siswa)}</div>
+                </div>
+              </div>
+              <div className="mt-3">
+                {renderAction(siswa, hasStatus)}
+              </div>
+            </div>
+          )
+        })}
       </div>
       <div className="mt-2 text-[11px] text-slate-500">
         Menampilkan {dataSiswa.length} siswa. Baris akun Anda diberi label <span className="font-semibold">Anda</span>.

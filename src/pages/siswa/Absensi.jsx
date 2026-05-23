@@ -90,11 +90,9 @@ export default function SAbsensi() {
     loadRingkasDanStatus,
     loadStatistikKehadiran,
     refreshFnsRef,
-    ringkas,
     setCurrentJadwal,
     setCurrentJadwalIndex,
     setStatus,
-    statistikKehadiran,
     status,
     statusRef,
   } = useStudentAttendanceData({
@@ -255,40 +253,12 @@ export default function SAbsensi() {
                   {profile.kelas} • {profile.nama}
                 </p>
                 <p className="text-[11px] text-slate-500 mt-1">
-                  Rekap Kehadiran <span className="font-semibold">Hari Ini</span>
+                  Status kelas ditampilkan sesuai mapel dan tanggal yang dipilih.
                 </p>
               </div>
             </div>
 
             <div className="flex flex-col lg:flex-row gap-3">
-              {/* Statistik Kehadiran HARI INI */}
-              <div className="grid grid-cols-4 gap-2 bg-slate-50 rounded-2xl p-3 border border-slate-200">
-                <div className="text-center">
-                  <div className="text-lg font-bold text-green-600">
-                    {statistikKehadiran.Hadir}
-                  </div>
-                  <div className="text-xs text-slate-600 font-medium">Hadir</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-lg font-bold text-yellow-600">
-                    {statistikKehadiran.Izin}
-                  </div>
-                  <div className="text-xs text-slate-600 font-medium">Izin</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-lg font-bold text-blue-600">
-                    {statistikKehadiran.Sakit}
-                  </div>
-                  <div className="text-xs text-slate-600 font-medium">Sakit</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-lg font-bold text-red-600">
-                    {statistikKehadiran.Alpha}
-                  </div>
-                  <div className="text-xs text-slate-600 font-medium">Alpha</div>
-                </div>
-              </div>
-
               {/* Jam Realtime + info RFID */}
               <div className="flex flex-col gap-1">
                 <RealTimeClock />
@@ -515,7 +485,7 @@ export default function SAbsensi() {
                     <div className="flex items-center gap-3">
                       <div className="w-2 h-7 bg-emerald-600 rounded-full"></div>
                       <h3 className="font-semibold text-base text-slate-900">
-                        Daftar Absensi Kelas
+                        Status Kehadiran Kelas
                       </h3>
                     </div>
                     <Badge variant="live" className="text-[10px]">Live</Badge>
@@ -547,25 +517,6 @@ export default function SAbsensi() {
                           RFID SELALU AKTIF
                         </span>
                       )}
-                    </div>
-
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-                      <div className="rounded-2xl border border-green-200 bg-green-50 p-3">
-                        <div className="text-[11px] text-green-700 font-semibold">Hadir</div>
-                        <div className="text-2xl font-bold text-green-700 mt-1">{ringkas.H}</div>
-                      </div>
-                      <div className="rounded-2xl border border-yellow-200 bg-yellow-50 p-3">
-                        <div className="text-[11px] text-yellow-700 font-semibold">Izin</div>
-                        <div className="text-2xl font-bold text-yellow-700 mt-1">{ringkas.I}</div>
-                      </div>
-                      <div className="rounded-2xl border border-blue-200 bg-blue-50 p-3">
-                        <div className="text-[11px] text-blue-700 font-semibold">Sakit</div>
-                        <div className="text-2xl font-bold text-blue-700 mt-1">{ringkas.S}</div>
-                      </div>
-                      <div className="rounded-2xl border border-red-200 bg-red-50 p-3">
-                        <div className="text-[11px] text-red-700 font-semibold">Alpha</div>
-                        <div className="text-2xl font-bold text-red-700 mt-1">{ringkas.A}</div>
-                      </div>
                     </div>
 
                     <RingkasanKelasTable
