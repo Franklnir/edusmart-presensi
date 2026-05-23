@@ -23,6 +23,8 @@ const getNamaKelasFromList = (kelasId, kelasList) => {
   return getKelasDisplayName(kelas) || kelasId || '—'
 }
 
+const normalizeTeacherName = (value) => String(value || '').trim().toLowerCase()
+
 const HARI_JS = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']
 
 const parseEskulDays = (hariText = '') => (
@@ -1318,6 +1320,10 @@ export default function JadwalGuru() {
     const todayStr = now.toLocaleDateString('en-CA')
     return { todayStr, todayName }
   }, [])
+  const currentTeacherName = React.useMemo(
+    () => String(profile?.nama || user?.email || 'Guru Pengganti').trim(),
+    [profile?.nama, user?.email]
+  )
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000)
@@ -1536,10 +1542,10 @@ export default function JadwalGuru() {
     fetchData()
   }, [activeAcademicPeriod.semester, activeAcademicPeriod.tahunAjaran, user?.id])
 
-  const loadSemuaJamKosongHariIni = React.useCallback(async () => {
+  const loadSemuaJamKosongHariIni = React.useCallback(async ({ silent = false } = {}) => {
     if (!todayStr) return
     try {
-      setLoading(true)
+      if (!silent) setLoading(true)
       const { data, error } = await supabase
         .from('jam_kosong')
         .select(`*, profiles!jam_kosong_created_by_fkey ( nama )`)
@@ -1557,7 +1563,10 @@ export default function JadwalGuru() {
         alasan: item.alasan,
         guru_pengganti: item.guru_pengganti,
         guru_pengaju: item.profiles?.nama || 'Guru',
-        created_by: item.created_by
+        created_by: item.created_by,
+        tanggal: item.tanggal,
+        created_at: item.created_at,
+        updated_at: item.updated_at
       })) || []
 
       setJamKosongHariIni(formattedData)
@@ -1565,13 +1574,37 @@ export default function JadwalGuru() {
       console.error('Error loading jam kosong:', error)
       pushToast('error', 'Gagal memuat data jam kosong')
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }, [todayStr, setLoading, pushToast])
 
   useEffect(() => {
     loadSemuaJamKosongHariIni()
   }, [loadSemuaJamKosongHariIni])
+
+  useEffect(() => {
+    if (!todayStr) return undefined
+
+    const channel = supabase
+      .channel(`guru-jam-kosong-monitor-${todayStr}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'jam_kosong',
+          filter: `tanggal=eq.${todayStr}`
+        },
+        () => {
+          loadSemuaJamKosongHariIni({ silent: true })
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [todayStr, loadSemuaJamKosongHariIni])
 
   // --- LOGIC HANDLERS ---
   const filteredJadwal = React.useMemo(() => {
@@ -1588,31 +1621,41 @@ export default function JadwalGuru() {
     return ['Hari Ini', ...sortedHari]
   }, [jadwal])
 
-  const handleToggleJamKosong = async (jamKosongId, currentPengganti) => {
+  const handleToggleJamKosong = async (item) => {
+    if (!item?.id) return
+    if (String(item.created_by || '') === String(user?.id || '')) {
+      pushToast('info', 'Jam kosong milik sendiri tidak bisa diambil. Tunggu guru lain mengambil jam ini.')
+      return
+    }
+
     try {
       setLoading(true)
-      const namaUser = profile?.nama || user?.email || 'Guru Pengganti'
-
-      const isCanceling = currentPengganti === namaUser
-      const newValue = isCanceling ? null : namaUser
-
-      const { error } = await supabase
+      const isCanceling = normalizeTeacherName(item.guru_pengganti) === normalizeTeacherName(currentTeacherName)
+      const newValue = isCanceling ? null : currentTeacherName
+      let query = supabase
         .from('jam_kosong')
         .update({
           guru_pengganti: newValue,
           updated_at: new Date().toISOString()
         })
-        .eq('id', jamKosongId)
+        .eq('id', item.id)
+
+      query = isCanceling
+        ? query.eq('guru_pengganti', item.guru_pengganti)
+        : query.is('guru_pengganti', null)
+
+      const { error } = await query
 
       if (error) throw error
 
       setJamKosongHariIni((prev) =>
         prev.map((jam) =>
-          jam.id === jamKosongId
+          jam.id === item.id
             ? { ...jam, guru_pengganti: newValue }
             : jam
         )
       )
+      await loadSemuaJamKosongHariIni({ silent: true })
 
       if (isCanceling) {
         pushToast('info', 'Anda membatalkan pengambilan jam ini.')
@@ -1796,10 +1839,33 @@ export default function JadwalGuru() {
     </div>
   )
 
+  const jamKosongStats = React.useMemo(() => {
+    const currentTeacherKey = normalizeTeacherName(currentTeacherName)
+    const ownCount = jamKosongHariIni.filter((item) => String(item.created_by || '') === String(user?.id || '')).length
+    const handledCount = jamKosongHariIni.filter((item) => item.guru_pengganti).length
+    const openCount = jamKosongHariIni.filter((item) => !item.guru_pengganti).length
+    const availableForMeCount = jamKosongHariIni.filter((item) => (
+      !item.guru_pengganti &&
+      String(item.created_by || '') !== String(user?.id || '')
+    )).length
+    const assignedToMeCount = jamKosongHariIni.filter((item) => (
+      normalizeTeacherName(item.guru_pengganti) === currentTeacherKey
+    )).length
+
+    return {
+      total: jamKosongHariIni.length,
+      open: openCount,
+      handled: handledCount,
+      own: ownCount,
+      availableForMe: availableForMeCount,
+      assignedToMe: assignedToMeCount
+    }
+  }, [currentTeacherName, jamKosongHariIni, user?.id])
+
   const monitoringJamKosongCard = (
-    <div className="bg-white rounded-2xl shadow-md border border-gray-200 flex flex-col max-h-[500px]">
+    <div className="bg-white rounded-2xl shadow-md border border-gray-200 flex flex-col max-h-[620px]">
       <div className="p-6 border-b border-gray-100">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex flex-col gap-5">
           <div>
             <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
               <span className="relative flex h-3 w-3">
@@ -1809,22 +1875,34 @@ export default function JadwalGuru() {
               Monitoring Jam Kosong
             </h2>
             <p className="text-sm text-gray-500 mt-1">
-              Data real-time pengajuan jam kosong hari ini ({todayName}).
+              Data real-time pengajuan jam kosong hari ini ({todayName}). Laporan milik sendiri hanya bisa dipantau dan harus diambil oleh guru lain.
             </p>
           </div>
 
-          <div className="flex gap-3">
-            <div className="bg-red-50 border border-red-100 px-4 py-2 rounded-xl text-center">
-              <div className="text-xs text-red-600 font-bold uppercase">Perlu Guru</div>
-              <div className="text-lg font-bold text-red-700 leading-none">
-                {jamKosongHariIni.filter(j => !j.guru_pengganti).length}
-              </div>
+          <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div className="text-[11px] text-slate-500 font-bold uppercase">Total</div>
+              <div className="text-xl font-bold text-slate-900 leading-none">{jamKosongStats.total}</div>
             </div>
-            <div className="bg-green-50 border border-green-100 px-4 py-2 rounded-xl text-center">
-              <div className="text-xs text-green-600 font-bold uppercase">Teratasi</div>
-              <div className="text-lg font-bold text-green-700 leading-none">
-                {jamKosongHariIni.filter(j => j.guru_pengganti).length}
-              </div>
+            <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-3">
+              <div className="text-[11px] text-red-600 font-bold uppercase">Perlu Guru</div>
+              <div className="text-xl font-bold text-red-700 leading-none">{jamKosongStats.open}</div>
+            </div>
+            <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3">
+              <div className="text-[11px] text-blue-600 font-bold uppercase">Bisa Saya Ambil</div>
+              <div className="text-xl font-bold text-blue-700 leading-none">{jamKosongStats.availableForMe}</div>
+            </div>
+            <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3">
+              <div className="text-[11px] text-indigo-600 font-bold uppercase">Saya Ambil</div>
+              <div className="text-xl font-bold text-indigo-700 leading-none">{jamKosongStats.assignedToMe}</div>
+            </div>
+            <div className="rounded-xl border border-green-100 bg-green-50 px-4 py-3">
+              <div className="text-[11px] text-green-600 font-bold uppercase">Teratasi</div>
+              <div className="text-xl font-bold text-green-700 leading-none">{jamKosongStats.handled}</div>
+            </div>
+            <div className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3">
+              <div className="text-[11px] text-amber-600 font-bold uppercase">Laporan Saya</div>
+              <div className="text-xl font-bold text-amber-700 leading-none">{jamKosongStats.own}</div>
             </div>
           </div>
         </div>
@@ -1835,7 +1913,13 @@ export default function JadwalGuru() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {jamKosongHariIni.map((item) => {
               const isHandled = !!item.guru_pengganti
-              const isMe = item.guru_pengganti === (profile?.nama || user?.email)
+              const isOwnReport = String(item.created_by || '') === String(user?.id || '')
+              const isMe = normalizeTeacherName(item.guru_pengganti) === normalizeTeacherName(currentTeacherName)
+              const statusLabel = isOwnReport
+                ? 'Laporan Saya'
+                : isHandled
+                  ? 'Sudah Ada Guru'
+                  : 'Butuh Pengganti'
 
               return (
                 <div
@@ -1843,13 +1927,19 @@ export default function JadwalGuru() {
                   className={`relative p-5 rounded-xl border-2 transition-all duration-200 flex flex-col justify-between group ${
                     isHandled
                       ? 'bg-white border-green-200'
-                      : 'bg-white border-red-200 shadow-lg shadow-red-100 hover:-translate-y-1'
+                      : isOwnReport
+                        ? 'bg-white border-amber-200 shadow-sm'
+                        : 'bg-white border-red-200 shadow-lg shadow-red-100 hover:-translate-y-1'
                   }`}
                 >
                   <div className={`absolute top-0 right-0 px-3 py-1 rounded-bl-xl rounded-tr-lg text-[10px] font-bold tracking-wide uppercase ${
-                    isHandled ? 'bg-green-100 text-green-700' : 'bg-red-500 text-white'
+                    isOwnReport
+                      ? 'bg-amber-100 text-amber-700'
+                      : isHandled
+                        ? 'bg-green-100 text-green-700'
+                        : 'bg-red-500 text-white'
                   }`}>
-                    {isHandled ? 'Sudah Ada Guru' : 'Butuh Pengganti'}
+                    {statusLabel}
                   </div>
 
                   <div className="mb-4">
@@ -1882,7 +1972,7 @@ export default function JadwalGuru() {
                     {isHandled ? (
                       isMe ? (
                         <button
-                          onClick={() => handleToggleJamKosong(item.id, item.guru_pengganti)}
+                          onClick={() => handleToggleJamKosong(item)}
                           className="w-full py-2.5 px-4 bg-orange-100 hover:bg-orange-200 text-orange-700 border border-orange-300 rounded-lg font-bold text-sm transition-colors flex items-center justify-center gap-2"
                         >
                           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1901,15 +1991,21 @@ export default function JadwalGuru() {
                         </div>
                       )
                     ) : (
-                      <button
-                        onClick={() => handleToggleJamKosong(item.id, null)}
-                        className="w-full py-2.5 px-4 bg-red-500 hover:bg-red-600 active:bg-red-700 text-white rounded-lg font-semibold text-sm transition-colors shadow-md shadow-red-200 flex items-center justify-center gap-2"
-                      >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
-                        </svg>
-                        Ambil Jam Ini
-                      </button>
+                      isOwnReport ? (
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-center text-sm font-semibold text-amber-700">
+                          Menunggu guru lain mengambil jam ini.
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => handleToggleJamKosong(item)}
+                          className="w-full py-2.5 px-4 bg-red-500 hover:bg-red-600 active:bg-red-700 text-white rounded-lg font-semibold text-sm transition-colors shadow-md shadow-red-200 flex items-center justify-center gap-2"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+                          </svg>
+                          Ambil Jam Ini
+                        </button>
+                      )
                     )}
                   </div>
                 </div>

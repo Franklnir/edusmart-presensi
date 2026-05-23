@@ -1853,8 +1853,8 @@ class DbController extends ApiController
                     return true;
                 }
                 if ($this->isGuru($request)) {
-                    $query->where('created_by', $userId);
-
+                    // Guru boleh memonitor semua jam kosong dalam tenant aktif.
+                    // Filter tenant sudah dipasang sebelum policy ini dipanggil.
                     return true;
                 }
                 if ($this->isSiswa($request)) {
@@ -1871,14 +1871,61 @@ class DbController extends ApiController
                     return true;
                 }
                 if ($this->isGuru($request)) {
-                    $query->where('created_by', $userId);
-                    $this->mapPayload($payload, function ($row) use ($userId) {
+                    $teacherReplacementName = trim((string) ($profile->nama ?? $request->user()?->email ?? 'Guru'));
+                    $normalizeOwnJamKosongPayload = function ($row) use ($userId, $teacherReplacementName) {
                         if (! isset($row['created_by'])) {
                             $row['created_by'] = $userId;
                         }
+                        if (array_key_exists('guru_pengganti', $row)) {
+                            $replacement = trim((string) ($row['guru_pengganti'] ?? ''));
+                            $row['guru_pengganti'] = $replacement === '' || strcasecmp($replacement, $teacherReplacementName) === 0
+                                ? null
+                                : $replacement;
+                        }
 
                         return $row;
-                    });
+                    };
+
+                    if (in_array($action, ['insert', 'upsert'], true)) {
+                        $this->mapPayload($payload, $normalizeOwnJamKosongPayload);
+
+                        return true;
+                    }
+
+                    if ($action === 'delete') {
+                        $query->where('created_by', $userId);
+
+                        return true;
+                    }
+
+                    $rows = $this->normalizeRows($payload);
+                    $isReplacementOnlyUpdate = ! empty($rows);
+                    foreach ($rows as $row) {
+                        $keys = array_keys($row);
+                        $hasReplacementColumn = array_key_exists('guru_pengganti', $row);
+                        $onlyReplacementColumns = empty(array_diff($keys, ['guru_pengganti', 'updated_at']));
+                        if (! $hasReplacementColumn || ! $onlyReplacementColumns) {
+                            $isReplacementOnlyUpdate = false;
+                            break;
+                        }
+                    }
+
+                    if ($isReplacementOnlyUpdate) {
+                        $query->where('created_by', '!=', $userId);
+                        $this->mapPayload($payload, function ($row) use ($teacherReplacementName) {
+                            $replacement = trim((string) ($row['guru_pengganti'] ?? ''));
+
+                            return [
+                                'guru_pengganti' => $replacement === '' ? null : $teacherReplacementName,
+                                'updated_at' => now(),
+                            ];
+                        });
+
+                        return true;
+                    }
+
+                    $query->where('created_by', $userId);
+                    $this->mapPayload($payload, $normalizeOwnJamKosongPayload);
 
                     return true;
                 }

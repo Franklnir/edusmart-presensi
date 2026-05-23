@@ -35,6 +35,59 @@ function addCacheBuster(url) {
   return `${url}${joiner}t=${Date.now()}`
 }
 
+function displayValue(value, fallback = '-') {
+  const text = String(value ?? '').trim()
+  return text || fallback
+}
+
+function genderLabel(value) {
+  const normalized = String(value || '').trim().toUpperCase()
+  if (normalized === 'L') return 'Laki-laki'
+  if (normalized === 'P') return 'Perempuan'
+  return displayValue(value)
+}
+
+function roleLabel(value) {
+  const normalized = String(value || '').trim().toLowerCase()
+  if (normalized === 'guru' || normalized === 'teacher') return 'Guru'
+  if (normalized === 'admin') return 'Admin Sekolah'
+  if (normalized === 'siswa' || normalized === 'student') return 'Siswa'
+  if (normalized === 'super_admin') return 'Super Admin'
+  return displayValue(value)
+}
+
+function statusLabel(value) {
+  const normalized = String(value || '').trim().toLowerCase()
+  if (!normalized) return 'Aktif'
+  if (['aktif', 'active', 'enabled'].includes(normalized)) return 'Aktif'
+  if (['nonaktif', 'inactive', 'disabled'].includes(normalized)) return 'Nonaktif'
+  return displayValue(value)
+}
+
+function formatDateLabel(value) {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return displayValue(value)
+  return date.toLocaleDateString('id-ID', {
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric'
+  })
+}
+
+function formatDateTimeLabel(value) {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return displayValue(value)
+  return date.toLocaleString('id-ID', {
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
 /* ========= Helper: kompres gambar ke <= 100KB ========= */
 async function compressImageTo100KB(file, maxBytes = MAX_COMPRESSED_BYTES) {
   if (!file) throw new Error('File gambar tidak tersedia')
@@ -197,6 +250,30 @@ export default function ProfileGuru() {
       setShowPasswordFields(true)
     }
   }, [needsAccountSetup])
+
+  useEffect(() => {
+    if (!user?.id) return undefined
+
+    const channel = supabase
+      .channel(`guru-profile-sync-${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'profiles',
+          filter: `id=eq.${user.id}`
+        },
+        () => {
+          refreshProfile()
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [user?.id, refreshProfile])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -593,6 +670,28 @@ export default function ProfileGuru() {
     }
   }
 
+  const identityRows = useMemo(() => ([
+    { label: 'NIP/NUPTK', value: displayValue(profile?.nis) },
+    { label: 'Jabatan', value: displayValue(profile?.jabatan) },
+    { label: 'Role Akun', value: roleLabel(profile?.role) },
+    { label: 'Status Akun', value: statusLabel(profile?.status) },
+    { label: 'Jenis Kelamin', value: genderLabel(profile?.jk) },
+    { label: 'Agama', value: displayValue(profile?.agama) },
+    { label: 'Telepon', value: displayValue(profile?.telp) },
+    { label: 'Tanggal Lahir', value: formatDateLabel(profile?.tanggal_lahir) },
+    { label: 'Terakhir Sinkron', value: formatDateTimeLabel(profile?.updated_at) }
+  ]), [
+    profile?.agama,
+    profile?.jabatan,
+    profile?.jk,
+    profile?.nis,
+    profile?.role,
+    profile?.status,
+    profile?.tanggal_lahir,
+    profile?.telp,
+    profile?.updated_at
+  ])
+
   const securityAccountCard = canManageAccount ? (
     <div
       className={`rounded-2xl border p-6 shadow-sm ${needsAccountSetup
@@ -885,7 +984,34 @@ export default function ProfileGuru() {
           </div>
 
           {/* ========== FORM EDIT PROFIL ========== */}
-          <div className="lg:col-span-3">
+          <div className="lg:col-span-3 space-y-6">
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-6 sm:p-8">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-600">Identitas Guru</p>
+                  <h3 className="mt-2 text-2xl font-bold text-slate-900">Data Profil Tersinkron</h3>
+                  <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+                    Data ini memakai profil yang sama dengan admin sekolah. Jika admin memperbarui identitas guru, halaman ini ikut tersinkron otomatis tanpa menunggu refresh manual.
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
+                  {statusLabel(profile?.status)}
+                </div>
+              </div>
+
+              <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {identityRows.map((item) => (
+                  <div key={item.label} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{item.label}</div>
+                    <div className="mt-1 break-words text-sm font-semibold text-slate-900">{item.value}</div>
+                  </div>
+                ))}
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 sm:col-span-2 xl:col-span-3">
+                  <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Email Login</div>
+                  <div className="mt-1 break-all text-sm font-semibold text-slate-900">{displayValue(email)}</div>
+                </div>
+              </div>
+            </div>
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-8">
               <div className="flex items-center justify-between mb-8">
                 <div>

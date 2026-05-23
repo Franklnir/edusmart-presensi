@@ -700,7 +700,7 @@ const SubjectDatePicker = ({
 
 /* ===== Main Component ===== */
 function AbsensiGuru() {
-  const { user } = useAuthStore()
+  const { user, profile } = useAuthStore()
   const { pushToast } = useUIStore()
 
   // View state
@@ -817,6 +817,14 @@ function AbsensiGuru() {
   })
 
   const [loadingJamKosong, setLoadingJamKosong] = useState(false)
+  const currentTeacherName = useMemo(
+    () => String(profile?.nama || user?.email || '').trim(),
+    [profile?.nama, user?.email]
+  )
+  const replacementGuruList = useMemo(
+    () => guruList.filter((guru) => String(guru.id || '') !== String(user?.id || '')),
+    [guruList, user?.id]
+  )
 
   // Real-time
   const [currentDateTime, setCurrentDateTime] = useState(getCurrentDateTime())
@@ -2038,6 +2046,15 @@ function AbsensiGuru() {
       return
     }
 
+    if (
+      jamKosong.guru_pengganti &&
+      currentTeacherName &&
+      jamKosong.guru_pengganti.trim().toLowerCase() === currentTeacherName.toLowerCase()
+    ) {
+      pushToast('error', 'Guru tidak bisa menjadi pengganti jam kosong miliknya sendiri')
+      return
+    }
+
     setLoadingJamKosong(true)
 
     try {
@@ -2104,6 +2121,15 @@ function AbsensiGuru() {
 
   const handleUpdateJamKosong = async () => {
     if (!editingJamKosong) return
+
+    if (
+      editingJamKosong.guru_pengganti &&
+      currentTeacherName &&
+      editingJamKosong.guru_pengganti.trim().toLowerCase() === currentTeacherName.toLowerCase()
+    ) {
+      pushToast('error', 'Guru tidak bisa menjadi pengganti jam kosong miliknya sendiri')
+      return
+    }
 
     try {
       const { error } = await supabase
@@ -2909,7 +2935,7 @@ function AbsensiGuru() {
                           onChange={e => setJamKosong(p => ({ ...p, guru_pengganti: e.target.value }))}
                         >
                           <option value="">— Tidak Ada —</option>
-                          {guruList.map(g => (
+                          {replacementGuruList.map(g => (
                             <option key={g.id} value={g.nama}>
                               {g.nama}
                             </option>
@@ -3165,7 +3191,7 @@ function AbsensiGuru() {
                   }
                 >
                   <option value="">— Pengganti —</option>
-                  {guruList.map(g => (
+                  {replacementGuruList.map(g => (
                     <option key={g.id} value={g.nama}>
                       {g.nama}
                     </option>
