@@ -50,6 +50,66 @@ const SEMESTER_OPTIONS = [
 
 const PERIOD_FILTER_STORAGE_KEY = 'edusmart.guru.absensi.periodFilter'
 
+const getScheduleSignature = (row = {}) => [
+  row.kelas_id || '',
+  row.hari || '',
+  row.jam_mulai || '',
+  row.jam_selesai || '',
+  String(row.mapel || '').trim().toLowerCase()
+].join('|')
+
+const getScheduleSemesterPriority = (row = {}, selectedSemester = '') => {
+  const rowSemester = String(row.semester || '').trim()
+  if (!selectedSemester) return rowSemester ? 1 : 0
+  if (rowSemester === selectedSemester) return 0
+  if (!rowSemester) return 1
+  return 2
+}
+
+const dedupeAcademicYearSchedules = (rows = [], selectedSemester = '') => {
+  const bySignature = new Map()
+
+  ;(rows || []).forEach((row) => {
+    const signature = getScheduleSignature(row)
+    if (!signature.replace(/\|/g, '')) return
+
+    const existing = bySignature.get(signature)
+    if (!existing) {
+      bySignature.set(signature, row)
+      return
+    }
+
+    if (
+      getScheduleSemesterPriority(row, selectedSemester) <
+      getScheduleSemesterPriority(existing, selectedSemester)
+    ) {
+      bySignature.set(signature, row)
+    }
+  })
+
+  return Array.from(bySignature.values())
+}
+
+const isDateInRange = (dateKey = '', start = '', end = '') => (
+  Boolean(dateKey && start && end && dateKey >= start && dateKey <= end)
+)
+
+const getSemesterForAttendanceDate = (dateKey, activePeriod = {}, fallbackSemester = '') => {
+  if (isDateInRange(dateKey, activePeriod?.periodeGanjilMulai, activePeriod?.periodeGanjilSelesai)) {
+    return SEMESTER_GANJIL
+  }
+  if (isDateInRange(dateKey, activePeriod?.periodeGenapMulai, activePeriod?.periodeGenapSelesai)) {
+    return SEMESTER_GENAP
+  }
+
+  const month = Number(String(dateKey || '').slice(5, 7))
+  if (Number.isFinite(month) && month >= 1 && month <= 12) {
+    return month >= 7 ? SEMESTER_GANJIL : SEMESTER_GENAP
+  }
+
+  return fallbackSemester || activePeriod?.semester || SEMESTER_GENAP
+}
+
 const readStoredPeriodFilter = (fallback) => {
   if (typeof window === 'undefined') return fallback
 
@@ -1190,7 +1250,7 @@ function AbsensiGuru() {
     loadJadwal()
     loadGuruList()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, periodFilter.tahunAjaran, periodFilter.semester])
+  }, [user?.id, periodFilter.tahunAjaran])
 
   const loadJadwal = async () => {
     if (!user?.id) return
@@ -1260,7 +1320,6 @@ function AbsensiGuru() {
         .limit(50)
 
       if (periodFilter.tahunAjaran) query = query.eq('tahun_ajaran', periodFilter.tahunAjaran)
-      if (periodFilter.semester) query = query.eq('semester', periodFilter.semester)
 
       const { data, error } = await query
 
@@ -1282,7 +1341,7 @@ function AbsensiGuru() {
   useEffect(() => {
     if (view === 'jam_kosong') loadRiwayatJamKosong()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, periodFilter.tahunAjaran, periodFilter.semester])
+  }, [view, periodFilter.tahunAjaran])
 
   /* ===== Computed Data ===== */
   const { myKelasList, schedulesForSelectedClass, schedulesForActiveClass, jadwalByHari, jadwalHariIni } = useMemo(() => {
@@ -1300,24 +1359,19 @@ function AbsensiGuru() {
     const jadwalByHariTemp = {}
     const todayDayName = getDayName(getToday())
     const selectedDayName = getDayName(tgl)
-    const periodSchedules = selectedSemester
-      ? jadwalAll.filter((j) => String(j.semester || '').trim() === selectedSemester)
-      : jadwalAll
+    const academicYearSchedules = dedupeAcademicYearSchedules(jadwalAll, selectedSemester)
 
-    const jadwalHariIniTemp = periodSchedules.filter(j => j.hari === todayDayName)
+    const jadwalHariIniTemp = academicYearSchedules.filter(j => j.hari === todayDayName)
 
-    jadwalAll.forEach(j => {
+    academicYearSchedules.forEach(j => {
       if (j.kelas_id) kelasSet.add(j.kelas_id)
-    })
-
-    periodSchedules.forEach(j => {
       if (!jadwalByHariTemp[j.hari]) jadwalByHariTemp[j.hari] = []
       jadwalByHariTemp[j.hari].push(j)
     })
 
     const schedulesList = []
     const schedulesForActiveClassTemp = kelas
-      ? periodSchedules.filter(j => j.kelas_id === kelas)
+      ? academicYearSchedules.filter(j => j.kelas_id === kelas)
       : []
 
     if (kelas) {
@@ -1351,8 +1405,9 @@ function AbsensiGuru() {
   const jadwalForJamKosongHariIni = useMemo(() => {
     if (!kelas || !jadwalAll.length) return []
     const todayDayName = getDayName(getToday())
+    const academicYearSchedules = dedupeAcademicYearSchedules(jadwalAll, periodFilter.semester)
 
-    return jadwalAll
+    return academicYearSchedules
       .filter(j => j.kelas_id === kelas && j.hari === todayDayName)
       .map(j => ({
         id: j.id,
@@ -1361,7 +1416,7 @@ function AbsensiGuru() {
         jam_mulai: j.jam_mulai,
         jam_selesai: j.jam_selesai
       }))
-  }, [kelas, jadwalAll])
+  }, [kelas, jadwalAll, periodFilter.semester])
 
   const canRunAutoAlpha = useMemo(() => {
     if (!currentSchedule || tgl !== getToday()) return false
@@ -1373,8 +1428,8 @@ function AbsensiGuru() {
 
   const academicPeriodPayload = useMemo(() => ({
     tahun_ajaran: periodFilter.tahunAjaran,
-    semester: periodFilter.semester
-  }), [periodFilter.semester, periodFilter.tahunAjaran])
+    semester: getSemesterForAttendanceDate(tgl, activeAcademicPeriod, periodFilter.semester)
+  }), [activeAcademicPeriod, periodFilter.semester, periodFilter.tahunAjaran, tgl])
 
   const selectedScheduleForPicker = useMemo(() => {
     return (
@@ -1488,17 +1543,13 @@ function AbsensiGuru() {
         absenQuery = absenQuery.eq('tahun_ajaran', periodFilter.tahunAjaran)
         reqsQuery = reqsQuery.eq('tahun_ajaran', periodFilter.tahunAjaran)
       }
-      if (periodFilter.semester) {
-        absenQuery = absenQuery.eq('semester', periodFilter.semester)
-        reqsQuery = reqsQuery.eq('semester', periodFilter.semester)
-      }
 
       const [settingsRes, studentsRes, absenRes, reqsRes] = await Promise.all([
         fetchAbsensiSettings({
           kelas,
           tanggal: tgl,
           mapel: schedule.mapel,
-          periodFilter,
+          periodFilter: { tahunAjaran: periodFilter.tahunAjaran },
           single: true
         }),
         supabase
@@ -1839,10 +1890,6 @@ function AbsensiGuru() {
         absensiQuery = absensiQuery.eq('tahun_ajaran', periodFilter.tahunAjaran)
         ajuanQuery = ajuanQuery.eq('tahun_ajaran', periodFilter.tahunAjaran)
       }
-      if (periodFilter.semester) {
-        absensiQuery = absensiQuery.eq('semester', periodFilter.semester)
-        ajuanQuery = ajuanQuery.eq('semester', periodFilter.semester)
-      }
 
       const [siswaRes, absensiRes, ajuanRes] = await Promise.all([
         supabase.from('profiles').select(STUDENT_COLUMNS).eq('role', 'siswa').eq('kelas', kelas).order('nama'),
@@ -1958,10 +2005,6 @@ function AbsensiGuru() {
         if (periodFilter.tahunAjaran) {
           absensiQuery = absensiQuery.eq('tahun_ajaran', periodFilter.tahunAjaran)
           ajuanQuery = ajuanQuery.eq('tahun_ajaran', periodFilter.tahunAjaran)
-        }
-        if (periodFilter.semester) {
-          absensiQuery = absensiQuery.eq('semester', periodFilter.semester)
-          ajuanQuery = ajuanQuery.eq('semester', periodFilter.semester)
         }
 
         const [absensiRes, ajuanRes, siswaRes] = await Promise.all([
@@ -2732,7 +2775,7 @@ function AbsensiGuru() {
                     </select>
                     {kelas && schedulesForSelectedClass.length === 0 && (
                       <p className="mt-2 text-xs font-medium text-amber-700">
-                        Kelas tersedia, tetapi jadwal untuk tanggal dan Semester {periodFilter.semester || '-'} belum ada.
+                        Kelas tersedia. Belum ada jadwal pada tanggal ini di tahun ajaran yang dipilih.
                       </p>
                     )}
                   </div>
