@@ -15,7 +15,7 @@ export function useStudentPromotionActions({
   siswaRaw,
 }) {
   const [promotionModalOpen, setPromotionModalOpen] = useState(false)
-  const [promotionMode, setPromotionMode] = useState('kelas')
+  const [promotionMode, setPromotionMode] = useState('selected')
   const [promotionFromKelas, setPromotionFromKelas] = useState('')
   const [promotionToKelas, setPromotionToKelas] = useState('')
   const [promotionLoading, setPromotionLoading] = useState(false)
@@ -77,7 +77,7 @@ export function useStudentPromotionActions({
     openPasswordModal(
       'Fitur Kenaikan Kelas',
       () => {
-        setPromotionMode('kelas')
+        setPromotionMode('selected')
         resetPromotionFields()
         setPromotionModalOpen(true)
       }
@@ -126,33 +126,14 @@ export function useStudentPromotionActions({
         return
       }
 
-      if (promotionMode === 'kelas') {
-        if (!promotionFromKelas) {
-          pushToast('error', 'Pilih kelas asal terlebih dahulu')
-          return
-        }
-
-        const isExit = [PROMO_ALUMNI, PROMO_MUTASI].includes(promotionToKelas)
-        if (!isExit && promotionFromKelas === promotionToKelas) {
-          pushToast('error', 'Kelas asal dan tujuan tidak boleh sama')
-          return
-        }
-      } else if (!promotionSelectedIds.length) {
+      if (!promotionSelectedIds.length) {
         pushToast('error', 'Pilih minimal 1 siswa untuk dipindahkan')
         return
       }
 
-      let selectedSiswa = []
-      let ids = []
-
-      if (promotionMode === 'kelas') {
-        selectedSiswa = siswaRaw.filter(s => s.kelas === promotionFromKelas)
-        ids = selectedSiswa.map(s => s.id)
-      } else {
-        const selectedIdSet = new Set(promotionSelectedIds)
-        selectedSiswa = siswaRaw.filter(s => selectedIdSet.has(s.id))
-        ids = [...selectedIdSet]
-      }
+      const selectedIdSet = new Set(promotionSelectedIds)
+      const selectedSiswa = siswaRaw.filter(s => selectedIdSet.has(s.id))
+      const ids = [...selectedIdSet]
 
       if (!ids.length) {
         pushToast('error', 'Tidak ada siswa yang bisa diproses')
@@ -163,7 +144,6 @@ export function useStudentPromotionActions({
       const isMutasiMode = promotionToKelas === PROMO_MUTASI
       const isExitMode = isAlumniMode || isMutasiMode
 
-      const fromKelasName = promotionMode === 'kelas' ? getNamaKelas(promotionFromKelas) : null
       const toKelasName = !isExitMode ? getNamaKelas(promotionToKelas) : null
       const lines = []
 
@@ -171,11 +151,7 @@ export function useStudentPromotionActions({
         const modeLabel = isAlumniMode ? 'ALUMNI (Lulus)' : 'MUTASI (Pindah Sekolah)'
         lines.push(`Anda akan memproses status ${modeLabel} untuk ${ids.length} siswa.`)
         lines.push('')
-        lines.push(
-          promotionMode === 'kelas'
-            ? `Sumber: kelas "${fromKelasName || promotionFromKelas}"`
-            : 'Sumber: siswa terpilih (multi-kelas)'
-        )
+        lines.push('Sumber: siswa terpilih (multi-kelas)')
 
         if (isAlumniMode) {
           const eligible = selectedSiswa.filter(s => getGradeLabel(s.kelas) === 'XII')
@@ -198,27 +174,13 @@ export function useStudentPromotionActions({
         lines.push('')
         lines.push('Lanjutkan?')
       } else {
-        if (promotionMode === 'kelas') {
-          lines.push(
-            `Anda akan memindahkan semua siswa dari kelas "${fromKelasName || promotionFromKelas}"`,
-            `ke kelas "${toKelasName || promotionToKelas}".`,
-            '',
-            `Total siswa: ${ids.length}`
-          )
-        } else {
-          lines.push(
-            `Anda akan memindahkan ${ids.length} siswa terpilih`,
-            `ke kelas "${toKelasName || promotionToKelas}".`
-          )
-        }
+        lines.push(
+          `Anda akan memindahkan ${ids.length} siswa terpilih`,
+          `ke kelas "${toKelasName || promotionToKelas}".`
+        )
 
-        const fromGrade =
-          promotionMode === 'kelas'
-            ? getGradeLabel(promotionFromKelas)
-            : (() => {
-              const uniqueFromGrades = [...new Set(selectedSiswa.map(s => getGradeLabel(s.kelas)).filter(Boolean))]
-              return uniqueFromGrades.length === 1 ? uniqueFromGrades[0] : ''
-            })()
+        const uniqueFromGrades = [...new Set(selectedSiswa.map(s => getGradeLabel(s.kelas)).filter(Boolean))]
+        const fromGrade = uniqueFromGrades.length === 1 ? uniqueFromGrades[0] : ''
 
         const toGrade = getGradeLabel(promotionToKelas)
 
@@ -256,9 +218,7 @@ export function useStudentPromotionActions({
           .update({ ketua_siswa_id: null, ketua_siswa_nama: null })
           .in('ketua_siswa_id', eligibleIds)
 
-        const lastClassText = promotionMode === 'kelas'
-          ? (fromKelasName || promotionFromKelas)
-          : 'Multi-kelas'
+        const lastClassText = 'Multi-kelas'
 
         let alasan = ''
         if (isAlumniMode) {

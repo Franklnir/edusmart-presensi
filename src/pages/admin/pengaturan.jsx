@@ -1102,24 +1102,24 @@ export default function APengaturan() {
       if (yearMovesForwardOneStep) {
         const hasRetainedStudents = await requestConfirmation({
           title: 'Ada siswa yang tidak naik kelas?',
-          message: 'Jika ada siswa yang tetap di kelas asal, pilih siswa tersebut melalui fitur Kenaikan Kelas sebelum tahun ajaran baru diaktifkan.',
-          confirmText: 'Ada, pilih siswa dulu',
+          message: 'Jika ada siswa yang tetap di kelas asal, simpan siswa tersebut sebagai pengecualian sebelum tahun ajaran baru diaktifkan.',
+          confirmText: 'Ada, pilih pengecualian',
           cancelText: 'Tidak ada',
           tone: 'info'
         })
         if (hasRetainedStudents) {
           const openPromotion = await requestConfirmation({
-            title: 'Buka Kenaikan Kelas?',
-            message: 'Anda akan diarahkan ke Kelas & Jadwal untuk memilih siswa yang tidak naik kelas.',
-            confirmText: 'Buka Kenaikan Kelas',
+            title: 'Buka Pengecualian Rollover?',
+            message: 'Anda akan diarahkan ke Kelas & Jadwal untuk memilih siswa yang tidak ikut rollover otomatis.',
+            confirmText: 'Buka Pengecualian',
             cancelText: 'Tetap di sini',
             tone: 'info'
           })
           if (openPromotion) {
             window.location.assign('/admin/kelas?openPromotion=1')
           }
-          pushToast('warning', 'Pilih siswa melalui fitur Kenaikan Kelas sebelum mengaktifkan tahun ajaran baru.', {
-            title: 'Kenaikan kelas diperlukan',
+          pushToast('warning', 'Simpan daftar siswa pengecualian dulu sebelum mengaktifkan tahun ajaran baru.', {
+            title: 'Pengecualian rollover diperlukan',
             duration: 8000
           })
           return
@@ -1195,7 +1195,7 @@ export default function APengaturan() {
       queryClient.invalidateQueries({ queryKey: ['admin', 'student-options'] })
       const rollover = data?.rollover
       const rolloverText = rollover
-        ? ` Siswa naik: ${rollover.promoted_students || 0}, alumni: ${rollover.alumni_students || 0}.`
+        ? ` Siswa naik: ${rollover.promoted_students || 0}, tidak naik: ${rollover.retained_students || 0}, alumni: ${rollover.alumni_students || 0}.`
         : ''
       const eskulText = rollover && payload.carry_eskul_members
         ? ` Eskul disalin: ${rollover.eskul_members_copied || 0}.`

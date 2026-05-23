@@ -2442,7 +2442,9 @@ class AdminController extends ApiController
         $studentClassSnapshots = [];
         $clearedClassStudentIds = [];
         $skippedStudents = 0;
+        $retainedStudents = 0;
         $missingTargets = [];
+        $retainedStudentIds = $this->rolloverExceptionStudentIds($tenantId, $previousYear, $period['tahun_ajaran']);
 
         foreach ($studentRows as $student) {
             $studentId = trim((string) ($student->id ?? ''));
@@ -2454,6 +2456,14 @@ class AdminController extends ApiController
             }
 
             $currentClass = $classInfoById[$classId];
+            if (isset($retainedStudentIds[$studentId])) {
+                $affectedClassIds[$classId] = true;
+                $studentClassSnapshots[$studentId] = $classId;
+                $retainedStudents += 1;
+
+                continue;
+            }
+
             $nextGrade = $this->nextAcademicGrade($currentClass['grade']);
             if ($nextGrade === null) {
                 $skippedStudents += 1;
@@ -2534,6 +2544,7 @@ class AdminController extends ApiController
         }
 
         $snapshotUpdates = $this->syncStudentClassSnapshotTables($tenantId, $studentClassSnapshots, $clearedClassStudentIds);
+        $this->markRolloverExceptionsResolved($tenantId, $previousYear, $period['tahun_ajaran']);
         $eskulMembersCopied = $carryEskulMembers
             ? $this->copyEskulMembershipsToAcademicPeriod(
                 $tenantId,
@@ -2563,11 +2574,60 @@ class AdminController extends ApiController
         return [
             'promoted_students' => $promotedStudents,
             'alumni_students' => count($alumniIds),
+            'retained_students' => $retainedStudents,
             'skipped_students' => $skippedStudents,
             'classes_synced' => $this->syncClassPeriodMetadata($tenantId, $period),
             'related_snapshots_synced' => $snapshotUpdates,
             'eskul_members_copied' => $eskulMembersCopied,
         ];
+    }
+
+    private function rolloverExceptionStudentIds(string $tenantId, string $sourceYear, string $targetYear): array
+    {
+        if (
+            Schema::hasTable('academic_rollover_exceptions') === false
+            || Schema::hasColumn('academic_rollover_exceptions', 'student_id') === false
+        ) {
+            return [];
+        }
+
+        $query = $this->tenantQuery('academic_rollover_exceptions', $tenantId)
+            ->where('source_tahun_ajaran', $sourceYear)
+            ->where('target_tahun_ajaran', $targetYear);
+
+        if (Schema::hasColumn('academic_rollover_exceptions', 'resolved_at')) {
+            $query->whereNull('resolved_at');
+        }
+
+        return $query
+            ->pluck('student_id')
+            ->mapWithKeys(fn ($studentId) => [trim((string) $studentId) => true])
+            ->filter(fn ($selected, $studentId) => $studentId !== '')
+            ->all();
+    }
+
+    private function markRolloverExceptionsResolved(string $tenantId, string $sourceYear, string $targetYear): void
+    {
+        if (
+            Schema::hasTable('academic_rollover_exceptions') === false
+            || Schema::hasColumn('academic_rollover_exceptions', 'resolved_at') === false
+        ) {
+            return;
+        }
+
+        $payload = $this->filterExistingPayload('academic_rollover_exceptions', [
+            'resolved_at' => now(),
+            'updated_at' => now(),
+        ]);
+        if ($payload === []) {
+            return;
+        }
+
+        $this->tenantQuery('academic_rollover_exceptions', $tenantId)
+            ->where('source_tahun_ajaran', $sourceYear)
+            ->where('target_tahun_ajaran', $targetYear)
+            ->whereNull('resolved_at')
+            ->update($payload);
     }
 
     private function copyEskulMembershipsToAcademicPeriod(

@@ -55,6 +55,17 @@ import {
 } from '../../features/classes/utils/classUtils'
 import SchedulePreviewTable from '../../features/classes/components/SchedulePreviewTable'
 
+const createClientUuid = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
+    const random = Math.floor(Math.random() * 16)
+    const value = char === 'x' ? random : (random & 0x3) | 0x8
+    return value.toString(16)
+  })
+}
 
 /* ===== Password Modal Component (Akses Halaman) ===== */
 function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Password", loading = false }) {
@@ -382,18 +393,11 @@ export default function AKelas({ initialTab = 'kelas' }) {
   const [exportFormat, setExportFormat] = useState('excel')
   const [exportingJadwal, setExportingJadwal] = useState(false)
 
-  const PROMO_ALUMNI = '__ALUMNI__'
-  const PROMO_MUTASI = '__MUTASI__'
   const [promotionModalOpen, setPromotionModalOpen] = useState(false)
-  const [promotionMode, setPromotionMode] = useState('kelas')
-  const [promotionFromKelas, setPromotionFromKelas] = useState('')
-  const [promotionToKelas, setPromotionToKelas] = useState('')
   const [promotionFilterGrade, setPromotionFilterGrade] = useState('')
   const [promotionFilterKelas, setPromotionFilterKelas] = useState('')
   const [promotionSelectedIds, setPromotionSelectedIds] = useState([])
-  const [promotionAlumniYear, setPromotionAlumniYear] = useState(String(new Date().getFullYear()))
-  const [promotionExitReason, setPromotionExitReason] = useState('')
-  const [promotionAdvancePeriod, setPromotionAdvancePeriod] = useState(false)
+  const [promotionRetainReason, setPromotionRetainReason] = useState('Tidak naik kelas')
   const [promotionLoading, setPromotionLoading] = useState(false)
   const [promotionQueryHandled, setPromotionQueryHandled] = useState(false)
 
@@ -551,8 +555,8 @@ export default function AKelas({ initialTab = 'kelas' }) {
     setPromotionQueryHandled(true)
     setTab('kelas')
     openPromotionModal()
-    pushToast('info', 'Pilih siswa yang tidak naik kelas, lalu jalankan proses kenaikan kelas sesuai tujuan kelas.', {
-      title: 'Mode kenaikan kelas',
+    pushToast('info', 'Pilih siswa yang tidak naik kelas. Saat tahun ajaran baru diaktifkan, siswa ini tetap di kelas asal.', {
+      title: 'Pengecualian kenaikan kelas',
       duration: 7000
     })
     url.searchParams.delete('openPromotion')
@@ -1185,25 +1189,47 @@ export default function AKelas({ initialTab = 'kelas' }) {
     }
   }
 
+  async function loadPromotionExceptions() {
+    try {
+      const { data, error } = await supabase
+        .from('academic_rollover_exceptions')
+        .select('student_id,reason')
+        .eq('source_tahun_ajaran', academicPeriod.tahunAjaran)
+        .eq('target_tahun_ajaran', nextAcademicPeriod.tahunAjaran)
+        .is('resolved_at', null)
+
+      if (error) throw error
+
+      const rows = data || []
+      setPromotionSelectedIds(rows.map((row) => row.student_id).filter(Boolean))
+      const reason = rows.find((row) => String(row.reason || '').trim())?.reason
+      setPromotionRetainReason(reason || 'Tidak naik kelas')
+    } catch (error) {
+      console.error('Error loading rollover exceptions:', error)
+      setPromotionSelectedIds([])
+      if (String(error?.message || '').toLowerCase().includes('academic_rollover_exceptions')) {
+        pushToast('warning', 'Tabel pengecualian rollover belum siap. Jalankan migration terbaru di VPS.')
+      } else {
+        pushToast('warning', 'Gagal memuat pengecualian kenaikan kelas.')
+      }
+    }
+  }
+
   function openPromotionModal() {
-    setPromotionMode('kelas')
-    setPromotionFromKelas(kelasSelected || '')
-    setPromotionToKelas('')
     setPromotionFilterGrade('')
     setPromotionFilterKelas(kelasSelected || '')
     setPromotionSelectedIds([])
-    setPromotionAlumniYear(String(new Date().getFullYear()))
-    setPromotionExitReason('')
-    setPromotionAdvancePeriod(false)
+    setPromotionRetainReason('Tidak naik kelas')
     setPromotionModalOpen(true)
     void loadPromotionStudents()
+    void loadPromotionExceptions()
   }
 
   function closePromotionModal() {
     setPromotionModalOpen(false)
     setPromotionLoading(false)
     setPromotionSelectedIds([])
-    setPromotionExitReason('')
+    setPromotionRetainReason('Tidak naik kelas')
   }
 
   function togglePromotionSelect(uid) {
@@ -1231,74 +1257,18 @@ export default function AKelas({ initialTab = 'kelas' }) {
         availableActiveStudents = await loadPromotionStudents()
       }
 
-      if (!promotionToKelas) {
-        pushToast('error', 'Pilih tujuan kenaikan/pindah kelas terlebih dahulu')
-        return
-      }
-
-      let selectedSiswa = []
-      if (promotionMode === 'kelas') {
-        if (!promotionFromKelas) {
-          pushToast('error', 'Pilih kelas asal terlebih dahulu')
-          return
-        }
-        selectedSiswa = availableActiveStudents.filter((siswa) => siswa.kelas === promotionFromKelas)
-      } else {
-        if (!promotionSelectedIds.length) {
-          pushToast('error', 'Pilih minimal 1 siswa')
-          return
-        }
-        selectedSiswa = availableActiveStudents.filter((siswa) => promotionSelectedIds.includes(siswa.uid))
-      }
-
+      const selectedSet = new Set(promotionSelectedIds)
+      const selectedSiswa = availableActiveStudents.filter((siswa) => selectedSet.has(siswa.uid))
       const selectedIds = selectedSiswa.map((siswa) => siswa.uid)
-      if (!selectedIds.length) {
-        pushToast('error', 'Tidak ada siswa aktif yang bisa diproses')
-        return
-      }
-
-      const isAlumniMode = promotionToKelas === PROMO_ALUMNI
-      const isMutasiMode = promotionToKelas === PROMO_MUTASI
-      const isExitMode = isAlumniMode || isMutasiMode
-      const fromLabel = promotionMode === 'kelas'
-        ? getKelasName(promotionFromKelas)
-        : 'Siswa terpilih'
-      const toLabel = isExitMode
-        ? (isAlumniMode ? 'Alumni / Lulus' : 'Mutasi / Pindah Sekolah')
-        : getKelasName(promotionToKelas)
-
-      if (!isExitMode && promotionMode === 'kelas' && promotionFromKelas === promotionToKelas) {
-        pushToast('error', 'Kelas asal dan kelas tujuan tidak boleh sama')
-        return
-      }
-
-      if (isExitMode && !promotionExitReason.trim()) {
-        pushToast('error', 'Alasan/catatan wajib diisi untuk Alumni atau Mutasi')
-        return
-      }
-
-      const fromGrades = Array.from(new Set(selectedSiswa.map((siswa) => parseGrade(siswa.kelas)).filter(Boolean)))
-      const toGrade = !isExitMode ? parseGrade(promotionToKelas) : ''
       const lines = [
-        `Periode aktif: ${academicPeriod.tahunAjaran} - ${academicPeriod.semester}`,
-        `Sumber: ${fromLabel}`,
-        `Tujuan: ${toLabel}`,
-        `Total siswa: ${selectedIds.length}`
+        `Periode sumber: ${academicPeriod.tahunAjaran}`,
+        `Periode target: ${nextAcademicPeriod.tahunAjaran}`,
+        `Siswa tidak naik kelas: ${selectedIds.length}`,
+        '',
+        selectedIds.length
+          ? 'Siswa terpilih akan tetap di kelas asal saat rollover tahun ajaran dijalankan dari Pengaturan Akademik.'
+          : 'Daftar pengecualian akan dikosongkan. Semua siswa aktif akan mengikuti rollover otomatis.'
       ]
-
-      if (isAlumniMode) {
-        const eligible = selectedSiswa.filter((siswa) => parseGrade(siswa.kelas) === 'XII')
-        lines.push('', `Alumni hanya memproses kelas XII. Eligible: ${eligible.length}, dilewati: ${selectedIds.length - eligible.length}.`)
-        lines.push(`Tahun lulus: ${promotionAlumniYear || new Date().getFullYear()}`)
-      }
-
-      if (!isExitMode && fromGrades.length === 1 && toGrade && fromGrades[0] !== toGrade) {
-        lines.push('', `Perubahan tingkatan: ${fromGrades[0]} ke ${toGrade}.`)
-      }
-
-      if (promotionAdvancePeriod) {
-        lines.push('', `Setelah proses, periode aktif akan diganti ke ${nextAcademicPeriod.tahunAjaran} - ${nextAcademicPeriod.semester}.`)
-      }
 
       lines.push('', 'Lanjutkan?')
       if (!window.confirm(lines.join('\n'))) return
@@ -1306,104 +1276,44 @@ export default function AKelas({ initialTab = 'kelas' }) {
       setPromotionLoading(true)
       const now = new Date().toISOString()
 
-      if (isExitMode) {
-        let eligibleSiswa = selectedSiswa
-        if (isAlumniMode) {
-          eligibleSiswa = selectedSiswa.filter((siswa) => parseGrade(siswa.kelas) === 'XII')
-        }
+      const deleteQuery = supabase
+        .from('academic_rollover_exceptions')
+        .delete()
+        .eq('source_tahun_ajaran', academicPeriod.tahunAjaran)
+        .eq('target_tahun_ajaran', nextAcademicPeriod.tahunAjaran)
+        .is('resolved_at', null)
+      const { error: deleteError } = await deleteQuery
+      if (deleteError) throw deleteError
 
-        if (!eligibleSiswa.length) {
-          pushToast('error', 'Tidak ada siswa eligible untuk diproses')
-          return
-        }
-
-        const eligibleIds = eligibleSiswa.map((siswa) => siswa.uid)
-        const affectedClasses = Array.from(new Set(eligibleSiswa.map((siswa) => siswa.kelas).filter(Boolean)))
-
-        await supabase
-          .from('kelas_struktur')
-          .update({ ketua_siswa_id: null, ketua_siswa_nama: null, updated_at: now })
-          .in('ketua_siswa_id', eligibleIds)
-
-        const payload = {
-          status: isAlumniMode ? 'alumni' : 'mutasi',
-          disabled_at: now,
-          alasan_nonaktif: `${toLabel}. Kelas terakhir: ${fromLabel}. ${promotionExitReason.trim()}`.trim(),
-          rfid_uid: null,
-          kelas: '',
+      if (selectedIds.length) {
+        const reason = String(promotionRetainReason || '').trim() || 'Tidak naik kelas'
+        const rows = selectedIds.map((studentId) => ({
+          id: createClientUuid(),
+          student_id: studentId,
+          source_tahun_ajaran: academicPeriod.tahunAjaran,
+          target_tahun_ajaran: nextAcademicPeriod.tahunAjaran,
+          reason,
+          created_at: now,
           updated_at: now
-        }
+        }))
 
-        if (isAlumniMode) {
-          payload.tahun_lulus = Number(promotionAlumniYear) || new Date().getFullYear()
-        }
-
-        const { error } = await supabase
-          .from('profiles')
-          .update(payload)
-          .in('id', eligibleIds)
-
-        if (error) throw error
-
-        if (affectedClasses.length) {
-          await supabase
-            .from('kelas_struktur')
-            .update({ ketua_siswa_id: null, ketua_siswa_nama: null, updated_at: now })
-            .in('kelas_id', affectedClasses)
-        }
-
-        pushToast('success', `${toLabel} berhasil diproses untuk ${eligibleIds.length} siswa`)
-      } else {
-        const targetClass = kelas.find((item) => item.id === promotionToKelas)
-        const targetGrade = targetClass?.grade || parseGrade(promotionToKelas)
-        const targetCohort = targetClass?.angkatan || inferCohortYear(targetGrade, academicPeriod.startYear)
-
-        const { error } = await supabase
-          .from('profiles')
-          .update({ kelas: promotionToKelas, updated_at: now })
-          .in('id', selectedIds)
-
-        if (error) throw error
-
-        const missingCohortIds = selectedSiswa
-          .filter((siswa) => !String(siswa.angkatan || '').trim())
-          .map((siswa) => siswa.uid)
-
-        if (missingCohortIds.length) {
-          await supabase
-            .from('profiles')
-            .update({ angkatan: targetCohort, updated_at: now })
-            .in('id', missingCohortIds)
-        }
-
-        const affectedClasses = Array.from(new Set([
-          ...selectedSiswa.map((siswa) => siswa.kelas).filter(Boolean),
-          promotionToKelas
-        ]))
-        await supabase
-          .from('kelas_struktur')
-          .update({ ketua_siswa_id: null, ketua_siswa_nama: null, updated_at: now })
-          .in('kelas_id', affectedClasses)
-
-        pushToast('success', `Berhasil memindahkan ${selectedIds.length} siswa ke ${targetClass?.nama || promotionToKelas}`)
-      }
-
-      if (promotionAdvancePeriod) {
-        await persistAcademicPeriod(nextAcademicPeriod, { silent: true, manualRolloverCompleted: true })
-        pushToast('success', `Periode aktif diperbarui ke ${nextAcademicPeriod.tahunAjaran} - ${nextAcademicPeriod.semester}`)
+        const { error: insertError } = await supabase
+          .from('academic_rollover_exceptions')
+          .insert(rows)
+        if (insertError) throw insertError
       }
 
       invalidateAcademicQueries()
+      pushToast(
+        'success',
+        selectedIds.length
+          ? `${selectedIds.length} siswa disimpan sebagai pengecualian rollover.`
+          : 'Daftar pengecualian rollover dikosongkan.'
+      )
       closePromotionModal()
-      setPromotionStudentsLoaded(false)
-      setPromotionSiswaList([])
-      await Promise.all([
-        loadSelectedClassData({ force: true }),
-        loadKelas()
-      ])
     } catch (error) {
-      console.error('Error running promotion:', error)
-      pushToast('error', error.message || 'Gagal memproses kenaikan kelas')
+      console.error('Error saving rollover exceptions:', error)
+      pushToast('error', error.message || 'Gagal menyimpan pengecualian kenaikan kelas')
     } finally {
       setPromotionLoading(false)
     }
@@ -2408,7 +2318,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
                       onClick={openPromotionModal}
                     >
                       <span>⬆️</span>
-                      <span>Kenaikan Kelas</span>
+                      <span>Pengecualian Rollover</span>
                     </button>
                     <button
                       type="button"
@@ -3577,10 +3487,10 @@ export default function AKelas({ initialTab = 'kelas' }) {
                     <div>
                       <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
                         <span className="p-2 bg-indigo-100 text-indigo-700 rounded-lg">⬆️</span>
-                        <span>Kenaikan Kelas</span>
+                        <span>Pengecualian Kenaikan Kelas</span>
                       </h3>
                       <p className="text-sm text-gray-600 mt-1">
-                        Periode aktif {academicPeriod.tahunAjaran} - {academicPeriod.semester}. Data tugas, quiz, nilai, dan absensi lama tidak dihapus.
+                        Pilih siswa yang tidak naik kelas. Rollover otomatis tetap dijalankan dari Pengaturan Akademik.
                       </p>
                     </div>
                     <button
@@ -3594,199 +3504,111 @@ export default function AKelas({ initialTab = 'kelas' }) {
                   </div>
 
                   <div className="p-6 space-y-5">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        className={`px-4 py-3 rounded-lg border text-sm font-medium ${promotionMode === 'kelas' ? 'bg-indigo-50 border-indigo-400 text-indigo-700' : 'bg-white border-gray-300 text-gray-700'}`}
-                        onClick={() => setPromotionMode('kelas')}
-                      >
-                        Berdasarkan Kelas
-                      </button>
-                      <button
-                        type="button"
-                        className={`px-4 py-3 rounded-lg border text-sm font-medium ${promotionMode === 'selected' ? 'bg-indigo-50 border-indigo-400 text-indigo-700' : 'bg-white border-gray-300 text-gray-700'}`}
-                        onClick={() => setPromotionMode('selected')}
-                      >
-                        Pilih Siswa Manual ({promotionSelectedIds.length})
-                      </button>
+                    <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4">
+                      <p className="text-sm font-semibold text-indigo-900">
+                        Rollover target: {academicPeriod.tahunAjaran} → {nextAcademicPeriod.tahunAjaran}
+                      </p>
+                      <p className="mt-1 text-xs text-indigo-700">
+                        Siswa yang dipilih akan tetap di kelas asal. Siswa lain tetap naik otomatis saat tahun ajaran baru diaktifkan.
+                      </p>
                     </div>
 
-                    {promotionMode === 'kelas' ? (
+                    <div className="space-y-4">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Kelas Asal</label>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Filter Tingkatan</label>
                           <select
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-indigo-500"
-                            value={promotionFromKelas}
-                            onChange={(event) => setPromotionFromKelas(event.target.value)}
+                            value={promotionFilterGrade}
+                            onChange={(event) => {
+                              setPromotionFilterGrade(event.target.value)
+                              setPromotionFilterKelas('')
+                            }}
                           >
-                            <option value="">Pilih kelas asal</option>
-                            {kelasOptions.map((option) => (
-                              <option key={option.value} value={option.value}>{option.label}</option>
+                            <option value="">Semua tingkatan</option>
+                            {gradeLabelsForPromotion.map((grade) => (
+                              <option key={grade} value={grade}>{grade}</option>
                             ))}
                           </select>
                         </div>
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Tujuan</label>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Filter Kelas</label>
                           <select
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-indigo-500"
-                            value={promotionToKelas}
-                            onChange={(event) => setPromotionToKelas(event.target.value)}
+                            value={promotionFilterKelas}
+                            onChange={(event) => setPromotionFilterKelas(event.target.value)}
                           >
-                            <option value="">Pilih tujuan</option>
-                            {kelasOptions.map((option) => (
-                              <option key={option.value} value={option.value}>{option.label}</option>
-                            ))}
-                            <option value={PROMO_ALUMNI}>Alumni / Lulus</option>
-                            <option value={PROMO_MUTASI}>Mutasi / Pindah Sekolah</option>
-                          </select>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Filter Tingkatan</label>
-                            <select
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-indigo-500"
-                              value={promotionFilterGrade}
-                              onChange={(event) => {
-                                setPromotionFilterGrade(event.target.value)
-                                setPromotionFilterKelas('')
-                              }}
-                            >
-                              <option value="">Semua tingkatan</option>
-                              {gradeLabelsForPromotion.map((grade) => (
-                                <option key={grade} value={grade}>{grade}</option>
+                            <option value="">Semua kelas</option>
+                            {kelasOptions
+                              .filter((option) => !promotionFilterGrade || option.grade === promotionFilterGrade)
+                              .map((option) => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
                               ))}
-                            </select>
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Filter Kelas</label>
-                            <select
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-indigo-500"
-                              value={promotionFilterKelas}
-                              onChange={(event) => setPromotionFilterKelas(event.target.value)}
-                            >
-                              <option value="">Semua kelas</option>
-                              {kelasOptions
-                                .filter((option) => !promotionFilterGrade || option.grade === promotionFilterGrade)
-                                .map((option) => (
-                                  <option key={option.value} value={option.value}>{option.label}</option>
-                                ))}
-                            </select>
-                          </div>
-                        </div>
-
-                        <div className="rounded-xl border border-gray-200 overflow-hidden">
-                          <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between gap-3">
-                            <p className="text-xs text-gray-600">
-                              Siswa terlihat: <span className="font-semibold">{promotionStudentsLoading ? '...' : promotionCandidateSiswa.length}</span>
-                              {' '}• Dipilih: <span className="font-semibold">{promotionSelectedIds.length}</span>
-                            </p>
-                            <button
-                              type="button"
-                              className="text-xs text-indigo-600 hover:underline disabled:text-gray-400"
-                              onClick={togglePromotionSelectAllVisible}
-                              disabled={!promotionCandidateSiswa.length}
-                            >
-                              {promotionCandidateSiswa.length > 0 && promotionCandidateSiswa.every((siswa) => promotionSelectedIds.includes(siswa.uid))
-                                ? 'Hapus pilih semua'
-                                : 'Pilih semua terlihat'}
-                            </button>
-                          </div>
-                          <div className="max-h-64 overflow-y-auto divide-y divide-gray-100">
-                            {promotionStudentsLoading ? (
-                              <div className="px-4 py-8 text-center text-sm text-gray-500">
-                                Memuat daftar siswa...
-                              </div>
-                            ) : promotionCandidateSiswa.length ? (
-                              promotionCandidateSiswa.map((siswa) => (
-                                <label key={siswa.uid} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50">
-                                  <input
-                                    type="checkbox"
-                                    className="h-4 w-4 text-indigo-600 border-gray-300 rounded"
-                                    checked={promotionSelectedIds.includes(siswa.uid)}
-                                    onChange={() => togglePromotionSelect(siswa.uid)}
-                                  />
-                                  <span className="flex-1 min-w-0">
-                                    <span className="block text-sm font-medium text-gray-900 truncate">{siswa.nama}</span>
-                                    <span className="block text-xs text-gray-500 truncate">
-                                      {getKelasName(siswa.kelas)} • Angkatan {siswa.angkatan || '-'} • {siswa.email}
-                                    </span>
-                                  </span>
-                                </label>
-                              ))
-                            ) : (
-                              <div className="px-4 py-8 text-center text-sm text-gray-500">
-                                Tidak ada siswa aktif yang cocok dengan filter.
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Tujuan</label>
-                          <select
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-indigo-500"
-                            value={promotionToKelas}
-                            onChange={(event) => setPromotionToKelas(event.target.value)}
-                          >
-                            <option value="">Pilih tujuan</option>
-                            {kelasOptions.map((option) => (
-                              <option key={option.value} value={option.value}>{option.label}</option>
-                            ))}
-                            <option value={PROMO_ALUMNI}>Alumni / Lulus</option>
-                            <option value={PROMO_MUTASI}>Mutasi / Pindah Sekolah</option>
                           </select>
                         </div>
                       </div>
-                    )}
 
-                    {(promotionToKelas === PROMO_ALUMNI || promotionToKelas === PROMO_MUTASI) && (
-                      <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 space-y-3">
-                        {promotionToKelas === PROMO_ALUMNI && (
-                          <div>
-                            <label className="block text-sm font-medium text-yellow-900 mb-1">Tahun Lulus</label>
-                            <input
-                              type="number"
-                              min="2000"
-                              max="2100"
-                              className="w-full px-3 py-2 border border-yellow-300 rounded-lg bg-white focus:ring-2 focus:ring-yellow-500"
-                              value={promotionAlumniYear}
-                              onChange={(event) => setPromotionAlumniYear(event.target.value)}
-                            />
-                          </div>
-                        )}
-                        <div>
-                          <label className="block text-sm font-medium text-yellow-900 mb-1">Alasan / Catatan</label>
-                          <textarea
-                            className="w-full px-3 py-2 border border-yellow-300 rounded-lg bg-white focus:ring-2 focus:ring-yellow-500 resize-none"
-                            rows={3}
-                            value={promotionExitReason}
-                            onChange={(event) => setPromotionExitReason(event.target.value)}
-                            placeholder={promotionToKelas === PROMO_ALUMNI ? 'Contoh: Lulus sesuai keputusan sekolah.' : 'Contoh: Mutasi mengikuti perpindahan orang tua.'}
-                          />
+                      <div className="rounded-xl border border-gray-200 overflow-hidden">
+                        <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between gap-3">
+                          <p className="text-xs text-gray-600">
+                            Siswa terlihat: <span className="font-semibold">{promotionStudentsLoading ? '...' : promotionCandidateSiswa.length}</span>
+                            {' '}• Tidak naik: <span className="font-semibold">{promotionSelectedIds.length}</span>
+                          </p>
+                          <button
+                            type="button"
+                            className="text-xs text-indigo-600 hover:underline disabled:text-gray-400"
+                            onClick={togglePromotionSelectAllVisible}
+                            disabled={!promotionCandidateSiswa.length}
+                          >
+                            {promotionCandidateSiswa.length > 0 && promotionCandidateSiswa.every((siswa) => promotionSelectedIds.includes(siswa.uid))
+                              ? 'Hapus pilih semua'
+                              : 'Pilih semua terlihat'}
+                          </button>
+                        </div>
+                        <div className="max-h-72 overflow-y-auto divide-y divide-gray-100">
+                          {promotionStudentsLoading ? (
+                            <div className="px-4 py-8 text-center text-sm text-gray-500">
+                              Memuat daftar siswa...
+                            </div>
+                          ) : promotionCandidateSiswa.length ? (
+                            promotionCandidateSiswa.map((siswa) => (
+                              <label key={siswa.uid} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50">
+                                <input
+                                  type="checkbox"
+                                  className="h-4 w-4 text-indigo-600 border-gray-300 rounded"
+                                  checked={promotionSelectedIds.includes(siswa.uid)}
+                                  onChange={() => togglePromotionSelect(siswa.uid)}
+                                />
+                                <span className="flex-1 min-w-0">
+                                  <span className="block text-sm font-medium text-gray-900 truncate">{siswa.nama}</span>
+                                  <span className="block text-xs text-gray-500 truncate">
+                                    {getKelasName(siswa.kelas)} • Angkatan {siswa.angkatan || '-'} • {siswa.email}
+                                  </span>
+                                </span>
+                              </label>
+                            ))
+                          ) : (
+                            <div className="px-4 py-8 text-center text-sm text-gray-500">
+                              Tidak ada siswa aktif yang cocok dengan filter.
+                            </div>
+                          )}
                         </div>
                       </div>
-                    )}
 
-                    <label className="flex items-start gap-3 rounded-xl border border-indigo-200 bg-indigo-50 p-4">
-                      <input
-                        type="checkbox"
-                        className="mt-1 h-4 w-4 text-indigo-600 border-gray-300 rounded"
-                        checked={promotionAdvancePeriod}
-                        onChange={(event) => setPromotionAdvancePeriod(event.target.checked)}
-                      />
-                      <span>
-                        <span className="block text-sm font-semibold text-indigo-900">
-                          Setelah proses, aktifkan periode berikutnya
-                        </span>
-                        <span className="block text-xs text-indigo-700 mt-1">
-                          {nextAcademicPeriod.tahunAjaran} - {nextAcademicPeriod.semester}. Aktifkan ini saat kenaikan kelas akhir tahun benar-benar selesai.
-                        </span>
-                      </span>
-                    </label>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Catatan pengecualian</label>
+                        <textarea
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-indigo-500 resize-none"
+                          rows={3}
+                          value={promotionRetainReason}
+                          onChange={(event) => setPromotionRetainReason(event.target.value)}
+                          placeholder="Contoh: Tidak naik kelas berdasarkan keputusan rapat kenaikan kelas."
+                        />
+                        <p className="mt-1 text-xs text-gray-500">
+                          Catatan ini hanya untuk audit rollover. Data tugas, quiz, nilai, dan absensi lama tetap tersimpan.
+                        </p>
+                      </div>
+                    </div>
                   </div>
 
                   <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
@@ -3804,14 +3626,10 @@ export default function AKelas({ initialTab = 'kelas' }) {
                       onClick={handlePromotion}
                       disabled={
                         promotionLoading ||
-                        promotionStudentsLoading ||
-                        !promotionToKelas ||
-                        (promotionMode === 'kelas' && !promotionFromKelas) ||
-                        (promotionMode === 'selected' && !promotionSelectedIds.length) ||
-                        ([PROMO_ALUMNI, PROMO_MUTASI].includes(promotionToKelas) && !promotionExitReason.trim())
+                        promotionStudentsLoading
                       }
                     >
-                      {promotionLoading ? 'Memproses...' : 'Jalankan Kenaikan'}
+                      {promotionLoading ? 'Menyimpan...' : 'Simpan Pengecualian'}
                     </button>
                   </div>
                 </div>
