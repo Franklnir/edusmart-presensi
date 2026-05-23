@@ -350,6 +350,138 @@ const RiwayatSertifikatOverlay = ({ sertifikatList, onClose, onViewDetail, onDow
   )
 }
 
+const JamKosongActionOverlay = ({ action, onClose, onConfirm, processing }) => {
+  if (!action?.item) return null
+
+  const tone = {
+    available: {
+      badge: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+      panel: 'border-emerald-200 bg-emerald-50',
+      button: 'bg-emerald-600 hover:bg-emerald-700 text-white',
+      label: 'Bisa Diambil'
+    },
+    cancel: {
+      badge: 'bg-orange-100 text-orange-700 border-orange-200',
+      panel: 'border-orange-200 bg-orange-50',
+      button: 'bg-orange-600 hover:bg-orange-700 text-white',
+      label: 'Batalkan'
+    },
+    success: {
+      badge: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+      panel: 'border-emerald-200 bg-emerald-50',
+      button: 'bg-slate-900 hover:bg-slate-800 text-white',
+      label: 'Berhasil'
+    },
+    conflict: {
+      badge: 'bg-amber-100 text-amber-700 border-amber-200',
+      panel: 'border-amber-200 bg-amber-50',
+      button: 'bg-slate-900 hover:bg-slate-800 text-white',
+      label: 'Bentrok'
+    },
+    blocked: {
+      badge: 'bg-slate-100 text-slate-700 border-slate-200',
+      panel: 'border-slate-200 bg-slate-50',
+      button: 'bg-slate-900 hover:bg-slate-800 text-white',
+      label: 'Tidak Tersedia'
+    },
+    error: {
+      badge: 'bg-red-100 text-red-700 border-red-200',
+      panel: 'border-red-200 bg-red-50',
+      button: 'bg-slate-900 hover:bg-slate-800 text-white',
+      label: 'Gagal'
+    }
+  }[action.type] || {}
+
+  const item = action.item
+  const canConfirm = Boolean(action.canConfirm)
+  const confirmLabel = action.type === 'cancel' ? 'Ya, Batalkan' : 'Ya, Ambil Jam Ini'
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/50 p-4">
+      <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+        <div className="border-b border-slate-100 px-5 py-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <span className={`inline-flex rounded-full border px-3 py-1 text-[11px] font-bold uppercase tracking-wide ${tone.badge}`}>
+                {tone.label}
+              </span>
+              <h3 className="mt-3 text-xl font-extrabold text-slate-950">
+                {action.title}
+              </h3>
+              <p className="mt-1 text-sm leading-6 text-slate-600">
+                {action.message}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+              aria-label="Tutup status jam kosong"
+            >
+              x
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-4 px-5 py-5">
+          <div className={`rounded-xl border px-4 py-3 text-sm leading-6 ${tone.panel}`}>
+            {action.reason || action.message}
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Mapel</div>
+              <div className="mt-1 font-bold text-slate-900">{item.mapel || '-'}</div>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Kelas</div>
+              <div className="mt-1 font-bold text-slate-900">{action.kelasLabel || '-'}</div>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Waktu</div>
+              <div className="mt-1 font-bold text-slate-900">
+                {formatWaktu(item.jam_mulai)} - {formatWaktu(item.jam_selesai)}
+              </div>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Pengajar</div>
+              <div className="mt-1 font-bold text-slate-900">{item.guru_pengaju || '-'}</div>
+            </div>
+          </div>
+
+          {item.alasan && (
+            <div className="rounded-xl border border-slate-200 px-4 py-3">
+              <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Keterangan Guru Pengaju</div>
+              <div className="mt-1 text-sm leading-6 text-slate-700">{item.alasan}</div>
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-col-reverse gap-2 border-t border-slate-100 bg-slate-50 px-5 py-4 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={processing}
+            className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 transition hover:bg-slate-100 disabled:opacity-60"
+          >
+            Tutup
+          </button>
+          {canConfirm && (
+            <button
+              type="button"
+              onClick={onConfirm}
+              disabled={processing}
+              className={`rounded-xl px-4 py-2.5 text-sm font-bold transition disabled:cursor-wait disabled:opacity-70 ${tone.button}`}
+            >
+              {processing ? 'Memproses...' : confirmLabel}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // Komponen Overlay Absensi Eskul
 const AbsensiEskulOverlay = ({ eskul, onClose, siswaMap, academicPeriod }) => {
   const { pushToast, setLoading } = useUIStore()
@@ -1329,6 +1461,8 @@ export default function JadwalGuru() {
   const [showSertifikatOverlay, setShowSertifikatOverlay] = useState(false)
   const [showRiwayatSertifikatOverlay, setShowRiwayatSertifikatOverlay] = useState(false)
   const [selectedSertifikat, setSelectedSertifikat] = useState(null)
+  const [jamKosongAction, setJamKosongAction] = useState(null)
+  const [jamKosongActionProcessing, setJamKosongActionProcessing] = useState(false)
 
   const [activeHari, setActiveHari] = useState('Hari Ini')
   const [currentTime, setCurrentTime] = useState(new Date())
@@ -1582,7 +1716,7 @@ export default function JadwalGuru() {
         jam_selesai: item.jam_selesai,
         alasan: item.alasan,
         guru_pengganti: item.guru_pengganti,
-        guru_pengaju: item.profiles?.nama || 'Guru',
+        guru_pengaju: item.guru_pengaju || item.profiles?.nama || 'Guru',
         created_by: item.created_by,
         tanggal: item.tanggal,
         created_at: item.created_at,
@@ -1641,6 +1775,13 @@ export default function JadwalGuru() {
     return ['Hari Ini', ...sortedHari]
   }, [jadwal])
 
+  const isOwnJamKosongItem = React.useCallback((item) => {
+    if (!item) return false
+    if (String(item.created_by || '') === String(user?.id || '')) return true
+    if (item.created_by) return false
+    return normalizeTeacherName(item.guru_pengaju) === normalizeTeacherName(currentTeacherName)
+  }, [currentTeacherName, user?.id])
+
   const getJamKosongConflictMessage = React.useCallback((item) => {
     if (!item) return ''
     const scheduleConflict = jadwal.find((entry) => (
@@ -1667,20 +1808,105 @@ export default function JadwalGuru() {
     return ''
   }, [currentTeacherName, jadwal, jamKosongHariIni, kelasList, todayName, todayStr])
 
-  const handleToggleJamKosong = async (item) => {
-    if (!item?.id) return
-    if (String(item.created_by || '') === String(user?.id || '')) {
-      pushToast('info', 'Jam kosong milik sendiri tidak bisa diambil. Tunggu guru lain mengambil jam ini.')
-      return
+  const buildJamKosongAction = React.useCallback((item, override = {}) => {
+    if (!item?.id) return null
+    const kelasLabel = getNamaKelasFromList(item.kelas, kelasList)
+    const isCanceling = normalizeTeacherName(item.guru_pengganti) === normalizeTeacherName(currentTeacherName)
+    const isOwnReport = isOwnJamKosongItem(item)
+    const isHandledByOther = Boolean(item.guru_pengganti) && !isCanceling
+
+    if (override.type) {
+      return {
+        item,
+        kelasLabel,
+        canConfirm: false,
+        ...override
+      }
     }
 
+    if (isOwnReport) {
+      return {
+        type: 'blocked',
+        title: 'Jam kosong ini milik Anda',
+        message: 'Guru tidak bisa mengambil jam kosong yang diajukan oleh dirinya sendiri.',
+        reason: 'Silakan tunggu guru lain mengambil jam ini. Ini menjaga data pengganti tetap objektif dan tidak konflik.',
+        item,
+        kelasLabel,
+        canConfirm: false
+      }
+    }
+
+    if (isHandledByOther) {
+      return {
+        type: 'blocked',
+        title: 'Jam kosong sudah diambil',
+        message: `Jam kosong ini sudah digantikan oleh ${item.guru_pengganti}.`,
+        reason: 'Jika ada perubahan, guru pengganti yang sedang tercatat perlu membatalkan terlebih dahulu atau admin/guru pengaju memperbarui data.',
+        item,
+        kelasLabel,
+        canConfirm: false
+      }
+    }
+
+    if (isCanceling) {
+      return {
+        type: 'cancel',
+        title: 'Batalkan pengambilan jam kosong?',
+        message: 'Anda sedang tercatat sebagai guru pengganti untuk jam ini.',
+        reason: 'Jika dibatalkan, jam kosong akan kembali terbuka dan bisa diambil guru lain.',
+        item,
+        kelasLabel,
+        canConfirm: true
+      }
+    }
+
+    const conflictMessage = getJamKosongConflictMessage(item)
+    if (conflictMessage) {
+      return {
+        type: 'conflict',
+        title: 'Jam kosong belum bisa diambil',
+        message: 'Sistem menemukan bentrok jadwal untuk akun Anda.',
+        reason: conflictMessage,
+        item,
+        kelasLabel,
+        canConfirm: false
+      }
+    }
+
+    return {
+      type: 'available',
+      title: 'Jam kosong bisa diambil',
+      message: 'Silakan konfirmasi jika Anda siap menjadi guru pengganti pada jam ini.',
+      reason: 'Tidak ada jadwal mengajar atau pengambilan jam kosong lain yang bentrok pada waktu ini.',
+      item,
+      kelasLabel,
+      canConfirm: true
+    }
+  }, [currentTeacherName, getJamKosongConflictMessage, isOwnJamKosongItem, kelasList])
+
+  const handleToggleJamKosong = (item) => {
+    const action = buildJamKosongAction(item)
+    if (!action) return
+    setJamKosongAction(action)
+  }
+
+  const executeJamKosongAction = async () => {
+    const item = jamKosongAction?.item
+    if (!item?.id || !jamKosongAction?.canConfirm) return
+
     try {
-      setLoading(true)
+      setJamKosongActionProcessing(true)
       const isCanceling = normalizeTeacherName(item.guru_pengganti) === normalizeTeacherName(currentTeacherName)
       if (!isCanceling) {
         const conflictMessage = getJamKosongConflictMessage(item)
         if (conflictMessage) {
-          pushToast('error', conflictMessage)
+          setJamKosongAction(buildJamKosongAction(item, {
+            type: 'conflict',
+            title: 'Jam kosong belum bisa diambil',
+            message: 'Sistem menemukan bentrok jadwal untuk akun Anda.',
+            reason: conflictMessage,
+            canConfirm: false
+          }))
           return
         }
       }
@@ -1718,15 +1944,37 @@ export default function JadwalGuru() {
 
       if (isCanceling) {
         pushToast('info', 'Anda membatalkan pengambilan jam ini.')
+        setJamKosongAction(buildJamKosongAction({ ...item, guru_pengganti: null }, {
+          type: 'success',
+          title: 'Pengambilan jam kosong dibatalkan',
+          message: 'Jam kosong kembali terbuka untuk guru lain.',
+          reason: 'Data terbaru sudah disinkronkan.',
+          canConfirm: false
+        }))
       } else {
         pushToast('success', 'Berhasil mengambil jam kosong!')
+        setJamKosongAction(buildJamKosongAction({ ...item, guru_pengganti: currentTeacherName }, {
+          type: 'success',
+          title: 'Berhasil mengambil jam kosong',
+          message: 'Anda sekarang tercatat sebagai guru pengganti.',
+          reason: 'Silakan hadir sesuai kelas dan waktu yang tercatat.',
+          canConfirm: false
+        }))
       }
     } catch (error) {
       console.error('Error updating jam kosong:', error)
-      pushToast('error', error?.message || 'Gagal memperbarui status jam kosong')
+      const message = error?.message || 'Gagal memperbarui status jam kosong'
+      pushToast('error', message)
+      setJamKosongAction(buildJamKosongAction(item, {
+        type: 'error',
+        title: 'Gagal memperbarui jam kosong',
+        message,
+        reason: 'Data akan dimuat ulang. Jika jam kosong sudah diambil guru lain, silakan pilih jam kosong lain.',
+        canConfirm: false
+      }))
       await loadSemuaJamKosongHariIni({ silent: true })
     } finally {
-      setLoading(false)
+      setJamKosongActionProcessing(false)
     }
   }
 
@@ -1899,12 +2147,13 @@ export default function JadwalGuru() {
 
   const jamKosongStats = React.useMemo(() => {
     const currentTeacherKey = normalizeTeacherName(currentTeacherName)
-    const ownCount = jamKosongHariIni.filter((item) => String(item.created_by || '') === String(user?.id || '')).length
+    const ownCount = jamKosongHariIni.filter((item) => isOwnJamKosongItem(item)).length
     const handledCount = jamKosongHariIni.filter((item) => item.guru_pengganti).length
     const openCount = jamKosongHariIni.filter((item) => !item.guru_pengganti).length
     const availableForMeCount = jamKosongHariIni.filter((item) => (
       !item.guru_pengganti &&
-      String(item.created_by || '') !== String(user?.id || '')
+      !isOwnJamKosongItem(item) &&
+      !getJamKosongConflictMessage(item)
     )).length
     const assignedToMeCount = jamKosongHariIni.filter((item) => (
       normalizeTeacherName(item.guru_pengganti) === currentTeacherKey
@@ -1918,7 +2167,7 @@ export default function JadwalGuru() {
       availableForMe: availableForMeCount,
       assignedToMe: assignedToMeCount
     }
-  }, [currentTeacherName, jamKosongHariIni, user?.id])
+  }, [currentTeacherName, getJamKosongConflictMessage, isOwnJamKosongItem, jamKosongHariIni])
 
   const sertifikatSayaCard = (
     <div className="bg-white rounded-2xl shadow-md border border-gray-200">
@@ -2068,7 +2317,7 @@ export default function JadwalGuru() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {jamKosongHariIni.map((item) => {
               const isHandled = !!item.guru_pengganti
-              const isOwnReport = String(item.created_by || '') === String(user?.id || '')
+              const isOwnReport = isOwnJamKosongItem(item)
               const isMe = normalizeTeacherName(item.guru_pengganti) === normalizeTeacherName(currentTeacherName)
               const statusLabel = isOwnReport
                 ? 'Laporan Saya'
@@ -2459,6 +2708,15 @@ export default function JadwalGuru() {
           onClose={closeRiwayatSertifikatOverlay}
           onViewDetail={handleViewSertifikat}
           onDownload={handleDownloadSertifikat}
+        />
+      )}
+
+      {jamKosongAction && (
+        <JamKosongActionOverlay
+          action={jamKosongAction}
+          onClose={() => setJamKosongAction(null)}
+          onConfirm={executeJamKosongAction}
+          processing={jamKosongActionProcessing}
         />
       )}
     </div>

@@ -1932,7 +1932,7 @@ class DbController extends ApiController
                             $query->whereNull('guru_pengganti');
                         }
 
-                        $query->where('created_by', '!=', $userId);
+                        $this->whereNotOwnCreator($query, $userId);
                         $this->mapPayload($payload, function ($row) use ($teacherReplacementName) {
                             $replacement = trim((string) ($row['guru_pengganti'] ?? ''));
 
@@ -2274,14 +2274,22 @@ class DbController extends ApiController
         return false;
     }
 
+    private function whereNotOwnCreator($query, string $userId): void
+    {
+        $query->where(function ($inner) use ($userId) {
+            $inner->whereNull('created_by')
+                ->orWhere('created_by', '!=', $userId);
+        });
+    }
+
     private function validateGuruJamKosongReplacement(
         Request $request,
         string $userId,
         string $teacherReplacementName,
         ?string $tenantId
     ): ?array {
-        $targetQuery = DB::table('jam_kosong')
-            ->where('created_by', '!=', $userId);
+        $targetQuery = DB::table('jam_kosong');
+        $this->whereNotOwnCreator($targetQuery, $userId);
         $this->applyTenantFilter($targetQuery);
         $this->applyFilters($targetQuery, $request->input('filters', []));
 
