@@ -2157,18 +2157,17 @@ export default function JadwalGuru() {
                         <div className="space-y-2">
                           <button
                             onClick={() => handleToggleJamKosong(item)}
-                            disabled={Boolean(conflictMessage)}
                             title={conflictMessage || 'Ambil Jam Ini'}
                             className={`w-full py-2.5 px-4 rounded-lg font-semibold text-sm transition-colors flex items-center justify-center gap-2 ${
                               conflictMessage
-                                ? 'bg-slate-100 text-slate-500 border border-slate-200 cursor-not-allowed'
+                                ? 'bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-600 border border-slate-200'
                                 : 'bg-red-500 hover:bg-red-600 active:bg-red-700 text-white shadow-md shadow-red-200'
                             }`}
                           >
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
                             </svg>
-                            {conflictMessage ? 'Tidak Bisa Diambil' : 'Ambil Jam Ini'}
+                            {conflictMessage ? 'Lihat Alasan Konflik' : 'Ambil Jam Ini'}
                           </button>
                           {conflictMessage && (
                             <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
