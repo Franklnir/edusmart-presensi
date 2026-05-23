@@ -1884,11 +1884,36 @@ export default function JadwalGuru() {
     }
   }, [currentTeacherName, getJamKosongConflictMessage, isOwnJamKosongItem, kelasList])
 
-  const handleToggleJamKosong = (item) => {
-    const action = buildJamKosongAction(item)
-    if (!action) return
-    setJamKosongAction(action)
-  }
+  const handleToggleJamKosong = React.useCallback((item, event) => {
+    event?.preventDefault?.()
+    event?.stopPropagation?.()
+
+    try {
+      const action = buildJamKosongAction(item)
+      if (!action) {
+        pushToast('error', 'Data jam kosong belum lengkap. Refresh data lalu coba lagi.')
+        return
+      }
+
+      setJamKosongAction(action)
+      if (!action.canConfirm) {
+        const type = action.type === 'conflict' ? 'warning' : action.type === 'error' ? 'error' : 'info'
+        pushToast(type, action.reason || action.message)
+      }
+    } catch (error) {
+      console.error('Error opening jam kosong action:', error)
+      pushToast('error', 'Gagal membuka status jam kosong. Refresh data lalu coba lagi.')
+      setJamKosongAction({
+        type: 'error',
+        title: 'Gagal membuka aksi jam kosong',
+        message: 'Data jam kosong belum bisa diproses.',
+        reason: error?.message || 'Silakan refresh data, lalu coba lagi.',
+        item,
+        kelasLabel: item?.kelas || '-',
+        canConfirm: false
+      })
+    }
+  }, [buildJamKosongAction, pushToast])
 
   const executeJamKosongAction = async () => {
     const item = jamKosongAction?.item
@@ -2375,12 +2400,13 @@ export default function JadwalGuru() {
                     </div>
                   </div>
 
-                  <div className="mt-2 pt-3 border-t border-gray-100">
+                  <div className="relative z-10 mt-2 border-t border-gray-100 pt-3 pointer-events-auto">
                     {isHandled ? (
                       isMe ? (
                         <button
-                          onClick={() => handleToggleJamKosong(item)}
-                          className="w-full py-2.5 px-4 bg-orange-100 hover:bg-orange-200 text-orange-700 border border-orange-300 rounded-lg font-bold text-sm transition-colors flex items-center justify-center gap-2"
+                          type="button"
+                          onClick={(event) => handleToggleJamKosong(item, event)}
+                          className="relative z-20 w-full cursor-pointer py-2.5 px-4 bg-orange-100 hover:bg-orange-200 text-orange-700 border border-orange-300 rounded-lg font-bold text-sm transition-colors flex items-center justify-center gap-2 pointer-events-auto"
                         >
                           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -2405,9 +2431,10 @@ export default function JadwalGuru() {
                       ) : (
                         <div className="space-y-2">
                           <button
-                            onClick={() => handleToggleJamKosong(item)}
+                            type="button"
+                            onClick={(event) => handleToggleJamKosong(item, event)}
                             title={conflictMessage || 'Ambil Jam Ini'}
-                            className={`w-full py-2.5 px-4 rounded-lg font-semibold text-sm transition-colors flex items-center justify-center gap-2 ${
+                            className={`relative z-20 w-full cursor-pointer py-2.5 px-4 rounded-lg font-semibold text-sm transition-colors flex items-center justify-center gap-2 pointer-events-auto ${
                               conflictMessage
                                 ? 'bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-600 border border-slate-200'
                                 : 'bg-red-500 hover:bg-red-600 active:bg-red-700 text-white shadow-md shadow-red-200'
