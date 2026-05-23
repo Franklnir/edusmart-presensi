@@ -17,6 +17,7 @@ import UploadProgressTrain from '../../components/UploadProgressTrain'
 import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveFilter'
 import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 import { parseSupabaseError } from '../../utils/supabaseError'
+import { filterSchedulesForSemester } from '../../utils/schedulePeriodScope'
 import {
   ASSIGNMENT_PHOTO_MAX_BYTES,
   ASSIGNMENT_PHOTOS_MAX_TOTAL_BYTES,
@@ -473,9 +474,10 @@ export default function TugasSiswa() {
   const { user, profile } = useAuthStore()
   const { loading, pushToast, setLoading } = useUIStore()
   const {
-    activeAcademicPeriod,
-    period,
-    periodFilter,
+	    activeAcademicPeriod,
+	    period,
+	    dateFilterPeriod,
+	    periodFilter,
     academicYearOptions,
     semesterOptions,
     setAcademicYear,
@@ -543,12 +545,12 @@ export default function TugasSiswa() {
   const uploadAbortRef = useRef(null)
 
   /* ---------- Derived ---------- */
-  const monthOptions = useMemo(() => (
-    (period.months || []).map((month) => ({
-      value: month.value,
-      label: month.label
-    }))
-  ), [period.months])
+	  const monthOptions = useMemo(() => (
+	    (dateFilterPeriod.months || []).map((month) => ({
+	      value: month.value,
+	      label: month.label
+	    }))
+	  ), [dateFilterPeriod.months])
 
   const kelasSiswa = useMemo(() => profile?.kelas || profile?.kelas_id || '', [profile])
   const selectedKelas = kelasSiswa
@@ -628,11 +630,11 @@ export default function TugasSiswa() {
         .order('mapel', { ascending: true })
       tugasQuery = applyPeriodFilters(tugasQuery)
 
-      let jadwalQuery = supabase
-        .from('jadwal')
-        .select('mapel')
-        .eq('kelas_id', kelas)
-        .order('mapel', { ascending: true })
+	      let jadwalQuery = supabase
+	        .from('jadwal')
+	        .select('mapel,periode_berlaku')
+	        .eq('kelas_id', kelas)
+	        .order('mapel', { ascending: true })
       jadwalQuery = applyPeriodFilters(jadwalQuery)
 
       const [
@@ -646,7 +648,10 @@ export default function TugasSiswa() {
       }
       if (requestId !== mapelRequestSeqRef.current) return
 
-      const mapels = normalizeMapelOptions([...(jadwalMapelData || []), ...(tugasMapelData || [])])
+	      const mapels = normalizeMapelOptions([
+	        ...filterSchedulesForSemester(jadwalMapelData || [], periodFilter.semester),
+	        ...(tugasMapelData || [])
+	      ])
       setMapelOptions(mapels)
       writeMapelOptionsCache(user.id, kelas, mapels)
     } catch (error) {
@@ -657,7 +662,7 @@ export default function TugasSiswa() {
         setIsMapelLoading(false)
       }
     }
-  }, [applyPeriodFilters, user?.id, selectedKelas, kelasSiswa])
+  }, [applyPeriodFilters, user?.id, selectedKelas, kelasSiswa, periodFilter.semester])
 
   const loadTugasList = useCallback(async () => {
     if (!user?.id) return
@@ -681,12 +686,12 @@ export default function TugasSiswa() {
         weekAgo.setDate(now.getDate() - 7)
         query = query.gte('created_at', weekAgo.toISOString())
       } else if (timeRange === 'all') {
-        if (period.startsAt && period.endsAt) {
-          const start = new Date(`${period.startsAt}T00:00:00`)
-          const end = new Date(`${period.endsAt}T00:00:00`)
-          end.setDate(end.getDate() + 1)
-          query = query.gte('created_at', start.toISOString()).lt('created_at', end.toISOString())
-        }
+	        if (dateFilterPeriod.startsAt && dateFilterPeriod.endsAt) {
+	          const start = new Date(`${dateFilterPeriod.startsAt}T00:00:00`)
+	          const end = new Date(`${dateFilterPeriod.endsAt}T00:00:00`)
+	          end.setDate(end.getDate() + 1)
+	          query = query.gte('created_at', start.toISOString()).lt('created_at', end.toISOString())
+	        }
       } else if (timeRange === 'custom_months') {
         if (selectedMonths.length > 0) {
           let minYear = Infinity
@@ -810,8 +815,8 @@ export default function TugasSiswa() {
     selectedMapel,
     timeRange,
     selectedMonths,
-    period.endsAt,
-    period.startsAt,
+    dateFilterPeriod.endsAt,
+    dateFilterPeriod.startsAt,
     statusFilter,
     debouncedSearchTerm,
     hasActiveTaskFilter,

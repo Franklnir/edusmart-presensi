@@ -10,6 +10,7 @@ import {
 } from '../../utils/certificateFiles'
 import { loadExcelJsBrowser } from '../../utils/excelBrowser'
 import { resolveAcademicPeriod } from '../../utils/academicPeriod'
+import { filterSchedulesForSemester } from '../../utils/schedulePeriodScope'
 
 // --- HELPER FUNCTIONS ---
 
@@ -1632,10 +1633,9 @@ export default function JadwalGuru() {
           .select('*')
           .eq('guru_id', user.id)
           .order('jam_mulai', { ascending: true })
-        if (activeAcademicPeriod.tahunAjaran) jadwalQuery = jadwalQuery.eq('tahun_ajaran', activeAcademicPeriod.tahunAjaran)
-        if (activeAcademicPeriod.semester) jadwalQuery = jadwalQuery.eq('semester', activeAcademicPeriod.semester)
-        const { data: jadwalData } = await jadwalQuery
-        setJadwal(jadwalData || [])
+	        if (activeAcademicPeriod.tahunAjaran) jadwalQuery = jadwalQuery.eq('tahun_ajaran', activeAcademicPeriod.tahunAjaran)
+	        const { data: jadwalData } = await jadwalQuery
+	        setJadwal(filterSchedulesForSemester(jadwalData || [], activeAcademicPeriod.semester))
 
         // Ekskul
         let ekskulQuery = supabase

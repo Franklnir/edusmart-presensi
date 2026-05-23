@@ -7,7 +7,7 @@ import {
 
 let qrCodePromise = null
 
-export const JADWAL_COLUMNS = 'id,kelas_id,hari,mapel,guru_id,guru_nama,jam_mulai,jam_selesai,created_at,updated_at,tahun_ajaran,semester'
+export const JADWAL_COLUMNS = 'id,kelas_id,hari,mapel,guru_id,guru_nama,jam_mulai,jam_selesai,created_at,updated_at,tahun_ajaran,semester,periode_berlaku'
 export const STUDENT_COLUMNS = 'id,nama,kelas,role,photo_url,photo_path,photo_updated_at,rfid_uid,status,updated_at'
 export const GURU_COLUMNS = 'id,nama'
 export const ABSENSI_COLUMNS = 'id,kelas,tanggal,uid,mapel,status,nama,waktu,komentar,oleh,dikonfirmasi,tahun_ajaran,semester'

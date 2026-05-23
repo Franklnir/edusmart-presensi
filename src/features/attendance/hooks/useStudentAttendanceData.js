@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../../../lib/supabase'
 import { fetchAbsensiSettings } from '../../../utils/absensiSettings'
+import { filterSchedulesForSemester } from '../../../utils/schedulePeriodScope'
 import { getDayName, getToday, toMinutes } from '../utils/attendanceDate'
 
 const HARI_ORDER = [
@@ -95,7 +96,6 @@ export function useStudentAttendanceData({
         .order('jam_mulai')
 
       if (periodFilter.tahunAjaran) jadwalQuery = jadwalQuery.eq('tahun_ajaran', periodFilter.tahunAjaran)
-      if (periodFilter.semester) jadwalQuery = jadwalQuery.eq('semester', periodFilter.semester)
 
       let jamKosongQuery = supabase
         .from('jam_kosong')
@@ -119,7 +119,7 @@ export function useStudentAttendanceData({
 
       if (jadwalRes.error) throw jadwalRes.error
 
-      const jadwalList = jadwalRes.data || []
+      const jadwalList = filterSchedulesForSemester(jadwalRes.data || [], periodFilter.semester)
       const settingsList = settingsRes.data || []
       if (settingsRes.error) {
         console.warn('Error loading absensi settings:', settingsRes.error)
@@ -241,7 +241,6 @@ export function useStudentAttendanceData({
         .order('jam_mulai')
 
       if (periodFilter.tahunAjaran) query = query.eq('tahun_ajaran', periodFilter.tahunAjaran)
-      if (periodFilter.semester) query = query.eq('semester', periodFilter.semester)
 
       const { data: jadwalList, error } = await query
 
@@ -262,7 +261,7 @@ export function useStudentAttendanceData({
         jadwalByHari[hari] = []
       })
 
-      ; (jadwalList || []).forEach((jadwal) => {
+      ; (filterSchedulesForSemester(jadwalList || [], periodFilter.semester)).forEach((jadwal) => {
         if (jadwalByHari[jadwal.hari]) {
           const settingsForMapel = (settingsList || []).find((item) => item.mapel === jadwal.mapel)
           jadwalByHari[jadwal.hari].push({

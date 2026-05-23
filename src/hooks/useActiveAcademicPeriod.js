@@ -225,6 +225,7 @@ export default function useActiveAcademicPeriod({
     activeAcademicPeriod,
     periodFilter,
     period: yearScopedPeriod,
+    dateFilterPeriod: resolvedPeriod,
     activeSemesterPeriod: resolvedPeriod,
     isViewingArchivePeriod:
       resolvedPeriod.tahunAjaran !== activeAcademicPeriod.tahunAjaran ||

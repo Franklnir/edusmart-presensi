@@ -7,6 +7,11 @@ import { useUIStore } from '../../store/useUIStore'
 import ProfileAvatar from '../../components/ProfileAvatar'
 import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveFilter'
 import {
+  filterSchedulesForSemester,
+  scheduleScopeFromRow,
+  scheduleScopeToSemester
+} from '../../utils/schedulePeriodScope'
+import {
   SEMESTER_GANJIL,
   SEMESTER_GENAP,
   resolveAcademicPeriod
@@ -59,7 +64,7 @@ const getScheduleSignature = (row = {}) => [
 ].join('|')
 
 const getScheduleSemesterPriority = (row = {}, selectedSemester = '') => {
-  const rowSemester = String(row.semester || '').trim()
+  const rowSemester = scheduleScopeToSemester(scheduleScopeFromRow(row))
   if (!selectedSemester) return rowSemester ? 1 : 0
   if (rowSemester === selectedSemester) return 0
   if (!rowSemester) return 1
@@ -69,7 +74,7 @@ const getScheduleSemesterPriority = (row = {}, selectedSemester = '') => {
 const dedupeAcademicYearSchedules = (rows = [], selectedSemester = '') => {
   const bySignature = new Map()
 
-  ;(rows || []).forEach((row) => {
+  filterSchedulesForSemester(rows || [], selectedSemester).forEach((row) => {
     const signature = getScheduleSignature(row)
     if (!signature.replace(/\|/g, '')) return
 
@@ -1354,17 +1359,21 @@ function AbsensiGuru() {
         jadwalHariIni: []
       }
 
-    const selectedSemester = String(periodFilter.semester || '').trim()
+    const selectedSemester = getSemesterForAttendanceDate(tgl, activeAcademicPeriod, periodFilter.semester)
+    const todaySemester = getSemesterForAttendanceDate(getToday(), activeAcademicPeriod, periodFilter.semester)
     const kelasSet = new Set()
     const jadwalByHariTemp = {}
     const todayDayName = getDayName(getToday())
     const selectedDayName = getDayName(tgl)
     const academicYearSchedules = dedupeAcademicYearSchedules(jadwalAll, selectedSemester)
+    const todayAcademicYearSchedules = dedupeAcademicYearSchedules(jadwalAll, todaySemester)
 
-    const jadwalHariIniTemp = academicYearSchedules.filter(j => j.hari === todayDayName)
+    const jadwalHariIniTemp = todayAcademicYearSchedules.filter(j => j.hari === todayDayName)
 
-    academicYearSchedules.forEach(j => {
+    jadwalAll.forEach(j => {
       if (j.kelas_id) kelasSet.add(j.kelas_id)
+    })
+    academicYearSchedules.forEach(j => {
       if (!jadwalByHariTemp[j.hari]) jadwalByHariTemp[j.hari] = []
       jadwalByHariTemp[j.hari].push(j)
     })
@@ -1400,12 +1409,13 @@ function AbsensiGuru() {
       jadwalByHari: jadwalByHariTemp,
       jadwalHariIni: jadwalHariIniTemp
     }
-  }, [jadwalAll, user?.id, kelas, currentDateTime, tgl, periodFilter.semester])
+  }, [activeAcademicPeriod, jadwalAll, user?.id, kelas, currentDateTime, tgl, periodFilter.semester])
 
   const jadwalForJamKosongHariIni = useMemo(() => {
     if (!kelas || !jadwalAll.length) return []
     const todayDayName = getDayName(getToday())
-    const academicYearSchedules = dedupeAcademicYearSchedules(jadwalAll, periodFilter.semester)
+    const todaySemester = getSemesterForAttendanceDate(getToday(), activeAcademicPeriod, periodFilter.semester)
+    const academicYearSchedules = dedupeAcademicYearSchedules(jadwalAll, todaySemester)
 
     return academicYearSchedules
       .filter(j => j.kelas_id === kelas && j.hari === todayDayName)
@@ -1416,7 +1426,7 @@ function AbsensiGuru() {
         jam_mulai: j.jam_mulai,
         jam_selesai: j.jam_selesai
       }))
-  }, [kelas, jadwalAll, periodFilter.semester])
+  }, [activeAcademicPeriod, kelas, jadwalAll, periodFilter.semester])
 
   const canRunAutoAlpha = useMemo(() => {
     if (!currentSchedule || tgl !== getToday()) return false

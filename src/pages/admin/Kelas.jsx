@@ -11,6 +11,15 @@ import { verifyCurrentUserPassword as verifyPassword } from '../../services/auth
 import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 import { loadExcelJsBrowser } from '../../utils/excelBrowser'
 import {
+  SCHEDULE_SCOPE_OPTIONS,
+  SCHEDULE_SCOPE_YEAR,
+  doScheduleScopesOverlap,
+  filterSchedulesForSemester,
+  normalizeScheduleScope,
+  scheduleScopeLabel,
+  scheduleScopeToSemester
+} from '../../utils/schedulePeriodScope'
+import {
   getNextAcademicPeriod,
   inferCohortYear,
   normalizeAcademicYear,
@@ -231,7 +240,8 @@ const mapScheduleRows = (rows = [], period = {}) => {
     jamMulai: toTimeHHMM(row.jam_mulai),
     jamSelesai: toTimeHHMM(row.jam_selesai),
     tahunAjaran: row.tahun_ajaran || period.tahunAjaran,
-    semester: row.semester || period.semester
+    semester: row.semester || period.semester,
+    periodeBerlaku: normalizeScheduleScope(row.periode_berlaku)
   }))
 
   mapped.sort((a, b) => {
@@ -358,7 +368,14 @@ export default function AKelas({ initialTab = 'kelas' }) {
   const [newMapel, setNewMapel] = useState('')
 
   // Form Jadwal
-  const [form, setForm] = useState({ hari: '', mapel: '', guruId: '', jamMulai: '', jamSelesai: '' })
+  const [form, setForm] = useState({
+    hari: '',
+    mapel: '',
+    guruId: '',
+    jamMulai: '',
+    jamSelesai: '',
+    periodeBerlaku: SCHEDULE_SCOPE_YEAR
+  })
   const [editId, setEditId] = useState(null)
   const [editData, setEditData] = useState(null)
   const [exportClassId, setExportClassId] = useState('')
@@ -423,7 +440,9 @@ export default function AKelas({ initialTab = 'kelas' }) {
       })
 
       const nextStudents = needsStudents ? mapStudentRows(data?.selected_students || []) : null
-      const nextSchedule = needsSchedule ? mapScheduleRows(data?.schedule || [], schedulePeriod) : null
+      const nextSchedule = needsSchedule
+        ? mapScheduleRows(filterSchedulesForSemester(data?.schedule || [], schedulePeriod.semester), schedulePeriod)
+        : null
       const nextMapel = needsMapel ? mapSubjectRows(data?.mapel || []) : null
 
       startTransition(() => {
@@ -701,13 +720,12 @@ export default function AKelas({ initialTab = 'kelas' }) {
         .select('*')
         .eq('kelas_id', kelasSelected)
         .eq('tahun_ajaran', schedulePeriod.tahunAjaran)
-        .eq('semester', schedulePeriod.semester)
         .order('hari')
         .order('jam_mulai')
 
       if (error) throw error
 
-      const rows = data.map(j => ({
+      const rows = filterSchedulesForSemester(data || [], schedulePeriod.semester).map(j => ({
         id: j.id,
         hari: j.hari,
         mapel: normalizeMapelName(j.mapel),
@@ -716,7 +734,8 @@ export default function AKelas({ initialTab = 'kelas' }) {
         jamMulai: toTimeHHMM(j.jam_mulai),
         jamSelesai: toTimeHHMM(j.jam_selesai),
         tahunAjaran: j.tahun_ajaran || schedulePeriod.tahunAjaran,
-        semester: j.semester || schedulePeriod.semester
+        semester: j.semester || schedulePeriod.semester,
+        periodeBerlaku: normalizeScheduleScope(j.periode_berlaku)
       }))
 
       rows.sort((a, b) => {
@@ -964,15 +983,15 @@ export default function AKelas({ initialTab = 'kelas' }) {
     }
   }
 
-  function buildJadwalKey({ hari, mapel, jamMulai, jamSelesai }) {
+  function buildJadwalKey({ hari, mapel, jamMulai, jamSelesai, periodeBerlaku = SCHEDULE_SCOPE_YEAR }) {
     const cleanMapel = normalizeMapelName(mapel).replace(/\s+/g, '_').replace(/[^\w-]/g, '')
     const cleanHari = (hari || '').replace(/\s+/g, '_')
     const cleanJamMulai = (jamMulai || '').replace(/:/g, '')
     const cleanJamSelesai = (jamSelesai || '').replace(/:/g, '')
     const cleanYear = (academicPeriod.tahunAjaran || '').replace(/[^\w]/g, '')
-    const cleanSemester = (academicPeriod.semester || '').replace(/[^\w]/g, '')
+    const cleanScope = normalizeScheduleScope(periodeBerlaku).replace(/[^\w]/g, '')
 
-    return `${kelasSelected}-${cleanYear}-${cleanSemester}-${cleanHari}-${cleanMapel}-${cleanJamMulai}-${cleanJamSelesai}`
+    return `${kelasSelected}-${cleanYear}-${cleanScope}-${cleanHari}-${cleanMapel}-${cleanJamMulai}-${cleanJamSelesai}`
   }
 
   async function persistAcademicPeriod(nextPeriod, { silent = false, manualRolloverCompleted = false } = {}) {
@@ -1055,8 +1074,9 @@ export default function AKelas({ initialTab = 'kelas' }) {
     return resolved
   }
 
-  async function hasConflict({ hari, jamMulai, jamSelesai, guruId, mapel, kelasId }, ignoreId = null) {
+  async function hasConflict({ hari, jamMulai, jamSelesai, guruId, mapel, kelasId, periodeBerlaku = SCHEDULE_SCOPE_YEAR }, ignoreId = null) {
     if (!kelasId) return 'Kelas belum dipilih'
+    const scheduleScope = normalizeScheduleScope(periodeBerlaku)
 
     try {
       // Validasi waktu
@@ -1077,7 +1097,6 @@ export default function AKelas({ initialTab = 'kelas' }) {
         .eq('kelas_id', kelasId)
         .eq('hari', hari)
         .eq('tahun_ajaran', academicPeriod.tahunAjaran)
-        .eq('semester', academicPeriod.semester)
 
       if (ignoreId) {
         classQuery = classQuery.neq('id', ignoreId)
@@ -1087,8 +1106,9 @@ export default function AKelas({ initialTab = 'kelas' }) {
       if (classError) throw classError
 
       for (const j of sameClassSchedule || []) {
+        if (!doScheduleScopesOverlap(scheduleScope, j.periode_berlaku)) continue
         if (timesOverlap(jamMulai, jamSelesai, j.jam_mulai, j.jam_selesai)) {
-          return `Konflik dengan ${j.mapel} di kelas ini (${j.jam_mulai}-${j.jam_selesai})`
+          return `Konflik dengan ${j.mapel} di kelas ini (${j.jam_mulai}-${j.jam_selesai}, berlaku ${scheduleScopeLabel(j.periode_berlaku, { short: true })})`
         }
       }
 
@@ -1100,7 +1120,6 @@ export default function AKelas({ initialTab = 'kelas' }) {
           .eq('guru_id', guruId)
           .eq('hari', hari)
           .eq('tahun_ajaran', academicPeriod.tahunAjaran)
-          .eq('semester', academicPeriod.semester)
 
         if (ignoreId) {
           teacherQuery = teacherQuery.neq('id', ignoreId)
@@ -1110,8 +1129,9 @@ export default function AKelas({ initialTab = 'kelas' }) {
         if (teacherError) throw teacherError
 
         for (const j of teacherSchedule || []) {
+          if (!doScheduleScopesOverlap(scheduleScope, j.periode_berlaku)) continue
           if (timesOverlap(jamMulai, jamSelesai, j.jam_mulai, j.jam_selesai)) {
-            return `Guru bentrok di kelas ${j.kelas_id} (${j.mapel} ${j.jam_mulai}-${j.jam_selesai})`
+            return `Guru bentrok di kelas ${j.kelas_id} (${j.mapel} ${j.jam_mulai}-${j.jam_selesai}, berlaku ${scheduleScopeLabel(j.periode_berlaku, { short: true })})`
           }
         }
       }
@@ -1719,6 +1739,8 @@ export default function AKelas({ initialTab = 'kelas' }) {
     const jamMulai = toTimeHHMM(form.jamMulai)
     const jamSelesai = toTimeHHMM(form.jamSelesai)
     const mapel = normalizeMapelName(form.mapel)
+    const periodeBerlaku = normalizeScheduleScope(form.periodeBerlaku)
+    const scheduleSemester = scheduleScopeToSemester(periodeBerlaku)
 
     // Validasi
     if (!hari || !mapel || !jamMulai || !jamSelesai) {
@@ -1735,7 +1757,8 @@ export default function AKelas({ initialTab = 'kelas' }) {
         jamSelesai,
         guruId,
         mapel,
-        kelasId: kelasSelected
+        kelasId: kelasSelected,
+        periodeBerlaku
       })
 
       if (conflictMsg) {
@@ -1743,7 +1766,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
         return
       }
 
-      const id = buildJadwalKey({ hari, mapel, jamMulai, jamSelesai })
+      const id = buildJadwalKey({ hari, mapel, jamMulai, jamSelesai, periodeBerlaku })
       const guruNama = guruId ? guruNameById(guruId) : ''
 
       const { error } = await supabase
@@ -1758,14 +1781,22 @@ export default function AKelas({ initialTab = 'kelas' }) {
           jam_mulai: jamMulai,
           jam_selesai: jamSelesai,
           tahun_ajaran: academicPeriod.tahunAjaran,
-          semester: academicPeriod.semester,
+          semester: scheduleSemester || null,
+          periode_berlaku: periodeBerlaku,
           created_at: new Date().toISOString()
         })
 
       if (error) throw error
 
       pushToast('success', 'Jadwal berhasil ditambahkan')
-      setForm({ hari: '', mapel: '', guruId: '', jamMulai: '', jamSelesai: '' })
+      setForm({
+        hari: '',
+        mapel: '',
+        guruId: '',
+        jamMulai: '',
+        jamSelesai: '',
+        periodeBerlaku: SCHEDULE_SCOPE_YEAR
+      })
       invalidateAcademicQueries()
       await loadJadwal()
     } catch (error) {
@@ -1815,7 +1846,10 @@ export default function AKelas({ initialTab = 'kelas' }) {
 
   function startEdit(row) {
     setEditId(row.id)
-    setEditData({ ...row })
+    setEditData({
+      ...row,
+      periodeBerlaku: normalizeScheduleScope(row.periodeBerlaku)
+    })
   }
 
   function cancelEdit() {
@@ -1834,6 +1868,8 @@ export default function AKelas({ initialTab = 'kelas' }) {
     const jamMulai = toTimeHHMM(editData.jamMulai)
     const jamSelesai = toTimeHHMM(editData.jamSelesai)
     const mapel = normalizeMapelName(editData.mapel)
+    const periodeBerlaku = normalizeScheduleScope(editData.periodeBerlaku)
+    const scheduleSemester = scheduleScopeToSemester(periodeBerlaku)
 
     if (!hari || !mapel || !jamMulai || !jamSelesai) {
       pushToast('error', 'Lengkapi semua field yang wajib.')
@@ -1849,7 +1885,8 @@ export default function AKelas({ initialTab = 'kelas' }) {
         jamSelesai,
         guruId,
         mapel,
-        kelasId: kelasSelected
+        kelasId: kelasSelected,
+        periodeBerlaku
       }, editId)
 
       if (conflictMsg) {
@@ -1857,7 +1894,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
         return
       }
 
-      const newId = buildJadwalKey({ hari, mapel, jamMulai, jamSelesai })
+      const newId = buildJadwalKey({ hari, mapel, jamMulai, jamSelesai, periodeBerlaku })
       const guruNama = guruId ? guruNameById(guruId) : ''
 
       if (newId !== editId) {
@@ -1880,7 +1917,8 @@ export default function AKelas({ initialTab = 'kelas' }) {
             jam_mulai: jamMulai,
             jam_selesai: jamSelesai,
             tahun_ajaran: academicPeriod.tahunAjaran,
-            semester: academicPeriod.semester,
+            semester: scheduleSemester || null,
+            periode_berlaku: periodeBerlaku,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
           })
@@ -1898,7 +1936,8 @@ export default function AKelas({ initialTab = 'kelas' }) {
             jam_mulai: jamMulai,
             jam_selesai: jamSelesai,
             tahun_ajaran: academicPeriod.tahunAjaran,
-            semester: academicPeriod.semester,
+            semester: scheduleSemester || null,
+            periode_berlaku: periodeBerlaku,
             updated_at: new Date().toISOString()
           })
           .eq('id', editId)
@@ -1950,7 +1989,8 @@ export default function AKelas({ initialTab = 'kelas' }) {
     guruId: row?.guru_id || '',
     guruNama: row?.guru_nama || '',
     jamMulai: toTimeHHMM(row?.jam_mulai || row?.jamMulai),
-    jamSelesai: toTimeHHMM(row?.jam_selesai || row?.jamSelesai)
+    jamSelesai: toTimeHHMM(row?.jam_selesai || row?.jamSelesai),
+    periodeBerlaku: normalizeScheduleScope(row?.periode_berlaku || row?.periodeBerlaku)
   })
 
   const resolveExportClassName = (classId) => {
@@ -1968,7 +2008,6 @@ export default function AKelas({ initialTab = 'kelas' }) {
         .from('jadwal')
         .select('*')
         .eq('tahun_ajaran', schedulePeriod.tahunAjaran)
-        .eq('semester', schedulePeriod.semester)
         .order('kelas_id')
         .order('hari')
         .order('jam_mulai')
@@ -1976,7 +2015,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
       if (error) throw error
 
       const grouped = {}
-      ;(data || []).forEach((raw) => {
+      filterSchedulesForSemester(data || [], schedulePeriod.semester).forEach((raw) => {
         const row = normalizeScheduleRow(raw)
         if (!row.kelasId) return
         if (!grouped[row.kelasId]) grouped[row.kelasId] = []
@@ -2021,11 +2060,10 @@ export default function AKelas({ initialTab = 'kelas' }) {
         .select('*')
         .eq('kelas_id', selectedId)
         .eq('tahun_ajaran', schedulePeriod.tahunAjaran)
-        .eq('semester', schedulePeriod.semester)
         .order('hari')
         .order('jam_mulai')
       if (error) throw error
-      rows = sortJadwalRows((data || []).map(normalizeScheduleRow))
+      rows = sortJadwalRows(filterSchedulesForSemester(data || [], schedulePeriod.semester).map(normalizeScheduleRow))
     }
 
     const days = [...DEFAULT_SCHEDULE_DAYS]
@@ -2782,9 +2820,11 @@ export default function AKelas({ initialTab = 'kelas' }) {
                         </select>
                       </div>
                       <div className="rounded-xl border border-orange-100 bg-orange-50 p-4 text-sm text-orange-900">
-                        <p className="font-semibold">Periode jadwal</p>
-                        <p className="mt-1">{schedulePeriod.tahunAjaran} - Semester {schedulePeriod.semester}</p>
-                        <p className="mt-2 text-xs text-orange-700">Perubahan periode aktif tetap dikelola dari halaman Pengaturan.</p>
+	                        <p className="font-semibold">Periode jadwal</p>
+	                        <p className="mt-1">{schedulePeriod.tahunAjaran} - Tampilan Semester {schedulePeriod.semester}</p>
+	                        <p className="mt-2 text-xs text-orange-700">
+	                          Jadwal tahunan selalu tampil. Jadwal khusus semester hanya tampil pada semester yang sesuai.
+	                        </p>
                       </div>
                       <AcademicPeriodArchiveFilter
                         activeAcademicPeriod={activeSchedulePeriod}
@@ -2883,9 +2923,9 @@ export default function AKelas({ initialTab = 'kelas' }) {
                         <p className="text-gray-600 text-sm mt-1">
                           Kelola jadwal pelajaran untuk kelas ini
                         </p>
-                        <p className="text-xs text-blue-700 mt-1">
-                          Periode: {schedulePeriod.tahunAjaran} - Semester {schedulePeriod.semester}
-                        </p>
+	                        <p className="text-xs text-blue-700 mt-1">
+	                          Periode: {schedulePeriod.tahunAjaran} • tampilan Semester {schedulePeriod.semester}
+	                        </p>
                         {isViewingScheduleArchive && (
                           <p className="text-xs text-amber-700 mt-1">
                             Mode arsip: perubahan jadwal dinonaktifkan.
@@ -2988,8 +3028,8 @@ export default function AKelas({ initialTab = 'kelas' }) {
                       </h4>
                       <form
                         onSubmit={tambahJadwal}
-                        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4"
-                      >
+	                        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4"
+	                      >
                         <div>
                           <label className="block text-xs font-medium text-blue-800 mb-1">
                             Hari <span className="text-red-500">*</span>
@@ -3022,9 +3062,9 @@ export default function AKelas({ initialTab = 'kelas' }) {
                             ))}
                           </select>
                         </div>
-                        <div>
-                          <label className="block text-xs font-medium text-blue-800 mb-1">Guru Pengajar</label>
-                          <select
+	                        <div>
+	                          <label className="block text-xs font-medium text-blue-800 mb-1">Guru Pengajar</label>
+	                          <select
                             className="block w-full px-3 py-2 text-sm border border-blue-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm text-gray-900"
                             value={form.guruId}
                             onChange={e => setForm(f => ({ ...f, guruId: e.target.value }))}
@@ -3032,12 +3072,24 @@ export default function AKelas({ initialTab = 'kelas' }) {
                             <option value="">Pilih guru (opsional)</option>
                             {guruList.map(g => (
                               <option key={g.id} value={g.id}>{g.label || g.name}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium text-blue-800 mb-1">
-                            Jam Mulai <span className="text-red-500">*</span>
+	                            ))}
+	                          </select>
+	                        </div>
+	                        <div>
+	                          <label className="block text-xs font-medium text-blue-800 mb-1">Berlaku</label>
+	                          <select
+	                            className="block w-full px-3 py-2 text-sm border border-blue-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm text-gray-900"
+	                            value={form.periodeBerlaku}
+	                            onChange={e => setForm(f => ({ ...f, periodeBerlaku: e.target.value }))}
+	                          >
+	                            {SCHEDULE_SCOPE_OPTIONS.map((option) => (
+	                              <option key={option.value} value={option.value}>{option.label}</option>
+	                            ))}
+	                          </select>
+	                        </div>
+	                        <div>
+	                          <label className="block text-xs font-medium text-blue-800 mb-1">
+	                            Jam Mulai <span className="text-red-500">*</span>
                           </label>
                           <input
                             type="time"
@@ -3097,12 +3149,15 @@ export default function AKelas({ initialTab = 'kelas' }) {
                             <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
                               Mapel
                             </th>
-                            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                              Guru
-                            </th>
-                            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                              Aksi
-                            </th>
+	                            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+	                              Guru
+	                            </th>
+	                            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+	                              Berlaku
+	                            </th>
+	                            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
+	                              Aksi
+	                            </th>
                           </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-200">
@@ -3110,9 +3165,9 @@ export default function AKelas({ initialTab = 'kelas' }) {
                             <tr key={j.id} className="hover:bg-blue-50 transition-colors duration-150 group">
                               {editId === j.id ? (
                                 <>
-                                  <td className="px-6 py-4 whitespace-nowrap">
-                                    <select
-                                      className="block w-full px-3 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
+	                                  <td className="px-6 py-4 whitespace-nowrap">
+	                                    <select
+	                                      className="block w-full px-3 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
                                       value={editData.hari}
                                       onChange={e => setEditData(d => ({ ...d, hari: e.target.value }))}
                                     >
@@ -3159,10 +3214,21 @@ export default function AKelas({ initialTab = 'kelas' }) {
                                       <option value="">Pilih guru</option>
                                       {guruList.map(g => (
                                         <option key={g.id} value={g.id}>{g.label || g.name}</option>
-                                      ))}
-                                    </select>
-                                  </td>
-                                  <td className="px-6 py-4 whitespace-nowrap text-right space-x-2">
+	                                      ))}
+	                                    </select>
+	                                  </td>
+	                                  <td className="px-6 py-4 whitespace-nowrap">
+	                                    <select
+	                                      className="block w-full px-3 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
+	                                      value={editData.periodeBerlaku || SCHEDULE_SCOPE_YEAR}
+	                                      onChange={e => setEditData(d => ({ ...d, periodeBerlaku: e.target.value }))}
+	                                    >
+	                                      {SCHEDULE_SCOPE_OPTIONS.map((option) => (
+	                                        <option key={option.value} value={option.value}>{option.label}</option>
+	                                      ))}
+	                                    </select>
+	                                  </td>
+	                                  <td className="px-6 py-4 whitespace-nowrap text-right space-x-2">
                                     <button
                                       className="text-green-600 hover:text-green-800 font-medium text-sm px-3 py-1.5 rounded-lg hover:bg-green-50 transition-colors duration-200 flex items-center space-x-1"
                                       onClick={saveEdit}
@@ -3209,8 +3275,8 @@ export default function AKelas({ initialTab = 'kelas' }) {
                                       <span className="font-semibold text-gray-900">{j.mapel}</span>
                                     </div>
                                   </td>
-                                  <td className="px-6 py-4 whitespace-nowrap">
-                                    {j.guruNama ? (
+	                                  <td className="px-6 py-4 whitespace-nowrap">
+	                                    {j.guruNama ? (
                                       <div className="flex items-center space-x-2">
                                         <div className="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center">
                                           <span className="text-green-600 text-xs">👨‍🏫</span>
@@ -3218,10 +3284,15 @@ export default function AKelas({ initialTab = 'kelas' }) {
                                         <span className="text-gray-700">{j.guruNama}</span>
                                       </div>
                                     ) : (
-                                      <span className="text-gray-400 italic">Belum ada guru</span>
-                                    )}
-                                  </td>
-                                  <td className="px-6 py-4 whitespace-nowrap text-right space-x-2">
+	                                      <span className="text-gray-400 italic">Belum ada guru</span>
+	                                    )}
+	                                  </td>
+	                                  <td className="px-6 py-4 whitespace-nowrap">
+	                                    <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
+	                                      {scheduleScopeLabel(j.periodeBerlaku, { short: true })}
+	                                    </span>
+	                                  </td>
+	                                  <td className="px-6 py-4 whitespace-nowrap text-right space-x-2">
                                     <div className="flex justify-end space-x-2">
                                       <button
                                         className="text-blue-600 hover:text-blue-800 font-medium text-sm px-3 py-1.5 rounded-lg hover:bg-blue-50 transition-colors duration-200 flex items-center space-x-1 opacity-0 group-hover:opacity-100"
@@ -3251,18 +3322,18 @@ export default function AKelas({ initialTab = 'kelas' }) {
                           ))}
                           {!jadwalToShow.length && (
                             <tr>
-                              <td colSpan="5" className="px-6 py-12 text-center text-gray-500">
+	                              <td colSpan="6" className="px-6 py-12 text-center text-gray-500">
                                 <div className="w-20 h-20 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
                                   <svg className="w-10 h-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                                   </svg>
                                 </div>
-                                <p className="text-lg font-medium text-gray-600">
-                                  {filterHari
-                                    ? `Tidak ada jadwal untuk hari ${filterHari}`
-                                    : 'Belum ada jadwal untuk kelas ini.'}
-                                </p>
-                                <p className="text-sm mt-1">Tambahkan jadwal baru untuk memulai</p>
+	                                <p className="text-lg font-medium text-gray-600">
+	                                  {filterHari
+	                                    ? `Tidak ada jadwal untuk hari ${filterHari}`
+	                                    : `Belum ada jadwal yang berlaku untuk Semester ${schedulePeriod.semester}.`}
+	                                </p>
+	                                <p className="text-sm mt-1">Tambahkan jadwal tahunan, atau jadwal khusus semester jika memang berbeda.</p>
                               </td>
                             </tr>
                           )}

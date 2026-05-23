@@ -18,6 +18,7 @@ import UploadProgressTrain from '../../components/UploadProgressTrain'
 import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveFilter'
 import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 import { parseSupabaseError } from '../../utils/supabaseError'
+import { filterSchedulesForSemester } from '../../utils/schedulePeriodScope'
 import {
   ASSIGNMENT_PHOTO_MAX_BYTES,
   ASSIGNMENT_PHOTOS_MAX_TOTAL_BYTES,
@@ -43,7 +44,7 @@ const FILE_SIZE_LIMITS = {
 }
 
 const KELAS_COLUMNS = 'id,nama,grade,suffix,tingkat,jurusan,angkatan'
-const JADWAL_GURU_COLUMNS = 'id,kelas_id,mapel,guru_id,guru_nama,hari,jam_mulai,jam_selesai,tahun_ajaran,semester'
+const JADWAL_GURU_COLUMNS = 'id,kelas_id,mapel,guru_id,guru_nama,hari,jam_mulai,jam_selesai,tahun_ajaran,semester,periode_berlaku'
 const TUGAS_GURU_COLUMNS = 'id,kelas,judul,mapel,mulai,deadline,keterangan,file_url,link,created_by,created_at,updated_at,tahun_ajaran,semester,angkatan'
 const TUGAS_JAWABAN_STATS_COLUMNS = 'tugas_id,user_id,nilai,status'
 const TUGAS_JAWABAN_DETAIL_COLUMNS = 'id,tugas_id,user_id,file_url,file_urls,link_url,komentar_siswa,nilai,status,waktu_submit,profiles(nama,photo_url)'
@@ -476,9 +477,10 @@ export default function TugasGuru() {
   const { user, profile } = useAuthStore()
   const { loading, pushToast, setLoading } = useUIStore()
   const {
-    activeAcademicPeriod,
-    period,
-    periodFilter,
+	    activeAcademicPeriod,
+	    period,
+	    dateFilterPeriod,
+	    periodFilter,
     academicYearOptions,
     semesterOptions,
     setAcademicYear,
@@ -671,18 +673,18 @@ export default function TugasGuru() {
     const loadJadwal = async () => {
       if (!user?.id) return
       try {
-        let query = supabase.from('jadwal').select(JADWAL_GURU_COLUMNS).eq('guru_id', user.id)
-        query = applyPeriodFilters(query)
-        const { data, error } = await query
-        if (error) throw error
-        setJadwalAll(data || [])
-      } catch (error) {
-        console.error('Error loading jadwal:', error)
-        pushToast('error', 'Gagal memuat jadwal mengajar')
-      }
-    }
-    loadJadwal()
-  }, [applyPeriodFilters, user?.id, pushToast])
+	        let query = supabase.from('jadwal').select(JADWAL_GURU_COLUMNS).eq('guru_id', user.id)
+	        query = applyPeriodFilters(query)
+	        const { data, error } = await query
+	        if (error) throw error
+	        setJadwalAll(filterSchedulesForSemester(data || [], periodFilter.semester))
+	      } catch (error) {
+	        console.error('Error loading jadwal:', error)
+	        pushToast('error', 'Gagal memuat jadwal mengajar')
+	      }
+	    }
+	    loadJadwal()
+	  }, [applyPeriodFilters, periodFilter.semester, user?.id, pushToast])
 
   /* =========================
      3) Mapel list untuk form create
@@ -748,12 +750,12 @@ export default function TugasGuru() {
         weekAgo.setDate(now.getDate() - 7)
         query = query.gte('created_at', weekAgo.toISOString())
       } else if (timeRange === 'all') {
-        if (period.startsAt && period.endsAt) {
-          const start = new Date(`${period.startsAt}T00:00:00`)
-          const end = new Date(`${period.endsAt}T00:00:00`)
-          end.setDate(end.getDate() + 1)
-          query = query.gte('created_at', start.toISOString()).lt('created_at', end.toISOString())
-        }
+	        if (dateFilterPeriod.startsAt && dateFilterPeriod.endsAt) {
+	          const start = new Date(`${dateFilterPeriod.startsAt}T00:00:00`)
+	          const end = new Date(`${dateFilterPeriod.endsAt}T00:00:00`)
+	          end.setDate(end.getDate() + 1)
+	          query = query.gte('created_at', start.toISOString()).lt('created_at', end.toISOString())
+	        }
       } else if (timeRange === 'custom_months' && selectedMonths.length > 0) {
         let minYear = Infinity
         let minMonth = Infinity
@@ -912,8 +914,8 @@ export default function TugasGuru() {
     selectedMonths,
     debouncedHistorySearchTerm,
     hasActiveHistoryFilter,
-    period.endsAt,
-    period.startsAt,
+	    dateFilterPeriod.endsAt,
+	    dateFilterPeriod.startsAt,
     setLoading,
     pushToast
   ])
@@ -2143,12 +2145,12 @@ export default function TugasGuru() {
     )
   }
 
-  const monthOptions = useMemo(() => (
-    (period.months || []).map((month) => ({
-      value: month.value,
-      label: month.label
-    }))
-  ), [period.months])
+	  const monthOptions = useMemo(() => (
+	    (dateFilterPeriod.months || []).map((month) => ({
+	      value: month.value,
+	      label: month.label
+	    }))
+	  ), [dateFilterPeriod.months])
 
   const dashboardStats = useMemo(() => {
     const total = listTugas.length

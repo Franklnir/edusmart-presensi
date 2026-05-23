@@ -8,6 +8,7 @@ import ProfileAvatar from '../../components/ProfileAvatar'
 import FilePreviewModal from '../../components/FilePreviewModal'
 import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveFilter'
 import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
+import { filterSchedulesForSemester } from '../../utils/schedulePeriodScope'
 
 import {
   POINT_OPTIONS,
@@ -83,9 +84,10 @@ export default function GuruQuiz() {
   const { user } = useAuthStore()
   const { pushToast, setLoading } = useUIStore()
   const {
-    activeAcademicPeriod,
-    period,
-    periodFilter,
+	    activeAcademicPeriod,
+	    period,
+	    dateFilterPeriod,
+	    periodFilter,
     academicYearOptions,
     semesterOptions,
     setAcademicYear,
@@ -186,9 +188,9 @@ export default function GuruQuiz() {
     sortQuizzesByPriority(quizList, nowTick)
   ), [quizList, nowTick])
 
-  const monthOptions = useMemo(() => (
-    (period.months || []).map((month) => month.value)
-  ), [period.months])
+	  const monthOptions = useMemo(() => (
+	    (dateFilterPeriod.months || []).map((month) => month.value)
+	  ), [dateFilterPeriod.months])
 
   const currentMonthKey = useMemo(() => (
     getMonthKeyFromDate(nowTick)
@@ -304,10 +306,10 @@ export default function GuruQuiz() {
     (questions || []).reduce((sum, q) => sum + Number(q?.poin || 0), 0)
   ), [questions])
   const periodBounds = useMemo(() => {
-    const start = safeDate(period.startsAt ? `${period.startsAt}T00:00:00` : null)
-    const end = safeDate(period.endsAt ? `${period.endsAt}T23:59:59` : null)
-    return { start, end }
-  }, [period.startsAt, period.endsAt])
+	    const start = safeDate(dateFilterPeriod.startsAt ? `${dateFilterPeriod.startsAt}T00:00:00` : null)
+	    const end = safeDate(dateFilterPeriod.endsAt ? `${dateFilterPeriod.endsAt}T23:59:59` : null)
+	    return { start, end }
+	  }, [dateFilterPeriod.startsAt, dateFilterPeriod.endsAt])
   const periodRangeLabel = useMemo(() => {
     if (!periodBounds.start || !periodBounds.end) return activeAcademicPeriod.tahunAjaran
     return `${formatDateTime(periodBounds.start)} - ${formatDateTime(periodBounds.end)}`
@@ -694,19 +696,19 @@ export default function GuruQuiz() {
   }, [detailAnswers.length])
 
   useEffect(() => {
-    const loadJadwal = async () => {
-      if (!user?.id) return
-      try {
-        let query = supabase.from('jadwal').select('*').eq('guru_id', user.id)
-        query = applyPeriodFilters(query)
-        const { data } = await query
-        setJadwal(data || [])
-      } catch (err) {
-        console.error(err)
-      }
-    }
-    loadJadwal()
-  }, [applyPeriodFilters, user?.id])
+	    const loadJadwal = async () => {
+	      if (!user?.id) return
+	      try {
+	        let query = supabase.from('jadwal').select('*').eq('guru_id', user.id)
+	        query = applyPeriodFilters(query)
+	        const { data } = await query
+	        setJadwal(filterSchedulesForSemester(data || [], periodFilter.semester))
+	      } catch (err) {
+	        console.error(err)
+	      }
+	    }
+	    loadJadwal()
+	  }, [applyPeriodFilters, periodFilter.semester, user?.id])
 
   useEffect(() => {
     const timer = setInterval(() => setNowTick(new Date()), 1000)
@@ -2160,13 +2162,13 @@ export default function GuruQuiz() {
     return Math.ceil((deadlineAt.getTime() - startsAt.getTime()) / 60000)
   }, [scheduleForm.starts_at, scheduleForm.deadline_at])
 
-  const periodStartInput = useMemo(() => (
-    period.startsAt ? `${period.startsAt}T00:00` : ''
-  ), [period.startsAt])
+	  const periodStartInput = useMemo(() => (
+	    dateFilterPeriod.startsAt ? `${dateFilterPeriod.startsAt}T00:00` : ''
+	  ), [dateFilterPeriod.startsAt])
 
-  const periodEndInput = useMemo(() => (
-    period.endsAt ? `${period.endsAt}T23:59` : ''
-  ), [period.endsAt])
+	  const periodEndInput = useMemo(() => (
+	    dateFilterPeriod.endsAt ? `${dateFilterPeriod.endsAt}T23:59` : ''
+	  ), [dateFilterPeriod.endsAt])
 
   const startInputMin = useMemo(() => {
     const nowInput = getNowLocalInput()

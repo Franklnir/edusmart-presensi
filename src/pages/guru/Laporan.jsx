@@ -7,6 +7,7 @@ import { useUIStore } from '../../store/useUIStore'
 import { loadExcelJsBrowser } from '../../utils/excelBrowser'
 import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveFilter'
 import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
+import { filterSchedulesForSemester } from '../../utils/schedulePeriodScope'
 import {
   getKelasDisplayName,
   getNamaKelasFromList,
@@ -129,9 +130,10 @@ export default function LaporanRekap() {
   const {
     activeAcademicPeriod,
     academicYearOptions,
-    isViewingArchivePeriod,
-    period: reportPeriod,
-    periodFilter,
+	    isViewingArchivePeriod,
+	    period: reportPeriod,
+	    dateFilterPeriod,
+	    periodFilter,
     resetToActivePeriod,
     selectedAcademicPeriodPayload,
     semesterOptions,
@@ -182,15 +184,15 @@ export default function LaporanRekap() {
   const isActiveReportPeriod = !isViewingArchivePeriod
   const selectedTahunAjaran = selectedAcademicPeriodPayload.tahun_ajaran
   const selectedSemester = selectedAcademicPeriodPayload.semester
-  const reportMonthOptions = useMemo(
-    () => ((reportPeriod.academicYearMonths?.length ? reportPeriod.academicYearMonths : reportPeriod.months) || []).map((month) => ({
-      value: month.value,
-      label: month.label,
-      month: String(month.month).padStart(2, '0'),
-      year: month.year
-    })),
-    [reportPeriod]
-  )
+	  const reportMonthOptions = useMemo(
+	    () => ((dateFilterPeriod.months?.length ? dateFilterPeriod.months : reportPeriod.months) || []).map((month) => ({
+	      value: month.value,
+	      label: month.label,
+	      month: String(month.month).padStart(2, '0'),
+	      year: month.year
+	    })),
+	    [dateFilterPeriod.months, reportPeriod.months]
+	  )
   const reportMonthOptionValues = useMemo(
     () => reportMonthOptions.map((month) => month.value),
     [reportMonthOptions]
@@ -282,16 +284,16 @@ export default function LaporanRekap() {
     const load = async () => {
       if (!user?.id) return
       try {
-        let query = supabase.from('jadwal').select('*').eq('guru_id', user.id)
-        query = applyReportAcademicFilters(query)
-        const { data } = await query
-        setJadwalGuru(data || [])
-      } catch (e) {
+	        let query = supabase.from('jadwal').select('*').eq('guru_id', user.id)
+	        query = applyReportAcademicFilters(query)
+	        const { data } = await query
+	        setJadwalGuru(filterSchedulesForSemester(data || [], selectedSemester))
+	      } catch (e) {
         console.error(e)
       }
     }
     load()
-  }, [applyReportAcademicFilters, user?.id])
+	  }, [applyReportAcademicFilters, selectedSemester, user?.id])
 
   useEffect(() => {
     const loadWaliKelas = async () => {
@@ -768,12 +770,13 @@ export default function LaporanRekap() {
       const startDate = `${dateStrings[0]}T00:00:00`
       const endDate = `${dateStrings[dateStrings.length - 1]}T23:59:59`
 
-      let jadwalKelasQuery = supabase
-        .from('jadwal')
-        .select('mapel, guru_id')
-        .eq('kelas_id', selectedWaliKelas)
-      jadwalKelasQuery = applyReportAcademicFilters(jadwalKelasQuery)
-      const { data: jadwalKelasList } = await jadwalKelasQuery
+	      let jadwalKelasQuery = supabase
+	        .from('jadwal')
+	        .select('mapel, guru_id, periode_berlaku')
+	        .eq('kelas_id', selectedWaliKelas)
+	      jadwalKelasQuery = applyReportAcademicFilters(jadwalKelasQuery)
+	      const { data: jadwalKelasRaw } = await jadwalKelasQuery
+	      const jadwalKelasList = filterSchedulesForSemester(jadwalKelasRaw || [], selectedSemester)
 
       let tugasQuery = supabase
         .from('tugas')
@@ -1411,7 +1414,7 @@ export default function LaporanRekap() {
         const startDate = `${dateStrings[0]}T00:00:00`
         const endDate = `${dateStrings[dateStrings.length - 1]}T23:59:59`
 
-        let jadwalDetailQuery = supabase.from('jadwal').select('mapel, guru_id').eq('kelas_id', selectedWaliKelas)
+        let jadwalDetailQuery = supabase.from('jadwal').select('mapel, guru_id, periode_berlaku').eq('kelas_id', selectedWaliKelas)
         jadwalDetailQuery = applyReportAcademicFilters(jadwalDetailQuery)
         let tugasDetailQuery = supabase
           .from('tugas')
@@ -1438,7 +1441,7 @@ export default function LaporanRekap() {
         if (tugasRes.error) throw tugasRes.error
         if (quizRes.error) throw quizRes.error
 
-        const jadwalList = jadwalRes.data || []
+        const jadwalList = filterSchedulesForSemester(jadwalRes.data || [], selectedSemester)
         const tugasList = tugasRes.data || []
         const quizList = quizRes.data || []
 

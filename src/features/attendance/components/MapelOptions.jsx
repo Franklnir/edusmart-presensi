@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../../../lib/supabase'
+import { filterSchedulesForSemester } from '../../../utils/schedulePeriodScope'
 import { getDayName, getToday } from '../utils/attendanceDate'
 
 export default function MapelOptions({ kelas, tanggal, periodFilter }) {
@@ -14,19 +15,18 @@ export default function MapelOptions({ kelas, tanggal, periodFilter }) {
 
         let query = supabase
           .from('jadwal')
-          .select('mapel, guru_nama, jam_mulai, jam_selesai, hari')
+          .select('mapel, guru_nama, jam_mulai, jam_selesai, hari, periode_berlaku')
           .eq('kelas_id', kelas)
           .eq('hari', hari)
 
         if (periodFilter?.tahunAjaran) query = query.eq('tahun_ajaran', periodFilter.tahunAjaran)
-        if (periodFilter?.semester) query = query.eq('semester', periodFilter.semester)
 
         const { data, error } = await query
 
         if (error) throw error
 
         const uniqueMap = new Map()
-        ; (data || []).forEach((d) => {
+        ; (filterSchedulesForSemester(data || [], periodFilter?.semester)).forEach((d) => {
           if (!uniqueMap.has(d.mapel)) uniqueMap.set(d.mapel, d)
         })
 

@@ -1134,7 +1134,7 @@ export default function APengaturan() {
         tone: 'warning',
         details: [
           'Perubahan semester tidak memindahkan kelas dan tidak membuat riwayat kelas baru.',
-          'Data baru yang memang semester-spesifik, seperti jadwal dan absensi, akan memakai semester aktif ini.',
+          'Jadwal baru default berlaku satu tahun ajaran penuh. Admin bisa memilih jadwal khusus Ganjil/Genap jika sekolah membutuhkannya.',
           'Halaman tugas, quiz, laporan, dan storage tetap bisa menampilkan satu tahun ajaran penuh lewat filter masing-masing.',
           `Periode aktif setelah disimpan: ${tahunAjaran} - Semester ${semester}.`
         ]

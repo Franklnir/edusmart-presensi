@@ -21,6 +21,7 @@ import { formatDateTime, parseDateTime } from '../../lib/time'
 import FilePreviewModal from '../../components/FilePreviewModal'
 import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveFilter'
 import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
+import { filterSchedulesForSemester } from '../../utils/schedulePeriodScope'
 
 const safeDate = (value) => {
   return parseDateTime(value)
@@ -427,9 +428,10 @@ export default function SiswaQuiz() {
   const { user, profile } = useAuthStore()
   const { pushToast, setLoading } = useUIStore()
   const {
-    activeAcademicPeriod,
-    period,
-    periodFilter,
+	    activeAcademicPeriod,
+	    period,
+	    dateFilterPeriod,
+	    periodFilter,
     academicYearOptions,
     semesterOptions,
     setAcademicYear,
@@ -540,9 +542,9 @@ export default function SiswaQuiz() {
     return orderedQuizList.filter((q) => q.mapel === selectedMapel)
   }, [orderedQuizList, selectedMapel])
 
-  const monthOptions = useMemo(() => (
-    (period.months || []).map((month) => month.value)
-  ), [period.months])
+	  const monthOptions = useMemo(() => (
+	    (dateFilterPeriod.months || []).map((month) => month.value)
+	  ), [dateFilterPeriod.months])
 
   const currentMonthKey = useMemo(() => (
     getMonthKeyFromDate(nowTick)
@@ -1096,26 +1098,26 @@ export default function SiswaQuiz() {
     if (!kelasId) return []
 
     try {
-      let query = supabase
-        .from('jadwal')
-        .select('mapel')
-        .eq('kelas_id', kelasId)
-        .order('mapel', { ascending: true })
+	      let query = supabase
+	        .from('jadwal')
+	        .select('mapel,periode_berlaku')
+	        .eq('kelas_id', kelasId)
+	        .order('mapel', { ascending: true })
       query = applyPeriodFilters(query)
 
       const { data, error } = await query
       if (error) throw error
 
-      return [...new Set(
-        (data || [])
-          .map((row) => String(row?.mapel || '').trim())
-          .filter(Boolean)
-      )].sort((a, b) => a.localeCompare(b, 'id'))
+	      return [...new Set(
+	        filterSchedulesForSemester(data || [], periodFilter.semester)
+	          .map((row) => String(row?.mapel || '').trim())
+	          .filter(Boolean)
+	      )].sort((a, b) => a.localeCompare(b, 'id'))
     } catch (err) {
       console.warn('Gagal memuat mapel jadwal quiz siswa:', err)
       return []
     }
-  }, [applyPeriodFilters, kelasId])
+	  }, [applyPeriodFilters, kelasId, periodFilter.semester])
 
   const rememberEssayDraft = (questionId, value) => {
     const key = String(questionId || '')

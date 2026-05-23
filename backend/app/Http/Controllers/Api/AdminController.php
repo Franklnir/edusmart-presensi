@@ -705,7 +705,7 @@ class AdminController extends ApiController
             $scheduleQuery = $this->tenantQuery('jadwal', $tenantId)
                 ->select($this->existingColumns('jadwal', [
                     'id', 'kelas_id', 'hari', 'mapel', 'guru_id', 'guru_nama',
-                    'jam_mulai', 'jam_selesai', 'tahun_ajaran', 'semester',
+                    'jam_mulai', 'jam_selesai', 'tahun_ajaran', 'semester', 'periode_berlaku',
                     'created_at', 'updated_at',
                 ]))
                 ->where('kelas_id', $selectedClassId);
@@ -713,8 +713,20 @@ class AdminController extends ApiController
             if ($tahunAjaran !== '' && Schema::hasColumn('jadwal', 'tahun_ajaran')) {
                 $scheduleQuery->where('tahun_ajaran', $tahunAjaran);
             }
-            if ($semester !== '' && Schema::hasColumn('jadwal', 'semester')) {
-                $scheduleQuery->where('semester', $semester);
+            if ($semester !== '' && Schema::hasColumn('jadwal', 'periode_berlaku')) {
+                $scope = strtolower($semester);
+                $scheduleQuery->where(function ($query) use ($scope) {
+                    $query->whereNull('periode_berlaku')
+                        ->orWhere('periode_berlaku', '')
+                        ->orWhere('periode_berlaku', 'tahunan')
+                        ->orWhere('periode_berlaku', $scope);
+                });
+            } elseif ($semester !== '' && Schema::hasColumn('jadwal', 'semester')) {
+                $scheduleQuery->where(function ($query) use ($semester) {
+                    $query->whereNull('semester')
+                        ->orWhere('semester', '')
+                        ->orWhere('semester', $semester);
+                });
             }
 
             $schedule = $scheduleQuery

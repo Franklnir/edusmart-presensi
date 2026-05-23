@@ -9,6 +9,7 @@ import React, {
 import { supabase } from '../../lib/supabase'
 import { useUIStore } from '../../store/useUIStore'
 import ProfileAvatar from '../../components/ProfileAvatar'
+import { filterSchedulesForSemester } from '../../utils/schedulePeriodScope'
 import {
   Save,
   History,
@@ -53,6 +54,12 @@ const getTodayLocal = () => {
 }
 
 const toTimeValue = (value) => String(value || '').slice(0, 5)
+
+const semesterForDateKey = (dateKey = '') => {
+  const month = Number(String(dateKey || '').slice(5, 7))
+  if (!Number.isFinite(month) || month < 1 || month > 12) return ''
+  return month >= 7 ? 'Ganjil' : 'Genap'
+}
 
 const SETTINGS_SCAN_COLUMNS = `
   id,
@@ -702,22 +709,27 @@ export default function Scan() {
           const timeStr = now.toTimeString().slice(0, 5)
           const dayName = format(now, 'EEEE', { locale: localeId })
 
-          const { data: jadwalAktif, error: errJadwal } = await supabase
-            .from('jadwal')
-            .select('*')
-            .eq('kelas_id', student.kelas)
-            .eq('hari', dayName)
-            .lte('jam_mulai', timeStr)
-            .gte('jam_selesai', timeStr)
-            .maybeSingle()
+	          const { data: jadwalAktifRows, error: errJadwal } = await supabase
+	            .from('jadwal')
+	            .select('*')
+	            .eq('kelas_id', student.kelas)
+	            .eq('hari', dayName)
+	            .lte('jam_mulai', timeStr)
+	            .gte('jam_selesai', timeStr)
+	            .order('jam_mulai')
 
-          if (!jadwalAktif) {
-            pushToast('warning', `Tidak ada jadwal aktif untuk ${student.nama} (${timeStr})`)
-            return
-          }
+	          const todayIso = now.toISOString().slice(0, 10)
+	          const jadwalAktif = filterSchedulesForSemester(
+	            jadwalAktifRows || [],
+	            semesterForDateKey(todayIso)
+	          )[0] || null
 
-          const todayIso = now.toISOString().slice(0, 10)
-          const { error: errAbsen } = await supabase.from('absensi').upsert(
+	          if (!jadwalAktif) {
+	            pushToast('warning', `Tidak ada jadwal aktif untuk ${student.nama} (${timeStr})`)
+	            return
+	          }
+
+	          const { error: errAbsen } = await supabase.from('absensi').upsert(
             {
               kelas: student.kelas,
               tanggal: todayIso,
@@ -1061,13 +1073,17 @@ export default function Scan() {
       const baseDate = new Date(`${tanggal}T00:00:00`)
       const hariIni = format(baseDate, 'EEEE', { locale: localeId })
 
-      const { data: jadwalHariIni, error: errJadwal } = await supabase
-        .from('jadwal')
-        .select('*')
-        .eq('hari', hariIni)
+	      const { data: jadwalHariIniRaw, error: errJadwal } = await supabase
+	        .from('jadwal')
+	        .select('*')
+	        .eq('hari', hariIni)
 
-      if (errJadwal) throw errJadwal
-      if (!jadwalHariIni?.length) {
+	      if (errJadwal) throw errJadwal
+	      const jadwalHariIni = filterSchedulesForSemester(
+	        jadwalHariIniRaw || [],
+	        semesterForDateKey(tanggal)
+	      )
+	      if (!jadwalHariIni?.length) {
         pushToast(
           'info',
           'Scan masuk/pulang tetap tercatat, tetapi tidak ada jadwal pelajaran hari ini sehingga absensi mapel tidak dibuat.'
