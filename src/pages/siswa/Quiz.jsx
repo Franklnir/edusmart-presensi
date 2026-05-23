@@ -500,6 +500,8 @@ export default function SiswaQuiz() {
   const selectedQuizIdRef = useRef('')
   const trackedQuestionIdsRef = useRef(new Set())
   const essaySaveTimersRef = useRef({})
+  const essayDraftMetaRef = useRef({})
+  const quizDetailRequestSeqRef = useRef(0)
   const quizReloadTimerRef = useRef(null)
   const quizDetailReloadTimerRef = useRef(null)
 
@@ -627,6 +629,8 @@ export default function SiswaQuiz() {
   useEffect(() => {
     Object.values(essaySaveTimersRef.current).forEach((timerId) => clearTimeout(timerId))
     essaySaveTimersRef.current = {}
+    essayDraftMetaRef.current = {}
+    quizDetailRequestSeqRef.current += 1
     setActiveQuestionIndex(0)
     setShowResultDetail(false)
   }, [selectedQuizId])
@@ -666,6 +670,8 @@ export default function SiswaQuiz() {
       if (quizDetailReloadTimerRef.current) clearTimeout(quizDetailReloadTimerRef.current)
       Object.values(essaySaveTimersRef.current).forEach((timerId) => clearTimeout(timerId))
       essaySaveTimersRef.current = {}
+      essayDraftMetaRef.current = {}
+      quizDetailRequestSeqRef.current += 1
     }
   }, [])
 
@@ -848,6 +854,11 @@ export default function SiswaQuiz() {
     if (!objectPath) return ''
     return supabase.storage.from(QUIZ_MEDIA_BUCKET).getPublicUrl(objectPath)?.data?.publicUrl || ''
   }, [normalizeQuizMediaPath])
+
+  const getQuizItemImagePath = useCallback((item) => (
+    normalizeQuizMediaPath(item?.image_path || item?.media_url || '')
+  ), [normalizeQuizMediaPath])
+  const activeQuestionImagePath = getQuizItemImagePath(activeQuestion)
 
   const isQuestionAnswered = useCallback((question) => {
     if (!question?.id) return false
@@ -1104,24 +1115,76 @@ export default function SiswaQuiz() {
     }
   }, [applyPeriodFilters, kelasId])
 
+  const rememberEssayDraft = (questionId, value) => {
+    const key = String(questionId || '')
+    if (!key) return 0
+    const current = essayDraftMetaRef.current[key] || {}
+    const revision = Number(current.revision || 0) + 1
+    essayDraftMetaRef.current[key] = {
+      value: String(value ?? ''),
+      revision,
+      updatedAt: Date.now(),
+      savedAt: Number(current.savedAt || 0)
+    }
+    return revision
+  }
+
+  const markEssayDraftSaved = (questionId, value, revision) => {
+    const key = String(questionId || '')
+    const current = essayDraftMetaRef.current[key]
+    if (!current) return
+    if (Number(current.revision || 0) !== Number(revision || 0)) return
+    if (String(current.value ?? '') !== String(value ?? '')) return
+    essayDraftMetaRef.current[key] = {
+      ...current,
+      savedAt: Date.now()
+    }
+  }
+
+  const shouldKeepEssayDraft = (questionId, serverValue) => {
+    const key = String(questionId || '')
+    const current = essayDraftMetaRef.current[key]
+    if (!current) return false
+
+    const draftValue = String(current.value ?? '')
+    const normalizedServerValue = String(serverValue ?? '')
+    const hasPendingTimer = Boolean(essaySaveTimersRef.current[questionId] || essaySaveTimersRef.current[key])
+    const recentlyEdited = Date.now() - Number(current.updatedAt || 0) < 15000
+
+    return hasPendingTimer || recentlyEdited || draftValue !== normalizedServerValue
+  }
+
+  const mergeServerAnswersWithEssayDrafts = (serverAnswers = {}, questionTypeById = {}) => {
+    const next = { ...(serverAnswers || {}) }
+    Object.entries(questionTypeById || {}).forEach(([questionId, questionType]) => {
+      if (normalizeQuestionType(questionType) !== 'essay') return
+      if (!shouldKeepEssayDraft(questionId, serverAnswers?.[questionId])) return
+      next[questionId] = String(essayDraftMetaRef.current[String(questionId)]?.value ?? '')
+    })
+    return next
+  }
+
   const loadQuizzes = async () => {
     if (!kelasId) return
     try {
       setQuizLoadDone(false)
       setLoading(true)
-      const { data, error } = await supabase.quiz.dashboard({
-        page: 1,
-        per_page: 100,
-        kelas: kelasId,
-        tahun_ajaran: period.tahunAjaran,
-        semester: period.semester
-      })
+      const [dashboardResult, scheduleMapels] = await Promise.all([
+        supabase.quiz.dashboard({
+          page: 1,
+          per_page: 100,
+          kelas: kelasId,
+          tahun_ajaran: period.tahunAjaran,
+          semester: period.semester
+        }),
+        loadScheduleMapels()
+      ])
+      const { data, error } = dashboardResult || {}
       if (error?.code === 'REQUEST_ABORTED') return
       if (error) throw error
 
       const merged = data?.rows || []
 
-      const scheduleMapels = await loadScheduleMapels()
       const quizMapels = merged
         .map((q) => String(q?.mapel || '').trim())
         .filter(Boolean)
@@ -1258,6 +1321,7 @@ export default function SiswaQuiz() {
   const loadQuizDetails = async () => {
     const targetQuizId = selectedQuiz?.id || (isSessionPage ? sessionQuizIdParam : '')
     if (!targetQuizId) {
+      quizDetailRequestSeqRef.current += 1
       setQuizDetailsLoading(false)
       setQuizDetailsLoadedForId('')
       setQuizDetailsError('')
@@ -1270,6 +1334,7 @@ export default function SiswaQuiz() {
       return
     }
 
+    const requestSeq = ++quizDetailRequestSeqRef.current
     try {
       setQuizDetailsLoading(true)
       setQuizDetailsLoadedForId('')
@@ -1283,6 +1348,7 @@ export default function SiswaQuiz() {
       })
       if (error?.code === 'REQUEST_ABORTED') return
       if (error) throw error
+      if (requestSeq !== quizDetailRequestSeqRef.current) return
 
       const questionRows = data?.questions || []
       const grouped = data?.options_by_question || {}
@@ -1313,6 +1379,7 @@ export default function SiswaQuiz() {
       const orderedDetail = applyQuizOrder(questionRows || [], grouped, submissionRow?.answer_order)
       const numberedQuestions = normalizeQuestionNumbering(orderedDetail.questions)
       startTransition(() => {
+        if (requestSeq !== quizDetailRequestSeqRef.current) return
         if (quizPayload) {
           setSessionQuizFallback(quizPayload)
           setQuizList((prev) => {
@@ -1325,7 +1392,7 @@ export default function SiswaQuiz() {
         }
         setQuestions(numberedQuestions)
         setOptionsByQuestion(orderedDetail.optionsByQuestion)
-        setAnswers(answerMap)
+        setAnswers(() => mergeServerAnswersWithEssayDrafts(answerMap, questionTypeById))
         setAnswerIds(answerIdMap)
         setAnswerRowsByQuestion(answerRowMap)
         setSubmission(submissionRow || null)
@@ -1333,13 +1400,16 @@ export default function SiswaQuiz() {
       })
     } catch (err) {
       if (err?.code === 'REQUEST_ABORTED') return
+      if (requestSeq !== quizDetailRequestSeqRef.current) return
       if (handleQuizRequestError(err)) return
       setQuizDetailsLoadedForId('')
       setQuizDetailsError(err?.message || 'Gagal memuat detail quiz')
       pushToast('error', err?.message || 'Gagal memuat detail quiz')
     } finally {
-      setQuizDetailsLoading(false)
-      setLoading(false)
+      if (requestSeq === quizDetailRequestSeqRef.current) {
+        setQuizDetailsLoading(false)
+        setLoading(false)
+      }
     }
   }
 
@@ -1451,6 +1521,9 @@ export default function SiswaQuiz() {
           return text.trim() ? text : null
         })()
       : null
+    const essayRevision = mode === 'essay'
+      ? Number(options?.revision || essayDraftMetaRef.current[String(questionId || '')]?.revision || 0)
+      : 0
     const { data, error } = await supabase.quiz.saveAnswer({
       id: answerId,
       quiz_id: selectedQuiz.id,
@@ -1470,33 +1543,52 @@ export default function SiswaQuiz() {
       return
     }
 
-    setAnswers((prev) => ({ ...prev, [questionId]: mode === 'essay' ? String(value || '') : optionId }))
+    let shouldApplyAnswerPayload = true
+    if (mode === 'essay') {
+      const latestDraft = essayDraftMetaRef.current[String(questionId || '')]
+      const savedText = String(value || '')
+      const responseStillCurrent = !latestDraft
+        || Number(latestDraft.revision || 0) <= essayRevision
+        || String(latestDraft.value ?? '') === savedText
+
+      shouldApplyAnswerPayload = responseStillCurrent
+      if (responseStillCurrent) {
+        setAnswers((prev) => ({ ...prev, [questionId]: savedText }))
+      }
+      markEssayDraftSaved(questionId, savedText, essayRevision)
+    } else {
+      setAnswers((prev) => ({ ...prev, [questionId]: optionId }))
+    }
     const savedAnswerId = data?.answer_id || answerId
     if (savedAnswerId) {
       setAnswerIds((prev) => ({ ...prev, [questionId]: savedAnswerId }))
       setAnswerRowsByQuestion((prev) => ({
         ...prev,
-        [questionId]: {
-          ...(prev[questionId] || {}),
-          id: savedAnswerId,
-          submission_id: sub.id,
-          question_id: questionId,
-          option_id: optionId,
-          essay_answer: essayAnswer,
-          saved_at: data?.saved_at || new Date().toISOString()
-        }
+        [questionId]: (() => {
+          const previousRow = prev[questionId] || {}
+          return {
+            ...previousRow,
+            id: savedAnswerId,
+            submission_id: sub.id,
+            question_id: questionId,
+            option_id: optionId,
+            essay_answer: mode === 'essay' && !shouldApplyAnswerPayload ? previousRow.essay_answer : essayAnswer,
+            saved_at: data?.saved_at || new Date().toISOString()
+          }
+        })()
       }))
     }
   }
 
   const handleEssayChange = (questionId, value) => {
+    const revision = rememberEssayDraft(questionId, value)
     setAnswers((prev) => ({ ...prev, [questionId]: value }))
     if (essaySaveTimersRef.current[questionId]) {
       clearTimeout(essaySaveTimersRef.current[questionId])
     }
     essaySaveTimersRef.current[questionId] = setTimeout(() => {
       delete essaySaveTimersRef.current[questionId]
-      void saveAnswer(questionId, value, 'essay', { silent: true })
+      void saveAnswer(questionId, value, 'essay', { silent: true, revision })
     }, 550)
   }
 
@@ -1505,7 +1597,11 @@ export default function SiswaQuiz() {
       clearTimeout(essaySaveTimersRef.current[questionId])
       delete essaySaveTimersRef.current[questionId]
     }
-    void saveAnswer(questionId, value, 'essay')
+    const currentDraft = essayDraftMetaRef.current[String(questionId || '')]
+    const revision = currentDraft && String(currentDraft.value ?? '') === String(value ?? '')
+      ? Number(currentDraft.revision || 0)
+      : rememberEssayDraft(questionId, value)
+    void saveAnswer(questionId, value, 'essay', { revision })
   }
 
   const buildSubmitAnswersPayload = () => (
@@ -2558,21 +2654,27 @@ export default function SiswaQuiz() {
                             </div>
 
                             <div className="space-y-5 px-4 py-5 sm:px-5">
-                              <div className="whitespace-pre-line text-base leading-7 text-slate-900">
-                                {activeQuestion.soal}
+                              <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-4">
+                                <div className="mb-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                                  Soal
+                                </div>
+                                <div className="whitespace-pre-line text-base leading-7 text-slate-950">
+                                  {activeQuestion.soal}
+                                </div>
                               </div>
 
-                              {activeQuestion.image_path && (
+                              {!!activeQuestionImagePath && (
                                 <button
                                   type="button"
-                                  onClick={() => setPreviewMediaUrl(getQuizImageUrl(activeQuestion.image_path))}
+                                  onClick={() => setPreviewMediaUrl(getQuizImageUrl(activeQuestionImagePath))}
                                   className="block w-full rounded-lg border border-slate-200 bg-slate-50 p-3 text-left hover:border-indigo-200"
                                   aria-label={`Perbesar gambar soal ${activeQuestionIndex + 1}`}
                                 >
                                   <img
-                                    src={getQuizImageUrl(activeQuestion.image_path)}
+                                    src={getQuizImageUrl(activeQuestionImagePath)}
                                     alt={`Gambar soal ${activeQuestionIndex + 1}`}
                                     className="mx-auto block max-h-[24rem] w-auto max-w-full rounded-md object-contain"
+                                    decoding="async"
                                   />
                                 </button>
                               )}
@@ -2603,51 +2705,59 @@ export default function SiswaQuiz() {
                                     .slice()
                                     .sort((a, b) => String(a?.label || '').localeCompare(String(b?.label || ''), 'id'))
                                   return (
-                                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                                      {mcqOptions.map((opt) => {
-                                        const selected = answers[activeQuestion.id] === opt.id
-                                        const disabled = answerInteractionLocked
-                                        return (
-                                          <div key={opt.id} className="space-y-2">
-                                            <button
-                                              type="button"
-                                              onClick={() => saveAnswer(activeQuestion.id, opt.id, 'mcq')}
-                                              disabled={disabled}
-                                              className={`group flex min-h-[64px] w-full items-start gap-3 rounded-lg border px-4 py-3 text-left transition ${
-                                                selected
-                                                  ? 'border-indigo-500 bg-indigo-50 text-indigo-900 shadow-sm'
-                                                  : disabled
-                                                    ? 'border-slate-200 bg-slate-50 text-slate-500'
-                                                    : 'border-slate-200 bg-white text-slate-800 hover:border-indigo-200 hover:bg-indigo-50/40'
-                                              } ${disabled ? 'cursor-not-allowed opacity-70' : ''}`}
-                                            >
-                                              <span className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border text-sm font-bold ${
-                                                selected
-                                                  ? 'border-indigo-600 bg-indigo-600 text-white'
-                                                  : 'border-slate-300 bg-white text-slate-700'
-                                              }`}>
-                                                {opt.label}
-                                              </span>
-                                              <span className="min-w-0 flex-1 text-sm leading-6">{opt.text}</span>
-                                              {selected && <CheckCircle2 className="mt-1 h-4 w-4 shrink-0 text-indigo-600" />}
-                                            </button>
-                                            {!!opt.image_path && (
+                                    <div className="space-y-3">
+                                      <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                                        Pilihan jawaban
+                                      </div>
+                                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                                        {mcqOptions.map((opt) => {
+                                          const selected = answers[activeQuestion.id] === opt.id
+                                          const disabled = answerInteractionLocked
+                                          const optionImagePath = getQuizItemImagePath(opt)
+                                          return (
+                                            <div key={opt.id} className="space-y-2">
                                               <button
                                                 type="button"
-                                                onClick={() => setPreviewMediaUrl(getQuizImageUrl(opt.image_path))}
-                                                className="inline-flex max-w-full flex-col rounded-lg border border-slate-200 bg-slate-50 p-2 hover:border-indigo-200"
-                                                aria-label={`Perbesar gambar opsi ${opt.label}`}
+                                                onClick={() => saveAnswer(activeQuestion.id, opt.id, 'mcq')}
+                                                disabled={disabled}
+                                                className={`group flex min-h-[64px] w-full items-start gap-3 rounded-lg border px-4 py-3 text-left transition ${
+                                                  selected
+                                                    ? 'border-indigo-500 bg-indigo-50 text-indigo-900 shadow-sm'
+                                                    : disabled
+                                                      ? 'border-slate-200 bg-slate-50 text-slate-500'
+                                                      : 'border-slate-200 bg-white text-slate-800 hover:border-indigo-200 hover:bg-indigo-50/40'
+                                                } ${disabled ? 'cursor-not-allowed opacity-70' : ''}`}
                                               >
-                                                <img
-                                                  src={getQuizImageUrl(opt.image_path)}
-                                                  alt={`Gambar opsi ${opt.label}`}
-                                                  className="block max-h-56 w-auto max-w-full rounded-md object-contain"
-                                                />
+                                                <span className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border text-sm font-bold ${
+                                                  selected
+                                                    ? 'border-indigo-600 bg-indigo-600 text-white'
+                                                    : 'border-slate-300 bg-white text-slate-700'
+                                                }`}>
+                                                  {opt.label}
+                                                </span>
+                                                <span className="min-w-0 flex-1 text-sm leading-6">{opt.text}</span>
+                                                {selected && <CheckCircle2 className="mt-1 h-4 w-4 shrink-0 text-indigo-600" />}
                                               </button>
-                                            )}
-                                          </div>
-                                        )
-                                      })}
+                                              {!!optionImagePath && (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => setPreviewMediaUrl(getQuizImageUrl(optionImagePath))}
+                                                  className="inline-flex max-w-full flex-col rounded-lg border border-slate-200 bg-slate-50 p-2 hover:border-indigo-200"
+                                                  aria-label={`Perbesar gambar opsi ${opt.label}`}
+                                                >
+                                                  <img
+                                                    src={getQuizImageUrl(optionImagePath)}
+                                                    alt={`Gambar opsi ${opt.label}`}
+                                                    className="block max-h-56 w-auto max-w-full rounded-md object-contain"
+                                                    loading="lazy"
+                                                    decoding="async"
+                                                  />
+                                                </button>
+                                              )}
+                                            </div>
+                                          )
+                                        })}
+                                      </div>
                                     </div>
                                   )
                                 })()
@@ -3147,6 +3257,7 @@ export default function SiswaQuiz() {
                   const answerRow = answerRowsByQuestion[question.id] || null
                   const essayAnswer = String(answers[question.id] || '').trim()
                   const essayScore = answerRow?.essay_score
+                  const questionImagePath = getQuizItemImagePath(question)
 
                   return (
                     <div key={question.id} className="rounded-2xl border border-slate-200 bg-white p-4">
@@ -3165,14 +3276,16 @@ export default function SiswaQuiz() {
                       </div>
                       <div className="text-sm text-slate-700 mt-2">{question.soal}</div>
 
-                      {!!question.image_path && (
+                      {!!questionImagePath && (
                         <div className="mt-3">
                           <div className="inline-flex max-w-full flex-col rounded-xl border border-slate-200 bg-slate-50 p-2">
                             <img
-                              src={getQuizImageUrl(question.image_path)}
+                              src={getQuizImageUrl(questionImagePath)}
                               alt={`Gambar soal ${idx + 1}`}
                               className="block max-h-56 w-auto max-w-full object-contain rounded-lg cursor-zoom-in"
-                              onClick={() => setPreviewMediaUrl(getQuizImageUrl(question.image_path))}
+                              onClick={() => setPreviewMediaUrl(getQuizImageUrl(questionImagePath))}
+                              loading="lazy"
+                              decoding="async"
                             />
                           </div>
                         </div>
@@ -3199,6 +3312,7 @@ export default function SiswaQuiz() {
                             {optionRows.map((opt) => {
                               const isSelected = selectedOptionId === opt.id
                               const isCorrect = Boolean(opt.is_correct)
+                              const optionImagePath = getQuizItemImagePath(opt)
                               return (
                                 <div key={opt.id} className="space-y-2">
                                   <div
@@ -3213,13 +3327,15 @@ export default function SiswaQuiz() {
                                     <span className="font-semibold mr-2">{opt.label}.</span>
                                     {opt.text}
                                   </div>
-                                  {!!opt.image_path && (
+                                  {!!optionImagePath && (
                                     <div className="inline-flex max-w-full flex-col rounded-xl border border-slate-200 bg-slate-50 p-2">
                                       <img
-                                        src={getQuizImageUrl(opt.image_path)}
+                                        src={getQuizImageUrl(optionImagePath)}
                                         alt={`Gambar opsi ${opt.label}`}
                                         className="block max-h-52 w-auto max-w-full object-contain rounded-lg cursor-zoom-in"
-                                        onClick={() => setPreviewMediaUrl(getQuizImageUrl(opt.image_path))}
+                                        onClick={() => setPreviewMediaUrl(getQuizImageUrl(optionImagePath))}
+                                        loading="lazy"
+                                        decoding="async"
                                       />
                                     </div>
                                   )}

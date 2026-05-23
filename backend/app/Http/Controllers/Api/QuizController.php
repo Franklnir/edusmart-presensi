@@ -37,6 +37,7 @@ class QuizController extends ApiController
         $kelas = trim((string) $request->query('kelas', ''));
         $mapel = trim((string) $request->query('mapel', ''));
         $search = trim((string) $request->query('q', ''));
+        $isStudentDashboard = $this->isSiswa($request) && ! $this->isGuru($request) && ! $this->isAdmin($request);
 
         $query = $this->quizTenantQuery($tenantId)
             ->select($this->selectExistingQuizColumns('quizzes', [
@@ -85,25 +86,31 @@ class QuizController extends ApiController
         $essayQuestionRows = $questionRows->filter(fn ($row) => $this->normalizeQuestionType($row->question_type ?? null) === 'essay');
         $essayQuestionToQuiz = $essayQuestionRows->mapWithKeys(fn ($row) => [(string) $row->id => (string) $row->quiz_id]);
 
-        $submissionRows = empty($quizIds) ? collect() : $this->quizTenantTable('quiz_submissions', $tenantId)
-            ->select($this->selectExistingQuizColumns('quiz_submissions', ['id', 'quiz_id', 'siswa_id', 'status', 'essay_review_completed_at']))
-            ->whereIn('quiz_id', $quizIds)
-            ->get();
+        $submissionRows = collect();
+        if (! $isStudentDashboard && ! empty($quizIds)) {
+            $submissionRows = $this->quizTenantTable('quiz_submissions', $tenantId)
+                ->select($this->selectExistingQuizColumns('quiz_submissions', ['id', 'quiz_id', 'siswa_id', 'status', 'essay_review_completed_at']))
+                ->whereIn('quiz_id', $quizIds)
+                ->get();
+        }
         $submissionsByQuiz = $submissionRows->groupBy('quiz_id');
         $submissionById = $submissionRows->keyBy('id');
 
         $classIds = $rows->pluck('kelas_id')->filter()->unique()->values()->all();
-        $studentCountsByClass = empty($classIds) ? collect() : DB::table('profiles')
-            ->select('kelas', DB::raw('count(*) as aggregate'))
-            ->where('tenant_id', $tenantId)
-            ->where('role', 'siswa')
-            ->whereIn('kelas', $classIds)
-            ->groupBy('kelas')
-            ->pluck('aggregate', 'kelas');
+        $studentCountsByClass = collect();
+        if (! $isStudentDashboard && ! empty($classIds)) {
+            $studentCountsByClass = DB::table('profiles')
+                ->select('kelas', DB::raw('count(*) as aggregate'))
+                ->where('tenant_id', $tenantId)
+                ->where('role', 'siswa')
+                ->whereIn('kelas', $classIds)
+                ->groupBy('kelas')
+                ->pluck('aggregate', 'kelas');
+        }
 
         $essayAnswerStatsByQuiz = [];
         $essayQuestionIds = $essayQuestionToQuiz->keys()->all();
-        if (! empty($essayQuestionIds)) {
+        if (! $isStudentDashboard && ! empty($essayQuestionIds)) {
             $this->quizTenantTable('quiz_answers', $tenantId)
                 ->select($this->selectExistingQuizColumns('quiz_answers', ['submission_id', 'question_id', 'essay_answer', 'essay_score']))
                 ->whereIn('question_id', $essayQuestionIds)
@@ -238,7 +245,7 @@ class QuizController extends ApiController
         }
 
         $questions = DB::table('quiz_questions')
-            ->select($this->selectExistingQuizColumns('quiz_questions', ['id', 'quiz_id', 'nomor', 'soal', 'type', 'poin', 'media_url', 'created_at', 'updated_at']))
+            ->select($this->selectExistingQuizColumns('quiz_questions', ['id', 'quiz_id', 'nomor', 'soal', 'question_type', 'type', 'poin', 'image_path', 'media_url', 'created_at', 'updated_at']))
             ->where('quiz_id', $quizId)
             ->orderBy('nomor')
             ->orderBy('id')
@@ -246,7 +253,7 @@ class QuizController extends ApiController
         $questions = $this->normalizeQuestionNumbersForPayload($questions);
         $questionIds = $questions->pluck('id')->filter()->values()->all();
         $optionsByQuestion = empty($questionIds) ? collect() : DB::table('quiz_options')
-            ->select($this->selectExistingQuizColumns('quiz_options', ['id', 'question_id', 'label', 'text', 'is_correct', 'created_at', 'updated_at']))
+            ->select($this->selectExistingQuizColumns('quiz_options', ['id', 'question_id', 'label', 'text', 'image_path', 'is_correct', 'created_at', 'updated_at']))
             ->whereIn('question_id', $questionIds)
             ->orderBy('label')
             ->get()
