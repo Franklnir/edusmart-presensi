@@ -55,7 +55,9 @@ export const completeGoogleLinkOAuthFlow = async ({
   for (let attempt = 0; attempt < GOOGLE_LINK_CONFIRM_RETRY_ATTEMPTS; attempt += 1) {
     lastResult = await refreshAuthSession?.({
       showErrorToast: false,
-      logErrorOnFail: false
+      logErrorOnFail: false,
+      retryAttempts: 1,
+      retryDelayMs: 0
     })
 
     if (isGoogleLinkedAccount(lastResult?.user)) {

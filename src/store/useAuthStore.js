@@ -20,10 +20,66 @@ import {
 const normalizeEmail = (email) => email.trim().toLowerCase()
 let authInitPromise = null
 const SETTINGS_COLUMNS = 'id,nama_sekolah,admin_lock_enabled,updated_at'
-const GOOGLE_POPUP_SESSION_RETRY_ATTEMPTS = 14
-const GOOGLE_POPUP_SESSION_RETRY_DELAY_MS = 650
+const AUTH_SESSION_RETRY_ATTEMPTS = 5
+const AUTH_SESSION_RETRY_DELAY_MS = 350
+const GOOGLE_POPUP_SESSION_RETRY_ATTEMPTS = 24
+const GOOGLE_POPUP_SESSION_RETRY_DELAY_MS = 700
+const SESSION_NOT_READY_MESSAGE =
+  'Sesi login belum siap. Tunggu sebentar lalu coba lagi.'
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+const normalizeRetryNumber = (value, fallback) => {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback
+}
+
+const readActiveAuthSession = async ({
+  retryAttempts = AUTH_SESSION_RETRY_ATTEMPTS,
+  retryDelayMs = AUTH_SESSION_RETRY_DELAY_MS
+} = {}) => {
+  const attempts = normalizeRetryNumber(retryAttempts, AUTH_SESSION_RETRY_ATTEMPTS)
+  const delayMs = Math.max(0, Number(retryDelayMs) || 0)
+  let lastError = null
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+    if (sessionError) {
+      lastError = new Error(sessionError.message || 'Gagal memuat sesi login')
+    } else {
+      const session = sessionData?.session || null
+      const user = session?.user || null
+      const profile = withResolvedThemePreference(
+        session?.profile || sessionData?.profile || null,
+        session?.user?.id
+      )
+
+      if (user && profile) {
+        return {
+          sessionData,
+          session,
+          user,
+          profile,
+          settings: session?.settings || sessionData?.settings || null,
+          hasSuperAdminBootstrap:
+            sessionData?.superAdminChecked === true ||
+            session?.superAdminChecked === true,
+          bootstrapIsSuperAdmin: Boolean(
+            sessionData?.isSuperAdmin || session?.isSuperAdmin
+          )
+        }
+      }
+
+      lastError = new Error(SESSION_NOT_READY_MESSAGE)
+    }
+
+    if (attempt < attempts - 1 && delayMs > 0) {
+      await wait(delayMs)
+    }
+  }
+
+  throw lastError || new Error(SESSION_NOT_READY_MESSAGE)
+}
 
 const uniqueProviders = (...lists) => {
   const providers = []
@@ -374,32 +430,24 @@ export const useAuthStore = create((set, get) => ({
     successMessage = '',
     successToastOptions = {},
     showErrorToast = true,
-    logErrorOnFail = true
+    logErrorOnFail = true,
+    retryAttempts = AUTH_SESSION_RETRY_ATTEMPTS,
+    retryDelayMs = AUTH_SESSION_RETRY_DELAY_MS
   } = {}) => {
     const { pushToast } = useUIStore.getState()
 
     try {
-      const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
-      if (sessionError) {
-        throw new Error(sessionError.message || 'Gagal memuat sesi login')
-      }
-
-      const session = sessionData?.session || null
-      const user = session?.user || null
-      const profile = withResolvedThemePreference(
-        session?.profile || sessionData?.profile || null,
-        session?.user?.id
-      )
-      let settings = session?.settings || sessionData?.settings || get().settings || null
-      const hasSuperAdminBootstrap =
-        sessionData?.superAdminChecked === true ||
-        session?.superAdminChecked === true
-      const bootstrapIsSuperAdmin = Boolean(
-        sessionData?.isSuperAdmin || session?.isSuperAdmin
-      )
-      if (!user || !profile) {
-        throw new Error('Sesi login belum aktif. Silakan coba lagi.')
-      }
+      const {
+        user,
+        profile,
+        settings: sessionSettings,
+        hasSuperAdminBootstrap,
+        bootstrapIsSuperAdmin
+      } = await readActiveAuthSession({
+        retryAttempts,
+        retryDelayMs
+      })
+      let settings = sessionSettings || get().settings || null
 
       if (!isValidRole(profile?.role)) {
         await supabase.auth.signOut()
@@ -469,6 +517,7 @@ export const useAuthStore = create((set, get) => ({
     set({ isLoading: true, error: null })
 
     try {
+      clearAuthSessionHint()
       await supabase.auth.signOut()
 
       const normalizedEmail = normalizeEmail(email)
@@ -567,6 +616,7 @@ export const useAuthStore = create((set, get) => ({
     set({ isLoading: true, error: null })
 
     try {
+      clearAuthSessionHint()
       await supabase.auth.signOut()
 
       const { data: authData, error: authError } = await supabase.auth.signInWithGoogleCode({
@@ -643,6 +693,7 @@ export const useAuthStore = create((set, get) => ({
     set({ isLoading: true, error: null })
 
     try {
+      clearAuthSessionHint()
       await supabase.auth.signOut()
 
       const { data: authData, error: authError } = await supabase.auth.signInWithGoogleCredential({
@@ -719,25 +770,22 @@ export const useAuthStore = create((set, get) => ({
     set({ isLoading: true, error: null })
 
     try {
-      let lastResult = null
-      for (let attempt = 0; attempt < GOOGLE_POPUP_SESSION_RETRY_ATTEMPTS; attempt += 1) {
-        lastResult = await get().refreshAuthSession({
-          successMessage: attempt === 0 ? 'Login Google berhasil' : '',
-          showErrorToast: false,
-          logErrorOnFail: false
-        })
+      clearAuthSessionHint()
+      const result = await get().refreshAuthSession({
+        successMessage: 'Login Google berhasil',
+        showErrorToast: false,
+        logErrorOnFail: false,
+        retryAttempts: GOOGLE_POPUP_SESSION_RETRY_ATTEMPTS,
+        retryDelayMs: GOOGLE_POPUP_SESSION_RETRY_DELAY_MS
+      })
 
-        if (!lastResult?.error) {
-          if (attempt > 0) pushToast('success', 'Login Google berhasil')
-          return lastResult
-        }
-
-        if (attempt < GOOGLE_POPUP_SESSION_RETRY_ATTEMPTS - 1) {
-          await wait(GOOGLE_POPUP_SESSION_RETRY_DELAY_MS)
-        }
+      if (!result?.error) {
+        return result
       }
 
-      const errorMessage = lastResult?.error || 'Sesi login Google belum aktif. Silakan klik Masuk dengan Google lagi.'
+      const errorMessage =
+        result?.error ||
+        'Login Google belum selesai diproses. Tunggu beberapa detik lalu coba lagi.'
       set({ error: errorMessage })
       pushToast('error', errorMessage)
       return { error: errorMessage }
