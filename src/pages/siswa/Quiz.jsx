@@ -2562,8 +2562,9 @@ export default function SiswaQuiz() {
 
                     <div className="mt-5 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
                       <div>
-                        <label className="text-xs font-semibold text-slate-600">Kode Akses</label>
+                        <label htmlFor="quiz-session-access-code" className="text-xs font-semibold text-slate-600">Kode Akses</label>
                         <input
+                          id="quiz-session-access-code"
                           name="quiz_access_code"
                           aria-label="Kode akses quiz"
                           type="password"
@@ -3155,8 +3156,9 @@ export default function SiswaQuiz() {
                         </div>
                       )}
                       <div className="mt-3 max-w-sm">
-                        <label className="text-xs font-semibold text-slate-600">Kode Akses</label>
+                        <label htmlFor="quiz-inline-access-code" className="text-xs font-semibold text-slate-600">Kode Akses</label>
                         <input
+                          id="quiz-inline-access-code"
                           name="quiz_access_code_inline"
                           aria-label="Kode akses quiz"
                           type="password"

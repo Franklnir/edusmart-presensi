@@ -167,6 +167,56 @@ class StorageSecurityTest extends TestCase
         $this->assertStringContainsString('/quiz-media/private/quiz-media/quiz-media/'.$guru->id.'/', $uploadUrl);
     }
 
+    public function test_quiz_media_object_storage_read_is_proxied_to_app_origin(): void
+    {
+        Storage::fake('local');
+        config([
+            'services.object_storage.enabled' => true,
+            'services.object_storage.label' => 'Nevaobjects S3',
+            'services.object_storage.key' => 'test-access-key',
+            'services.object_storage.secret' => 'test-secret-key',
+            'services.object_storage.region' => 'us-east-1',
+            'services.object_storage.bucket' => '',
+            'services.object_storage.bucket_map' => [
+                'quiz-media' => 'quiz-media',
+            ],
+            'services.object_storage.endpoint' => 'https://s3.nevaobjects.id',
+            'services.object_storage.use_path_style_endpoint' => true,
+            'services.object_storage.direct_upload_buckets' => ['quiz-media'],
+        ]);
+
+        $tenantId = $this->defaultTenantId();
+        [$guru] = $this->createUserWithProfile($tenantId, 'guru', 'X-1');
+        Sanctum::actingAs($guru);
+
+        $objectPath = 'quiz-media/'.$guru->id.'/quiz-1/question.jpg';
+        $storageGetSeen = false;
+        Http::fake(function ($request) use (&$storageGetSeen, $guru) {
+            if ($request->method() === 'GET') {
+                $storageGetSeen = true;
+                $this->assertStringContainsString(
+                    '/quiz-media/private/quiz-media/quiz-media/'.$guru->id.'/quiz-1/question.jpg',
+                    $request->url()
+                );
+
+                return Http::response('image-bytes', 200, [
+                    'Content-Type' => 'image/jpeg',
+                    'Content-Length' => '11',
+                    'ETag' => '"quiz-media-etag"',
+                ]);
+            }
+
+            return Http::response('Unexpected storage request', 500);
+        });
+
+        $response = $this->get('/api/storage/object?bucket=quiz-media&path='.urlencode($objectPath));
+
+        $response->assertOk();
+        $this->assertSame('image/jpeg', $response->headers->get('Content-Type'));
+        $this->assertSame('image-bytes', $response->getContent());
+        $this->assertTrue($storageGetSeen, 'Object storage GET tidak terpanggil.');
+    }
+
     public function test_api_upload_relays_to_object_storage_when_direct_upload_needs_backend_fallback(): void
     {
         Storage::fake('local');

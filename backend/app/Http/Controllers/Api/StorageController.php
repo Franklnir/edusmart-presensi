@@ -9,6 +9,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -707,7 +708,8 @@ class StorageController extends ApiController
 
         $storage = Storage::disk('local');
         $fullPath = $this->buildStoragePath($bucket, $path);
-        if ($this->objectStorageEnabledForBucket($bucket) && ! $storage->exists($fullPath)) {
+        $shouldProxyObjectStorageRead = $this->shouldProxyObjectStorageRead((string) $bucket);
+        if ($this->objectStorageEnabledForBucket($bucket) && ! $storage->exists($fullPath) && ! $shouldProxyObjectStorageRead) {
             try {
                 $signed = $this->objectStorageSigner->presignGet($fullPath, $expiresIn, $bucket);
 
@@ -787,6 +789,10 @@ class StorageController extends ApiController
 
         if (! $storage->exists($fullPath)) {
             if ($this->objectStorageEnabledForBucket($bucket)) {
+                if ($this->shouldProxyObjectStorageRead((string) $bucket)) {
+                    return $this->proxyObjectStorageObject($request, (string) $bucket, $path, $fullPath, $expires);
+                }
+
                 try {
                     $signed = $this->objectStorageSigner->presignGet($fullPath, $this->normalizeExpiresIn($expires), $bucket);
 
@@ -834,6 +840,64 @@ class StorageController extends ApiController
                 }
             }
         }, 200, $headers);
+    }
+
+    private function proxyObjectStorageObject(Request $request, string $bucket, string $path, string $fullPath, $expires)
+    {
+        try {
+            $signed = $this->objectStorageSigner->presignGet($fullPath, $this->normalizeExpiresIn($expires), $bucket);
+            $objectResponse = Http::timeout(20)
+                ->connectTimeout(8)
+                ->get($signed['url']);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'error' => 'Gagal membaca file object storage: '.$e->getMessage(),
+            ], 422);
+        }
+
+        if ($objectResponse->status() === 404) {
+            return $this->deny('File tidak ditemukan', 404);
+        }
+
+        if (! $objectResponse->successful()) {
+            return response()->json([
+                'error' => 'Gagal membaca file object storage (HTTP '.$objectResponse->status().').',
+            ], 422);
+        }
+
+        $contents = (string) $objectResponse->body();
+        $mime = (string) ($objectResponse->header('Content-Type') ?: $this->resolveMetadataMime(basename($path), ''));
+        if (trim($mime) === '') {
+            $mime = 'application/octet-stream';
+        }
+
+        $filename = str_replace('"', '', basename($path));
+        $dispositionType = $this->isInlineRenderableMime($mime) ? 'inline' : 'attachment';
+        $cacheControl = $request->user()
+            ? 'no-store, private'
+            : 'public, max-age=300, stale-while-revalidate=60';
+
+        $headers = [
+            'Content-Type' => $mime,
+            'Content-Disposition' => $dispositionType.'; filename="'.$filename.'"',
+            'X-Content-Type-Options' => 'nosniff',
+            'Cache-Control' => $cacheControl,
+            'X-Frame-Options' => 'SAMEORIGIN',
+        ];
+
+        $size = $objectResponse->header('Content-Length');
+        if (is_numeric($size)) {
+            $headers['Content-Length'] = (string) $size;
+        } else {
+            $headers['Content-Length'] = (string) strlen($contents);
+        }
+
+        $etag = $objectResponse->header('ETag');
+        if ($etag) {
+            $headers['ETag'] = $etag;
+        }
+
+        return response($contents, 200, $headers);
     }
 
     private function buildStoragePath(string $bucket, string $path): string
@@ -1571,6 +1635,13 @@ class StorageController extends ApiController
     private function objectStorageEnabledForBucket(string $bucket): bool
     {
         return $this->objectStorageSigner->isEnabledForBucket($bucket);
+    }
+
+    private function shouldProxyObjectStorageRead(string $bucket): bool
+    {
+        // Quiz media is small and rendered inside the app. Proxying it keeps the
+        // browser on the tenant origin, so missing S3 CORS cannot break images.
+        return $bucket === 'quiz-media';
     }
 
     private function objectStorageBrowserDirectEnabledForBucket(string $bucket): bool
