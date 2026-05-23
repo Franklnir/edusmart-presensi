@@ -436,7 +436,9 @@ export default function SiswaQuiz() {
     setSemester,
     resetToActivePeriod,
     applyPeriodFilters
-  } = useActiveAcademicPeriod()
+  } = useActiveAcademicPeriod({
+    storageKey: 'edusmart.siswa.quiz.periodFilter'
+  })
 
   const [quizList, setQuizList] = useState([])
   const [quizLoadDone, setQuizLoadDone] = useState(false)

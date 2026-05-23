@@ -93,7 +93,9 @@ export default function GuruQuiz() {
     resetToActivePeriod,
     applyPeriodFilters,
     activeAcademicPeriodPayload
-  } = useActiveAcademicPeriod()
+  } = useActiveAcademicPeriod({
+    storageKey: 'edusmart.guru.quiz.periodFilter'
+  })
 
   const [jadwal, setJadwal] = useState([])
   const [kelasList, setKelasList] = useState([])

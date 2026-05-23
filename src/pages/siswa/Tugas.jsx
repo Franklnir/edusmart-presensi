@@ -484,7 +484,9 @@ export default function TugasSiswa() {
     applyPeriodFilters,
     academicPeriodPayload,
     isViewingArchivePeriod
-  } = useActiveAcademicPeriod()
+  } = useActiveAcademicPeriod({
+    storageKey: 'edusmart.siswa.tugas.periodFilter'
+  })
   const [searchParams] = useSearchParams()
   const requestedTugasId = String(searchParams.get('tugas') || '').trim()
 

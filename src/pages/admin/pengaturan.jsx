@@ -1128,13 +1128,14 @@ export default function APengaturan() {
     } else {
       const confirmedPeriod = await requestConfirmation({
         title: 'Simpan perubahan semester/bulan?',
-        message: 'Perubahan semester aktif atau rentang bulan akan langsung digunakan sebagai periode berjalan.',
+        message: 'Semester aktif akan dipakai sebagai default operasional, tetapi tahun ajaran tetap menjadi periode besar yang berisi dua semester.',
         confirmText: 'Ya, simpan periode',
         cancelText: 'Batal',
         tone: 'warning',
         details: [
-          'Filter tugas, absensi, jadwal, laporan, rekap, dan storage akan mengikuti periode baru.',
-          'Metadata daftar kelas aktif ikut disinkronkan dengan semester/periode baru.',
+          'Perubahan semester tidak memindahkan kelas dan tidak membuat riwayat kelas baru.',
+          'Data baru yang memang semester-spesifik, seperti jadwal dan absensi, akan memakai semester aktif ini.',
+          'Halaman tugas, quiz, laporan, dan storage tetap bisa menampilkan satu tahun ajaran penuh lewat filter masing-masing.',
           `Periode aktif setelah disimpan: ${tahunAjaran} - Semester ${semester}.`
         ]
       })
@@ -1200,7 +1201,7 @@ export default function APengaturan() {
         ? ` Eskul disalin: ${rollover.eskul_members_copied || 0}.`
         : ''
       setCarryEskulMembers(false)
-      pushToast('success', `Periode aktif disimpan: ${tahunAjaran} - ${semester}.${rolloverText}${eskulText}`, {
+      pushToast('success', `Tahun ajaran ${tahunAjaran} disimpan. Semester operasional: ${semester}.${rolloverText}${eskulText}`, {
         title: 'Kalender akademik diperbarui'
       })
     } catch (error) {
@@ -1646,6 +1647,9 @@ export default function APengaturan() {
   const academicMonths = activeAcademicPeriod.months?.length
     ? activeAcademicPeriod.months
     : activeAcademicPeriod.academicYearMonths || []
+  const academicYearMonths = activeAcademicPeriod.academicYearMonths?.length
+    ? activeAcademicPeriod.academicYearMonths
+    : academicMonths
   const periodYearOptions = generateAcademicYearOptions({ back: 5, forward: 2 })
   const semesterPeriodCards = [
     {
@@ -1994,16 +1998,19 @@ export default function APengaturan() {
             <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
               <div className="min-w-0">
                 <p className="text-xs font-semibold uppercase tracking-wide text-emerald-600">Kalender Akademik</p>
-                <h2 className="mt-1 text-xl font-bold text-gray-900">Periode Aktif Sekolah</h2>
+                <h2 className="mt-1 text-xl font-bold text-gray-900">Tahun Ajaran Aktif</h2>
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-                  Periode aktif dipakai untuk operasional baru. Data tahun sebelumnya dibuka dari filter periode pada halaman tugas, quiz, absensi, jadwal, eskul, laporan, dan storage.
+                  Satu tahun ajaran adalah satu periode besar yang berisi Semester Ganjil dan Semester Genap. Semester aktif hanya menentukan default operasional data baru, sementara arsip dan laporan tetap bisa melihat seluruh tahun ajaran.
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2 text-xs">
                   <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 font-semibold text-emerald-700">
-                    {activeAcademicPeriod.label}
+                    Tahun ajaran {activeAcademicPeriod.tahunAjaran}
                   </span>
                   <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 font-semibold text-slate-700">
-                    {activeAcademicPeriod.rangeLabel || '-'}
+                    Semester aktif: {activeAcademicPeriod.semester}
+                  </span>
+                  <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 font-semibold text-slate-700">
+                    {activeAcademicPeriod.academicYearRangeLabel || activeAcademicPeriod.rangeLabel || '-'}
                   </span>
                   <span
                     className={`rounded-full border px-3 py-1 font-semibold ${
@@ -2023,12 +2030,12 @@ export default function APengaturan() {
                   <p className="mt-1 text-sm font-bold text-slate-900">{activeAcademicPeriod.tahunAjaran}</p>
                 </div>
                 <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3">
-                  <p className="text-xs font-semibold text-emerald-700">Semester</p>
+                  <p className="text-xs font-semibold text-emerald-700">Semester Operasional</p>
                   <p className="mt-1 text-sm font-bold text-slate-900">{activeAcademicPeriod.semester}</p>
                 </div>
                 <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3">
-                  <p className="text-xs font-semibold text-emerald-700">Bulan</p>
-                  <p className="mt-1 text-sm font-bold text-slate-900">{activeAcademicPeriod.rangeLabel || '-'}</p>
+                  <p className="text-xs font-semibold text-emerald-700">Rentang Periode</p>
+                  <p className="mt-1 text-sm font-bold text-slate-900">{activeAcademicPeriod.academicYearRangeLabel || '-'}</p>
                 </div>
               </div>
             </div>
@@ -2134,7 +2141,7 @@ export default function APengaturan() {
 
               <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-xs leading-5 text-slate-600">
-                  Data tugas, eskul, absensi, jadwal, laporan, rekap, dan filter bulan memakai tahun ajaran serta semester aktif ini.
+                  Tahun ajaran menaungi dua semester. Mengganti semester aktif tidak memindahkan kelas atau riwayat siswa; perubahan kelas hanya terjadi saat rollover tahun ajaran.
                 </p>
                 <div className="flex flex-wrap gap-2">
                   <button
@@ -2158,11 +2165,11 @@ export default function APengaturan() {
             <div className="mt-5">
               <div>
                 <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                  <p className="text-sm font-semibold text-gray-700">Bulan Semester Aktif</p>
+                  <p className="text-sm font-semibold text-gray-700">Bulan dalam Tahun Ajaran</p>
                   <span className="text-xs font-semibold text-amber-700">Kuning = bulan berjalan</span>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2">
-                  {academicMonths.map((month) => {
+                  {academicYearMonths.map((month) => {
                     const isCurrentMonth = month.value === currentMonthValue
 
                     return (

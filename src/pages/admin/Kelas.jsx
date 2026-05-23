@@ -272,7 +272,9 @@ export default function AKelas({ initialTab = 'kelas' }) {
     setSemester,
     resetToActivePeriod,
     isViewingArchivePeriod: isViewingScheduleArchive
-  } = useActiveAcademicPeriod()
+  } = useActiveAcademicPeriod({
+    storageKey: 'edusmart.admin.jadwal.periodFilter'
+  })
   const routeClassId = React.useMemo(() => {
     const params = new URLSearchParams(location.search)
     return String(params.get('kelas') || '').trim()

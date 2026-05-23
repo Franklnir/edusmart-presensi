@@ -7,7 +7,7 @@ import {
   resolveAcademicPeriod
 } from '../utils/attendanceDate'
 
-const STORAGE_KEY = 'edusmart.academic.periodFilter'
+const STORAGE_KEY = 'edusmart.attendance.periodFilter'
 
 const readStoredPeriodFilter = (fallback) => {
   if (typeof window === 'undefined') return fallback

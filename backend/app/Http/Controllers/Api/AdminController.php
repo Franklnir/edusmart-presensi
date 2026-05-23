@@ -834,6 +834,7 @@ class AdminController extends ApiController
 
         $previousStartYear = (int) substr($previousYear, 0, 4);
         $targetStartYear = (int) substr($tahunAjaran, 0, 4);
+        $semesterOnlyChange = $yearChanged === false && $previousSemester !== $semester;
         $serverNow = Carbon::now('Asia/Jakarta');
         $calendarPeriod = AcademicPeriod::current($serverNow);
         $calendarStartYear = (int) substr((string) $calendarPeriod['tahun_ajaran'], 0, 4);
@@ -895,6 +896,7 @@ class AdminController extends ApiController
                 $previousYear,
                 $previousSemester,
                 $yearChanged,
+                $semesterOnlyChange,
                 $requiresRollover,
                 $isCalendarCorrection,
                 $manualRolloverCompleted,
@@ -915,18 +917,20 @@ class AdminController extends ApiController
                         $carryEskulMembers
                     );
                     $classesSynced = (int) ($rollover['classes_synced'] ?? 0);
-                } else {
+                } elseif ($yearChanged || $isCalendarCorrection || $manualRolloverCompleted) {
                     $classesSynced = $this->syncClassPeriodMetadata($tenantId, $activePeriod);
                 }
 
                 $settings = $this->saveAcademicPeriodSettings($tenantId, $existing, $settingsPayload);
-                $classHistorySnapshots = $this->snapshotStudentClassHistoriesForPeriod(
-                    $tenantId,
-                    $activePeriod,
-                    $requiresRollover
-                        ? 'auto_rollover'
-                        : ($manualRolloverCompleted ? 'manual_rollover_completed' : 'period_sync')
-                );
+                if ($classesSynced > 0 || $requiresRollover || $yearChanged || $manualRolloverCompleted) {
+                    $classHistorySnapshots = $this->snapshotStudentClassHistoriesForPeriod(
+                        $tenantId,
+                        $activePeriod,
+                        $requiresRollover
+                            ? 'auto_rollover'
+                            : ($manualRolloverCompleted ? 'manual_rollover_completed' : 'period_sync')
+                    );
+                }
 
                 return [
                     'settings' => $settings ? (array) $settings : null,
@@ -937,6 +941,7 @@ class AdminController extends ApiController
                         'ends_at' => $activePeriod['ends_at'],
                     ],
                     'year_changed' => $yearChanged,
+                    'semester_only_change' => $semesterOnlyChange,
                     'calendar_correction' => $isCalendarCorrection,
                     'manual_rollover_completed' => $manualRolloverCompleted,
                     'class_history_snapshots' => $classHistorySnapshots,

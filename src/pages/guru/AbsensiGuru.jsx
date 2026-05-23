@@ -48,7 +48,7 @@ const SEMESTER_OPTIONS = [
   { value: SEMESTER_GENAP, label: 'Semester 2 (Genap)' }
 ]
 
-const PERIOD_FILTER_STORAGE_KEY = 'edusmart.academic.periodFilter'
+const PERIOD_FILTER_STORAGE_KEY = 'edusmart.guru.absensi.periodFilter'
 
 const readStoredPeriodFilter = (fallback) => {
   if (typeof window === 'undefined') return fallback

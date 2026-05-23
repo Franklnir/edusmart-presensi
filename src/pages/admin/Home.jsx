@@ -181,7 +181,9 @@ export default function AHome() {
     setAcademicYear,
     setSemester,
     resetToActivePeriod
-  } = useActiveAcademicPeriod()
+  } = useActiveAcademicPeriod({
+    storageKey: 'edusmart.admin.eskul.periodFilter'
+  })
 
   const [isLoading, setIsLoading] = useState(true)
 

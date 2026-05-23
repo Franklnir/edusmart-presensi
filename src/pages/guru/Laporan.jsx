@@ -137,7 +137,9 @@ export default function LaporanRekap() {
     semesterOptions,
     setAcademicYear,
     setSemester
-  } = useActiveAcademicPeriod()
+  } = useActiveAcademicPeriod({
+    storageKey: 'edusmart.guru.laporan.periodFilter'
+  })
 
   // -- Data Result State --
   const [absensiData, setAbsensiData] = useState(null)

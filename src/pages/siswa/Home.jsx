@@ -18,7 +18,7 @@ import {
 const DASHBOARD_TASK_LIMIT = 6
 const DASHBOARD_TASK_QUERY_LIMIT = 80
 const DASHBOARD_TASK_COLUMNS = 'id, kelas, judul, mapel, deadline, keterangan, file_url, link'
-const ACADEMIC_PERIOD_STORAGE_KEY = 'edusmart.academic.periodFilter'
+const ACADEMIC_PERIOD_STORAGE_KEY = 'edusmart.siswa.home.periodFilter'
 
 const isValidDate = (date) => date instanceof Date && !Number.isNaN(date.getTime())
 

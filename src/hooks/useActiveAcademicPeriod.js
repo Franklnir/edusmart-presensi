@@ -14,7 +14,7 @@ const toPeriodFilter = (period) => ({
   semester: period.semester
 })
 
-const DEFAULT_FILTER_STORAGE_KEY = 'edusmart.academic.periodFilter'
+const DEFAULT_FILTER_STORAGE_KEY = 'edusmart.default.periodFilter'
 
 const normalizeStoredPeriodFilter = (value, fallback) => {
   if (!value || typeof value !== 'object') return fallback

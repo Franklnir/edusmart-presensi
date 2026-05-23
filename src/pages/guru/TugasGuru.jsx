@@ -487,7 +487,9 @@ export default function TugasGuru() {
     applyPeriodFilters,
     activeAcademicPeriodPayload,
     isViewingArchivePeriod
-  } = useActiveAcademicPeriod()
+  } = useActiveAcademicPeriod({
+    storageKey: 'edusmart.guru.tugas.periodFilter'
+  })
 
   /* ---------- State ---------- */
   const [jadwalAll, setJadwalAll] = useState([])

@@ -157,7 +157,7 @@ export default function AcademicPeriodArchiveFilter({
                     {title}
                   </h3>
                   <p className="mt-1 text-xs leading-5 text-slate-500">
-                    Pilih tahun ajaran dan semester untuk memuat data pada halaman ini.
+                    Pilihan ini hanya berlaku untuk halaman ini. Tahun ajaran adalah periode utama; semester dipakai saat data memang dipisah per semester.
                   </p>
                 </div>
               </div>
