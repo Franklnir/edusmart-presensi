@@ -1943,9 +1943,12 @@ export default function GuruQuiz() {
     }
     const maxPoint = Number(row.poin || 0)
     const hasEssayAnswer = String(row.essayAnswer || '').trim() !== ''
-    const minPoint = hasEssayAnswer && maxPoint > 0 ? 1 : 0
-    if (score < minPoint || score > maxPoint) {
-      pushToast('error', `Nilai esai harus ${minPoint} sampai ${maxPoint}`)
+    if (!hasEssayAnswer && score > 0) {
+      pushToast('error', 'Jawaban esai kosong, nilai harus 0')
+      return
+    }
+    if (score < 0 || score > maxPoint) {
+      pushToast('error', `Nilai esai harus 0 sampai ${maxPoint}`)
       return
     }
 

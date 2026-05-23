@@ -1121,10 +1121,6 @@ class QuizController extends ApiController
         if (! $hasEssayAnswer && $essayScore > 0) {
             return response()->json(['error' => 'Jawaban esai kosong, nilai harus 0'], 422);
         }
-        if ($hasEssayAnswer && $maxPoint > 0 && $essayScore < 1) {
-            return response()->json(['error' => 'Nilai esai minimal 1 untuk jawaban terisi'], 422);
-        }
-
         $now = now();
         $oldAnswerData = [
             'essay_score' => $answer->essay_score !== null ? (int) $answer->essay_score : null,
