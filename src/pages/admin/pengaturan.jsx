@@ -244,16 +244,21 @@ const getActiveRangeFromPeriodForm = (form = {}) => {
   }
 }
 
+const getAcademicYearRangeFromPeriodForm = (form = {}) => ({
+  startsAt: form.periodeGanjilMulai || '',
+  endsAt: form.periodeGenapSelesai || ''
+})
+
 const buildPeriodPayloadFromForm = (form = {}) => {
   const tahunAjaran = normalizeAcademicYear(form.tahunAjaran)
   const semester = normalizeSemester(form.semester)
-  const activeRange = getActiveRangeFromPeriodForm({ ...form, semester })
+  const academicYearRange = getAcademicYearRangeFromPeriodForm(form)
 
   return {
     tahun_ajaran: tahunAjaran,
     semester_aktif: semester,
-    periode_mulai: activeRange.startsAt,
-    periode_selesai: activeRange.endsAt,
+    periode_mulai: academicYearRange.startsAt,
+    periode_selesai: academicYearRange.endsAt,
     periode_ganjil_mulai: form.periodeGanjilMulai || '',
     periode_ganjil_selesai: form.periodeGanjilSelesai || '',
     periode_genap_mulai: form.periodeGenapMulai || '',
@@ -976,6 +981,10 @@ export default function APengaturan() {
     setPeriodForm((prev) => {
       if (name === 'tahunAjaran') {
         const nextYear = normalizeAcademicYear(value) || value
+        const calendarPeriod = getCurrentAcademicPeriod()
+        const nextSemester = nextYear === calendarPeriod.tahunAjaran
+          ? calendarPeriod.semester
+          : SEMESTER_GANJIL
         const ganjil = resolveAcademicPeriod({
           tahun_ajaran: nextYear,
           semester_aktif: SEMESTER_GANJIL
@@ -984,11 +993,12 @@ export default function APengaturan() {
           tahun_ajaran: nextYear,
           semester_aktif: SEMESTER_GENAP
         })
-        const activeRange = prev.semester === SEMESTER_GENAP ? genap : ganjil
+        const activeRange = nextSemester === SEMESTER_GENAP ? genap : ganjil
 
         return {
           ...prev,
           tahunAjaran: nextYear,
+          semester: nextSemester,
           periodeGanjilMulai: ganjil.startsAt,
           periodeGanjilSelesai: ganjil.endsAt,
           periodeGenapMulai: genap.startsAt,
@@ -1044,7 +1054,7 @@ export default function APengaturan() {
     const previousPayload = buildPeriodPayloadFromForm(persistedPeriodForm)
     const tahunAjaran = nextPayload.tahun_ajaran
     const semester = nextPayload.semester_aktif
-    const previewPeriod = resolveAcademicPeriod(nextPayload)
+    const semesterPreview = resolveAcademicPeriod(nextPayload)
     const ganjilPreview = resolveAcademicPeriod({
       ...nextPayload,
       semester_aktif: SEMESTER_GANJIL
@@ -1053,6 +1063,10 @@ export default function APengaturan() {
       ...nextPayload,
       semester_aktif: SEMESTER_GENAP
     })
+    const academicYearRange = {
+      startsAt: ganjilPreview.startsAt,
+      endsAt: genapPreview.endsAt
+    }
 
     if (!tahunAjaran || !semester) {
       pushToast('error', 'Tahun ajaran atau semester belum valid.')
@@ -1066,8 +1080,12 @@ export default function APengaturan() {
       pushToast('error', 'Rentang bulan semester Genap belum valid.')
       return
     }
-    if (!previewPeriod.startsAt || !previewPeriod.endsAt || !previewPeriod.customRange) {
-      pushToast('error', 'Rentang bulan periode aktif belum valid.')
+    if (!semesterPreview.startsAt || !semesterPreview.endsAt || !semesterPreview.customRange) {
+      pushToast('error', 'Rentang bulan semester kalender belum valid.')
+      return
+    }
+    if (!academicYearRange.startsAt || !academicYearRange.endsAt) {
+      pushToast('error', 'Rentang tahun ajaran penuh belum valid.')
       return
     }
 
@@ -1142,16 +1160,16 @@ export default function APengaturan() {
       }
     } else {
       const confirmedPeriod = await requestConfirmation({
-        title: 'Simpan perubahan semester/bulan?',
-        message: 'Semester aktif akan dipakai sebagai default operasional, tetapi tahun ajaran tetap menjadi periode besar yang berisi dua semester.',
+        title: 'Simpan perubahan kalender?',
+        message: 'Semester kalender hanya menjadi penanda operasional. Data aktif tetap memakai satu tahun ajaran penuh.',
         confirmText: 'Ya, simpan periode',
         cancelText: 'Batal',
         tone: 'warning',
         details: [
-          'Perubahan semester tidak memindahkan kelas dan tidak membuat riwayat kelas baru.',
+          'Perubahan semester kalender tidak memindahkan kelas, tidak memfilter data global, dan tidak membuat riwayat kelas baru.',
           `Masa berlaku jadwal baru: ${scheduleScopeLabel(nextPayload.jadwal_periode_berlaku)}.`,
-          'Halaman tugas, quiz, laporan, dan storage tetap bisa menampilkan satu tahun ajaran penuh lewat filter masing-masing.',
-          `Periode aktif setelah disimpan: ${tahunAjaran} - Semester ${semester}.`
+          'Halaman tugas, quiz, laporan, absensi, dan storage tetap berada dalam satu tahun ajaran kecuali fiturnya memakai filter sendiri.',
+          `Cakupan aktif setelah disimpan: ${tahunAjaran} penuh, penanda kalender: Semester ${semester}.`
         ]
       })
       if (!confirmedPeriod) return
@@ -1161,8 +1179,8 @@ export default function APengaturan() {
     try {
       const payload = {
         ...nextPayload,
-        periode_mulai: previewPeriod.startsAt,
-        periode_selesai: previewPeriod.endsAt,
+        periode_mulai: academicYearRange.startsAt,
+        periode_selesai: academicYearRange.endsAt,
         periode_ganjil_mulai: ganjilPreview.startsAt,
         periode_ganjil_selesai: ganjilPreview.endsAt,
         periode_genap_mulai: genapPreview.startsAt,
@@ -1217,11 +1235,11 @@ export default function APengaturan() {
         ? ` Eskul disalin: ${rollover.eskul_members_copied || 0}.`
         : ''
       setCarryEskulMembers(false)
-      pushToast('success', `Tahun ajaran ${tahunAjaran} disimpan. Semester operasional: ${semester}.${rolloverText}${eskulText}`, {
+      pushToast('success', `Tahun ajaran ${tahunAjaran} aktif penuh. Semester kalender: ${semester}.${rolloverText}${eskulText}`, {
         title: 'Kalender akademik diperbarui'
       })
     } catch (error) {
-      pushToast('error', error?.message || 'Gagal menyimpan periode aktif')
+      pushToast('error', error?.message || 'Gagal menyimpan kalender akademik')
     } finally {
       setSavingPeriod(false)
     }
@@ -1765,7 +1783,7 @@ export default function APengaturan() {
     {
       id: 'academic',
       label: 'Akademik',
-      description: 'Tahun ajaran, semester aktif, dan rentang bulan',
+      description: 'Tahun ajaran penuh, semester kalender, dan rentang bulan',
       icon: CalendarDays
     },
     {
@@ -1804,7 +1822,7 @@ export default function APengaturan() {
     ? 'Pengaturan Akademik'
     : 'Pengaturan Sistem'
   const pageDescription = isAcademicStandalone
-    ? 'Kelola tahun ajaran, semester aktif, dan rentang bulan.'
+    ? 'Kelola tahun ajaran penuh, semester kalender, dan rentang bulan.'
     : 'Kelola identitas sekolah, Google Drive, akun admin, dan registrasi publik.'
 
   return (
@@ -2016,14 +2034,14 @@ export default function APengaturan() {
                 <p className="text-xs font-semibold uppercase tracking-wide text-emerald-600">Kalender Akademik</p>
                 <h2 className="mt-1 text-xl font-bold text-gray-900">Tahun Ajaran Aktif</h2>
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-                  Satu tahun ajaran adalah satu periode besar yang berisi Semester Ganjil dan Semester Genap. Semester aktif hanya menentukan default operasional data baru, sementara arsip dan laporan tetap bisa melihat seluruh tahun ajaran.
+                  Satu tahun ajaran adalah satu periode besar yang berisi Semester Ganjil dan Semester Genap. Semester kalender hanya menjadi penanda operasional, bukan filter global. Jadwal bisa dibatasi sendiri lewat masa berlaku jadwal.
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2 text-xs">
                   <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 font-semibold text-emerald-700">
                     Tahun ajaran {activeAcademicPeriod.tahunAjaran}
                   </span>
                   <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 font-semibold text-slate-700">
-                    Semester aktif: {activeAcademicPeriod.semester}
+                    Semester kalender: {activeAcademicPeriod.semester}
                   </span>
                   <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 font-semibold text-slate-700">
                     {activeAcademicPeriod.academicYearRangeLabel || activeAcademicPeriod.rangeLabel || '-'}
@@ -2046,7 +2064,7 @@ export default function APengaturan() {
                   <p className="mt-1 text-sm font-bold text-slate-900">{activeAcademicPeriod.tahunAjaran}</p>
                 </div>
                 <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3">
-                  <p className="text-xs font-semibold text-emerald-700">Semester Operasional</p>
+                  <p className="text-xs font-semibold text-emerald-700">Semester Kalender</p>
                   <p className="mt-1 text-sm font-bold text-slate-900">{activeAcademicPeriod.semester}</p>
                 </div>
                 <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3">
@@ -2081,16 +2099,13 @@ export default function APengaturan() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">Semester Aktif</label>
-                  <select
-                    name="semester"
-                    value={periodForm.semester}
-                    onChange={handlePeriodChange}
-                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
-                  >
-                    <option value={SEMESTER_GANJIL}>Ganjil</option>
-                    <option value={SEMESTER_GENAP}>Genap</option>
-                  </select>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Semester Kalender</label>
+                  <div className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-bold text-slate-900">
+                    {periodForm.semester || '-'}
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Otomatis sebagai penanda kalender. Bukan filter data global.
+                  </p>
                 </div>
 
                 <div>
@@ -2180,7 +2195,7 @@ export default function APengaturan() {
 
               <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-xs leading-5 text-slate-600">
-                  Tahun ajaran menaungi dua semester. Mengganti semester aktif tidak memindahkan kelas atau riwayat siswa; perubahan kelas hanya terjadi saat rollover tahun ajaran.
+                  Tahun ajaran menaungi dua semester sekaligus. Mengganti semester kalender tidak memindahkan kelas, tidak menyembunyikan data semester lain, dan perubahan kelas hanya terjadi saat rollover tahun ajaran.
                 </p>
                 <div className="flex flex-wrap gap-2">
                   <button

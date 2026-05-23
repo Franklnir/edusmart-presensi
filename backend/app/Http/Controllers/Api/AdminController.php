@@ -796,10 +796,14 @@ class AdminController extends ApiController
         $activeStart = AcademicPeriod::normalizeDate($payload['periode_mulai'] ?? null);
         $activeEnd = AcademicPeriod::normalizeDate($payload['periode_selesai'] ?? null);
 
-        if ($semester === AcademicPeriod::SEMESTER_GANJIL) {
+        $activeFallbackPeriod = AcademicPeriod::make($tahunAjaran, $semester, $activeStart, $activeEnd);
+        $activeFallbackIsSemesterRange = ! empty($activeFallbackPeriod['custom_range'])
+            && count($activeFallbackPeriod['months'] ?? []) <= 6;
+
+        if ($semester === AcademicPeriod::SEMESTER_GANJIL && $activeFallbackIsSemesterRange) {
             $ganjilStart = $ganjilStart ?: $activeStart;
             $ganjilEnd = $ganjilEnd ?: $activeEnd;
-        } else {
+        } elseif ($semester === AcademicPeriod::SEMESTER_GENAP && $activeFallbackIsSemesterRange) {
             $genapStart = $genapStart ?: $activeStart;
             $genapEnd = $genapEnd ?: $activeEnd;
         }
@@ -816,19 +820,30 @@ class AdminController extends ApiController
             $genapStart,
             $genapEnd
         );
-        if (empty($ganjilPeriod['custom_range'])) {
+        if (($ganjilStart !== null || $ganjilEnd !== null) && empty($ganjilPeriod['custom_range'])) {
             return $this->deny('Rentang bulan semester Ganjil belum valid.', 422);
         }
-        if (empty($genapPeriod['custom_range'])) {
+        if (($genapStart !== null || $genapEnd !== null) && empty($genapPeriod['custom_range'])) {
             return $this->deny('Rentang bulan semester Genap belum valid.', 422);
         }
 
         $activePeriod = $semester === AcademicPeriod::SEMESTER_GENAP ? $genapPeriod : $ganjilPeriod;
+        $academicYearPeriod = [
+            'tahun_ajaran' => $tahunAjaran,
+            'semester' => $semester,
+            'starts_at' => $ganjilPeriod['starts_at'],
+            'ends_at' => $genapPeriod['ends_at'],
+            'periode_mulai' => $ganjilPeriod['starts_at'],
+            'periode_selesai' => $genapPeriod['ends_at'],
+            'range_label' => ($ganjilPeriod['starts_at'] && $genapPeriod['ends_at'])
+                ? ($ganjilPeriod['range_label'] ?? '').' - '.($genapPeriod['range_label'] ?? '')
+                : null,
+        ];
         $settingsPayload = [
             'tahun_ajaran' => $tahunAjaran,
             'semester_aktif' => $semester,
-            'periode_mulai' => $activePeriod['starts_at'],
-            'periode_selesai' => $activePeriod['ends_at'],
+            'periode_mulai' => $academicYearPeriod['starts_at'],
+            'periode_selesai' => $academicYearPeriod['ends_at'],
             'periode_ganjil_mulai' => $ganjilPeriod['starts_at'],
             'periode_ganjil_selesai' => $ganjilPeriod['ends_at'],
             'periode_genap_mulai' => $genapPeriod['starts_at'],
@@ -907,6 +922,7 @@ class AdminController extends ApiController
                 $existing,
                 $settingsPayload,
                 $activePeriod,
+                $academicYearPeriod,
                 $previousYear,
                 $previousSemester,
                 $yearChanged,
@@ -949,10 +965,11 @@ class AdminController extends ApiController
                 return [
                     'settings' => $settings ? (array) $settings : null,
                     'period' => [
-                        'tahun_ajaran' => $activePeriod['tahun_ajaran'],
-                        'semester' => $activePeriod['semester'],
-                        'starts_at' => $activePeriod['starts_at'],
-                        'ends_at' => $activePeriod['ends_at'],
+                        'tahun_ajaran' => $academicYearPeriod['tahun_ajaran'],
+                        'semester' => $academicYearPeriod['semester'],
+                        'starts_at' => $academicYearPeriod['starts_at'],
+                        'ends_at' => $academicYearPeriod['ends_at'],
+                        'scope' => 'academic_year',
                     ],
                     'year_changed' => $yearChanged,
                     'semester_only_change' => $semesterOnlyChange,
