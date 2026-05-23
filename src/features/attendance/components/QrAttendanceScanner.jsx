@@ -76,10 +76,38 @@ export const QrScannerPanel = ({ onSubmitToken, isSubmitting, lastError }) => {
   const canvasRef = useRef(null)
   const streamRef = useRef(null)
   const frameRef = useRef(0)
+  const zoomRef = useRef(1)
   const processingRef = useRef(false)
   const [cameraState, setCameraState] = useState('idle')
   const [cameraError, setCameraError] = useState('')
   const [manualToken, setManualToken] = useState('')
+  const [zoomValue, setZoomValue] = useState(1)
+  const [zoomRange, setZoomRange] = useState({ min: 1, max: 3, step: 0.1 })
+  const [supportsHardwareZoom, setSupportsHardwareZoom] = useState(false)
+
+  const applyCameraZoom = useCallback(async (nextZoom) => {
+    const normalized = Math.min(
+      zoomRange.max,
+      Math.max(zoomRange.min, Number(nextZoom) || 1)
+    )
+    zoomRef.current = normalized
+    setZoomValue(normalized)
+
+    const track = streamRef.current?.getVideoTracks?.()?.[0]
+    if (!track || !supportsHardwareZoom) return
+
+    try {
+      await track.applyConstraints({
+        advanced: [{ zoom: normalized }]
+      })
+    } catch {
+      setSupportsHardwareZoom(false)
+    }
+  }, [supportsHardwareZoom, zoomRange.max, zoomRange.min])
+
+  const handleZoomChange = useCallback((event) => {
+    void applyCameraZoom(event.target.value)
+  }, [applyCameraZoom])
 
   const stopCamera = useCallback((updateState = true) => {
     try {
@@ -92,6 +120,10 @@ export const QrScannerPanel = ({ onSubmitToken, isSubmitting, lastError }) => {
     }
     frameRef.current = 0
     streamRef.current = null
+    zoomRef.current = 1
+    setZoomValue(1)
+    setSupportsHardwareZoom(false)
+    setZoomRange({ min: 1, max: 3, step: 0.1 })
     if (videoRef.current) {
       videoRef.current.srcObject = null
     }
@@ -138,11 +170,26 @@ export const QrScannerPanel = ({ onSubmitToken, isSubmitting, lastError }) => {
             const height = video.videoHeight || 0
             if (canvas && width > 0 && height > 0) {
               const targetWidth = Math.min(640, width)
-              const targetHeight = Math.max(1, Math.round((height / width) * targetWidth))
+              const zoom = Math.max(1, Number(zoomRef.current) || 1)
+              const cropWidth = Math.max(1, Math.round(width / zoom))
+              const cropHeight = Math.max(1, Math.round(height / zoom))
+              const cropX = Math.max(0, Math.round((width - cropWidth) / 2))
+              const cropY = Math.max(0, Math.round((height - cropHeight) / 2))
+              const targetHeight = Math.max(1, Math.round((cropHeight / cropWidth) * targetWidth))
               canvas.width = targetWidth
               canvas.height = targetHeight
               const context = canvas.getContext('2d', { willReadFrequently: true })
-              context.drawImage(video, 0, 0, targetWidth, targetHeight)
+              context.drawImage(
+                video,
+                cropX,
+                cropY,
+                cropWidth,
+                cropHeight,
+                0,
+                0,
+                targetWidth,
+                targetHeight
+              )
               const imageData = context.getImageData(0, 0, targetWidth, targetHeight)
               const result = scanner.decode(imageData.data, targetWidth, targetHeight, {
                 inversionAttempts: 'attemptBoth'
@@ -190,12 +237,39 @@ export const QrScannerPanel = ({ onSubmitToken, isSubmitting, lastError }) => {
         await videoRef.current.play()
       }
 
+      const videoTrack = stream.getVideoTracks?.()?.[0]
+      const capabilities = videoTrack?.getCapabilities?.() || {}
+      const zoomCapability = capabilities?.zoom
+      let hasHardwareZoom = false
+      if (
+        videoTrack &&
+        zoomCapability &&
+        Number.isFinite(Number(zoomCapability.max)) &&
+        Number(zoomCapability.max) > 1
+      ) {
+        const min = Math.max(1, Number(zoomCapability.min) || 1)
+        const max = Math.min(6, Math.max(min, Number(zoomCapability.max) || 3))
+        const step = Number(zoomCapability.step) > 0 ? Number(zoomCapability.step) : 0.1
+        setZoomRange({ min, max, step })
+        setSupportsHardwareZoom(true)
+        zoomRef.current = min
+        setZoomValue(min)
+        hasHardwareZoom = true
+      } else {
+        setZoomRange({ min: 1, max: 3, step: 0.1 })
+        setSupportsHardwareZoom(false)
+        zoomRef.current = 1
+        setZoomValue(1)
+      }
+
       let scanner = null
       if (typeof window !== 'undefined' && typeof window.BarcodeDetector === 'function') {
         try {
-          scanner = {
-            type: 'native',
-            detector: new window.BarcodeDetector({ formats: ['qr_code'] })
+          if (hasHardwareZoom) {
+            scanner = {
+              type: 'native',
+              detector: new window.BarcodeDetector({ formats: ['qr_code'] })
+            }
           }
         } catch {
           scanner = null
@@ -241,7 +315,15 @@ export const QrScannerPanel = ({ onSubmitToken, isSubmitting, lastError }) => {
     <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.2fr),minmax(320px,0.8fr)] gap-4">
       <div className="rounded-2xl border border-slate-200 bg-slate-950 overflow-hidden shadow-sm">
         <div className="relative aspect-[4/3] bg-slate-950">
-          <video ref={videoRef} className="h-full w-full object-cover" muted playsInline />
+          <video
+            ref={videoRef}
+            className="h-full w-full object-cover transition-transform duration-150"
+            style={{
+              transform: supportsHardwareZoom ? 'none' : `scale(${zoomValue})`
+            }}
+            muted
+            playsInline
+          />
           <canvas ref={canvasRef} className="hidden" aria-hidden="true" />
           {cameraState !== 'active' && (
             <div className="absolute inset-0 grid place-items-center bg-slate-950">
@@ -256,32 +338,69 @@ export const QrScannerPanel = ({ onSubmitToken, isSubmitting, lastError }) => {
           )}
           {cameraState === 'active' && (
             <div className="absolute inset-0 pointer-events-none grid place-items-center">
-              <div className="h-48 w-48 rounded-2xl border-4 border-emerald-400 shadow-[0_0_0_9999px_rgba(2,6,23,0.38)]" />
+              <div
+                className="rounded-[30px] border-[5px] border-emerald-400 shadow-[0_0_0_9999px_rgba(2,6,23,0.34)]"
+                style={{
+                  width: 'min(78vw, 420px)',
+                  height: 'min(78vw, 420px)',
+                  maxWidth: '76%',
+                  maxHeight: '82%'
+                }}
+              />
             </div>
           )}
         </div>
 
-        <div className="bg-white p-4 flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={startCamera}
-            disabled={isSubmitting || cameraState === 'starting' || cameraState === 'active'}
-            className="inline-flex items-center gap-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed px-4 py-2.5 text-sm font-bold text-white"
-          >
-            {cameraState === 'starting' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
-            {cameraState === 'starting' ? 'Membuka kamera' : 'Mulai Scan'}
-          </button>
-          <button
-            type="button"
-            onClick={() => stopCamera()}
-            disabled={cameraState !== 'active'}
-            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2.5 text-sm font-bold text-slate-700"
-          >
-            <XCircle className="h-4 w-4" />
-            Stop
-          </button>
-          <div className="ml-auto text-xs font-semibold text-slate-500">
-            {cameraState === 'active' ? 'Scanner aktif' : 'Scanner standby'}
+        <div className="bg-white p-4 space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={startCamera}
+              disabled={isSubmitting || cameraState === 'starting' || cameraState === 'active'}
+              className="inline-flex items-center gap-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed px-4 py-2.5 text-sm font-bold text-white"
+            >
+              {cameraState === 'starting' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
+              {cameraState === 'starting' ? 'Membuka kamera' : 'Mulai Scan'}
+            </button>
+            <button
+              type="button"
+              onClick={() => stopCamera()}
+              disabled={cameraState !== 'active'}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2.5 text-sm font-bold text-slate-700"
+            >
+              <XCircle className="h-4 w-4" />
+              Stop
+            </button>
+            <div className="ml-auto text-xs font-semibold text-slate-500">
+              {cameraState === 'active' ? 'Scanner aktif' : 'Scanner standby'}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <label htmlFor="qr-camera-zoom" className="text-xs font-bold uppercase tracking-wide text-slate-600">
+                Zoom Kamera
+              </label>
+              <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-bold text-slate-700 shadow-sm">
+                {zoomValue.toFixed(1)}x
+              </span>
+            </div>
+            <input
+              id="qr-camera-zoom"
+              type="range"
+              min={zoomRange.min}
+              max={zoomRange.max}
+              step={zoomRange.step}
+              value={zoomValue}
+              onChange={handleZoomChange}
+              disabled={cameraState !== 'active'}
+              className="w-full accent-emerald-500 disabled:opacity-50"
+            />
+            <p className="mt-2 text-[11px] text-slate-500">
+              {supportsHardwareZoom
+                ? 'Menggunakan zoom kamera perangkat.'
+                : 'Zoom visual aktif. Arahkan QR ke kotak hijau besar.'}
+            </p>
           </div>
         </div>
       </div>
