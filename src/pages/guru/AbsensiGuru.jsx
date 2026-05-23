@@ -1204,7 +1204,6 @@ function AbsensiGuru() {
         .order('jam_mulai')
 
       if (periodFilter.tahunAjaran) query = query.eq('tahun_ajaran', periodFilter.tahunAjaran)
-      if (periodFilter.semester) query = query.eq('semester', periodFilter.semester)
 
       const { data, error } = await query
 
@@ -1214,8 +1213,9 @@ function AbsensiGuru() {
         return
       }
 
-      setJadwalAll(data || [])
-      if (selectedScheduleId && !(data || []).some((jadwal) => jadwal.id === selectedScheduleId)) {
+      const rows = data || []
+      setJadwalAll(rows)
+      if (selectedScheduleId && !rows.some((jadwal) => jadwal.id === selectedScheduleId)) {
         setSelectedScheduleId('')
         setCurrentSchedule(null)
         setAllowSelfAbsen(false)
@@ -1295,22 +1295,29 @@ function AbsensiGuru() {
         jadwalHariIni: []
       }
 
+    const selectedSemester = String(periodFilter.semester || '').trim()
     const kelasSet = new Set()
     const jadwalByHariTemp = {}
     const todayDayName = getDayName(getToday())
     const selectedDayName = getDayName(tgl)
+    const periodSchedules = selectedSemester
+      ? jadwalAll.filter((j) => String(j.semester || '').trim() === selectedSemester)
+      : jadwalAll
 
-    const jadwalHariIniTemp = jadwalAll.filter(j => j.hari === todayDayName)
+    const jadwalHariIniTemp = periodSchedules.filter(j => j.hari === todayDayName)
 
     jadwalAll.forEach(j => {
       if (j.kelas_id) kelasSet.add(j.kelas_id)
+    })
+
+    periodSchedules.forEach(j => {
       if (!jadwalByHariTemp[j.hari]) jadwalByHariTemp[j.hari] = []
       jadwalByHariTemp[j.hari].push(j)
     })
 
     const schedulesList = []
     const schedulesForActiveClassTemp = kelas
-      ? jadwalAll.filter(j => j.kelas_id === kelas)
+      ? periodSchedules.filter(j => j.kelas_id === kelas)
       : []
 
     if (kelas) {
@@ -1339,7 +1346,7 @@ function AbsensiGuru() {
       jadwalByHari: jadwalByHariTemp,
       jadwalHariIni: jadwalHariIniTemp
     }
-  }, [jadwalAll, user?.id, kelas, currentDateTime, tgl])
+  }, [jadwalAll, user?.id, kelas, currentDateTime, tgl, periodFilter.semester])
 
   const jadwalForJamKosongHariIni = useMemo(() => {
     if (!kelas || !jadwalAll.length) return []
@@ -2692,6 +2699,11 @@ function AbsensiGuru() {
                     </option>
                   ))}
                 </select>
+                {!myKelasList.length && (
+                  <p className="mt-2 text-xs font-medium text-amber-700">
+                    Belum ada kelas dari jadwal mengajar pada tahun ajaran ini.
+                  </p>
+                )}
               </div>
               {view === 'absen' && (
                 <>
@@ -2718,6 +2730,11 @@ function AbsensiGuru() {
                         </option>
                       ))}
                     </select>
+                    {kelas && schedulesForSelectedClass.length === 0 && (
+                      <p className="mt-2 text-xs font-medium text-amber-700">
+                        Kelas tersedia, tetapi jadwal untuk tanggal dan Semester {periodFilter.semester || '-'} belum ada.
+                      </p>
+                    )}
                   </div>
                 </>
               )}
