@@ -40,6 +40,12 @@ import {
   SEMESTER_GANJIL,
   toMonthInputValue
 } from '../../utils/academicPeriod'
+import {
+  SCHEDULE_SCOPE_OPTIONS,
+  SCHEDULE_SCOPE_YEAR,
+  normalizeScheduleScope,
+  scheduleScopeLabel
+} from '../../utils/schedulePeriodScope'
 
 const SUPABASE_BUCKET = 'profile-photos'
 const LOGO_FILE_PATH = 'logo_sekolah.png'
@@ -66,7 +72,8 @@ const SETTINGS_SELECT_COLUMNS = [
   'periode_ganjil_mulai',
   'periode_ganjil_selesai',
   'periode_genap_mulai',
-  'periode_genap_selesai'
+  'periode_genap_selesai',
+  'jadwal_periode_berlaku'
 ].join(',')
 const SETTINGS_QUERY_KEY = ['admin', 'settings', 'system']
 const SETTINGS_STALE_TIME = 5 * 60 * 1000
@@ -217,7 +224,8 @@ const resolvePeriodForm = (row = {}) => {
     periodeGanjilMulai,
     periodeGanjilSelesai,
     periodeGenapMulai,
-    periodeGenapSelesai
+    periodeGenapSelesai,
+    jadwalPeriodeBerlaku: normalizeScheduleScope(row.jadwal_periode_berlaku)
   }
 }
 
@@ -249,7 +257,8 @@ const buildPeriodPayloadFromForm = (form = {}) => {
     periode_ganjil_mulai: form.periodeGanjilMulai || '',
     periode_ganjil_selesai: form.periodeGanjilSelesai || '',
     periode_genap_mulai: form.periodeGenapMulai || '',
-    periode_genap_selesai: form.periodeGenapSelesai || ''
+    periode_genap_selesai: form.periodeGenapSelesai || '',
+    jadwal_periode_berlaku: normalizeScheduleScope(form.jadwalPeriodeBerlaku || SCHEDULE_SCOPE_YEAR)
   }
 }
 
@@ -261,7 +270,8 @@ const periodPayloadChanged = (nextPayload, previousPayload) => [
   'periode_ganjil_mulai',
   'periode_ganjil_selesai',
   'periode_genap_mulai',
-  'periode_genap_selesai'
+  'periode_genap_selesai',
+  'jadwal_periode_berlaku'
 ].some((key) => String(nextPayload?.[key] || '') !== String(previousPayload?.[key] || ''))
 
 /**
@@ -951,6 +961,11 @@ export default function APengaturan() {
 
   function handlePeriodChange(e) {
     const { name, value } = e.target
+    if (name === 'jadwalPeriodeBerlaku') {
+      setPeriodForm((prev) => ({ ...prev, jadwalPeriodeBerlaku: normalizeScheduleScope(value) }))
+      return
+    }
+
     if (name === 'tahunAjaran') {
       const nextYear = normalizeAcademicYear(value) || value
       if (nextYear === persistedPeriodForm.tahunAjaran) {
@@ -1134,7 +1149,7 @@ export default function APengaturan() {
         tone: 'warning',
         details: [
           'Perubahan semester tidak memindahkan kelas dan tidak membuat riwayat kelas baru.',
-          'Jadwal baru default berlaku satu tahun ajaran penuh. Admin bisa memilih jadwal khusus Ganjil/Genap jika sekolah membutuhkannya.',
+          `Masa berlaku jadwal baru: ${scheduleScopeLabel(nextPayload.jadwal_periode_berlaku)}.`,
           'Halaman tugas, quiz, laporan, dan storage tetap bisa menampilkan satu tahun ajaran penuh lewat filter masing-masing.',
           `Periode aktif setelah disimpan: ${tahunAjaran} - Semester ${semester}.`
         ]
@@ -1152,6 +1167,7 @@ export default function APengaturan() {
         periode_ganjil_selesai: ganjilPreview.endsAt,
         periode_genap_mulai: genapPreview.startsAt,
         periode_genap_selesai: genapPreview.endsAt,
+        jadwal_periode_berlaku: nextPayload.jadwal_periode_berlaku,
         auto_rollover: yearMovesForwardOneStep,
         carry_eskul_members: yearMovesForwardOneStep && carryEskulMembers
       }
@@ -2024,7 +2040,7 @@ export default function APengaturan() {
                 </div>
               </div>
 
-              <div className="grid w-full gap-3 sm:grid-cols-3 xl:w-auto">
+              <div className="grid w-full gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:w-auto">
                 <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3">
                   <p className="text-xs font-semibold text-emerald-700">Tahun Ajaran</p>
                   <p className="mt-1 text-sm font-bold text-slate-900">{activeAcademicPeriod.tahunAjaran}</p>
@@ -2037,11 +2053,17 @@ export default function APengaturan() {
                   <p className="text-xs font-semibold text-emerald-700">Rentang Periode</p>
                   <p className="mt-1 text-sm font-bold text-slate-900">{activeAcademicPeriod.academicYearRangeLabel || '-'}</p>
                 </div>
+                <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3">
+                  <p className="text-xs font-semibold text-emerald-700">Masa Berlaku Jadwal</p>
+                  <p className="mt-1 text-sm font-bold text-slate-900">
+                    {scheduleScopeLabel(periodForm.jadwalPeriodeBerlaku)}
+                  </p>
+                </div>
               </div>
             </div>
 
             <form onSubmit={(event) => { event.preventDefault(); saveAcademicPeriod() }} className="mt-6 rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-[220px_220px_minmax(0,1fr)]">
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-[220px_220px_240px_minmax(0,1fr)]">
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-2">Tahun Ajaran</label>
                   <select
@@ -2069,6 +2091,23 @@ export default function APengaturan() {
                     <option value={SEMESTER_GANJIL}>Ganjil</option>
                     <option value={SEMESTER_GENAP}>Genap</option>
                   </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Masa Berlaku Jadwal</label>
+                  <select
+                    name="jadwalPeriodeBerlaku"
+                    value={periodForm.jadwalPeriodeBerlaku || SCHEDULE_SCOPE_YEAR}
+                    onChange={handlePeriodChange}
+                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                  >
+                    {SCHEDULE_SCOPE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Dipakai sebagai default jadwal baru. Pilih 1 Tahun Ajaran agar jadwal tampil di Ganjil dan Genap.
+                  </p>
                 </div>
 
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">

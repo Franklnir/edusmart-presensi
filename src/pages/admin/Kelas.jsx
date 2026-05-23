@@ -11,7 +11,6 @@ import { verifyCurrentUserPassword as verifyPassword } from '../../services/auth
 import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 import { loadExcelJsBrowser } from '../../utils/excelBrowser'
 import {
-  SCHEDULE_SCOPE_OPTIONS,
   SCHEDULE_SCOPE_YEAR,
   doScheduleScopesOverlap,
   filterSchedulesForSemester,
@@ -349,6 +348,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
   const [jadwalLoadedKey, setJadwalLoadedKey] = useState('')
   const [filterHari, setFilterHari] = useState('')
   const [academicPeriod, setAcademicPeriod] = useState(() => resolveAcademicPeriod())
+  const [scheduleDefaultScope, setScheduleDefaultScope] = useState(SCHEDULE_SCOPE_YEAR)
   const [deletedHistoryOpen, setDeletedHistoryOpen] = useState(false)
   const [deletedHistoryLoading, setDeletedHistoryLoading] = useState(false)
   const [deletedClassHistories, setDeletedClassHistories] = useState([])
@@ -604,7 +604,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
     try {
       const { data, error } = await supabase
         .from('settings')
-        .select('id, tahun_ajaran, semester_aktif, periode_mulai, periode_selesai, periode_ganjil_mulai, periode_ganjil_selesai, periode_genap_mulai, periode_genap_selesai')
+        .select('id, tahun_ajaran, semester_aktif, periode_mulai, periode_selesai, periode_ganjil_mulai, periode_ganjil_selesai, periode_genap_mulai, periode_genap_selesai, jadwal_periode_berlaku')
         .order('id')
         .limit(1)
         .maybeSingle()
@@ -613,6 +613,9 @@ export default function AKelas({ initialTab = 'kelas' }) {
 
       const resolved = resolveAcademicPeriod(data || {})
       setAcademicPeriod(resolved)
+      const defaultScope = normalizeScheduleScope(data?.jadwal_periode_berlaku)
+      setScheduleDefaultScope(defaultScope)
+      setForm((prev) => ({ ...prev, periodeBerlaku: defaultScope }))
     } catch (error) {
       console.error('Error loading settings:', error)
       pushToast('error', 'Gagal memuat tahun ajaran aktif')
@@ -1649,7 +1652,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
     const jamMulai = toTimeHHMM(form.jamMulai)
     const jamSelesai = toTimeHHMM(form.jamSelesai)
     const mapel = normalizeMapelName(form.mapel)
-    const periodeBerlaku = normalizeScheduleScope(form.periodeBerlaku)
+    const periodeBerlaku = normalizeScheduleScope(form.periodeBerlaku || scheduleDefaultScope)
     const scheduleSemester = scheduleScopeToSemester(periodeBerlaku)
 
     // Validasi
@@ -1705,7 +1708,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
         guruId: '',
         jamMulai: '',
         jamSelesai: '',
-        periodeBerlaku: SCHEDULE_SCOPE_YEAR
+        periodeBerlaku: scheduleDefaultScope
       })
       invalidateAcademicQueries()
       await loadJadwal()
@@ -2735,6 +2738,9 @@ export default function AKelas({ initialTab = 'kelas' }) {
 	                        <p className="mt-2 text-xs text-orange-700">
 	                          Jadwal tahunan selalu tampil. Jadwal khusus semester hanya tampil pada semester yang sesuai.
 	                        </p>
+                          <p className="mt-1 text-xs text-orange-700">
+                            Default jadwal baru: {scheduleScopeLabel(scheduleDefaultScope)}. Ubah dari Pengaturan Akademik.
+                          </p>
                       </div>
                       <AcademicPeriodArchiveFilter
                         activeAcademicPeriod={activeSchedulePeriod}
@@ -2936,6 +2942,9 @@ export default function AKelas({ initialTab = 'kelas' }) {
                         </svg>
                         <span>Tambah Jadwal Baru</span>
                       </h4>
+                      <p className="mb-4 rounded-lg border border-blue-100 bg-white/70 px-3 py-2 text-xs font-medium text-blue-800">
+                        Masa berlaku mengikuti Pengaturan Akademik: {scheduleScopeLabel(scheduleDefaultScope)}.
+                      </p>
                       <form
                         onSubmit={tambahJadwal}
 	                        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4"
@@ -2980,20 +2989,8 @@ export default function AKelas({ initialTab = 'kelas' }) {
                             onChange={e => setForm(f => ({ ...f, guruId: e.target.value }))}
                           >
                             <option value="">Pilih guru (opsional)</option>
-                            {guruList.map(g => (
-                              <option key={g.id} value={g.id}>{g.label || g.name}</option>
-	                            ))}
-	                          </select>
-	                        </div>
-	                        <div>
-	                          <label className="block text-xs font-medium text-blue-800 mb-1">Berlaku</label>
-	                          <select
-	                            className="block w-full px-3 py-2 text-sm border border-blue-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm text-gray-900"
-	                            value={form.periodeBerlaku}
-	                            onChange={e => setForm(f => ({ ...f, periodeBerlaku: e.target.value }))}
-	                          >
-	                            {SCHEDULE_SCOPE_OPTIONS.map((option) => (
-	                              <option key={option.value} value={option.value}>{option.label}</option>
+	                            {guruList.map(g => (
+	                              <option key={g.id} value={g.id}>{g.label || g.name}</option>
 	                            ))}
 	                          </select>
 	                        </div>
@@ -3128,15 +3125,9 @@ export default function AKelas({ initialTab = 'kelas' }) {
 	                                    </select>
 	                                  </td>
 	                                  <td className="px-6 py-4 whitespace-nowrap">
-	                                    <select
-	                                      className="block w-full px-3 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
-	                                      value={editData.periodeBerlaku || SCHEDULE_SCOPE_YEAR}
-	                                      onChange={e => setEditData(d => ({ ...d, periodeBerlaku: e.target.value }))}
-	                                    >
-	                                      {SCHEDULE_SCOPE_OPTIONS.map((option) => (
-	                                        <option key={option.value} value={option.value}>{option.label}</option>
-	                                      ))}
-	                                    </select>
+                                      <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
+                                        {scheduleScopeLabel(editData.periodeBerlaku, { short: true })}
+                                      </span>
 	                                  </td>
 	                                  <td className="px-6 py-4 whitespace-nowrap text-right space-x-2">
                                     <button

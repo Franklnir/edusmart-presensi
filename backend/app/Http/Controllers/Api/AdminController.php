@@ -784,6 +784,7 @@ class AdminController extends ApiController
         $payload = $request->all();
         $tahunAjaran = AcademicPeriod::normalizeAcademicYear($payload['tahun_ajaran'] ?? null);
         $semester = AcademicPeriod::normalizeSemester($payload['semester_aktif'] ?? null);
+        $jadwalPeriodeBerlaku = $this->normalizeSchedulePeriodScope($payload['jadwal_periode_berlaku'] ?? null);
         if ($tahunAjaran === null || $semester === null) {
             return $this->deny('Tahun ajaran atau semester belum valid.', 422);
         }
@@ -832,6 +833,7 @@ class AdminController extends ApiController
             'periode_ganjil_selesai' => $ganjilPeriod['ends_at'],
             'periode_genap_mulai' => $genapPeriod['starts_at'],
             'periode_genap_selesai' => $genapPeriod['ends_at'],
+            'jadwal_periode_berlaku' => $jadwalPeriodeBerlaku,
         ];
 
         $existing = $this->firstTenantRow('settings', $tenantId);
@@ -2376,6 +2378,17 @@ class AdminController extends ApiController
         }
 
         return $select->first();
+    }
+
+    private function normalizeSchedulePeriodScope(mixed $value): string
+    {
+        $raw = strtolower(trim((string) $value));
+
+        return match ($raw) {
+            'ganjil', 'gasal', 'semester_ganjil', 'semester ganjil', '1' => 'ganjil',
+            'genap', 'semester_genap', 'semester genap', '2' => 'genap',
+            default => 'tahunan',
+        };
     }
 
     private function rolloverAcademicYearData(
