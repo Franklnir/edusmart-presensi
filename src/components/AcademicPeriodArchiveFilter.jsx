@@ -1,14 +1,6 @@
 import React, { useEffect, useId, useMemo, useState } from 'react'
 import { CalendarDays, X } from 'lucide-react'
 
-const normalizeSemesterOptions = (options = []) => (
-  options.map((option) => (
-    typeof option === 'string'
-      ? { value: option, label: option }
-      : option
-  )).filter((option) => option?.value)
-)
-
 const normalizeYearOptions = (options = []) => (
   options.map((option) => (
     typeof option === 'string'
@@ -21,47 +13,34 @@ export default function AcademicPeriodArchiveFilter({
   activeAcademicPeriod,
   periodFilter,
   academicYearOptions = [],
-  semesterOptions = [],
   setAcademicYear,
-  setSemester,
   title = 'Periode Data',
   className = '',
   compact = false,
   disabled = false
 }) {
   const selectedYear = periodFilter?.tahunAjaran || activeAcademicPeriod?.tahunAjaran || ''
-  const selectedSemester = periodFilter?.semester || activeAcademicPeriod?.semester || ''
   const generatedId = useId().replace(/:/g, '')
   const periodButtonId = `academic-period-button-${generatedId}`
   const dialogTitleId = `academic-period-filter-title-${generatedId}`
   const academicYearSelectId = `academic-period-year-${generatedId}`
-  const isArchive =
-    selectedYear !== (activeAcademicPeriod?.tahunAjaran || '') ||
-    selectedSemester !== (activeAcademicPeriod?.semester || '')
+  const isArchive = selectedYear !== (activeAcademicPeriod?.tahunAjaran || '')
   const normalizedYearOptions = useMemo(
     () => normalizeYearOptions(academicYearOptions),
     [academicYearOptions]
   )
-  const normalizedSemesterOptions = useMemo(
-    () => normalizeSemesterOptions(semesterOptions),
-    [semesterOptions]
-  )
   const [isOpen, setIsOpen] = useState(false)
   const [draft, setDraft] = useState({
-    tahunAjaran: selectedYear,
-    semester: selectedSemester
+    tahunAjaran: selectedYear
   })
-  const draftIsArchive =
-    draft.tahunAjaran !== (activeAcademicPeriod?.tahunAjaran || '') ||
-    draft.semester !== (activeAcademicPeriod?.semester || '')
+  const draftIsArchive = draft.tahunAjaran !== (activeAcademicPeriod?.tahunAjaran || '')
 
   useEffect(() => {
     if (!isOpen) return
     setDraft({
-      tahunAjaran: selectedYear,
-      semester: selectedSemester
+      tahunAjaran: selectedYear
     })
-  }, [isOpen, selectedSemester, selectedYear])
+  }, [isOpen, selectedYear])
 
   useEffect(() => {
     if (!isOpen) return undefined
@@ -77,22 +56,19 @@ export default function AcademicPeriodArchiveFilter({
   const handleOpen = () => {
     if (disabled) return
     setDraft({
-      tahunAjaran: selectedYear,
-      semester: selectedSemester
+      tahunAjaran: selectedYear
     })
     setIsOpen(true)
   }
 
   const handleUseActivePeriod = () => {
     setDraft({
-      tahunAjaran: activeAcademicPeriod?.tahunAjaran || selectedYear,
-      semester: activeAcademicPeriod?.semester || selectedSemester
+      tahunAjaran: activeAcademicPeriod?.tahunAjaran || selectedYear
     })
   }
 
   const handleApply = () => {
     if (draft.tahunAjaran !== selectedYear) setAcademicYear?.(draft.tahunAjaran)
-    if (draft.semester !== selectedSemester) setSemester?.(draft.semester)
     setIsOpen(false)
   }
 
@@ -115,7 +91,7 @@ export default function AcademicPeriodArchiveFilter({
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
               <div className="truncate text-sm font-bold text-slate-900">
-                {selectedYear || '-'}{selectedSemester ? ` - Semester ${selectedSemester}` : ''}
+                {selectedYear || '-'}
               </div>
               <div className="mt-0.5 text-[11px] font-medium text-slate-500">
                 {isArchive ? 'Periode arsip dipilih' : 'Mengikuti periode aktif sekolah'}
@@ -157,7 +133,7 @@ export default function AcademicPeriodArchiveFilter({
                     {title}
                   </h3>
                   <p className="mt-1 text-xs leading-5 text-slate-500">
-                    Pilihan ini hanya berlaku untuk halaman ini. Tahun ajaran adalah periode utama; semester dipakai saat data memang dipisah per semester.
+                    Pilihan ini hanya berlaku untuk halaman ini. Tahun ajaran menampilkan seluruh rentang Ganjil dan Genap dalam satu periode.
                   </p>
                 </div>
               </div>
@@ -180,10 +156,10 @@ export default function AcademicPeriodArchiveFilter({
                         Periode Aktif Sekolah
                       </div>
                       <div className="mt-1 text-sm font-extrabold text-slate-900">
-                        {activeAcademicPeriod?.tahunAjaran || '-'}{activeAcademicPeriod?.semester ? ` - Semester ${activeAcademicPeriod.semester}` : ''}
+                        {activeAcademicPeriod?.tahunAjaran || '-'}
                       </div>
                       <div className="mt-1 text-xs leading-5 text-slate-600">
-                        {activeAcademicPeriod?.rangeLabel || 'Mengikuti pengaturan akademik sekolah.'}
+                        {activeAcademicPeriod?.academicYearRangeLabel || activeAcademicPeriod?.rangeLabel || 'Mengikuti pengaturan akademik sekolah.'}
                       </div>
                     </div>
                     <span className="shrink-0 rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-bold text-emerald-700">
@@ -192,7 +168,7 @@ export default function AcademicPeriodArchiveFilter({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-4">
                   <div>
                     <label htmlFor={academicYearSelectId} className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">
                       Tahun Ajaran
@@ -213,35 +189,6 @@ export default function AcademicPeriodArchiveFilter({
                         </option>
                       ))}
                     </select>
-                  </div>
-
-                  <div>
-                    <div className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">
-                      Semester
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      {normalizedSemesterOptions.map((option) => {
-                        const selected = draft.semester === option.value
-                        return (
-                          <button
-                            key={option.value}
-                            type="button"
-                            onClick={() => setDraft((current) => ({
-                              ...current,
-                              semester: option.value
-                            }))}
-                            className={`min-h-[46px] rounded-2xl border px-3 text-sm font-bold transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-                              selected
-                                ? 'border-indigo-500 bg-indigo-600 text-white shadow-sm'
-                                : 'border-slate-300 bg-white text-slate-700 hover:border-indigo-300 hover:bg-indigo-50'
-                            }`}
-                            aria-pressed={selected}
-                          >
-                            {option.label}
-                          </button>
-                        )
-                      })}
-                    </div>
                   </div>
                 </div>
 

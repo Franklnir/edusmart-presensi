@@ -1,28 +1,36 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import {
-  SEMESTER_GANJIL,
-  SEMESTER_GENAP,
   generateAcademicYearOptions,
+  getCurrentAcademicPeriod,
   normalizeAcademicYear,
-  normalizeSemester,
   resolveAcademicPeriod
 } from '../utils/academicPeriod'
 
 const toPeriodFilter = (period) => ({
   tahunAjaran: period.tahunAjaran,
-  semester: period.semester
+  semester: ''
 })
 
 const DEFAULT_FILTER_STORAGE_KEY = 'edusmart.default.periodFilter'
 
+const withCalendarSemester = (period) => {
+  const current = getCurrentAcademicPeriod()
+  if (period?.tahunAjaran !== current.tahunAjaran) return period
+
+  return {
+    ...period,
+    semester: current.semester,
+    label: `${period.tahunAjaran} - Semester ${current.semester}`
+  }
+}
+
 const normalizeStoredPeriodFilter = (value, fallback) => {
   if (!value || typeof value !== 'object') return fallback
   const tahunAjaran = normalizeAcademicYear(value.tahunAjaran || value.tahun_ajaran)
-  const semester = normalizeSemester(value.semester)
-  if (!tahunAjaran || !semester) return fallback
+  if (!tahunAjaran) return fallback
 
-  return { tahunAjaran, semester }
+  return { tahunAjaran, semester: '' }
 }
 
 const readStoredPeriodFilter = (storageKey, fallback) => {
@@ -41,8 +49,7 @@ const writeStoredPeriodFilter = (storageKey, periodFilter, activeAcademicPeriod)
 
   try {
     const followsActive =
-      periodFilter?.tahunAjaran === activeAcademicPeriod?.tahunAjaran &&
-      periodFilter?.semester === activeAcademicPeriod?.semester
+      periodFilter?.tahunAjaran === activeAcademicPeriod?.tahunAjaran
 
     if (followsActive) {
       window.localStorage.removeItem(storageKey)
@@ -83,12 +90,10 @@ export default function useActiveAcademicPeriod({
       setActiveAcademicPeriod(resolved)
       setPeriodFilter((prev) => {
         const year = normalizeAcademicYear(prev.tahunAjaran)
-        const semester = normalizeSemester(prev.semester)
-        const isFallbackPeriod = year === fallback.tahunAjaran && semester === fallback.semester
+        const isFallbackPeriod = year === fallback.tahunAjaran
         const currentActive = activeAcademicPeriodRef.current
-        const isPreviousActive =
-          year === currentActive.tahunAjaran && semester === currentActive.semester
-        if (year && semester && !isFallbackPeriod && !isPreviousActive) return prev
+        const isPreviousActive = year === currentActive.tahunAjaran
+        if (year && !isFallbackPeriod && !isPreviousActive) return { ...prev, semester: '' }
         return toPeriodFilter(resolved)
       })
     }
@@ -105,15 +110,14 @@ export default function useActiveAcademicPeriod({
         if (error) throw error
         if (cancelled) return
 
-        const resolved = resolveAcademicPeriod(data || {})
+        const resolved = withCalendarSemester(resolveAcademicPeriod(data || {}))
         applyResolvedPeriod(resolved)
       } catch (error) {
         if (!cancelled) {
           setActiveAcademicPeriod(fallback)
           setPeriodFilter((prev) => {
             const year = normalizeAcademicYear(prev.tahunAjaran)
-            const semester = normalizeSemester(prev.semester)
-            return year && semester ? prev : toPeriodFilter(fallback)
+            return year ? { ...prev, semester: '' } : toPeriodFilter(fallback)
           })
         }
       }
@@ -124,7 +128,7 @@ export default function useActiveAcademicPeriod({
       .channel('active_academic_period_settings')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, (payload) => {
         if (cancelled) return
-        const resolved = resolveAcademicPeriod(payload.new || {})
+        const resolved = withCalendarSemester(resolveAcademicPeriod(payload.new || {}))
         applyResolvedPeriod(resolved)
       })
       .subscribe()
@@ -138,7 +142,7 @@ export default function useActiveAcademicPeriod({
   const resolvedPeriod = useMemo(
     () => resolveAcademicPeriod({
       tahun_ajaran: periodFilter.tahunAjaran || activeAcademicPeriod.tahunAjaran,
-      semester_aktif: periodFilter.semester || activeAcademicPeriod.semester,
+      semester_aktif: activeAcademicPeriod.semester,
       periode_mulai: activeAcademicPeriod.periodeMulai,
       periode_selesai: activeAcademicPeriod.periodeSelesai,
       periode_ganjil_mulai: activeAcademicPeriod.periodeGanjilMulai,
@@ -155,7 +159,6 @@ export default function useActiveAcademicPeriod({
       activeAcademicPeriod.periodeGenapMulai,
       activeAcademicPeriod.periodeGenapSelesai,
       activeAcademicPeriod.tahunAjaran,
-      periodFilter.semester,
       periodFilter.tahunAjaran
     ]
   )
@@ -169,6 +172,7 @@ export default function useActiveAcademicPeriod({
 
     return {
       ...resolvedPeriod,
+      semester: '',
       months,
       monthNumbers: months.map((item) => item.month),
       monthLabels: months.map((item) => item.label),
@@ -189,14 +193,10 @@ export default function useActiveAcademicPeriod({
   const setAcademicYear = useCallback((tahunAjaran) => {
     const normalized = normalizeAcademicYear(tahunAjaran)
     if (!normalized) return
-    setPeriodFilter((prev) => ({ ...prev, tahunAjaran: normalized }))
+    setPeriodFilter((prev) => ({ ...prev, tahunAjaran: normalized, semester: '' }))
   }, [])
 
-  const setSemester = useCallback((semester) => {
-    const normalized = normalizeSemester(semester)
-    if (!normalized) return
-    setPeriodFilter((prev) => ({ ...prev, semester: normalized }))
-  }, [])
+  const setSemester = useCallback(() => {}, [])
 
   const resetToActivePeriod = useCallback(() => {
     setPeriodFilter(toPeriodFilter(activeAcademicPeriod))
@@ -214,24 +214,22 @@ export default function useActiveAcademicPeriod({
   const applySemesterPeriodFilters = useCallback(
     (query) => {
       let next = query
-      if (resolvedPeriod.tahunAjaran) next = next.eq('tahun_ajaran', resolvedPeriod.tahunAjaran)
-      if (resolvedPeriod.semester) next = next.eq('semester', resolvedPeriod.semester)
+      if (yearScopedPeriod.tahunAjaran) next = next.eq('tahun_ajaran', yearScopedPeriod.tahunAjaran)
       return next
     },
-    [resolvedPeriod.semester, resolvedPeriod.tahunAjaran]
+    [yearScopedPeriod.tahunAjaran]
   )
 
   return {
     activeAcademicPeriod,
     periodFilter,
     period: yearScopedPeriod,
-    dateFilterPeriod: resolvedPeriod,
-    activeSemesterPeriod: resolvedPeriod,
+    dateFilterPeriod: yearScopedPeriod,
+    activeSemesterPeriod: yearScopedPeriod,
     isViewingArchivePeriod:
-      resolvedPeriod.tahunAjaran !== activeAcademicPeriod.tahunAjaran ||
-      resolvedPeriod.semester !== activeAcademicPeriod.semester,
+      yearScopedPeriod.tahunAjaran !== activeAcademicPeriod.tahunAjaran,
     academicYearOptions,
-    semesterOptions: [SEMESTER_GANJIL, SEMESTER_GENAP],
+    semesterOptions: [],
     setAcademicYear,
     setSemester,
     setPeriodFilter,
@@ -243,12 +241,12 @@ export default function useActiveAcademicPeriod({
       semester: activeAcademicPeriod.semester
     },
     selectedAcademicPeriodPayload: {
-      tahun_ajaran: resolvedPeriod.tahunAjaran,
-      semester: resolvedPeriod.semester
+      tahun_ajaran: yearScopedPeriod.tahunAjaran,
+      semester: ''
     },
     academicPeriodPayload: {
-      tahun_ajaran: resolvedPeriod.tahunAjaran,
-      semester: resolvedPeriod.semester
+      tahun_ajaran: yearScopedPeriod.tahunAjaran,
+      semester: activeAcademicPeriod.semester
     }
   }
 }

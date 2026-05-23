@@ -616,14 +616,10 @@ class AdminController extends ApiController
         $requestedClassId = $this->queryText($request, 'class_id');
         $studentStatus = strtolower($this->queryText($request, 'student_status'));
         $tahunAjaran = $this->queryText($request, 'tahun_ajaran');
-        $semester = $this->queryText($request, 'semester');
 
         $settings = $this->firstTenantRow('settings', $tenantId);
         if ($tahunAjaran === '') {
             $tahunAjaran = (string) ($settings?->tahun_ajaran ?? '');
-        }
-        if ($semester === '') {
-            $semester = (string) ($settings?->semester_aktif ?? '');
         }
 
         $classes = $this->tenantQuery('kelas', $tenantId)
@@ -713,22 +709,6 @@ class AdminController extends ApiController
             if ($tahunAjaran !== '' && Schema::hasColumn('jadwal', 'tahun_ajaran')) {
                 $scheduleQuery->where('tahun_ajaran', $tahunAjaran);
             }
-            if ($semester !== '' && Schema::hasColumn('jadwal', 'periode_berlaku')) {
-                $scope = strtolower($semester);
-                $scheduleQuery->where(function ($query) use ($scope) {
-                    $query->whereNull('periode_berlaku')
-                        ->orWhere('periode_berlaku', '')
-                        ->orWhere('periode_berlaku', 'tahunan')
-                        ->orWhere('periode_berlaku', $scope);
-                });
-            } elseif ($semester !== '' && Schema::hasColumn('jadwal', 'semester')) {
-                $scheduleQuery->where(function ($query) use ($semester) {
-                    $query->whereNull('semester')
-                        ->orWhere('semester', '')
-                        ->orWhere('semester', $semester);
-                });
-            }
-
             $schedule = $scheduleQuery
                 ->orderBy('hari')
                 ->orderBy('jam_mulai')
@@ -784,7 +764,7 @@ class AdminController extends ApiController
         $payload = $request->all();
         $tahunAjaran = AcademicPeriod::normalizeAcademicYear($payload['tahun_ajaran'] ?? null);
         $semester = AcademicPeriod::normalizeSemester($payload['semester_aktif'] ?? null);
-        $jadwalPeriodeBerlaku = $this->normalizeSchedulePeriodScope($payload['jadwal_periode_berlaku'] ?? null);
+        $jadwalPeriodeBerlaku = 'tahunan';
         if ($tahunAjaran === null || $semester === null) {
             return $this->deny('Tahun ajaran atau semester belum valid.', 422);
         }
@@ -2395,17 +2375,6 @@ class AdminController extends ApiController
         }
 
         return $select->first();
-    }
-
-    private function normalizeSchedulePeriodScope(mixed $value): string
-    {
-        $raw = strtolower(trim((string) $value));
-
-        return match ($raw) {
-            'ganjil', 'gasal', 'semester_ganjil', 'semester ganjil', '1' => 'ganjil',
-            'genap', 'semester_genap', 'semester genap', '2' => 'genap',
-            default => 'tahunan',
-        };
     }
 
     private function rolloverAcademicYearData(

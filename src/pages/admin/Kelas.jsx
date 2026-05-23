@@ -2734,12 +2734,12 @@ export default function AKelas({ initialTab = 'kelas' }) {
                       </div>
                       <div className="rounded-xl border border-orange-100 bg-orange-50 p-4 text-sm text-orange-900">
 	                        <p className="font-semibold">Periode jadwal</p>
-	                        <p className="mt-1">{schedulePeriod.tahunAjaran} - Tampilan Semester {schedulePeriod.semester}</p>
+	                        <p className="mt-1">{schedulePeriod.tahunAjaran} - 1 Tahun Ajaran</p>
 	                        <p className="mt-2 text-xs text-orange-700">
-	                          Jadwal tahunan selalu tampil. Jadwal khusus semester hanya tampil pada semester yang sesuai.
+	                          Jadwal berlaku penuh untuk Ganjil dan Genap dalam tahun ajaran yang dipilih.
 	                        </p>
                           <p className="mt-1 text-xs text-orange-700">
-                            Default jadwal baru: {scheduleScopeLabel(scheduleDefaultScope)}. Ubah dari Pengaturan Akademik.
+                            Default jadwal baru: {scheduleScopeLabel(scheduleDefaultScope)}.
                           </p>
                       </div>
                       <AcademicPeriodArchiveFilter

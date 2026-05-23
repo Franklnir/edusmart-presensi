@@ -40,12 +40,7 @@ import {
   SEMESTER_GANJIL,
   toMonthInputValue
 } from '../../utils/academicPeriod'
-import {
-  SCHEDULE_SCOPE_OPTIONS,
-  SCHEDULE_SCOPE_YEAR,
-  normalizeScheduleScope,
-  scheduleScopeLabel
-} from '../../utils/schedulePeriodScope'
+import { SCHEDULE_SCOPE_YEAR } from '../../utils/schedulePeriodScope'
 
 const SUPABASE_BUCKET = 'profile-photos'
 const LOGO_FILE_PATH = 'logo_sekolah.png'
@@ -225,7 +220,7 @@ const resolvePeriodForm = (row = {}) => {
     periodeGanjilSelesai,
     periodeGenapMulai,
     periodeGenapSelesai,
-    jadwalPeriodeBerlaku: normalizeScheduleScope(row.jadwal_periode_berlaku)
+    jadwalPeriodeBerlaku: SCHEDULE_SCOPE_YEAR
   }
 }
 
@@ -249,9 +244,16 @@ const getAcademicYearRangeFromPeriodForm = (form = {}) => ({
   endsAt: form.periodeGenapSelesai || ''
 })
 
+const resolveOperationalSemesterFromForm = (form = {}) => {
+  const tahunAjaran = normalizeAcademicYear(form.tahunAjaran)
+  const current = getCurrentAcademicPeriod()
+  if (tahunAjaran && tahunAjaran === current.tahunAjaran) return current.semester
+  return normalizeSemester(form.semester) || SEMESTER_GANJIL
+}
+
 const buildPeriodPayloadFromForm = (form = {}) => {
   const tahunAjaran = normalizeAcademicYear(form.tahunAjaran)
-  const semester = normalizeSemester(form.semester)
+  const semester = resolveOperationalSemesterFromForm(form)
   const academicYearRange = getAcademicYearRangeFromPeriodForm(form)
 
   return {
@@ -263,7 +265,7 @@ const buildPeriodPayloadFromForm = (form = {}) => {
     periode_ganjil_selesai: form.periodeGanjilSelesai || '',
     periode_genap_mulai: form.periodeGenapMulai || '',
     periode_genap_selesai: form.periodeGenapSelesai || '',
-    jadwal_periode_berlaku: normalizeScheduleScope(form.jadwalPeriodeBerlaku || SCHEDULE_SCOPE_YEAR)
+    jadwal_periode_berlaku: SCHEDULE_SCOPE_YEAR
   }
 }
 
@@ -562,7 +564,7 @@ export default function APengaturan() {
     const current = resolveAcademicPeriod()
     return {
       tahunAjaran: current.tahunAjaran,
-      semester: current.semester
+      semester: ''
     }
   })
   const [driveFiles, setDriveFiles] = useState([])
@@ -760,7 +762,7 @@ export default function APengaturan() {
       setPersistedPeriodForm(nextPeriodForm)
       setDrivePeriodFilter({
         tahunAjaran: nextPeriodForm.tahunAjaran,
-        semester: nextPeriodForm.semester
+        semester: ''
       })
     }
 
@@ -807,7 +809,7 @@ export default function APengaturan() {
           setPersistedPeriodForm(nextPeriodForm)
           setDrivePeriodFilter({
             tahunAjaran: nextPeriodForm.tahunAjaran,
-            semester: nextPeriodForm.semester
+            semester: ''
           })
         }
       } catch (err) {
@@ -838,8 +840,7 @@ export default function APengaturan() {
       setDriveLoading(true)
       try {
         const { data, error } = await supabase.admin.googleDrive({
-          tahun_ajaran: drivePeriodFilter.tahunAjaran,
-          semester: drivePeriodFilter.semester
+          tahun_ajaran: drivePeriodFilter.tahunAjaran
         })
         if (error) throw error
         if (!isCancelled) {
@@ -860,7 +861,7 @@ export default function APengaturan() {
     return () => {
       isCancelled = true
     }
-  }, [activeSettingsMenu, drivePeriodFilter.semester, drivePeriodFilter.tahunAjaran, isAuthorized, pushToast])
+  }, [activeSettingsMenu, drivePeriodFilter.tahunAjaran, isAuthorized, pushToast])
 
   useEffect(() => {
     if (!isAuthorized || activeSettingsMenu !== 'drive') return
@@ -872,7 +873,6 @@ export default function APengaturan() {
       try {
         const params = {
           tahun_ajaran: drivePeriodFilter.tahunAjaran,
-          semester: drivePeriodFilter.semester,
           limit: 50
         }
         if (driveFileBucket !== 'all') {
@@ -905,7 +905,7 @@ export default function APengaturan() {
     return () => {
       isCancelled = true
     }
-  }, [activeSettingsMenu, driveFileBucket, drivePeriodFilter.semester, drivePeriodFilter.tahunAjaran, isAuthorized, pushToast])
+  }, [activeSettingsMenu, driveFileBucket, drivePeriodFilter.tahunAjaran, isAuthorized, pushToast])
 
   useEffect(() => {
     if (!settingsId || !isAuthorized) return
@@ -948,7 +948,7 @@ export default function APengaturan() {
           setPersistedPeriodForm(nextPeriodForm)
           setDrivePeriodFilter({
             tahunAjaran: nextPeriodForm.tahunAjaran,
-            semester: nextPeriodForm.semester
+            semester: ''
           })
         }
       )
@@ -966,10 +966,6 @@ export default function APengaturan() {
 
   function handlePeriodChange(e) {
     const { name, value } = e.target
-    if (name === 'jadwalPeriodeBerlaku') {
-      setPeriodForm((prev) => ({ ...prev, jadwalPeriodeBerlaku: normalizeScheduleScope(value) }))
-      return
-    }
 
     if (name === 'tahunAjaran') {
       const nextYear = normalizeAcademicYear(value) || value
@@ -1081,7 +1077,7 @@ export default function APengaturan() {
       return
     }
     if (!semesterPreview.startsAt || !semesterPreview.endsAt || !semesterPreview.customRange) {
-      pushToast('error', 'Rentang bulan semester kalender belum valid.')
+      pushToast('error', 'Rentang bulan periode belum valid.')
       return
     }
     if (!academicYearRange.startsAt || !academicYearRange.endsAt) {
@@ -1161,15 +1157,15 @@ export default function APengaturan() {
     } else {
       const confirmedPeriod = await requestConfirmation({
         title: 'Simpan perubahan kalender?',
-        message: 'Semester kalender hanya menjadi penanda operasional. Data aktif tetap memakai satu tahun ajaran penuh.',
+        message: 'Data aktif akan memakai satu tahun ajaran penuh, mencakup Ganjil dan Genap.',
         confirmText: 'Ya, simpan periode',
         cancelText: 'Batal',
         tone: 'warning',
         details: [
-          'Perubahan semester kalender tidak memindahkan kelas, tidak memfilter data global, dan tidak membuat riwayat kelas baru.',
-          `Masa berlaku jadwal baru: ${scheduleScopeLabel(nextPayload.jadwal_periode_berlaku)}.`,
+          'Perubahan rentang bulan tidak memindahkan kelas, tidak memfilter data global, dan tidak membuat riwayat kelas baru.',
+          'Jadwal berlaku untuk 1 tahun ajaran penuh.',
           'Halaman tugas, quiz, laporan, absensi, dan storage tetap berada dalam satu tahun ajaran kecuali fiturnya memakai filter sendiri.',
-          `Cakupan aktif setelah disimpan: ${tahunAjaran} penuh, penanda kalender: Semester ${semester}.`
+          `Cakupan aktif setelah disimpan: ${tahunAjaran} penuh.`
         ]
       })
       if (!confirmedPeriod) return
@@ -1202,8 +1198,8 @@ export default function APengaturan() {
           tone: 'warning',
           details: [
             `Tanggal server: ${serverCalendar.today || '-'} (${serverCalendar.timezone || 'Asia/Jakarta'})`,
-            `Kalender server: ${serverCalendar.tahun_ajaran || '-'} - Semester ${serverCalendar.semester || '-'}`,
-            `Target simpan: ${targetPeriod.tahun_ajaran || tahunAjaran} - Semester ${targetPeriod.semester || semester}`
+            `Kalender server: ${serverCalendar.tahun_ajaran || '-'}`,
+            `Target simpan: ${targetPeriod.tahun_ajaran || tahunAjaran}`
           ]
         })
         if (!confirmedCalendar) return
@@ -1222,7 +1218,7 @@ export default function APengaturan() {
       const savedPeriodForm = resolvePeriodForm(payload)
       setPeriodForm(savedPeriodForm)
       setPersistedPeriodForm(savedPeriodForm)
-      setDrivePeriodFilter({ tahunAjaran, semester })
+      setDrivePeriodFilter({ tahunAjaran, semester: '' })
       clearCachedSettingsRow()
       queryClient.invalidateQueries({ queryKey: SETTINGS_QUERY_KEY })
       queryClient.invalidateQueries({ queryKey: ['admin', 'academic-summary'] })
@@ -1235,7 +1231,7 @@ export default function APengaturan() {
         ? ` Eskul disalin: ${rollover.eskul_members_copied || 0}.`
         : ''
       setCarryEskulMembers(false)
-      pushToast('success', `Tahun ajaran ${tahunAjaran} aktif penuh. Semester kalender: ${semester}.${rolloverText}${eskulText}`, {
+      pushToast('success', `Tahun ajaran ${tahunAjaran} aktif penuh.${rolloverText}${eskulText}`, {
         title: 'Kalender akademik diperbarui'
       })
     } catch (error) {
@@ -1590,8 +1586,7 @@ export default function APengaturan() {
     setDriveSyncing(true)
     try {
       const { data, error } = await supabase.admin.syncGoogleDrive({
-        tahun_ajaran: drivePeriodFilter.tahunAjaran,
-        semester: drivePeriodFilter.semester
+        tahun_ajaran: drivePeriodFilter.tahunAjaran
       })
       if (error) throw error
       setDriveStatus(data || DRIVE_STATUS_DEFAULT)
@@ -1676,8 +1671,7 @@ export default function APengaturan() {
   const currentMonthValue = `${browserNow.getFullYear()}-${String(browserNow.getMonth() + 1).padStart(2, '0')}`
   const currentAcademicPeriod = getCurrentAcademicPeriod(browserNow)
   const activePeriodMatchesCalendar =
-    activeAcademicPeriod.tahunAjaran === currentAcademicPeriod.tahunAjaran &&
-    activeAcademicPeriod.semester === currentAcademicPeriod.semester
+    activeAcademicPeriod.tahunAjaran === currentAcademicPeriod.tahunAjaran
   const academicMonths = activeAcademicPeriod.months?.length
     ? activeAcademicPeriod.months
     : activeAcademicPeriod.academicYearMonths || []
@@ -1783,7 +1777,7 @@ export default function APengaturan() {
     {
       id: 'academic',
       label: 'Akademik',
-      description: 'Tahun ajaran penuh, semester kalender, dan rentang bulan',
+      description: 'Tahun ajaran penuh dan rentang bulan Ganjil/Genap',
       icon: CalendarDays
     },
     {
@@ -1822,7 +1816,7 @@ export default function APengaturan() {
     ? 'Pengaturan Akademik'
     : 'Pengaturan Sistem'
   const pageDescription = isAcademicStandalone
-    ? 'Kelola tahun ajaran penuh, semester kalender, dan rentang bulan.'
+    ? 'Kelola tahun ajaran penuh dan rentang bulan Ganjil/Genap.'
     : 'Kelola identitas sekolah, Google Drive, akun admin, dan registrasi publik.'
 
   return (
@@ -1966,19 +1960,11 @@ export default function APengaturan() {
                   <select
                     className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
                     value={drivePeriodFilter.tahunAjaran}
-                    onChange={(event) => setDrivePeriodFilter((prev) => ({ ...prev, tahunAjaran: event.target.value }))}
+                    onChange={(event) => setDrivePeriodFilter((prev) => ({ ...prev, tahunAjaran: event.target.value, semester: '' }))}
                   >
                     {driveYearOptions.map((option) => (
                       <option key={option.value} value={option.value}>{option.label}</option>
                     ))}
-                  </select>
-                  <select
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-                    value={drivePeriodFilter.semester}
-                    onChange={(event) => setDrivePeriodFilter((prev) => ({ ...prev, semester: event.target.value }))}
-                  >
-                    <option value={SEMESTER_GANJIL}>Ganjil</option>
-                    <option value={SEMESTER_GENAP}>Genap</option>
                   </select>
                 </div>
                 <div className="mt-4 rounded-lg bg-white p-3 text-sm">
@@ -1992,7 +1978,7 @@ export default function APengaturan() {
                 <div className="border-b border-slate-200 px-4 py-3">
                   <p className="text-sm font-bold text-slate-900">Detail Storage per Kelas</p>
                   <p className="text-xs text-slate-500">
-                    {drivePeriodFilter.tahunAjaran} - Semester {drivePeriodFilter.semester}
+                    {drivePeriodFilter.tahunAjaran} - 1 Tahun Ajaran
                   </p>
                 </div>
                 <div className="max-h-72 overflow-auto">
@@ -2034,14 +2020,11 @@ export default function APengaturan() {
                 <p className="text-xs font-semibold uppercase tracking-wide text-emerald-600">Kalender Akademik</p>
                 <h2 className="mt-1 text-xl font-bold text-gray-900">Tahun Ajaran Aktif</h2>
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-                  Satu tahun ajaran adalah satu periode besar yang berisi Semester Ganjil dan Semester Genap. Semester kalender hanya menjadi penanda operasional, bukan filter global. Jadwal bisa dibatasi sendiri lewat masa berlaku jadwal.
+                  Satu tahun ajaran adalah satu periode besar yang berisi Semester Ganjil dan Semester Genap. Filter halaman lain akan melihat seluruh bulan dalam periode ini, dan jadwal berlaku untuk 1 tahun ajaran penuh.
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2 text-xs">
                   <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 font-semibold text-emerald-700">
                     Tahun ajaran {activeAcademicPeriod.tahunAjaran}
-                  </span>
-                  <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 font-semibold text-slate-700">
-                    Semester kalender: {activeAcademicPeriod.semester}
                   </span>
                   <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 font-semibold text-slate-700">
                     {activeAcademicPeriod.academicYearRangeLabel || activeAcademicPeriod.rangeLabel || '-'}
@@ -2053,35 +2036,29 @@ export default function APengaturan() {
                         : 'border-amber-200 bg-amber-50 text-amber-800'
                     }`}
                   >
-                    Kalender hari ini: {currentAcademicPeriod.tahunAjaran} - {currentAcademicPeriod.semester}
+                    Kalender hari ini: {currentAcademicPeriod.tahunAjaran}
                   </span>
                 </div>
               </div>
 
-              <div className="grid w-full gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:w-auto">
+              <div className="grid w-full gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:w-auto">
                 <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3">
                   <p className="text-xs font-semibold text-emerald-700">Tahun Ajaran</p>
                   <p className="mt-1 text-sm font-bold text-slate-900">{activeAcademicPeriod.tahunAjaran}</p>
-                </div>
-                <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3">
-                  <p className="text-xs font-semibold text-emerald-700">Semester Kalender</p>
-                  <p className="mt-1 text-sm font-bold text-slate-900">{activeAcademicPeriod.semester}</p>
                 </div>
                 <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3">
                   <p className="text-xs font-semibold text-emerald-700">Rentang Periode</p>
                   <p className="mt-1 text-sm font-bold text-slate-900">{activeAcademicPeriod.academicYearRangeLabel || '-'}</p>
                 </div>
                 <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3">
-                  <p className="text-xs font-semibold text-emerald-700">Masa Berlaku Jadwal</p>
-                  <p className="mt-1 text-sm font-bold text-slate-900">
-                    {scheduleScopeLabel(periodForm.jadwalPeriodeBerlaku)}
-                  </p>
+                  <p className="text-xs font-semibold text-emerald-700">Jadwal</p>
+                  <p className="mt-1 text-sm font-bold text-slate-900">1 Tahun Ajaran</p>
                 </div>
               </div>
             </div>
 
             <form onSubmit={(event) => { event.preventDefault(); saveAcademicPeriod() }} className="mt-6 rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-[220px_220px_240px_minmax(0,1fr)]">
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-2">Tahun Ajaran</label>
                   <select
@@ -2098,49 +2075,12 @@ export default function APengaturan() {
                   </select>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">Semester Kalender</label>
-                  <div className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-bold text-slate-900">
-                    {periodForm.semester || '-'}
-                  </div>
-                  <p className="mt-1 text-xs text-slate-500">
-                    Otomatis sebagai penanda kalender. Bukan filter data global.
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">Masa Berlaku Jadwal</label>
-                  <select
-                    name="jadwalPeriodeBerlaku"
-                    value={periodForm.jadwalPeriodeBerlaku || SCHEDULE_SCOPE_YEAR}
-                    onChange={handlePeriodChange}
-                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
-                  >
-                    {SCHEDULE_SCOPE_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-                  <p className="mt-1 text-xs text-slate-500">
-                    Dipakai sebagai default jadwal baru. Pilih 1 Tahun Ajaran agar jadwal tampil di Ganjil dan Genap.
-                  </p>
-                </div>
-
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   {semesterPeriodCards.map((item) => {
-                    const isActiveSemester = periodForm.semester === item.key
-                    const toneClass = item.tone === 'emerald'
-                      ? 'border-emerald-200 bg-emerald-50/80 text-emerald-800'
-                      : 'border-sky-200 bg-sky-50/80 text-sky-800'
-
                     return (
-                      <div key={item.key} className={`rounded-xl border p-3 ${isActiveSemester ? toneClass : 'border-slate-200 bg-white text-slate-700'}`}>
+                      <div key={item.key} className="rounded-xl border border-slate-200 bg-white p-3 text-slate-700">
                         <div className="mb-3 flex items-center justify-between gap-2">
                           <p className="text-sm font-bold">{item.title}</p>
-                          {isActiveSemester && (
-                            <span className="rounded-full bg-white/80 px-2 py-0.5 text-[11px] font-bold">
-                              Aktif
-                            </span>
-                          )}
                         </div>
                         <div className="grid grid-cols-2 gap-2">
                           <div>
@@ -2195,7 +2135,7 @@ export default function APengaturan() {
 
               <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-xs leading-5 text-slate-600">
-                  Tahun ajaran menaungi dua semester sekaligus. Mengganti semester kalender tidak memindahkan kelas, tidak menyembunyikan data semester lain, dan perubahan kelas hanya terjadi saat rollover tahun ajaran.
+                  Tahun ajaran menaungi dua semester sekaligus. Filter bulan di tugas, quiz, laporan, absensi, dan storage akan memakai seluruh rentang Ganjil dan Genap dalam periode ini.
                 </p>
                 <div className="flex flex-wrap gap-2">
                   <button
@@ -2447,7 +2387,7 @@ export default function APengaturan() {
                       {driveFilteredStorage.uploaded_label || '0 B'}
                     </p>
                     <p className="mt-1 text-xs text-slate-500">
-                      {drivePeriodFilter.tahunAjaran} - {drivePeriodFilter.semester}
+                      {drivePeriodFilter.tahunAjaran} - 1 Tahun Ajaran
                     </p>
                   </div>
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -2540,19 +2480,11 @@ export default function APengaturan() {
                       <select
                         className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
                         value={drivePeriodFilter.tahunAjaran}
-                        onChange={(event) => setDrivePeriodFilter((prev) => ({ ...prev, tahunAjaran: event.target.value }))}
+                        onChange={(event) => setDrivePeriodFilter((prev) => ({ ...prev, tahunAjaran: event.target.value, semester: '' }))}
                       >
                         {driveYearOptions.map((option) => (
                           <option key={option.value} value={option.value}>{option.label}</option>
                         ))}
-                      </select>
-                      <select
-                        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-                        value={drivePeriodFilter.semester}
-                        onChange={(event) => setDrivePeriodFilter((prev) => ({ ...prev, semester: event.target.value }))}
-                      >
-                        <option value={SEMESTER_GANJIL}>Ganjil</option>
-                        <option value={SEMESTER_GENAP}>Genap</option>
                       </select>
                       <select
                         className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
@@ -2580,7 +2512,7 @@ export default function APengaturan() {
                     <div className="overflow-hidden rounded-xl border border-slate-200">
                       <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
                         <p className="text-sm font-bold text-slate-900">Pemakaian per Kelas</p>
-                        <p className="text-xs text-slate-500">{drivePeriodFilter.tahunAjaran} - Semester {drivePeriodFilter.semester}</p>
+                        <p className="text-xs text-slate-500">{drivePeriodFilter.tahunAjaran} - 1 Tahun Ajaran</p>
                       </div>
                       <div className="max-h-72 overflow-auto">
                         <table className="min-w-full text-sm">

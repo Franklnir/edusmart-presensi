@@ -752,7 +752,7 @@ function StorageManager() {
           <div className="mt-3 space-y-2 text-sm text-slate-600">
             {[
               'Tidak bisa untuk file di bawah 3 bulan',
-              'Periode opsional, termasuk semester aktif jika umur file sudah aman',
+              'Periode opsional, mengikuti tahun ajaran aktif jika umur file sudah aman',
               'Hanya bucket assignments dan quiz-media',
               'Berlaku untuk VPS Storage dan Neva Cloud S3',
               'Hanya dokumen/gambar tugas atau quiz',
