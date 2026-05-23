@@ -25,6 +25,26 @@ const getNamaKelasFromList = (kelasId, kelasList) => {
 
 const normalizeTeacherName = (value) => String(value || '').trim().toLowerCase()
 
+const timeToMinutes = (value) => {
+  const match = String(value || '').match(/^(\d{1,2}):(\d{2})/)
+  if (!match) return null
+  const hour = Number(match[1])
+  const minute = Number(match[2])
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null
+  return hour * 60 + minute
+}
+
+const hasTimeOverlap = (startA, endA, startB, endB) => {
+  const aStart = timeToMinutes(startA)
+  const aEnd = timeToMinutes(endA)
+  const bStart = timeToMinutes(startB)
+  const bEnd = timeToMinutes(endB)
+  if ([aStart, aEnd, bStart, bEnd].some((value) => value === null)) return false
+  return aStart < bEnd && aEnd > bStart
+}
+
+const formatWaktu = (waktu) => (waktu ? String(waktu).slice(0, 5) : '-')
+
 const HARI_JS = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']
 
 const parseEskulDays = (hariText = '') => (
@@ -1621,6 +1641,32 @@ export default function JadwalGuru() {
     return ['Hari Ini', ...sortedHari]
   }, [jadwal])
 
+  const getJamKosongConflictMessage = React.useCallback((item) => {
+    if (!item) return ''
+    const scheduleConflict = jadwal.find((entry) => (
+      entry.hari === todayName &&
+      hasTimeOverlap(entry.jam_mulai, entry.jam_selesai, item.jam_mulai, item.jam_selesai)
+    ))
+
+    if (scheduleConflict) {
+      return `Bentrok dengan jadwal ${scheduleConflict.mapel || 'mengajar'} kelas ${getNamaKelasFromList(scheduleConflict.kelas_id, kelasList)} pukul ${formatWaktu(scheduleConflict.jam_mulai)}-${formatWaktu(scheduleConflict.jam_selesai)}.`
+    }
+
+    const currentTeacherKey = normalizeTeacherName(currentTeacherName)
+    const takenConflict = jamKosongHariIni.find((entry) => (
+      entry.id !== item.id &&
+      normalizeTeacherName(entry.guru_pengganti) === currentTeacherKey &&
+      String(entry.tanggal || todayStr) === String(item.tanggal || todayStr) &&
+      hasTimeOverlap(entry.jam_mulai, entry.jam_selesai, item.jam_mulai, item.jam_selesai)
+    ))
+
+    if (takenConflict) {
+      return `Anda sudah mengambil jam kosong ${takenConflict.mapel || 'lain'} kelas ${getNamaKelasFromList(takenConflict.kelas, kelasList)} pada pukul ${formatWaktu(takenConflict.jam_mulai)}-${formatWaktu(takenConflict.jam_selesai)}.`
+    }
+
+    return ''
+  }, [currentTeacherName, jadwal, jamKosongHariIni, kelasList, todayName, todayStr])
+
   const handleToggleJamKosong = async (item) => {
     if (!item?.id) return
     if (String(item.created_by || '') === String(user?.id || '')) {
@@ -1631,6 +1677,14 @@ export default function JadwalGuru() {
     try {
       setLoading(true)
       const isCanceling = normalizeTeacherName(item.guru_pengganti) === normalizeTeacherName(currentTeacherName)
+      if (!isCanceling) {
+        const conflictMessage = getJamKosongConflictMessage(item)
+        if (conflictMessage) {
+          pushToast('error', conflictMessage)
+          return
+        }
+      }
+
       const newValue = isCanceling ? null : currentTeacherName
       let query = supabase
         .from('jam_kosong')
@@ -1644,9 +1698,14 @@ export default function JadwalGuru() {
         ? query.eq('guru_pengganti', item.guru_pengganti)
         : query.is('guru_pengganti', null)
 
-      const { error } = await query
+      const { data, error } = await query
 
       if (error) throw error
+      if (Number(data || 0) < 1) {
+        throw new Error(isCanceling
+          ? 'Jam kosong ini sudah berubah. Data akan diperbarui.'
+          : 'Jam kosong sudah diambil guru lain atau tidak tersedia lagi.')
+      }
 
       setJamKosongHariIni((prev) =>
         prev.map((jam) =>
@@ -1664,13 +1723,12 @@ export default function JadwalGuru() {
       }
     } catch (error) {
       console.error('Error updating jam kosong:', error)
-      pushToast('error', 'Gagal memperbarui status jam kosong')
+      pushToast('error', error?.message || 'Gagal memperbarui status jam kosong')
+      await loadSemuaJamKosongHariIni({ silent: true })
     } finally {
       setLoading(false)
     }
   }
-
-  const formatWaktu = (waktu) => (waktu ? String(waktu).slice(0, 5) : '-')
 
   const handleViewSertifikat = (sertifikat) => {
     setSelectedSertifikat(sertifikat)
@@ -1862,6 +1920,103 @@ export default function JadwalGuru() {
     }
   }, [currentTeacherName, jamKosongHariIni, user?.id])
 
+  const sertifikatSayaCard = (
+    <div className="bg-white rounded-2xl shadow-md border border-gray-200">
+      <div className="p-6 border-b border-gray-100">
+        <div className="flex justify-between items-center">
+          <div>
+            <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+              <span>🏆</span> Sertifikat Saya
+            </h2>
+            <p className="text-sm text-gray-500 mt-1">
+              {sertifikatList.length > 5
+                ? `Menampilkan 5 dari ${sertifikatList.length} sertifikat`
+                : `${sertifikatList.length} sertifikat`}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="bg-amber-100 text-amber-700 text-xs font-bold px-3 py-1 rounded-full">
+              {sertifikatList.length} Total
+            </span>
+            {sertifikatList.length > 5 && (
+              <button
+                onClick={handleRiwayatSertifikat}
+                className="text-xs text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1 px-3 py-1 bg-blue-50 rounded-lg border border-blue-100 hover:bg-blue-100 transition-colors"
+              >
+                <span>Lihat Riwayat</span>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="p-6">
+        {displayedSertifikat.length > 0 ? (
+          <div className="grid grid-cols-1 gap-4">
+            {displayedSertifikat.map((sertifikat) => (
+              <div
+                key={sertifikat.id}
+                className="border border-gray-200 rounded-xl p-4 hover:border-amber-300 hover:shadow-md transition-all cursor-pointer group"
+                onClick={() => handleViewSertifikat(sertifikat)}
+              >
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex-1">
+                    <h3 className="font-bold text-gray-900 line-clamp-2 group-hover:text-amber-600 transition-colors">
+                      {sertifikat.event}
+                    </h3>
+                    <p className="text-sm text-gray-600 mt-1">
+                      {sertifikat.nama_penerima}
+                    </p>
+                  </div>
+                  <span className={`text-xs px-2 py-1 rounded-full ${
+                    sertifikat.sent
+                      ? 'bg-green-100 text-green-700 border border-green-200'
+                      : 'bg-yellow-100 text-yellow-700 border border-yellow-200'
+                  }`}>
+                    {sertifikat.sent ? 'Terkirim' : 'Pending'}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between text-xs text-gray-500">
+                  <span>
+                    {new Date(sertifikat.issued_at).toLocaleDateString('id-ID', {
+                      day: 'numeric',
+                      month: 'short',
+                      year: 'numeric'
+                    })}
+                  </span>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleDownloadSertifikat(sertifikat)
+                      }}
+                      className="text-amber-600 hover:text-amber-700 font-medium flex items-center gap-1"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                      </svg>
+                      Download
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-12 bg-gray-50 rounded-xl border-2 border-dashed border-gray-300">
+            <div className="text-gray-300 text-6xl mb-4">🏆</div>
+            <p className="text-gray-500 text-lg font-medium">Belum ada sertifikat</p>
+            <p className="text-gray-400 mt-2">Sertifikat akan muncul di sini setelah diterbitkan oleh admin</p>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+
   const monitoringJamKosongCard = (
     <div className="bg-white rounded-2xl shadow-md border border-gray-200 flex flex-col max-h-[620px]">
       <div className="p-6 border-b border-gray-100">
@@ -1920,6 +2075,9 @@ export default function JadwalGuru() {
                 : isHandled
                   ? 'Sudah Ada Guru'
                   : 'Butuh Pengganti'
+              const conflictMessage = !isHandled && !isOwnReport
+                ? getJamKosongConflictMessage(item)
+                : ''
 
               return (
                 <div
@@ -1996,15 +2154,28 @@ export default function JadwalGuru() {
                           Menunggu guru lain mengambil jam ini.
                         </div>
                       ) : (
-                        <button
-                          onClick={() => handleToggleJamKosong(item)}
-                          className="w-full py-2.5 px-4 bg-red-500 hover:bg-red-600 active:bg-red-700 text-white rounded-lg font-semibold text-sm transition-colors shadow-md shadow-red-200 flex items-center justify-center gap-2"
-                        >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
-                          </svg>
-                          Ambil Jam Ini
-                        </button>
+                        <div className="space-y-2">
+                          <button
+                            onClick={() => handleToggleJamKosong(item)}
+                            disabled={Boolean(conflictMessage)}
+                            title={conflictMessage || 'Ambil Jam Ini'}
+                            className={`w-full py-2.5 px-4 rounded-lg font-semibold text-sm transition-colors flex items-center justify-center gap-2 ${
+                              conflictMessage
+                                ? 'bg-slate-100 text-slate-500 border border-slate-200 cursor-not-allowed'
+                                : 'bg-red-500 hover:bg-red-600 active:bg-red-700 text-white shadow-md shadow-red-200'
+                            }`}
+                          >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+                            </svg>
+                            {conflictMessage ? 'Tidak Bisa Diambil' : 'Ambil Jam Ini'}
+                          </button>
+                          {conflictMessage && (
+                            <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
+                              {conflictMessage}
+                            </p>
+                          )}
+                        </div>
                       )
                     )}
                   </div>
@@ -2162,7 +2333,7 @@ export default function JadwalGuru() {
               </div>
             </div>
 
-            {monitoringJamKosongCard}
+            {sertifikatSayaCard}
 
             {/* Struktur Sekolah */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
@@ -2249,101 +2420,7 @@ export default function JadwalGuru() {
 
             {tanggungJawabCard}
 
-            {/* Sertifikat Saya */}
-            <div className="bg-white rounded-2xl shadow-md border border-gray-200">
-              <div className="p-6 border-b border-gray-100">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-                      <span>🏆</span> Sertifikat Saya
-                    </h2>
-                    <p className="text-sm text-gray-500 mt-1">
-                      {sertifikatList.length > 5
-                        ? `Menampilkan 5 dari ${sertifikatList.length} sertifikat`
-                        : `${sertifikatList.length} sertifikat`}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="bg-amber-100 text-amber-700 text-xs font-bold px-3 py-1 rounded-full">
-                      {sertifikatList.length} Total
-                    </span>
-                    {sertifikatList.length > 5 && (
-                      <button
-                        onClick={handleRiwayatSertifikat}
-                        className="text-xs text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1 px-3 py-1 bg-blue-50 rounded-lg border border-blue-100 hover:bg-blue-100 transition-colors"
-                      >
-                        <span>Lihat Riwayat</span>
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                        </svg>
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <div className="p-6">
-                {displayedSertifikat.length > 0 ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {displayedSertifikat.map((sertifikat) => (
-                      <div
-                        key={sertifikat.id}
-                        className="border border-gray-200 rounded-xl p-4 hover:border-amber-300 hover:shadow-md transition-all cursor-pointer group"
-                        onClick={() => handleViewSertifikat(sertifikat)}
-                      >
-                        <div className="flex items-start justify-between mb-3">
-                          <div className="flex-1">
-                            <h3 className="font-bold text-gray-900 line-clamp-2 group-hover:text-amber-600 transition-colors">
-                              {sertifikat.event}
-                            </h3>
-                            <p className="text-sm text-gray-600 mt-1">
-                              {sertifikat.nama_penerima}
-                            </p>
-                          </div>
-                          <span className={`text-xs px-2 py-1 rounded-full ${
-                            sertifikat.sent
-                              ? 'bg-green-100 text-green-700 border border-green-200'
-                              : 'bg-yellow-100 text-yellow-700 border border-yellow-200'
-                          }`}>
-                            {sertifikat.sent ? 'Terkirim' : 'Pending'}
-                          </span>
-                        </div>
-
-                        <div className="flex items-center justify-between text-xs text-gray-500">
-                          <span>
-                            {new Date(sertifikat.issued_at).toLocaleDateString('id-ID', {
-                              day: 'numeric',
-                              month: 'short',
-                              year: 'numeric'
-                            })}
-                          </span>
-                          <div className="flex gap-2">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                handleDownloadSertifikat(sertifikat)
-                              }}
-                              className="text-amber-600 hover:text-amber-700 font-medium flex items-center gap-1"
-                            >
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                              </svg>
-                              Download
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-12 bg-gray-50 rounded-xl border-2 border-dashed border-gray-300">
-                    <div className="text-gray-300 text-6xl mb-4">🏆</div>
-                    <p className="text-gray-500 text-lg font-medium">Belum ada sertifikat</p>
-                    <p className="text-gray-400 mt-2">Sertifikat akan muncul di sini setelah diterbitkan oleh admin</p>
-                  </div>
-                )}
-              </div>
-            </div>
+            {monitoringJamKosongCard}
           </div>
         </div>
       </div>

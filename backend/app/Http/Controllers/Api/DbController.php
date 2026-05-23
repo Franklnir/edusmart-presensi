@@ -1911,6 +1911,27 @@ class DbController extends ApiController
                     }
 
                     if ($isReplacementOnlyUpdate) {
+                        $isTakingReplacement = false;
+                        foreach ($rows as $row) {
+                            if (trim((string) ($row['guru_pengganti'] ?? '')) !== '') {
+                                $isTakingReplacement = true;
+                                break;
+                            }
+                        }
+
+                        if ($isTakingReplacement) {
+                            $replacementConflict = $this->validateGuruJamKosongReplacement(
+                                $request,
+                                $userId,
+                                $teacherReplacementName,
+                                $tenantId
+                            );
+                            if ($replacementConflict !== null) {
+                                return $this->deny($replacementConflict['message'], $replacementConflict['status']);
+                            }
+                            $query->whereNull('guru_pengganti');
+                        }
+
                         $query->where('created_by', '!=', $userId);
                         $this->mapPayload($payload, function ($row) use ($teacherReplacementName) {
                             $replacement = trim((string) ($row['guru_pengganti'] ?? ''));
@@ -2251,6 +2272,184 @@ class DbController extends ApiController
         }
 
         return false;
+    }
+
+    private function validateGuruJamKosongReplacement(
+        Request $request,
+        string $userId,
+        string $teacherReplacementName,
+        ?string $tenantId
+    ): ?array {
+        $targetQuery = DB::table('jam_kosong')
+            ->where('created_by', '!=', $userId);
+        $this->applyTenantFilter($targetQuery);
+        $this->applyFilters($targetQuery, $request->input('filters', []));
+
+        $targets = $targetQuery
+            ->limit(2)
+            ->get([
+                'id',
+                'tanggal',
+                'jam_mulai',
+                'jam_selesai',
+                'mapel',
+                'kelas',
+                'guru_pengganti',
+                'tahun_ajaran',
+                'semester',
+            ]);
+
+        if ($targets->count() !== 1) {
+            return [
+                'message' => 'Jam kosong sudah diambil guru lain atau tidak tersedia lagi.',
+                'status' => 409,
+            ];
+        }
+
+        $target = $targets->first();
+        if (trim((string) ($target->guru_pengganti ?? '')) !== '') {
+            return [
+                'message' => 'Jam kosong sudah diambil guru lain atau tidak tersedia lagi.',
+                'status' => 409,
+            ];
+        }
+
+        $tanggal = trim((string) ($target->tanggal ?? ''));
+        $jamMulai = $this->normalizeClockForQuery($target->jam_mulai ?? null);
+        $jamSelesai = $this->normalizeClockForQuery($target->jam_selesai ?? null);
+        $hari = $this->dayNameForDateKey($tanggal);
+
+        if ($tanggal === '' || $jamMulai === null || $jamSelesai === null || $hari === null) {
+            return [
+                'message' => 'Data jam kosong tidak lengkap. Minta guru pengaju memperbaiki data jam kosong.',
+                'status' => 422,
+            ];
+        }
+
+        $jadwalQuery = DB::table('jadwal')
+            ->where('guru_id', $userId)
+            ->where('hari', $hari);
+        $this->applyTenantFilter($jadwalQuery);
+        $this->applyPeriodFromTargetOrCurrent($jadwalQuery, 'jadwal', $target, $tenantId);
+        $this->applyClockOverlap($jadwalQuery, $jamMulai, $jamSelesai);
+
+        $jadwalConflict = $jadwalQuery->first(['mapel', 'kelas_id', 'jam_mulai', 'jam_selesai']);
+        if ($jadwalConflict) {
+            return [
+                'message' => sprintf(
+                    'Tidak bisa mengambil jam kosong. Anda masih punya jadwal %s kelas %s pukul %s-%s.',
+                    $jadwalConflict->mapel ?: 'mengajar',
+                    $jadwalConflict->kelas_id ?: '-',
+                    $this->formatClockForMessage($jadwalConflict->jam_mulai ?? null),
+                    $this->formatClockForMessage($jadwalConflict->jam_selesai ?? null)
+                ),
+                'status' => 409,
+            ];
+        }
+
+        $replacementName = Str::lower(trim($teacherReplacementName));
+        if ($replacementName === '') {
+            return [
+                'message' => 'Nama guru pengganti tidak valid.',
+                'status' => 422,
+            ];
+        }
+
+        $jamConflictQuery = DB::table('jam_kosong')
+            ->where('tanggal', $tanggal)
+            ->where('id', '!=', $target->id)
+            ->whereRaw('LOWER(TRIM(guru_pengganti)) = ?', [$replacementName]);
+        $this->applyTenantFilter($jamConflictQuery);
+        $this->applyPeriodFromTargetOrCurrent($jamConflictQuery, 'jam_kosong', $target, $tenantId);
+        $this->applyClockOverlap($jamConflictQuery, $jamMulai, $jamSelesai);
+
+        $jamConflict = $jamConflictQuery->first(['mapel', 'kelas', 'jam_mulai', 'jam_selesai']);
+        if ($jamConflict) {
+            return [
+                'message' => sprintf(
+                    'Tidak bisa mengambil jam kosong. Anda sudah mengambil jam kosong %s kelas %s pukul %s-%s.',
+                    $jamConflict->mapel ?: 'lain',
+                    $jamConflict->kelas ?: '-',
+                    $this->formatClockForMessage($jamConflict->jam_mulai ?? null),
+                    $this->formatClockForMessage($jamConflict->jam_selesai ?? null)
+                ),
+                'status' => 409,
+            ];
+        }
+
+        return null;
+    }
+
+    private function applyClockOverlap($query, string $start, string $end): void
+    {
+        $query->where('jam_mulai', '<', $end)
+            ->where('jam_selesai', '>', $start);
+    }
+
+    private function applyPeriodFromTargetOrCurrent($query, string $table, $target, ?string $tenantId): void
+    {
+        if (! $this->tableHasAcademicPeriodColumns($table)) {
+            return;
+        }
+
+        $tahunAjaran = trim((string) ($target->tahun_ajaran ?? ''));
+        $semester = trim((string) ($target->semester ?? ''));
+        if ($tahunAjaran !== '' && $semester !== '') {
+            $query->where('tahun_ajaran', $tahunAjaran)
+                ->where('semester', $semester);
+
+            return;
+        }
+
+        $this->applyCurrentAcademicPeriodToQuery($query, $table, $tenantId);
+    }
+
+    private function dayNameForDateKey(string $dateKey): ?string
+    {
+        try {
+            $date = Carbon::parse($dateKey, 'Asia/Jakarta');
+        } catch (\Throwable $e) {
+            return null;
+        }
+
+        return [
+            0 => 'Minggu',
+            1 => 'Senin',
+            2 => 'Selasa',
+            3 => 'Rabu',
+            4 => 'Kamis',
+            5 => 'Jumat',
+            6 => 'Sabtu',
+        ][$date->dayOfWeek] ?? null;
+    }
+
+    private function normalizeClockForQuery($value): ?string
+    {
+        $raw = trim((string) ($value ?? ''));
+        if ($raw === '') {
+            return null;
+        }
+
+        if (preg_match('/^(\d{1,2}):(\d{2})(?::(\d{2}))?/', $raw, $matches) !== 1) {
+            return null;
+        }
+
+        return sprintf(
+            '%02d:%02d:%02d',
+            (int) $matches[1],
+            (int) $matches[2],
+            isset($matches[3]) ? (int) $matches[3] : 0
+        );
+    }
+
+    private function formatClockForMessage($value): string
+    {
+        $clock = $this->normalizeClockForQuery($value);
+        if ($clock === null) {
+            return '-';
+        }
+
+        return substr($clock, 0, 5);
     }
 
     private function validateDbRequestShape(Request $request): ?string
