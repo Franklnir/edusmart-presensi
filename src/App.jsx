@@ -6,6 +6,7 @@ import ConfirmDialog from './components/ConfirmDialog'
 import AppRoutes from './router'
 import { useAuthStore } from './store/useAuthStore'
 import { SESSION_EXPIRED_EVENT, supabase } from './lib/supabase'
+import { isMarketingLandingPath } from './utils/marketingHost'
 import {
   DEFAULT_USER_THEME,
   canUseUserTheme,
@@ -31,9 +32,10 @@ const App = () => {
   const lastSessionRevalidateRef = useRef(0)
 
   const isAuthPage = AUTH_PATHS.some((p) => location.pathname.startsWith(p))
+  const isMarketingPage = isMarketingLandingPath(location.pathname)
   const isQuizSessionPage = location.pathname.startsWith('/siswa/quiz/session/')
   const role = profile?.role || ''
-  const canTrackPresence = Boolean(user?.id && profile?.id && !isSuperAdmin)
+  const canTrackPresence = Boolean(user?.id && profile?.id && !isSuperAdmin && !isMarketingPage)
   const canApplyUserTheme = canUseUserTheme(role)
   const activeTheme = canApplyUserTheme
     ? normalizeUserTheme(profile?.theme_preference)
@@ -75,10 +77,11 @@ const App = () => {
   }, [activeTheme, canApplyUserTheme, role])
 
   useEffect(() => {
+    if (isMarketingPage) return
     if (!initialized) {
       init()
     }
-  }, [initialized, init])
+  }, [initialized, init, isMarketingPage])
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined
@@ -193,8 +196,8 @@ const App = () => {
     }
   }, [user?.id])
 
-  // Layout untuk halaman auth (login, register, dll)
-  if (isAuthPage || !user) {
+  // Layout untuk halaman publik/auth (landing, login, register, dll)
+  if (isMarketingPage || isAuthPage || !user) {
     return (
       <div className={appShellClassName}>
         <main className="w-full min-h-screen">

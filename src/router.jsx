@@ -4,8 +4,10 @@ import AdminLockGate from './components/AdminLockGate'
 import ProtectedRoute from './components/ProtectedRoute'
 import RoleGate from './components/RoleGate'
 import { lazyRoute } from './lib/routePrefetch'
+import { isMarketingRootHost } from './utils/marketingHost'
 
 const Login = lazyRoute('/login')
+const SismuLanding = lazyRoute('/landing')
 const GoogleAuthPopup = lazyRoute('/auth/google/popup')
 const Register = lazyRoute('/register')
 const ForgotPassword = lazyRoute('/forgot-password')
@@ -55,8 +57,17 @@ const lazyElement = (Component) => (
   </Suspense>
 )
 
+const RootRoute = () => (
+  isMarketingRootHost()
+    ? lazyElement(SismuLanding)
+    : <Navigate to="/login" replace />
+)
+
 const AppRoutes = () => (
   <Routes>
+    {/* Public marketing */}
+    <Route path="/landing" element={lazyElement(SismuLanding)} />
+
     {/* Auth (tidak butuh login) */}
     <Route path="/login" element={lazyElement(Login)} />
     <Route path="/auth/google/popup" element={lazyElement(GoogleAuthPopup)} />
@@ -127,8 +138,8 @@ const AppRoutes = () => (
       </Route>
     </Route>
 
-    {/* Default - Redirect ke login */}
-    <Route path="/" element={<Navigate to="/login" replace />} />
+    {/* Root domain menampilkan landing SISMU, subdomain tetap ke login */}
+    <Route path="/" element={<RootRoute />} />
     <Route path="*" element={<Navigate to="/login" replace />} />
   </Routes>
 )

@@ -2,6 +2,7 @@ import { lazy } from 'react'
 
 const routeLoaders = {
   '/login': () => import('../pages/auth/Login'),
+  '/landing': () => import('../pages/public/SismuLanding'),
   '/auth/google/popup': () => import('../pages/auth/GoogleAuthPopup'),
   '/register': () => import('../pages/auth/Register'),
   '/forgot-password': () => import('../pages/auth/ForgotPassword'),
