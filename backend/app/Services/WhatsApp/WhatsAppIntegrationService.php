@@ -7,6 +7,7 @@ use App\Models\WhatsAppMessageLog;
 use App\Models\WhatsAppNotificationSetting;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use RuntimeException;
 
@@ -52,23 +53,23 @@ class WhatsAppIntegrationService
         if ($this->providerType() !== 'fonnte' && $this->usesCentralProvider()) {
             $centralTenantId = $this->centralTenantId();
             if ($centralTenantId !== '') {
-                return $this->getOrCreateIntegration($centralTenantId);
+                return $this->getOrCreateIntegration($centralTenantId, true);
             }
         }
 
         return $this->getOrCreateIntegration($tenantId);
     }
 
-    public function getOrCreateIntegration(string $tenantId): WhatsAppIntegration
+    public function getOrCreateIntegration(string $tenantId, bool $forceCentralInstance = false): WhatsAppIntegration
     {
         $tenantId = trim($tenantId);
         if ($tenantId === '') {
             throw new RuntimeException('Tenant tidak valid.');
         }
 
-        $instanceName = $this->makeInstanceName($tenantId);
+        $instanceName = $this->makeInstanceName($tenantId, $forceCentralInstance);
 
-        return WhatsAppIntegration::query()->firstOrCreate(
+        $integration = WhatsAppIntegration::query()->firstOrCreate(
             ['tenant_id' => $tenantId],
             [
                 'id' => (string) Str::uuid(),
@@ -80,6 +81,21 @@ class WhatsAppIntegrationService
                 'is_enabled' => true,
             ]
         );
+
+        if ($forceCentralInstance && $integration->instance_name !== $instanceName) {
+            $integration->forceFill([
+                'instance_name' => $instanceName,
+                'status' => 'disconnected',
+                'connection_state' => 'close',
+                'qr_code' => null,
+                'pairing_code' => null,
+                'connected_phone' => null,
+                'connected_name' => null,
+                'last_error' => null,
+            ])->save();
+        }
+
+        return $integration;
     }
 
     public function getOrCreateNotificationSettings(
@@ -116,6 +132,38 @@ class WhatsAppIntegrationService
     public function overview(string $tenantId, ?string $requestHost = null): array
     {
         $integration = $this->getOrCreateIntegration($tenantId)->fresh();
+        $settings = $this->getOrCreateNotificationSettings($tenantId, $integration)->fresh();
+        $school = $this->schoolSettings($tenantId);
+
+        $logs = WhatsAppMessageLog::query()
+            ->where('tenant_id', $tenantId)
+            ->orderByDesc('created_at')
+            ->limit(30)
+            ->get();
+
+        return [
+            'integration' => $integration,
+            'settings' => $settings,
+            'logs' => $logs,
+            'provider' => [
+                'configured' => $this->providerConfigured(),
+                'name' => $this->providerName(),
+                'type' => $this->providerType(),
+                'central' => $this->usesCentralProvider(),
+                'public_url' => $this->evolutionPublicUrl($requestHost),
+            ],
+            'school' => $school,
+        ];
+    }
+
+    public function centralOverview(?string $requestHost = null): array
+    {
+        $tenantId = $this->centralTenantId();
+        if ($tenantId === '') {
+            throw new RuntimeException('Tenant pusat WhatsApp belum dikonfigurasi dan belum ada tenant aktif sebagai anchor.');
+        }
+
+        $integration = $this->getOrCreateIntegration($tenantId, true)->fresh();
         $settings = $this->getOrCreateNotificationSettings($tenantId, $integration)->fresh();
         $school = $this->schoolSettings($tenantId);
 
@@ -244,12 +292,37 @@ class WhatsAppIntegrationService
         return $this->overview($tenantId, $requestHost);
     }
 
+    public function requestCentralQr(?string $requestHost = null): array
+    {
+        $tenantId = $this->centralTenantId();
+        if ($tenantId === '') {
+            throw new RuntimeException('Tenant pusat WhatsApp belum dikonfigurasi dan belum ada tenant aktif sebagai anchor.');
+        }
+
+        $this->getOrCreateIntegration($tenantId, true);
+
+        return $this->requestQr($tenantId, $requestHost);
+    }
+
     public function synchronize(string $tenantId, ?string $requestHost = null): array
     {
         $integration = $this->getOrCreateIntegration($tenantId);
         $this->syncIntegration($integration, true);
 
         return $this->overview($tenantId, $requestHost);
+    }
+
+    public function synchronizeCentral(?string $requestHost = null): array
+    {
+        $tenantId = $this->centralTenantId();
+        if ($tenantId === '') {
+            throw new RuntimeException('Tenant pusat WhatsApp belum dikonfigurasi dan belum ada tenant aktif sebagai anchor.');
+        }
+
+        $integration = $this->getOrCreateIntegration($tenantId, true);
+        $this->syncIntegration($integration, true);
+
+        return $this->centralOverview($requestHost);
     }
 
     public function syncIntegration(WhatsAppIntegration $integration, bool $refreshPendingQr = false): WhatsAppIntegration
@@ -368,6 +441,18 @@ class WhatsAppIntegrationService
         $integration->save();
 
         return $this->overview($tenantId, $requestHost);
+    }
+
+    public function logoutCentral(?string $requestHost = null): array
+    {
+        $tenantId = $this->centralTenantId();
+        if ($tenantId === '') {
+            throw new RuntimeException('Tenant pusat WhatsApp belum dikonfigurasi dan belum ada tenant aktif sebagai anchor.');
+        }
+
+        $this->logout($tenantId, $requestHost);
+
+        return $this->centralOverview($requestHost);
     }
 
     public function handleWebhook(string $secret, ?string $eventSlug, array $payload): ?WhatsAppIntegration
@@ -728,7 +813,15 @@ class WhatsAppIntegrationService
             }
         }
 
-        return '';
+        $query = DB::table('tenants')->select('id')->orderBy('name');
+        if (Schema::hasColumn('tenants', 'status')) {
+            $query->where(function ($statusQuery) {
+                $statusQuery->whereNull('status')
+                    ->orWhereRaw("LOWER(COALESCE(status, 'active')) = 'active'");
+            });
+        }
+
+        return (string) ($query->value('id') ?: '');
     }
 
     private function isCentralTenant(string $tenantId): bool
@@ -908,10 +1001,10 @@ class WhatsAppIntegrationService
         return $this->extractQrCode($payload) !== '' || $this->extractPairingCode($payload) !== '';
     }
 
-    private function makeInstanceName(string $tenantId): string
+    private function makeInstanceName(string $tenantId, bool $forceCentralInstance = false): string
     {
         $centralInstance = Str::slug((string) config('services.whatsapp.central_instance_name', ''), '-');
-        if ($centralInstance !== '' && $this->isCentralTenant($tenantId)) {
+        if ($forceCentralInstance && $centralInstance !== '') {
             return Str::lower($centralInstance);
         }
 

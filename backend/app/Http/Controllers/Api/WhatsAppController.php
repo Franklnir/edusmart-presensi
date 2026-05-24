@@ -229,10 +229,7 @@ class WhatsAppController extends ApiController
         }
 
         try {
-            return $this->ok($this->whatsAppIntegrationService->requestQr(
-                $this->validatedCentralTenantId(),
-                $request->getHost()
-            ));
+            return $this->ok($this->whatsAppIntegrationService->requestCentralQr($request->getHost()));
         } catch (\Throwable $e) {
             return $this->deny($this->gatewayErrorMessage($e), 422);
         }
@@ -245,10 +242,7 @@ class WhatsAppController extends ApiController
         }
 
         try {
-            return $this->ok($this->whatsAppIntegrationService->synchronize(
-                $this->validatedCentralTenantId(),
-                $request->getHost()
-            ));
+            return $this->ok($this->whatsAppIntegrationService->synchronizeCentral($request->getHost()));
         } catch (\Throwable $e) {
             return $this->deny($this->gatewayErrorMessage($e), 422);
         }
@@ -261,10 +255,7 @@ class WhatsAppController extends ApiController
         }
 
         try {
-            return $this->ok($this->whatsAppIntegrationService->logout(
-                $this->validatedCentralTenantId(),
-                $request->getHost()
-            ));
+            return $this->ok($this->whatsAppIntegrationService->logoutCentral($request->getHost()));
         } catch (\Throwable $e) {
             return $this->deny($this->gatewayErrorMessage($e), 422);
         }
@@ -379,7 +370,7 @@ class WhatsAppController extends ApiController
         }
 
         try {
-            return $this->whatsAppIntegrationService->overview($tenantId, $request->getHost());
+            return $this->whatsAppIntegrationService->centralOverview($request->getHost());
         } catch (\Throwable $e) {
             return [
                 'integration' => null,
