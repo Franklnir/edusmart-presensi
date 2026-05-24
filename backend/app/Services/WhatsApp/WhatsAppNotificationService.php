@@ -14,6 +14,8 @@ class WhatsAppNotificationService
 {
     private const SCHOOL_TIMEZONE = 'Asia/Jakarta';
 
+    private const ALPHA_CATEGORY = 'attendance_alpha_daily';
+
     private const PROFILE_FIELDS = [
         'nama' => 'Nama',
         'nis' => 'NIS',
@@ -127,35 +129,32 @@ class WhatsAppNotificationService
             return $emptySummary;
         }
 
-        $settingsQuery = WhatsAppNotificationSetting::query()
-            ->where('is_enabled', true)
-            ->where('send_assignment_updates', true);
-
-        $tenantId = trim((string) $tenantId);
-        if ($tenantId !== '') {
-            $settingsQuery->where('tenant_id', $tenantId);
-        }
-
         $summary = $emptySummary;
-
         $batchSize = max(1, min((int) ($limit ?: config('services.whatsapp.assignment_missing_batch_size', 100)), 500));
+        $tenantIds = $this->tenantIdsForNotification($tenantId);
+        $providerType = $this->integrationService->providerType();
 
-        $settingsQuery->orderBy('tenant_id')->chunk(50, function ($settingsRows) use (&$summary, $batchSize) {
-            foreach ($settingsRows as $settings) {
+        foreach (array_chunk($tenantIds, 50) as $tenantChunk) {
+            foreach ($tenantChunk as $tenant) {
                 $summary['tenants']++;
-                $context = $this->notificationContext((string) $settings->tenant_id);
-                if (! $context || ! $context['settings']->send_assignment_updates || ! $context['integration']->isConnected()) {
+                $context = $this->notificationContext((string) $tenant);
+                if (
+                    ! $context
+                    || ! $context['settings']->is_enabled
+                    || ! $context['settings']->send_assignment_updates
+                    || ($providerType !== 'fonnte' && ! $context['integration']->isConnected())
+                ) {
                     $summary['skipped']++;
 
                     continue;
                 }
 
-                $tasks = $this->recentlyClosedTasks((string) $settings->tenant_id, $batchSize);
+                $tasks = $this->recentlyClosedTasks((string) $tenant, $batchSize);
                 $summary['tasks_checked'] += count($tasks);
 
                 foreach ($tasks as $task) {
                     $result = $this->queueMissingAssignmentForTask(
-                        (string) $settings->tenant_id,
+                        (string) $tenant,
                         $context,
                         (array) $task
                     );
@@ -165,60 +164,219 @@ class WhatsAppNotificationService
                     $summary['skipped'] += $result['skipped'];
                 }
             }
-        });
+        }
 
         return $summary;
     }
 
+    public function queueDailyAlphaWarnings(?string $tenantId = null, ?string $date = null, ?int $limit = null): array
+    {
+        $summary = [
+            'tenants' => 0,
+            'students_checked' => 0,
+            'alpha_students' => 0,
+            'queued' => 0,
+            'skipped' => 0,
+            'ready' => true,
+            'reason' => null,
+            'next_run_at' => null,
+            'send_until' => null,
+        ];
+
+        if (! Schema::hasTable('tenants') || ! Schema::hasTable('absensi') || ! Schema::hasTable('profiles')) {
+            return $summary;
+        }
+
+        if (! $this->integrationService->providerConfigured()) {
+            $summary['ready'] = false;
+            $summary['reason'] = 'Konfigurasi gateway WhatsApp pusat belum lengkap.';
+
+            return $summary;
+        }
+
+        $targetDate = $this->normalizeDate($date) ?: Carbon::now(self::SCHOOL_TIMEZONE)->toDateString();
+        $tenantIds = $this->tenantIdsForNotification($tenantId);
+        $batchLimit = max(1, min((int) ($limit ?: 500), 5000));
+        $readiness = $this->alphaDispatchReadiness($tenantIds, $targetDate);
+        $summary['ready'] = $readiness['ready'];
+        $summary['reason'] = $readiness['reason'];
+        $summary['next_run_at'] = $readiness['next_run_at'];
+
+        if (! $readiness['ready']) {
+            return $summary;
+        }
+
+        $plannedMessages = $this->collectDailyAlphaMessages($tenantIds, $targetDate, $batchLimit, $summary);
+        $totalMessages = count($plannedMessages);
+        $sendPlan = $this->dailySendPlan($totalMessages);
+        $summary['send_until'] = $sendPlan['send_until'];
+
+        if (! $sendPlan['accepting']) {
+            $summary['skipped'] += $totalMessages;
+            $summary['reason'] = 'Jendela pengiriman Alpha hari ini sudah lewat.';
+
+            return $summary;
+        }
+
+        foreach ($plannedMessages as $index => $planned) {
+            $delaySeconds = $this->delayForDailyMessage($index, $sendPlan);
+            $result = $this->queueForRecipients(
+                $planned['tenant_id'],
+                $planned['integration_id'],
+                $planned['settings'],
+                $planned['student'],
+                self::ALPHA_CATEGORY,
+                'attendance-alpha-daily:'.$targetDate.':'.$planned['student']['id'],
+                $planned['message'],
+                'absensi',
+                $targetDate,
+                $delaySeconds
+            );
+
+            $summary['queued'] += $result['queued'];
+            $summary['skipped'] += $result['skipped'];
+        }
+
+        return $summary;
+    }
+
+    public function alphaDeliveryOverview(?string $date = null): array
+    {
+        $targetDate = $this->normalizeDate($date) ?: Carbon::now(self::SCHOOL_TIMEZONE)->toDateString();
+        $tenantIds = $this->tenantIdsForNotification(null);
+        $readiness = $this->alphaDispatchReadiness($tenantIds, $targetDate);
+        $plan = $this->dailySendPlan(0);
+        $tenants = [];
+
+        foreach ($tenantIds as $tenantId) {
+            $tenant = DB::table('tenants')
+                ->where('id', $tenantId)
+                ->first(['id', 'name', 'slug']);
+
+            $alphaRows = $this->dailyAlphaRows($tenantId, $targetDate);
+            $alphaStudents = [];
+            foreach ($alphaRows as $row) {
+                $studentId = trim((string) ($row->uid ?? ''));
+                if ($studentId !== '') {
+                    $alphaStudents[$studentId] = true;
+                }
+            }
+
+            $logs = WhatsAppMessageLog::query()
+                ->where('tenant_id', $tenantId)
+                ->where('category', self::ALPHA_CATEGORY)
+                ->whereDate('created_at', $targetDate)
+                ->get();
+
+            $latestSent = $logs->where('status', 'sent')->max('sent_at');
+            $latestFailed = $logs->where('status', 'failed')->max('failed_at');
+            $failedOrSkipped = $logs
+                ->filter(fn ($log) => in_array((string) $log->status, ['failed', 'skipped'], true))
+                ->sortByDesc(fn ($log) => $log->failed_at ?: $log->created_at)
+                ->take(6)
+                ->values()
+                ->map(fn ($log) => [
+                    'id' => $log->id,
+                    'target_name' => $log->target_name,
+                    'target_phone' => $log->target_phone,
+                    'status' => $log->status,
+                    'last_error' => $log->last_error ?: $this->failureLabel($log),
+                    'attempt_count' => (int) $log->attempt_count,
+                    'created_at' => $log->created_at,
+                    'failed_at' => $log->failed_at,
+                ]);
+
+            $required = count($alphaStudents);
+            $sent = $logs->where('status', 'sent')->count();
+            $queued = $logs->where('status', 'queued')->count();
+            $failed = $logs->where('status', 'failed')->count();
+            $skipped = $logs->where('status', 'skipped')->count();
+
+            $tenants[] = [
+                'tenant_id' => $tenantId,
+                'tenant_name' => $tenant->name ?? null,
+                'tenant_slug' => $tenant->slug ?? null,
+                'required' => $required,
+                'pending' => max(0, $required - $sent - $queued - $failed - $skipped),
+                'sent' => $sent,
+                'queued' => $queued,
+                'failed' => $failed,
+                'skipped' => $skipped,
+                'latest_sent_at' => $latestSent,
+                'latest_failed_at' => $latestFailed,
+                'failures' => $failedOrSkipped,
+            ];
+        }
+
+        $totalRequired = array_sum(array_column($tenants, 'required'));
+        $deliveryPlan = $this->dailySendPlan($totalRequired);
+
+        return [
+            'date' => $targetDate,
+            'readiness' => $readiness,
+            'delivery_plan' => [
+                'mode' => $deliveryPlan['fast'] ? 'cepat' : 'batch',
+                'interval_seconds' => $deliveryPlan['interval_seconds'],
+                'batch_per_minute' => $deliveryPlan['batch_per_minute'],
+                'send_until' => $deliveryPlan['send_until'],
+                'accepting' => $deliveryPlan['accepting'],
+            ],
+            'tenants' => $tenants,
+        ];
+    }
+
+    public function retryFailedMessages(?int $limit = null): array
+    {
+        $maxAttempts = max(1, min((int) config('services.whatsapp.retry_max_attempts', 3), 10));
+        $batchSize = max(1, min((int) ($limit ?: config('services.whatsapp.retry_batch_size', 50)), 500));
+
+        $logs = WhatsAppMessageLog::query()
+            ->where('status', 'failed')
+            ->where('category', self::ALPHA_CATEGORY)
+            ->where('attempt_count', '<', $maxAttempts)
+            ->where(function ($query) {
+                $query->whereNull('failed_at')
+                    ->orWhere('failed_at', '<=', now()->subMinutes(5));
+            })
+            ->orderBy('failed_at')
+            ->orderBy('created_at')
+            ->limit($batchSize)
+            ->get();
+
+        $plan = $this->dailySendPlan($logs->count());
+        if (! $plan['accepting']) {
+            return [
+                'checked' => $logs->count(),
+                'retried' => 0,
+                'reason' => 'Jendela retry Alpha hari ini sudah lewat.',
+            ];
+        }
+
+        $retried = 0;
+        foreach ($logs as $log) {
+            $log->fill([
+                'status' => 'queued',
+                'queued_at' => now(),
+                'failed_at' => null,
+                'last_error' => null,
+            ])->save();
+
+            SendWhatsAppMessageJob::dispatch($log->id)->afterCommit();
+            $retried++;
+        }
+
+        return [
+            'checked' => $logs->count(),
+            'retried' => $retried,
+        ];
+    }
+
     private function handleAttendanceMutation(string $tenantId, array $rows): void
     {
-        $context = $this->notificationContext($tenantId);
-        if (! $context || ! $context['settings']->send_attendance) {
-            return;
-        }
-
-        foreach ($rows as $row) {
-            $attendance = (array) $row;
-            $studentId = trim((string) ($attendance['uid'] ?? ''));
-            if ($studentId === '') {
-                continue;
-            }
-
-            $student = $this->studentProfile($tenantId, $studentId);
-            if (! $student) {
-                continue;
-            }
-
-            $problem = $this->attendanceProblemForRow($tenantId, $attendance);
-            if (! $problem) {
-                continue;
-            }
-
-            $message = $this->messageBuilder->buildAttendanceProblemMessage(
-                $context['school'],
-                $student,
-                $problem
-            );
-
-            $eventKey = implode(':', [
-                'attendance-problem',
-                $problem['type'],
-                $studentId,
-                (string) ($attendance['tanggal'] ?? ''),
-            ]);
-
-            $this->queueForRecipients(
-                $context['integration']->tenant_id,
-                $context['integration']->id,
-                $context['settings'],
-                $student,
-                'attendance_problem',
-                $eventKey,
-                $message,
-                'absensi',
-                (string) ($attendance['id'] ?? $eventKey)
-            );
-        }
+        // WA pusat saat ini hanya mengirim rekap Alpha harian. Mutasi absensi
+        // real-time tidak langsung mengirim pesan agar wali murid tidak spam
+        // ketika satu siswa Alpha di beberapa mapel pada hari yang sama.
+        return;
     }
 
     private function attendanceProblemForRow(string $tenantId, array $attendance): ?array
@@ -415,6 +573,311 @@ class WhatsAppNotificationService
         $this->applyTenantFilter($query, 'profiles', $tenantId);
 
         return $query->get($columns)->all();
+    }
+
+    private function tenantIdsForNotification(?string $tenantId = null): array
+    {
+        $tenantId = trim((string) $tenantId);
+        if ($tenantId !== '') {
+            return [$tenantId];
+        }
+
+        $query = DB::table('tenants')->select('id')->orderBy('name');
+        if (Schema::hasColumn('tenants', 'status')) {
+            $query->where(function ($statusQuery) {
+                $statusQuery->whereNull('status')
+                    ->orWhereRaw("LOWER(COALESCE(status, 'active')) = 'active'");
+            });
+        }
+
+        return $query->pluck('id')->map(fn ($id) => (string) $id)->all();
+    }
+
+    private function collectDailyAlphaMessages(array $tenantIds, string $date, int $limit, array &$summary): array
+    {
+        $planned = [];
+
+        foreach ($tenantIds as $tenantId) {
+            if (count($planned) >= $limit) {
+                break;
+            }
+
+            $context = $this->notificationContext((string) $tenantId);
+            if (! $context || ! $context['settings']->send_attendance) {
+                $summary['skipped']++;
+                continue;
+            }
+
+            $summary['tenants']++;
+
+            $alphaRows = $this->dailyAlphaRows((string) $tenantId, $date);
+            $byStudent = [];
+            foreach ($alphaRows as $row) {
+                $payload = (array) $row;
+                $studentId = trim((string) ($payload['uid'] ?? ''));
+                if ($studentId === '') {
+                    continue;
+                }
+
+                if (! isset($byStudent[$studentId])) {
+                    $byStudent[$studentId] = [
+                        'student_id' => $studentId,
+                        'kelas' => $payload['kelas'] ?? null,
+                        'tanggal' => $date,
+                        'mapels' => [],
+                        'first_at' => $payload['waktu'] ?? $payload['created_at'] ?? $date,
+                    ];
+                }
+
+                $mapel = trim((string) ($payload['mapel'] ?? ''));
+                if ($mapel !== '') {
+                    $byStudent[$studentId]['mapels'][$mapel] = true;
+                }
+            }
+
+            foreach ($byStudent as $studentId => $alpha) {
+                if (count($planned) >= $limit) {
+                    break 2;
+                }
+
+                $summary['students_checked']++;
+                $student = $this->studentProfile((string) $tenantId, (string) $studentId);
+                if (! $student) {
+                    $summary['skipped']++;
+                    continue;
+                }
+
+                $alpha['mapels'] = array_keys($alpha['mapels']);
+                $planned[] = [
+                    'tenant_id' => (string) $tenantId,
+                    'integration_id' => $context['integration']->id,
+                    'settings' => $context['settings'],
+                    'student' => $student,
+                    'message' => $this->messageBuilder->buildDailyAlphaMessage($context['school'], $student, $alpha),
+                ];
+                $summary['alpha_students']++;
+            }
+        }
+
+        return $planned;
+    }
+
+    private function dailyAlphaRows(string $tenantId, string $date): array
+    {
+        $columns = $this->existingColumns('absensi', [
+            'id',
+            'tenant_id',
+            'kelas',
+            'tanggal',
+            'uid',
+            'mapel',
+            'status',
+            'nama',
+            'waktu',
+            'created_at',
+        ]);
+
+        $query = DB::table('absensi')
+            ->where('tanggal', $date)
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'alpha'")
+            ->orderBy('kelas')
+            ->orderBy('nama')
+            ->orderBy('mapel');
+
+        $this->applyTenantFilter($query, 'absensi', $tenantId);
+
+        return $query->get($columns)->all();
+    }
+
+    private function dailySendPlan(int $totalMessages): array
+    {
+        $fastLimit = max(1, (int) config('services.whatsapp.daily_alpha_fast_limit', 20));
+        $fastInterval = max(5, min((int) config('services.whatsapp.daily_alpha_fast_interval_seconds', 15), 120));
+        $batchPerMinute = max(1, (int) config('services.whatsapp.daily_alpha_batch_per_minute', 10));
+        $fastMaxHour = max(0, min((int) config('services.whatsapp.daily_alpha_fast_max_send_hour', 23), 23));
+        $batchMaxHour = max(0, min((int) config('services.whatsapp.daily_alpha_batch_max_send_hour', 21), 23));
+        $isFast = $totalMessages <= $fastLimit;
+        $maxHour = $isFast ? $fastMaxHour : $batchMaxHour;
+        $now = Carbon::now(self::SCHOOL_TIMEZONE);
+        $deadline = $now->copy()->setTime($maxHour, 0, 0);
+
+        $accepting = $deadline->greaterThan($now);
+
+        $availableMinutes = max(1, $now->diffInMinutes($deadline) + 1);
+        if (! $isFast) {
+            $batchPerMinute = max($batchPerMinute, (int) ceil($totalMessages / $availableMinutes));
+        }
+
+        return [
+            'accepting' => $accepting || $totalMessages === 0,
+            'fast' => $isFast,
+            'interval_seconds' => $isFast ? $fastInterval : 60,
+            'batch_per_minute' => $batchPerMinute,
+            'send_until' => $deadline->toIso8601String(),
+        ];
+    }
+
+    private function delayForDailyMessage(int $index, array $plan): int
+    {
+        if (! empty($plan['fast'])) {
+            return $index * max(5, (int) ($plan['interval_seconds'] ?? 15));
+        }
+
+        $batchPerMinute = max(1, (int) ($plan['batch_per_minute'] ?? 10));
+
+        return intdiv($index, $batchPerMinute) * 60;
+    }
+
+    private function alphaDispatchReadiness(array $tenantIds, string $date): array
+    {
+        $targetDate = $this->normalizeDate($date) ?: Carbon::now(self::SCHOOL_TIMEZONE)->toDateString();
+        $now = Carbon::now(self::SCHOOL_TIMEZONE);
+
+        if ($targetDate !== $now->toDateString()) {
+            return [
+                'ready' => true,
+                'reason' => 'Tanggal lampau/terpilih dapat diproses manual.',
+                'next_run_at' => null,
+                'last_school_activity_at' => null,
+            ];
+        }
+
+        $lastActivity = $this->lastSchoolActivityAt($tenantIds, $targetDate);
+        if (! $lastActivity) {
+            $lastActivity = $this->dateTimeFromTime($targetDate, (string) config('services.whatsapp.daily_alpha_default_start_time', '16:00'))
+                ?: $now->copy()->setTime(16, 0, 0);
+        }
+
+        $bufferMinutes = max(0, min((int) config('services.whatsapp.daily_alpha_after_school_buffer_minutes', 10), 120));
+        $readyAt = $lastActivity->copy()->addMinutes($bufferMinutes);
+
+        if ($now->lessThan($readyAt)) {
+            return [
+                'ready' => false,
+                'reason' => 'Menunggu jam pelajaran/scan pulang terakhir selesai.',
+                'next_run_at' => $readyAt->toIso8601String(),
+                'last_school_activity_at' => $lastActivity->toIso8601String(),
+            ];
+        }
+
+        return [
+            'ready' => true,
+            'reason' => 'Hari sekolah sudah selesai, rekap Alpha siap diproses.',
+            'next_run_at' => null,
+            'last_school_activity_at' => $lastActivity->toIso8601String(),
+        ];
+    }
+
+    private function lastSchoolActivityAt(array $tenantIds, string $date): ?Carbon
+    {
+        $dayName = $this->dayNameForDate($date);
+        $latest = null;
+
+        foreach ($tenantIds as $tenantId) {
+            foreach ([$this->lastScheduleEndAt($tenantId, $date, $dayName), $this->scanPulangEndAt($tenantId, $date)] as $candidate) {
+                if ($candidate && (! $latest || $candidate->greaterThan($latest))) {
+                    $latest = $candidate;
+                }
+            }
+        }
+
+        return $latest;
+    }
+
+    private function lastScheduleEndAt(string $tenantId, string $date, ?string $dayName): ?Carbon
+    {
+        if (
+            ! $dayName
+            || ! Schema::hasTable('jadwal')
+            || ! Schema::hasColumn('jadwal', 'hari')
+            || ! Schema::hasColumn('jadwal', 'jam_selesai')
+        ) {
+            return null;
+        }
+
+        $query = DB::table('jadwal')
+            ->whereRaw('LOWER(hari) = ?', [Str::lower($dayName)])
+            ->whereNotNull('jam_selesai');
+
+        $this->applyTenantFilter($query, 'jadwal', $tenantId);
+
+        $time = $query->max('jam_selesai');
+
+        return $this->dateTimeFromTime($date, $time);
+    }
+
+    private function scanPulangEndAt(string $tenantId, string $date): ?Carbon
+    {
+        if (! Schema::hasTable('settings') || ! Schema::hasColumn('settings', 'manual_jam_pulang_selesai')) {
+            return null;
+        }
+
+        $query = DB::table('settings')->whereNotNull('manual_jam_pulang_selesai');
+        $this->applyTenantFilter($query, 'settings', $tenantId);
+
+        $time = $query->max('manual_jam_pulang_selesai');
+
+        return $this->dateTimeFromTime($date, $time);
+    }
+
+    private function dateTimeFromTime(string $date, $time): ?Carbon
+    {
+        $time = trim((string) $time);
+        if ($time === '') {
+            return null;
+        }
+
+        try {
+            return Carbon::parse($date.' '.$time, self::SCHOOL_TIMEZONE);
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    private function dayNameForDate(string $date): ?string
+    {
+        try {
+            $day = Carbon::parse($date, self::SCHOOL_TIMEZONE)->dayOfWeek;
+        } catch (\Throwable $e) {
+            return null;
+        }
+
+        return [
+            0 => 'Minggu',
+            1 => 'Senin',
+            2 => 'Selasa',
+            3 => 'Rabu',
+            4 => 'Kamis',
+            5 => 'Jumat',
+            6 => 'Sabtu',
+        ][$day] ?? null;
+    }
+
+    private function failureLabel(WhatsAppMessageLog $log): string
+    {
+        if ($log->normalized_phone === 'missing') {
+            return 'Nomor wali murid belum tersedia atau tidak valid.';
+        }
+
+        if ($log->status === 'failed') {
+            return 'Gateway tidak berhasil mengirim pesan. Cek koneksi WA pusat atau nomor tujuan.';
+        }
+
+        return 'Pesan dilewati oleh sistem.';
+    }
+
+    private function normalizeDate(?string $date): ?string
+    {
+        $date = trim((string) $date);
+        if ($date === '') {
+            return null;
+        }
+
+        try {
+            return Carbon::parse($date, self::SCHOOL_TIMEZONE)->toDateString();
+        } catch (\Throwable $e) {
+            return null;
+        }
     }
 
     private function classLookupValues(string $kelas): array
@@ -769,8 +1232,9 @@ class WhatsAppNotificationService
 
     private function notificationContext(string $tenantId): ?array
     {
-        $integration = $this->integrationService->getOrCreateIntegration($tenantId);
-        $settings = $this->integrationService->getOrCreateNotificationSettings($tenantId, $integration);
+        $tenantIntegration = $this->integrationService->getOrCreateIntegration($tenantId);
+        $settings = $this->integrationService->getOrCreateNotificationSettings($tenantId, $tenantIntegration);
+        $integration = $this->integrationService->senderIntegrationForTenant($tenantId);
 
         if (! $integration->is_enabled || ! $settings->is_enabled) {
             return null;
@@ -792,7 +1256,8 @@ class WhatsAppNotificationService
         string $eventKey,
         string $message,
         string $sourceTable,
-        string $sourceRecordId
+        string $sourceRecordId,
+        int $delaySeconds = 0
     ): array {
         $recipients = $this->recipientsForStudent($student, $settings);
         if (empty($recipients)) {
@@ -840,7 +1305,9 @@ class WhatsAppNotificationService
                     'target_name' => $recipient['name'],
                     'target_phone' => $recipient['raw'],
                     'normalized_phone' => $recipient['normalized'],
-                ]
+                ],
+                true,
+                $delaySeconds
             );
 
             if ($log->wasRecentlyCreated && $log->status === 'queued') {
@@ -860,7 +1327,8 @@ class WhatsAppNotificationService
         string $eventKey,
         string $message,
         array $overrides = [],
-        bool $dispatch = true
+        bool $dispatch = true,
+        int $delaySeconds = 0
     ): WhatsAppMessageLog {
         $status = $overrides['status'] ?? 'queued';
 
@@ -883,7 +1351,10 @@ class WhatsAppNotificationService
         );
 
         if ($dispatch && $log->wasRecentlyCreated && $log->status === 'queued') {
-            SendWhatsAppMessageJob::dispatch($log->id)->afterCommit();
+            $job = SendWhatsAppMessageJob::dispatch($log->id)->afterCommit();
+            if ($delaySeconds > 0) {
+                $job->delay(now()->addSeconds($delaySeconds));
+            }
         }
 
         return $log;
@@ -891,30 +1362,15 @@ class WhatsAppNotificationService
 
     private function recipientsForStudent(array $student, WhatsAppNotificationSetting $settings): array
     {
-        $mode = strtolower(trim((string) $settings->recipient_mode));
         $recipients = [];
 
-        if (in_array($mode, ['wali', 'wali_and_student'], true)) {
-            $normalized = $this->normalizePhone((string) ($student['no_hp_wali'] ?? ''));
-            if ($normalized !== '') {
-                $recipients[] = [
-                    'name' => 'Wali '.($student['nama'] ?? 'Siswa'),
-                    'raw' => (string) ($student['no_hp_wali'] ?? ''),
-                    'normalized' => $normalized,
-                ];
-            }
-        }
-
-        if (in_array($mode, ['siswa', 'wali_and_student'], true)) {
-            $studentPhone = (string) ($student['no_hp_siswa'] ?? $student['telp'] ?? '');
-            $normalized = $this->normalizePhone($studentPhone);
-            if ($normalized !== '') {
-                $recipients[] = [
-                    'name' => (string) ($student['nama'] ?? 'Siswa'),
-                    'raw' => $studentPhone,
-                    'normalized' => $normalized,
-                ];
-            }
+        $normalized = $this->normalizePhone((string) ($student['no_hp_wali'] ?? ''));
+        if ($normalized !== '') {
+            $recipients[] = [
+                'name' => 'Wali '.($student['nama'] ?? 'Siswa'),
+                'raw' => (string) ($student['no_hp_wali'] ?? ''),
+                'normalized' => $normalized,
+            ];
         }
 
         $deduped = [];

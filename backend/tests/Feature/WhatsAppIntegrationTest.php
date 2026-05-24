@@ -782,7 +782,7 @@ class WhatsAppIntegrationTest extends TestCase
         $this->assertDatabaseCount('whatsapp_message_logs', 0);
     }
 
-    public function test_closed_assignment_warning_queues_only_missing_students_once(): void
+    public function test_closed_assignment_warning_is_disabled_for_central_alpha_policy(): void
     {
         Queue::fake();
 
@@ -831,16 +831,9 @@ class WhatsAppIntegrationTest extends TestCase
         $first = $service->queueClosedAssignmentWarnings($tenantId);
         $second = $service->queueClosedAssignmentWarnings($tenantId);
 
-        $this->assertSame(1, $first['queued']);
+        $this->assertSame(0, $first['queued']);
         $this->assertSame(0, $second['queued']);
-        $this->assertDatabaseHas('whatsapp_message_logs', [
-            'tenant_id' => $tenantId,
-            'category' => 'assignment_missing',
-            'event_key' => 'assignment-missing:'.$taskId.':'.$missing->id,
-            'normalized_phone' => '6281234567890',
-            'target_profile_id' => $missing->id,
-            'status' => 'queued',
-        ]);
+        $this->assertDatabaseCount('whatsapp_message_logs', 0);
         $this->assertDatabaseMissing('whatsapp_message_logs', [
             'tenant_id' => $tenantId,
             'event_key' => 'assignment-missing:'.$taskId.':'.$submitted->id,

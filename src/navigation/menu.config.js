@@ -58,14 +58,6 @@ export const menuConfig = {
       ],
     },
     {
-      id: 'admin-komunikasi',
-      group: 'Komunikasi',
-      icon: 'chat',
-      items: [
-        { id: 'admin-whatsapp', to: '/admin/whatsapp', label: 'WhatsApp', icon: 'chat' },
-      ],
-    },
-    {
       id: 'admin-sistem',
       group: 'Sistem',
       icon: 'cog',
@@ -93,6 +85,7 @@ export const superAdminGroup = {
   items: [
     { id: 'super-tenants', to: '/admin/tenants', label: 'Sekolah', icon: 'school' },
     { id: 'super-storage', to: '/admin/storage', label: 'Storage VPS & S3', icon: 'storage' },
+    { id: 'super-whatsapp', to: '/admin/whatsapp', label: 'WA Pusat', icon: 'chat' },
     { id: 'super-admins', to: '/admin/super-admins', label: 'Super Admin', icon: 'shield' },
     { id: 'super-audit-trail', to: '/admin/audit-trail', label: 'Audit Trail', icon: 'chart' },
     { id: 'super-plugins', to: '/admin/plugins', label: 'Plugins', icon: 'cog' },

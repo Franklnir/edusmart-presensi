@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Services\WhatsApp\WhatsAppIntegrationService;
 use App\Services\WhatsApp\WhatsAppNotificationService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 
 class WhatsAppController extends ApiController
 {
@@ -133,25 +135,125 @@ class WhatsAppController extends ApiController
         ]);
     }
 
-    public function runAssignmentWarnings(Request $request)
+    public function superOverview(Request $request)
     {
-        $tenantId = $this->validatedTenantAdmin($request);
-        if (! $tenantId) {
+        if (! $this->isSuperAdmin($request)) {
             return $this->deny();
         }
 
-        try {
-            $summary = $this->whatsAppNotificationService->queueClosedAssignmentWarnings($tenantId);
-            $overview = $this->whatsAppIntegrationService->overview($tenantId, $request->getHost());
-        } catch (\Throwable $e) {
-            return $this->deny($this->gatewayErrorMessage($e), 422);
+        $date = $this->normalizeDate($request->query('date')) ?: Carbon::now('Asia/Jakarta')->toDateString();
+        $delivery = $this->whatsAppNotificationService->alphaDeliveryOverview($date);
+        $logs = DB::table('whatsapp_message_logs as l')
+            ->leftJoin('tenants as t', 't.id', '=', 'l.tenant_id')
+            ->select([
+                'l.id',
+                'l.tenant_id',
+                't.name as tenant_name',
+                't.slug as tenant_slug',
+                'l.category',
+                'l.event_key',
+                'l.target_name',
+                'l.target_phone',
+                'l.normalized_phone',
+                'l.status',
+                'l.attempt_count',
+                'l.message_text',
+                'l.last_error',
+                'l.queued_at',
+                'l.sent_at',
+                'l.failed_at',
+                'l.created_at',
+            ])
+            ->whereDate('l.created_at', $date)
+            ->where('l.category', 'attendance_alpha_daily')
+            ->orderByDesc('l.created_at')
+            ->limit(200)
+            ->get();
+
+        $stats = [
+            'total' => $logs->count(),
+            'sent' => $logs->where('status', 'sent')->count(),
+            'queued' => $logs->where('status', 'queued')->count(),
+            'failed' => $logs->where('status', 'failed')->count(),
+            'skipped' => $logs->where('status', 'skipped')->count(),
+        ];
+
+        $byTenant = $logs
+            ->groupBy('tenant_id')
+            ->map(function ($items) {
+                $first = $items->first();
+
+                return [
+                    'tenant_id' => $first->tenant_id,
+                    'tenant_name' => $first->tenant_name,
+                    'tenant_slug' => $first->tenant_slug,
+                    'total' => $items->count(),
+                    'sent' => $items->where('status', 'sent')->count(),
+                    'queued' => $items->where('status', 'queued')->count(),
+                    'failed' => $items->where('status', 'failed')->count(),
+                    'skipped' => $items->where('status', 'skipped')->count(),
+                ];
+            })
+            ->values();
+
+        return $this->ok([
+            'provider' => [
+                'configured' => $this->whatsAppIntegrationService->providerConfigured(),
+                'name' => $this->whatsAppIntegrationService->providerName(),
+                'type' => $this->whatsAppIntegrationService->providerType(),
+                'central' => $this->whatsAppIntegrationService->usesCentralProvider(),
+            ],
+            'date' => $date,
+            'settings' => [
+                'fast_max_send_hour' => (int) config('services.whatsapp.daily_alpha_fast_max_send_hour', 23),
+                'batch_max_send_hour' => (int) config('services.whatsapp.daily_alpha_batch_max_send_hour', 21),
+                'fast_limit' => (int) config('services.whatsapp.daily_alpha_fast_limit', 20),
+                'batch_per_minute' => (int) config('services.whatsapp.daily_alpha_batch_per_minute', 10),
+                'fast_interval_seconds' => (int) config('services.whatsapp.daily_alpha_fast_interval_seconds', 15),
+            ],
+            'stats' => $stats,
+            'readiness' => $delivery['readiness'] ?? null,
+            'delivery_plan' => $delivery['delivery_plan'] ?? null,
+            'tenants' => $delivery['tenants'] ?? $byTenant,
+            'logs' => $logs,
+        ]);
+    }
+
+    public function superRunDailyAlpha(Request $request)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
         }
 
-        return response()->json([
-            'data' => [
-                'summary' => $summary,
-                'overview' => $overview,
-            ],
+        $validated = $request->validate([
+            'date' => ['nullable', 'date'],
+            'tenant_id' => ['nullable', 'uuid'],
+            'limit' => ['nullable', 'integer', 'min:1', 'max:5000'],
+        ]);
+
+        $summary = $this->whatsAppNotificationService->queueDailyAlphaWarnings(
+            $validated['tenant_id'] ?? null,
+            $validated['date'] ?? null,
+            $validated['limit'] ?? null
+        );
+
+        return $this->ok([
+            'summary' => $summary,
+        ]);
+    }
+
+    public function superRetryFailed(Request $request)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
+        }
+
+        $validated = $request->validate([
+            'limit' => ['nullable', 'integer', 'min:1', 'max:500'],
+        ]);
+
+        return $this->ok([
+            'summary' => $this->whatsAppNotificationService->retryFailedMessages($validated['limit'] ?? null),
         ]);
     }
 
@@ -176,5 +278,19 @@ class WhatsAppController extends ApiController
         return $message !== ''
             ? $message
             : 'Gateway WhatsApp belum siap. Cek service Evolution API, Redis, dan koneksi tenant.';
+    }
+
+    private function normalizeDate($date): ?string
+    {
+        $date = trim((string) $date);
+        if ($date === '') {
+            return null;
+        }
+
+        try {
+            return Carbon::parse($date, 'Asia/Jakarta')->toDateString();
+        } catch (\Throwable $e) {
+            return null;
+        }
     }
 }

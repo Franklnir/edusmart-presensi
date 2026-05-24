@@ -2691,13 +2691,6 @@ const auth = {
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
-    async runWhatsAppAssignmentWarnings() {
-      const res = await apiFetch('/api/admin/whatsapp/assignment-warnings/run', {
-        method: 'POST',
-        body: {}
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
     async googleDrive(params = {}) {
       const query = new URLSearchParams()
       Object.entries(params || {}).forEach(([key, value]) => {
@@ -3004,6 +2997,33 @@ const auth = {
         body: {},
         cacheTtlMs: 0,
         timeoutMs: 60000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async whatsapp(params = {}) {
+      const res = await apiFetch(`/api/super/whatsapp${buildQueryString(params)}`, {
+        method: 'GET',
+        cacheTtlMs: 10 * 1000,
+        staleKey: `super.whatsapp.${JSON.stringify(params || {})}`,
+        timeoutMs: 20000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async runDailyAlphaWhatsApp(payload = {}) {
+      const res = await apiFetch('/api/super/whatsapp/daily-alpha/run', {
+        method: 'POST',
+        body: payload,
+        cacheTtlMs: 0,
+        timeoutMs: 60000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async retryFailedWhatsApp(payload = {}) {
+      const res = await apiFetch('/api/super/whatsapp/retry-failed', {
+        method: 'POST',
+        body: payload,
+        cacheTtlMs: 0,
+        timeoutMs: 30000
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },

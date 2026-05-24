@@ -255,24 +255,51 @@ Schedule::call(function (WhatsAppIntegrationService $integrationService) {
     ->withoutOverlapping();
 
 Schedule::call(function (WhatsAppNotificationService $notificationService) {
-    $notificationService->queueClosedAssignmentWarnings();
+    $notificationService->queueDailyAlphaWarnings();
 })
-    ->name('whatsapp:assignment-missing-warnings')
-    ->everyMinute()
+    ->name('whatsapp:daily-alpha-warnings')
+    ->everyFiveMinutes()
+    ->between('12:00', '23:00')
     ->withoutOverlapping();
 
-Artisan::command('whatsapp:assignment-missing-warnings {--tenant= : Batasi tenant tertentu}', function (WhatsAppNotificationService $notificationService) {
-    $summary = $notificationService->queueClosedAssignmentWarnings($this->option('tenant') ?: null);
+Schedule::call(function (WhatsAppNotificationService $notificationService) {
+    $notificationService->retryFailedMessages();
+})
+    ->name('whatsapp:retry-failed')
+    ->everyFiveMinutes()
+    ->between('07:00', '22:00')
+    ->withoutOverlapping();
 
-    $this->info('Cek peringatan tugas tertutup selesai.');
+Artisan::command('whatsapp:daily-alpha-warnings {--tenant= : Batasi tenant tertentu} {--date= : Tanggal YYYY-MM-DD} {--limit= : Maksimal pesan}', function (WhatsAppNotificationService $notificationService) {
+    $summary = $notificationService->queueDailyAlphaWarnings(
+        $this->option('tenant') ?: null,
+        $this->option('date') ?: null,
+        $this->option('limit') ? (int) $this->option('limit') : null
+    );
+
+    $this->info('Cek peringatan Alpha harian selesai.');
     $this->line('Tenant          : '.($summary['tenants'] ?? 0));
-    $this->line('Tugas dicek     : '.($summary['tasks_checked'] ?? 0));
     $this->line('Siswa dicek     : '.($summary['students_checked'] ?? 0));
+    $this->line('Siswa Alpha     : '.($summary['alpha_students'] ?? 0));
     $this->line('Antrean baru    : '.($summary['queued'] ?? 0));
     $this->line('Dilewati/dedupe : '.($summary['skipped'] ?? 0));
+    $this->line('Siap kirim      : '.(($summary['ready'] ?? false) ? 'Ya' : 'Belum'));
+    $this->line('Alasan          : '.($summary['reason'] ?? '-'));
+    $this->line('Coba lagi       : '.($summary['next_run_at'] ?? '-'));
+    $this->line('Batas kirim     : '.($summary['send_until'] ?? '-'));
 
     return 0;
-})->purpose('Kirim peringatan WhatsApp untuk siswa yang belum mengerjakan tugas saat deadline lewat');
+})->purpose('Kirim satu ringkasan WhatsApp Alpha per siswa per hari');
+
+Artisan::command('whatsapp:retry-failed {--limit= : Maksimal pesan}', function (WhatsAppNotificationService $notificationService) {
+    $summary = $notificationService->retryFailedMessages($this->option('limit') ? (int) $this->option('limit') : null);
+
+    $this->info('Retry pesan WhatsApp gagal selesai.');
+    $this->line('Dicek  : '.($summary['checked'] ?? 0));
+    $this->line('Retry  : '.($summary['retried'] ?? 0));
+
+    return 0;
+})->purpose('Retry otomatis pesan WhatsApp gagal tanpa membuat log dobel');
 
 Schedule::call(function (StorageManagementService $storageManagementService) {
     $storageManagementService->purgeExpiredTrash();

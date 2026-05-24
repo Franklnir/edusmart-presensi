@@ -214,7 +214,6 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'throttle:api'])->group(func
     Route::post('/whatsapp/logout', [WhatsAppController::class, 'logout']);
     Route::patch('/whatsapp/settings', [WhatsAppController::class, 'updateSettings']);
     Route::post('/whatsapp/test', [WhatsAppController::class, 'sendTest']);
-    Route::post('/whatsapp/assignment-warnings/run', [WhatsAppController::class, 'runAssignmentWarnings']);
     Route::get('/google-drive', [GoogleDriveController::class, 'show']);
     Route::get('/google-drive/files', [GoogleDriveController::class, 'files']);
     Route::post('/google-drive/connect-url', [GoogleDriveController::class, 'connectUrl']);
@@ -266,6 +265,9 @@ Route::middleware(['auth:sanctum', 'throttle:super', 'super.domain'])->group(fun
     Route::get('/super/tenants/{id}/backup', [SuperAdminController::class, 'backupTenant']);
     Route::post('/super/tenants/{id}/restore', [SuperAdminController::class, 'restoreTenant']);
     Route::patch('/super/tenants/{id}/status', [SuperAdminController::class, 'updateTenantStatus']);
+    Route::get('/super/whatsapp', [WhatsAppController::class, 'superOverview']);
+    Route::post('/super/whatsapp/daily-alpha/run', [WhatsAppController::class, 'superRunDailyAlpha']);
+    Route::post('/super/whatsapp/retry-failed', [WhatsAppController::class, 'superRetryFailed']);
     Route::post('/super/tenants/{tenantId}/admins/{userId}/reset-password', [SuperAdminController::class, 'resetTenantAdminPassword']);
     Route::patch('/super/tenants/{tenantId}/admins/{userId}/primary', [SuperAdminController::class, 'setTenantPrimaryAdmin']);
     Route::get('/super/admins', [SuperAdminController::class, 'admins']);

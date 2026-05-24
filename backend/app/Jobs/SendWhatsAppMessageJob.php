@@ -34,7 +34,7 @@ class SendWhatsAppMessageJob implements ShouldQueue
             $log->fill([
                 'status' => 'failed',
                 'failed_at' => now(),
-                'last_error' => 'Konfigurasi Evolution API belum lengkap.',
+                'last_error' => 'Konfigurasi gateway WhatsApp pusat belum lengkap.',
             ])->save();
 
             return;
@@ -49,15 +49,31 @@ class SendWhatsAppMessageJob implements ShouldQueue
             return;
         }
 
+        if (
+            $log->category === 'attendance_alpha_daily'
+            && now('Asia/Jakarta')->hour >= (int) config('services.whatsapp.daily_alpha_fast_max_send_hour', 23)
+        ) {
+            $log->fill([
+                'status' => 'failed',
+                'failed_at' => now(),
+                'last_error' => 'Jendela pengiriman Alpha hari ini sudah lewat.',
+            ])->save();
+
+            return;
+        }
+
         $log->attempt_count = (int) $log->attempt_count + 1;
         $log->save();
 
         $integration = $integrationService
-            ->getOrCreateIntegration((string) $log->tenant_id)
+            ->senderIntegrationForTenant((string) $log->tenant_id)
             ->fresh();
-        $integration = $integrationService->syncIntegration($integration);
 
-        if (! $integration->isConnected()) {
+        if ($integrationService->providerType() !== 'fonnte') {
+            $integration = $integrationService->syncIntegration($integration);
+        }
+
+        if ($integrationService->providerType() !== 'fonnte' && ! $integration->isConnected()) {
             $log->fill([
                 'status' => 'failed',
                 'failed_at' => now(),

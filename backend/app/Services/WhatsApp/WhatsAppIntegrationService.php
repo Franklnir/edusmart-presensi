@@ -18,12 +18,45 @@ class WhatsAppIntegrationService
     ];
 
     public function __construct(
-        private readonly EvolutionApiClient $evolutionApiClient
+        private readonly EvolutionApiClient $evolutionApiClient,
+        private readonly FonnteApiClient $fonnteApiClient
     ) {}
 
     public function providerConfigured(): bool
     {
-        return $this->evolutionApiClient->isConfigured();
+        return $this->providerType() === 'fonnte'
+            ? $this->fonnteApiClient->isConfigured()
+            : $this->evolutionApiClient->isConfigured();
+    }
+
+    public function providerType(): string
+    {
+        $provider = strtolower(trim((string) config('services.whatsapp.provider', 'evolution')));
+
+        return $provider === 'fonnte' ? 'fonnte' : 'evolution';
+    }
+
+    public function providerName(): string
+    {
+        return $this->providerType() === 'fonnte' ? 'Fonnte' : 'Evolution API';
+    }
+
+    public function usesCentralProvider(): bool
+    {
+        return $this->providerType() === 'fonnte'
+            || (bool) config('services.whatsapp.central_enabled', true);
+    }
+
+    public function senderIntegrationForTenant(string $tenantId): WhatsAppIntegration
+    {
+        if ($this->providerType() !== 'fonnte' && $this->usesCentralProvider()) {
+            $centralTenantId = $this->centralTenantId();
+            if ($centralTenantId !== '') {
+                return $this->getOrCreateIntegration($centralTenantId);
+            }
+        }
+
+        return $this->getOrCreateIntegration($tenantId);
     }
 
     public function getOrCreateIntegration(string $tenantId): WhatsAppIntegration
@@ -98,7 +131,9 @@ class WhatsAppIntegrationService
             'logs' => $logs,
             'provider' => [
                 'configured' => $this->providerConfigured(),
-                'name' => 'Evolution API',
+                'name' => $this->providerName(),
+                'type' => $this->providerType(),
+                'central' => $this->usesCentralProvider(),
                 'public_url' => $this->evolutionPublicUrl($requestHost),
             ],
             'school' => $school,
@@ -115,10 +150,10 @@ class WhatsAppIntegrationService
             'is_enabled' => (bool) ($payload['is_enabled'] ?? $settings->is_enabled),
             'send_attendance' => (bool) ($payload['send_attendance'] ?? $settings->send_attendance),
             'send_profile_updates' => false,
-            'send_assignment_updates' => (bool) ($payload['send_assignment_updates'] ?? $settings->send_assignment_updates),
+            'send_assignment_updates' => false,
             'send_extracurricular_updates' => false,
             'send_grade_updates' => false,
-            'recipient_mode' => $this->normalizeRecipientMode($payload['recipient_mode'] ?? $settings->recipient_mode),
+            'recipient_mode' => 'wali',
         ]);
         $settings->save();
 
@@ -260,7 +295,7 @@ class WhatsAppIntegrationService
 
     public function syncAll(): int
     {
-        if (! $this->providerConfigured()) {
+        if (! $this->providerConfigured() || $this->providerType() === 'fonnte') {
             return 0;
         }
 
@@ -446,6 +481,10 @@ class WhatsAppIntegrationService
 
     public function sendText(WhatsAppIntegration $integration, string $number, string $text): array
     {
+        if ($this->providerType() === 'fonnte') {
+            return $this->fonnteApiClient->sendText($number, $text);
+        }
+
         return $this->evolutionApiClient->sendText($integration->instance_name, $number, $text);
     }
 
@@ -674,6 +713,29 @@ class WhatsAppIntegrationService
         return in_array($appScheme, ['http', 'https'], true) ? $appScheme : 'https';
     }
 
+    private function centralTenantId(): string
+    {
+        $configuredId = trim((string) config('services.whatsapp.central_tenant_id', ''));
+        if ($configuredId !== '' && DB::table('tenants')->where('id', $configuredId)->exists()) {
+            return $configuredId;
+        }
+
+        $slug = trim((string) config('services.whatsapp.central_tenant_slug', ''));
+        if ($slug !== '') {
+            $tenantId = DB::table('tenants')->where('slug', $slug)->value('id');
+            if ($tenantId) {
+                return (string) $tenantId;
+            }
+        }
+
+        return '';
+    }
+
+    private function isCentralTenant(string $tenantId): bool
+    {
+        return $tenantId !== '' && $tenantId === $this->centralTenantId();
+    }
+
     private function webhookUrl(WhatsAppIntegration $integration): string
     {
         $baseUrl = trim((string) config('services.evolution_api.webhook_base_url', ''));
@@ -848,6 +910,11 @@ class WhatsAppIntegrationService
 
     private function makeInstanceName(string $tenantId): string
     {
+        $centralInstance = Str::slug((string) config('services.whatsapp.central_instance_name', ''), '-');
+        if ($centralInstance !== '' && $this->isCentralTenant($tenantId)) {
+            return Str::lower($centralInstance);
+        }
+
         $prefix = Str::slug((string) config('services.evolution_api.instance_prefix', 'edusmart'), '-');
         $tenantSlug = (string) DB::table('tenants')->where('id', $tenantId)->value('slug');
         $tenantSlug = Str::slug($tenantSlug !== '' ? $tenantSlug : substr($tenantId, 0, 12), '-');
@@ -859,13 +926,19 @@ class WhatsAppIntegrationService
     {
         if (
             $settings->send_profile_updates
+            || $settings->send_assignment_updates
             || $settings->send_extracurricular_updates
             || $settings->send_grade_updates
+            || ! $settings->send_attendance
+            || $settings->recipient_mode !== 'wali'
         ) {
             $settings->forceFill([
+                'send_attendance' => true,
                 'send_profile_updates' => false,
+                'send_assignment_updates' => false,
                 'send_extracurricular_updates' => false,
                 'send_grade_updates' => false,
+                'recipient_mode' => 'wali',
             ])->save();
         }
     }

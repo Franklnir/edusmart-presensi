@@ -54,6 +54,33 @@ class WhatsAppMessageBuilder
         ]));
     }
 
+    public function buildDailyAlphaMessage(array $school, array $student, array $alpha): string
+    {
+        $schoolName = $this->schoolName($school);
+        $date = $this->formatDate($alpha['tanggal'] ?? null);
+        $mapels = array_values(array_filter(array_map(
+            fn ($item) => trim((string) $item),
+            (array) ($alpha['mapels'] ?? [])
+        )));
+        $mapelLines = empty($mapels)
+            ? ['- Mapel belum tercatat']
+            : array_map(fn ($mapel) => '- '.$mapel, $mapels);
+
+        return trim(implode("\n", array_merge([
+            "Halo orang tua/wali dari {$this->value($student, 'nama', 'siswa')},",
+            '',
+            "Rekap presensi Alpha dari {$schoolName}:",
+            "Nama: {$this->value($student, 'nama', '-')}",
+            "Kelas: {$this->value($student, 'kelas', $this->value($alpha, 'kelas', '-'))}",
+            "Tanggal: {$date}",
+            '',
+            'Status Alpha terdeteksi pada mapel/sesi:',
+        ], $mapelLines, [
+            '',
+            'Pesan ini dikirim satu kali per hari agar tidak mengganggu. Silakan konfirmasi ke pihak sekolah bila data perlu dikoreksi.',
+        ])));
+    }
+
     public function buildProfileUpdateMessage(array $school, array $student, array $changes): string
     {
         $schoolName = $this->schoolName($school);

@@ -146,8 +146,28 @@ return [
     ],
 
     'whatsapp' => [
+        'provider' => env('WHATSAPP_PROVIDER', 'evolution'),
+        'central_enabled' => filter_var(env('WHATSAPP_CENTRAL_ENABLED', true), FILTER_VALIDATE_BOOL),
+        'central_tenant_id' => env('WHATSAPP_CENTRAL_TENANT_ID'),
+        'central_tenant_slug' => env('WHATSAPP_CENTRAL_TENANT_SLUG'),
+        'central_instance_name' => env('WHATSAPP_CENTRAL_INSTANCE_NAME', 'edusmart-admin26'),
         'assignment_missing_lookback_minutes' => (int) env('WHATSAPP_ASSIGNMENT_MISSING_LOOKBACK_MINUTES', 180),
         'assignment_missing_batch_size' => (int) env('WHATSAPP_ASSIGNMENT_MISSING_BATCH_SIZE', 100),
+        'daily_alpha_fast_limit' => (int) env('WHATSAPP_DAILY_ALPHA_FAST_LIMIT', 20),
+        'daily_alpha_fast_interval_seconds' => (int) env('WHATSAPP_DAILY_ALPHA_FAST_INTERVAL_SECONDS', 15),
+        'daily_alpha_batch_per_minute' => (int) env('WHATSAPP_DAILY_ALPHA_BATCH_PER_MINUTE', 10),
+        'daily_alpha_fast_max_send_hour' => (int) env('WHATSAPP_DAILY_ALPHA_FAST_MAX_SEND_HOUR', 23),
+        'daily_alpha_batch_max_send_hour' => (int) env('WHATSAPP_DAILY_ALPHA_BATCH_MAX_SEND_HOUR', 21),
+        'daily_alpha_default_start_time' => env('WHATSAPP_DAILY_ALPHA_DEFAULT_START_TIME', '16:00'),
+        'daily_alpha_after_school_buffer_minutes' => (int) env('WHATSAPP_DAILY_ALPHA_AFTER_SCHOOL_BUFFER_MINUTES', 10),
+        'retry_max_attempts' => (int) env('WHATSAPP_RETRY_MAX_ATTEMPTS', 3),
+        'retry_batch_size' => (int) env('WHATSAPP_RETRY_BATCH_SIZE', 50),
+    ],
+
+    'fonnte' => [
+        'base_url' => env('FONNTE_BASE_URL', 'https://api.fonnte.com'),
+        'token' => env('FONNTE_TOKEN'),
+        'timeout' => (int) env('FONNTE_TIMEOUT_SECONDS', 20),
     ],
 
     'caddy' => [

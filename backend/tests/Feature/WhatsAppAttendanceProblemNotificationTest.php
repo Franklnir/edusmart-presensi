@@ -64,7 +64,7 @@ class WhatsAppAttendanceProblemNotificationTest extends TestCase
         Queue::assertNothingPushed();
     }
 
-    public function test_attendance_whatsapp_sends_one_no_checkin_alpha_problem_per_student_day(): void
+    public function test_attendance_whatsapp_does_not_send_immediate_alpha_problem(): void
     {
         Queue::fake();
 
@@ -96,19 +96,11 @@ class WhatsAppAttendanceProblemNotificationTest extends TestCase
             ],
         ]);
 
-        $this->assertDatabaseCount('whatsapp_message_logs', 1);
-
-        $log = DB::table('whatsapp_message_logs')->first();
-        $this->assertSame('attendance_problem', $log->category);
-        $this->assertStringContainsString('attendance-problem:no_checkin:'.$student->id.':2026-05-03', $log->event_key);
-        $this->assertStringContainsString('Tidak scan masuk / Alpha', $log->message_text);
-        $this->assertStringContainsString('Tanggal: 03-05-2026', $log->message_text);
-        $this->assertStringContainsString('Waktu tercatat: 03-05-2026 08:01', $log->message_text);
-
-        Queue::assertPushed(SendWhatsAppMessageJob::class, 1);
+        $this->assertDatabaseCount('whatsapp_message_logs', 0);
+        Queue::assertNothingPushed();
     }
 
-    public function test_attendance_whatsapp_sends_missing_checkout_with_real_scan_time(): void
+    public function test_attendance_whatsapp_does_not_send_missing_checkout_immediately(): void
     {
         Queue::fake();
 
@@ -139,20 +131,11 @@ class WhatsAppAttendanceProblemNotificationTest extends TestCase
             'waktu' => '2026-05-03T14:30:00+07:00',
         ]]);
 
-        $this->assertDatabaseCount('whatsapp_message_logs', 1);
-
-        $log = DB::table('whatsapp_message_logs')->first();
-        $this->assertSame('attendance_problem', $log->category);
-        $this->assertStringContainsString('attendance-problem:missing_checkout:'.$student->id.':2026-05-03', $log->event_key);
-        $this->assertStringContainsString('Scan masuk, tetapi belum scan pulang', $log->message_text);
-        $this->assertStringContainsString('Scan masuk: 07:05', $log->message_text);
-        $this->assertStringContainsString('Scan pulang: -', $log->message_text);
-        $this->assertStringContainsString('Waktu tercatat: 03-05-2026 14:30', $log->message_text);
-
-        Queue::assertPushed(SendWhatsAppMessageJob::class, 1);
+        $this->assertDatabaseCount('whatsapp_message_logs', 0);
+        Queue::assertNothingPushed();
     }
 
-    public function test_attendance_whatsapp_sends_no_checkin_when_only_checkout_exists(): void
+    public function test_attendance_whatsapp_does_not_send_no_checkin_immediately(): void
     {
         Queue::fake();
 
@@ -183,17 +166,8 @@ class WhatsAppAttendanceProblemNotificationTest extends TestCase
             'waktu' => '2026-05-03T14:15:00+07:00',
         ]]);
 
-        $this->assertDatabaseCount('whatsapp_message_logs', 1);
-
-        $log = DB::table('whatsapp_message_logs')->first();
-        $this->assertSame('attendance_problem', $log->category);
-        $this->assertStringContainsString('attendance-problem:no_checkin:'.$student->id.':2026-05-03', $log->event_key);
-        $this->assertStringContainsString('Scan pulang tanpa scan masuk', $log->message_text);
-        $this->assertStringContainsString('Scan masuk: -', $log->message_text);
-        $this->assertStringContainsString('Scan pulang: 14:10', $log->message_text);
-        $this->assertStringContainsString('Waktu tercatat: 03-05-2026 14:15', $log->message_text);
-
-        Queue::assertPushed(SendWhatsAppMessageJob::class, 1);
+        $this->assertDatabaseCount('whatsapp_message_logs', 0);
+        Queue::assertNothingPushed();
     }
 
     public function test_whatsapp_assignment_submission_notification_is_not_sent(): void
