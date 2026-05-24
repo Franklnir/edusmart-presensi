@@ -569,6 +569,81 @@ function TenantMetricCard({ icon: Icon, label, value, description, tone = 'slate
   )
 }
 
+function TenantSchoolCard({ tenant, host, selected, onSelect }) {
+  const status = String(tenant?.status || 'unknown').toLowerCase()
+  const statusLabel = tenant?.status || 'unknown'
+  const createdLabel = tenant?.created_at ? formatDateTime(tenant.created_at) : '-'
+
+  return (
+    <article
+      className={`group min-h-[228px] rounded-2xl border bg-white p-5 text-left shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-card-hover ${
+        selected ? 'border-blue-400 ring-2 ring-blue-100' : 'border-slate-100'
+      }`}
+    >
+      <button type="button" onClick={onSelect} className="block w-full text-left">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-blue-50 text-blue-700 transition group-hover:bg-blue-100">
+              <School className="h-5 w-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-base font-bold text-slate-950">{tenant?.name || 'Sekolah'}</p>
+              <p className="mt-1 truncate text-xs font-medium text-slate-500">{tenant?.slug || tenant?.id || '-'}</p>
+            </div>
+          </div>
+          <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${tenantStatusBadgeClass(status)}`}>
+            {statusLabel}
+          </span>
+        </div>
+
+        <div className="mt-4 space-y-3">
+          <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+            <div className="flex items-start gap-2">
+              <Globe2 className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
+              <div className="min-w-0">
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Subdomain</p>
+                <p className="mt-1 truncate text-sm font-semibold text-slate-900">{host || '-'}</p>
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Dibuat</p>
+              <p className="mt-1 truncate text-xs font-semibold text-slate-700">{createdLabel}</p>
+            </div>
+            <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Tenant ID</p>
+              <p className="mt-1 truncate text-xs font-semibold text-slate-700">{tenant?.id || '-'}</p>
+            </div>
+          </div>
+        </div>
+      </button>
+
+      <div className="mt-4 flex flex-col gap-2 border-t border-slate-100 pt-4 sm:flex-row">
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation()
+            onSelect?.()
+          }}
+          className="inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 text-sm font-semibold text-white transition hover:bg-blue-700"
+        >
+          <UserCog className="h-4 w-4" />
+          Kelola
+        </button>
+        <a
+          href={`/admin/storage?tenant=${encodeURIComponent(tenant?.id || '')}`}
+          onClick={(event) => event.stopPropagation()}
+          className="inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-700 no-underline transition hover:bg-slate-50"
+        >
+          <HardDrive className="h-4 w-4" />
+          Storage
+        </a>
+      </div>
+    </article>
+  )
+}
+
 function TenantEmptyState({ title, description }) {
   return (
     <div className="px-5 py-12 text-center">
@@ -1587,7 +1662,8 @@ const Tenants = () => {
   }
 
   return (
-    <div className="w-full space-y-6 px-4 pb-8 pt-2 sm:px-6 lg:px-8">
+    <div className="page-wrapper">
+      <div className="w-full space-y-6">
       <div className="page-title-card">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-4">
@@ -1724,70 +1800,19 @@ const Tenants = () => {
               description="Ubah kata kunci atau filter status untuk melihat sekolah lain."
             />
           ) : (
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full text-sm">
-                <thead>
-                  <tr className="border-b border-slate-100 bg-slate-50/80 text-left text-xs uppercase tracking-wide text-slate-500">
-                    <th className="px-5 py-3">Sekolah</th>
-                    <th className="px-5 py-3">Subdomain</th>
-                    <th className="px-5 py-3">Status</th>
-                    <th className="px-5 py-3">Dibuat</th>
-                    <th className="px-5 py-3 text-right">Aksi</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-slate-700">
-                  {filteredTenants.map((tenant) => {
-                    const tenantHost = tenant.slug ? `${tenant.slug}.${platformRootDomain || rootDomain}` : '-'
-                    return (
-                      <tr
-                        key={tenant.id}
-                        className={`cursor-pointer transition hover:bg-slate-50 ${
-                          selectedTenantId === tenant.id ? 'bg-blue-50/80' : 'bg-white'
-                        }`}
-                        onClick={() => handleSelectTenant(tenant.id)}
-                      >
-                        <td className="px-5 py-4">
-                          <div className="flex items-center gap-3">
-                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-slate-600">
-                              <School className="h-5 w-5" />
-                            </div>
-                            <div className="min-w-0">
-                              <p className="truncate font-semibold text-slate-900">{tenant.name || '-'}</p>
-                              <p className="mt-1 truncate text-xs text-slate-500">{tenant.id}</p>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-5 py-4">
-                          <p className="font-medium text-slate-900">{tenantHost}</p>
-                          <p className="mt-1 text-xs text-slate-500">Slug: {tenant.slug || '-'}</p>
-                        </td>
-                        <td className="px-5 py-4">
-                          <span
-                            className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${tenantStatusBadgeClass(
-                              tenant.status
-                            )}`}
-                          >
-                            {tenant.status || 'unknown'}
-                          </span>
-                        </td>
-                        <td className="px-5 py-4 text-slate-500">{formatDateTime(tenant.created_at)}</td>
-                        <td className="px-5 py-4 text-right">
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              handleSelectTenant(tenant.id)
-                            }}
-                            className="rounded-xl border border-blue-200 px-3 py-1.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-50"
-                          >
-                            Kelola
-                          </button>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+            <div className="grid gap-4 p-5 lg:grid-cols-2 2xl:grid-cols-3">
+              {filteredTenants.map((tenant) => {
+                const tenantHost = tenant.slug ? `${tenant.slug}.${platformRootDomain || rootDomain}` : '-'
+                return (
+                  <TenantSchoolCard
+                    key={tenant.id}
+                    tenant={tenant}
+                    host={tenantHost}
+                    selected={selectedTenantId === tenant.id}
+                    onSelect={() => handleSelectTenant(tenant.id)}
+                  />
+                )
+              })}
             </div>
           )}
         </section>
@@ -3303,6 +3328,7 @@ const Tenants = () => {
           )}
         </section>
       )}
+      </div>
     </div>
   )
 }
