@@ -145,6 +145,12 @@ function SuperWhatsAppCenter() {
   const [loading, setLoading] = useState(true)
   const [running, setRunning] = useState(false)
   const [retrying, setRetrying] = useState(false)
+  const [connecting, setConnecting] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [loggingOut, setLoggingOut] = useState(false)
+  const [sendingTest, setSendingTest] = useState(false)
+  const [testForm, setTestForm] = useState({ number: '', message: '' })
+  const [qrPreview, setQrPreview] = useState('')
 
   const loadData = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true)
@@ -160,6 +166,18 @@ function SuperWhatsAppCenter() {
   useEffect(() => {
     loadData()
   }, [loadData])
+
+  const applyCentralPayload = useCallback((data) => {
+    if (!data) return
+    setPayload((prev) => ({
+      ...prev,
+      central: data,
+      provider: {
+        ...(prev.provider || {}),
+        ...(data.provider || {})
+      }
+    }))
+  }, [])
 
   const runDailyAlpha = async () => {
     setRunning(true)
@@ -193,12 +211,187 @@ function SuperWhatsAppCenter() {
   }
 
   const provider = payload.provider || {}
+  const central = payload.central || {}
+  const integration = central.integration || null
   const stats = payload.stats || {}
   const settings = payload.settings || {}
   const readiness = payload.readiness || {}
   const deliveryPlan = payload.delivery_plan || {}
+  const currentStatus = String(integration?.status || 'disconnected').toLowerCase()
+  const currentMeta = statusMeta(currentStatus)
+  const providerConfigured = Boolean(provider.configured)
+  const canGenerateQr = providerConfigured && provider.type !== 'fonnte' && !connecting && currentStatus !== 'connected'
+  const connectButtonLabel = currentStatus === 'connected'
+    ? 'Sudah Terhubung'
+    : (integration?.qr_code || integration?.pairing_code || currentStatus === 'awaiting_qr')
+      ? 'Refresh QR'
+      : 'Generate QR'
+  const configuredEvolutionUrl = String(central.provider?.public_url || provider.public_url || '').trim().replace(/\/+$/, '')
+  const evolutionManagerHost = getEvolutionManagerHost()
+  const evolutionPublicUrl = integration?.instance_name
+    ? `${configuredEvolutionUrl || `https://${evolutionManagerHost}`}/manager/instance/${integration.instance_name}`
+    : (configuredEvolutionUrl || `https://${evolutionManagerHost}`)
   const totalRequired = (payload.tenants || []).reduce((sum, tenant) => sum + Number(tenant.required || 0), 0)
   const totalPending = (payload.tenants || []).reduce((sum, tenant) => sum + Number(tenant.pending || 0), 0)
+
+  useEffect(() => {
+    if (!integration?.qr_code) {
+      setQrPreview('')
+      return
+    }
+
+    let cancelled = false
+    const qrValue = String(integration.qr_code || '').trim()
+    if (!qrValue) {
+      setQrPreview('')
+      return
+    }
+
+    if (qrValue.startsWith('data:image/')) {
+      setQrPreview(qrValue)
+      return
+    }
+
+    loadQrCodeLibrary()
+      .then((QRCode) =>
+        QRCode.toDataURL(qrValue, {
+          margin: 1,
+          width: 320,
+          color: {
+            dark: '#0f172a',
+            light: '#ffffff'
+          }
+        })
+      )
+      .then((url) => {
+        if (!cancelled) setQrPreview(url)
+      })
+      .catch(() => {
+        if (!cancelled) setQrPreview('')
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [integration?.qr_code])
+
+  useEffect(() => {
+    const shouldPoll = providerConfigured && provider.type !== 'fonnte' && (currentStatus === 'awaiting_qr' || currentStatus === 'connected')
+    if (!shouldPoll) return undefined
+
+    let cancelled = false
+    const poll = async () => {
+      if (document.hidden) return
+      const { data, error } = await supabase.super.syncWhatsApp()
+      if (cancelled || error) return
+      applyCentralPayload(data)
+    }
+
+    const warmupTimer = currentStatus === 'awaiting_qr'
+      ? setTimeout(() => {
+          poll()
+        }, 5000)
+      : null
+    const timer = setInterval(() => {
+      poll()
+    }, currentStatus === 'awaiting_qr' ? 10000 : 30000)
+
+    return () => {
+      cancelled = true
+      if (warmupTimer) clearTimeout(warmupTimer)
+      clearInterval(timer)
+    }
+  }, [applyCentralPayload, currentStatus, provider.type, providerConfigured])
+
+  const connectCentral = async () => {
+    setConnecting(true)
+    const { data, error } = await supabase.super.connectWhatsApp()
+    setConnecting(false)
+
+    if (error) {
+      pushToast('error', error.message || 'Gagal menyiapkan QR WhatsApp pusat')
+      return
+    }
+
+    applyCentralPayload(data)
+    const nextIntegration = data?.integration
+    if (nextIntegration?.qr_code || nextIntegration?.pairing_code) {
+      pushToast('success', 'QR WA pusat siap dipindai')
+      return
+    }
+    if (nextIntegration?.last_error) {
+      pushToast('warning', nextIntegration.last_error)
+      return
+    }
+    pushToast('info', 'Gateway sedang menyiapkan QR. Klik Sinkronkan jika QR belum muncul.')
+  }
+
+  const syncCentral = async () => {
+    setSyncing(true)
+    const { data, error } = await supabase.super.syncWhatsApp()
+    setSyncing(false)
+
+    if (error) {
+      pushToast('error', error.message || 'Gagal sinkron status WA pusat')
+      return
+    }
+
+    applyCentralPayload(data)
+    if (data?.integration?.last_error) {
+      pushToast('warning', data.integration.last_error)
+      return
+    }
+    pushToast('success', 'Status WA pusat berhasil disinkronkan')
+  }
+
+  const logoutCentral = async () => {
+    const confirmed = window.confirm('Logout WhatsApp pusat sekarang? QR dan sesi aktif akan dibersihkan.')
+    if (!confirmed) return
+
+    setLoggingOut(true)
+    const { data, error } = await supabase.super.logoutWhatsApp()
+    setLoggingOut(false)
+
+    if (error) {
+      pushToast('error', error.message || 'Gagal logout WA pusat')
+      return
+    }
+
+    applyCentralPayload(data)
+    pushToast('success', 'WA pusat berhasil logout')
+  }
+
+  const sendCentralTest = async (event) => {
+    event.preventDefault()
+    if (!testForm.number.trim()) {
+      pushToast('error', 'Nomor tujuan tes wajib diisi')
+      return
+    }
+
+    if (!providerConfigured || (provider.type !== 'fonnte' && currentStatus !== 'connected')) {
+      pushToast('warning', 'Hubungkan WA pusat sampai Terhubung sebelum kirim tes.')
+      return
+    }
+
+    setSendingTest(true)
+    const { data, error } = await supabase.super.sendWhatsAppTest(testForm)
+    setSendingTest(false)
+
+    if (error) {
+      pushToast('error', error.message || 'Gagal mengirim tes WA')
+      return
+    }
+
+    setPayload((prev) => ({
+      ...prev,
+      central: {
+        ...(prev.central || {}),
+        logs: data?.log ? [data.log, ...((prev.central || {}).logs || [])].slice(0, 30) : ((prev.central || {}).logs || [])
+      }
+    }))
+    setTestForm((prev) => ({ ...prev, message: '' }))
+    pushToast('success', 'Pesan tes masuk ke antrean pengiriman')
+  }
 
   return (
     <div className="page-wrapper space-y-6">
@@ -237,6 +430,185 @@ function SuperWhatsAppCenter() {
           Gateway WhatsApp belum aktif. Untuk saat ini gunakan `WHATSAPP_PROVIDER=evolution`, isi `EVOLUTION_API_BASE_URL` dan `EVOLUTION_API_KEY`, lalu clear config/restart backend.
         </div>
       )}
+
+      {central.error && (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-700">
+          {central.error}
+        </div>
+      )}
+
+      <section className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-lg font-extrabold text-slate-900">Koneksi Nomor Pusat</h2>
+                <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-bold ${currentMeta.badge}`}>
+                  {currentMeta.label}
+                </span>
+              </div>
+              <p className="mt-2 text-sm text-slate-600">
+                Scan QR ini memakai instance pusat Super Admin. Nomor ini dipakai untuk semua notifikasi Alpha multi sekolah.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={connectCentral}
+                disabled={!canGenerateQr}
+                className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {connecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
+                {connectButtonLabel}
+              </button>
+              <button
+                type="button"
+                onClick={syncCentral}
+                disabled={syncing || !providerConfigured || provider.type === 'fonnte'}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+                Sinkronkan
+              </button>
+              <button
+                type="button"
+                onClick={logoutCentral}
+                disabled={loggingOut || !integration || provider.type === 'fonnte'}
+                className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {loggingOut ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
+                Logout
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-5 grid gap-4 md:grid-cols-3">
+            <InfoCard
+              icon={MessageCircle}
+              label="Instance"
+              value={integration?.instance_name || '-'}
+              helper={central.school?.slug ? `${central.school.slug}.anchor` : 'Nomor pusat'}
+            />
+            <InfoCard
+              icon={Smartphone}
+              label="Nomor Terhubung"
+              value={integration?.connected_phone || '-'}
+              helper={integration?.connected_name || 'Belum ada perangkat aktif'}
+            />
+            <InfoCard
+              icon={CheckCircle2}
+              label="Sync Terakhir"
+              value={formatDateTime(integration?.last_synced_at)}
+              helper={`Webhook: ${integration?.last_webhook_event || '-'}`}
+            />
+          </div>
+
+          {provider.type !== 'fonnte' && (
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+              Host manager Evolution: <span className="font-semibold text-slate-900">{evolutionPublicUrl || '-'}</span>
+            </div>
+          )}
+
+          {integration?.last_error && (
+            <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              {integration.last_error}
+            </div>
+          )}
+
+          <div className="mt-5 grid gap-5 lg:grid-cols-[340px_1fr]">
+            <div className="rounded-3xl border border-dashed border-slate-300 bg-slate-50 p-4">
+              <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-700">
+                <QrCode className="h-4 w-4" />
+                QR Scan WA Pusat
+              </div>
+              {qrPreview ? (
+                <div className="rounded-2xl bg-white p-4 shadow-sm">
+                  <img src={qrPreview} alt="QR WhatsApp pusat" className="mx-auto h-auto w-full max-w-[320px]" />
+                </div>
+              ) : (
+                <div className="grid min-h-[320px] place-items-center rounded-2xl bg-white px-6 text-center text-sm text-slate-500 shadow-sm">
+                  Klik Generate QR untuk membuat sesi scan. Jika QR belum tampil, tunggu beberapa detik lalu klik Sinkronkan.
+                </div>
+              )}
+              {integration?.pairing_code && (
+                <div className="mt-3 rounded-2xl bg-white px-4 py-3 text-xs text-slate-500 shadow-sm">
+                  Pairing code: <span className="font-semibold text-slate-800">{integration.pairing_code}</span>
+                </div>
+              )}
+            </div>
+
+            <form onSubmit={sendCentralTest} className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+              <h3 className="text-base font-extrabold text-slate-900">Tes Kirim Pesan</h3>
+              <p className="mt-1 text-sm text-slate-600">
+                Pakai ini untuk memastikan nomor pusat dan queue bisa mengirim pesan sebelum notifikasi Alpha dijalankan.
+              </p>
+              <label className="mt-4 block space-y-2">
+                <span className="text-sm font-semibold text-slate-700">Nomor Tujuan</span>
+                <input
+                  type="text"
+                  value={testForm.number}
+                  onChange={(event) => setTestForm((prev) => ({ ...prev, number: event.target.value }))}
+                  placeholder="contoh: 081234567890"
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+                />
+              </label>
+              <label className="mt-4 block space-y-2">
+                <span className="text-sm font-semibold text-slate-700">Pesan Opsional</span>
+                <textarea
+                  rows={4}
+                  value={testForm.message}
+                  onChange={(event) => setTestForm((prev) => ({ ...prev, message: event.target.value }))}
+                  placeholder="Kosongkan untuk memakai template tes bawaan."
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+                />
+              </label>
+              <button
+                type="submit"
+                disabled={sendingTest || !providerConfigured || (provider.type !== 'fonnte' && currentStatus !== 'connected')}
+                className="mt-4 inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {sendingTest ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                Kirim Tes
+              </button>
+              {provider.type !== 'fonnte' && currentStatus !== 'connected' && (
+                <p className="mt-2 text-xs text-slate-500">Tes aktif setelah QR berhasil dipindai dan status menjadi Terhubung.</p>
+              )}
+            </form>
+          </div>
+        </div>
+
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h2 className="text-lg font-extrabold text-slate-900">Log Nomor Pusat</h2>
+          <div className="mt-4 space-y-3">
+            {(central.logs || []).length ? central.logs.slice(0, 6).map((item) => (
+              <article key={item.id} className="rounded-2xl border border-slate-200 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-700">
+                        {categoryLabel(item.category)}
+                      </span>
+                      <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${logStatusClass(item.status)}`}>
+                        {item.status || 'unknown'}
+                      </span>
+                    </div>
+                    <div className="mt-2 text-sm font-bold text-slate-900">{item.target_name || 'Tujuan tidak dikenal'}</div>
+                    <div className="mt-1 text-xs text-slate-500">{item.target_phone || item.normalized_phone || '-'} • {formatDateTime(item.created_at)}</div>
+                  </div>
+                  <div className="text-xs text-slate-500">Attempts: {item.attempt_count || 0}</div>
+                </div>
+                {item.last_error && (
+                  <div className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700">{item.last_error}</div>
+                )}
+              </article>
+            )) : (
+              <div className="rounded-2xl border border-dashed border-slate-300 px-6 py-10 text-center text-sm text-slate-500">
+                Belum ada log nomor pusat.
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <CenterStat icon={MessageCircle} label="Provider" value={provider.name || '-'} helper={provider.central ? 'Nomor pusat aktif' : 'Per tenant'} />

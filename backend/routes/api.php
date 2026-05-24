@@ -266,6 +266,10 @@ Route::middleware(['auth:sanctum', 'throttle:super', 'super.domain'])->group(fun
     Route::post('/super/tenants/{id}/restore', [SuperAdminController::class, 'restoreTenant']);
     Route::patch('/super/tenants/{id}/status', [SuperAdminController::class, 'updateTenantStatus']);
     Route::get('/super/whatsapp', [WhatsAppController::class, 'superOverview']);
+    Route::post('/super/whatsapp/connect', [WhatsAppController::class, 'superConnect']);
+    Route::post('/super/whatsapp/sync', [WhatsAppController::class, 'superSync']);
+    Route::post('/super/whatsapp/logout', [WhatsAppController::class, 'superLogout']);
+    Route::post('/super/whatsapp/test', [WhatsAppController::class, 'superSendTest']);
     Route::post('/super/whatsapp/daily-alpha/run', [WhatsAppController::class, 'superRunDailyAlpha']);
     Route::post('/super/whatsapp/retry-failed', [WhatsAppController::class, 'superRetryFailed']);
     Route::post('/super/tenants/{tenantId}/admins/{userId}/reset-password', [SuperAdminController::class, 'resetTenantAdminPassword']);

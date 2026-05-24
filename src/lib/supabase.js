@@ -3009,6 +3009,42 @@ const auth = {
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
+    async connectWhatsApp() {
+      const res = await apiFetch('/api/super/whatsapp/connect', {
+        method: 'POST',
+        body: {},
+        cacheTtlMs: 0,
+        timeoutMs: 30000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async syncWhatsApp() {
+      const res = await apiFetch('/api/super/whatsapp/sync', {
+        method: 'POST',
+        body: {},
+        cacheTtlMs: 0,
+        timeoutMs: 30000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async logoutWhatsApp() {
+      const res = await apiFetch('/api/super/whatsapp/logout', {
+        method: 'POST',
+        body: {},
+        cacheTtlMs: 0,
+        timeoutMs: 30000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async sendWhatsAppTest(payload = {}) {
+      const res = await apiFetch('/api/super/whatsapp/test', {
+        method: 'POST',
+        body: payload,
+        cacheTtlMs: 0,
+        timeoutMs: 30000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
     async runDailyAlphaWhatsApp(payload = {}) {
       const res = await apiFetch('/api/super/whatsapp/daily-alpha/run', {
         method: 'POST',

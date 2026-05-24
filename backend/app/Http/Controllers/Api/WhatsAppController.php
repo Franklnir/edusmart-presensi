@@ -142,6 +142,7 @@ class WhatsAppController extends ApiController
         }
 
         $date = $this->normalizeDate($request->query('date')) ?: Carbon::now('Asia/Jakarta')->toDateString();
+        $central = $this->centralGatewayOverview($request);
         $delivery = $this->whatsAppNotificationService->alphaDeliveryOverview($date);
         $logs = DB::table('whatsapp_message_logs as l')
             ->leftJoin('tenants as t', 't.id', '=', 'l.tenant_id')
@@ -202,7 +203,9 @@ class WhatsAppController extends ApiController
                 'name' => $this->whatsAppIntegrationService->providerName(),
                 'type' => $this->whatsAppIntegrationService->providerType(),
                 'central' => $this->whatsAppIntegrationService->usesCentralProvider(),
+                'public_url' => $central['provider']['public_url'] ?? null,
             ],
+            'central' => $central,
             'date' => $date,
             'settings' => [
                 'fast_max_send_hour' => (int) config('services.whatsapp.daily_alpha_fast_max_send_hour', 23),
@@ -216,6 +219,81 @@ class WhatsAppController extends ApiController
             'delivery_plan' => $delivery['delivery_plan'] ?? null,
             'tenants' => $delivery['tenants'] ?? $byTenant,
             'logs' => $logs,
+        ]);
+    }
+
+    public function superConnect(Request $request)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
+        }
+
+        try {
+            return $this->ok($this->whatsAppIntegrationService->requestQr(
+                $this->validatedCentralTenantId(),
+                $request->getHost()
+            ));
+        } catch (\Throwable $e) {
+            return $this->deny($this->gatewayErrorMessage($e), 422);
+        }
+    }
+
+    public function superSync(Request $request)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
+        }
+
+        try {
+            return $this->ok($this->whatsAppIntegrationService->synchronize(
+                $this->validatedCentralTenantId(),
+                $request->getHost()
+            ));
+        } catch (\Throwable $e) {
+            return $this->deny($this->gatewayErrorMessage($e), 422);
+        }
+    }
+
+    public function superLogout(Request $request)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
+        }
+
+        try {
+            return $this->ok($this->whatsAppIntegrationService->logout(
+                $this->validatedCentralTenantId(),
+                $request->getHost()
+            ));
+        } catch (\Throwable $e) {
+            return $this->deny($this->gatewayErrorMessage($e), 422);
+        }
+    }
+
+    public function superSendTest(Request $request)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
+        }
+
+        $validated = $request->validate([
+            'number' => ['required', 'string', 'max:32'],
+            'message' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        try {
+            $log = $this->whatsAppNotificationService->queueTestMessage(
+                $this->validatedCentralTenantId(),
+                (string) $validated['number'],
+                (string) ($validated['message'] ?? '')
+            );
+        } catch (\Throwable $e) {
+            return $this->deny($e->getMessage(), 422);
+        }
+
+        return $this->ok([
+            'queued' => true,
+            'log' => $log->fresh(),
         ]);
     }
 
@@ -278,6 +356,56 @@ class WhatsAppController extends ApiController
         return $message !== ''
             ? $message
             : 'Gateway WhatsApp belum siap. Cek service Evolution API, Redis, dan koneksi tenant.';
+    }
+
+    private function centralGatewayOverview(Request $request): ?array
+    {
+        $tenantId = $this->whatsAppIntegrationService->centralTenantId();
+        if ($tenantId === '') {
+            return [
+                'integration' => null,
+                'settings' => null,
+                'logs' => [],
+                'school' => [],
+                'provider' => [
+                    'configured' => $this->whatsAppIntegrationService->providerConfigured(),
+                    'name' => $this->whatsAppIntegrationService->providerName(),
+                    'type' => $this->whatsAppIntegrationService->providerType(),
+                    'central' => $this->whatsAppIntegrationService->usesCentralProvider(),
+                    'public_url' => null,
+                ],
+                'error' => 'Tenant pusat WhatsApp belum dikonfigurasi.',
+            ];
+        }
+
+        try {
+            return $this->whatsAppIntegrationService->overview($tenantId, $request->getHost());
+        } catch (\Throwable $e) {
+            return [
+                'integration' => null,
+                'settings' => null,
+                'logs' => [],
+                'school' => [],
+                'provider' => [
+                    'configured' => $this->whatsAppIntegrationService->providerConfigured(),
+                    'name' => $this->whatsAppIntegrationService->providerName(),
+                    'type' => $this->whatsAppIntegrationService->providerType(),
+                    'central' => $this->whatsAppIntegrationService->usesCentralProvider(),
+                    'public_url' => null,
+                ],
+                'error' => $this->gatewayErrorMessage($e),
+            ];
+        }
+    }
+
+    private function validatedCentralTenantId(): string
+    {
+        $tenantId = $this->whatsAppIntegrationService->centralTenantId();
+        if ($tenantId === '') {
+            throw new \RuntimeException('Tenant pusat WhatsApp belum dikonfigurasi. Isi WHATSAPP_CENTRAL_TENANT_ID atau WHATSAPP_CENTRAL_TENANT_SLUG.');
+        }
+
+        return $tenantId;
     }
 
     private function normalizeDate($date): ?string

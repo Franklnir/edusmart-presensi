@@ -713,7 +713,7 @@ class WhatsAppIntegrationService
         return in_array($appScheme, ['http', 'https'], true) ? $appScheme : 'https';
     }
 
-    private function centralTenantId(): string
+    public function centralTenantId(): string
     {
         $configuredId = trim((string) config('services.whatsapp.central_tenant_id', ''));
         if ($configuredId !== '' && DB::table('tenants')->where('id', $configuredId)->exists()) {
