@@ -36,12 +36,7 @@ class StorageManagementController extends ApiController
             return $this->deny();
         }
 
-        $tenantId = (string) ($this->tenantId($request) ?? '');
-        if ($tenantId === '') {
-            return $this->deny('Tenant tidak ditemukan', 422);
-        }
-
-        return $this->ok($this->storageManagementService->cleanupPreview($tenantId, $this->cleanupFilters($request)));
+        return $this->deny('Cleanup storage hanya dapat dilakukan Super Admin. Admin sekolah hanya bisa memonitor storage sekolahnya sendiri.', 403);
     }
 
     public function adminCleanupExecute(Request $request)
@@ -50,21 +45,7 @@ class StorageManagementController extends ApiController
             return $this->deny();
         }
 
-        $tenantId = (string) ($this->tenantId($request) ?? '');
-        if ($tenantId === '') {
-            return $this->deny('Tenant tidak ditemukan', 422);
-        }
-
-        $result = $this->storageManagementService->executeCleanup(
-            $tenantId,
-            $this->cleanupFilters($request),
-            (string) ($request->user()?->id ?? ''),
-            filter_var($request->input('backup', true), FILTER_VALIDATE_BOOLEAN)
-        );
-
-        return ($result['ok'] ?? false)
-            ? $this->ok($result)
-            : response()->json(['error' => $result['message'] ?? 'Cleanup gagal', 'data' => $result], 422);
+        return $this->deny('Cleanup storage hanya dapat dilakukan Super Admin. Admin sekolah hanya bisa memonitor storage sekolahnya sendiri.', 403);
     }
 
     public function adminObjectStorageSync(Request $request)

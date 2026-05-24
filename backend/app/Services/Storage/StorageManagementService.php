@@ -23,7 +23,7 @@ class StorageManagementService
         self::PROVIDER_NEVA_S3 => 'Neva Cloud S3',
     ];
 
-    private const CLEANUP_MINIMUM_FILE_AGE_DAYS = 90;
+    private const CLEANUP_MINIMUM_FILE_AGE_DAYS = 60;
 
     private const CLEANUP_SAFE_CATEGORIES = ['tugas', 'kuis', 'lampiran'];
 
@@ -382,27 +382,42 @@ class StorageManagementService
         $now = now();
         $exists = DB::table('tenant_storage_quotas')->where('tenant_id', $tenantId)->exists();
         $values = [];
+        $hasVpsQuotaPayload = array_key_exists('vps_quota_bytes', $payload) || array_key_exists('quota_bytes', $payload);
+        $hasNevaQuotaPayload = array_key_exists('neva_s3_quota_bytes', $payload);
         $vpsQuota = $payload['vps_quota_bytes'] ?? $payload['quota_bytes'] ?? null;
         $nevaQuota = $payload['neva_s3_quota_bytes'] ?? null;
         $normalizedVpsQuota = $this->nullableBytes($vpsQuota);
         $normalizedNevaQuota = $this->nullableBytes($nevaQuota);
 
-        $this->assertQuotaAllocationWithinCapacity($tenantId, self::PROVIDER_VPS, $normalizedVpsQuota);
-        $this->assertQuotaAllocationWithinCapacity($tenantId, self::PROVIDER_NEVA_S3, $normalizedNevaQuota);
+        if ($hasVpsQuotaPayload && $normalizedVpsQuota === null) {
+            throw new \InvalidArgumentException('Kuota VPS wajib diisi dan harus lebih dari 0 GB agar alokasi platform bisa dihitung aman.');
+        }
+        if ($hasNevaQuotaPayload && $normalizedNevaQuota === null) {
+            throw new \InvalidArgumentException('Kuota Neva S3 wajib diisi dan harus lebih dari 0 GB agar alokasi platform bisa dihitung aman.');
+        }
 
-        if ($this->tableHasColumn('tenant_storage_quotas', 'quota_bytes')) {
+        if ($hasVpsQuotaPayload) {
+            $this->assertQuotaNotBelowUsage($tenantId, self::PROVIDER_VPS, $normalizedVpsQuota);
+            $this->assertQuotaAllocationWithinCapacity($tenantId, self::PROVIDER_VPS, $normalizedVpsQuota);
+        }
+        if ($hasNevaQuotaPayload) {
+            $this->assertQuotaNotBelowUsage($tenantId, self::PROVIDER_NEVA_S3, $normalizedNevaQuota);
+            $this->assertQuotaAllocationWithinCapacity($tenantId, self::PROVIDER_NEVA_S3, $normalizedNevaQuota);
+        }
+
+        if ($hasVpsQuotaPayload && $this->tableHasColumn('tenant_storage_quotas', 'quota_bytes')) {
             $values['quota_bytes'] = $normalizedVpsQuota;
         }
         if ($this->tableHasColumn('tenant_storage_quotas', 'max_upload_bytes')) {
             $values['max_upload_bytes'] = null;
         }
-        if ($this->tableHasColumn('tenant_storage_quotas', 'vps_quota_bytes')) {
+        if ($hasVpsQuotaPayload && $this->tableHasColumn('tenant_storage_quotas', 'vps_quota_bytes')) {
             $values['vps_quota_bytes'] = $normalizedVpsQuota;
         }
         if ($this->tableHasColumn('tenant_storage_quotas', 'vps_max_upload_bytes')) {
             $values['vps_max_upload_bytes'] = null;
         }
-        if ($this->tableHasColumn('tenant_storage_quotas', 'neva_s3_quota_bytes')) {
+        if ($hasNevaQuotaPayload && $this->tableHasColumn('tenant_storage_quotas', 'neva_s3_quota_bytes')) {
             $values['neva_s3_quota_bytes'] = $normalizedNevaQuota;
         }
         if ($this->tableHasColumn('tenant_storage_quotas', 'neva_s3_max_upload_bytes')) {
@@ -820,6 +835,7 @@ class StorageManagementService
     {
         if (
             ! $this->storageFilesReady()
+            || ! $this->tableHasColumn('storage_files', 'provider')
             || ! $this->tableHasColumn('storage_files', 'trash_expires_at')
             || ! $this->tableHasColumn('storage_files', 'uploaded_at')
         ) {
@@ -828,6 +844,7 @@ class StorageManagementService
 
         $rows = DB::table('storage_files')
             ->where('status', 'trash')
+            ->where('provider', self::PROVIDER_NEVA_S3)
             ->whereNotNull('trash_expires_at')
             ->where('trash_expires_at', '<=', now())
             ->whereNotNull('uploaded_at')
@@ -835,7 +852,6 @@ class StorageManagementService
             ->limit(500)
             ->get();
 
-        $storage = Storage::disk('local');
         $files = 0;
         $bytes = 0;
         foreach ($rows as $row) {
@@ -849,10 +865,7 @@ class StorageManagementService
                     continue;
                 }
             } else {
-                $trashPath = trim((string) ($row->trash_path ?? ''));
-                if ($trashPath !== '' && $storage->exists($trashPath)) {
-                    $storage->delete($trashPath);
-                }
+                continue;
             }
             $bytes += (int) ($row->size_bytes ?? 0);
             $files++;
@@ -1520,16 +1533,16 @@ class StorageManagementService
 
         $rawProvider = trim((string) ($filters['provider'] ?? ''));
         if ($rawProvider === '') {
-            return 'Pilih provider storage terlebih dahulu sebelum cleanup.';
+            return 'Pilih provider Neva Cloud S3 terlebih dahulu sebelum cleanup.';
         }
 
         if (! in_array(strtolower($rawProvider), ['local', 'vps', 'neva', 'neva_s3', 's3', 'object-storage', 'object_storage'], true)) {
-            return 'Pilih provider storage yang valid sebelum cleanup.';
+            return 'Cleanup hanya boleh untuk Neva Cloud S3. VPS Storage berisi data penting dan hanya boleh dimonitor, bukan dihapus.';
         }
 
         $provider = $this->normalizeProvider($rawProvider);
-        if (! in_array($provider, [self::PROVIDER_VPS, self::PROVIDER_NEVA_S3], true)) {
-            return 'Pilih provider storage yang valid sebelum cleanup.';
+        if ($provider !== self::PROVIDER_NEVA_S3) {
+            return 'Cleanup hanya boleh untuk Neva Cloud S3. VPS Storage berisi data penting dan hanya boleh dimonitor, bukan dihapus.';
         }
 
         $bucket = trim((string) ($filters['bucket'] ?? ''));
@@ -1800,6 +1813,14 @@ class StorageManagementService
             $column = $this->vpsQuotaSqlExpression();
         }
 
+        if ((! $capacityBytes || $capacityBytes <= 0) && $provider === self::PROVIDER_NEVA_S3) {
+            throw new \InvalidArgumentException('Kapasitas platform Neva Cloud S3 belum diset. Isi APP_OBJECT_STORAGE_CAPACITY_GB agar sisa kuota yang bisa dibagikan dapat dihitung aman.');
+        }
+
+        if (! $column && $provider === self::PROVIDER_NEVA_S3) {
+            throw new \InvalidArgumentException('Kolom kuota Neva S3 belum tersedia. Jalankan migrasi storage sebelum membagikan kuota Neva S3.');
+        }
+
         if (! $capacityBytes || $capacityBytes <= 0 || ! $column) {
             return;
         }
@@ -1812,7 +1833,25 @@ class StorageManagementService
 
         $remainingForTenant = max(0, $capacityBytes - $allocatedOther);
         throw new \InvalidArgumentException(
-            'Kuota '.$label.' melebihi kapasitas platform. Maksimal tambahan untuk sekolah ini '.$this->formatBytes($remainingForTenant).'.'
+            'Kuota '.$label.' melebihi sisa kapasitas platform. Maksimal kuota untuk sekolah ini '.$this->formatBytes($remainingForTenant).'.'
+        );
+    }
+
+    private function assertQuotaNotBelowUsage(string $tenantId, string $provider, ?int $newQuotaBytes): void
+    {
+        if ($newQuotaBytes === null) {
+            return;
+        }
+
+        $provider = $this->normalizeProvider($provider);
+        $usedBytes = $this->tenantUsedBytes($tenantId, $provider);
+        if ($newQuotaBytes >= $usedBytes) {
+            return;
+        }
+
+        $label = self::PROVIDER_LABELS[$provider] ?? 'Storage';
+        throw new \InvalidArgumentException(
+            'Kuota '.$label.' tidak boleh lebih kecil dari pemakaian saat ini. Pemakaian saat ini '.$this->formatBytes($usedBytes).'.'
         );
     }
 

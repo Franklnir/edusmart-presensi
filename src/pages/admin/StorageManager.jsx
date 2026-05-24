@@ -39,7 +39,6 @@ const CLEANUP_CATEGORIES = [
 ]
 
 const CLEANUP_PROVIDER_OPTIONS = [
-  { value: 'local', label: 'VPS Storage' },
   { value: 'object_storage', label: 'Neva Cloud S3' }
 ]
 
@@ -50,7 +49,8 @@ const CLEANUP_BUCKET_OPTIONS = [
 ]
 
 const CLEANUP_AGE_OPTIONS = [
-  { value: '90', label: 'Minimal 3 bulan' },
+  { value: '60', label: 'Minimal 2 bulan' },
+  { value: '90', label: 'Lebih dari 90 hari' },
   { value: '180', label: 'Lebih dari 180 hari' },
   { value: '365', label: 'Lebih dari 1 tahun' }
 ]
@@ -73,6 +73,19 @@ const NEVA_BUCKET_LABELS = {
 }
 
 const numberFormatter = new Intl.NumberFormat('id-ID')
+const formatBytesLabel = (bytes) => {
+  const value = Number(bytes)
+  if (!Number.isFinite(value) || value < 0) return '-'
+  if (value < 1024) return `${numberFormatter.format(Math.round(value))} B`
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let size = value / 1024
+  let unitIndex = 0
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024
+    unitIndex += 1
+  }
+  return `${numberFormatter.format(Math.round(size * 100) / 100)} ${units[unitIndex]}`
+}
 const toBytesFromGb = (value) => {
   const num = Number(value)
   return Number.isFinite(num) && num > 0 ? Math.round(num * 1024 * 1024 * 1024) : null
@@ -155,7 +168,7 @@ function TenantStorageCard({ tenant, selected, onClick }) {
     <button
       type="button"
       onClick={onClick}
-      className={`min-h-[176px] rounded-2xl border bg-white p-5 text-left shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-indigo-300 hover:shadow-card-hover ${selected ? 'border-indigo-400 ring-2 ring-indigo-100' : 'border-slate-100'}`}
+      className={`min-h-[196px] rounded-2xl border bg-white p-5 text-left shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-indigo-300 hover:shadow-card-hover ${selected ? 'border-indigo-400 ring-2 ring-indigo-100' : 'border-slate-100'}`}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -175,6 +188,7 @@ function TenantStorageCard({ tenant, selected, onClick }) {
           </div>
           <p className="mt-1 text-sm font-bold text-slate-900">{vps.used_label || tenant.usage?.total_label || '0 B'}</p>
           <p className="mt-0.5 text-xs text-slate-500">Kuota {vps.quota_label || 'Tidak dibatasi'}</p>
+          <p className="mt-0.5 text-xs text-slate-500">Sisa {vps.remaining_label || 'Tidak dibatasi'}</p>
         </div>
         <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
           <div className="flex items-center justify-between gap-2">
@@ -183,6 +197,7 @@ function TenantStorageCard({ tenant, selected, onClick }) {
           </div>
           <p className="mt-1 text-sm font-bold text-slate-900">{neva.used_label || '0 B'}</p>
           <p className="mt-0.5 text-xs text-slate-500">Kuota {neva.quota_label || 'Tidak dibatasi'}</p>
+          <p className="mt-0.5 text-xs text-slate-500">Sisa {neva.remaining_label || 'Tidak dibatasi'}</p>
         </div>
       </div>
 
@@ -213,12 +228,12 @@ function StorageManager() {
   const [storageFilters, setStorageFilters] = useState({ tahun_ajaran: '', semester: '', category: '' })
   const [storageFilterDraft, setStorageFilterDraft] = useState({ tahun_ajaran: '', semester: '', category: '' })
   const [cleanupForm, setCleanupForm] = useState({
-    provider: 'local',
+    provider: 'object_storage',
     bucket: '',
     tahun_ajaran: '',
     semester: '',
     category: '',
-    older_than_days: '90',
+    older_than_days: '60',
     largest_percent: ''
   })
   const [cleanupPreview, setCleanupPreview] = useState(null)
@@ -310,6 +325,18 @@ function StorageManager() {
   const selectedTenant = tenants.find((tenant) => tenant.id === selectedTenantId)
   const selectedTenantName = selectedTenant?.name || tenantDetail?.tenant?.name || 'Sekolah dipilih'
   const canManageStorageScope = !isSuperAdmin || Boolean(selectedTenantId)
+  const vpsUsedBytes = Number(vpsQuota?.used_bytes || 0)
+  const nevaUsedBytes = Number(nevaQuota?.used_bytes || 0)
+  const currentVpsQuotaBytes = Number(vpsQuota?.quota_bytes || 0)
+  const currentNevaQuotaBytes = Number(nevaQuota?.quota_bytes || 0)
+  const platformVpsRemainingBytes = Number(superSummary?.server?.remaining_after_allocated_bytes)
+  const platformNevaRemainingBytes = Number(nevaPlatform?.remaining_after_allocated_bytes)
+  const maxVpsQuotaForSelectedBytes = Number.isFinite(platformVpsRemainingBytes)
+    ? platformVpsRemainingBytes + currentVpsQuotaBytes
+    : null
+  const maxNevaQuotaForSelectedBytes = Number.isFinite(platformNevaRemainingBytes)
+    ? platformNevaRemainingBytes + currentNevaQuotaBytes
+    : null
   const activePeriod = activeSummary?.active_period || {}
   const periodOptions = useMemo(() => {
     const map = new Map()
@@ -458,7 +485,7 @@ function StorageManager() {
     setCleanupPreview(null)
     setCleanupForm((prev) => ({
       ...prev,
-      provider: activeTab === 'neva' ? 'object_storage' : 'local'
+      provider: 'object_storage'
     }))
   }, [activeTab])
 
@@ -475,8 +502,12 @@ function StorageManager() {
   }, [isSuperAdmin, selectedTenantId, pushToast])
 
   const handlePreviewCleanup = async () => {
+    if (!isSuperAdmin) {
+      pushToast('warning', 'Cleanup storage hanya dapat dilakukan Super Admin.')
+      return
+    }
     if (!cleanupHasProviderBucket) {
-      pushToast('warning', 'Pilih provider dan bucket storage terlebih dahulu.')
+      pushToast('warning', 'Pilih bucket Neva S3 terlebih dahulu.')
       return
     }
     setCleanupLoading(true)
@@ -496,15 +527,19 @@ function StorageManager() {
   }
 
   const handleExecuteCleanup = async () => {
+    if (!isSuperAdmin) {
+      pushToast('warning', 'Cleanup storage hanya dapat dilakukan Super Admin.')
+      return
+    }
     if (!cleanupHasProviderBucket) {
-      pushToast('warning', 'Cleanup wajib memilih provider dan bucket storage.')
+      pushToast('warning', 'Cleanup wajib memilih bucket Neva S3.')
       return
     }
     if (!cleanupPreview?.allowed || cleanupPreview.files <= 0) {
       pushToast('warning', 'Jalankan preview cleanup dulu')
       return
     }
-    const confirmed = window.confirm(`Pindahkan ${cleanupPreview.files} file (${cleanupPreview.bytes_label}) ke Trash?`)
+    const confirmed = window.confirm(`Pindahkan ${cleanupPreview.files} file Neva S3 (${cleanupPreview.bytes_label}) ke Trash?`)
     if (!confirmed) return
 
     setCleanupLoading(true)
@@ -515,7 +550,7 @@ function StorageManager() {
         : supabase.admin.storageCleanupExecute(payload)
       const { data, error } = await api
       if (error) throw error
-      pushToast('success', `${data?.files || 0} file dipindahkan ke Trash`)
+      pushToast('success', `${data?.files || 0} file Neva S3 dipindahkan ke Trash`)
       setCleanupPreview(null)
       await reloadActiveStorage()
     } catch (error) {
@@ -560,10 +595,31 @@ function StorageManager() {
     setSavingQuota(true)
     try {
       const vpsQuotaBytes = toBytesFromGb(quotaForm.vpsQuotaGb)
+      const nevaQuotaBytes = toBytesFromGb(quotaForm.nevaQuotaGb)
+      if (!vpsQuotaBytes || !nevaQuotaBytes) {
+        pushToast('warning', 'Kuota VPS dan Neva S3 wajib diisi lebih dari 0 GB.')
+        return
+      }
+      if (vpsQuotaBytes < vpsUsedBytes) {
+        pushToast('warning', `Kuota VPS tidak boleh lebih kecil dari pemakaian saat ini (${vpsQuota?.used_label || formatBytesLabel(vpsUsedBytes)}).`)
+        return
+      }
+      if (nevaQuotaBytes < nevaUsedBytes) {
+        pushToast('warning', `Kuota Neva S3 tidak boleh lebih kecil dari pemakaian saat ini (${nevaQuota?.used_label || formatBytesLabel(nevaUsedBytes)}).`)
+        return
+      }
+      if (maxVpsQuotaForSelectedBytes !== null && vpsQuotaBytes > maxVpsQuotaForSelectedBytes) {
+        pushToast('warning', `Kuota VPS melebihi sisa platform. Maksimal untuk sekolah ini ${formatBytesLabel(maxVpsQuotaForSelectedBytes)}.`)
+        return
+      }
+      if (maxNevaQuotaForSelectedBytes !== null && nevaQuotaBytes > maxNevaQuotaForSelectedBytes) {
+        pushToast('warning', `Kuota Neva S3 melebihi sisa platform. Maksimal untuk sekolah ini ${formatBytesLabel(maxNevaQuotaForSelectedBytes)}.`)
+        return
+      }
       const payload = {
         quota_bytes: vpsQuotaBytes,
         vps_quota_bytes: vpsQuotaBytes,
-        neva_s3_quota_bytes: toBytesFromGb(quotaForm.nevaQuotaGb),
+        neva_s3_quota_bytes: nevaQuotaBytes,
         notes: quotaForm.notes
       }
       const { error } = await supabase.super.updateTenantStorageQuota(selectedTenantId, payload)
@@ -597,14 +653,14 @@ function StorageManager() {
 
   const handlePurgeExpiredTrash = async () => {
     if (!isSuperAdmin) return
-    const confirmed = window.confirm('Hapus permanen file Trash yang sudah kedaluwarsa lebih dari 30 hari?')
+    const confirmed = window.confirm('Hapus permanen file Neva S3 di Trash yang sudah kedaluwarsa lebih dari 30 hari? VPS Storage tidak akan disentuh.')
     if (!confirmed) return
 
     setPurgingTrash(true)
     try {
       const { data, error } = await supabase.super.purgeExpiredStorageTrash()
       if (error) throw error
-      pushToast('success', `${data?.files || 0} file Trash kedaluwarsa dipurge`)
+      pushToast('success', `${data?.files || 0} file Trash Neva S3 kedaluwarsa dipurge`)
       await reloadActiveStorage()
     } catch (error) {
       pushToast('error', error?.message || 'Gagal purge Trash kedaluwarsa')
@@ -660,12 +716,13 @@ function StorageManager() {
         <div className="max-w-3xl">
           <h2 className="text-sm font-bold text-slate-900">Cleanup Aman ke Trash</h2>
           <p className="mt-1 text-xs text-slate-500">
-            Cleanup hanya memindahkan file storage tugas, quiz, dan lampiran ke Trash. Data tugas, quiz, nilai, siswa, guru, dan record penting tetap aman.
+            Cleanup hanya untuk file Neva S3 kategori tugas, quiz, dan lampiran yang sudah berumur minimal 2 bulan. Data tugas, quiz, nilai, siswa, guru, dan VPS Storage tetap aman.
           </p>
         </div>
         <div className="flex flex-wrap gap-2 text-xs">
           <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 font-semibold text-emerald-700">Trash 30 hari</span>
-          <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 font-semibold text-amber-800">Minimal 3 bulan</span>
+          <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 font-semibold text-amber-800">Minimal 2 bulan</span>
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 font-semibold text-slate-700">VPS read-only</span>
         </div>
       </div>
 
@@ -678,7 +735,8 @@ function StorageManager() {
               <select
                 value={cleanupForm.provider}
                 onChange={(event) => updateCleanupForm({ provider: event.target.value })}
-                className="mt-1 min-h-10 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                disabled
+                className="mt-1 min-h-10 w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-700"
               >
                 {CLEANUP_PROVIDER_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
               </select>
@@ -711,7 +769,7 @@ function StorageManager() {
                 )}
               </select>
               <span className="mt-1 block text-[11px] font-normal text-slate-500">
-                Opsional. Kosongkan untuk cleanup semua file aman yang sudah lewat minimal 3 bulan.
+                Opsional. Kosongkan untuk cleanup semua file aman yang sudah lewat minimal 2 bulan.
               </span>
             </label>
             <label className="block text-xs font-semibold text-slate-600">
@@ -751,10 +809,11 @@ function StorageManager() {
           <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">Pengaman aktif</h3>
           <div className="mt-3 space-y-2 text-sm text-slate-600">
             {[
-              'Tidak bisa untuk file di bawah 3 bulan',
+              'Tidak bisa untuk file di bawah 2 bulan',
               'Periode opsional, mengikuti tahun ajaran aktif jika umur file sudah aman',
               'Hanya bucket assignments dan quiz-media',
-              'Berlaku untuk VPS Storage dan Neva Cloud S3',
+              'Hanya berlaku untuk Neva Cloud S3',
+              'VPS Storage tidak bisa dihapus dari Storage Manager',
               'Hanya dokumen/gambar tugas atau quiz',
               'Preview wajib sebelum pindah ke Trash'
             ].map((item) => (
@@ -789,7 +848,7 @@ function StorageManager() {
 
       {!cleanupHasProviderBucket && (
         <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          Pilih provider dan bucket terlebih dahulu supaya cleanup hanya menyasar lokasi storage yang benar.
+          Pilih bucket Neva S3 terlebih dahulu supaya cleanup hanya menyasar lokasi storage yang benar.
         </div>
       )}
       {cleanupPreview && (
@@ -811,7 +870,7 @@ function StorageManager() {
           Kuota VPS (GB)
           <input
             type="number"
-            min="0"
+            min="0.1"
             step="0.1"
             value={quotaForm.vpsQuotaGb}
             onChange={(e) => setQuotaForm((prev) => ({ ...prev, vpsQuotaGb: e.target.value }))}
@@ -823,7 +882,7 @@ function StorageManager() {
           Kuota Neva S3 (GB)
           <input
             type="number"
-            min="0"
+            min="0.1"
             step="0.1"
             value={quotaForm.nevaQuotaGb}
             onChange={(e) => setQuotaForm((prev) => ({ ...prev, nevaQuotaGb: e.target.value }))}
@@ -832,8 +891,28 @@ function StorageManager() {
           />
         </label>
       </div>
-      <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-        Storage Manager tidak memasang batas ukuran per-file. Pengaman kapasitas berjalan dari total kuota sekolah.
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+          <p className="font-bold uppercase tracking-wide text-slate-500">Indikator VPS</p>
+          <div className="mt-2 space-y-1">
+            <p>Pemakaian sekolah: <span className="font-semibold text-slate-900">{vpsQuota?.used_label || formatBytesLabel(vpsUsedBytes)}</span></p>
+            <p>Kuota saat ini: <span className="font-semibold text-slate-900">{vpsQuota?.quota_label || 'Belum diset'}</span></p>
+            <p>Sisa platform bisa dibagi: <span className="font-semibold text-slate-900">{superSummary?.server?.remaining_after_allocated_label || '0 B'}</span></p>
+            <p>Maksimal untuk sekolah ini: <span className="font-semibold text-slate-900">{maxVpsQuotaForSelectedBytes !== null ? formatBytesLabel(maxVpsQuotaForSelectedBytes) : 'Mengikuti kapasitas VPS'}</span></p>
+          </div>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+          <p className="font-bold uppercase tracking-wide text-slate-500">Indikator Neva S3</p>
+          <div className="mt-2 space-y-1">
+            <p>Pemakaian sekolah: <span className="font-semibold text-slate-900">{nevaQuota?.used_label || formatBytesLabel(nevaUsedBytes)}</span></p>
+            <p>Kuota saat ini: <span className="font-semibold text-slate-900">{nevaQuota?.quota_label || 'Belum diset'}</span></p>
+            <p>Sisa platform bisa dibagi: <span className="font-semibold text-slate-900">{nevaPlatform?.remaining_after_allocated_label || 'Belum diset'}</span></p>
+            <p>Maksimal untuk sekolah ini: <span className="font-semibold text-slate-900">{maxNevaQuotaForSelectedBytes !== null ? formatBytesLabel(maxNevaQuotaForSelectedBytes) : 'Set APP_OBJECT_STORAGE_CAPACITY_GB'}</span></p>
+          </div>
+        </div>
+      </div>
+      <div className="mt-3 rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-xs text-indigo-800">
+        Kuota tidak bisa disimpan jika lebih kecil dari pemakaian saat ini atau lebih besar dari sisa kapasitas platform. Storage Manager tidak memasang batas ukuran per-file.
       </div>
       <label className="mt-3 block text-xs font-semibold text-slate-600">
         Catatan
@@ -1354,11 +1433,13 @@ function StorageManager() {
             {syncingObjectStorage ? 'Membaca S3...' : 'Scan Platform Neva'}
           </button>
         </div>
-        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
           <StatTile icon={HardDrive} label="Total VPS" value={superSummary?.server?.total_label} hint={`${superSummary?.server?.disk_percent || 0}% disk`} />
-          <StatTile icon={ShieldCheck} label="Kuota VPS Dibagikan" value={superSummary?.server?.allocated_quota_label} hint={`Sisa ${superSummary?.server?.remaining_after_allocated_label || '0 B'}`} />
+          <StatTile icon={ShieldCheck} label="VPS Dibagikan" value={superSummary?.server?.allocated_quota_label} hint="Total kuota sekolah" />
+          <StatTile icon={Archive} label="Sisa VPS Bisa Dibagi" value={superSummary?.server?.remaining_after_allocated_label || '0 B'} hint="Belum dialokasikan" />
           <StatTile icon={Cloud} label="Total Neva S3" value={nevaPlatform?.capacity_label || 'Belum diset'} hint={nevaPlatform?.endpoint || 'Neva Cloud S3'} />
-          <StatTile icon={Archive} label="Kuota S3 Dibagikan" value={nevaPlatform?.allocated_quota_label || '0 B'} hint={`Sisa ${nevaPlatform?.remaining_after_allocated_label || 'Belum diset'}`} />
+          <StatTile icon={ShieldCheck} label="S3 Dibagikan" value={nevaPlatform?.allocated_quota_label || '0 B'} hint="Total kuota sekolah" />
+          <StatTile icon={Database} label="Sisa S3 Bisa Dibagi" value={nevaPlatform?.remaining_after_allocated_label || 'Belum diset'} hint="Belum dialokasikan" />
         </div>
       </section>
 
@@ -1409,7 +1490,7 @@ function StorageManager() {
                 <h1 className="page-title-heading">Storage VPS & Neva Cloud S3</h1>
                 <p className="page-title-description">
                   {isSuperAdmin
-                    ? 'Kelola kuota, monitoring, cleanup aman, dan Trash semua sekolah dari satu halaman.'
+                    ? 'Kelola kuota, monitoring, cleanup aman Neva S3, dan Trash semua sekolah dari satu halaman.'
                     : 'Pantau pemakaian VPS dan Neva Cloud S3 sekolah secara ringkas, responsif, dan read-only.'}
                 </p>
               </div>
@@ -1423,7 +1504,7 @@ function StorageManager() {
                   className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700 shadow-sm transition hover:bg-rose-50 disabled:opacity-60"
                 >
                   <Trash2 size={16} />
-                  {purgingTrash ? 'Memproses...' : 'Purge Trash'}
+                  {purgingTrash ? 'Memproses...' : 'Purge Trash S3'}
                 </button>
               )}
               <button
