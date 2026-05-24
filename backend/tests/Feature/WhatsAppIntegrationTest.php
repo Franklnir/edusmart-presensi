@@ -98,6 +98,35 @@ class WhatsAppIntegrationTest extends TestCase
         $response->assertJsonPath('data.integration.last_error', 'Evolution gagal membuat QR untuk instance: Gateway timeout');
     }
 
+    public function test_admin_can_generate_qr_when_instance_check_returns_server_error_but_connect_recovers(): void
+    {
+        config()->set('services.evolution_api.base_url', 'https://evolution.test');
+        config()->set('services.evolution_api.api_key', 'secret-key');
+        config()->set('services.evolution_api.webhook_base_url', 'https://edusmart.example.com');
+
+        $tenantId = $this->defaultTenantId();
+        $user = $this->createUserWithProfile($tenantId, 'admin', 'admin-fetch-500-connect@example.com');
+
+        Http::fake([
+            'https://evolution.test/instance/fetchInstances*' => Http::response([
+                'message' => 'Internal Server Error',
+            ], 500),
+            'https://evolution.test/webhook/set/*' => Http::response(['success' => true], 200),
+            'https://evolution.test/instance/connect/*' => Http::response([
+                'base64' => 'data:image/png;base64,QR-FETCH-FAILED-CONNECT-OK',
+            ], 200),
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $response = $this->postJson('/api/admin/whatsapp/connect');
+
+        $response->assertOk();
+        $response->assertJsonPath('data.integration.status', 'awaiting_qr');
+        $response->assertJsonPath('data.integration.qr_code', 'data:image/png;base64,QR-FETCH-FAILED-CONNECT-OK');
+        $response->assertJsonPath('data.integration.last_error', null);
+    }
+
     public function test_admin_can_generate_qr_even_when_webhook_setup_fails(): void
     {
         config()->set('services.evolution_api.base_url', 'https://evolution.test');
@@ -733,6 +762,14 @@ class WhatsAppIntegrationTest extends TestCase
             'https://evolution.test/instance/fetchInstances*' => Http::response([
                 'message' => 'Evolution API error HTTP 502',
             ], 502),
+            'https://evolution.test/instance/connect/*' => Http::response([
+                'message' => 'Evolution API error HTTP 502',
+            ], 502),
+            'https://evolution.test/instance/logout/*' => Http::response(['success' => true], 200),
+            'https://evolution.test/instance/delete/*' => Http::response(['success' => true], 200),
+            'https://evolution.test/instance/create' => Http::response([
+                'message' => 'Evolution API error HTTP 502',
+            ], 502),
         ]);
 
         Sanctum::actingAs($user);
@@ -741,7 +778,7 @@ class WhatsAppIntegrationTest extends TestCase
 
         $response->assertOk();
         $response->assertJsonPath('data.integration.status', 'disconnected');
-        $response->assertJsonPath('data.integration.last_error', 'Evolution API error HTTP 502');
+        $response->assertJsonPath('data.integration.last_error', 'Evolution gagal membuat instance WhatsApp setelah reset state: Evolution API error HTTP 502');
     }
 
     public function test_assignment_submission_mutation_does_not_send_whatsapp_anymore(): void

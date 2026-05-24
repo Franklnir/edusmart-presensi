@@ -215,9 +215,10 @@ class WhatsAppIntegrationService
         $integration = $this->getOrCreateIntegration($tenantId);
         $this->getOrCreateNotificationSettings($tenantId, $integration);
         $webhookError = null;
+        $providerCheckError = null;
 
         try {
-            $remote = $this->evolutionApiClient->fetchInstance($integration->instance_name);
+            $remote = $this->safeFetchInstance($integration->instance_name, $providerCheckError);
             if ($remote && $this->normalizeConnectionState((string) ($remote['status'] ?? $remote['connectionStatus'] ?? '')) === 'open') {
                 $webhookError = $this->safeSetWebhook($integration);
 
@@ -234,7 +235,10 @@ class WhatsAppIntegrationService
             $created = [];
             $connect = [];
             if (! $remote) {
-                $created = $this->createInstanceForQr($integration);
+                ['response' => $connect, 'error' => $connectError] = $this->attemptQrConnect($integration->instance_name);
+                if (! $this->hasQrPayload($connect)) {
+                    $created = $this->createInstanceForQr($integration);
+                }
                 $webhookError = $this->safeSetWebhook($integration);
             } else {
                 $this->applyRemoteSnapshot($integration, $remote);
@@ -266,7 +270,9 @@ class WhatsAppIntegrationService
             }
 
             $hasFreshQr = $qrCode !== '' || $pairingCode !== '';
-            $lastError = $connectError ?: $webhookError;
+            $lastError = $hasFreshQr
+                ? $webhookError
+                : ($connectError ?: $webhookError ?: $providerCheckError);
 
             $integration->fill([
                 // Evolution v2 may deliver the QR via webhook instead of connect response.
@@ -335,13 +341,13 @@ class WhatsAppIntegrationService
             (string) $integration->status,
             (string) $integration->connection_state
         );
-        $remote = $this->evolutionApiClient->fetchInstance($integration->instance_name);
+        $remote = $this->safeFetchInstance($integration->instance_name, $providerCheckError);
         if (! $remote) {
             $integration->fill([
                 'status' => 'disconnected',
                 'connection_state' => 'close',
                 'last_synced_at' => now(),
-                'last_error' => 'Instance belum ditemukan di Evolution API.',
+                'last_error' => $providerCheckError ?: 'Instance belum ditemukan di Evolution API.',
             ]);
             $integration->save();
 
@@ -882,9 +888,12 @@ class WhatsAppIntegrationService
                     try {
                         return $this->createInstanceForQr($integration, false);
                     } catch (\Throwable $resetException) {
+                        $resetMessage = $this->normalizeProviderErrorMessage($resetException->getMessage());
+                        $resetMessage = Str::replaceStart('Evolution gagal membuat instance WhatsApp: ', '', $resetMessage);
+
                         throw new RuntimeException(
                             'Evolution gagal membuat instance WhatsApp setelah reset state: '
-                            .$this->normalizeProviderErrorMessage($resetException->getMessage())
+                            .$resetMessage
                         );
                     }
                 }
@@ -892,17 +901,17 @@ class WhatsAppIntegrationService
                 throw new RuntimeException('Evolution gagal membuat instance WhatsApp: '.$providerMessage);
             }
 
-            $remote = $this->evolutionApiClient->fetchInstance($integration->instance_name);
-            if (! $remote) {
-                throw new RuntimeException('Evolution menganggap instance sudah ada, tetapi instance tidak ditemukan saat dicek ulang.');
-            }
-
             ['response' => $connect] = $this->attemptQrConnect($integration->instance_name);
             if ($this->hasQrPayload($connect)) {
                 return $connect;
             }
 
-            throw new RuntimeException('Evolution instance sudah ada, tetapi QR belum bisa dibuat: '.$providerMessage);
+            $remote = $this->safeFetchInstance($integration->instance_name, $checkError);
+            if (! $remote) {
+                throw new RuntimeException('Evolution menganggap instance sudah ada, tetapi instance tidak ditemukan saat dicek ulang: '.($checkError ?: $providerMessage));
+            }
+
+            throw new RuntimeException('Evolution instance sudah ada, tetapi QR belum bisa dibuat: '.($checkError ?: $providerMessage));
         }
     }
 
@@ -943,7 +952,7 @@ class WhatsAppIntegrationService
         $remote = null;
 
         for ($attempt = 0; $attempt < $attempts; $attempt++) {
-            $remote = $this->evolutionApiClient->fetchInstance($instanceName);
+            $remote = $this->safeFetchInstance($instanceName, $checkError);
             if (! $remote) {
                 return null;
             }
@@ -952,6 +961,20 @@ class WhatsAppIntegrationService
         }
 
         return $remote;
+    }
+
+    private function safeFetchInstance(string $instanceName, ?string &$error = null): ?array
+    {
+        $error = null;
+
+        try {
+            return $this->evolutionApiClient->fetchInstance($instanceName);
+        } catch (\Throwable $e) {
+            $error = 'Evolution belum siap saat mengecek instance: '
+                .$this->normalizeProviderErrorMessage($e->getMessage());
+
+            return null;
+        }
     }
 
     private function attemptQrConnect(string $instanceName): array
