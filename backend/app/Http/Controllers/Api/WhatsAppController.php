@@ -213,6 +213,7 @@ class WhatsAppController extends ApiController
                 'fast_limit' => (int) config('services.whatsapp.daily_alpha_fast_limit', 20),
                 'batch_per_minute' => (int) config('services.whatsapp.daily_alpha_batch_per_minute', 10),
                 'fast_interval_seconds' => (int) config('services.whatsapp.daily_alpha_fast_interval_seconds', 15),
+                'send_min_interval_seconds' => (int) config('services.whatsapp.send_min_interval_seconds', 10),
             ],
             'stats' => $stats,
             'readiness' => $delivery['readiness'] ?? null,

@@ -8,6 +8,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Cache;
 
 class SendWhatsAppMessageJob implements ShouldQueue
 {
@@ -62,9 +63,6 @@ class SendWhatsAppMessageJob implements ShouldQueue
             return;
         }
 
-        $log->attempt_count = (int) $log->attempt_count + 1;
-        $log->save();
-
         $integration = $integrationService
             ->senderIntegrationForTenant((string) $log->tenant_id)
             ->fresh();
@@ -82,6 +80,16 @@ class SendWhatsAppMessageJob implements ShouldQueue
 
             return;
         }
+
+        $delaySeconds = $this->reserveSendSlot($integration->instance_name ?: $integration->id);
+        if ($delaySeconds > 0) {
+            $this->release($delaySeconds);
+
+            return;
+        }
+
+        $log->attempt_count = (int) $log->attempt_count + 1;
+        $log->save();
 
         try {
             $response = $integrationService->sendText(
@@ -110,6 +118,34 @@ class SendWhatsAppMessageJob implements ShouldQueue
                 'failed_at' => now(),
                 'last_error' => $e->getMessage(),
             ])->save();
+        }
+    }
+
+    private function reserveSendSlot(string $senderKey): int
+    {
+        $senderKey = preg_replace('/[^a-zA-Z0-9_.:-]+/', '-', trim($senderKey)) ?: 'central';
+        $intervalSeconds = max(3, min((int) config('services.whatsapp.send_min_interval_seconds', 10), 120));
+        $maxReleaseSeconds = max(10, min((int) config('services.whatsapp.send_throttle_release_max_seconds', 120), 600));
+        $lock = Cache::lock('whatsapp-send-throttle-lock:'.$senderKey, 10);
+
+        if (! $lock->get()) {
+            return min($maxReleaseSeconds, $intervalSeconds);
+        }
+
+        try {
+            $cacheKey = 'whatsapp-send-throttle-next-at:'.$senderKey;
+            $now = now()->timestamp;
+            $nextAt = (int) Cache::get($cacheKey, 0);
+
+            if ($nextAt > $now) {
+                return min($maxReleaseSeconds, max(1, $nextAt - $now));
+            }
+
+            Cache::put($cacheKey, $now + $intervalSeconds, now()->addMinutes(30));
+
+            return 0;
+        } finally {
+            optional($lock)->release();
         }
     }
 }

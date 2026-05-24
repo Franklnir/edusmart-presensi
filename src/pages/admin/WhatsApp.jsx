@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
   CalendarDays,
@@ -151,6 +151,7 @@ function SuperWhatsAppCenter() {
   const [sendingTest, setSendingTest] = useState(false)
   const [testForm, setTestForm] = useState({ number: '', message: '' })
   const [qrPreview, setQrPreview] = useState('')
+  const lastConnectionStatusRef = useRef('')
 
   const loadData = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true)
@@ -235,6 +236,18 @@ function SuperWhatsAppCenter() {
   const totalPending = (payload.tenants || []).reduce((sum, tenant) => sum + Number(tenant.pending || 0), 0)
 
   useEffect(() => {
+    const previousStatus = lastConnectionStatusRef.current
+    if (previousStatus && previousStatus !== currentStatus) {
+      if (previousStatus === 'connected' && currentStatus !== 'connected') {
+        pushToast('warning', 'WA pusat terputus. Jika logout dilakukan dari aplikasi WhatsApp, status di sini sudah ikut diperbarui.')
+      } else if (currentStatus === 'connected') {
+        pushToast('success', 'WA pusat terhubung dan siap mengirim notifikasi.')
+      }
+    }
+    lastConnectionStatusRef.current = currentStatus
+  }, [currentStatus, pushToast])
+
+  useEffect(() => {
     if (!integration?.qr_code) {
       setQrPreview('')
       return
@@ -294,7 +307,7 @@ function SuperWhatsAppCenter() {
       : null
     const timer = setInterval(() => {
       poll()
-    }, currentStatus === 'awaiting_qr' ? 10000 : 30000)
+    }, currentStatus === 'awaiting_qr' ? 5000 : 8000)
 
     return () => {
       cancelled = true
@@ -302,6 +315,19 @@ function SuperWhatsAppCenter() {
       clearInterval(timer)
     }
   }, [applyCentralPayload, currentStatus, provider.type, providerConfigured])
+
+  useEffect(() => {
+    const hasLiveDelivery = Number(stats.queued || 0) > 0 || totalPending > 0 || running || retrying
+    if (!hasLiveDelivery) return undefined
+
+    const timer = setInterval(() => {
+      if (!document.hidden) {
+        loadData({ silent: true })
+      }
+    }, 15000)
+
+    return () => clearInterval(timer)
+  }, [loadData, retrying, running, stats.queued, totalPending])
 
   const connectCentral = async () => {
     setConnecting(true)
@@ -624,6 +650,7 @@ function SuperWhatsAppCenter() {
             <h2 className="text-lg font-extrabold text-slate-900">Aturan Kirim Alpha</h2>
             <p className="mt-1 text-sm text-slate-600">
               Mulai bekerja setelah jam pelajaran atau scan pulang terakhir selesai. Jika pesan sedikit, dikirim tiap {settings.fast_interval_seconds || 15} detik sampai jam {settings.fast_max_send_hour || 23}.00. Jika banyak, disebar sampai jam {settings.batch_max_send_hour || 21}.00.
+              Gateway juga punya jeda global minimal {settings.send_min_interval_seconds || 10} detik per nomor pusat supaya antrean aman dan tidak menumpuk di Baileys.
             </p>
             <div className={`mt-3 rounded-2xl px-4 py-3 text-sm ${readiness.ready ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800'}`}>
               <b>{readiness.ready ? 'Siap diproses.' : 'Belum waktunya kirim.'}</b> {readiness.reason || '-'}
