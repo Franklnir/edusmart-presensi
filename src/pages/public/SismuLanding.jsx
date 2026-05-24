@@ -244,7 +244,7 @@ const scrollToId = (id) => {
 
 const MarketingButton = ({ children, variant = 'primary', href, onClick, className = '', ...props }) => {
   const base =
-    'inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-black transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2'
+    'sismu-button inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-black transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2'
   const styles =
     variant === 'primary'
       ? 'bg-blue-600 text-white shadow-[0_18px_40px_-22px_rgba(37,99,235,0.95)] hover:bg-blue-700'
@@ -297,9 +297,9 @@ const DashboardPreview = () => {
   ]
 
   return (
-    <div className="relative">
+    <div className="sismu-dashboard-preview relative">
       <div className="absolute -inset-5 rounded-[2rem] bg-blue-200/50 blur-3xl" />
-      <div className="relative overflow-hidden rounded-[1.6rem] border border-white/80 bg-white p-4 shadow-[0_28px_70px_-38px_rgba(15,23,42,0.65)]">
+      <div className="sismu-dashboard-card sismu-shine relative overflow-hidden rounded-[1.6rem] border border-white/80 bg-white p-4 shadow-[0_28px_70px_-38px_rgba(15,23,42,0.65)]">
         <div className="mb-4 flex items-center justify-between border-b border-slate-100 pb-4">
           <div className="flex items-center gap-2">
             <span className="h-3 w-3 rounded-full bg-red-400" />
@@ -312,17 +312,17 @@ const DashboardPreview = () => {
         </div>
 
         <div className="grid grid-cols-3 gap-3">
-          <div className="rounded-2xl bg-blue-50 p-4">
+          <div className="sismu-stat-card rounded-2xl bg-blue-50 p-4">
             <Users className="mb-3 h-5 w-5 text-blue-600" />
             <p className="text-2xl font-black text-slate-950">1.234</p>
             <p className="text-xs font-semibold text-slate-500">Siswa Aktif</p>
           </div>
-          <div className="rounded-2xl bg-emerald-50 p-4">
+          <div className="sismu-stat-card rounded-2xl bg-emerald-50 p-4">
             <UserCog className="mb-3 h-5 w-5 text-emerald-700" />
             <p className="text-2xl font-black text-slate-950">89</p>
             <p className="text-xs font-semibold text-slate-500">Guru</p>
           </div>
-          <div className="rounded-2xl bg-amber-50 p-4">
+          <div className="sismu-stat-card rounded-2xl bg-amber-50 p-4">
             <Activity className="mb-3 h-5 w-5 text-amber-600" />
             <p className="text-2xl font-black text-slate-950">94%</p>
             <p className="text-xs font-semibold text-slate-500">Hadir</p>
@@ -338,8 +338,8 @@ const DashboardPreview = () => {
             {bars.map((height, index) => (
               <div
                 key={index}
-                className="flex-1 rounded-t-xl bg-gradient-to-t from-blue-700 to-blue-400"
-                style={{ height: `${height}%` }}
+                className="sismu-chart-bar flex-1 rounded-t-xl bg-gradient-to-t from-blue-700 to-blue-400"
+                style={{ height: `${height}%`, '--sismu-bar-delay': `${index * 80 + 240}ms` }}
               />
             ))}
           </div>
@@ -349,7 +349,7 @@ const DashboardPreview = () => {
         </div>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          <div className="rounded-2xl bg-slate-950 p-4 text-white">
+          <div className="sismu-stat-card rounded-2xl bg-slate-950 p-4 text-white">
             <div className="mb-3 flex items-center justify-between">
               <p className="text-xs font-bold text-slate-300">RFID Scan</p>
               <Radio className="h-4 w-4 text-blue-300" />
@@ -360,7 +360,7 @@ const DashboardPreview = () => {
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Hadir tercatat
             </p>
           </div>
-          <div className="rounded-2xl bg-emerald-50 p-4">
+          <div className="sismu-stat-card rounded-2xl bg-emerald-50 p-4">
             <div className="mb-3 flex items-center justify-between">
               <p className="text-xs font-bold text-emerald-700">Backup Data</p>
               <DatabaseBackup className="h-4 w-4 text-emerald-700" />
@@ -368,7 +368,7 @@ const DashboardPreview = () => {
             <p className="text-sm font-black text-slate-900">Aman & Terbackup</p>
             <p className="text-xs text-slate-500">Hari ini, 08:30 WIB</p>
             <div className="mt-3 h-2 overflow-hidden rounded-full bg-emerald-100">
-              <div className="h-full w-4/5 rounded-full bg-emerald-500" />
+              <div className="sismu-progress-line h-full w-4/5 rounded-full bg-emerald-500" />
             </div>
           </div>
         </div>
@@ -376,8 +376,12 @@ const DashboardPreview = () => {
         <div className="mt-4 rounded-2xl border border-slate-100 bg-white p-4">
           <p className="mb-3 text-xs font-black uppercase tracking-widest text-slate-500">Aktivitas terbaru</p>
           <div className="space-y-2">
-            {activity.map((item) => (
-              <div key={item} className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
+            {activity.map((item, index) => (
+              <div
+                key={item}
+                className="sismu-activity-row flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600"
+                style={{ '--sismu-bar-delay': `${index * 120 + 680}ms` }}
+              >
                 <span className="h-2 w-2 rounded-full bg-blue-500" />
                 {item}
               </div>
@@ -423,6 +427,53 @@ const SismuLanding = () => {
     }
   }, [])
 
+  useEffect(() => {
+    const root = document.querySelector('.sismu-marketing-page')
+    if (!root) return undefined
+
+    const candidates = Array.from(
+      root.querySelectorAll([
+        '.sismu-reveal-target',
+        'section > div',
+        'article',
+        '.sismu-price-card',
+        '.sismu-faq-item',
+        '.sismu-table-wrap'
+      ].join(','))
+    )
+      .filter((node) => !node.closest('header'))
+      .filter((node, index, list) => list.indexOf(node) === index)
+
+    candidates.forEach((node, index) => {
+      node.classList.add('sismu-reveal')
+      if (!node.style.getPropertyValue('--sismu-reveal-delay')) {
+        node.style.setProperty('--sismu-reveal-delay', `${Math.min((index % 8) * 45, 260)}ms`)
+      }
+    })
+
+    if (typeof IntersectionObserver === 'undefined') {
+      candidates.forEach((node) => node.classList.add('is-visible'))
+      return undefined
+    }
+
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return
+        entry.target.classList.add('is-visible')
+        observer.unobserve(entry.target)
+      })
+    }, {
+      rootMargin: '0px 0px -8% 0px',
+      threshold: 0.08
+    })
+
+    candidates
+      .filter((node) => !node.classList.contains('is-visible'))
+      .forEach((node) => observer.observe(node))
+
+    return () => observer.disconnect()
+  }, [activeFilter, openFaq])
+
   const navItems = [
     ['fitur', 'Fitur'],
     ['solusi', 'Solusi'],
@@ -432,9 +483,9 @@ const SismuLanding = () => {
   ]
 
   return (
-    <div className="min-h-screen bg-white text-slate-950">
+    <div className="sismu-marketing-page min-h-screen bg-white text-slate-950">
       <header
-        className={`fixed inset-x-0 top-0 z-50 transition ${
+        className={`sismu-nav fixed inset-x-0 top-0 z-50 transition ${
           scrolled ? 'border-b border-slate-200 bg-white/85 shadow-sm backdrop-blur-xl' : 'bg-transparent'
         }`}
       >
@@ -515,13 +566,13 @@ const SismuLanding = () => {
 
       <main>
         <section id="home" className="relative min-h-screen overflow-hidden bg-gradient-to-b from-blue-50 via-white to-white pt-28">
-          <div className="absolute inset-0 bg-[linear-gradient(rgba(37,99,235,.07)_1px,transparent_1px),linear-gradient(90deg,rgba(37,99,235,.07)_1px,transparent_1px)] bg-[size:42px_42px]" />
-          <div className="absolute -left-40 top-28 h-96 w-96 rounded-full bg-blue-200/40 blur-3xl" />
-          <div className="absolute -right-40 bottom-20 h-[30rem] w-[30rem] rounded-full bg-emerald-200/30 blur-3xl" />
+          <div className="sismu-grid-drift absolute inset-0 bg-[linear-gradient(rgba(37,99,235,.07)_1px,transparent_1px),linear-gradient(90deg,rgba(37,99,235,.07)_1px,transparent_1px)] bg-[size:42px_42px]" />
+          <div className="sismu-soft-orb absolute -left-40 top-28 h-96 w-96 rounded-full bg-blue-200/40 blur-3xl" />
+          <div className="sismu-soft-orb sismu-soft-orb--slow absolute -right-40 bottom-20 h-[30rem] w-[30rem] rounded-full bg-emerald-200/30 blur-3xl" />
 
           <div className="relative mx-auto grid min-h-[calc(100vh-7rem)] max-w-7xl items-center gap-12 px-4 py-12 sm:px-6 lg:grid-cols-2 lg:px-8">
-            <div className="text-center lg:text-left">
-              <div className="inline-flex items-center gap-2 rounded-full border border-blue-100 bg-white/80 px-4 py-2 text-sm font-black text-blue-700 shadow-sm backdrop-blur">
+            <div className="sismu-hero-copy text-center lg:text-left">
+              <div className="sismu-hero-kicker inline-flex items-center gap-2 rounded-full border border-blue-100 bg-white/80 px-4 py-2 text-sm font-black text-blue-700 shadow-sm backdrop-blur">
                 <span className="relative flex h-2.5 w-2.5">
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
                   <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
@@ -529,16 +580,16 @@ const SismuLanding = () => {
                 Platform sekolah modern berbasis cloud
               </div>
 
-              <h1 className="mt-6 text-4xl font-black leading-tight tracking-tight text-slate-950 sm:text-5xl lg:text-6xl">
+              <h1 className="sismu-hero-title mt-6 text-4xl font-black leading-tight tracking-tight text-slate-950 sm:text-5xl lg:text-6xl">
                 SISMU membuat administrasi sekolah lebih tertata, cepat, dan profesional.
               </h1>
 
-              <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-slate-600 sm:text-lg lg:mx-0">
+              <p className="sismu-hero-subtitle mx-auto mt-6 max-w-2xl text-base leading-relaxed text-slate-600 sm:text-lg lg:mx-0">
                 Sistem Informasi Sekolah Mutu Unggul membantu sekolah mengelola presensi QR/RFID, data siswa,
                 guru, kelas, tugas, quiz, nilai, ekstrakurikuler, laporan, storage, dan backup dalam satu platform.
               </p>
 
-              <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row lg:justify-start">
+              <div className="sismu-hero-actions mt-8 flex flex-col justify-center gap-3 sm:flex-row lg:justify-start">
                 <MarketingButton href={whatsappUrl} className="px-7 py-4 text-base">
                   <MessageCircle className="h-5 w-5" /> Konsultasi Sekarang <ArrowRight className="h-4 w-4" />
                 </MarketingButton>
@@ -547,7 +598,7 @@ const SismuLanding = () => {
                 </MarketingButton>
               </div>
 
-              <div className="mt-8 flex flex-wrap justify-center gap-2 lg:justify-start">
+              <div className="sismu-hero-tags mt-8 flex flex-wrap justify-center gap-2 lg:justify-start">
                 {[
                   ['school', 'Siap pakai untuk sekolah'],
                   ['radio', 'RFID ready'],
@@ -593,7 +644,7 @@ const SismuLanding = () => {
             />
             <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               {problems.map((problem) => (
-                <article key={problem.title} className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:border-blue-200 hover:shadow-lg">
+                <article key={problem.title} className="sismu-card rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:border-blue-200 hover:shadow-lg">
                   <div className="mb-4 grid h-12 w-12 place-items-center rounded-2xl bg-red-50">
                     <Icon name={problem.icon} className="h-6 w-6 text-red-500" />
                   </div>
@@ -639,7 +690,7 @@ const SismuLanding = () => {
 
             <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {filteredFeatures.map((feature) => (
-                <article key={feature.title} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-1 hover:border-blue-200 hover:shadow-lg">
+                <article key={feature.title} className="sismu-card rounded-3xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-1 hover:border-blue-200 hover:shadow-lg">
                   <div className="mb-4 grid h-11 w-11 place-items-center rounded-2xl bg-blue-50">
                     <Icon name={feature.icon} className="h-5 w-5 text-blue-600" />
                   </div>
@@ -718,7 +769,7 @@ const SismuLanding = () => {
             />
             <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {benefits.map((benefit) => (
-                <article key={benefit.title} className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:border-emerald-200 hover:shadow-lg">
+                <article key={benefit.title} className="sismu-card rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:border-emerald-200 hover:shadow-lg">
                   <div className="mb-4 grid h-12 w-12 place-items-center rounded-2xl bg-emerald-50">
                     <Icon name={benefit.icon} className="h-6 w-6 text-emerald-700" />
                   </div>
@@ -742,7 +793,7 @@ const SismuLanding = () => {
               {pricingPlans.map((plan) => (
                 <article
                   key={plan.name}
-                  className={`relative rounded-[2rem] border p-7 ${
+                  className={`sismu-price-card relative rounded-[2rem] border p-7 ${
                     plan.highlighted
                       ? 'border-blue-400 bg-slate-950 text-white shadow-[0_28px_70px_-36px_rgba(37,99,235,0.85)]'
                       : 'border-slate-200 bg-white text-slate-950 shadow-[0_24px_60px_-42px_rgba(15,23,42,0.55)]'
@@ -799,7 +850,7 @@ const SismuLanding = () => {
               ))}
             </div>
 
-            <div className="mt-8 rounded-[2rem] border border-slate-200 bg-white p-6 shadow-[0_24px_60px_-42px_rgba(15,23,42,0.55)]">
+            <div className="sismu-table-wrap mt-8 rounded-[2rem] border border-slate-200 bg-white p-6 shadow-[0_24px_60px_-42px_rgba(15,23,42,0.55)]">
               <div className="mb-5">
                 <p className="text-xl font-black text-slate-950">Perbandingan Singkat</p>
                 <p className="text-sm font-semibold text-slate-500">
@@ -837,7 +888,7 @@ const SismuLanding = () => {
               {faqs.map((item, index) => {
                 const isOpen = openFaq === index
                 return (
-                  <div key={item.q} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                  <div key={item.q} className="sismu-faq-item overflow-hidden rounded-2xl border border-slate-200 bg-white">
                     <button
                       type="button"
                       onClick={() => setOpenFaq(isOpen ? -1 : index)}

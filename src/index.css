@@ -1633,3 +1633,262 @@ body.quiz-strict-active img {
     gap: 0.35rem;
   }
 }
+
+/* ===== SISMU Public Landing Motion ===== */
+.sismu-marketing-page {
+  scroll-behavior: smooth;
+  --sismu-ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.sismu-marketing-page *,
+.sismu-marketing-page *::before,
+.sismu-marketing-page *::after {
+  backface-visibility: hidden;
+}
+
+.sismu-nav {
+  transition:
+    background-color 320ms var(--sismu-ease),
+    border-color 320ms var(--sismu-ease),
+    box-shadow 320ms var(--sismu-ease),
+    backdrop-filter 320ms var(--sismu-ease);
+}
+
+.sismu-button {
+  transform: translate3d(0, 0, 0);
+  transition:
+    transform 240ms var(--sismu-ease),
+    box-shadow 240ms var(--sismu-ease),
+    background-color 240ms var(--sismu-ease),
+    border-color 240ms var(--sismu-ease),
+    color 240ms var(--sismu-ease);
+}
+
+.sismu-button:hover {
+  transform: translate3d(0, -2px, 0);
+}
+
+.sismu-reveal {
+  opacity: 0;
+  transform: translate3d(0, 28px, 0);
+  transition:
+    opacity 760ms var(--sismu-ease),
+    transform 760ms var(--sismu-ease);
+  transition-delay: var(--sismu-reveal-delay, 0ms);
+  will-change: opacity, transform;
+}
+
+.sismu-reveal.is-visible {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+}
+
+.sismu-hero-kicker,
+.sismu-hero-title,
+.sismu-hero-subtitle,
+.sismu-hero-actions,
+.sismu-hero-tags,
+.sismu-dashboard-preview {
+  animation: sismuHeroIn 860ms var(--sismu-ease) both;
+}
+
+.sismu-hero-title {
+  animation-delay: 90ms;
+}
+
+.sismu-hero-subtitle {
+  animation-delay: 170ms;
+}
+
+.sismu-hero-actions {
+  animation-delay: 250ms;
+}
+
+.sismu-hero-tags {
+  animation-delay: 330ms;
+}
+
+.sismu-dashboard-preview {
+  animation-delay: 220ms;
+}
+
+.sismu-dashboard-card {
+  transform: translate3d(0, 0, 0);
+  animation: sismuFloat 7.5s ease-in-out 1s infinite;
+}
+
+.sismu-card,
+.sismu-price-card,
+.sismu-stat-card {
+  transform: translate3d(0, 0, 0);
+  transition:
+    transform 280ms var(--sismu-ease),
+    border-color 280ms var(--sismu-ease),
+    box-shadow 280ms var(--sismu-ease);
+}
+
+.sismu-card:hover,
+.sismu-price-card:hover,
+.sismu-stat-card:hover {
+  transform: translate3d(0, -4px, 0);
+}
+
+.sismu-grid-drift {
+  animation: sismuGridDrift 28s linear infinite;
+  will-change: background-position;
+}
+
+.sismu-soft-orb {
+  animation: sismuOrbFloat 12s ease-in-out infinite alternate;
+  transform: translate3d(0, 0, 0);
+}
+
+.sismu-soft-orb--slow {
+  animation-duration: 16s;
+  animation-delay: -4s;
+}
+
+.sismu-shine::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  transform: translateX(-130%) skewX(-18deg);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.18) 45%,
+    rgba(255, 255, 255, 0.55) 50%,
+    rgba(255, 255, 255, 0.18) 55%,
+    transparent 100%
+  );
+  animation: sismuShine 4.8s ease-in-out 1.2s infinite;
+}
+
+.sismu-chart-bar {
+  transform-origin: bottom;
+  animation: sismuBarGrow 920ms var(--sismu-ease) both;
+  animation-delay: var(--sismu-bar-delay, 0ms);
+  will-change: transform, opacity;
+}
+
+.sismu-progress-line {
+  transform-origin: left;
+  animation: sismuProgressGrow 1s var(--sismu-ease) 760ms both;
+}
+
+.sismu-activity-row {
+  animation: sismuActivityIn 680ms var(--sismu-ease) both;
+  animation-delay: var(--sismu-bar-delay, 0ms);
+}
+
+@keyframes sismuHeroIn {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 24px, 0) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes sismuFloat {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+
+  50% {
+    transform: translate3d(0, -10px, 0);
+  }
+}
+
+@keyframes sismuGridDrift {
+  from {
+    background-position: 0 0;
+  }
+
+  to {
+    background-position: 84px 42px;
+  }
+}
+
+@keyframes sismuOrbFloat {
+  from {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  to {
+    transform: translate3d(26px, -18px, 0) scale(1.05);
+  }
+}
+
+@keyframes sismuShine {
+  0%,
+  62% {
+    transform: translateX(-130%) skewX(-18deg);
+    opacity: 0;
+  }
+
+  72% {
+    opacity: 1;
+  }
+
+  100% {
+    transform: translateX(130%) skewX(-18deg);
+    opacity: 0;
+  }
+}
+
+@keyframes sismuBarGrow {
+  from {
+    opacity: 0.2;
+    transform: scaleY(0.08);
+  }
+
+  to {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+}
+
+@keyframes sismuProgressGrow {
+  from {
+    transform: scaleX(0.08);
+  }
+
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes sismuActivityIn {
+  from {
+    opacity: 0;
+    transform: translate3d(10px, 0, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sismu-marketing-page,
+  .sismu-marketing-page *,
+  .sismu-marketing-page *::before,
+  .sismu-marketing-page *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+
+  .sismu-reveal {
+    opacity: 1;
+    transform: none;
+  }
+}
