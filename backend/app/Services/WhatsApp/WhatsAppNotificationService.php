@@ -376,7 +376,7 @@ class WhatsAppNotificationService
         // WA pusat saat ini hanya mengirim rekap Alpha harian. Mutasi absensi
         // real-time tidak langsung mengirim pesan agar wali murid tidak spam
         // ketika satu siswa Alpha di beberapa mapel pada hari yang sama.
-        return;
+
     }
 
     private function attendanceProblemForRow(string $tenantId, array $attendance): ?array
@@ -605,6 +605,7 @@ class WhatsAppNotificationService
             $context = $this->notificationContext((string) $tenantId);
             if (! $context || ! $context['settings']->send_attendance) {
                 $summary['skipped']++;
+
                 continue;
             }
 
@@ -644,6 +645,7 @@ class WhatsAppNotificationService
                 $student = $this->studentProfile((string) $tenantId, (string) $studentId);
                 if (! $student) {
                     $summary['skipped']++;
+
                     continue;
                 }
 

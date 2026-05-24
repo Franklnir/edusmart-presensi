@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Jobs\SendWhatsAppMessageJob;
 use App\Services\WhatsApp\WhatsAppIntegrationService;
 use App\Services\WhatsApp\WhatsAppNotificationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
