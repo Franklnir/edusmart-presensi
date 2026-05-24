@@ -127,6 +127,43 @@ class WhatsAppIntegrationTest extends TestCase
         $response->assertJsonPath('data.integration.last_error', null);
     }
 
+    public function test_admin_can_generate_qr_through_public_url_when_internal_url_returns_server_error(): void
+    {
+        config()->set('services.evolution_api.base_url', 'http://evolution_api:8080');
+        config()->set('services.evolution_api.public_url', 'https://wa.sismu.biz.id');
+        config()->set('services.evolution_api.api_key', 'secret-key');
+        config()->set('services.evolution_api.webhook_base_url', 'https://edusmart.example.com');
+
+        $tenantId = $this->defaultTenantId();
+        $user = $this->createUserWithProfile($tenantId, 'admin', 'admin-public-fallback@example.com');
+
+        Http::fake([
+            'http://evolution_api:8080/instance/fetchInstances*' => Http::response([
+                'message' => 'Internal Server Error',
+            ], 500),
+            'https://wa.sismu.biz.id/instance/fetchInstances*' => Http::response([
+                'status' => 404,
+                'error' => 'Not Found',
+            ], 404),
+            'http://evolution_api:8080/instance/connect/*' => Http::response([
+                'message' => 'Internal Server Error',
+            ], 500),
+            'https://wa.sismu.biz.id/instance/connect/*' => Http::response([
+                'base64' => 'data:image/png;base64,QR-PUBLIC-FALLBACK',
+            ], 200),
+            'https://wa.sismu.biz.id/webhook/set/*' => Http::response(['success' => true], 200),
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $response = $this->postJson('/api/admin/whatsapp/connect');
+
+        $response->assertOk();
+        $response->assertJsonPath('data.integration.status', 'awaiting_qr');
+        $response->assertJsonPath('data.integration.qr_code', 'data:image/png;base64,QR-PUBLIC-FALLBACK');
+        $response->assertJsonPath('data.integration.last_error', null);
+    }
+
     public function test_admin_can_generate_qr_even_when_webhook_setup_fails(): void
     {
         config()->set('services.evolution_api.base_url', 'https://evolution.test');

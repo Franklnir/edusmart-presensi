@@ -44,6 +44,7 @@ class EvolutionApiClient
         }
 
         $response = null;
+        $lastServerError = null;
         $lastConnectionException = null;
         foreach ($this->baseUrls() as $baseUrl) {
             try {
@@ -60,6 +61,12 @@ class EvolutionApiClient
                 return null;
             }
             if (! $response->successful()) {
+                if ($response->serverError()) {
+                    $lastServerError = $response;
+
+                    continue;
+                }
+
                 throw new RuntimeException($this->buildErrorMessage($response));
             }
 
@@ -67,7 +74,15 @@ class EvolutionApiClient
         }
 
         if (! $response instanceof Response) {
+            if ($lastServerError instanceof Response) {
+                throw new RuntimeException($this->buildErrorMessage($lastServerError));
+            }
+
             throw new RuntimeException($this->buildConnectionErrorMessage($lastConnectionException));
+        }
+
+        if (! $response->successful()) {
+            throw new RuntimeException($this->buildErrorMessage($response));
         }
 
         $items = $this->extractInstanceItems($response->json());
@@ -161,6 +176,7 @@ class EvolutionApiClient
             $options['json'] = $payload;
         }
 
+        $lastServerError = null;
         $lastConnectionException = null;
         foreach ($this->baseUrls() as $baseUrl) {
             try {
@@ -172,6 +188,12 @@ class EvolutionApiClient
             }
 
             if (! $response->successful()) {
+                if ($response->serverError()) {
+                    $lastServerError = $response;
+
+                    continue;
+                }
+
                 throw new RuntimeException($this->buildErrorMessage($response));
             }
 
@@ -181,6 +203,10 @@ class EvolutionApiClient
             }
 
             return [];
+        }
+
+        if ($lastServerError instanceof Response) {
+            throw new RuntimeException($this->buildErrorMessage($lastServerError));
         }
 
         throw new RuntimeException($this->buildConnectionErrorMessage($lastConnectionException));
