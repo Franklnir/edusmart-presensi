@@ -987,19 +987,19 @@ class StorageManagementService
     private function storageRowsQuery(string $tenantId, array $filters = [])
     {
         $query = DB::table('storage_files')
-            ->where('tenant_id', $tenantId)
-            ->whereIn('status', self::MANAGED_STATUSES);
+            ->where('storage_files.tenant_id', $tenantId)
+            ->whereIn('storage_files.status', self::MANAGED_STATUSES);
 
         foreach (['category', 'tahun_ajaran', 'semester', 'uploaded_by_user_id', 'provider', 'bucket'] as $field) {
             $value = trim((string) ($filters[$field] ?? ''));
             if ($value !== '' && $value !== 'all' && $this->tableHasColumn('storage_files', $field)) {
-                $query->where($field, $field === 'provider' ? $this->normalizeProvider($value) : $value);
+                $query->where('storage_files.'.$field, $field === 'provider' ? $this->normalizeProvider($value) : $value);
             }
         }
 
         $minBytes = isset($filters['min_bytes']) ? (int) $filters['min_bytes'] : 0;
         if ($minBytes > 0 && $this->tableHasColumn('storage_files', 'size_bytes')) {
-            $query->where('size_bytes', '>=', $minBytes);
+            $query->where('storage_files.size_bytes', '>=', $minBytes);
         }
 
         return $query;

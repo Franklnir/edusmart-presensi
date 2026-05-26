@@ -121,6 +121,16 @@ const providerBadgeClass = (enabled) => (
     ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
     : 'bg-amber-100 text-amber-800 border-amber-200'
 )
+const filterScopeLabel = (filters) => {
+  const parts = []
+  if (filters?.tahun_ajaran && filters?.semester) {
+    parts.push(`${filters.tahun_ajaran} ${filters.semester}`)
+  }
+  if (filters?.category) {
+    parts.push(CATEGORIES.find((item) => item.value === filters.category)?.label || filters.category)
+  }
+  return parts.length > 0 ? parts.join(' · ') : 'Semua metadata sekolah'
+}
 
 function StatTile({ icon: Icon, label, value, hint }) {
   return (
@@ -128,7 +138,7 @@ function StatTile({ icon: Icon, label, value, hint }) {
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
-          <p className="mt-1 truncate text-2xl font-extrabold text-slate-950">{value || '-'}</p>
+          <p className="mt-1 break-words text-xl font-extrabold leading-tight text-slate-950 sm:text-2xl">{value || '-'}</p>
         </div>
         <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-indigo-50 text-indigo-600 transition-colors group-hover:bg-indigo-100">
           <Icon size={18} />
@@ -322,6 +332,7 @@ function StorageManager() {
   const combinedPeriods = Array.isArray(combinedUsage?.by_period) ? combinedUsage.by_period : []
   const combinedLargestFiles = Array.isArray(activeSummary?.largest_files) ? activeSummary.largest_files : []
   const combinedUploaders = Array.isArray(activeSummary?.by_uploader) ? activeSummary.by_uploader : []
+  const appliedFilterLabel = filterScopeLabel(storageFilters)
   const selectedTenant = tenants.find((tenant) => tenant.id === selectedTenantId)
   const selectedTenantName = selectedTenant?.name || tenantDetail?.tenant?.name || 'Sekolah dipilih'
   const canManageStorageScope = !isSuperAdmin || Boolean(selectedTenantId)
@@ -943,7 +954,7 @@ function StorageManager() {
           <p className="mt-1 text-xs text-slate-500">
             {isSuperAdmin
               ? 'Filter ini dipakai untuk analitik, file terbesar, uploader, rekomendasi, dan preview cleanup.'
-              : 'Filter ini dipakai untuk analitik, file terbesar, uploader, rekomendasi, dan riwayat storage sekolah.'}
+              : `Filter ini hanya membaca metadata storage milik sekolah ini. Scope aktif: ${appliedFilterLabel}.`}
           </p>
         </div>
         <div className="grid w-full gap-2 sm:grid-cols-2 lg:max-w-3xl lg:grid-cols-[1fr_180px_auto_auto]">
@@ -1033,12 +1044,13 @@ function StorageManager() {
             </div>
           ) : (
             <div className="space-y-5">
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
-                <StatTile icon={HardDrive} label="VPS Terpakai" value={vpsQuota?.used_label || '0 B'} hint={providerPercentLabel(vpsQuota)} />
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
+                <StatTile icon={HardDrive} label="VPS Terpakai" value={vpsQuota?.used_label || '0 B'} hint={`Total sekolah · ${providerPercentLabel(vpsQuota)}`} />
                 <StatTile icon={Database} label="Kuota VPS" value={vpsQuota?.quota_label || 'Tidak dibatasi'} />
                 <StatTile icon={Archive} label="Sisa VPS" value={vpsQuota?.remaining_label || 'Tidak dibatasi'} />
-                <StatTile icon={Cloud} label="S3 Terpakai" value={nevaQuota?.used_label || '0 B'} hint={providerPercentLabel(nevaQuota)} />
+                <StatTile icon={Cloud} label="S3 Terpakai" value={nevaQuota?.used_label || '0 B'} hint={`Total sekolah · ${providerPercentLabel(nevaQuota)}`} />
                 <StatTile icon={ShieldCheck} label="Kuota S3" value={nevaQuota?.quota_label || 'Tidak dibatasi'} />
+                <StatTile icon={Archive} label="Sisa S3" value={nevaQuota?.remaining_label || 'Tidak dibatasi'} />
                 <StatTile icon={Trash2} label="Trash" value={activeSummary?.trash?.bytes_label || '0 B'} hint={`${numberFormatter.format(activeSummary?.trash?.files || 0)} file`} />
               </div>
 
@@ -1232,14 +1244,33 @@ function StorageManager() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
-        <StatTile icon={HardDrive} label="VPS Terpakai" value={vpsQuota?.used_label || vpsSummary?.usage?.total_label || '0 B'} hint={providerPercentLabel(vpsQuota)} />
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
+        <StatTile icon={HardDrive} label="VPS Terpakai" value={vpsQuota?.used_label || vpsSummary?.usage?.total_label || '0 B'} hint={`Total sekolah · ${providerPercentLabel(vpsQuota)}`} />
         <StatTile icon={Database} label="Kuota VPS" value={vpsQuota?.quota_label || 'Tidak dibatasi'} />
         <StatTile icon={Archive} label="Sisa VPS" value={vpsQuota?.remaining_label || 'Tidak dibatasi'} />
-        <StatTile icon={Cloud} label="S3 Terpakai" value={nevaQuota?.used_label || nevaSummary?.usage?.total_label || '0 B'} hint={providerPercentLabel(nevaQuota)} />
+        <StatTile icon={Cloud} label="S3 Terpakai" value={nevaQuota?.used_label || nevaSummary?.usage?.total_label || '0 B'} hint={`Total sekolah · ${providerPercentLabel(nevaQuota)}`} />
         <StatTile icon={ShieldCheck} label="Kuota S3" value={nevaQuota?.quota_label || 'Tidak dibatasi'} />
+        <StatTile icon={Archive} label="Sisa S3" value={nevaQuota?.remaining_label || 'Tidak dibatasi'} />
         <StatTile icon={Trash2} label="Trash" value={activeSummary?.trash?.bytes_label || '0 B'} hint={`${numberFormatter.format(activeSummary?.trash?.files || 0)} file`} />
       </div>
+
+      <section className="rounded-2xl border border-indigo-100 bg-white p-5 shadow-card">
+        <div className="grid gap-4 lg:grid-cols-2">
+          <ProgressLine
+            label="Pemakaian VPS sekolah"
+            value={`${vpsQuota?.used_label || '0 B'} dari ${vpsQuota?.quota_label || 'kuota tidak dibatasi'}`}
+            percent={vpsQuota?.percent || 0}
+          />
+          <ProgressLine
+            label="Pemakaian Neva S3 sekolah"
+            value={`${nevaQuota?.used_label || '0 B'} dari ${nevaQuota?.quota_label || 'kuota tidak dibatasi'}`}
+            percent={nevaQuota?.percent || 0}
+          />
+        </div>
+        <p className="mt-3 text-xs text-slate-500">
+          Angka di atas adalah total storage milik sekolah ini. Filter di bawah hanya mengubah analitik, bucket, file terbesar, dan uploader untuk scope sekolah yang sama.
+        </p>
+      </section>
 
       {storageFilterSection}
 
@@ -1247,7 +1278,9 @@ function StorageManager() {
         <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card">
           <div className="flex flex-col gap-1">
             <h2 className="text-sm font-bold text-slate-900">Bucket Storage Sekolah</h2>
-            <p className="text-xs text-slate-500">Pantau pemakaian bucket VPS dan Neva S3 tanpa aksi penghapusan.</p>
+            <p className="text-xs text-slate-500">
+              Pantau pemakaian bucket VPS dan Neva S3 milik sekolah ini saja. Total S3 sekolah: <span className="font-semibold text-slate-700">{nevaQuota?.used_label || nevaSummary?.usage?.total_label || '0 B'}</span>, sisa kuota S3: <span className="font-semibold text-slate-700">{nevaQuota?.remaining_label || 'Tidak dibatasi'}</span>.
+            </p>
           </div>
           <div className="mt-4 grid gap-4 lg:grid-cols-2">
             <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
@@ -1326,6 +1359,9 @@ function StorageManager() {
             <BarChart3 size={18} className="text-indigo-600" />
             <h2 className="text-sm font-bold text-slate-900">Analitik Storage</h2>
           </div>
+          <p className="mb-4 rounded-xl border border-indigo-100 bg-indigo-50 px-3 py-2 text-xs text-indigo-800">
+            Hasil analitik di bawah mengikuti filter sekolah ini: <span className="font-semibold">{appliedFilterLabel}</span>.
+          </p>
           <div className="grid gap-5 lg:grid-cols-2">
             <div className="space-y-3">
               <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">Kategori terbesar</h3>

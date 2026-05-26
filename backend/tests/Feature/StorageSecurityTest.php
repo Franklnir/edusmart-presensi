@@ -655,6 +655,82 @@ class StorageSecurityTest extends TestCase
         $this->assertSame('image-bytes', $image->getContent());
     }
 
+    public function test_admin_storage_summary_is_scoped_to_its_own_school_even_when_filtered(): void
+    {
+        $tenantA = $this->defaultTenantId();
+        $tenantB = $this->createTenant('Sekolah Lain', 'sekolah-lain');
+        [$admin] = $this->createUserWithProfile($tenantA, 'admin', 'X-1');
+        Sanctum::actingAs($admin);
+
+        DB::table('tenant_storage_quotas')->insert([
+            [
+                'id' => (string) Str::uuid(),
+                'tenant_id' => $tenantA,
+                'quota_bytes' => 5 * 1024 * 1024,
+                'vps_quota_bytes' => 5 * 1024 * 1024,
+                'neva_s3_quota_bytes' => 3 * 1024 * 1024,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'id' => (string) Str::uuid(),
+                'tenant_id' => $tenantB,
+                'quota_bytes' => 50 * 1024 * 1024,
+                'vps_quota_bytes' => 50 * 1024 * 1024,
+                'neva_s3_quota_bytes' => 40 * 1024 * 1024,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ]);
+
+        $tenantAFilteredBytes = 240 * 1024;
+        $tenantAOtherBytes = 80 * 1024;
+        $tenantBBytes = 9 * 1024 * 1024;
+
+        $this->insertStorageFile($tenantA, [
+            'bucket' => 'assignments',
+            'path' => 'private/assignments/tenant-a/tugas.pdf',
+            'provider' => 'object_storage',
+            'category' => 'tugas',
+            'file_name' => 'tugas.pdf',
+            'size_bytes' => $tenantAFilteredBytes,
+            'tahun_ajaran' => '2025/2026',
+            'semester' => 'Genap',
+        ]);
+        $this->insertStorageFile($tenantA, [
+            'bucket' => 'quiz-media',
+            'path' => 'private/quiz-media/tenant-a/gambar.jpg',
+            'provider' => 'object_storage',
+            'category' => 'kuis',
+            'file_name' => 'gambar.jpg',
+            'size_bytes' => $tenantAOtherBytes,
+            'tahun_ajaran' => '2025/2026',
+            'semester' => 'Ganjil',
+        ]);
+        $this->insertStorageFile($tenantB, [
+            'bucket' => 'assignments',
+            'path' => 'private/assignments/tenant-b/besar.pdf',
+            'provider' => 'object_storage',
+            'category' => 'tugas',
+            'file_name' => 'besar.pdf',
+            'size_bytes' => $tenantBBytes,
+            'tahun_ajaran' => '2025/2026',
+            'semester' => 'Genap',
+        ]);
+
+        $response = $this->getJson('/api/admin/storage-manager?tahun_ajaran=2025%2F2026&semester=Genap&category=tugas');
+
+        $response->assertOk();
+        $response->assertJsonPath('data.usage.total_bytes', $tenantAFilteredBytes);
+        $response->assertJsonPath('data.provider_summaries.neva_s3.usage.total_bytes', $tenantAFilteredBytes);
+        $response->assertJsonPath('data.quota.providers.neva_s3.used_bytes', $tenantAFilteredBytes + $tenantAOtherBytes);
+        $response->assertJsonPath('data.quota.providers.neva_s3.remaining_bytes', (3 * 1024 * 1024) - ($tenantAFilteredBytes + $tenantAOtherBytes));
+
+        $largestFiles = collect($response->json('data.largest_files'));
+        $this->assertTrue($largestFiles->contains(fn ($file) => ($file['file_name'] ?? null) === 'tugas.pdf'));
+        $this->assertFalse($largestFiles->contains(fn ($file) => ($file['file_name'] ?? null) === 'besar.pdf'));
+    }
+
     public function test_guest_object_access_requires_valid_signature(): void
     {
         Storage::fake('local');
@@ -692,6 +768,52 @@ class StorageSecurityTest extends TestCase
         $this->assertNotSame('', $tenantId, 'Tenant default tidak ditemukan di database test');
 
         return $tenantId;
+    }
+
+    private function createTenant(string $name, string $slug): string
+    {
+        $tenantId = (string) Str::uuid();
+        DB::table('tenants')->insert([
+            'id' => $tenantId,
+            'name' => $name,
+            'slug' => $slug,
+            'status' => 'active',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return $tenantId;
+    }
+
+    private function insertStorageFile(string $tenantId, array $overrides = []): void
+    {
+        $path = (string) ($overrides['path'] ?? Str::uuid().'.pdf');
+        DB::table('storage_files')->insert([
+            'id' => (string) Str::uuid(),
+            'tenant_id' => $tenantId,
+            'bucket' => (string) ($overrides['bucket'] ?? 'assignments'),
+            'path' => $path,
+            'path_hash' => hash('sha256', $tenantId.'|'.$path),
+            'provider' => (string) ($overrides['provider'] ?? 'local'),
+            'category' => (string) ($overrides['category'] ?? 'dokumen'),
+            'file_name' => $overrides['file_name'] ?? basename($path),
+            'mime_type' => $overrides['mime_type'] ?? 'application/pdf',
+            'extension' => $overrides['extension'] ?? 'pdf',
+            'size_bytes' => (int) ($overrides['size_bytes'] ?? 1024),
+            'uploaded_by_user_id' => $overrides['uploaded_by_user_id'] ?? null,
+            'uploaded_by_role' => $overrides['uploaded_by_role'] ?? null,
+            'source_table' => $overrides['source_table'] ?? null,
+            'source_id' => $overrides['source_id'] ?? null,
+            'tahun_ajaran' => $overrides['tahun_ajaran'] ?? null,
+            'semester' => $overrides['semester'] ?? null,
+            'periode_key' => $overrides['periode_key'] ?? null,
+            'kelas' => $overrides['kelas'] ?? null,
+            'status' => $overrides['status'] ?? 'active',
+            'uploaded_at' => $overrides['uploaded_at'] ?? now(),
+            'metadata' => json_encode($overrides['metadata'] ?? []),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
     }
 
     private function createUserWithProfile(string $tenantId, string $role, string $kelas): array
