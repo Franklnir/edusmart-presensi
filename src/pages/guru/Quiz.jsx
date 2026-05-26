@@ -274,6 +274,33 @@ export default function GuruQuiz() {
   const hasEssayQuestions = useMemo(() => (
     (questions || []).some((q) => normalizeQuestionType(q?.question_type) === 'essay')
   ), [questions])
+  const hasMcqQuestions = useMemo(() => (
+    (questions || []).some((q) => normalizeQuestionType(q?.question_type) === 'mcq')
+  ), [questions])
+  const questionTypeFlowError = useMemo(() => {
+    const nextType = normalizeQuestionType(questionForm.question_type)
+    if (!editingQuestion?.id && nextType === 'mcq' && hasEssayQuestions) {
+      return 'Soal PG harus dibuat sebelum Esai. Hapus atau ubah soal Esai dulu jika masih ingin menambah PG.'
+    }
+
+    if (editingQuestion?.id) {
+      const simulatedQuestions = (questions || []).map((question) => (
+        question.id === editingQuestion.id
+          ? { ...question, question_type: nextType }
+          : question
+      ))
+      let essayStarted = false
+      for (const question of simulatedQuestions) {
+        const type = normalizeQuestionType(question?.question_type)
+        if (type === 'essay') essayStarted = true
+        if (type === 'mcq' && essayStarted) {
+          return 'Urutan soal harus PG dulu lalu Esai. Jangan ubah jenis soal jika membuat PG berada setelah Esai.'
+        }
+      }
+    }
+
+    return ''
+  }, [editingQuestion?.id, hasEssayQuestions, questionForm.question_type, questions])
   const notStartedStudents = useMemo(() => (
     participants
       .filter((p) => !p.submission?.started_at)
@@ -1554,7 +1581,7 @@ export default function GuruQuiz() {
     if (!q) {
       setEditingQuestion(null)
       setQuestionForm({
-        question_type: 'mcq',
+        question_type: hasEssayQuestions ? 'essay' : 'mcq',
         soal: '',
         image_path: '',
         poin: 10,
@@ -1697,6 +1724,10 @@ export default function GuruQuiz() {
     }
 
     const questionType = normalizeQuestionType(questionForm.question_type)
+    if (questionTypeFlowError) {
+      pushToast('error', questionTypeFlowError)
+      return
+    }
     const questionPoint = Number(questionForm.poin || 0)
     if (!Number.isFinite(questionPoint) || questionPoint <= 0) {
       pushToast('error', 'Poin soal wajib lebih dari 0')
@@ -2299,7 +2330,7 @@ export default function GuruQuiz() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm lg:sticky lg:top-4 lg:self-start">
             <div className="flex items-center justify-between border-b border-slate-200 p-4">
               <div className="flex items-center gap-3">
                 <div className="h-8 w-1.5 rounded-full bg-indigo-600"></div>
@@ -2317,7 +2348,7 @@ export default function GuruQuiz() {
                 </span>
               </div>
             </div>
-            <div className="p-4 space-y-3 min-h-[30rem] max-h-[calc(100vh-130px)] overflow-y-auto">
+            <div className="p-4 pr-2 space-y-3 min-h-[30rem] max-h-[calc(100vh-12rem)] overflow-y-auto overscroll-contain pb-10">
               {filteredQuizList.length === 0 && (
                 <div className="text-sm text-slate-500 p-4 rounded-xl border border-dashed border-slate-300 bg-slate-50">
                   Belum ada quiz.
@@ -3718,11 +3749,35 @@ export default function GuruQuiz() {
                 aria-label="Jenis soal quiz"
                 className="mt-1 w-full border border-slate-300 rounded-xl px-4 py-3"
                 value={questionForm.question_type}
-                onChange={(e) => setQuestionForm((prev) => ({ ...prev, question_type: e.target.value }))}
+                onChange={(e) => {
+                  const nextType = e.target.value
+                  if (!editingQuestion?.id && nextType === 'essay' && hasMcqQuestions && !hasEssayQuestions) {
+                    const confirmed = window.confirm(
+                      'Setelah mulai membuat soal Esai, soal PG baru tidak bisa ditambahkan lagi. Pastikan semua soal PG sudah selesai dibuat.'
+                    )
+                    if (!confirmed) return
+                  }
+                  setQuestionForm((prev) => ({ ...prev, question_type: nextType }))
+                }}
               >
-                <option value="mcq">Pilihan Ganda</option>
+                <option value="mcq" disabled={!editingQuestion?.id && hasEssayQuestions}>
+                  Pilihan Ganda
+                </option>
                 <option value="essay">Esai</option>
               </select>
+              <div className={`mt-2 rounded-xl border px-3 py-2 text-xs font-semibold ${
+                questionTypeFlowError
+                  ? 'border-red-200 bg-red-50 text-red-700'
+                  : hasEssayQuestions && !editingQuestion?.id
+                    ? 'border-amber-200 bg-amber-50 text-amber-700'
+                    : 'border-indigo-100 bg-indigo-50 text-indigo-700'
+              }`}>
+                {questionTypeFlowError || (
+                  hasEssayQuestions && !editingQuestion?.id
+                    ? 'Esai sudah dibuat. Soal tambahan berikutnya hanya Esai agar urutan PG dan Esai tidak tercampur.'
+                    : 'Alur quiz dibuat seperti ulangan: selesaikan semua PG dulu, lalu lanjutkan Esai.'
+                )}
+              </div>
             </div>
             <div>
               <label className="text-sm font-semibold text-slate-600">Soal</label>

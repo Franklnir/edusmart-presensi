@@ -167,6 +167,7 @@ const applyQuizOrder = (questionRows = [], groupedOptions = {}, rawOrder = null)
 
 const FULLSCREEN_REQUIRED_MESSAGE = 'Quiz mode ketat wajib fullscreen. Klik tombol Izinkan Fullscreen & Mulai, lalu pilih Izinkan pada browser.'
 const FULLSCREEN_FAILED_MESSAGE = 'Browser menolak fullscreen. Klik ulang tombol mulai dan pilih Izinkan pada popup browser.'
+const TEXT_INPUT_FULLSCREEN_GRACE_MS = 8000
 const MONTH_FILTER_ALL = ''
 const MONTH_FILTER_THIS = '__this_month'
 
@@ -469,6 +470,7 @@ export default function SiswaQuiz() {
   const [remainingSeconds, setRemainingSeconds] = useState(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [textInputFocused, setTextInputFocused] = useState(false)
+  const [textInputFullscreenGraceUntil, setTextInputFullscreenGraceUntil] = useState(0)
   const [sessionPrepared, setSessionPrepared] = useState(false)
   const [sessionNeedsManualStart, setSessionNeedsManualStart] = useState(false)
   const [sessionQuizFallback, setSessionQuizFallback] = useState(null)
@@ -497,6 +499,7 @@ export default function SiswaQuiz() {
   const violationTriggeredRef = useRef(false)
   const violationCountRef = useRef(0)
   const violationLogRef = useRef({ key: '', at: 0 })
+  const inputFullscreenExitLogRef = useRef({ key: '', at: 0 })
   const strictSecurityLockRef = useRef({ key: '', at: 0 })
   const strictSecurityIncidentRef = useRef({ active: false, id: '', at: 0, reason: '' })
   const sessionInitRef = useRef('')
@@ -752,7 +755,7 @@ export default function SiswaQuiz() {
     ? Boolean(document.fullscreenElement)
     : isFullscreen
   const isStrictSecurity = selectedQuiz?.security_mode === 'strict'
-  const strictTextInputGrace = isStrictSecurity && textInputFocused
+  const strictTextInputGrace = isStrictSecurity && textInputFocused && nowTick.getTime() < Number(textInputFullscreenGraceUntil || 0)
   const strictSecurityLocked = isTaking && isStrictSecurity && (
     privacyShield.open
     || violationPrompt.open
@@ -1001,6 +1004,7 @@ export default function SiswaQuiz() {
     setSessionNeedsManualStart(false)
     releaseStrictIncident()
     setPrivacyShield({ open: false, message: '', reason: '' })
+    setTextInputFullscreenGraceUntil(0)
     violationTriggeredRef.current = false
     violationCountRef.current = 0
     setViolationCount(0)
@@ -1697,6 +1701,7 @@ export default function SiswaQuiz() {
     setPrivacyShield({ open: false, message: '', reason: '' })
     setViolationPrompt({ open: false, message: '', stage: 1 })
     setSubmitConfirmOpen(false)
+    setTextInputFullscreenGraceUntil(0)
   }, [isTaking, releaseStrictIncident])
 
   useEffect(() => {
@@ -1761,12 +1766,38 @@ export default function SiswaQuiz() {
         const stillEditing = Boolean(getActiveTextEditableElement())
         setTextInputFocused(stillEditing)
         if (!stillEditing && !document.fullscreenElement) {
+          setTextInputFullscreenGraceUntil(0)
           lockStrictSession(
             'Fullscreen wajib aktif setelah selesai mengetik jawaban.',
             'fullscreen_exit_after_input'
           )
         }
       }, 700)
+    }
+
+    const markFullscreenExitDuringInput = () => {
+      const nextCount = violationCountRef.current + 1
+      violationCountRef.current = nextCount
+      setViolationCount(nextCount)
+      setViolationMessage('Fullscreen keluar saat mengetik esai. Kejadian dicatat dan wajib kembali fullscreen.')
+      setTextInputFullscreenGraceUntil(Date.now() + TEXT_INPUT_FULLSCREEN_GRACE_MS)
+
+      const questionId = activeQuestion?.id || ''
+      const dedupeKey = `${selectedQuiz?.id || ''}|${activeSubmissionId || ''}|${questionId}`
+      const nowMs = Date.now()
+      if (inputFullscreenExitLogRef.current.key === dedupeKey && nowMs - Number(inputFullscreenExitLogRef.current.at || 0) < TEXT_INPUT_FULLSCREEN_GRACE_MS) {
+        return
+      }
+      inputFullscreenExitLogRef.current = { key: dedupeKey, at: nowMs }
+      void logViolationEvent(
+        'fullscreen_exit_during_essay_input',
+        'Fullscreen keluar saat siswa sedang mengisi jawaban esai.',
+        {
+          warning_count: nextCount,
+          question_id: questionId,
+          grace_ms: TEXT_INPUT_FULLSCREEN_GRACE_MS
+        }
+      )
     }
 
     const handleEditableFocusIn = (event) => {
@@ -1830,7 +1861,12 @@ export default function SiswaQuiz() {
 
     const handleBlur = () => {
       if (document.hidden) return
-      if (isTextInputActiveOrRecent()) return
+      if (isTextInputActiveOrRecent()) {
+        if (!document.fullscreenElement) {
+          markFullscreenExitDuringInput()
+        }
+        return
+      }
       lockStrictSession(
         'Fokus keluar dari halaman quiz. Tampilan dikunci sampai Anda kembali fullscreen.',
         'window_blur'
@@ -1841,12 +1877,15 @@ export default function SiswaQuiz() {
       const active = Boolean(document.fullscreenElement)
       setIsFullscreen(active)
       if (active) {
+        setTextInputFullscreenGraceUntil(0)
         lockKeyboardShortcuts()
       } else {
         if (isTextInputActiveOrRecent()) {
+          markFullscreenExitDuringInput()
           schedulePostInputFullscreenCheck()
           return
         }
+        setTextInputFullscreenGraceUntil(0)
         lockStrictSession(
           'Fullscreen ditutup. Quiz dikunci sampai Anda masuk fullscreen lagi.',
           'fullscreen_exit'
@@ -2004,7 +2043,7 @@ export default function SiswaQuiz() {
       window.removeEventListener('beforeunload', handleBeforeUnload)
       unlockKeyboardShortcuts()
     }
-  }, [isTaking, isStrictSecurity, selectedQuiz?.id, submission?.id, activeSubmission?.id, logViolationEvent, lockStrictSession])
+  }, [isTaking, isStrictSecurity, selectedQuiz?.id, submission?.id, activeSubmission?.id, activeSubmissionId, activeQuestion?.id, logViolationEvent, lockStrictSession])
 
   useEffect(() => {
     if (isTaking) {
@@ -2147,6 +2186,7 @@ export default function SiswaQuiz() {
       releaseStrictIncident()
       setPrivacyShield({ open: false, message: '', reason: '' })
       setViolationPrompt({ open: false, message: '', stage: 1 })
+      setTextInputFullscreenGraceUntil(0)
       violationTriggeredRef.current = false
     }
   }
@@ -2183,6 +2223,7 @@ export default function SiswaQuiz() {
     releaseStrictIncident()
     setPrivacyShield({ open: false, message: '', reason: '' })
     setViolationPrompt({ open: false, message: '', stage: 1 })
+    setTextInputFullscreenGraceUntil(0)
     violationTriggeredRef.current = false
     setViolationMessage('Fullscreen aktif. Lanjutkan quiz dengan tetap fokus.')
   }
