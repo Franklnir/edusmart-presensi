@@ -134,6 +134,21 @@ export const normalizeQuestionNumbering = (questionRows = []) => (
   }))
 )
 
+export const sortQuestionsByExamFlow = (questionRows = []) => {
+  const rows = Array.isArray(questionRows) ? questionRows : []
+  const indexed = rows.map((question, index) => ({ question, index }))
+  const sortPart = (type) => indexed
+    .filter(({ question }) => normalizeQuestionType(question?.question_type) === type)
+    .sort((a, b) => {
+      const numberDiff = Number(a.question?.nomor || 0) - Number(b.question?.nomor || 0)
+      if (numberDiff !== 0) return numberDiff
+      return a.index - b.index
+    })
+    .map(({ question }) => question)
+
+  return normalizeQuestionNumbering([...sortPart('mcq'), ...sortPart('essay')])
+}
+
 export const getQuizEndAt = (quiz) => {
   const mode = normalizeMode(quiz)
   if (mode === 'regular') return safeDate(quiz?.deadline_at)

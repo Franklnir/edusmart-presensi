@@ -560,17 +560,18 @@ export default function TugasSiswa() {
   const kelasSiswa = useMemo(() => profile?.kelas || profile?.kelas_id || '', [profile])
   const selectedKelas = kelasSiswa
 
-  const showUploadSuccessNotice = useCallback((title, detailText = '') => {
+  const showUploadSuccessNotice = useCallback((title, detailText = '', variant = 'toast') => {
     if (successNoticeTimerRef.current) clearTimeout(successNoticeTimerRef.current)
     setUploadSuccessNotice({
       id: Date.now(),
       title,
-      detail: detailText
+      detail: detailText,
+      variant
     })
     successNoticeTimerRef.current = setTimeout(() => {
       setUploadSuccessNotice(null)
       successNoticeTimerRef.current = null
-    }, 3200)
+    }, variant === 'overlay' ? 2200 : 3200)
   }, [])
 
   useEffect(() => {
@@ -1402,7 +1403,7 @@ export default function TugasSiswa() {
       setPendingJawabanPhotos([])
       setIsEditingJawaban(false)
       pushToast('success', 'Jawaban berhasil dikirim')
-      showUploadSuccessNotice('Jawaban berhasil dikirim', 'Guru dapat melihat foto, file, link, dan komentar Anda.')
+      showUploadSuccessNotice('Jawaban berhasil dikirim', 'Tugas Anda sudah tercatat dan bisa dilihat guru.', 'overlay')
 
       // refresh detail & list
       await loadTugasList()
@@ -1560,7 +1561,26 @@ export default function TugasSiswa() {
 ========================= */
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-purple-50/30 p-4 sm:p-6">
-      {uploadSuccessNotice && (
+      {uploadSuccessNotice?.variant === 'overlay' && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm">
+          <div
+            key={uploadSuccessNotice.id}
+            className="assignment-submit-success rounded-3xl border border-emerald-200 bg-white p-7 text-center shadow-2xl shadow-emerald-950/20"
+            role="status"
+            aria-live="polite"
+          >
+            <div className="assignment-submit-success__mark mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+              <CheckCircle2 className="h-11 w-11" />
+            </div>
+            <div className="text-xl font-extrabold text-slate-950">{uploadSuccessNotice.title}</div>
+            {uploadSuccessNotice.detail && (
+              <div className="mt-2 max-w-xs text-sm font-medium text-slate-600">{uploadSuccessNotice.detail}</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {uploadSuccessNotice && uploadSuccessNotice.variant !== 'overlay' && (
         <div className="fixed left-1/2 top-6 z-[80] w-[calc(100%-2rem)] max-w-md -translate-x-1/2">
           <div
             key={uploadSuccessNotice.id}

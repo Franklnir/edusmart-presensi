@@ -2768,9 +2768,19 @@ class QuizController extends ApiController
 
     private function buildAnswerOrder(object $quiz, string $submissionId, $questions, array $optionsByQuestion): array
     {
-        $questionIds = $questions->pluck('id')->map(fn ($id) => (string) $id)->all();
+        $mcqQuestionIds = [];
+        $essayQuestionIds = [];
+        foreach ($questions as $question) {
+            $id = (string) $question->id;
+            if ($this->normalizeQuestionType($question->question_type ?? null) === 'essay') {
+                $essayQuestionIds[] = $id;
+            } else {
+                $mcqQuestionIds[] = $id;
+            }
+        }
+
         if ($this->boolValue($quiz->shuffle_questions ?? false)) {
-            usort($questionIds, fn ($a, $b) => strcmp(
+            usort($mcqQuestionIds, fn ($a, $b) => strcmp(
                 $this->stableOrderKey($submissionId, 'question', $a),
                 $this->stableOrderKey($submissionId, 'question', $b)
             ));
@@ -2789,7 +2799,7 @@ class QuizController extends ApiController
         }
 
         return [
-            'questions' => $questionIds,
+            'questions' => array_values(array_merge($mcqQuestionIds, $essayQuestionIds)),
             'options' => $options,
         ];
     }
@@ -2810,13 +2820,43 @@ class QuizController extends ApiController
             $questionMap[(string) $question->id] = $question;
         }
 
+        $orderedQuestionIds = array_values(array_filter(array_map('strval', $order['questions'] ?? [])));
+        $orderedMcqIds = [];
         $seenQuestions = [];
-        $orderedQuestions = [];
-        foreach (($order['questions'] ?? []) as $questionId) {
+        foreach ($orderedQuestionIds as $questionId) {
             if (! isset($questionMap[$questionId])) {
                 continue;
             }
+            if ($this->normalizeQuestionType($questionMap[$questionId]->question_type ?? null) === 'essay') {
+                continue;
+            }
             $seenQuestions[$questionId] = true;
+            $orderedMcqIds[] = $questionId;
+        }
+        foreach ($questions as $question) {
+            $questionId = (string) $question->id;
+            if (isset($seenQuestions[$questionId])) {
+                continue;
+            }
+            if ($this->normalizeQuestionType($question->question_type ?? null) !== 'essay') {
+                $seenQuestions[$questionId] = true;
+                $orderedMcqIds[] = $questionId;
+            }
+        }
+        $essayIds = [];
+        foreach ($questions as $question) {
+            $questionId = (string) $question->id;
+            if ($this->normalizeQuestionType($question->question_type ?? null) === 'essay') {
+                $seenQuestions[$questionId] = true;
+                $essayIds[] = $questionId;
+            }
+        }
+
+        $orderedQuestions = [];
+        foreach (array_merge($orderedMcqIds, $essayIds) as $questionId) {
+            if (! isset($questionMap[$questionId])) {
+                continue;
+            }
             $orderedQuestions[] = $this->questionPayload($questionMap[$questionId]);
         }
         foreach ($questions as $question) {

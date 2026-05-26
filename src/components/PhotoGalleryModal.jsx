@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronLeft, ChevronRight, ExternalLink, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ExternalLink, Minus, Plus, RotateCcw, X } from 'lucide-react'
 import { sanitizeExternalUrl, sanitizeMediaUrl } from '../utils/sanitize'
 
 const normalizeItems = (items = []) => (
@@ -29,11 +29,19 @@ const resolveDrivePreviewUrl = (value = '') => {
 export default function PhotoGalleryModal({ items = [], initialIndex = 0, title = 'Galeri Foto', onClose }) {
   const files = useMemo(() => normalizeItems(items), [items])
   const [index, setIndex] = useState(() => Math.max(0, Math.min(initialIndex, files.length - 1)))
+  const [zoom, setZoom] = useState(1)
+  const [pan, setPan] = useState({ x: 0, y: 0 })
   const touchStartRef = useRef(null)
+  const dragRef = useRef(null)
 
   useEffect(() => {
     setIndex(Math.max(0, Math.min(initialIndex, files.length - 1)))
   }, [files.length, initialIndex])
+
+  useEffect(() => {
+    setZoom(1)
+    setPan({ x: 0, y: 0 })
+  }, [index])
 
   const current = files[index] || ''
   const drivePreviewUrl = resolveDrivePreviewUrl(current)
@@ -44,6 +52,17 @@ export default function PhotoGalleryModal({ items = [], initialIndex = 0, title 
   const go = (delta) => {
     if (!files.length) return
     setIndex((prev) => (prev + delta + files.length) % files.length)
+  }
+
+  const updateZoom = (nextZoom) => {
+    const value = Math.max(1, Math.min(4, Number(nextZoom) || 1))
+    setZoom(value)
+    if (value === 1) setPan({ x: 0, y: 0 })
+  }
+
+  const resetView = () => {
+    setZoom(1)
+    setPan({ x: 0, y: 0 })
   }
 
   useEffect(() => {
@@ -79,6 +98,35 @@ export default function PhotoGalleryModal({ items = [], initialIndex = 0, title 
           </div>
 
           <div className="flex items-center gap-2">
+            {!drivePreviewUrl && (
+              <div className="hidden items-center gap-1 rounded-full border border-white/15 bg-white/10 p-1 sm:flex">
+                <button
+                  type="button"
+                  onClick={() => updateZoom(zoom - 0.25)}
+                  className="grid h-8 w-8 place-items-center rounded-full hover:bg-white/15"
+                  title="Perkecil"
+                >
+                  <Minus className="h-4 w-4" />
+                </button>
+                <span className="min-w-12 text-center text-xs font-bold">{Math.round(zoom * 100)}%</span>
+                <button
+                  type="button"
+                  onClick={() => updateZoom(zoom + 0.25)}
+                  className="grid h-8 w-8 place-items-center rounded-full hover:bg-white/15"
+                  title="Perbesar"
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={resetView}
+                  className="grid h-8 w-8 place-items-center rounded-full hover:bg-white/15"
+                  title="Reset zoom"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                </button>
+              </div>
+            )}
             {openUrl && (
               <a
                 href={openUrl}
@@ -103,10 +151,42 @@ export default function PhotoGalleryModal({ items = [], initialIndex = 0, title 
 
         <div
           className="relative min-h-0 flex-1"
+          onWheel={(event) => {
+            if (drivePreviewUrl) return
+            event.preventDefault()
+            updateZoom(zoom + (event.deltaY < 0 ? 0.15 : -0.15))
+          }}
+          onPointerDown={(event) => {
+            if (drivePreviewUrl || zoom <= 1) return
+            event.currentTarget.setPointerCapture?.(event.pointerId)
+            dragRef.current = {
+              pointerId: event.pointerId,
+              startX: event.clientX,
+              startY: event.clientY,
+              panX: pan.x,
+              panY: pan.y
+            }
+          }}
+          onPointerMove={(event) => {
+            const drag = dragRef.current
+            if (!drag || drag.pointerId !== event.pointerId || zoom <= 1) return
+            setPan({
+              x: drag.panX + event.clientX - drag.startX,
+              y: drag.panY + event.clientY - drag.startY
+            })
+          }}
+          onPointerUp={(event) => {
+            if (dragRef.current?.pointerId === event.pointerId) dragRef.current = null
+          }}
+          onPointerCancel={() => {
+            dragRef.current = null
+          }}
           onTouchStart={(event) => {
+            if (zoom > 1) return
             touchStartRef.current = event.changedTouches?.[0]?.clientX ?? null
           }}
           onTouchEnd={(event) => {
+            if (zoom > 1) return
             const start = touchStartRef.current
             touchStartRef.current = null
             if (start == null) return
@@ -128,8 +208,13 @@ export default function PhotoGalleryModal({ items = [], initialIndex = 0, title 
               <img
                 src={mediaUrl}
                 alt={`${title} ${index + 1}`}
-                className="max-h-full max-w-full select-none rounded-xl object-contain"
+                className={`max-h-full max-w-full select-none rounded-xl object-contain transition-transform duration-75 ${zoom > 1 ? 'cursor-grab active:cursor-grabbing' : 'cursor-zoom-in'}`}
                 draggable={false}
+                onClick={() => updateZoom(zoom > 1 ? 1 : 2)}
+                style={{
+                  transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom})`,
+                  transformOrigin: 'center center'
+                }}
               />
             )}
           </div>

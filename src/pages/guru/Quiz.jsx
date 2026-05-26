@@ -34,6 +34,7 @@ import {
   getModeLabel,
   normalizeQuestionType,
   normalizeQuestionNumbering,
+  sortQuestionsByExamFlow,
   getQuestionTypeLabel,
   getQuizEndAt,
   getRemainingSeconds,
@@ -830,7 +831,7 @@ export default function GuruQuiz() {
       if (detailError?.code === 'REQUEST_ABORTED') return
       if (detailError) throw detailError
 
-      const questionRows = normalizeQuestionNumbering(detailData?.questions || [])
+      const questionRows = sortQuestionsByExamFlow(normalizeQuestionNumbering(detailData?.questions || []))
       const byQuestion = detailData?.options_by_question || {}
       const submissionRows = detailData?.submissions || []
       const answersBySubmission = detailData?.answers_by_submission || {}
@@ -1340,10 +1341,36 @@ export default function GuruQuiz() {
     return { ok: true, message: 'Keamanan dan akses perangkat siap' }
   }, [selectedQuiz, securitySettingsDirty])
 
+  const persistQuestionExamFlowOrder = async () => {
+    if (!selectedQuiz?.id || !questions.length) return
+    const sorted = sortQuestionsByExamFlow(questions)
+    const currentById = new Map((questions || []).map((question) => [question.id, question]))
+    const updates = sorted
+      .map((question, index) => ({ ...question, nomor: index + 1 }))
+      .filter((question) => Number(currentById.get(question.id)?.nomor || 0) !== Number(question.nomor))
+
+    if (!updates.length) {
+      setQuestions(sorted)
+      return
+    }
+
+    await Promise.all(updates.map((question) => (
+      supabase.from('quiz_questions')
+        .update({ nomor: question.nomor, updated_at: new Date().toISOString() })
+        .eq('id', question.id)
+        .eq('quiz_id', selectedQuiz.id)
+    )))
+    setQuestions(sorted)
+  }
+
   const handleSaveSchedule = async () => {
     if (!selectedQuiz) return
     if (!questions.length) {
       pushToast('error', 'Tambahkan minimal 1 soal sebelum mengatur jadwal')
+      return
+    }
+    if (Number(totalQuestionPoints) !== QUIZ_MAX_POINTS) {
+      pushToast('error', `Total poin soal harus tepat ${QUIZ_MAX_POINTS} sebelum jadwal disimpan. Saat ini ${totalQuestionPoints}/${QUIZ_MAX_POINTS}.`)
       return
     }
     if (!selectedQuizSettingsReady.ok) {
@@ -1400,6 +1427,7 @@ export default function GuruQuiz() {
 
     try {
       setLoading(true)
+      await persistQuestionExamFlowOrder()
       const { data, error } = await supabase.quiz.schedule({
         quiz_id: selectedQuiz.id,
         starts_at: startsAt.toISOString(),
