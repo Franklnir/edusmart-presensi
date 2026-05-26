@@ -140,6 +140,8 @@ export default function GuruQuiz() {
     deadline_at: '',
     duration_minutes: 60
   })
+  const [showScheduleSettings, setShowScheduleSettings] = useState(false)
+  const [showSecuritySettings, setShowSecuritySettings] = useState(false)
 
   const [showQuestionForm, setShowQuestionForm] = useState(false)
   const [showStudentPreview, setShowStudentPreview] = useState(false)
@@ -607,6 +609,8 @@ export default function GuruQuiz() {
 
   useEffect(() => {
     selectedQuizIdRef.current = selectedQuizId || ''
+    setShowScheduleSettings(false)
+    setShowSecuritySettings(false)
   }, [selectedQuizId])
 
   useEffect(() => {
@@ -1368,17 +1372,21 @@ export default function GuruQuiz() {
     return { ok: true, message: 'Keamanan dan akses perangkat siap' }
   }, [selectedQuiz, securitySettingsDirty])
 
-  const persistQuestionExamFlowOrder = async () => {
-    if (!selectedQuiz?.id || !questions.length) return
-    const sorted = sortQuestionsByExamFlow(questions)
-    const currentById = new Map((questions || []).map((question) => [question.id, question]))
+  const persistQuestionExamFlowOrder = async (sourceRows = questions) => {
+    if (!selectedQuiz?.id) return []
+    const sorted = sortQuestionsByExamFlow(sourceRows || [])
+    if (!sorted.length) {
+      setQuestions([])
+      return []
+    }
+    const currentById = new Map((sourceRows || []).map((question) => [question.id, question]))
     const updates = sorted
       .map((question, index) => ({ ...question, nomor: index + 1 }))
       .filter((question) => Number(currentById.get(question.id)?.nomor || 0) !== Number(question.nomor))
 
     if (!updates.length) {
       setQuestions(sorted)
-      return
+      return sorted
     }
 
     await Promise.all(updates.map((question) => (
@@ -1387,7 +1395,9 @@ export default function GuruQuiz() {
         .eq('id', question.id)
         .eq('quiz_id', selectedQuiz.id)
     )))
-    setQuestions(sorted)
+    const normalized = sorted.map((question, index) => ({ ...question, nomor: index + 1 }))
+    setQuestions(normalized)
+    return normalized
   }
 
   const handleSaveSchedule = async () => {
@@ -1773,9 +1783,22 @@ export default function GuruQuiz() {
         ...questionForm,
         option_images: questionType === 'mcq' ? questionForm.option_images : {}
       })
+      const savedQuestionRow = {
+        ...(editingQuestion || {}),
+        id: questionId || '',
+        quiz_id: selectedQuizId,
+        soal: questionForm.soal.trim(),
+        image_path: questionForm.image_path || null,
+        poin: questionPoint,
+        question_type: questionType,
+        updated_at: new Date().toISOString()
+      }
       if (!questionId) {
         questionId = makeId()
         const nextNomor = questions.length + 1
+        savedQuestionRow.id = questionId
+        savedQuestionRow.nomor = nextNomor
+        savedQuestionRow.created_at = new Date().toISOString()
         const { error } = await supabase.from('quiz_questions').insert({
           id: questionId,
           quiz_id: selectedQuizId,
@@ -1789,6 +1812,7 @@ export default function GuruQuiz() {
         })
         if (error) throw error
       } else {
+        savedQuestionRow.nomor = editingQuestion?.nomor || questions.length
         const { error } = await supabase
           .from('quiz_questions')
           .update({
@@ -1823,6 +1847,10 @@ export default function GuruQuiz() {
         await Promise.all(staleImagePaths.map((path) => removeQuizImageIfExists(path)))
       }
 
+      const nextQuestionRows = editingQuestion?.id
+        ? questions.map((question) => (question.id === questionId ? savedQuestionRow : question))
+        : [...questions, savedQuestionRow]
+      await persistQuestionExamFlowOrder(nextQuestionRows)
       pushToast('success', 'Soal berhasil disimpan')
       setShowQuestionForm(false)
       await loadQuizDetails()
@@ -2080,17 +2108,10 @@ export default function GuruQuiz() {
       await supabase.from('quiz_questions').delete().eq('id', questionId)
       const { data } = await supabase
         .from('quiz_questions')
-        .select('id')
+        .select('id,quiz_id,nomor,soal,image_path,poin,question_type,updated_at')
         .eq('quiz_id', selectedQuizId)
         .order('nomor', { ascending: true })
-      const reorder = (data || []).map((q, idx) => ({
-        id: q.id,
-        nomor: idx + 1,
-        updated_at: new Date().toISOString()
-      }))
-      for (const row of reorder) {
-        await supabase.from('quiz_questions').update({ nomor: row.nomor, updated_at: row.updated_at }).eq('id', row.id)
-      }
+      await persistQuestionExamFlowOrder(data || [])
       await loadQuizDetails()
       pushToast('success', 'Soal dihapus')
     } catch (err) {
@@ -2537,16 +2558,24 @@ export default function GuruQuiz() {
                 <div className="flex items-center justify-between border-b border-slate-200 p-4">
                   <div className="flex items-center gap-3">
                     <div className="h-8 w-1.5 rounded-full bg-emerald-600"></div>
-                    <h3 className="text-lg font-bold text-slate-900">Jadwal Quiz</h3>
+                    <div>
+                      <h3 className="text-lg font-bold text-slate-900">Jadwal Quiz</h3>
+                      <p className="mt-0.5 text-xs text-slate-500">
+                        {selectedQuiz?.starts_at && selectedQuiz?.deadline_at
+                          ? `${formatDateTime(selectedQuiz.starts_at)} - ${formatDateTime(selectedQuiz.deadline_at)}`
+                          : 'Belum dijadwalkan'}
+                      </p>
+                    </div>
                   </div>
                   <button
                     type="button"
-                    onClick={handleSaveSchedule}
-                    className="rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700"
+                    onClick={() => setShowScheduleSettings((prev) => !prev)}
+                    className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-700 transition-colors hover:bg-emerald-100"
                   >
-                    Simpan Jadwal
+                    {showScheduleSettings ? 'Tutup Jadwal' : 'Atur Jadwal'}
                   </button>
                 </div>
+                {showScheduleSettings && (
                 <div className="p-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
@@ -2603,23 +2632,37 @@ export default function GuruQuiz() {
                     Quiz ini sudah berakhir. Untuk menjadwalkan ulang, ubah Tanggal Mulai ke waktu setelah sekarang dan sesuaikan durasi/deadline.
                   </div>
                 )}
+                <div className="mt-4 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={handleSaveSchedule}
+                    className="rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700"
+                  >
+                    Simpan Jadwal
+                  </button>
                 </div>
+                </div>
+                )}
               </div>
 
               <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
                 <div className="flex flex-col gap-3 border-b border-slate-200 p-4 md:flex-row md:items-center md:justify-between">
                   <div className="flex items-center gap-3">
                     <div className="h-8 w-1.5 rounded-full bg-slate-700"></div>
-                    <h3 className="text-lg font-bold text-slate-900">Keamanan Quiz</h3>
+                    <div>
+                      <h3 className="text-lg font-bold text-slate-900">Keamanan Quiz</h3>
+                      <p className="mt-0.5 text-xs text-slate-500">
+                        {selectedQuizSettingsReady.message}
+                      </p>
+                    </div>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
-                      onClick={handleSaveSecuritySettings}
-                      disabled={securitySaving || quizContentLocked}
-                      className="rounded-lg bg-slate-800 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-slate-900 disabled:opacity-60"
+                      onClick={() => setShowSecuritySettings((prev) => !prev)}
+                      className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
                     >
-                      {securitySaving ? 'Menyimpan...' : quizContentLocked ? 'Keamanan Dikunci' : 'Simpan Keamanan'}
+                      {showSecuritySettings ? 'Tutup Keamanan' : 'Atur Keamanan'}
                     </button>
                     <button
                       type="button"
@@ -2631,6 +2674,7 @@ export default function GuruQuiz() {
                     </button>
                   </div>
                 </div>
+                {showSecuritySettings && (
                 <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
                   <label className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
                     <span className="text-sm font-semibold text-slate-700">Acak urutan soal</span>
@@ -2730,7 +2774,18 @@ export default function GuruQuiz() {
                       disabled={quizContentLocked}
                     />
                   </div>
+                  <div className="md:col-span-2 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={handleSaveSecuritySettings}
+                      disabled={securitySaving || quizContentLocked}
+                      className="rounded-lg bg-slate-800 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-slate-900 disabled:opacity-60"
+                    >
+                      {securitySaving ? 'Menyimpan...' : quizContentLocked ? 'Keamanan Dikunci' : 'Simpan Keamanan'}
+                    </button>
+                  </div>
                 </div>
+                )}
               </div>
 
               <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
