@@ -1878,46 +1878,27 @@ export default function TugasGuru() {
     const StatusIcon = summary.isComplete ? CheckCircle2 : summary.hasAnyAnswer ? AlertCircle : X
 
     return (
-      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-        <div className="mb-2 flex flex-wrap items-center gap-2">
-          <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-extrabold ${summary.className}`}>
-            <StatusIcon className="h-3.5 w-3.5" />
-            {summary.label}
-          </span>
-          {summary.completed.length > 0 && (
-            <span className="text-xs font-semibold text-slate-500">
-              Diisi: {summary.completed.map((part) => part.label).join(', ')}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-extrabold ${summary.className}`}>
+          <StatusIcon className="h-3.5 w-3.5" />
+          {summary.label}
+        </span>
+
+        {summary.parts.map((part) => {
+          const PartIcon = part.icon
+          return (
+            <span
+              key={part.key}
+              className={`inline-flex min-w-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-bold ${
+                part.done ? 'border-slate-200 bg-white text-slate-700' : 'border-dashed border-slate-200 bg-slate-50 text-slate-400'
+              }`}
+              title={part.detail}
+            >
+              <PartIcon className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">{part.done ? part.label : `Belum ${part.label}`}</span>
             </span>
-          )}
-        </div>
-
-        <div className="grid gap-2 sm:grid-cols-3">
-          {summary.parts.map((part) => {
-            const PartIcon = part.icon
-            return (
-              <div
-                key={part.key}
-                className={`flex min-w-0 items-center gap-2 rounded-xl border px-3 py-2 ${
-                  part.done ? 'border-slate-200 bg-white text-slate-800' : 'border-dashed border-slate-200 bg-white/60 text-slate-400'
-                }`}
-              >
-                <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${part.done ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-400'}`}>
-                  <PartIcon className="h-4 w-4" />
-                </span>
-                <span className="min-w-0">
-                  <span className="block truncate text-xs font-extrabold">{part.label}</span>
-                  <span className="block truncate text-[11px] font-medium">{part.detail}</span>
-                </span>
-              </div>
-            )
-          })}
-        </div>
-
-        {summary.hasAnyAnswer && summary.missing.length > 0 && (
-          <div className="mt-2 text-[11px] font-semibold text-slate-500">
-            Belum diisi: {summary.missing.map((part) => part.label).join(', ')}
-          </div>
-        )}
+          )
+        })}
       </div>
     )
   }
@@ -1940,11 +1921,11 @@ export default function TugasGuru() {
     }
 
     const containerClass = compact
-      ? 'grid min-w-[260px] grid-cols-1 gap-2 xl:grid-cols-2'
-      : 'grid grid-cols-1 gap-2 sm:grid-cols-2'
+      ? 'flex flex-wrap gap-2'
+      : 'flex flex-wrap gap-2'
     const actionClass =
-      'group flex min-h-[58px] items-center gap-3 rounded-xl border px-3 py-2 text-left transition-all hover:-translate-y-0.5 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
-    const iconClass = 'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-base'
+      'group flex min-h-[48px] max-w-full items-center gap-2 rounded-xl border px-3 py-2 text-left transition-all hover:-translate-y-0.5 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:max-w-[260px]'
+    const iconClass = 'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-base'
     const textClass = 'min-w-0 flex-1'
     const titleClass = 'truncate text-xs font-extrabold text-slate-900'
     const descClass = 'mt-0.5 truncate text-[11px] font-medium text-slate-500'
@@ -2079,7 +2060,7 @@ export default function TugasGuru() {
 
               return (
                 <article key={siswa.id} className="rounded-2xl border border-white/80 bg-white p-4 shadow-sm ring-1 ring-slate-100/80">
-                  <div className="grid gap-4 xl:grid-cols-[minmax(220px,0.8fr)_minmax(360px,1.5fr)_minmax(160px,0.55fr)_220px] xl:items-start">
+                  <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)_220px] lg:items-start">
                     <div className="min-w-0">
                       <div className="flex items-start gap-3">
                         <Avatar src={siswa.photo_url} name={siswa.nama} />
@@ -2107,26 +2088,22 @@ export default function TugasGuru() {
                       )}
                     </div>
 
-                    <div>
-                      {type === 'belum' ? (
+                    {type === 'belum' ? (
+                      <div className="flex lg:justify-end">
                         <span className="inline-flex rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-extrabold text-rose-700">
                           Belum mengumpulkan
                         </span>
-                      ) : (
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-                          <div className="text-[11px] font-extrabold uppercase tracking-wide text-slate-500">Status Nilai</div>
-                          <span className={`mt-2 inline-flex rounded-full border px-3 py-1.5 text-xs font-extrabold ${scoreClass}`}>
+                      </div>
+                    ) : (
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <label htmlFor={`nilai-${siswa.id}`} className="block text-xs font-extrabold uppercase tracking-wide text-slate-500">
+                            Nilai
+                          </label>
+                          <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-extrabold ${scoreClass}`}>
                             {scoreLabel}
                           </span>
                         </div>
-                      )}
-                    </div>
-
-                    {type !== 'belum' && (
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-                        <label htmlFor={`nilai-${siswa.id}`} className="mb-2 block text-xs font-extrabold uppercase tracking-wide text-slate-500">
-                          Nilai
-                        </label>
                         <div className="flex items-center gap-2">
                           <input
                             id={`nilai-${siswa.id}`}
@@ -2909,6 +2886,18 @@ export default function TugasGuru() {
                         >
                           Deadline: {formatDateTime(selectedTugas.deadline)}
                         </span>
+                        <span className="rounded-full border border-slate-200 bg-white px-3 py-1 font-bold text-slate-700">
+                          Total: {siswaDiKelas.length}
+                        </span>
+                        <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 font-bold text-blue-700">
+                          Mengumpulkan: {jawabanTugas.length}
+                        </span>
+                        <span className="rounded-full border border-yellow-200 bg-yellow-50 px-3 py-1 font-bold text-yellow-800">
+                          Menunggu: {siswaDikerjakan.length}
+                        </span>
+                        <span className="rounded-full border border-green-200 bg-green-50 px-3 py-1 font-bold text-green-700">
+                          Dinilai: {siswaDinilai.length}
+                        </span>
                       </div>
                     </div>
 
@@ -3097,64 +3086,32 @@ export default function TugasGuru() {
                     </div>
                   ) : (
                     <>
-                      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-                        <div className="space-y-4">
-                          {selectedTugas.keterangan ? (
-                            <div className="rounded-xl border border-slate-200 bg-white p-4">
-                              <div className="mb-2 text-sm font-bold text-slate-900">Instruksi</div>
-                              <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">
-                                {selectedTugas.keterangan}
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-slate-500">
-                              <div className="font-semibold">Tidak ada keterangan.</div>
-                            </div>
-                          )}
-
-                          {isLoadingDetail ? (
-                            <div className="rounded-xl border border-slate-200 bg-white p-10 text-center">
-                              <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-                              <div className="text-slate-600 font-semibold">Memuat detail...</div>
-                            </div>
-                          ) : (
-                            <div className="space-y-4">
-                              {renderTabelSiswa(siswaDikerjakan, 'dikerjakan')}
-                              {renderTabelSiswa(siswaDinilai, 'dinilai')}
-                              {renderTabelSiswa(siswaBelum, 'belum')}
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="space-y-4 lg:sticky lg:top-0 lg:self-start">
+                      <div className="space-y-4">
+                        {selectedTugas.keterangan ? (
                           <div className="rounded-xl border border-slate-200 bg-white p-4">
-                            <div className="mb-3 text-sm font-bold text-slate-900">Ringkasan</div>
-
-                            <div className="grid grid-cols-2 gap-3">
-                              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                                <div className="text-xs text-slate-500">Total Siswa</div>
-                                <div className="text-xl font-extrabold text-slate-800">{siswaDiKelas.length}</div>
-                              </div>
-                              <div className="rounded-xl border border-blue-200 bg-blue-50 p-3">
-                                <div className="text-xs text-blue-700">Mengumpulkan</div>
-                                <div className="text-xl font-extrabold text-blue-800">{jawabanTugas.length}</div>
-                              </div>
-                              <div className="rounded-xl border border-yellow-200 bg-yellow-50 p-3">
-                                <div className="text-xs text-yellow-700">Menunggu Nilai</div>
-                                <div className="text-xl font-extrabold text-yellow-800">{siswaDikerjakan.length}</div>
-                              </div>
-                              <div className="rounded-xl border border-green-200 bg-green-50 p-3">
-                                <div className="text-xs text-green-700">Sudah Dinilai</div>
-                                <div className="text-xl font-extrabold text-green-800">{siswaDinilai.length}</div>
-                              </div>
-                            </div>
-
-                            <div className="mt-4 text-xs text-slate-500">
-                              Nilai tersimpan akan otomatis ter-update di kartu riwayat siswa.
+                            <div className="mb-2 text-sm font-bold text-slate-900">Instruksi</div>
+                            <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">
+                              {selectedTugas.keterangan}
                             </div>
                           </div>
+                        ) : (
+                          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-slate-500">
+                            <div className="font-semibold">Tidak ada keterangan.</div>
+                          </div>
+                        )}
 
-                        </div>
+                        {isLoadingDetail ? (
+                          <div className="rounded-xl border border-slate-200 bg-white p-10 text-center">
+                            <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                            <div className="text-slate-600 font-semibold">Memuat detail...</div>
+                          </div>
+                        ) : (
+                          <div className="space-y-4">
+                            {renderTabelSiswa(siswaDikerjakan, 'dikerjakan')}
+                            {renderTabelSiswa(siswaDinilai, 'dinilai')}
+                            {renderTabelSiswa(siswaBelum, 'belum')}
+                          </div>
+                        )}
                       </div>
                     </>
                   )}
