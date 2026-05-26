@@ -126,6 +126,16 @@ const getNowDateTimeLocal = () => {
 
 const maxDateTimeLocal = (a, b) => (a > b ? a : b)
 
+const toStartDateTimeLocal = (dateString) => (dateString ? `${dateString}T00:00` : '')
+const toEndDateTimeLocal = (dateString) => (dateString ? `${dateString}T23:59` : '')
+
+const clampDateTimeLocal = (value, min, max) => {
+  let next = value || min || getNowDateTimeLocal()
+  if (min && next < min) next = min
+  if (max && next > max) next = max
+  return next
+}
+
 const NEAR_DEADLINE_HOURS = 24
 
 const toDatetimeLocalValue = (isoString) => {
@@ -186,17 +196,31 @@ const isPastDateTimeLocal = (value) => {
 }
 
 const validateTimelineInput = (mulai, deadline, options = {}) => {
-  const { allowPastStart = false, allowPastDeadline = false } = options
+  const {
+    allowPastStart = false,
+    allowPastDeadline = false,
+    periodStart = '',
+    periodEnd = '',
+    periodLabel = ''
+  } = options
   const now = new Date()
   now.setSeconds(0, 0)
   const mulaiDate = mulai ? new Date(mulai) : null
   const deadlineDate = deadline ? new Date(deadline) : null
+  const periodStartDate = periodStart ? new Date(periodStart) : null
+  const periodEndDate = periodEnd ? new Date(periodEnd) : null
 
   if (!mulai || !isValidDate(mulaiDate)) return 'Waktu mulai wajib diisi dan valid'
   if (!deadline || !isValidDate(deadlineDate)) return 'Deadline wajib diisi dan valid'
   if (!allowPastStart && mulaiDate < now) return 'Waktu mulai tidak boleh di masa lalu'
   if (!allowPastDeadline && deadlineDate < now) return 'Deadline tidak boleh di masa lalu'
   if (deadlineDate <= mulaiDate) return 'Deadline harus setelah waktu mulai'
+  if (isValidDate(periodStartDate) && mulaiDate < periodStartDate) {
+    return `Waktu mulai harus berada dalam periode ${periodLabel || 'aktif'}`
+  }
+  if (isValidDate(periodEndDate) && deadlineDate > periodEndDate) {
+    return `Deadline tidak boleh melewati periode ${periodLabel || 'aktif'}`
+  }
   return ''
 }
 
@@ -498,6 +522,7 @@ export default function TugasGuru() {
   const [kelasList, setKelasList] = useState([])
 
   // Create form
+  const [isCreatePanelOpen, setIsCreatePanelOpen] = useState(false)
   const [kelas, setKelas] = useState('')
   const [mapelList, setMapelList] = useState([])
   const [selectedMapel, setSelectedMapel] = useState('')
@@ -532,6 +557,47 @@ export default function TugasGuru() {
       setTimeRange('all')
     }
   }, [isViewingArchivePeriod, timeRange])
+
+  const createPeriodBounds = useMemo(() => {
+    const startDate =
+      activeAcademicPeriod.academicYearStartsAt ||
+      period.academicYearStartsAt ||
+      dateFilterPeriod.startsAt
+    const endDate =
+      activeAcademicPeriod.academicYearEndsAt ||
+      period.academicYearEndsAt ||
+      dateFilterPeriod.endsAt
+    const startsAt = toStartDateTimeLocal(startDate)
+    const endsAt = toEndDateTimeLocal(endDate)
+    const nowLocal = getNowDateTimeLocal()
+    const min = startsAt ? maxDateTimeLocal(nowLocal, startsAt) : nowLocal
+
+    return {
+      startsAt,
+      endsAt,
+      min,
+      label: `${activeAcademicPeriod.tahunAjaran || period.tahunAjaran || 'periode aktif'}`
+    }
+  }, [
+    activeAcademicPeriod.academicYearEndsAt,
+    activeAcademicPeriod.academicYearStartsAt,
+    activeAcademicPeriod.tahunAjaran,
+    dateFilterPeriod.endsAt,
+    dateFilterPeriod.startsAt,
+    period.academicYearEndsAt,
+    period.academicYearStartsAt,
+    period.tahunAjaran
+  ])
+
+  useEffect(() => {
+    if (!isCreatePanelOpen) return
+    setForm((prev) => {
+      const mulai = clampDateTimeLocal(prev.mulai, createPeriodBounds.min, createPeriodBounds.endsAt)
+      const deadline = clampDateTimeLocal(prev.deadline, mulai, createPeriodBounds.endsAt)
+      if (mulai === prev.mulai && deadline === prev.deadline) return prev
+      return { ...prev, mulai, deadline }
+    })
+  }, [createPeriodBounds.endsAt, createPeriodBounds.min, isCreatePanelOpen])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1312,16 +1378,18 @@ export default function TugasGuru() {
   }, [pendingCreateFile?.value, user?.id])
 
   const resetCreateFormState = useCallback(() => {
-    const nowLocal = getNowDateTimeLocal()
-    setForm({ judul: '', keterangan: '', link: '', mulai: nowLocal, deadline: nowLocal, file_url: '' })
+    const mulai = clampDateTimeLocal(getNowDateTimeLocal(), createPeriodBounds.min, createPeriodBounds.endsAt)
+    const deadline = clampDateTimeLocal(mulai, mulai, createPeriodBounds.endsAt)
+    setForm({ judul: '', keterangan: '', link: '', mulai, deadline, file_url: '' })
     setUploadedFileSizeCreate('')
     pendingCreateFileRef.current = null
     setPendingCreateFile(null)
-  }, [])
+  }, [createPeriodBounds.endsAt, createPeriodBounds.min])
 
   const cancelCreateTugas = useCallback(async () => {
     await discardPendingCreateFile()
     resetCreateFormState()
+    setIsCreatePanelOpen(false)
     pushToast('info', 'Pembuatan tugas dibatalkan')
   }, [discardPendingCreateFile, pushToast, resetCreateFormState])
 
@@ -1424,8 +1492,13 @@ export default function TugasGuru() {
     }
 
     const timelineError = validateTimelineInput(form.mulai, form.deadline)
-    if (timelineError) {
-      pushToast('error', timelineError)
+    const periodTimelineError = validateTimelineInput(form.mulai, form.deadline, {
+      periodStart: createPeriodBounds.startsAt,
+      periodEnd: createPeriodBounds.endsAt,
+      periodLabel: createPeriodBounds.label
+    })
+    if (timelineError || periodTimelineError) {
+      pushToast('error', timelineError || periodTimelineError)
       return
     }
 
@@ -1456,6 +1529,7 @@ export default function TugasGuru() {
 
       pushToast('success', 'Tugas berhasil ditambahkan')
       resetCreateFormState()
+      setIsCreatePanelOpen(false)
 
       await loadTugas()
       await loadTugasPerluDinilai()
@@ -1517,7 +1591,10 @@ export default function TugasGuru() {
     const deadlineChanged = String(editForm.deadline || '') !== String(editForm.originalDeadline || '')
     const timelineError = validateTimelineInput(editForm.mulai, editForm.deadline, {
       allowPastStart: !mulaiChanged,
-      allowPastDeadline: !deadlineChanged
+      allowPastDeadline: !deadlineChanged,
+      periodStart: createPeriodBounds.startsAt,
+      periodEnd: createPeriodBounds.endsAt,
+      periodLabel: createPeriodBounds.label
     })
     if (timelineError) {
       pushToast('error', timelineError)
@@ -2219,7 +2296,43 @@ export default function TugasGuru() {
           </div>
         </div>
 
+        {/* AKSI BUAT TUGAS */}
+        <div className="rounded-2xl border border-slate-200/70 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-green-50 text-green-700">
+                <span className="text-lg">➕</span>
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">Buat Tugas Baru</h3>
+                <p className="text-sm text-slate-500">
+                  Form tugas disembunyikan agar halaman tetap ringkas. Tanggal hanya bisa dipilih dalam periode {createPeriodBounds.label}.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                if (!isCreatePanelOpen) {
+                  const mulai = clampDateTimeLocal(form.mulai || getNowDateTimeLocal(), createPeriodBounds.min, createPeriodBounds.endsAt)
+                  const deadline = clampDateTimeLocal(form.deadline || mulai, mulai, createPeriodBounds.endsAt)
+                  setForm((prev) => ({ ...prev, mulai, deadline }))
+                }
+                setIsCreatePanelOpen((open) => !open)
+              }}
+              className={`inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-bold shadow-sm transition ${
+                isCreatePanelOpen
+                  ? 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                  : 'bg-gradient-to-r from-blue-600 to-blue-700 text-white hover:from-blue-700 hover:to-blue-800'
+              }`}
+            >
+              {isCreatePanelOpen ? 'Tutup Form' : 'Buat Tugas Baru'}
+            </button>
+          </div>
+        </div>
+
         {/* FORM BUAT TUGAS */}
+        {isCreatePanelOpen && (
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-6">
           <h3 className="text-xl font-bold text-slate-800 mb-5 flex items-center gap-3">
             <div className="w-9 h-9 bg-green-500 rounded-xl flex items-center justify-center shadow">
@@ -2290,8 +2403,16 @@ export default function TugasGuru() {
                 type="datetime-local"
                 className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
                 value={form.mulai}
-                onChange={(e) => setForm((prev) => ({ ...prev, mulai: e.target.value }))}
-                min={getNowDateTimeLocal()}
+                onChange={(e) => {
+                  const mulai = clampDateTimeLocal(e.target.value, createPeriodBounds.min, createPeriodBounds.endsAt)
+                  setForm((prev) => ({
+                    ...prev,
+                    mulai,
+                    deadline: clampDateTimeLocal(prev.deadline, mulai, createPeriodBounds.endsAt)
+                  }))
+                }}
+                min={createPeriodBounds.min}
+                max={createPeriodBounds.endsAt || undefined}
               />
             </div>
 
@@ -2303,14 +2424,25 @@ export default function TugasGuru() {
                 type="datetime-local"
                 className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
                 value={form.deadline}
-                onChange={(e) => setForm((prev) => ({ ...prev, deadline: e.target.value }))}
-                min={maxDateTimeLocal(getNowDateTimeLocal(), form.mulai || getNowDateTimeLocal())}
+                onChange={(e) => setForm((prev) => ({
+                  ...prev,
+                  deadline: clampDateTimeLocal(
+                    e.target.value,
+                    maxDateTimeLocal(createPeriodBounds.min, prev.mulai || createPeriodBounds.min),
+                    createPeriodBounds.endsAt
+                  )
+                }))}
+                min={maxDateTimeLocal(createPeriodBounds.min, form.mulai || createPeriodBounds.min)}
+                max={createPeriodBounds.endsAt || undefined}
               />
             </div>
           </div>
 
           <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-            Periode tugas baru: <b>{activeAcademicPeriod.tahunAjaran}</b> - Semester <b>{activeAcademicPeriod.semester}</b>
+            Periode tugas baru: <b>{createPeriodBounds.label}</b>
+            {createPeriodBounds.startsAt && createPeriodBounds.endsAt ? (
+              <span> ({createPeriodBounds.startsAt.slice(0, 10)} sampai {createPeriodBounds.endsAt.slice(0, 10)})</span>
+            ) : null}
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mt-4">
@@ -2429,6 +2561,7 @@ export default function TugasGuru() {
             </button>
           </div>
         </div>
+        )}
 
         {/* GRID: SIDEBAR + MAIN */}
         <div className="grid xl:grid-cols-4 gap-6">
@@ -2983,8 +3116,19 @@ export default function TugasGuru() {
                             type="datetime-local"
                             className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
                             value={editForm.mulai}
-                            onChange={(e) => setEditForm((p) => ({ ...p, mulai: e.target.value }))}
-                            min={isPastDateTimeLocal(editForm.originalMulai) ? undefined : getNowDateTimeLocal()}
+                            onChange={(e) => {
+                              const min = isPastDateTimeLocal(editForm.originalMulai)
+                                ? createPeriodBounds.startsAt
+                                : createPeriodBounds.min
+                              const mulai = clampDateTimeLocal(e.target.value, min, createPeriodBounds.endsAt)
+                              setEditForm((p) => ({
+                                ...p,
+                                mulai,
+                                deadline: clampDateTimeLocal(p.deadline, mulai, createPeriodBounds.endsAt)
+                              }))
+                            }}
+                            min={isPastDateTimeLocal(editForm.originalMulai) ? createPeriodBounds.startsAt || undefined : createPeriodBounds.min}
+                            max={createPeriodBounds.endsAt || undefined}
                           />
                         </div>
 
@@ -2996,8 +3140,18 @@ export default function TugasGuru() {
                             type="datetime-local"
                             className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
                             value={editForm.deadline}
-                            onChange={(e) => setEditForm((p) => ({ ...p, deadline: e.target.value }))}
-                            min={isPastDateTimeLocal(editForm.originalDeadline) ? undefined : maxDateTimeLocal(getNowDateTimeLocal(), editForm.mulai || getNowDateTimeLocal())}
+                            onChange={(e) => setEditForm((p) => ({
+                              ...p,
+                              deadline: clampDateTimeLocal(
+                                e.target.value,
+                                isPastDateTimeLocal(editForm.originalDeadline)
+                                  ? p.mulai || createPeriodBounds.startsAt
+                                  : maxDateTimeLocal(createPeriodBounds.min, p.mulai || createPeriodBounds.min),
+                                createPeriodBounds.endsAt
+                              )
+                            }))}
+                            min={isPastDateTimeLocal(editForm.originalDeadline) ? editForm.mulai || createPeriodBounds.startsAt || undefined : maxDateTimeLocal(createPeriodBounds.min, editForm.mulai || createPeriodBounds.min)}
+                            max={createPeriodBounds.endsAt || undefined}
                           />
                         </div>
 
