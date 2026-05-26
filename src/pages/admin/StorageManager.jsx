@@ -30,6 +30,7 @@ const CATEGORIES = [
   { value: 'lampiran', label: 'Lampiran' },
   { value: 'arsip', label: 'Arsip' }
 ]
+const categoryLabel = (value) => CATEGORIES.find((item) => item.value === value)?.label || value || 'Semua kategori'
 
 const CLEANUP_CATEGORIES = [
   { value: '', label: 'Tugas, quiz, lampiran' },
@@ -102,6 +103,8 @@ const selectedTenantFromUrl = () => {
 const periodValue = (tahunAjaran, semester) => (
   tahunAjaran && semester ? `${tahunAjaran}|${semester}` : ''
 )
+const storagePeriodValue = (tahunAjaran) => String(tahunAjaran || '')
+const parseStoragePeriodValue = (value) => ({ tahun_ajaran: String(value || ''), semester: '' })
 const parsePeriodValue = (value) => {
   const [tahunAjaran = '', semester = ''] = String(value || '').split('|')
   return { tahun_ajaran: tahunAjaran, semester }
@@ -123,11 +126,11 @@ const providerBadgeClass = (enabled) => (
 )
 const filterScopeLabel = (filters) => {
   const parts = []
-  if (filters?.tahun_ajaran && filters?.semester) {
-    parts.push(`${filters.tahun_ajaran} ${filters.semester}`)
+  if (filters?.tahun_ajaran) {
+    parts.push(filters.tahun_ajaran)
   }
   if (filters?.category) {
-    parts.push(CATEGORIES.find((item) => item.value === filters.category)?.label || filters.category)
+    parts.push(categoryLabel(filters.category))
   }
   return parts.length > 0 ? parts.join(' · ') : 'Semua metadata sekolah'
 }
@@ -266,6 +269,7 @@ function StorageManager() {
   const categories = Array.isArray(usage?.by_category) ? usage.by_category : []
   const periods = Array.isArray(usage?.by_period) ? usage.by_period : []
   const periodCatalog = Array.isArray(activeSummary?.period_options) ? activeSummary.period_options : []
+  const categoryCatalog = Array.isArray(activeSummary?.category_options) ? activeSummary.category_options : []
   const largestFiles = Array.isArray(activeProviderSummary?.largest_files)
     ? activeProviderSummary.largest_files
     : Array.isArray(activeSummary?.largest_files)
@@ -351,14 +355,14 @@ function StorageManager() {
   const activePeriod = activeSummary?.active_period || {}
   const periodOptions = useMemo(() => {
     const map = new Map()
-    const addPeriod = (tahunAjaran, semester, meta = {}) => {
-      const value = periodValue(tahunAjaran, semester)
-      const rank = periodRank(tahunAjaran, semester)
-      if (!value || rank === null) return
+    const addPeriod = (tahunAjaran, meta = {}) => {
+      const value = storagePeriodValue(tahunAjaran)
+      const match = value.match(/^(\d{4})\/\d{4}$/)
+      if (!value || !match) return
+      const rank = Number(match[1])
       const existing = map.get(value) || {
         value,
         tahun_ajaran: tahunAjaran,
-        semester,
         rank,
         bytes_label: '',
         files: 0,
@@ -372,17 +376,48 @@ function StorageManager() {
       })
     }
 
-    addPeriod(activePeriod?.tahun_ajaran, activePeriod?.semester, { isActive: true })
-    periodCatalog.forEach((item) => addPeriod(item.tahun_ajaran, item.semester, item))
-    periods.forEach((item) => addPeriod(item.tahun_ajaran, item.semester, item))
+    addPeriod(activePeriod?.tahun_ajaran, { isActive: true })
+    periodCatalog.forEach((item) => addPeriod(item.tahun_ajaran, item))
+    periods.forEach((item) => addPeriod(item.tahun_ajaran, item))
 
     return Array.from(map.values()).sort((a, b) => b.rank - a.rank)
   }, [
-    activePeriod?.semester,
     activePeriod?.tahun_ajaran,
     periodCatalog,
     periods
   ])
+  const categoryOptions = useMemo(() => {
+    const map = new Map()
+    const addCategory = (value, label, meta = {}) => {
+      const normalized = String(value || '')
+      if (!normalized) return
+      const existing = map.get(normalized) || {
+        value: normalized,
+        label: label || categoryLabel(normalized),
+        bytes: 0,
+        bytes_label: '',
+        files: 0
+      }
+      map.set(normalized, {
+        ...existing,
+        label: label || existing.label,
+        bytes: Number(meta.bytes ?? existing.bytes ?? 0),
+        bytes_label: meta.bytes_label || existing.bytes_label || '',
+        files: Number(meta.files ?? existing.files ?? 0)
+      })
+    }
+
+    categoryCatalog.forEach((item) => addCategory(item.value || item.category, item.label, item))
+    categories.forEach((item) => addCategory(item.category, item.label, item))
+    if (storageFilterDraft.category) {
+      addCategory(storageFilterDraft.category, categoryLabel(storageFilterDraft.category))
+    }
+
+    return [
+      { value: '', label: 'Semua kategori/bucket' },
+      ...Array.from(map.values()).sort((a, b) => (b.bytes || 0) - (a.bytes || 0))
+    ]
+  }, [categories, categoryCatalog, storageFilterDraft.category])
   const cleanupPeriodValue = periodValue(cleanupForm.tahun_ajaran, cleanupForm.semester)
   const cleanupHasProviderBucket = Boolean(cleanupForm.provider && cleanupForm.bucket)
   const cleanupReady = cleanupHasProviderBucket
@@ -959,17 +994,17 @@ function StorageManager() {
         </div>
         <div className="grid w-full gap-2 sm:grid-cols-2 lg:max-w-3xl lg:grid-cols-[1fr_180px_auto_auto]">
           <select
-            value={periodValue(storageFilterDraft.tahun_ajaran, storageFilterDraft.semester)}
+            value={storagePeriodValue(storageFilterDraft.tahun_ajaran)}
             onChange={(event) => setStorageFilterDraft((prev) => ({
               ...prev,
-              ...parsePeriodValue(event.target.value)
+              ...parseStoragePeriodValue(event.target.value)
             }))}
             className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm"
           >
             <option value="">Semua periode</option>
             {periodOptions.map((item) => (
               <option key={item.value} value={item.value}>
-                {item.tahun_ajaran} - {item.semester}{item.isActive ? ' (Aktif)' : ''}
+                {item.tahun_ajaran}{item.isActive ? ' (Aktif)' : ''}{item.bytes_label ? ` · ${item.bytes_label}` : ''}
               </option>
             ))}
             {periodOptions.length === 0 && <option value="" disabled>Belum ada periode tercatat</option>}
@@ -979,7 +1014,11 @@ function StorageManager() {
             onChange={(event) => setStorageFilterDraft((prev) => ({ ...prev, category: event.target.value }))}
             className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm"
           >
-            {CATEGORIES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+            {categoryOptions.map((item) => (
+              <option key={item.value || 'all'} value={item.value}>
+                {item.label}{item.bytes_label ? ` · ${item.bytes_label}` : ''}
+              </option>
+            ))}
           </select>
           <button
             type="button"

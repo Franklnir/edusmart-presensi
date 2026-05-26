@@ -355,6 +355,7 @@ class StorageManagementService
             'trash' => $this->safeSection('trash_summary', $this->emptyTrash(), fn () => $this->trashSummary($tenantId), $context),
             'trash_files' => $this->safeSection('trash_files', [], fn () => $this->trashFiles($tenantId), $context),
             'active_period' => $this->safeSection('active_period', AcademicPeriod::current(), fn () => $this->activePeriod($tenantId), $context),
+            'category_options' => $this->safeSection('category_options', [], fn () => $this->categoryOptions($tenantId), $context),
             'computed_at' => now()->toIso8601String(),
         ];
     }
@@ -1222,13 +1223,13 @@ class StorageManagementService
             && $this->tableHasColumn('storage_files', 'size_bytes')
         )
             ? $this->storageRowsQuery($tenantId, $filters)
-                ->select('tahun_ajaran', 'semester')
+                ->select('tahun_ajaran')
                 ->selectRaw('coalesce(sum(size_bytes), 0) as bytes, count(*) as files')
-                ->groupBy('tahun_ajaran', 'semester')
+                ->groupBy('tahun_ajaran')
                 ->get()
                 ->map(fn ($row) => [
                     'tahun_ajaran' => (string) ($row->tahun_ajaran ?? ''),
-                    'semester' => (string) ($row->semester ?? ''),
+                    'semester' => '',
                     'bytes' => (int) ($row->bytes ?? 0),
                     'files' => (int) ($row->files ?? 0),
                 ])
@@ -1252,6 +1253,63 @@ class StorageManagementService
                 ...$row,
                 'bytes_label' => $this->formatBytes((int) $row['bytes']),
             ])
+            ->sortByDesc('bytes')
+            ->values()
+            ->all();
+    }
+
+    private function categoryOptions(string $tenantId): array
+    {
+        if (
+            ! $this->storageFilesReady()
+            || ! $this->tableHasColumn('storage_files', 'category')
+            || ! $this->tableHasColumn('storage_files', 'bucket')
+            || ! $this->tableHasColumn('storage_files', 'size_bytes')
+        ) {
+            return [];
+        }
+
+        $rows = DB::table('storage_files')
+            ->where('tenant_id', $tenantId)
+            ->whereIn('status', self::MANAGED_STATUSES)
+            ->select('category', 'bucket')
+            ->selectRaw('coalesce(sum(size_bytes), 0) as bytes, count(*) as files')
+            ->groupBy('category', 'bucket')
+            ->orderByDesc('bytes')
+            ->get();
+
+        $merged = [];
+        foreach ($rows as $row) {
+            $category = (string) ($row->category ?? 'dokumen');
+            $bucket = trim((string) ($row->bucket ?? ''));
+            $merged[$category] ??= [
+                'value' => $category,
+                'category' => $category,
+                'label' => self::CATEGORY_LABELS[$category] ?? Str::title($category),
+                'bytes' => 0,
+                'files' => 0,
+                'buckets' => [],
+            ];
+            $merged[$category]['bytes'] += (int) ($row->bytes ?? 0);
+            $merged[$category]['files'] += (int) ($row->files ?? 0);
+            if ($bucket !== '' && ! in_array($bucket, $merged[$category]['buckets'], true)) {
+                $merged[$category]['buckets'][] = $bucket;
+            }
+        }
+
+        return collect(array_values($merged))
+            ->map(function (array $row) {
+                $buckets = array_values($row['buckets']);
+                $bucketLabel = count($buckets) > 0
+                    ? ' · '.implode(', ', array_slice($buckets, 0, 2)).(count($buckets) > 2 ? ', +'.(count($buckets) - 2) : '')
+                    : '';
+
+                return [
+                    ...$row,
+                    'label' => $row['label'].$bucketLabel,
+                    'bytes_label' => $this->formatBytes((int) $row['bytes']),
+                ];
+            })
             ->sortByDesc('bytes')
             ->values()
             ->all();

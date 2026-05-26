@@ -726,6 +726,17 @@ class StorageSecurityTest extends TestCase
         $response->assertJsonPath('data.quota.providers.neva_s3.used_bytes', $tenantAFilteredBytes + $tenantAOtherBytes);
         $response->assertJsonPath('data.quota.providers.neva_s3.remaining_bytes', (3 * 1024 * 1024) - ($tenantAFilteredBytes + $tenantAOtherBytes));
 
+        $periodOptions = collect($response->json('data.period_options'));
+        $schoolYearOption = $periodOptions->firstWhere('tahun_ajaran', '2025/2026');
+        $this->assertNotNull($schoolYearOption);
+        $this->assertSame('', $schoolYearOption['semester'] ?? '');
+        $this->assertSame($tenantAFilteredBytes + $tenantAOtherBytes, $schoolYearOption['bytes'] ?? null);
+
+        $categoryOptions = collect($response->json('data.category_options'));
+        $this->assertTrue($categoryOptions->contains(fn ($category) => ($category['value'] ?? null) === 'tugas'
+            && in_array('assignments', $category['buckets'] ?? [], true)));
+        $this->assertFalse($categoryOptions->contains(fn ($category) => ($category['bytes'] ?? null) === $tenantBBytes));
+
         $largestFiles = collect($response->json('data.largest_files'));
         $this->assertTrue($largestFiles->contains(fn ($file) => ($file['file_name'] ?? null) === 'tugas.pdf'));
         $this->assertFalse($largestFiles->contains(fn ($file) => ($file['file_name'] ?? null) === 'besar.pdf'));
