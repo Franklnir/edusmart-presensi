@@ -1,6 +1,6 @@
 // src/pages/guru/TugasGuru.jsx
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
-import { MessageSquare, X } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Clock, Image as ImageIcon, Link2, MessageSquare, Paperclip, X } from 'lucide-react'
 import {
   supabase,
   ASSIGNMENT_BUCKET,
@@ -1820,6 +1820,108 @@ export default function TugasGuru() {
     }
   }
 
+  const getSubmissionSummary = (jawaban) => {
+    const assets = getSubmissionAssets(jawaban)
+    const fileCount = assets.photos.length + assets.attachments.length
+    const parts = [
+      {
+        key: 'file',
+        label: 'Foto/File',
+        done: fileCount > 0,
+        detail: fileCount > 0
+          ? [
+              assets.photos.length ? `${assets.photos.length} foto` : '',
+              assets.attachments.length ? `${assets.attachments.length} lampiran` : ''
+            ].filter(Boolean).join(', ')
+          : 'Belum ada file',
+        icon: fileCount > 0 && assets.photos.length > 0 ? ImageIcon : Paperclip
+      },
+      {
+        key: 'link',
+        label: 'Link',
+        done: hasUsableValue(assets.link),
+        detail: hasUsableValue(assets.link) ? 'Ada link' : 'Belum ada link',
+        icon: Link2
+      },
+      {
+        key: 'comment',
+        label: 'Komentar',
+        done: hasUsableValue(assets.comment),
+        detail: hasUsableValue(assets.comment) ? 'Ada komentar' : 'Belum ada komentar',
+        icon: MessageSquare
+      }
+    ]
+
+    const completed = parts.filter((part) => part.done)
+    const missing = parts.filter((part) => !part.done)
+    const hasAnyAnswer = completed.length > 0
+    const isComplete = completed.length === parts.length
+
+    return {
+      assets,
+      parts,
+      completed,
+      missing,
+      hasAnyAnswer,
+      isComplete,
+      label: isComplete ? 'Lengkap' : hasAnyAnswer ? 'Sebagian' : 'Belum lengkap',
+      className: isComplete
+        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+        : hasAnyAnswer
+          ? 'border-amber-200 bg-amber-50 text-amber-700'
+          : 'border-rose-200 bg-rose-50 text-rose-700'
+    }
+  }
+
+  const renderSubmissionCompleteness = (jawaban) => {
+    const summary = getSubmissionSummary(jawaban)
+    const StatusIcon = summary.isComplete ? CheckCircle2 : summary.hasAnyAnswer ? AlertCircle : X
+
+    return (
+      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-extrabold ${summary.className}`}>
+            <StatusIcon className="h-3.5 w-3.5" />
+            {summary.label}
+          </span>
+          {summary.completed.length > 0 && (
+            <span className="text-xs font-semibold text-slate-500">
+              Diisi: {summary.completed.map((part) => part.label).join(', ')}
+            </span>
+          )}
+        </div>
+
+        <div className="grid gap-2 sm:grid-cols-3">
+          {summary.parts.map((part) => {
+            const PartIcon = part.icon
+            return (
+              <div
+                key={part.key}
+                className={`flex min-w-0 items-center gap-2 rounded-xl border px-3 py-2 ${
+                  part.done ? 'border-slate-200 bg-white text-slate-800' : 'border-dashed border-slate-200 bg-white/60 text-slate-400'
+                }`}
+              >
+                <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${part.done ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-400'}`}>
+                  <PartIcon className="h-4 w-4" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block truncate text-xs font-extrabold">{part.label}</span>
+                  <span className="block truncate text-[11px] font-medium">{part.detail}</span>
+                </span>
+              </div>
+            )
+          })}
+        </div>
+
+        {summary.hasAnyAnswer && summary.missing.length > 0 && (
+          <div className="mt-2 text-[11px] font-semibold text-slate-500">
+            Belum diisi: {summary.missing.map((part) => part.label).join(', ')}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   const renderSubmissionViewer = (siswa, jawaban, options = {}) => {
     const { compact = false } = options
     const assets = getSubmissionAssets(jawaban)
@@ -1967,179 +2069,105 @@ export default function TugasGuru() {
             <p>Tidak ada data</p>
           </div>
         ) : (
-          <>
-          <div className="space-y-3 md:hidden">
+          <div className="space-y-3">
             {siswaList.map((siswa) => {
               const jawaban = siswa.jawaban
+              const scoreLabel = jawaban?.nilai != null ? String(jawaban.nilai) : 'Menunggu'
+              const scoreClass = jawaban?.nilai != null
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                : 'border-amber-200 bg-amber-50 text-amber-700'
 
               return (
-                <div key={siswa.id} className="rounded-xl border border-white/70 bg-white p-3 shadow-sm">
-                  <div className="flex items-start gap-3">
-                    <Avatar src={siswa.photo_url} name={siswa.nama} />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-bold text-slate-900">{siswa.nama}</p>
-                      <p className="text-xs text-slate-500">{siswa.kelas}</p>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {jawaban?.waktu_submit ? formatDateTime(jawaban.waktu_submit) : type === 'belum' ? 'Belum mengumpulkan' : '-'}
-                      </p>
+                <article key={siswa.id} className="rounded-2xl border border-white/80 bg-white p-4 shadow-sm ring-1 ring-slate-100/80">
+                  <div className="grid gap-4 xl:grid-cols-[minmax(220px,0.8fr)_minmax(360px,1.5fr)_minmax(160px,0.55fr)_220px] xl:items-start">
+                    <div className="min-w-0">
+                      <div className="flex items-start gap-3">
+                        <Avatar src={siswa.photo_url} name={siswa.nama} />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-extrabold text-slate-900">{siswa.nama}</p>
+                          <p className="mt-0.5 truncate text-xs font-semibold text-slate-500">{siswa.kelas || '-'}</p>
+                          <div className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-bold text-slate-500">
+                            <Clock className="h-3.5 w-3.5" />
+                            {jawaban?.waktu_submit ? formatDateTime(jawaban.waktu_submit) : type === 'belum' ? 'Belum mengumpulkan' : '-'}
+                          </div>
+                        </div>
+                      </div>
                     </div>
+
+                    <div className="min-w-0">
+                      {type === 'belum' ? (
+                        <div className="rounded-2xl border border-dashed border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
+                          Belum ada file, link, atau komentar jawaban.
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {renderSubmissionCompleteness(jawaban)}
+                          {renderSubmissionViewer(siswa, jawaban)}
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      {type === 'belum' ? (
+                        <span className="inline-flex rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-extrabold text-rose-700">
+                          Belum mengumpulkan
+                        </span>
+                      ) : (
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                          <div className="text-[11px] font-extrabold uppercase tracking-wide text-slate-500">Status Nilai</div>
+                          <span className={`mt-2 inline-flex rounded-full border px-3 py-1.5 text-xs font-extrabold ${scoreClass}`}>
+                            {scoreLabel}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
                     {type !== 'belum' && (
-                      <span className={`rounded-full px-2 py-1 text-xs font-bold ${jawaban?.nilai != null ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                        {jawaban?.nilai != null ? jawaban.nilai : 'Menunggu'}
-                      </span>
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                        <label htmlFor={`nilai-${siswa.id}`} className="mb-2 block text-xs font-extrabold uppercase tracking-wide text-slate-500">
+                          Nilai
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            id={`nilai-${siswa.id}`}
+                            type="number"
+                            name={`nilai-${siswa.id}`}
+                            aria-label={`Nilai ${siswa.nama || 'siswa'}`}
+                            min="0"
+                            max="100"
+                            inputMode="numeric"
+                            className="min-w-0 flex-1 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                            placeholder="0-100"
+                            value={nilaiInput[siswa.id] ?? ''}
+                            onChange={(e) => {
+                              const val = e.target.value
+                              if (val === '') return setNilaiInput((prev) => ({ ...prev, [siswa.id]: '' }))
+                              const n = parseInt(val, 10)
+                              if (!Number.isNaN(n) && n >= 0 && n <= 100) {
+                                setNilaiInput((prev) => ({ ...prev, [siswa.id]: val }))
+                              }
+                            }}
+                          />
+                          <button
+                            className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-green-600 px-3 py-2 text-xs font-extrabold text-white transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              simpanNilai(siswa.id)
+                            }}
+                            disabled={loading}
+                            type="button"
+                          >
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                            {loading ? '...' : 'Simpan'}
+                          </button>
+                        </div>
+                      </div>
                     )}
                   </div>
-
-                  {type !== 'belum' && (
-                    <div className="mt-3">
-                      {renderSubmissionViewer(siswa, jawaban)}
-                    </div>
-                  )}
-
-                  {type !== 'belum' && (
-                    <div className="mt-3 flex items-center gap-2">
-                      <input
-                        type="number"
-                        name={`nilai-${siswa.id}`}
-                        aria-label={`Nilai ${siswa.nama || 'siswa'}`}
-                        min="0"
-                        max="100"
-                        inputMode="numeric"
-                        className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                        placeholder="Nilai 0-100"
-                        value={nilaiInput[siswa.id] ?? ''}
-                        onChange={(e) => {
-                          const val = e.target.value
-                          if (val === '') return setNilaiInput((prev) => ({ ...prev, [siswa.id]: '' }))
-                          const n = parseInt(val, 10)
-                          if (!Number.isNaN(n) && n >= 0 && n <= 100) {
-                            setNilaiInput((prev) => ({ ...prev, [siswa.id]: val }))
-                          }
-                        }}
-                      />
-                      <button
-                        className="rounded-lg bg-green-600 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          simpanNilai(siswa.id)
-                        }}
-                        disabled={loading}
-                        type="button"
-                      >
-                        {loading ? '...' : 'Simpan'}
-                      </button>
-                    </div>
-                  )}
-                </div>
+                </article>
               )
             })}
           </div>
-
-          <div className="hidden overflow-x-auto md:block">
-            <table className="w-full min-w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-200">
-                  <th className="text-left py-3 px-2 font-semibold text-slate-700">Siswa</th>
-                  <th className="text-left py-3 px-2 font-semibold text-slate-700">Jawaban</th>
-                  <th className="text-left py-3 px-2 font-semibold text-slate-700">Waktu</th>
-                  <th className="text-left py-3 px-2 font-semibold text-slate-700">
-                    {type === 'belum' ? 'Keterangan' : 'Nilai'}
-                  </th>
-                  {type !== 'belum' && (
-                    <th className="text-left py-3 px-2 font-semibold text-slate-700">Aksi</th>
-                  )}
-                </tr>
-              </thead>
-              <tbody>
-                {siswaList.map((siswa) => {
-                  const jawaban = siswa.jawaban
-                  return (
-                    <tr key={siswa.id} className="border-b border-slate-100 hover:bg-white/60 transition-colors">
-                      <td className="py-3 px-2">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <Avatar src={siswa.photo_url} name={siswa.nama} />
-                          <div className="min-w-0">
-                            <div className="font-semibold text-slate-800 truncate">{siswa.nama}</div>
-                            <div className="text-xs text-slate-500 truncate">{siswa.kelas}</div>
-                          </div>
-                        </div>
-                      </td>
-
-                      <td className="py-3 px-2">
-                        {type === 'belum' ? (
-                          <span className="text-xs text-slate-500">-</span>
-                        ) : (
-                          renderSubmissionViewer(siswa, jawaban, { compact: true })
-                        )}
-                      </td>
-
-                      <td className="py-3 px-2">
-                        {jawaban?.waktu_submit ? (
-                          <span className="text-xs text-slate-600">{formatDateTime(jawaban.waktu_submit)}</span>
-                        ) : (
-                          <span className="text-xs text-slate-500">-</span>
-                        )}
-                      </td>
-
-                      <td className="py-3 px-2">
-                        {type === 'belum' ? (
-                          <span className="text-xs text-slate-500">Belum mengumpulkan</span>
-                        ) : (
-                          <span
-                            className={`text-xs font-semibold px-2 py-1 rounded-full ${
-                              jawaban?.nilai != null
-                                ? 'bg-green-100 text-green-700'
-                                : 'bg-yellow-100 text-yellow-700'
-                            }`}
-                          >
-                            {jawaban?.nilai != null ? jawaban.nilai : 'Menunggu'}
-                          </span>
-                        )}
-                      </td>
-
-                      {type !== 'belum' && (
-                        <td className="py-3 px-2">
-                          <div className="flex items-center gap-2">
-                            <input
-                              type="number"
-                              name={`nilai-${siswa.id}`}
-                              aria-label={`Nilai ${siswa.nama || 'siswa'}`}
-                              min="0"
-                              max="100"
-                              inputMode="numeric"
-                              className="w-20 px-2 py-1 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                              placeholder="0-100"
-                              value={nilaiInput[siswa.id] ?? ''}
-                              onChange={(e) => {
-                                const val = e.target.value
-                                if (val === '') return setNilaiInput((prev) => ({ ...prev, [siswa.id]: '' }))
-                                const n = parseInt(val, 10)
-                                if (!Number.isNaN(n) && n >= 0 && n <= 100) {
-                                  setNilaiInput((prev) => ({ ...prev, [siswa.id]: val }))
-                                }
-                              }}
-                            />
-                            <button
-                              className="rounded-lg bg-green-600 px-3 py-1 text-xs font-semibold text-white transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                simpanNilai(siswa.id)
-                              }}
-                              disabled={loading}
-                              type="button"
-                            >
-                              {loading ? '...' : 'Simpan'}
-                            </button>
-                          </div>
-                        </td>
-                      )}
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-          </>
         )}
       </div>
     )
