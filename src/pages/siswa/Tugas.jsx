@@ -116,17 +116,21 @@ const FILE_SIZE_LIMITS = {
 }
 
 const ASSIGNMENT_FILE_ACCEPT = {
-  'image/*': ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'],
   'application/pdf': ['.pdf'],
   'application/msword': ['.doc'],
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
-  'application/vnd.oasis.opendocument.text': ['.odt'],
-  'application/rtf': ['.rtf'],
   'application/vnd.ms-excel': ['.xls'],
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
   'application/vnd.ms-powerpoint': ['.ppt'],
-  'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'],
-  'application/vnd.oasis.opendocument.presentation': ['.odp']
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx']
+}
+
+const ANSWER_ATTACHMENT_EXTENSIONS = new Set(['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'])
+
+const isAllowedAnswerAttachment = (file) => {
+  const name = String(file?.name || '').toLowerCase()
+  const ext = name.includes('.') ? name.split('.').pop() : ''
+  return ANSWER_ATTACHMENT_EXTENSIONS.has(ext)
 }
 
 const uploadToneForProvider = (provider) => {
@@ -525,6 +529,7 @@ export default function TugasSiswa() {
   const [jawabanPhotoSizes, setJawabanPhotoSizes] = useState([])
   const [jawabanLink, setJawabanLink] = useState('')
   const [jawabanKomentar, setJawabanKomentar] = useState('')
+  const [isEditingJawaban, setIsEditingJawaban] = useState(false)
 
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(null)
@@ -867,6 +872,7 @@ export default function TugasSiswa() {
     setJawabanPhotoSizes([])
     setJawabanLink(tugas?.myJawaban?.link_url || '')
     setJawabanKomentar(tugas?.myJawaban?.komentar_siswa || '')
+    setIsEditingJawaban(!tugas?.myJawaban)
     setUploadProgress(null)
     setAnswerUploadProvider(null)
     setPendingJawabanFile(null)
@@ -921,6 +927,7 @@ export default function TugasSiswa() {
       setJawabanPhotoValues(existingPhotos)
       setJawabanPhotoSizes(existingPhotos.map(() => `maks ${formatFileSize(ASSIGNMENT_PHOTO_MAX_BYTES)}`))
       setJawabanKomentar(jawabanData?.komentar_siswa || '')
+      setIsEditingJawaban(!jawabanData)
 
       setJawabanFileKey(existingAttachment)
 
@@ -1003,6 +1010,11 @@ export default function TugasSiswa() {
     const animationStartedAt = Date.now()
     let uploadController = null
 
+    if (!isAllowedAnswerAttachment(file)) {
+      pushToast('error', 'File jawaban hanya boleh PDF, Word, Excel, atau PowerPoint.')
+      return
+    }
+
     // ANTI-IDOR: siswa hanya upload untuk tugas yang sedang dibuka
     const kelas = selectedKelas || kelasSiswa
     if (selectedTugas.kelas !== kelas) {
@@ -1057,21 +1069,9 @@ export default function TugasSiswa() {
           console.warn('Gagal hapus file jawaban sementara:', e)
         }
       }
-      if (pendingJawabanPhotos.length > 0) {
-        await Promise.allSettled(
-          pendingJawabanPhotos
-            .map((item) => item?.value)
-            .filter(Boolean)
-            .map((value) => deleteJawabanFileFromStorage(value, selectedTugas.id, user.id))
-        )
-      }
-
       setJawabanFileKey(storedFileValue)
       setJawabanFileSize(sizeLabel)
-      setJawabanPhotoValues([])
-      setJawabanPhotoSizes([])
       setPendingJawabanFile({ value: storedFileValue, sizeLabel, provider: storedProvider })
-      setPendingJawabanPhotos([])
       setUploadProgress(null)
 
       pushToast('success', `File jawaban berhasil diupload (${sizeLabel})`)
@@ -1170,10 +1170,7 @@ export default function TugasSiswa() {
       const hasObjectStorageUpload = uploaded.some((item) => item.provider === 'object_storage')
       setAnswerUploadProvider(hasDriveUpload ? 'google_drive' : hasObjectStorageUpload ? 'object_storage' : 'local')
 
-      const stalePending = [
-        pendingJawabanFile?.value,
-        ...pendingJawabanPhotos.map((item) => item?.value)
-      ].filter(Boolean)
+      const stalePending = pendingJawabanPhotos.map((item) => item?.value).filter(Boolean)
       if (stalePending.length > 0) {
         await Promise.allSettled(
           stalePending.map((value) => deleteJawabanFileFromStorage(value, selectedTugas.id, user.id))
@@ -1183,9 +1180,6 @@ export default function TugasSiswa() {
       const values = uploaded.map((item) => item.value)
       setJawabanPhotoValues(values)
       setJawabanPhotoSizes(uploaded.map((item) => item.sizeLabel))
-      setJawabanFileKey('')
-      setJawabanFileSize('')
-      setPendingJawabanFile(null)
       setPendingJawabanPhotos(uploaded)
       setUploadProgress(null)
 
@@ -1263,7 +1257,7 @@ export default function TugasSiswa() {
 
       const existing = detail?.myJawaban || null
       const currentLink = (jawabanLink || existing?.link_url || '').trim()
-      const existingPhotos = parseAssignmentFileList(existing?.file_urls).filter(isImageLikeFile)
+      const existingPhotos = parseAssignmentFileList(existing?.file_urls, existing?.file_url).filter(isImageLikeFile)
 
       if (existing?.id) {
         if (currentLink || existingPhotos.length > 0) {
@@ -1305,7 +1299,6 @@ export default function TugasSiswa() {
 
       setJawabanFileKey('')
       setJawabanFileSize('')
-      if (!currentLink) setJawabanKomentar('')
       await loadTugasList()
 
       if (storageError) {
@@ -1337,10 +1330,11 @@ export default function TugasSiswa() {
       return
     }
 
-    // validasi minimal: harus ada file atau link (pilih salah satu)
+    // validasi minimal: siswa boleh mengumpulkan salah satu atau semua: foto, file dokumen, atau link.
     const photoValues = jawabanPhotoValues.slice(0, MAX_ASSIGNMENT_PHOTOS)
     const attachmentValue = currentAttachmentValue
-    const hasFile = Boolean(attachmentValue || photoValues.length > 0)
+    const answerFiles = Array.from(new Set([...photoValues, attachmentValue].filter(Boolean)))
+    const hasFile = answerFiles.length > 0
     const link = (jawabanLink || '').trim()
     const hasLink = Boolean(link)
     const komentar = (jawabanKomentar || '').trim()
@@ -1381,13 +1375,11 @@ export default function TugasSiswa() {
 
       const existing = detail.myJawaban
       const existingFiles = parseAssignmentFileList(existing?.file_urls, existing?.file_url)
-      const nextFileValue = photoValues[0] || attachmentValue || null
-
       const payload = {
         tugas_id: selectedTugas.id,
         user_id: user.id,
-        file_url: nextFileValue,
-        file_urls: photoValues.length > 0 ? photoValues : null,
+        file_url: attachmentValue || photoValues[0] || null,
+        file_urls: answerFiles.length > 0 ? answerFiles : null,
         link_url: safeLink || null,
         komentar_siswa: komentar || null,
         status: existing?.nilai != null ? 'dinilai' : 'menunggu',
@@ -1398,11 +1390,7 @@ export default function TugasSiswa() {
       const { error } = await supabase.assignments.submitAnswer(payload)
       if (error) throw error
 
-      const nextFiles = photoValues.length > 0
-        ? photoValues
-        : payload.file_url
-        ? [payload.file_url]
-        : []
+      const nextFiles = answerFiles
       const staleFiles = existingFiles.filter((value) => value && !nextFiles.includes(value))
       if (staleFiles.length > 0) {
         await Promise.allSettled(
@@ -1412,8 +1400,9 @@ export default function TugasSiswa() {
 
       setPendingJawabanFile(null)
       setPendingJawabanPhotos([])
+      setIsEditingJawaban(false)
       pushToast('success', 'Jawaban berhasil dikirim')
-      showUploadSuccessNotice('Jawaban berhasil dikirim', 'Guru dapat melihat file, link, dan komentar Anda.')
+      showUploadSuccessNotice('Jawaban berhasil dikirim', 'Guru dapat melihat foto, file, link, dan komentar Anda.')
 
       // refresh detail & list
       await loadTugasList()
@@ -1558,11 +1547,9 @@ export default function TugasSiswa() {
   }, [jawabanPhotoValues, detail?.myJawaban?.file_urls, detail?.myJawaban?.file_url])
 
   const currentAttachmentValue = useMemo(() => {
-    if (pendingJawabanPhotos.length > 0) return ''
     if (jawabanFileKey && !isImageLikeFile(jawabanFileKey)) return jawabanFileKey
     return getFirstAttachmentValue(detail?.myJawaban?.file_urls, detail?.myJawaban?.file_url)
   }, [
-    pendingJawabanPhotos.length,
     jawabanFileKey,
     detail?.myJawaban?.file_urls,
     detail?.myJawaban?.file_url
@@ -2074,6 +2061,67 @@ export default function TugasSiswa() {
                             )}
                           </div>
 
+                          {detail?.myJawaban && !isEditingJawaban ? (
+                            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                              <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                <div>
+                                  <div className="text-sm font-extrabold text-emerald-900">Jawaban sudah terkirim</div>
+                                  <div className="mt-1 text-xs text-emerald-700">
+                                    {detail?.myJawaban?.waktu_submit ? `Terakhir submit: ${formatDateTime(detail.myJawaban.waktu_submit)}` : 'Jawaban tersimpan.'}
+                                  </div>
+                                </div>
+                                {!isSubmissionLocked && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setIsEditingJawaban(true)}
+                                    className="rounded-2xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700"
+                                  >
+                                    Edit Jawaban
+                                  </button>
+                                )}
+                              </div>
+
+                              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                                {currentPhotoValues.length > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => openPhotoGallery(currentPhotoValues, 0, 'Preview Tugas Saya')}
+                                    className="rounded-xl border border-emerald-200 bg-white p-3 text-left text-sm font-bold text-emerald-800 hover:bg-emerald-100"
+                                  >
+                                    🖼️ Foto
+                                    <span className="mt-1 block text-xs font-medium text-emerald-700">{currentPhotoValues.length} foto</span>
+                                  </button>
+                                )}
+                                {currentAttachmentValue && (
+                                  <button
+                                    type="button"
+                                    onClick={() => openPreview(currentAttachmentValue)}
+                                    className="rounded-xl border border-blue-200 bg-white p-3 text-left text-sm font-bold text-blue-800 hover:bg-blue-50"
+                                  >
+                                    📎 File
+                                    <span className="mt-1 block truncate text-xs font-medium text-blue-700">{jawabanFileSize || 'Dokumen jawaban'}</span>
+                                  </button>
+                                )}
+                                {jawabanLink && (
+                                  <button
+                                    type="button"
+                                    onClick={() => openPreview(jawabanLink)}
+                                    className="rounded-xl border border-indigo-200 bg-white p-3 text-left text-sm font-bold text-indigo-800 hover:bg-indigo-50"
+                                  >
+                                    🔗 Link
+                                    <span className="mt-1 block truncate text-xs font-medium text-indigo-700">{jawabanLink}</span>
+                                  </button>
+                                )}
+                                {jawabanKomentar && (
+                                  <div className="rounded-xl border border-amber-200 bg-white p-3 text-sm font-bold text-amber-900">
+                                    💬 Komentar
+                                    <span className="mt-1 block line-clamp-2 text-xs font-medium text-amber-800">{jawabanKomentar}</span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            <>
                           {/* Link */}
                           <div className="mb-4">
                             <label className="block text-sm font-semibold text-slate-700 mb-2">Link jawaban (opsional)</label>
@@ -2081,11 +2129,11 @@ export default function TugasSiswa() {
                               className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white text-sm"
                               value={jawabanLink}
                               onChange={(e) => setJawabanLink(e.target.value)}
-                              placeholder="contoh: drive.google.com/..."
+                              placeholder="contoh: drive.google.com/... / youtube.com/... / https://website.com/..."
                               disabled={isSubmissionLocked}
                             />
                             <div className="text-[11px] text-slate-500 mt-1">
-                              Boleh tanpa http(s). Link manual disimpan di database/VPS, bukan di Google Drive sekolah.
+                              Khusus URL seperti Google Drive, YouTube, atau website lain. Boleh tanpa http(s).
                             </div>
                           </div>
 
@@ -2177,7 +2225,7 @@ export default function TugasSiswa() {
                               <div>
                                 <div className="font-bold text-slate-800">📎 File jawaban (opsional)</div>
                                 <div className="mt-1 text-xs text-slate-500">
-                                  Gunakan untuk PDF, dokumen, spreadsheet, presentasi, atau gambar tunggal.
+                                  Khusus PDF, Word (.doc/.docx), Excel (.xls/.xlsx), dan PowerPoint (.ppt/.pptx). Foto gunakan tombol galeri di atas.
                                 </div>
                               </div>
 
@@ -2271,10 +2319,12 @@ export default function TugasSiswa() {
                                 onClick={() => openPreview(detail.myJawaban.link_url)}
                                 className="px-4 py-3 rounded-2xl bg-white border border-slate-200 text-slate-700 font-semibold hover:bg-slate-50 transition-colors text-center"
                               >
-                                🔗 Preview Link Saya
-                              </button>
-                            )}
+                              🔗 Preview Link Saya
+                            </button>
+                          )}
                           </div>
+                            </>
+                          )}
 
                           {detail?.myJawaban?.waktu_submit && (
                             <div className="mt-3 text-xs text-slate-500">
