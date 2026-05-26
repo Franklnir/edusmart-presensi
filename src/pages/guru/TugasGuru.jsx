@@ -1,6 +1,6 @@
 // src/pages/guru/TugasGuru.jsx
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
-import { AlertCircle, CheckCircle2, Clock, Image as ImageIcon, Link2, MessageSquare, Paperclip, X } from 'lucide-react'
+import { CheckCircle2, Clock, Image as ImageIcon, Link2, MessageSquare, Paperclip, X } from 'lucide-react'
 import {
   supabase,
   ASSIGNMENT_BUCKET,
@@ -1864,7 +1864,7 @@ export default function TugasGuru() {
       missing,
       hasAnyAnswer,
       isComplete,
-      label: isComplete ? 'Lengkap' : hasAnyAnswer ? 'Sebagian' : 'Belum lengkap',
+      label: isComplete ? 'Lengkap' : hasAnyAnswer ? 'Terkumpul' : 'Belum lengkap',
       className: isComplete
         ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
         : hasAnyAnswer
@@ -1875,7 +1875,7 @@ export default function TugasGuru() {
 
   const renderSubmissionCompleteness = (jawaban) => {
     const summary = getSubmissionSummary(jawaban)
-    const StatusIcon = summary.isComplete ? CheckCircle2 : summary.hasAnyAnswer ? AlertCircle : X
+    const StatusIcon = summary.hasAnyAnswer ? CheckCircle2 : X
 
     return (
       <div className="flex flex-wrap items-center gap-2">
@@ -1883,22 +1883,6 @@ export default function TugasGuru() {
           <StatusIcon className="h-3.5 w-3.5" />
           {summary.label}
         </span>
-
-        {summary.parts.map((part) => {
-          const PartIcon = part.icon
-          return (
-            <span
-              key={part.key}
-              className={`inline-flex min-w-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-bold ${
-                part.done ? 'border-slate-200 bg-white text-slate-700' : 'border-dashed border-slate-200 bg-slate-50 text-slate-400'
-              }`}
-              title={part.detail}
-            >
-              <PartIcon className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate">{part.done ? part.label : `Belum ${part.label}`}</span>
-            </span>
-          )
-        })}
       </div>
     )
   }
@@ -1927,8 +1911,8 @@ export default function TugasGuru() {
       'group flex min-h-[48px] max-w-full items-center gap-2 rounded-xl border px-3 py-2 text-left transition-all hover:-translate-y-0.5 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:max-w-[260px]'
     const iconClass = 'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-base'
     const textClass = 'min-w-0 flex-1'
-    const titleClass = 'truncate text-xs font-extrabold text-slate-900'
-    const descClass = 'mt-0.5 truncate text-[11px] font-medium text-slate-500'
+    const titleClass = 'block truncate text-xs font-extrabold text-slate-900'
+    const descClass = 'mt-0.5 block truncate text-[11px] font-medium text-slate-500'
 
     return (
       <div className={containerClass}>
@@ -1940,7 +1924,7 @@ export default function TugasGuru() {
           >
             <span className={`${iconClass} bg-emerald-100 text-emerald-700`}>🖼️</span>
             <span className={textClass}>
-              <span className={titleClass}>Foto jawaban</span>
+              <span className={titleClass}>Foto</span>
               <span className={descClass}>{assets.photos.length} foto • buka galeri</span>
             </span>
           </button>
@@ -1971,7 +1955,7 @@ export default function TugasGuru() {
           >
             <span className={`${iconClass} bg-purple-100 text-purple-700`}>🔗</span>
             <span className={textClass}>
-              <span className={titleClass}>Link jawaban</span>
+              <span className={titleClass}>Link</span>
               <span className={descClass}>{assets.link}</span>
             </span>
           </button>
@@ -1992,7 +1976,7 @@ export default function TugasGuru() {
               <MessageSquare className="h-4 w-4" />
             </span>
             <span className={textClass}>
-              <span className={titleClass}>Komentar siswa</span>
+              <span className={titleClass}>Komentar</span>
               <span className={descClass}>{assets.comment}</span>
             </span>
           </button>
