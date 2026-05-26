@@ -33,6 +33,8 @@ export default function PhotoGalleryModal({ items = [], initialIndex = 0, title 
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const touchStartRef = useRef(null)
   const dragRef = useRef(null)
+  const viewerRef = useRef(null)
+  const zoomRef = useRef(1)
 
   useEffect(() => {
     setIndex(Math.max(0, Math.min(initialIndex, files.length - 1)))
@@ -42,6 +44,10 @@ export default function PhotoGalleryModal({ items = [], initialIndex = 0, title 
     setZoom(1)
     setPan({ x: 0, y: 0 })
   }, [index])
+
+  useEffect(() => {
+    zoomRef.current = zoom
+  }, [zoom])
 
   const current = files[index] || ''
   const drivePreviewUrl = resolveDrivePreviewUrl(current)
@@ -59,6 +65,21 @@ export default function PhotoGalleryModal({ items = [], initialIndex = 0, title 
     setZoom(value)
     if (value === 1) setPan({ x: 0, y: 0 })
   }
+
+  useEffect(() => {
+    const node = viewerRef.current
+    if (!node || drivePreviewUrl) return undefined
+
+    const onWheel = (event) => {
+      event.preventDefault()
+      const currentZoom = zoomRef.current
+      updateZoom(currentZoom + (event.deltaY < 0 ? 0.15 : -0.15))
+    }
+
+    node.addEventListener('wheel', onWheel, { passive: false })
+    return () => node.removeEventListener('wheel', onWheel)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drivePreviewUrl, index])
 
   const resetView = () => {
     setZoom(1)
@@ -150,12 +171,8 @@ export default function PhotoGalleryModal({ items = [], initialIndex = 0, title 
         </div>
 
         <div
+          ref={viewerRef}
           className="relative min-h-0 flex-1"
-          onWheel={(event) => {
-            if (drivePreviewUrl) return
-            event.preventDefault()
-            updateZoom(zoom + (event.deltaY < 0 ? 0.15 : -0.15))
-          }}
           onPointerDown={(event) => {
             if (drivePreviewUrl || zoom <= 1) return
             event.currentTarget.setPointerCapture?.(event.pointerId)
