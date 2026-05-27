@@ -246,7 +246,9 @@ jobs:
         run: |
           set -euo pipefail
           port="${VPS_PORT:-22}"
+          deploy_log="$(mktemp)"
 
+          set +e
           {
             printf 'set -Eeuo pipefail\n'
             printf 'REMOTE_DIR=%q\n' "$VPS_APP_DIR"
@@ -292,4 +294,12 @@ jobs:
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
             "$VPS_USER@$VPS_HOST" \
-            "bash -s"
+            "bash -s" 2>&1 | tee "$deploy_log"
+          deploy_status="${PIPESTATUS[1]}"
+          set -e
+
+          if [ "$deploy_status" -ne 0 ]; then
+            message="$(tail -n 80 "$deploy_log" | sed -E 's/::/%3A%3A/g; s/%/%25/g; s/\r/%0D/g' | awk '{printf "%s%0A", $0}')"
+            echo "::error title=Remote deploy failed::${message}"
+            exit "$deploy_status"
+          fi
