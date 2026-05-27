@@ -475,6 +475,8 @@ export default function SiswaQuiz() {
   const [sessionQuizFallback, setSessionQuizFallback] = useState(null)
   const [fullscreenGuideOpen, setFullscreenGuideOpen] = useState(false)
   const [deviceLockNotice, setDeviceLockNotice] = useState({ open: false, message: '', retryAfter: null })
+  const [resumeQuizNotice, setResumeQuizNotice] = useState({ open: false, quiz: null })
+  const [dismissedResumeQuizId, setDismissedResumeQuizId] = useState('')
   const [privacyShield, setPrivacyShield] = useState({
     open: false,
     message: '',
@@ -494,7 +496,13 @@ export default function SiswaQuiz() {
     stage: 1
   })
   const [nowTick, setNowTick] = useState(() => new Date())
-  const [celebration, setCelebration] = useState({ open: false, score: null })
+  const [celebration, setCelebration] = useState({
+    open: false,
+    score: null,
+    title: '',
+    message: '',
+    tone: 'emerald'
+  })
   const autoSubmitLockRef = useRef(false)
   const violationTriggeredRef = useRef(false)
   const violationCountRef = useRef(0)
@@ -690,6 +698,16 @@ export default function SiswaQuiz() {
   const selectedStatus = useMemo(() => (
     selectedQuiz ? getQuizStatus(selectedQuiz, activeSubmission, nowTick) : null
   ), [selectedQuiz, activeSubmission, nowTick])
+
+  const resumableQuiz = useMemo(() => {
+    const candidates = (quizList || []).filter((quiz) => {
+      const sub = quiz?.submission
+      if (!quiz?.id || sub?.status !== 'ongoing') return false
+      return getQuizStatus(quiz, sub, nowTick).kind === 'active'
+    })
+    if (!candidates.length) return null
+    return sortQuizzesByPriority(candidates, nowTick)[0] || null
+  }, [quizList, nowTick])
 
   const canViewSelectedResult = useMemo(() => (
     Boolean(
@@ -1460,6 +1478,13 @@ export default function SiswaQuiz() {
   }, [selectedQuizId, selectedQuiz?.id, selectedQuiz?.submission?.id, user?.id, quizDetailsRetryTick, quizDetailRealtimeTick, period.tahunAjaran, period.semester])
 
   useEffect(() => {
+    if (isSessionPage || isTaking || !quizLoadDone || !resumableQuiz?.id) return
+    if (resumeQuizNotice.open) return
+    if (dismissedResumeQuizId === resumableQuiz.id) return
+    setResumeQuizNotice({ open: true, quiz: resumableQuiz })
+  }, [isSessionPage, isTaking, quizLoadDone, resumableQuiz, dismissedResumeQuizId, resumeQuizNotice.open])
+
+  useEffect(() => {
     if (!isSessionPage || !selectedQuiz?.id) return
     if (quizDetailsLoading) return
     if (quizDetailsLoadedForId === selectedQuiz.id) return
@@ -1664,6 +1689,7 @@ export default function SiswaQuiz() {
     if (!selectedQuiz || !sub?.id || isSubmitting || autoSubmitLockRef.current) return
 
     const confirmed = Boolean(options?.confirmed)
+    const timeExpired = options?.reason === 'time_expired'
     if (!auto && !confirmed) {
       setSubmitConfirmOpen(true)
       return
@@ -1702,13 +1728,26 @@ export default function SiswaQuiz() {
       setViolationMessage('')
       setViolationPrompt({ open: false, message: '', stage: 1 })
       setPrivacyShield({ open: false, message: '', reason: '' })
-      setCelebration({ open: true, score: canShowScoreNow ? score : null })
       if (document.fullscreenElement) {
         try {
           await document.exitFullscreen()
         } catch {}
       }
-      pushToast('success', canShowScoreNow ? 'Quiz selesai. Nilai sudah tersedia.' : 'Quiz selesai. Hasil menunggu publikasi dari guru.')
+      setCelebration({
+        open: true,
+        score: canShowScoreNow ? score : null,
+        title: timeExpired ? 'Waktu Quiz Habis' : 'Quiz Selesai',
+        message: timeExpired
+          ? 'Waktu pengerjaan sudah habis. Jawaban terakhir Anda sudah dikirim otomatis.'
+          : 'Jawaban Anda sudah dikirim.',
+        tone: timeExpired ? 'amber' : 'emerald'
+      })
+      pushToast(
+        timeExpired ? 'warning' : 'success',
+        timeExpired
+          ? 'Waktu quiz habis. Jawaban dikirim otomatis.'
+          : canShowScoreNow ? 'Quiz selesai. Nilai sudah tersedia.' : 'Quiz selesai. Hasil menunggu publikasi dari guru.'
+      )
       if (isSessionPage) {
         navigate('/siswa/quiz', { replace: true })
       }
@@ -1750,7 +1789,7 @@ export default function SiswaQuiz() {
       const diff = Math.floor((endAt.getTime() - Date.now()) / 1000)
       setRemainingSeconds(diff)
       if (diff <= 0) {
-        handleSubmitQuiz(true)
+        handleSubmitQuiz(true, { reason: 'time_expired' })
       }
     }
 
@@ -2262,7 +2301,25 @@ export default function SiswaQuiz() {
   }
 
   const handleCloseCelebration = () => {
-    setCelebration({ open: false, score: null })
+    setCelebration({ open: false, score: null, title: '', message: '', tone: 'emerald' })
+  }
+
+  const handleDismissResumeQuiz = () => {
+    const quizId = resumeQuizNotice.quiz?.id || ''
+    setDismissedResumeQuizId(quizId)
+    setResumeQuizNotice({ open: false, quiz: null })
+  }
+
+  const handleContinueResumeQuiz = () => {
+    const quiz = resumeQuizNotice.quiz
+    if (!quiz?.id) {
+      setResumeQuizNotice({ open: false, quiz: null })
+      return
+    }
+    setResumeQuizNotice({ open: false, quiz: null })
+    setDismissedResumeQuizId('')
+    setSelectedQuizId(quiz.id)
+    redirectToSessionPage(quiz.id)
   }
 
   const warningMessage = violationPrompt.open
@@ -2312,18 +2369,61 @@ export default function SiswaQuiz() {
     </div>
   )
 
+  const resumeQuizOverlay = resumeQuizNotice.open && resumeQuizNotice.quiz && (
+    <div className="fixed inset-0 z-[1460] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center px-4">
+      <div className="w-full max-w-lg rounded-3xl border border-indigo-200 bg-white p-5 sm:p-6 shadow-2xl">
+        <div className="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-bold uppercase tracking-wide text-indigo-700">
+          Quiz Belum Selesai
+        </div>
+        <h3 className="mt-4 text-2xl font-black text-slate-900">
+          Lanjutkan Quiz?
+        </h3>
+        <p className="mt-2 text-sm leading-6 text-slate-600">
+          Anda masih punya quiz yang belum dikirim. Jika waktu quiz belum habis,
+          lanjutkan dari sesi terakhir agar jawaban tidak tertinggal.
+        </p>
+        <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div className="text-base font-black text-slate-900">
+            {resumeQuizNotice.quiz.judul || resumeQuizNotice.quiz.title || 'Quiz'}
+          </div>
+          <div className="mt-1 text-sm text-slate-600">
+            {resumeQuizNotice.quiz.mapel || '-'} • Deadline: {formatDateTime(getQuizEndAt(resumeQuizNotice.quiz))}
+          </div>
+        </div>
+        <div className="mt-5 flex flex-col sm:flex-row gap-2 sm:justify-end">
+          <button
+            type="button"
+            onClick={handleDismissResumeQuiz}
+            className="px-4 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-700 text-sm font-semibold"
+          >
+            Nanti
+          </button>
+          <button
+            type="button"
+            onClick={handleContinueResumeQuiz}
+            className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold shadow-sm"
+          >
+            Lanjutkan Quiz
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+
   const celebrationOverlay = celebration.open && (
     <div className="fixed inset-0 z-[1300] bg-slate-900/45 backdrop-blur-[2px] flex items-center justify-center px-4">
       <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 text-center shadow-2xl">
-        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-md bg-emerald-50 text-emerald-700">
-          <CheckCircle2 className="h-7 w-7" />
+        <div className={`mx-auto flex h-12 w-12 items-center justify-center rounded-md ${
+          celebration.tone === 'amber' ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'
+        }`}>
+          {celebration.tone === 'amber' ? <Clock className="h-7 w-7" /> : <CheckCircle2 className="h-7 w-7" />}
         </div>
         <div>
           <h3 className="mt-4 text-2xl font-bold text-slate-900">
-            Quiz Selesai
+            {celebration.title || 'Quiz Selesai'}
           </h3>
           <p className="mt-2 text-slate-600">
-            Jawaban Anda sudah dikirim.
+            {celebration.message || 'Jawaban Anda sudah dikirim.'}
           </p>
           <div className="mt-5 inline-flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-2">
             <span className="text-sm text-slate-600">Nilai Anda</span>
@@ -3482,6 +3582,7 @@ export default function SiswaQuiz() {
         )}
 
         {celebrationOverlay}
+        {resumeQuizOverlay}
         {fullscreenGuideModal}
 
         {startCountdown.open && (

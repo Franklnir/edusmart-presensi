@@ -406,6 +406,19 @@ class QuizController extends ApiController
             }
         }
 
+        $answersStored = false;
+        if ($answers !== null && ! is_array($answers)) {
+            return response()->json(['error' => 'Format jawaban tidak valid'], 422);
+        }
+
+        if ($submission && is_array($answers) && count($answers)) {
+            $storeResponse = $this->storeSubmittedAnswers($tenantId, $quizId, (string) $submission->id, $answers, $now);
+            if ($storeResponse !== null) {
+                return $storeResponse;
+            }
+            $answersStored = true;
+        }
+
         $availability = $this->quizAvailabilityForStudent($quiz, $now);
         if (! $availability['ok']) {
             if ($submission && in_array((string) ($availability['reason'] ?? ''), ['closed', 'ended'], true)) {
@@ -442,35 +455,10 @@ class QuizController extends ApiController
         }
         $submissionId = (string) $submission->id;
 
-        if ($answers !== null && ! is_array($answers)) {
-            return response()->json(['error' => 'Format jawaban tidak valid'], 422);
-        }
-
-        if (is_array($answers) && count($answers)) {
-            foreach ($answers as $row) {
-                if (! is_array($row)) {
-                    continue;
-                }
-                $questionId = isset($row['question_id']) ? (string) $row['question_id'] : '';
-                $optionId = isset($row['option_id']) ? (string) $row['option_id'] : '';
-                $essayAnswerRaw = $row['essay_answer'] ?? null;
-                if (! $questionId) {
-                    continue;
-                }
-
-                $saved = $this->storeSubmissionAnswer(
-                    $tenantId,
-                    $quizId,
-                    $submissionId,
-                    $questionId,
-                    $optionId,
-                    $essayAnswerRaw,
-                    $now,
-                    isset($row['id']) ? (string) $row['id'] : null
-                );
-                if (! $saved['ok']) {
-                    return response()->json(['error' => $saved['message']], $saved['code']);
-                }
+        if (! $answersStored && is_array($answers) && count($answers)) {
+            $storeResponse = $this->storeSubmittedAnswers($tenantId, $quizId, $submissionId, $answers, $now);
+            if ($storeResponse !== null) {
+                return $storeResponse;
             }
         }
 
@@ -2958,6 +2946,37 @@ class QuizController extends ApiController
         }
 
         return $payload;
+    }
+
+    private function storeSubmittedAnswers(string $tenantId, string $quizId, string $submissionId, array $answers, Carbon $now)
+    {
+        foreach ($answers as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $questionId = isset($row['question_id']) ? (string) $row['question_id'] : '';
+            $optionId = isset($row['option_id']) ? (string) $row['option_id'] : '';
+            $essayAnswerRaw = $row['essay_answer'] ?? null;
+            if (! $questionId) {
+                continue;
+            }
+
+            $saved = $this->storeSubmissionAnswer(
+                $tenantId,
+                $quizId,
+                $submissionId,
+                $questionId,
+                $optionId,
+                $essayAnswerRaw,
+                $now,
+                isset($row['id']) ? (string) $row['id'] : null
+            );
+            if (! $saved['ok']) {
+                return response()->json(['error' => $saved['message']], $saved['code']);
+            }
+        }
+
+        return null;
     }
 
     private function storeSubmissionAnswer(
