@@ -258,9 +258,11 @@ jobs:
             printf 'GHCR_TOKEN=%q\n' "${GHCR_TOKEN:-}"
             printf '%s\n' \
               'cd "$REMOTE_DIR"' \
+              'git update-index --skip-worktree -- deploy/mosquitto/generated/.gitignore deploy/mosquitto/generated/.gitkeep 2>/dev/null || true' \
               'diagnose_remote_failure() {' \
               '  status="$?"' \
               '  echo "[diagnostic] Remote deploy gagal dengan exit ${status}."' \
+              '  git update-index --skip-worktree -- deploy/mosquitto/generated/.gitignore deploy/mosquitto/generated/.gitkeep 2>/dev/null || true' \
               '  git status --short -- . ":!deploy/mosquitto/generated" ":!backups" ":!.env.production" || true' \
               '  df -h / || true' \
               '  docker system df || true' \

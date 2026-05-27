@@ -80,6 +80,12 @@ split_words() {
   SPLIT_WORDS_RESULT=($value)
 }
 
+protect_runtime_generated_files() {
+  git update-index --skip-worktree -- \
+    deploy/mosquitto/generated/.gitignore \
+    deploy/mosquitto/generated/.gitkeep 2>/dev/null || true
+}
+
 append_unique() {
   local array_name="$1"
   shift
@@ -579,6 +585,7 @@ if [[ -n "$ENV_CORE_HEALTH_SERVICES" ]]; then
 fi
 
 configure_optional_evolution_services
+protect_runtime_generated_files
 stash_release_blocking_changes
 
 WORKTREE_CHANGES="$(git_status_for_release)"
