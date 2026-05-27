@@ -282,6 +282,9 @@ stash_release_blocking_changes() {
   local changes
   local stash_ref
   local timestamp
+  local paths=()
+  local line
+  local path
 
   changes="$(git_status_for_release)"
   if [[ -z "$changes" ]]; then
@@ -294,10 +297,20 @@ stash_release_blocking_changes() {
   echo "[info] Ada perubahan lokal di VPS yang bisa menghalangi release; disimpan ke git stash: ${stash_ref}"
   printf '%s\n' "$changes"
 
-  git stash push --message "$stash_ref" -- . \
-    ':!deploy/mosquitto/generated' \
-    ':!backups' \
-    ':!.env.production' >/dev/null
+  while IFS= read -r line; do
+    path="${line:3}"
+    if [[ "$path" == *" -> "* ]]; then
+      path="${path##* -> }"
+    fi
+    [[ -n "$path" ]] && paths+=("$path")
+  done <<< "$changes"
+
+  if [[ "${#paths[@]}" -eq 0 ]]; then
+    echo "[warn] Tidak ada path aman untuk distash; lanjutkan validasi working tree."
+    return 0
+  fi
+
+  git stash push --include-untracked --message "$stash_ref" -- "${paths[@]}" >/dev/null
 
   echo "[info] File env, backup, generated Mosquitto, dan file ignored lain tetap dipertahankan."
 }
