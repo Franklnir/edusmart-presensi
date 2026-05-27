@@ -15,6 +15,7 @@ use Illuminate\Support\Str;
 class QuizController extends ApiController
 {
     private const DEFAULT_QUIZ_TIMEZONE = 'Asia/Jakarta';
+
     private const DEVICE_SESSION_STALE_SECONDS = 90;
 
     public function __construct(
