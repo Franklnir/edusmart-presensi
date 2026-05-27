@@ -43,7 +43,10 @@ const readActiveAuthSession = async ({
   let lastError = null
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+    const { data: sessionData, error: sessionError } = await supabase.auth.waitForSessionReady({
+      attempts: 1,
+      delayMs: 0
+    })
     if (sessionError) {
       lastError = new Error(sessionError.message || 'Gagal memuat sesi login')
     } else {

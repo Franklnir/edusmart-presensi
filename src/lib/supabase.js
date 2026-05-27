@@ -657,6 +657,8 @@ const makeError = (message, status, code) => ({
   code
 })
 
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
 const isAbortError = (error) => (
   error?.name === 'AbortError' ||
   error?.code === 20 ||
@@ -2158,6 +2160,58 @@ const auth = {
     return GOOGLE_CLIENT_ID
   },
 
+  async waitForSessionReady({
+    attempts = 8,
+    delayMs = 350
+  } = {}) {
+    const maxAttempts = Math.max(1, Number(attempts) || 1)
+    const retryDelayMs = Math.max(0, Number(delayMs) || 0)
+    let lastError = null
+
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const res = await apiFetch('/api/auth/me', {
+        method: 'GET',
+        cacheTtlMs: 0,
+        persistCache: false
+      })
+
+      if (!res.error) {
+        const profile = res.raw?.data?.profile || null
+        const user = normalizeUser(res.raw?.data?.user, profile)
+        const settings = res.raw?.data?.settings || null
+        const hasSuperAdminFlag = Object.prototype.hasOwnProperty.call(res.raw?.data || {}, 'is_super_admin')
+        const isSuperAdmin = Boolean(res.raw?.data?.is_super_admin)
+
+        if (user && profile) {
+          return {
+            data: {
+              isSuperAdmin,
+              settings,
+              superAdminChecked: hasSuperAdminFlag,
+              profile,
+              session: { user, profile, settings, isSuperAdmin, superAdminChecked: hasSuperAdminFlag },
+              user
+            },
+            error: null
+          }
+        }
+
+        lastError = makeError('Sesi login belum siap.', 0, 'AUTH_SESSION_NOT_READY')
+      } else {
+        lastError = res.error
+      }
+
+      if (attempt < maxAttempts - 1 && retryDelayMs > 0) {
+        await wait(retryDelayMs)
+      }
+    }
+
+    return {
+      data: { session: null, user: null, profile: null },
+      error: lastError || makeError('Sesi login belum siap.', 0, 'AUTH_SESSION_NOT_READY')
+    }
+  },
+
   getProviderState(user) {
     const providers = collectUserProviders(user || {})
     return {
@@ -2176,9 +2230,14 @@ const auth = {
     if (res.error) return { data: null, error: res.error }
 
     invalidateDbSelectCache()
+    const ready = await this.waitForSessionReady()
+    if (!ready.error && ready.data?.user && ready.data?.profile) {
+      return { data: ready.data, error: null }
+    }
+
     const profile = res.raw?.data?.profile || null
     const user = normalizeUser(res.raw?.data?.user, profile)
-    return { data: { user, profile, session: user ? { user } : null }, error: null }
+    return { data: { user, profile, session: user ? { user, profile } : null }, error: null }
   },
 
   async signInWithGoogle(options = {}) {
@@ -2222,8 +2281,12 @@ const auth = {
     if (res.error) return { data: null, error: res.error }
 
     invalidateDbSelectCache()
-    const user = normalizeUser(res.raw?.data?.user, res.raw?.data?.profile)
+    const ready = await this.waitForSessionReady()
+    if (!ready.error && ready.data?.user && ready.data?.profile) {
+      return { data: ready.data, error: null }
+    }
 
+    const user = normalizeUser(res.raw?.data?.user, res.raw?.data?.profile)
     return {
       data: {
         user,
@@ -2243,8 +2306,12 @@ const auth = {
     if (res.error) return { data: null, error: res.error }
 
     invalidateDbSelectCache()
-    const user = normalizeUser(res.raw?.data?.user, res.raw?.data?.profile)
+    const ready = await this.waitForSessionReady()
+    if (!ready.error && ready.data?.user && ready.data?.profile) {
+      return { data: ready.data, error: null }
+    }
 
+    const user = normalizeUser(res.raw?.data?.user, res.raw?.data?.profile)
     return {
       data: {
         user,

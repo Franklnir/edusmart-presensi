@@ -303,6 +303,15 @@ const Login = () => {
 
       if (result?.error) {
         const errorMsg = result.error.toLowerCase();
+        const isSessionPreparing =
+          errorMsg.includes('sesi login belum siap') ||
+          errorMsg.includes('login belum selesai diproses')
+
+        if (isSessionPreparing) {
+          setError('Sesi login sedang disiapkan. Tunggu sebentar lalu klik Masuk sekali lagi.')
+          return
+        }
+
         const newFails = failCount + 1;
         setFailCount(newFails);
 
