@@ -2304,13 +2304,13 @@ export default function GuruQuiz() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4 mt-5">
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">Kelas</label>
+          <div className="sismu-filter-grid mt-5">
+            <div className="sismu-filter-field">
+              <label className="sismu-filter-label">Kelas</label>
               <select
                 name="quiz_class_filter"
                 aria-label="Filter kelas quiz"
-                className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white text-sm shadow-sm"
+                className="sismu-filter-control"
                 value={selectedKelas}
                 onChange={(e) => setSelectedKelas(e.target.value)}
               >
@@ -2321,12 +2321,12 @@ export default function GuruQuiz() {
                 ))}
               </select>
             </div>
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">Mata Pelajaran</label>
+            <div className="sismu-filter-field">
+              <label className="sismu-filter-label">Mata Pelajaran</label>
               <select
                 name="quiz_mapel_filter"
                 aria-label="Filter mata pelajaran quiz"
-                className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white text-sm shadow-sm"
+                className="sismu-filter-control"
                 value={selectedMapel}
                 onChange={(e) => setSelectedMapel(e.target.value)}
               >
@@ -2337,12 +2337,12 @@ export default function GuruQuiz() {
                 ))}
               </select>
             </div>
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">Bulan</label>
+            <div className="sismu-filter-field">
+              <label className="sismu-filter-label">Bulan</label>
               <select
                 name="quiz_month_filter"
                 aria-label="Filter bulan quiz"
-                className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white text-sm shadow-sm"
+                className="sismu-filter-control"
                 value={selectedMonth}
                 onChange={(e) => setSelectedMonth(e.target.value)}
               >

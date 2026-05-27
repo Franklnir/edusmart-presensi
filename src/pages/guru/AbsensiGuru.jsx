@@ -2769,7 +2769,7 @@ function AbsensiGuru() {
             </div>
             <div className={view === 'absen' ? 'grid grid-cols-1 2xl:grid-cols-[minmax(0,1fr)_390px] gap-5 items-start' : 'grid grid-cols-1 gap-5'}>
               <div className="min-w-0 space-y-5">
-                <div className={`grid grid-cols-1 md:grid-cols-2 gap-5 items-start ${view === 'absen' ? 'xl:grid-cols-3' : 'xl:grid-cols-2'}`}>
+                <div className={`sismu-filter-grid ${view === 'absen' ? '' : 'sismu-filter-grid--wide'}`}>
               <AcademicPeriodArchiveFilter
                 activeAcademicPeriod={activeAcademicPeriod}
                 periodFilter={periodFilter}
@@ -2781,12 +2781,12 @@ function AbsensiGuru() {
                 title="Periode Absensi"
                 compact
               />
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wide">
+              <div className="sismu-filter-field">
+                <label className="sismu-filter-label uppercase tracking-wide">
                   Pilih Kelas
                 </label>
                 <select
-                  className="w-full px-4 py-3 rounded-2xl border border-slate-300 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm"
+                  className="sismu-filter-control"
                   value={kelas}
                   onChange={e => {
                     setKelas(e.target.value)
@@ -2803,19 +2803,19 @@ function AbsensiGuru() {
                   ))}
                 </select>
                 {!myKelasList.length && (
-                  <p className="mt-2 text-xs font-medium text-amber-700">
+                  <p className="sismu-filter-help font-medium text-amber-700">
                     Belum ada kelas dari jadwal mengajar pada tahun ajaran ini.
                   </p>
                 )}
               </div>
               {view === 'absen' && (
                 <>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wide">
+                  <div className="sismu-filter-field">
+                    <label className="sismu-filter-label uppercase tracking-wide">
                       Pilih Jadwal
                     </label>
                     <select
-                      className="w-full px-4 py-3 rounded-2xl border border-slate-300 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm"
+                      className="sismu-filter-control"
                       value={selectedScheduleId}
                       onChange={e => {
                         const nextId = e.target.value
@@ -2834,7 +2834,7 @@ function AbsensiGuru() {
                       ))}
                     </select>
                     {kelas && schedulesForSelectedClass.length === 0 && (
-                      <p className="mt-2 text-xs font-medium text-amber-700">
+                      <p className="sismu-filter-help font-medium text-amber-700">
                         Kelas tersedia. Belum ada jadwal pada tanggal ini di tahun ajaran yang dipilih.
                       </p>
                     )}

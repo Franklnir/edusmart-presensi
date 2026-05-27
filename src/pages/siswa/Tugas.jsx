@@ -1670,21 +1670,21 @@ export default function TugasSiswa() {
             <span>Filter</span>
           </h3>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">Kelas</label>
+          <div className="sismu-filter-grid">
+            <div className="sismu-filter-field">
+              <label className="sismu-filter-label">Kelas</label>
               <input
-                className="w-full px-4 py-3 border border-slate-300 rounded-xl bg-slate-50 text-sm"
+                className="sismu-filter-control"
                 value={selectedKelas || kelasSiswa || ''}
                 readOnly
               />
-              <p className="text-[11px] text-slate-500 mt-1">Kelas otomatis dari profil.</p>
+              <p className="sismu-filter-help">Kelas otomatis dari profil.</p>
             </div>
 
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">Mapel</label>
+            <div className="sismu-filter-field">
+              <label className="sismu-filter-label">Mapel</label>
               <select
-                className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white text-sm"
+                className="sismu-filter-control"
                 value={selectedMapel}
                 onChange={(e) => setSelectedMapel(e.target.value)}
                 disabled={isMapelLoading && mapelOptions.length === 0}
@@ -1701,10 +1701,10 @@ export default function TugasSiswa() {
               </select>
             </div>
 
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">Status</label>
+            <div className="sismu-filter-field">
+              <label className="sismu-filter-label">Status</label>
               <select
-                className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white text-sm"
+                className="sismu-filter-control"
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
               >
@@ -1715,10 +1715,10 @@ export default function TugasSiswa() {
               </select>
             </div>
 
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">Rentang Waktu</label>
+            <div className="sismu-filter-field">
+              <label className="sismu-filter-label">Rentang Waktu</label>
               <select
-                className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white text-sm"
+                className="sismu-filter-control"
                 value={timeRange}
                 onChange={(e) => setTimeRange(e.target.value)}
               >
@@ -1729,10 +1729,10 @@ export default function TugasSiswa() {
               </select>
             </div>
 
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">Cari</label>
+            <div className="sismu-filter-field">
+              <label className="sismu-filter-label">Cari</label>
               <input
-                className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white text-sm"
+                className="sismu-filter-control"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder="Cari judul / mapel..."

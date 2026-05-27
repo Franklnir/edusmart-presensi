@@ -2345,13 +2345,13 @@ export default function TugasGuru() {
             <span>Buat Tugas Baru</span>
           </h3>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-            <div>
-              <label htmlFor="tugas-kelas" className="block text-sm font-semibold text-slate-700 mb-2">Kelas</label>
+          <div className="sismu-filter-grid">
+            <div className="sismu-filter-field">
+              <label htmlFor="tugas-kelas" className="sismu-filter-label">Kelas</label>
               <select
                 id="tugas-kelas"
                 name="kelas"
-                className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+                className="sismu-filter-control"
                 value={kelas}
                 onChange={(e) => setKelas(e.target.value)}
               >
@@ -2362,15 +2362,15 @@ export default function TugasGuru() {
                   </option>
                 ))}
               </select>
-              <p className="text-[11px] text-slate-500 mt-1">Hanya kelas yang Anda ampu yang tampil.</p>
+              <p className="sismu-filter-help">Hanya kelas yang Anda ampu yang tampil.</p>
             </div>
 
-            <div>
-              <label htmlFor="tugas-mapel" className="block text-sm font-semibold text-slate-700 mb-2">Mata Pelajaran</label>
+            <div className="sismu-filter-field">
+              <label htmlFor="tugas-mapel" className="sismu-filter-label">Mata Pelajaran</label>
               <select
                 id="tugas-mapel"
                 name="mapel"
-                className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white disabled:opacity-50 text-sm"
+                className="sismu-filter-control disabled:opacity-50"
                 value={selectedMapel}
                 onChange={(e) => setSelectedMapel(e.target.value)}
                 disabled={!kelas || mapelList.length === 0}
@@ -2386,12 +2386,12 @@ export default function TugasGuru() {
               </select>
             </div>
 
-            <div>
-              <label htmlFor="tugas-judul" className="block text-sm font-semibold text-slate-700 mb-2">Judul Tugas</label>
+            <div className="sismu-filter-field">
+              <label htmlFor="tugas-judul" className="sismu-filter-label">Judul Tugas</label>
               <input
                 id="tugas-judul"
                 name="judul"
-                className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+                className="sismu-filter-control"
                 value={form.judul}
                 onChange={(e) => setForm((prev) => ({ ...prev, judul: e.target.value }))}
                 placeholder="Judul tugas..."
@@ -2399,13 +2399,13 @@ export default function TugasGuru() {
               />
             </div>
 
-            <div>
-              <label htmlFor="tugas-mulai" className="block text-sm font-semibold text-slate-700 mb-2">Mulai</label>
+            <div className="sismu-filter-field">
+              <label htmlFor="tugas-mulai" className="sismu-filter-label">Mulai</label>
               <input
                 id="tugas-mulai"
                 name="mulai"
                 type="datetime-local"
-                className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+                className="sismu-filter-control"
                 value={form.mulai}
                 onChange={(e) => {
                   const mulai = clampDateTimeLocal(e.target.value, createPeriodBounds.min, createPeriodBounds.endsAt)
@@ -2420,13 +2420,13 @@ export default function TugasGuru() {
               />
             </div>
 
-            <div>
-              <label htmlFor="tugas-deadline" className="block text-sm font-semibold text-slate-700 mb-2">Deadline</label>
+            <div className="sismu-filter-field">
+              <label htmlFor="tugas-deadline" className="sismu-filter-label">Deadline</label>
               <input
                 id="tugas-deadline"
                 name="deadline"
                 type="datetime-local"
-                className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+                className="sismu-filter-control"
                 value={form.deadline}
                 onChange={(e) => setForm((prev) => ({
                   ...prev,
@@ -2633,24 +2633,24 @@ export default function TugasGuru() {
               </h3>
 
               <div className="space-y-3">
-                <div>
-                  <label htmlFor="filter-tugas-cari" className="block text-sm font-semibold text-slate-700 mb-2">Cari tugas</label>
+                <div className="sismu-filter-field">
+                  <label htmlFor="filter-tugas-cari" className="sismu-filter-label">Cari tugas</label>
                   <input
                     id="filter-tugas-cari"
                     name="filter_tugas_cari"
-                    className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+                    className="sismu-filter-control"
                     value={historySearchTerm}
                     onChange={(e) => setHistorySearchTerm(e.target.value)}
                     placeholder="Judul, mapel, kelas..."
                   />
                 </div>
 
-                <div>
-                  <label htmlFor="filter-tugas-kelas" className="block text-sm font-semibold text-slate-700 mb-2">Kelas</label>
+                <div className="sismu-filter-field">
+                  <label htmlFor="filter-tugas-kelas" className="sismu-filter-label">Kelas</label>
                   <select
                     id="filter-tugas-kelas"
                     name="filter_kelas"
-                    className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+                    className="sismu-filter-control"
                     value={selectedKelasFilter}
                     onChange={(e) => setSelectedKelasFilter(e.target.value)}
                   >
@@ -2663,12 +2663,12 @@ export default function TugasGuru() {
                   </select>
                 </div>
 
-                <div>
-                  <label htmlFor="filter-tugas-mapel" className="block text-sm font-semibold text-slate-700 mb-2">Mapel</label>
+                <div className="sismu-filter-field">
+                  <label htmlFor="filter-tugas-mapel" className="sismu-filter-label">Mapel</label>
                   <select
                     id="filter-tugas-mapel"
                     name="filter_mapel"
-                    className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm disabled:opacity-50"
+                    className="sismu-filter-control disabled:opacity-50"
                     value={selectedSubject}
                     onChange={(e) => setSelectedSubject(e.target.value)}
                     disabled={!selectedKelasFilter || mapelListFilter.length === 0}
@@ -2682,12 +2682,12 @@ export default function TugasGuru() {
                   </select>
                 </div>
 
-                <div>
-                  <label htmlFor="filter-tugas-status" className="block text-sm font-semibold text-slate-700 mb-2">Status Deadline</label>
+                <div className="sismu-filter-field">
+                  <label htmlFor="filter-tugas-status" className="sismu-filter-label">Status Deadline</label>
                   <select
                     id="filter-tugas-status"
                     name="filter_status"
-                    className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+                    className="sismu-filter-control"
                     value={filterStatus}
                     onChange={(e) => setFilterStatus(e.target.value)}
                   >
@@ -2709,12 +2709,12 @@ export default function TugasGuru() {
                   compact
                 />
 
-                <div>
-                  <label htmlFor="filter-tugas-rentang-waktu" className="block text-sm font-semibold text-slate-700 mb-2">Rentang Waktu</label>
+                <div className="sismu-filter-field">
+                  <label htmlFor="filter-tugas-rentang-waktu" className="sismu-filter-label">Rentang Waktu</label>
                   <select
                     id="filter-tugas-rentang-waktu"
                     name="filter_rentang_waktu"
-                    className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+                    className="sismu-filter-control"
                     value={timeRange}
                     onChange={(e) => setTimeRange(e.target.value)}
                   >

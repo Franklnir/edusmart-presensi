@@ -3097,15 +3097,15 @@ export default function LaporanRekap() {
 
         {/* === CONTROLS === */}
         <div
-          className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200/60 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-7 gap-4 print:hidden"
+          className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200/60 sismu-filter-grid print:hidden"
         >
           {/* Kelas */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+          <div className="sismu-filter-field">
+            <label className="sismu-filter-label">
               Kelas
             </label>
             <select
-              className="w-full border border-slate-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="sismu-filter-control"
               value={selectedKelas}
               onChange={(e) => setSelectedKelas(e.target.value)}
             >
@@ -3119,12 +3119,12 @@ export default function LaporanRekap() {
 
           {/* Mapel (tidak dipakai untuk tab Rekap Wali Kelas) */}
           {!isRekapTab && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+            <div className="sismu-filter-field">
+              <label className="sismu-filter-label">
                 Mapel
               </label>
               <select
-                className="w-full border border-slate-300 rounded-xl px-4 py-3 text-sm disabled:bg-gray-100 disabled:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="sismu-filter-control disabled:bg-gray-100 disabled:text-gray-400"
                 value={selectedMapel}
                 onChange={(e) => setSelectedMapel(e.target.value)}
               >
@@ -3149,27 +3149,27 @@ export default function LaporanRekap() {
             compact
           />
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+          <div className="sismu-filter-field">
+            <label className="sismu-filter-label">
               Angkatan
             </label>
-            <div className="w-full border border-slate-300 rounded-xl px-4 py-3 text-sm bg-slate-50 font-semibold text-slate-900">
+            <div className="sismu-filter-control bg-slate-50 font-semibold text-slate-900">
               {selectedFilterKelasMeta?.angkatan || '-'}
             </div>
-            <div className="mt-1 text-[11px] text-slate-500 truncate">
+            <div className="sismu-filter-help truncate">
               Mengikuti kelas yang dipilih.
             </div>
           </div>
 
           {/* Multi-Select Bulan */}
-          <div className="relative" ref={dropdownRef}>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+          <div className="sismu-filter-field relative" ref={dropdownRef}>
+            <label className="sismu-filter-label">
               Bulan & Tahun
             </label>
             <div>
               <button
                 type="button"
-                className="w-full border border-slate-300 rounded-xl px-4 py-3 text-left bg-white flex justify-between items-center text-sm min-w-0"
+                className="sismu-filter-control text-left flex justify-between items-center min-w-0"
                 onClick={() => setShowBulanDropdown(!showBulanDropdown)}
               >
                 <span
@@ -3197,7 +3197,7 @@ export default function LaporanRekap() {
                 </svg>
               </button>
             </div>
-            <div className="mt-1 text-[11px] text-slate-500 truncate">
+            <div className="sismu-filter-help truncate">
               {reportPeriod.rangeLabel || 'Mengikuti periode akademik'}
             </div>
 
@@ -3245,12 +3245,12 @@ export default function LaporanRekap() {
           </div>
 
           {/* Tombol Refresh */}
-          <div className="flex flex-col justify-end">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+          <div className="sismu-filter-field">
+            <label className="sismu-filter-label">
               Aksi
             </label>
             <button
-              className="w-full h-[48px] bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition flex items-center justify-center gap-2 shadow-sm"
+              className="sismu-filter-action bg-blue-600 text-white hover:bg-blue-700 transition flex items-center justify-center gap-2 shadow-sm"
               onClick={() => {
                 if (activeTab === 'absensi') loadRekapAbsensi()
                 else if (activeTab === 'tugas') loadRekapTugas()

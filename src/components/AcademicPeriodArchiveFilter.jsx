@@ -74,8 +74,8 @@ export default function AcademicPeriodArchiveFilter({
 
   return (
     <>
-      <div className={className}>
-        <div className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">
+      <div className={`sismu-filter-field ${className}`}>
+        <div className="sismu-filter-label uppercase tracking-wide">
           {title}
         </div>
         <button
@@ -83,7 +83,7 @@ export default function AcademicPeriodArchiveFilter({
           type="button"
           onClick={handleOpen}
           disabled={disabled}
-          className={`w-full rounded-2xl border border-slate-300 bg-white text-left shadow-sm transition-all hover:border-indigo-300 hover:bg-indigo-50/50 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-60 ${
+          className={`sismu-filter-control text-left hover:border-indigo-300 hover:bg-indigo-50/50 disabled:cursor-not-allowed disabled:opacity-60 ${
             compact ? 'px-3 py-2.5' : 'px-4 py-3'
           }`}
           aria-label={`Buka pengaturan ${title.toLowerCase()}`}
@@ -93,7 +93,7 @@ export default function AcademicPeriodArchiveFilter({
               <div className="truncate text-sm font-bold text-slate-900">
                 {selectedYear || '-'}
               </div>
-              <div className="mt-0.5 text-[11px] font-medium text-slate-500">
+              <div className="mt-0.5 truncate text-[11px] font-medium text-slate-500">
                 {isArchive ? 'Periode arsip dipilih' : 'Mengikuti periode aktif sekolah'}
               </div>
             </div>

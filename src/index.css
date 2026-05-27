@@ -749,6 +749,82 @@ body.quiz-strict-active img {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--theme-accent) 18%, transparent) !important;
 }
 
+.sismu-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+
+.sismu-filter-grid--wide {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.sismu-filter-field {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.sismu-filter-label {
+  min-height: 1.25rem;
+  color: rgb(51 65 85);
+  font-size: 0.875rem;
+  font-weight: 700;
+  line-height: 1.25rem;
+}
+
+.sismu-filter-control {
+  min-height: 3.5rem;
+  width: 100%;
+  border-radius: 1rem;
+  border: 1px solid rgb(203 213 225);
+  background: #fff;
+  padding: 0.75rem 1rem;
+  color: rgb(15 23 42);
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+  outline: none;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+}
+
+.sismu-filter-control:focus {
+  border-color: rgb(79 70 229);
+  box-shadow: 0 0 0 3px rgb(99 102 241 / 0.18);
+}
+
+.sismu-filter-control:disabled,
+.sismu-filter-control[readonly] {
+  background: rgb(248 250 252);
+  color: rgb(71 85 105);
+  opacity: 1;
+}
+
+.sismu-filter-help {
+  min-height: 1rem;
+  color: rgb(100 116 139);
+  font-size: 0.6875rem;
+  line-height: 1rem;
+}
+
+.sismu-filter-action {
+  min-height: 3.5rem;
+  width: 100%;
+  border-radius: 1rem;
+  padding: 0.75rem 1rem;
+  font-weight: 700;
+  line-height: 1.25rem;
+}
+
+@media (max-width: 640px) {
+  .sismu-filter-grid,
+  .sismu-filter-grid--wide {
+    grid-template-columns: 1fr;
+  }
+}
+
 .app-shell--user-themed table {
   background: var(--theme-surface-bg) !important;
   color: var(--theme-text) !important;
