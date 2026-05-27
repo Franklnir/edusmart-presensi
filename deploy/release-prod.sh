@@ -658,6 +658,8 @@ fi
 
 DEPLOY_PHASE="pull_images"
 if [[ "$PULL_IMAGES" == "true" ]]; then
+  echo "[4/9] Bersihkan image/cache Docker tidak terpakai sebelum pull..."
+  docker system prune -af || true
   echo "[4/9] Pull image registry..."
   compose pull \
     "${IMAGE_SERVICES[@]}"

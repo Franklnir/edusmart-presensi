@@ -275,6 +275,9 @@ jobs:
               '  printf "%s" "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin' \
               'fi' \
               'unset GHCR_TOKEN' \
+              'echo "[preflight] Bersihkan image/cache Docker tidak terpakai sebelum fetch release..."' \
+              'docker system prune -af || true' \
+              'df -h / || true' \
               'if [ -n "$RELEASE_BRANCH" ]; then' \
               '  git fetch origin "+refs/heads/${RELEASE_BRANCH}:refs/remotes/origin/${RELEASE_BRANCH}" --tags --prune || git fetch --all --tags --prune' \
               'else' \
