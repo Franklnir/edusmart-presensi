@@ -167,7 +167,6 @@ const applyQuizOrder = (questionRows = [], groupedOptions = {}, rawOrder = null)
 
 const FULLSCREEN_REQUIRED_MESSAGE = 'Quiz mode ketat wajib fullscreen. Klik tombol Izinkan Fullscreen & Mulai, lalu pilih Izinkan pada browser.'
 const FULLSCREEN_FAILED_MESSAGE = 'Browser menolak fullscreen. Klik ulang tombol mulai dan pilih Izinkan pada popup browser.'
-const TEXT_INPUT_FULLSCREEN_GRACE_MS = 8000
 const MONTH_FILTER_ALL = ''
 const MONTH_FILTER_THIS = '__this_month'
 
@@ -475,6 +474,7 @@ export default function SiswaQuiz() {
   const [sessionNeedsManualStart, setSessionNeedsManualStart] = useState(false)
   const [sessionQuizFallback, setSessionQuizFallback] = useState(null)
   const [fullscreenGuideOpen, setFullscreenGuideOpen] = useState(false)
+  const [deviceLockNotice, setDeviceLockNotice] = useState({ open: false, message: '', retryAfter: null })
   const [privacyShield, setPrivacyShield] = useState({
     open: false,
     message: '',
@@ -499,7 +499,6 @@ export default function SiswaQuiz() {
   const violationTriggeredRef = useRef(false)
   const violationCountRef = useRef(0)
   const violationLogRef = useRef({ key: '', at: 0 })
-  const inputFullscreenExitLogRef = useRef({ key: '', at: 0 })
   const strictSecurityLockRef = useRef({ key: '', at: 0 })
   const strictSecurityIncidentRef = useRef({ active: false, id: '', at: 0, reason: '' })
   const sessionInitRef = useRef('')
@@ -529,7 +528,13 @@ export default function SiswaQuiz() {
     setIsTaking(false)
     setSessionNeedsManualStart(false)
     setSubmitConfirmOpen(false)
-    pushToast('error', error.message || 'Quiz sedang aktif di perangkat lain.')
+    const message = error.message || 'Quiz ini sedang aktif di perangkat lain. Lanjutkan dari perangkat pertama atau minta guru mereset attempt.'
+    setDeviceLockNotice({
+      open: true,
+      message,
+      retryAfter: error?.retry_after_seconds ?? null
+    })
+    pushToast('error', message)
     if (isSessionPage) {
       navigate('/siswa/quiz', { replace: true })
     }
@@ -1091,6 +1096,29 @@ export default function SiswaQuiz() {
   useEffect(() => {
     violationLogRef.current = { key: '', at: 0 }
   }, [selectedQuiz?.id, activeSubmissionId])
+
+  useEffect(() => {
+    if (!isTaking || !user?.id) return undefined
+    const deviceId = getStableQuizDeviceId()
+    if (!deviceId) return undefined
+
+    let stopped = false
+    const pingQuizPresence = async () => {
+      try {
+        await supabase.presence.ping({ deviceId, activity: true })
+      } catch {}
+    }
+
+    void pingQuizPresence()
+    const interval = setInterval(() => {
+      if (!stopped) void pingQuizPresence()
+    }, 10000)
+
+    return () => {
+      stopped = true
+      clearInterval(interval)
+    }
+  }, [isTaking, user?.id])
 
   useEffect(() => {
     if (!celebration.open) return
@@ -1776,26 +1804,15 @@ export default function SiswaQuiz() {
     }
 
     const markFullscreenExitDuringInput = () => {
-      const nextCount = violationCountRef.current + 1
-      violationCountRef.current = nextCount
-      setViolationCount(nextCount)
-      setViolationMessage('Fullscreen keluar saat mengetik esai. Kejadian dicatat dan wajib kembali fullscreen.')
-      setTextInputFullscreenGraceUntil(Date.now() + TEXT_INPUT_FULLSCREEN_GRACE_MS)
-
       const questionId = activeQuestion?.id || ''
-      const dedupeKey = `${selectedQuiz?.id || ''}|${activeSubmissionId || ''}|${questionId}`
-      const nowMs = Date.now()
-      if (inputFullscreenExitLogRef.current.key === dedupeKey && nowMs - Number(inputFullscreenExitLogRef.current.at || 0) < TEXT_INPUT_FULLSCREEN_GRACE_MS) {
-        return
-      }
-      inputFullscreenExitLogRef.current = { key: dedupeKey, at: nowMs }
-      void logViolationEvent(
+      setTextInputFocused(false)
+      setTextInputFullscreenGraceUntil(0)
+      lockStrictSession(
+        'Fullscreen keluar saat mengetik esai. Quiz dikunci sampai Anda kembali fullscreen.',
         'fullscreen_exit_during_essay_input',
-        'Fullscreen keluar saat siswa sedang mengisi jawaban esai.',
         {
-          warning_count: nextCount,
           question_id: questionId,
-          grace_ms: TEXT_INPUT_FULLSCREEN_GRACE_MS
+          input_active: true
         }
       )
     }
@@ -2321,6 +2338,46 @@ export default function SiswaQuiz() {
               Tutup Notifikasi
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+  )
+
+  const deviceLockOverlay = deviceLockNotice.open && (
+    <div className="fixed inset-0 z-[1450] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center px-4">
+      <div className="w-full max-w-lg rounded-3xl border border-red-200 bg-white p-5 sm:p-6 shadow-2xl">
+        <div className="inline-flex items-center gap-2 rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-bold uppercase tracking-wide text-red-700">
+          Perangkat Quiz Dikunci
+        </div>
+        <h3 className="mt-4 text-2xl font-black text-slate-900">
+          Quiz Aktif di Perangkat Lain
+        </h3>
+        <p className="mt-2 text-sm leading-6 text-slate-600">
+          {deviceLockNotice.message}
+        </p>
+        {deviceLockNotice.retryAfter != null && (
+          <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            Jika perangkat pertama mati atau koneksinya putus, coba lagi sekitar {deviceLockNotice.retryAfter} detik.
+          </div>
+        )}
+        <div className="mt-5 flex flex-col sm:flex-row gap-2 sm:justify-end">
+          <button
+            type="button"
+            onClick={() => setDeviceLockNotice({ open: false, message: '', retryAfter: null })}
+            className="px-4 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-700 text-sm font-semibold"
+          >
+            Tutup
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setDeviceLockNotice({ open: false, message: '', retryAfter: null })
+              setQuizDetailsRetryTick((prev) => prev + 1)
+            }}
+            className="px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-sm font-semibold shadow-sm"
+          >
+            Coba Lagi
+          </button>
         </div>
       </div>
     </div>
@@ -2932,6 +2989,7 @@ export default function SiswaQuiz() {
         {submitConfirmModal}
         {strictPrivacyShieldOverlay}
         {fullscreenGuideModal}
+        {deviceLockOverlay}
       </div>
     )
   }

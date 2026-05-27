@@ -15,6 +15,7 @@ use Illuminate\Support\Str;
 class QuizController extends ApiController
 {
     private const DEFAULT_QUIZ_TIMEZONE = 'Asia/Jakarta';
+    private const DEVICE_SESSION_STALE_SECONDS = 90;
 
     public function __construct(
         private readonly QuizScoringService $scoringService,
@@ -2289,10 +2290,25 @@ class QuizController extends ApiController
         $lockedDeviceId = $this->clientDeviceIdFromMeta($storedMeta);
 
         if ($lockedDeviceId !== '' && ! hash_equals($lockedDeviceId, $currentDeviceId)) {
-            return response()->json([
-                'error' => 'Quiz ini sedang aktif di perangkat lain. Lanjutkan dari perangkat pertama atau minta guru mereset attempt.',
-                'code' => 'quiz_device_session_locked',
-            ], 409);
+            $lockedLastSeenAt = null;
+            try {
+                $lastSeenRaw = $storedMeta['last_seen_at'] ?? $storedMeta['locked_at'] ?? null;
+                $lockedLastSeenAt = $lastSeenRaw ? Carbon::parse((string) $lastSeenRaw) : null;
+            } catch (\Throwable) {
+                $lockedLastSeenAt = null;
+            }
+
+            $lockedStillActive = $lockedLastSeenAt !== null
+                && $lockedLastSeenAt->diffInSeconds($now, false) <= self::DEVICE_SESSION_STALE_SECONDS;
+
+            if ($lockedStillActive) {
+                return response()->json([
+                    'error' => 'Quiz ini sedang aktif di perangkat lain. Lanjutkan dari perangkat pertama atau minta guru mereset attempt.',
+                    'code' => 'quiz_device_session_locked',
+                    'locked_last_seen_at' => $lockedLastSeenAt?->toISOString(),
+                    'retry_after_seconds' => max(1, self::DEVICE_SESSION_STALE_SECONDS - $lockedLastSeenAt->diffInSeconds($now, false)),
+                ], 409);
+            }
         }
 
         if (! Schema::hasColumn('quiz_submissions', 'client_meta')) {
@@ -2308,6 +2324,10 @@ class QuizController extends ApiController
             'session_locked' => true,
             'last_seen_at' => $now->toISOString(),
         ]);
+        if ($lockedDeviceId !== '' && ! hash_equals($lockedDeviceId, $currentDeviceId)) {
+            $mergedMeta['previous_device_id'] = $lockedDeviceId;
+            $mergedMeta['takeover_at'] = $now->toISOString();
+        }
         if (empty($mergedMeta['locked_at'])) {
             $mergedMeta['locked_at'] = $now->toISOString();
         }

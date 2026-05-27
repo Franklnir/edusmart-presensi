@@ -958,7 +958,7 @@ export default function GuruQuiz() {
         if (siswaIds.length) {
           const { data: presenceRows, error: presenceError } = await supabase
             .from('user_presence')
-            .select('user_id, last_seen_at, activity_count')
+            .select('user_id, device_id, last_seen_at, activity_count')
             .in('user_id', siswaIds)
             .order('last_seen_at', { ascending: false })
             .limit(2000)
@@ -972,7 +972,8 @@ export default function GuruQuiz() {
                   online: false,
                   active_devices: 0,
                   activity_count: 0,
-                  last_seen_at: null
+                  last_seen_at: null,
+                  active_device_ids: new Set()
                 }
               }
               const current = presenceMap[userId]
@@ -984,10 +985,15 @@ export default function GuruQuiz() {
                 }
                 if (seenAt.getTime() >= cutoffMs) {
                   current.online = true
-                  current.active_devices += 1
+                  const deviceKey = String(row?.device_id || `unknown-${userId}`).trim()
+                  current.active_device_ids.add(deviceKey)
+                  current.active_devices = current.active_device_ids.size
                   current.activity_count += Number(row?.activity_count || 0)
                 }
               }
+            })
+            Object.values(presenceMap).forEach((presence) => {
+              delete presence.active_device_ids
             })
           }
         }
@@ -3012,6 +3018,9 @@ export default function GuruQuiz() {
                           <span className="px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 border border-orange-200">
                             Online: {ongoingOnlineCount}
                           </span>
+                          <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                            Device aktif: {ongoingStudents.reduce((sum, student) => sum + Number(presenceByStudent[student.id]?.active_devices || 0), 0)}
+                          </span>
                         </div>
                         <div className="space-y-2">
                           {!attemptedStudents.length && (
@@ -3029,6 +3038,8 @@ export default function GuruQuiz() {
                             const isEssayCorrected = Boolean(sub?.essay_review_completed_at)
                             const presence = presenceByStudent[p.id] || null
                             const isOnline = Boolean(presence?.online)
+                            const activeDeviceCount = Number(presence?.active_devices || 0)
+                            const hasMultipleDevices = activeDeviceCount > 1
                             const status = sub?.status === 'finished' ? 'Selesai' : 'Mengerjakan'
                             const durationText = formatDurationText(sub?.started_at, sub?.finished_at || nowTick)
                             const latestRetake = latestRetakeByStudent[p.id] || null
@@ -3060,11 +3071,16 @@ export default function GuruQuiz() {
                                       Simpan terakhir: {formatDateTime(sub.last_saved_at)}
                                     </div>
                                   )}
-                                  <div className={`text-[11px] font-semibold ${isOnline ? 'text-orange-700' : 'text-slate-500'}`}>
+                                  <div className={`text-[11px] font-semibold ${hasMultipleDevices ? 'text-red-600' : isOnline ? 'text-orange-700' : 'text-slate-500'}`}>
                                     {isOnline
-                                      ? 'Online sekarang'
+                                      ? `Online sekarang • ${activeDeviceCount || 1} device aktif`
                                       : `Offline${presence?.last_seen_at ? ` • Terakhir online: ${formatDateTime(presence.last_seen_at)}` : ''}`}
                                   </div>
+                                  {hasMultipleDevices && (
+                                    <div className="text-[11px] font-semibold text-red-600">
+                                      Perhatian: akun ini terlihat aktif di lebih dari 1 device.
+                                    </div>
+                                  )}
                                   <div className={`text-[11px] font-semibold mt-1 ${warningCount > 0 ? 'text-red-600' : 'text-slate-500'}`}>
                                     Peringatan attempt ini: {warningCount}
                                     {warningSummary?.lastAt ? ` • ${formatDateTime(warningSummary.lastAt)}` : ''}
@@ -3086,6 +3102,8 @@ export default function GuruQuiz() {
                                     className={`text-xs px-2 py-1 rounded-full ${
                                       sub?.status === 'finished'
                                         ? 'bg-green-100 text-green-700'
+                                        : hasMultipleDevices
+                                          ? 'bg-red-100 text-red-700 border border-red-200'
                                         : isOnline
                                           ? 'bg-orange-100 text-orange-700 border border-orange-200'
                                           : 'bg-yellow-100 text-yellow-700'

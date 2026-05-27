@@ -3127,19 +3127,19 @@ const auth = {
         staleKey: `quiz.detail.${id}`,
         timeoutMs: 15000
       })
-      return { data: res.raw?.data ?? res.data, error: res.error }
+      return { data: res.raw?.data ?? res.data, error: res.error ? { ...res.error, ...(res.raw || {}) } : null }
     },
     async start(payload) {
       const res = await apiFetch('/api/quiz/start', { method: 'POST', body: payload })
-      return { data: res.raw?.data ?? res.data, error: res.error }
+      return { data: res.raw?.data ?? res.data, error: res.error ? { ...res.error, ...(res.raw || {}) } : null }
     },
     async saveAnswer(payload) {
       const res = await apiFetch('/api/quiz/answer', { method: 'POST', body: payload })
-      return { data: res.raw?.data ?? res.data, error: res.error }
+      return { data: res.raw?.data ?? res.data, error: res.error ? { ...res.error, ...(res.raw || {}) } : null }
     },
     async submit(payload) {
       const res = await apiFetch('/api/quiz/submit', { method: 'POST', body: payload })
-      return { data: res.raw?.data ?? res.data, error: res.error }
+      return { data: res.raw?.data ?? res.data, error: res.error ? { ...res.error, ...(res.raw || {}) } : null }
     },
     async logViolation(payload) {
       const res = await apiFetch('/api/quiz/violation', { method: 'POST', body: payload })
