@@ -1273,9 +1273,6 @@ function StorageManager() {
                 Read-only
               </span>
             </div>
-            <p className="mt-1 max-w-3xl text-sm text-slate-500">
-              Admin sekolah hanya memantau pemakaian VPS dan Neva Cloud S3 milik sekolah sendiri. Pengaturan kuota, cleanup, restore, dan purge tetap dikelola Super Admin.
-            </p>
           </div>
           <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-600">
             Periode aktif: <span className="font-semibold text-slate-900">{activePeriod?.tahun_ajaran || '-'} {activePeriod?.semester || ''}</span>

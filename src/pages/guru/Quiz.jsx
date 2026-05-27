@@ -2524,7 +2524,7 @@ export default function GuruQuiz() {
                     )}
                   </div>
                 </div>
-                <div className="grid grid-cols-1 gap-3 p-4 text-sm sm:grid-cols-2 lg:grid-cols-5">
+                <div className="grid grid-cols-1 gap-3 p-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
                   <div className="rounded-lg border border-slate-200 px-3 py-2 text-slate-700">
                     Total siswa mapel: <span className="font-semibold text-slate-900">{totalStudents}</span>
                   </div>
@@ -2542,19 +2542,6 @@ export default function GuruQuiz() {
                     Sedang mengerjakan: <span className="font-semibold">
                       {activeWorkingStudents.length} siswa
                       {ongoingOnlineCount > 0 ? ` • ${ongoingOnlineCount} online` : ''}
-                    </span>
-                  </div>
-                  <div className={`rounded-lg border px-3 py-2 ${
-                    selectedEssayStudentPendingCount > 0
-                      ? 'border-red-200 bg-red-50 text-red-700'
-                      : selectedEssayQuestionCount > 0
-                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                        : 'border-slate-200 text-slate-600'
-                  }`}>
-                    Status koreksi: <span className="font-semibold">
-                      {selectedEssayQuestionCount === 0
-                        ? 'Tanpa esai'
-                        : `Belum ${selectedEssayStudentPendingCount} • Sudah ${selectedEssayStudentGradedCount}`}
                     </span>
                   </div>
                 </div>
@@ -2613,30 +2600,9 @@ export default function GuruQuiz() {
                   </div>
                 </div>
                 {scheduleDurationMinutes != null && (
-                  <div className="mt-3 rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-xs text-indigo-700">
-                    Total durasi otomatis: <span className="font-semibold">{scheduleDurationMinutes} menit</span>
-                    {normalizeMode(selectedQuiz) !== 'regular' && ' (dipakai sebagai timer UTS/UAS siswa)'}
-                  </div>
-                )}
-                {schedulePreviewEndAt && (
-                  <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-700">
-                    Perkiraan selesai: <span className="font-semibold">{formatDateTime(schedulePreviewEndAt)}</span>
-                  </div>
-                )}
-                <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">
-                  Batas tahun periode: {periodRangeLabel}. Saat ada siswa mengerjakan, hanya deadline/durasi yang boleh diubah.
-                </div>
-                <div className={`mt-3 rounded-lg border p-3 text-xs ${
-                  selectedQuizSettingsReady.ok
-                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                    : 'border-amber-200 bg-amber-50 text-amber-700'
-                }`}>
-                  Status sebelum jadwal: <span className="font-semibold">{selectedQuizSettingsReady.message}</span>
-                </div>
-                {selectedStatus?.kind === 'expired' && !quizContentLocked && (
-                  <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
-                    Quiz ini sudah berakhir. Untuk menjadwalkan ulang, ubah Tanggal Mulai ke waktu setelah sekarang dan sesuaikan durasi/deadline.
-                  </div>
+                  <p className="mt-2 text-xs font-medium text-slate-500">
+                    Durasi: {scheduleDurationMinutes} menit{schedulePreviewEndAt ? ` • Selesai ${formatDateTime(schedulePreviewEndAt)}` : ''}
+                  </p>
                 )}
                 <div className="mt-4 flex justify-end">
                   <button
@@ -3327,12 +3293,12 @@ export default function GuruQuiz() {
                         : 'text-slate-600'
                   }`}>
                     {detailReviewCompletedAt
-                      ? `Status koreksi: Selesai (${formatDateTime(detailReviewCompletedAt)})`
+                      ? `Selesai ${formatDateTime(detailReviewCompletedAt)}`
                       : !detailHasEssayQuestions
-                        ? 'Quiz ini tidak memiliki soal esai.'
+                        ? 'Tanpa soal esai'
                       : detailEssayPendingCount > 0
-                        ? `Pending koreksi esai: ${detailEssayPendingCount}`
-                        : 'Semua nilai esai sudah terisi. Klik Selesai untuk finalisasi koreksi.'}
+                        ? `Esai belum dinilai: ${detailEssayPendingCount}`
+                        : 'Esai sudah dinilai'}
                   </div>
                 </div>
               </div>

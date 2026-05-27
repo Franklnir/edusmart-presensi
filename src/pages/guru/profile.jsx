@@ -953,9 +953,6 @@ export default function ProfileGuru() {
                       </>
                     )}
                   </div>
-                  <p className="mt-3 text-center text-[11px] leading-5 text-slate-500">
-                    Verifikasi email 6 digit biasa sudah dimatikan. Kode 6 digit sekarang dipakai saat Anda mengganti email atau password akun.
-                  </p>
                 </div>
 
                 <button

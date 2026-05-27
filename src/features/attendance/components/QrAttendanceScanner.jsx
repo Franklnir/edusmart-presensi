@@ -416,10 +416,6 @@ export const QrScannerPanel = ({ onSubmitToken, isSubmitting, lastError }) => {
           </div>
         </div>
 
-        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-          QR akan otomatis ditolak jika sudah lewat jam pelajaran, token kedaluwarsa, atau bukan untuk sekolah dan kelas kamu.
-        </div>
-
         {(cameraError || lastError) && (
           <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {cameraError || lastError}

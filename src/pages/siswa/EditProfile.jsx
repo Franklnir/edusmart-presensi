@@ -851,19 +851,6 @@ export default function EditProfile() {
     return k ? k.nama : formatKelasDisplay(kelasSlug)
   }
 
-  const getFilledFieldCount = () => {
-    const required = ['nama', 'jk']
-    const optional = ['nis', 'usia', 'no_hp_siswa', 'no_hp_wali']
-    return {
-      required: required.filter((f) => form[f]).length,
-      optional: optional.filter((f) => form[f]).length,
-      totalRequired: required.length,
-      totalOptional: optional.length
-    }
-  }
-
-  const fieldStats = getFilledFieldCount()
-
   const securityAccountCard = (
     <div
       className={`rounded-2xl shadow-sm border p-6 ${needsAccountSetup
@@ -881,9 +868,6 @@ export default function EditProfile() {
               ? 'Password awal buatan sistem bisa diganti langsung. Jika email sistem ingin diganti ke email aktif, email baru akan diverifikasi dulu dengan kode 6 digit.'
               : 'Untuk mengganti email atau password, sistem akan mengirim kode verifikasi 6 digit. Jika email masih tertaut ke Google, lepas tautan dulu sebelum mengganti email lagi.'}
           </p>
-        </div>
-        <div className="text-xs text-slate-700 bg-white px-4 py-2 rounded-xl border border-slate-200">
-          <span className="font-semibold">Login awal siswa:</span> NIS + tanggal lahir.
         </div>
       </div>
 
@@ -1057,14 +1041,6 @@ export default function EditProfile() {
                 </p>
               </div>
 
-              <div className="bg-gradient-to-r from-emerald-500 to-emerald-600 rounded-2xl px-5 py-3 shadow-lg">
-                <p className="text-white text-center font-medium text-sm">
-                  <span className="block opacity-90 mb-1">Kelengkapan Data</span>
-                  <span className="block">
-                    {fieldStats.required}/{fieldStats.totalRequired} wajib
-                  </span>
-                </p>
-              </div>
             </div>
           </div>
         </div>
@@ -1151,11 +1127,6 @@ export default function EditProfile() {
                   <p className="text-slate-600 text-sm line-clamp-1 break-all">{email || 'Email tidak tersedia'}</p>
                 </div>
 
-                <div className="w-full p-3 bg-blue-50 rounded-xl border border-blue-200">
-                  <p className="text-xs text-blue-700 text-center">
-                    📷 Foto otomatis dikompresi ke <strong>maksimal 100KB</strong>
-                  </p>
-                </div>
               </div>
             </div>
 
@@ -1182,9 +1153,6 @@ export default function EditProfile() {
                     </>
                   )}
                 </div>
-                <p className="text-xs text-slate-500 text-center leading-5">
-                  Verifikasi email 6 digit biasa sudah dimatikan. Kode 6 digit sekarang dipakai saat Anda mengganti email atau password akun.
-                </p>
               </div>
             </div>
 

@@ -2019,9 +2019,6 @@ export default function APengaturan() {
               <div className="min-w-0">
                 <p className="text-xs font-semibold uppercase tracking-wide text-emerald-600">Kalender Akademik</p>
                 <h2 className="mt-1 text-xl font-bold text-gray-900">Tahun Ajaran Aktif</h2>
-                <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-                  Satu tahun ajaran adalah satu periode besar yang berisi Semester Ganjil dan Semester Genap. Filter halaman lain akan melihat seluruh bulan dalam periode ini, dan jadwal berlaku untuk 1 tahun ajaran penuh.
-                </p>
                 <div className="mt-3 flex flex-wrap gap-2 text-xs">
                   <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 font-semibold text-emerald-700">
                     Tahun ajaran {activeAcademicPeriod.tahunAjaran}
@@ -2134,9 +2131,6 @@ export default function APengaturan() {
               )}
 
               <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-xs leading-5 text-slate-600">
-                  Tahun ajaran menaungi dua semester sekaligus. Filter bulan di tugas, quiz, laporan, absensi, dan storage akan memakai seluruh rentang Ganjil dan Genap dalam periode ini.
-                </p>
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
@@ -2885,11 +2879,6 @@ export default function APengaturan() {
                         {emailVerified ? 'Terverifikasi' : 'Belum'}
                       </span>
                     </div>
-                    <p className={`text-[11px] leading-5 ${emailVerified ? 'text-emerald-600' : 'text-slate-500'}`}>
-                      {emailVerified
-                        ? '✅ Email akun sudah terverifikasi.'
-                        : 'Verifikasi email 6 digit biasa sudah dimatikan. Kode 6 digit sekarang dipakai saat mengganti email atau password akun.'}
-                    </p>
                   </div>
 
                   <button
