@@ -17,7 +17,7 @@ import {
   resolveAcademicPeriod
 } from '../../utils/academicPeriod'
 import {
-  fetchAbsensiSettings,
+  ABSENSI_SETTINGS_COLUMNS,
   isMissingAllowSelfAbsenColumnError
 } from '../../utils/absensiSettings'
 import {
@@ -1252,10 +1252,63 @@ function AbsensiGuru() {
 
   /* ===== Load Data Jadwal & Guru ===== */
   useEffect(() => {
-    loadJadwal()
-    loadGuruList()
+    loadInitialTeachingData()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, periodFilter.tahunAjaran])
+
+  const loadInitialTeachingData = async () => {
+    if (!user?.id) return
+
+    try {
+      let jadwalQuery = supabase
+        .from('jadwal')
+        .select(JADWAL_COLUMNS)
+        .eq('guru_id', user.id)
+        .order('hari')
+        .order('jam_mulai')
+
+      if (periodFilter.tahunAjaran) jadwalQuery = jadwalQuery.eq('tahun_ajaran', periodFilter.tahunAjaran)
+
+      const { data, error } = await supabase.batch([
+        { key: 'jadwal', query: jadwalQuery },
+        {
+          key: 'guru',
+          query: supabase
+            .from('profiles')
+            .select(GURU_COLUMNS)
+            .eq('role', 'guru')
+            .order('nama')
+        }
+      ])
+
+      if (error && !data) throw error
+      const jadwalRes = data?.jadwal || {}
+      const guruRes = data?.guru || {}
+
+      if (jadwalRes.error) {
+        console.error('Error loading jadwal:', jadwalRes.error)
+        pushToast('error', 'Gagal memuat jadwal mengajar')
+      } else {
+        const rows = jadwalRes.data || []
+        setJadwalAll(rows)
+        if (selectedScheduleId && !rows.some((jadwal) => jadwal.id === selectedScheduleId)) {
+          setSelectedScheduleId('')
+          setCurrentSchedule(null)
+          setAllowSelfAbsen(false)
+        }
+        setLastUpdate(new Date())
+      }
+
+      if (guruRes.error) {
+        console.error('Error loading guru list:', guruRes.error)
+      } else {
+        setGuruList(guruRes.data || [])
+      }
+    } catch (error) {
+      console.error('Exception loading initial teaching data:', error)
+      pushToast('error', 'Terjadi kesalahan saat memuat data awal absensi')
+    }
+  }
 
   const loadJadwal = async () => {
     if (!user?.id) return
@@ -1289,25 +1342,6 @@ function AbsensiGuru() {
     } catch (error) {
       console.error('Exception loading jadwal:', error)
       pushToast('error', 'Terjadi kesalahan saat memuat jadwal')
-    }
-  }
-
-  const loadGuruList = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select(GURU_COLUMNS)
-        .eq('role', 'guru')
-        .order('nama')
-
-      if (error) {
-        console.error('Error loading guru list:', error)
-        return
-      }
-
-      setGuruList(data || [])
-    } catch (error) {
-      console.error('Exception loading guru list:', error)
     }
   }
 
@@ -1554,27 +1588,43 @@ function AbsensiGuru() {
         reqsQuery = reqsQuery.eq('tahun_ajaran', periodFilter.tahunAjaran)
       }
 
-      const [settingsRes, studentsRes, absenRes, reqsRes] = await Promise.all([
-        fetchAbsensiSettings({
-          kelas,
-          tanggal: tgl,
-          mapel: schedule.mapel,
-          periodFilter: { tahunAjaran: periodFilter.tahunAjaran },
-          single: true
-        }),
-        supabase
-          .from('profiles')
-          .select(STUDENT_COLUMNS)
-          .eq('role', 'siswa')
-          .eq('kelas', kelas)
-          .order('nama'),
-        absenQuery,
-        reqsQuery
+      let settingsQuery = supabase
+        .from('absensi_settings')
+        .select(ABSENSI_SETTINGS_COLUMNS)
+        .eq('kelas', kelas)
+        .eq('tanggal', tgl)
+        .eq('mapel', schedule.mapel)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+
+      if (periodFilter.tahunAjaran) {
+        settingsQuery = settingsQuery.eq('tahun_ajaran', periodFilter.tahunAjaran)
+      }
+
+      const { data: absensiBatch } = await supabase.batch([
+        { key: 'settings', query: settingsQuery },
+        {
+          key: 'students',
+          query: supabase
+            .from('profiles')
+            .select(STUDENT_COLUMNS)
+            .eq('role', 'siswa')
+            .eq('kelas', kelas)
+            .order('nama')
+        },
+        { key: 'absen', query: absenQuery },
+        { key: 'reqs', query: reqsQuery }
       ])
 
       if (!isLatestRequest()) return
 
-      const { data: settings, error: settingsError } = settingsRes
+      const settingsRes = absensiBatch?.settings || { data: null, error: null }
+      const studentsRes = absensiBatch?.students || { data: [], error: null }
+      const absenRes = absensiBatch?.absen || { data: [], error: null }
+      const reqsRes = absensiBatch?.reqs || { data: [], error: null }
+
+      const settings = Array.isArray(settingsRes.data) ? settingsRes.data[0] : settingsRes.data
+      const { error: settingsError } = settingsRes
       if (settingsError) {
         console.error('Error loading settings:', settingsError)
       } else if (settings) {

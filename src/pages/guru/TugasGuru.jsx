@@ -717,43 +717,44 @@ export default function TugasGuru() {
   }, [timeRange])
 
   /* =========================
-     1) Load kelas list (master)
+     1) Load master kelas + jadwal guru dalam satu request batch
 ========================= */
   useEffect(() => {
-    const loadKelasData = async () => {
-      try {
-        const { data, error } = await supabase.from('kelas').select(KELAS_COLUMNS).order('grade').order('suffix')
-        if (error) throw error
-        setKelasList(data || [])
-      } catch (error) {
-        console.error('Error loading kelas data:', error)
-      }
-    }
-    loadKelasData()
-  }, [])
-
-  /* =========================
-     2) Load jadwal guru (kelas+mapel yang diampu)
-========================= */
-  useEffect(() => {
-    const loadJadwal = async () => {
+    const loadInitialData = async () => {
       if (!user?.id) return
       try {
-	        let query = supabase.from('jadwal').select(JADWAL_GURU_COLUMNS).eq('guru_id', user.id)
-	        query = applyPeriodFilters(query)
-	        const { data, error } = await query
-	        if (error) throw error
-	        setJadwalAll(filterSchedulesForSemester(data || [], periodFilter.semester))
-	      } catch (error) {
-	        console.error('Error loading jadwal:', error)
-	        pushToast('error', 'Gagal memuat jadwal mengajar')
-	      }
-	    }
-	    loadJadwal()
-	  }, [applyPeriodFilters, periodFilter.semester, user?.id, pushToast])
+        let jadwalQuery = supabase.from('jadwal').select(JADWAL_GURU_COLUMNS).eq('guru_id', user.id)
+        jadwalQuery = applyPeriodFilters(jadwalQuery)
+
+        const { data, error } = await supabase.batch([
+          {
+            key: 'kelas',
+            query: supabase.from('kelas').select(KELAS_COLUMNS).order('grade').order('suffix')
+          },
+          {
+            key: 'jadwal',
+            query: jadwalQuery
+          }
+        ])
+        if (error && !data) throw error
+
+        const kelasRes = data?.kelas || {}
+        const jadwalRes = data?.jadwal || {}
+        if (kelasRes.error) throw kelasRes.error
+        if (jadwalRes.error) throw jadwalRes.error
+
+        setKelasList(kelasRes.data || [])
+        setJadwalAll(filterSchedulesForSemester(jadwalRes.data || [], periodFilter.semester))
+      } catch (error) {
+        console.error('Error loading data awal tugas:', error)
+        pushToast('error', 'Gagal memuat data awal tugas')
+      }
+    }
+    loadInitialData()
+  }, [applyPeriodFilters, periodFilter.semester, user?.id, pushToast])
 
   /* =========================
-     3) Mapel list untuk form create
+     2) Mapel list untuk form create
 ========================= */
   useEffect(() => {
     if (kelas && jadwalAll.length) {
@@ -773,7 +774,7 @@ export default function TugasGuru() {
   }, [kelas, jadwalAll, selectedMapel])
 
   /* =========================
-     4) Mapel list untuk filter history
+     3) Mapel list untuk filter history
 ========================= */
   useEffect(() => {
     if (selectedKelasFilter && jadwalAll.length) {
@@ -793,7 +794,7 @@ export default function TugasGuru() {
   }, [selectedKelasFilter, jadwalAll, selectedSubject])
 
   /* =========================
-     5) Load list tugas (history) + stats
+     4) Load list tugas (history) + stats
 ========================= */
   const loadTugas = useCallback(async () => {
     if (!user?.id) return
@@ -893,32 +894,35 @@ export default function TugasGuru() {
       const uniqueKelas = [...new Set(tugasData.map((t) => t.kelas).filter(Boolean))]
       const uniqueKelasVariants = Array.from(new Set(uniqueKelas.flatMap((k) => buildKelasVariants(k))))
 
-      const jawabanPromise =
-        tugasIds.length > 0
-          ? applyPeriodFilters(
-              supabase.from('tugas_jawaban').select(TUGAS_JAWABAN_STATS_COLUMNS).in('tugas_id', tugasIds)
-            )
-          : Promise.resolve({ data: [], error: null })
+      const statRequests = []
+      if (tugasIds.length > 0) {
+        statRequests.push({
+          key: 'jawaban',
+          query: applyPeriodFilters(
+            supabase.from('tugas_jawaban').select(TUGAS_JAWABAN_STATS_COLUMNS).in('tugas_id', tugasIds)
+          )
+        })
+      }
+      if (uniqueKelasVariants.length > 0) {
+        statRequests.push({
+          key: 'siswa',
+          query: supabase
+            .from('profiles')
+            .select('id, kelas')
+            .eq('role', 'siswa')
+            .in('kelas', uniqueKelasVariants)
+        })
+      }
 
-      const siswaPromise =
-        uniqueKelasVariants.length > 0
-          ? supabase
-              .from('profiles')
-              .select('id, kelas')
-              .eq('role', 'siswa')
-              .in('kelas', uniqueKelasVariants)
-          : Promise.resolve({ data: [], error: null })
+      const { data: statBatch } = await supabase.batch(statRequests)
 
-      const [
-        { data: jawabanData, error: jawErr },
-        { data: siswaData, error: siswaErr }
-      ] = await Promise.all([jawabanPromise, siswaPromise])
+      const jawabanRes = statBatch?.jawaban || { data: [], error: null }
+      const siswaRes = statBatch?.siswa || { data: [], error: null }
+      if (jawabanRes.error) console.error('Error fetching stats jawaban tugas:', jawabanRes.error)
+      if (siswaRes.error) console.error('Error fetching students for stats:', siswaRes.error)
 
-      if (jawErr) console.error('Error fetching stats jawaban tugas:', jawErr)
-      if (siswaErr) console.error('Error fetching students for stats:', siswaErr)
-
-      const jawabanArr = jawabanData || []
-      const siswaArr = siswaData || []
+      const jawabanArr = jawabanRes.data || []
+      const siswaArr = siswaRes.data || []
 
       const formatted = tugasData.map((tugas) => {
         const kelasKey = normalizeKelasKey(tugas.kelas)
@@ -991,7 +995,7 @@ export default function TugasGuru() {
   }, [user?.id, loadTugas])
 
   /* =========================
-     6) Load "tugas perlu dinilai" (sidebar)
+     5) Load "tugas perlu dinilai" (sidebar)
 ========================= */
   const loadTugasPerluDinilai = useCallback(async () => {
     if (!user?.id) return
@@ -1057,7 +1061,7 @@ export default function TugasGuru() {
   }, [user?.id, loadTugasPerluDinilai])
 
   /* =========================
-     7) Detail Tugas (modal)
+     6) Detail Tugas (modal)
 ========================= */
   const loadDetailTugas = useCallback(
     async (tugas, { silent = false } = {}) => {

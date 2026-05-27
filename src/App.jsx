@@ -150,12 +150,21 @@ const App = () => {
       }
     }
 
+    let timer = null
+    const schedulePing = () => {
+      const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden'
+      timer = window.setTimeout(async () => {
+        await ping(false)
+        if (!stopped) schedulePing()
+      }, hidden ? 180000 : 60000)
+    }
+
     ping(true)
-    const interval = setInterval(() => ping(false), 30000)
+    schedulePing()
 
     return () => {
       stopped = true
-      clearInterval(interval)
+      if (timer) window.clearTimeout(timer)
     }
   }, [canTrackPresence])
 

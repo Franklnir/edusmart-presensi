@@ -81,6 +81,9 @@ const getAccessDeviceLabel = (value) => (
   ACCESS_DEVICE_OPTIONS.find((option) => option.value === normalizeAccessDevice(value))?.label || 'Web & Mobile'
 )
 
+const KELAS_COLUMNS = 'id,nama,grade,suffix,tingkat,jurusan,angkatan'
+const JADWAL_GURU_COLUMNS = 'id,kelas_id,mapel,guru_id,guru_nama,hari,jam_mulai,jam_selesai,tahun_ajaran,semester,periode_berlaku'
+
 export default function GuruQuiz() {
   const { user } = useAuthStore()
   const { pushToast, setLoading } = useUIStore()
@@ -728,43 +731,48 @@ export default function GuruQuiz() {
   }, [detailAnswers.length])
 
   useEffect(() => {
-	    const loadJadwal = async () => {
-	      if (!user?.id) return
-	      try {
-	        let query = supabase.from('jadwal').select('*').eq('guru_id', user.id)
-	        query = applyPeriodFilters(query)
-	        const { data } = await query
-	        setJadwal(filterSchedulesForSemester(data || [], periodFilter.semester))
-	      } catch (err) {
-	        console.error(err)
-	      }
-	    }
-	    loadJadwal()
-	  }, [applyPeriodFilters, periodFilter.semester, user?.id])
+    const loadInitialTeachingData = async () => {
+      if (!user?.id) return
+      try {
+        let jadwalQuery = supabase.from('jadwal').select(JADWAL_GURU_COLUMNS).eq('guru_id', user.id)
+        jadwalQuery = applyPeriodFilters(jadwalQuery)
+
+        const { data, error } = await supabase.batch([
+          { key: 'jadwal', query: jadwalQuery },
+          {
+            key: 'kelas',
+            query: supabase.from('kelas').select(KELAS_COLUMNS).order('grade').order('suffix')
+          }
+        ])
+        if (error && !data) throw error
+
+        const jadwalRes = data?.jadwal || {}
+        const kelasRes = data?.kelas || {}
+        if (jadwalRes.error) throw jadwalRes.error
+        if (kelasRes.error) throw kelasRes.error
+
+        const filteredJadwal = filterSchedulesForSemester(jadwalRes.data || [], periodFilter.semester)
+        const kelasIds = new Set(filteredJadwal.map((j) => j.kelas_id).filter(Boolean))
+        const visibleKelas = (kelasRes.data || []).filter((kelas) => kelasIds.has(kelas.id))
+
+        setJadwal(filteredJadwal)
+        setKelasList(visibleKelas)
+        setSelectedKelas((prev) => {
+          if (prev && visibleKelas.some((kelas) => kelas.id === prev)) return prev
+          return visibleKelas[0]?.id || ''
+        })
+      } catch (err) {
+        console.error('Error loading quiz teaching data:', err)
+        pushToast('error', 'Gagal memuat data awal quiz')
+      }
+    }
+    loadInitialTeachingData()
+  }, [applyPeriodFilters, periodFilter.semester, user?.id, pushToast])
 
   useEffect(() => {
     const timer = setInterval(() => setNowTick(new Date()), 1000)
     return () => clearInterval(timer)
   }, [])
-
-  useEffect(() => {
-    const loadKelas = async () => {
-      if (!jadwal.length) {
-        setKelasList([])
-        setSelectedKelas('')
-        return
-      }
-      const kelasIds = [...new Set(jadwal.map((j) => j.kelas_id).filter(Boolean))]
-      if (!kelasIds.length) {
-        setKelasList([])
-        return
-      }
-      const { data } = await supabase.from('kelas').select('*').in('id', kelasIds).order('grade').order('suffix')
-      setKelasList(data || [])
-      if (!selectedKelas && data?.length) setSelectedKelas(data[0].id)
-    }
-    loadKelas()
-  }, [jadwal, selectedKelas])
 
   useEffect(() => {
     if (!selectedKelas) {
@@ -868,25 +876,54 @@ export default function GuruQuiz() {
       const answersBySubmission = detailData?.answers_by_submission || {}
 
       let siswaRows = []
-      try {
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('id, nama, nis, photo_path, photo_url')
-          .eq('kelas', selectedKelas)
-          .eq('role', 'siswa')
-          .order('nama')
-        if (error) throw error
-        siswaRows = data || []
-      } catch (err) {
-        // Fallback untuk skema lama yang belum punya kolom photo_path.
-        if (/photo_path/i.test(String(err?.message || ''))) {
-          const { data } = await supabase
+      let historyRows = []
+      let warningRows = []
+      const detailBatchRequests = [
+        {
+          key: 'siswa',
+          query: supabase
             .from('profiles')
-            .select('id, nama, nis, photo_url')
+            .select('id, nama, nis, photo_path, photo_url')
             .eq('kelas', selectedKelas)
             .eq('role', 'siswa')
             .order('nama')
+        },
+        {
+          key: 'warnings',
+          query: supabase
+            .from('quiz_violation_logs')
+            .select('id, quiz_id, submission_id, siswa_id, event_type, event_message, event_meta, created_at')
+            .eq('quiz_id', selectedQuizId)
+            .order('created_at', { ascending: false })
+            .limit(300)
+        }
+      ]
+      try {
+        const [{ data: detailBatch }, retakeResult] = await Promise.all([
+          supabase.batch(detailBatchRequests),
+          supabase.quiz.retakeHistory(selectedQuizId)
+        ])
+
+        const siswaRes = detailBatch?.siswa || {}
+        const warningsRes = detailBatch?.warnings || {}
+        if (siswaRes.error) throw siswaRes.error
+        siswaRows = siswaRes.data || []
+        warningRows = warningsRes.error ? [] : (warningsRes.data || [])
+        if (!retakeResult?.error) historyRows = retakeResult.data || []
+      } catch (err) {
+        // Fallback untuk skema lama yang belum punya kolom photo_path.
+        if (/photo_path/i.test(String(err?.message || ''))) {
+          const [{ data }, retakeResult] = await Promise.all([
+            supabase
+              .from('profiles')
+              .select('id, nama, nis, photo_url')
+              .eq('kelas', selectedKelas)
+              .eq('role', 'siswa')
+              .order('nama'),
+            supabase.quiz.retakeHistory(selectedQuizId)
+          ])
           siswaRows = data || []
+          if (!retakeResult?.error) historyRows = retakeResult.data || []
         } else {
           throw err
         }
@@ -926,31 +963,6 @@ export default function GuruQuiz() {
             }
           })
         })
-      }
-
-      let historyRows = []
-      try {
-        const { data, error } = await supabase.quiz.retakeHistory(selectedQuizId)
-        if (!error) {
-          historyRows = data || []
-        }
-      } catch {
-        historyRows = []
-      }
-
-      let warningRows = []
-      try {
-        const { data, error } = await supabase
-          .from('quiz_violation_logs')
-          .select('id, quiz_id, submission_id, siswa_id, event_type, event_message, event_meta, created_at')
-          .eq('quiz_id', selectedQuizId)
-          .order('created_at', { ascending: false })
-          .limit(300)
-        if (!error) {
-          warningRows = data || []
-        }
-      } catch {
-        warningRows = []
       }
 
       let presenceMap = {}
