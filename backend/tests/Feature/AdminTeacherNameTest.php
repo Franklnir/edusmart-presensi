@@ -189,7 +189,7 @@ class AdminTeacherNameTest extends TestCase
         ]);
     }
 
-    public function test_teacher_can_update_own_profile_without_sensitive_fields(): void
+    public function test_teacher_can_update_own_profile_and_nip_without_sensitive_fields(): void
     {
         $tenantId = $this->defaultTenantId();
         $teacher = $this->createUserWithProfile($tenantId, 'guru', 'Bu Maya Lama', 'maya@example.com', [
@@ -221,6 +221,7 @@ class AdminTeacherNameTest extends TestCase
 
         $response->assertOk();
         $response->assertJsonPath('data.nama', 'Bu Maya Baru');
+        $response->assertJsonPath('data.nis', 'NIP-BARU');
         $response->assertJsonPath('data.email', 'maya@example.com');
 
         $this->assertDatabaseHas('profiles', [
@@ -232,7 +233,7 @@ class AdminTeacherNameTest extends TestCase
             'status' => 'active',
             'jabatan' => 'Guru Tetap',
             'rfid_uid' => 'RFID-LAMA',
-            'nis' => 'NIP-MAYA',
+            'nis' => 'NIP-BARU',
             'agama' => 'Hindu',
             'telp' => '089999',
             'alamat' => 'Alamat baru',

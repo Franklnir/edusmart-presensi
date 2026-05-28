@@ -859,17 +859,17 @@ export default function EditProfile() {
         }`}
     >
       <div className={`h-1.5 ${needsAccountSetup ? 'bg-amber-400' : 'bg-purple-500'}`} />
-      <div className="p-5 sm:p-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-3">
-            <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${
+      <div className="p-4 sm:p-5">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${
               needsAccountSetup ? 'bg-amber-100 text-amber-700' : 'bg-purple-100 text-purple-700'
             }`}>
-              <span className="text-lg">🔐</span>
+              <span className="text-base">🔐</span>
             </div>
             <div>
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Akses Akun</p>
-              <h2 className="mt-1 text-xl font-bold text-slate-900">
+              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-500">Akses Akun</p>
+              <h2 className="mt-0.5 text-base font-bold text-slate-900">
                 {needsAccountSetup ? 'Lengkapi Akun' : 'Keamanan Akun'}
               </h2>
             </div>
@@ -883,8 +883,8 @@ export default function EditProfile() {
           </span>
         </div>
 
-        <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-          <div className="grid gap-4 md:grid-cols-3">
+        <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-3 sm:p-4">
+          <div className="grid gap-3 md:grid-cols-3">
             <div className="space-y-1">
               <label className="text-sm font-semibold text-slate-900">Email Akun</label>
               <input
@@ -894,7 +894,7 @@ export default function EditProfile() {
                   setAccountForm((prev) => ({ ...prev, email: e.target.value }))
                 }
                 placeholder="nama@email.com"
-                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
               />
               {!isEmailFormat(accountForm.email) && accountForm.email && (
                 <p className="text-xs text-red-600">Format email tidak valid</p>
@@ -910,7 +910,7 @@ export default function EditProfile() {
                     setAccountForm((prev) => ({ ...prev, password: e.target.value }))
                   }
                   placeholder="Minimal 6 karakter"
-                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
                 />
               </div>
             )}
@@ -924,17 +924,17 @@ export default function EditProfile() {
                     setAccountForm((prev) => ({ ...prev, confirmPassword: e.target.value }))
                   }
                   placeholder="Ulangi password"
-                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
                 />
               </div>
             )}
           </div>
 
-          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:justify-end">
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:justify-end">
             <button
               type="button"
               onClick={handleTogglePasswordFields}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-800 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-900"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-800 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-900"
             >
               {showPasswordFields ? 'Batal Ganti Password' : 'Ganti Password'}
             </button>
@@ -942,7 +942,7 @@ export default function EditProfile() {
               type="button"
               onClick={handleCompleteAccount}
               disabled={accountSaving}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-purple-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-70"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-70"
             >
               {accountSaving
                 ? 'Menyimpan...'
@@ -959,7 +959,7 @@ export default function EditProfile() {
           </p>
         )}
 
-        <div className="mt-5 rounded-2xl border border-purple-100 bg-white px-4 py-4">
+        <div className="mt-4 rounded-2xl border border-purple-100 bg-white px-3 py-3">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-50 text-sm font-bold text-slate-700">

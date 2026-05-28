@@ -191,6 +191,7 @@ export default function ProfileGuru() {
   const fileInputRef = useRef(null)
   const [form, setForm] = useState({
     nama: '',
+    nis: '',
     jk: '',
     agama: '',
     telp: '',
@@ -424,6 +425,7 @@ export default function ProfileGuru() {
 
       setForm({
         nama: profile.nama || '',
+        nis: profile.nis || '',
         jk: profile.jk || '',
         agama: profile.agama || '',
         telp: profile.telp || '',
@@ -569,6 +571,7 @@ export default function ProfileGuru() {
     try {
       const { error } = await supabase.profile.updateMe({
         nama: form.nama.trim(),
+        nis: form.nis ? form.nis.trim() : null,
         jk: form.jk,
         agama: form.agama || null,
         telp: form.telp || null,
@@ -671,13 +674,11 @@ export default function ProfileGuru() {
   }
 
   const identityRows = useMemo(() => ([
-    { label: 'NIP/NUPTK', value: displayValue(profile?.nis) },
     { label: 'Jabatan', value: displayValue(profile?.jabatan) },
     { label: 'Role Akun', value: roleLabel(profile?.role) },
     { label: 'Terakhir Sinkron', value: formatDateTimeLabel(profile?.updated_at) }
   ]), [
     profile?.jabatan,
-    profile?.nis,
     profile?.role,
     profile?.updated_at
   ])
@@ -690,22 +691,22 @@ export default function ProfileGuru() {
         }`}
     >
       <div className={`h-1.5 ${needsAccountSetup ? 'bg-amber-400' : 'bg-blue-500'}`} />
-      <div className="p-5 sm:p-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-3">
-            <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${
+      <div className="p-4 sm:p-5">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${
               needsAccountSetup ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
             }`}>
-              <span className="text-lg">🔐</span>
+              <span className="text-base">🔐</span>
             </div>
             <div>
-              <p className={`text-xs font-bold uppercase tracking-[0.18em] ${
+              <p className={`text-[11px] font-bold uppercase tracking-[0.16em] ${
                 needsAccountSetup ? 'text-amber-700' : 'text-blue-700'
               }`}>
                 Akses Akun
               </p>
               <h2
-                className={`mt-1 text-xl font-bold ${needsAccountSetup ? 'text-amber-900' : 'text-blue-900'
+                className={`mt-0.5 text-base font-bold ${needsAccountSetup ? 'text-amber-900' : 'text-blue-900'
                   }`}
               >
                 {needsAccountSetup ? 'Lengkapi Akun' : 'Keamanan Akun'}
@@ -720,8 +721,8 @@ export default function ProfileGuru() {
           </span>
         </div>
 
-        <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-          <div className="grid gap-4 md:grid-cols-3">
+        <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-3 sm:p-4">
+          <div className="grid gap-3 md:grid-cols-3">
             <div className="space-y-1">
               <label className="text-sm font-semibold text-slate-900">Email Akun</label>
               <input
@@ -731,7 +732,7 @@ export default function ProfileGuru() {
                   setAccountForm((prev) => ({ ...prev, email: e.target.value }))
                 }
                 placeholder="nama@email.com"
-                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
               />
               {!isEmailFormat(accountForm.email) && accountForm.email && (
                 <p className="text-xs text-red-600">Format email tidak valid</p>
@@ -747,7 +748,7 @@ export default function ProfileGuru() {
                     setAccountForm((prev) => ({ ...prev, password: e.target.value }))
                   }
                   placeholder="Minimal 6 karakter"
-                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                 />
               </div>
             )}
@@ -761,17 +762,17 @@ export default function ProfileGuru() {
                     setAccountForm((prev) => ({ ...prev, confirmPassword: e.target.value }))
                   }
                   placeholder="Ulangi password"
-                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                 />
               </div>
             )}
           </div>
 
-          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:justify-end">
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:justify-end">
             <button
               type="button"
               onClick={handleTogglePasswordFields}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-800 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-900"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-800 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-900"
             >
               {showPasswordFields ? 'Batal Ganti Password' : 'Ganti Password'}
             </button>
@@ -779,7 +780,7 @@ export default function ProfileGuru() {
               type="button"
               onClick={handleCompleteAccount}
               disabled={accountSaving}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
             >
               {accountSaving
                 ? 'Menyimpan...'
@@ -795,7 +796,7 @@ export default function ProfileGuru() {
           </p>
         )}
 
-        <div className="mt-5 rounded-2xl border border-blue-100 bg-white px-4 py-4">
+        <div className="mt-4 rounded-2xl border border-blue-100 bg-white px-3 py-3">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-50 text-sm font-bold text-slate-700">
@@ -929,10 +930,6 @@ export default function ProfileGuru() {
                     {form.nama || profile?.nama || 'Guru'}
                   </h2>
                   <p className="text-gray-500 text-xs truncate">{email || 'Email tidak tersedia'}</p>
-                  <p className="text-[11px] text-gray-400 mt-2">
-                    Foto disimpan sebagai <span className="font-semibold">path</span> di DB dan ditampilkan via{' '}
-                    <span className="font-semibold">signed URL</span>.
-                  </p>
                 </div>
 
                 <div className="w-full mb-4">
@@ -1012,6 +1009,17 @@ export default function ProfileGuru() {
                     value={form.nama}
                     onChange={(e) => handleFieldChange('nama', e.target.value)}
                     placeholder="Masukkan nama lengkap"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="block text-sm font-semibold text-gray-900">NIP/NUPTK</label>
+                  <input
+                    type="text"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 placeholder-gray-400 transition-all duration-200 hover:border-blue-300 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    value={form.nis}
+                    onChange={(e) => handleFieldChange('nis', e.target.value)}
+                    placeholder="Masukkan NIP/NUPTK"
                   />
                 </div>
 

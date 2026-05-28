@@ -26,8 +26,8 @@ class ProfileController extends ApiController
 
         $role = strtolower((string) ($profile->role ?? ''));
         $allowedByRole = [
-            'guru' => ['nama', 'jk', 'agama', 'telp', 'alamat', 'tanggal_lahir', 'photo_url', 'photo_path'],
-            'teacher' => ['nama', 'jk', 'agama', 'telp', 'alamat', 'tanggal_lahir', 'photo_url', 'photo_path'],
+            'guru' => ['nama', 'nis', 'jk', 'agama', 'telp', 'alamat', 'tanggal_lahir', 'photo_url', 'photo_path'],
+            'teacher' => ['nama', 'nis', 'jk', 'agama', 'telp', 'alamat', 'tanggal_lahir', 'photo_url', 'photo_path'],
             'admin' => ['nama', 'jk', 'agama', 'telp', 'alamat', 'tanggal_lahir', 'photo_url', 'photo_path'],
             'siswa' => ['jk', 'agama', 'telp', 'alamat', 'tanggal_lahir', 'no_hp_siswa', 'no_hp_wali', 'photo_url', 'photo_path'],
         ];
@@ -36,6 +36,7 @@ class ProfileController extends ApiController
         $payload = array_intersect_key($request->all(), array_flip($allowed));
         $validator = Validator::make($payload, [
             'nama' => ['sometimes', 'required', 'string', 'max:120'],
+            'nis' => ['nullable', 'string', 'max:64'],
             'jk' => ['nullable', 'string', 'max:20'],
             'agama' => ['nullable', 'string', 'max:50'],
             'telp' => ['nullable', 'string', 'max:32'],
@@ -70,6 +71,17 @@ class ProfileController extends ApiController
         if (array_key_exists('jk', $data) && $data['jk'] !== null) {
             $gender = strtoupper((string) $data['jk']);
             $data['jk'] = in_array($gender, ['L', 'P'], true) ? $gender : $data['jk'];
+        }
+        if (($role === 'guru' || $role === 'teacher') && array_key_exists('nis', $data) && $data['nis'] !== null) {
+            $duplicateQuery = DB::table('profiles')
+                ->where('id', '!=', $profile->id)
+                ->whereRaw('LOWER(nis) = ?', [strtolower((string) $data['nis'])]);
+            if ($tenantId) {
+                $duplicateQuery->where('tenant_id', $tenantId);
+            }
+            if ($duplicateQuery->exists()) {
+                return $this->deny('NIP/NUPTK sudah dipakai oleh pengguna lain.', 422);
+            }
         }
 
         $data['updated_at'] = now();
