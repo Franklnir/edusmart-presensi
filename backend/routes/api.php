@@ -204,6 +204,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'throttle:api'])->group(func
     Route::get('/scan-settings', [SettingsController::class, 'scanShow']);
     Route::patch('/scan-settings', [SettingsController::class, 'scanUpdate']);
     Route::get('/backup', [AdminBackupController::class, 'backup']);
+    Route::post('/backup/google-drive', [AdminBackupController::class, 'saveToGoogleDrive']);
     Route::post('/backup/restore', [AdminBackupController::class, 'restore']);
     Route::get('/approvals', [ApprovalController::class, 'index']);
     Route::post('/approvals/{id}/approve', [ApprovalController::class, 'approve']);

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Services\GoogleDrive\GoogleDriveService;
 use App\Traits\HasTenantBackupLogic;
 use App\Traits\HasTenantRestoreLogic;
 use Illuminate\Http\Request;
@@ -11,6 +12,10 @@ class AdminBackupController extends ApiController
 {
     use HasTenantBackupLogic;
     use HasTenantRestoreLogic;
+
+    public function __construct(private readonly GoogleDriveService $googleDriveService)
+    {
+    }
 
     public function backup(Request $request)
     {
@@ -146,6 +151,120 @@ class AdminBackupController extends ApiController
                 'tenant_id' => $tenantId,
                 'dry_run' => $dryRun,
                 'result' => $result,
+            ],
+        ]);
+    }
+
+    public function saveToGoogleDrive(Request $request)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny('Akses ditolak. Hanya admin sekolah yang bisa menyimpan backup.');
+        }
+
+        $tenantId = $this->resolveOwnedTenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        $mode = $this->normalizeBackupMode($request->input('mode'));
+        $periodScope = $this->normalizeBackupPeriodScope((string) $tenantId, $request->input());
+
+        $tables = match ($mode) {
+            'students' => $this->buildStudentBackupTables($tenantId, $periodScope),
+            'teachers' => $this->buildTeacherBackupTables($tenantId, $periodScope),
+            'classes' => $this->buildClassBackupTables($tenantId, $periodScope),
+            default => $this->buildFullBackupTables($tenantId, $periodScope),
+        };
+
+        $totalRows = 0;
+        foreach ($tables as $tableInfo) {
+            $totalRows += (int) ($tableInfo['row_count'] ?? 0);
+        }
+
+        $tenantName = null;
+        try {
+            if ($this->hasTable('settings') && $this->tableHasColumn('settings', 'tenant_id')) {
+                $tenantName = DB::table('settings')
+                    ->where('tenant_id', $tenantId)
+                    ->orderBy('id')
+                    ->value('nama_sekolah');
+            }
+        } catch (\Throwable $e) {
+            $tenantName = null;
+        }
+
+        $payload = [
+            'tenant' => [
+                'id' => $tenantId,
+                'name' => $tenantName ?: 'Sekolah',
+            ],
+            'exported_at' => now()->toIso8601String(),
+            'mode' => $mode,
+            'mode_label' => $this->backupModeLabel($mode),
+            'period' => $this->backupPeriodPayload($periodScope),
+            'summary' => [
+                'table_count' => count($tables),
+                'total_rows' => $totalRows,
+            ],
+            'manifest' => [
+                'version' => 2,
+                'backup_type' => 'tenant_database',
+                'tenant_scoped' => true,
+                'contains_storage_files' => false,
+                'contains_linked_users' => true,
+                'restore_strategy' => 'id_or_unique_key_upsert',
+                'notes' => [
+                    'Backup berisi data database tenant dan metadata file, bukan isi file storage.',
+                    'Restore mengarah ke tenant aktif admin, bukan tenant asal di file JSON.',
+                ],
+            ],
+            'tables' => $tables,
+            'formats_supported' => ['json'],
+            'generated_by' => [
+                'user_id' => (string) ($request->user()?->id ?? ''),
+                'role' => $this->role($request) ?: null,
+            ],
+        ];
+
+        try {
+            $driveFile = $this->googleDriveService->uploadTenantBackupJson(
+                (string) $tenantId,
+                (string) ($request->user()?->id ?? ''),
+                $payload
+            );
+        } catch (\Throwable $e) {
+            return $this->deny('Gagal menyimpan backup ke Google Drive: '.trim((string) $e->getMessage()), 422);
+        }
+
+        $this->logAudit(
+            $request,
+            'tenant_backup_google_drive',
+            'backup-'.$tenantId,
+            'CREATE',
+            null,
+            [
+                'type' => 'tenant_backup_google_drive',
+                'tenant_id' => $tenantId,
+                'mode' => $mode,
+                'period' => $payload['period'] ?? null,
+                'summary' => $payload['summary'] ?? [],
+                'drive_file_id' => $driveFile['drive_file_id'] ?? null,
+                'drive_folder_path' => $driveFile['drive_folder_path'] ?? null,
+            ],
+            (string) $tenantId
+        );
+
+        return response()->json([
+            'data' => [
+                'backup' => [
+                    'tenant' => $payload['tenant'],
+                    'mode' => $payload['mode'],
+                    'mode_label' => $payload['mode_label'],
+                    'period' => $payload['period'],
+                    'summary' => $payload['summary'],
+                    'manifest' => $payload['manifest'],
+                ],
+                'drive_file' => $driveFile,
             ],
         ]);
     }

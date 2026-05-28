@@ -2704,6 +2704,13 @@ const auth = {
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
+    async saveBackupToGoogleDrive(payload = {}) {
+      const res = await apiFetch('/api/admin/backup/google-drive', {
+        method: 'POST',
+        body: payload
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
     async approvals(params = {}) {
       const query = new URLSearchParams()
       Object.entries(params || {}).forEach(([key, value]) => {

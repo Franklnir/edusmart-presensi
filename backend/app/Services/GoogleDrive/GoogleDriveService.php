@@ -290,6 +290,153 @@ class GoogleDriveService
         return $this->publicStatus($tenantId, $config->fresh());
     }
 
+    public function uploadTenantBackupJson(
+        string $tenantId,
+        string $userId,
+        array $backupPayload,
+        string $fileName = ''
+    ): array {
+        $tenantId = trim($tenantId);
+        $userId = trim($userId);
+        if ($tenantId === '') {
+            throw new RuntimeException('Tenant tidak valid.');
+        }
+        if (! $this->providerConfigured()) {
+            throw new RuntimeException('Google Drive belum dikonfigurasi di server.');
+        }
+        if (! $this->tablesReady()) {
+            throw new RuntimeException('Tabel Google Drive belum dimigrasikan.');
+        }
+
+        $config = TenantGoogleDriveConfig::query()
+            ->where('tenant_id', $tenantId)
+            ->where('is_enabled', true)
+            ->first();
+
+        if (! $config || $config->status !== self::STATUS_CONNECTED || ! $config->refresh_token) {
+            throw new RuntimeException('Google Drive sekolah belum tersambung.');
+        }
+
+        $config = $this->ensureSchoolFolder($config);
+        $accessToken = $this->validAccessToken($config);
+        $schoolFolderId = trim((string) ($config->drive_folder_id ?? ''));
+        if ($schoolFolderId === '') {
+            throw new RuntimeException('Folder Google Drive sekolah belum siap.');
+        }
+
+        $targetFolder = $this->ensureBackupFolder($accessToken, $schoolFolderId, $backupPayload);
+        $folderId = (string) ($targetFolder['id'] ?? $schoolFolderId);
+        $folderPath = (string) ($targetFolder['path'] ?? 'Backup Data Sekolah');
+
+        $safeName = $this->safeFilename($fileName ?: $this->defaultBackupFileName($backupPayload));
+        if (! str_ends_with(strtolower($safeName), '.json')) {
+            $safeName .= '.json';
+        }
+
+        $contents = json_encode($backupPayload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if (! is_string($contents) || $contents === '') {
+            throw new RuntimeException('Payload backup tidak bisa dibuat.');
+        }
+
+        $mime = 'application/json';
+        $metadata = [
+            'name' => $safeName,
+            'parents' => [$folderId],
+            'description' => 'Backup database EduSmart Presensi. File ini berisi data database tenant dan metadata file, bukan isi file storage.',
+            'appProperties' => [
+                'tenant_id' => $tenantId,
+                'bucket' => 'backups',
+                'module' => 'backup',
+                'folder_path' => $folderPath,
+                'backup_mode' => (string) ($backupPayload['mode'] ?? 'full'),
+                'backup_period' => (string) ($backupPayload['period']['label'] ?? ''),
+                'backup_type' => (string) ($backupPayload['manifest']['backup_type'] ?? 'tenant_database'),
+            ],
+        ];
+
+        $created = $this->multipartUploadContents($accessToken, $metadata, $contents, $mime);
+        $fileId = trim((string) ($created['id'] ?? ''));
+        if ($fileId === '') {
+            throw new RuntimeException('Google Drive tidak mengembalikan ID file backup.');
+        }
+
+        $shareWarning = null;
+        if ((bool) $this->driveConfig('share_uploaded_files', true)) {
+            try {
+                $this->shareFileWithLink($accessToken, $fileId);
+            } catch (\Throwable $e) {
+                $shareWarning = $this->shortError($e->getMessage());
+            }
+        }
+
+        $fileInfo = $this->fetchDriveFile($accessToken, $fileId);
+        $webViewLink = (string) ($fileInfo['webViewLink'] ?? $created['webViewLink'] ?? '');
+        if ($webViewLink === '') {
+            $webViewLink = 'https://drive.google.com/file/d/'.$fileId.'/view';
+        }
+
+        $record = TenantGoogleDriveFile::query()->firstOrNew([
+            'tenant_id' => $tenantId,
+            'drive_file_id' => $fileId,
+        ]);
+        if (! $record->exists) {
+            $record->id = (string) Str::uuid();
+        }
+
+        $sizeBytes = strlen($contents);
+        $record->fill([
+            'config_id' => $config->id,
+            'uploaded_by_user_id' => $userId !== '' ? $userId : null,
+            'bucket' => 'backups',
+            'source_path' => 'backup/'.$safeName,
+            'storage_value' => $webViewLink,
+            'drive_file_name' => (string) ($fileInfo['name'] ?? $safeName),
+            'drive_web_view_link' => $webViewLink,
+            'drive_web_content_link' => (string) ($fileInfo['webContentLink'] ?? ''),
+            'mime_type' => (string) ($fileInfo['mimeType'] ?? $mime),
+            'extension' => 'json',
+            'size_bytes' => $sizeBytes,
+            'uploaded_at' => now(),
+        ]);
+
+        $period = (array) ($backupPayload['period'] ?? []);
+        if (Schema::hasColumn('tenant_google_drive_files', 'tahun_ajaran')) {
+            $record->tahun_ajaran = AcademicPeriod::normalizeAcademicYear($period['tahun_ajaran'] ?? null);
+        }
+        if (Schema::hasColumn('tenant_google_drive_files', 'semester')) {
+            $record->semester = AcademicPeriod::normalizeSemester($period['semester'] ?? null);
+        }
+        $record->save();
+
+        try {
+            $this->syncQuota($config->fresh());
+        } catch (\Throwable $e) {
+            // File backup sudah tersimpan; quota bisa disegarkan manual dari UI.
+        }
+
+        if ($shareWarning) {
+            $config->fill([
+                'last_checked_at' => now(),
+                'last_error' => $shareWarning,
+            ]);
+            $config->save();
+        }
+
+        return [
+            'bucket' => 'backups',
+            'drive_file_id' => $fileId,
+            'drive_file_name' => (string) ($fileInfo['name'] ?? $safeName),
+            'drive_web_view_link' => $webViewLink,
+            'drive_web_content_link' => (string) ($fileInfo['webContentLink'] ?? ''),
+            'drive_folder_id' => $folderId,
+            'drive_folder_path' => $folderPath,
+            'size_bytes' => $sizeBytes,
+            'size_label' => $this->formatBytes($sizeBytes),
+            'uploaded_at' => now()->toIso8601String(),
+            'quota' => $this->statusForTenant($tenantId, true)['quota'] ?? null,
+        ];
+    }
+
     public function filesForTenant(string $tenantId, array $filters = []): array
     {
         $tenantId = trim($tenantId);
@@ -945,6 +1092,39 @@ class GoogleDriveService
         ];
     }
 
+    private function ensureBackupFolder(string $accessToken, string $schoolFolderId, array $backupPayload): array
+    {
+        $periodLabel = trim((string) ($backupPayload['period']['label'] ?? 'Semua Data'));
+        $modeLabel = trim((string) ($backupPayload['mode_label'] ?? $backupPayload['mode'] ?? 'Semua Data'));
+        $segments = ['Backup Data Sekolah'];
+        if ($periodLabel !== '') {
+            $segments[] = $periodLabel;
+        }
+        if ($modeLabel !== '') {
+            $segments[] = $modeLabel;
+        }
+
+        $parentId = $schoolFolderId;
+        $path = [];
+        foreach ($segments as $segment) {
+            $folderName = $this->safeDriveFolderName($segment);
+            if ($folderName === '') {
+                continue;
+            }
+
+            $folder = $this->findChildFolder($accessToken, $parentId, $folderName)
+                ?: $this->createChildFolder($accessToken, $parentId, $folderName, 'backup data sekolah');
+
+            $parentId = (string) ($folder['id'] ?? $parentId);
+            $path[] = (string) ($folder['name'] ?? $folderName);
+        }
+
+        return [
+            'id' => $parentId,
+            'path' => implode('/', $path),
+        ];
+    }
+
     private function assignmentFolderSegments(string $sourcePath, string $tenantId): array
     {
         $parts = array_values(array_filter(explode('/', trim($sourcePath, '/')), static fn ($part) => trim($part) !== ''));
@@ -1393,6 +1573,33 @@ class GoogleDriveService
         return (array) $response->json();
     }
 
+    private function multipartUploadContents(string $accessToken, array $metadata, string $contents, string $mime): array
+    {
+        $boundary = 'edusmart_drive_'.Str::random(24);
+
+        $body = "--{$boundary}\r\n"
+            ."Content-Type: application/json; charset=UTF-8\r\n\r\n"
+            .json_encode($metadata, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+            ."\r\n--{$boundary}\r\n"
+            ."Content-Type: {$mime}\r\n\r\n"
+            .$contents
+            ."\r\n--{$boundary}--";
+
+        $response = Http::withToken($accessToken)
+            ->withHeaders([
+                'Content-Type' => 'multipart/related; boundary='.$boundary,
+            ])
+            ->timeout(90)
+            ->withBody($body, 'multipart/related; boundary='.$boundary)
+            ->post('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType,size,webViewLink,webContentLink,createdTime');
+
+        if (! $response->successful()) {
+            throw new RuntimeException($this->googleErrorMessage($response->json(), 'Gagal upload backup ke Google Drive sekolah.'));
+        }
+
+        return (array) $response->json();
+    }
+
     private function shareFileWithLink(string $accessToken, string $fileId): void
     {
         $response = Http::withToken($accessToken)
@@ -1744,6 +1951,20 @@ class GoogleDriveService
         $name = preg_replace('/[^A-Za-z0-9._-]/', '', $name) ?: 'file';
 
         return substr($name, 0, 150) ?: 'file';
+    }
+
+    private function defaultBackupFileName(array $backupPayload): string
+    {
+        $tenant = (string) ($backupPayload['tenant']['name'] ?? $backupPayload['tenant']['id'] ?? 'sekolah');
+        $mode = (string) ($backupPayload['mode'] ?? 'full');
+        $period = (string) ($backupPayload['period']['label'] ?? 'semua-data');
+        $stamp = now()->format('Ymd-His');
+        $name = strtolower($tenant.'-'.$mode.'-'.$period.'-'.$stamp);
+        $name = str_replace('/', '-', $name);
+        $name = preg_replace('/[^a-z0-9._-]+/', '-', $name) ?: 'backup';
+        $name = trim($name, '-_.') ?: 'backup';
+
+        return 'backup-'.$name.'.json';
     }
 
     private function fileExtension(string $name): string

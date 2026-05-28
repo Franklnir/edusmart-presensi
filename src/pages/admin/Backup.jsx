@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Database, ShieldCheck } from 'lucide-react'
+import { AlertTriangle, Cloud, Database, ExternalLink, RefreshCw, ShieldCheck, UploadCloud } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useUIStore } from '../../store/useUIStore'
 import { loadExcelJsBrowser } from '../../utils/excelBrowser'
@@ -55,9 +55,42 @@ const ROW_PREVIEW_LIMIT = 30
 const TEXT_PREVIEW_MAX_LINES = 220
 const TEXT_PREVIEW_MAX_CHARS = 120000
 
+const DRIVE_STATUS_DEFAULT = {
+  provider_configured: false,
+  configured: false,
+  ready: false,
+  status: 'disconnected',
+  status_label: 'Belum tersambung',
+  account_email: '',
+  folder_name: '',
+  folder_url: '',
+  last_checked_at: '',
+  last_error: '',
+  quota: {
+    used_bytes: 0,
+    used_label: '0 B',
+    limit_bytes: null,
+    limit_label: 'Tidak terbatas',
+    percent: null
+  }
+}
+
 const toNumber = (value, fallback = 0) => {
   const num = Number(value)
   return Number.isFinite(num) ? num : fallback
+}
+
+const formatBytes = (bytes) => {
+  const value = Number(bytes)
+  if (!Number.isFinite(value) || value <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let size = value
+  let index = 0
+  while (size >= 1024 && index < units.length - 1) {
+    size /= 1024
+    index += 1
+  }
+  return `${size.toFixed(index === 0 ? 0 : 2).replace(/\\.00$/, '')} ${units[index]}`
 }
 
 const toCellValue = (value) => {
@@ -448,6 +481,12 @@ export default function BackupAdmin() {
   const [restorePreviewLoading, setRestorePreviewLoading] = useState(false)
   const [restoreApplyLoading, setRestoreApplyLoading] = useState(false)
   const [restoreIncludeTables, setRestoreIncludeTables] = useState('')
+  const [driveStatus, setDriveStatus] = useState(DRIVE_STATUS_DEFAULT)
+  const [driveLoading, setDriveLoading] = useState(false)
+  const [driveConnecting, setDriveConnecting] = useState(false)
+  const [driveSyncing, setDriveSyncing] = useState(false)
+  const [driveSaving, setDriveSaving] = useState(false)
+  const [lastDriveBackup, setLastDriveBackup] = useState(null)
 
   const resolvedMonths = useMemo(() => {
     if (periodType === 'all') return null
@@ -505,6 +544,78 @@ export default function BackupAdmin() {
     }
   }
 
+  const loadDriveStatus = async ({ refresh = false, silent = false } = {}) => {
+    setDriveLoading(true)
+    try {
+      const { data, error } = refresh
+        ? await supabase.admin.syncGoogleDrive()
+        : await supabase.admin.googleDrive()
+      if (error) throw error
+      setDriveStatus(data || DRIVE_STATUS_DEFAULT)
+      if (refresh && !silent) {
+        pushToast('success', 'Status Google Drive sekolah berhasil disinkronkan')
+      }
+      return data || DRIVE_STATUS_DEFAULT
+    } catch (err) {
+      if (!silent) pushToast('error', err?.message || 'Gagal memuat status Google Drive sekolah')
+      setDriveStatus((prev) => ({ ...prev, last_error: err?.message || prev.last_error }))
+      return null
+    } finally {
+      setDriveLoading(false)
+    }
+  }
+
+  const handleConnectGoogleDrive = async () => {
+    setDriveConnecting(true)
+    try {
+      const returnUrl = `${window.location.origin}/admin/backup?drive=connected`
+      const { data, error } = await supabase.admin.googleDriveConnectUrl({ return_url: returnUrl })
+      if (error) throw error
+      if (!data?.authorization_url) throw new Error('URL sambungkan Google Drive tidak tersedia')
+      window.location.href = data.authorization_url
+    } catch (err) {
+      pushToast('error', err?.message || 'Gagal menyiapkan sambungan Google Drive')
+      setDriveConnecting(false)
+    }
+  }
+
+  const handleSyncGoogleDrive = async () => {
+    setDriveSyncing(true)
+    try {
+      await loadDriveStatus({ refresh: true })
+    } finally {
+      setDriveSyncing(false)
+    }
+  }
+
+  const handleSaveToGoogleDrive = async () => {
+    if (driveSaving || loading || downloading) return
+    setDriveSaving(true)
+    try {
+      if (periodType === 'date_range' && (!startDate || !endDate)) {
+        throw new Error('Isi tanggal mulai dan tanggal selesai untuk backup rentang tanggal')
+      }
+
+      const { data, error } = await supabase.admin.saveBackupToGoogleDrive({
+        mode,
+        period_type: periodType,
+        months: periodType === 'last_months' ? resolvedMonths || undefined : undefined,
+        tahun_ajaran: ['semester', 'academic_year'].includes(periodType) ? tahunAjaran : undefined,
+        semester: periodType === 'semester' ? semester : undefined,
+        start_date: periodType === 'date_range' ? startDate : undefined,
+        end_date: periodType === 'date_range' ? endDate : undefined
+      })
+      if (error) throw error
+      setLastDriveBackup(data?.drive_file || null)
+      await loadDriveStatus({ refresh: true, silent: true })
+      pushToast('success', 'Backup JSON berhasil disimpan ke Google Drive sekolah')
+    } catch (err) {
+      pushToast('error', err?.message || 'Gagal menyimpan backup ke Google Drive')
+    } finally {
+      setDriveSaving(false)
+    }
+  }
+
   const exportBackup = async (activePayload) => {
     if (!activePayload) return
 
@@ -548,6 +659,11 @@ export default function BackupAdmin() {
     if (!activePayload) return
     await exportBackup(activePayload)
   }
+
+  useEffect(() => {
+    loadDriveStatus({ silent: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const parseRestoreIncludeTables = () =>
     restoreIncludeTables
@@ -675,6 +791,13 @@ export default function BackupAdmin() {
     [restorePayload]
   )
   const restorePayloadPreviewTables = restorePayloadSummary.tables.slice(0, 8)
+  const driveQuota = driveStatus?.quota || DRIVE_STATUS_DEFAULT.quota
+  const driveLimitBytes = Number(driveQuota?.limit_bytes || 0)
+  const driveUsedBytes = Number(driveQuota?.used_bytes || 0)
+  const driveRemainingBytes = driveLimitBytes > 0 ? Math.max(0, driveLimitBytes - driveUsedBytes) : null
+  const drivePercent = Number.isFinite(Number(driveQuota?.percent)) ? Number(driveQuota.percent) : null
+  const driveReady = Boolean(driveStatus?.ready)
+  const driveProviderReady = Boolean(driveStatus?.provider_configured)
 
   const formatPreview = useMemo(() => {
     if (!payload) {
@@ -766,6 +889,108 @@ export default function BackupAdmin() {
                 </div>
               </div>
             </div>
+          </div>
+
+          <div className="rounded-2xl border border-blue-200 bg-gradient-to-br from-blue-50 to-white p-4 shadow-sm">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="flex items-start gap-3">
+                <div className="rounded-2xl bg-blue-100 p-3 text-blue-700">
+                  <Cloud className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-sm font-bold text-slate-900">Google Drive Backup Sekolah</h3>
+                    <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${
+                      driveReady
+                        ? 'border border-emerald-200 bg-emerald-50 text-emerald-700'
+                        : 'border border-amber-200 bg-amber-50 text-amber-700'
+                    }`}>
+                      {driveStatus?.status_label || 'Belum tersambung'}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs leading-relaxed text-slate-600">
+                    Simpan salinan backup database sekolah ke folder Google Drive yang tertaut. File Drive memakai format JSON agar bisa dipakai restore.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={handleConnectGoogleDrive}
+                  disabled={driveConnecting || driveLoading || !driveProviderReady}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-blue-700 shadow-sm hover:bg-blue-50 disabled:opacity-60"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                  {driveConnecting ? 'Membuka Google...' : driveReady ? 'Sambungkan Ulang' : 'Sambungkan Drive'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSyncGoogleDrive}
+                  disabled={driveSyncing || driveLoading || !driveProviderReady}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-60"
+                >
+                  <RefreshCw className={`h-4 w-4 ${driveSyncing ? 'animate-spin' : ''}`} />
+                  Sinkronkan
+                </button>
+              </div>
+            </div>
+
+            {!driveProviderReady ? (
+              <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                Google Drive belum aktif di server. Lengkapi konfigurasi Google Drive production sebelum admin sekolah menyambungkan akun.
+              </div>
+            ) : null}
+
+            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
+              <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                <p className="text-xs font-semibold text-slate-500">Akun Drive</p>
+                <p className="mt-1 truncate text-sm font-bold text-slate-900">{driveStatus?.account_email || '-'}</p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                <p className="text-xs font-semibold text-slate-500">Folder Tujuan</p>
+                {driveStatus?.folder_url ? (
+                  <a href={driveStatus.folder_url} target="_blank" rel="noreferrer" className="mt-1 block truncate text-sm font-bold text-blue-700 hover:underline">
+                    {driveStatus?.folder_name || 'Folder Drive'}
+                  </a>
+                ) : (
+                  <p className="mt-1 truncate text-sm font-bold text-slate-900">{driveStatus?.folder_name || '-'}</p>
+                )}
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                <p className="text-xs font-semibold text-slate-500">Sisa Google Drive</p>
+                <p className="mt-1 text-sm font-bold text-slate-900">
+                  {driveRemainingBytes === null ? 'Tidak terbatas' : formatBytes(driveRemainingBytes)}
+                </p>
+                <p className="mt-0.5 text-[11px] text-slate-500">
+                  Terpakai {driveQuota?.used_label || '0 B'} dari {driveQuota?.limit_label || 'Tidak terbatas'}
+                </p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                <p className="text-xs font-semibold text-slate-500">Kesehatan Quota</p>
+                <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100">
+                  <div
+                    className={`h-full rounded-full ${drivePercent !== null && drivePercent >= 85 ? 'bg-rose-500' : 'bg-blue-600'}`}
+                    style={{ width: `${drivePercent === null ? 0 : Math.min(100, Math.max(0, drivePercent))}%` }}
+                  />
+                </div>
+                <p className="mt-1 text-[11px] text-slate-500">{drivePercent === null ? 'Quota tidak dibatasi' : `${drivePercent}% terpakai`}</p>
+              </div>
+            </div>
+
+            {lastDriveBackup ? (
+              <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                Backup terakhir tersimpan: <strong>{lastDriveBackup.drive_file_name || 'backup.json'}</strong>
+                {' '}({lastDriveBackup.size_label || '-'}) di <strong>{lastDriveBackup.drive_folder_path || 'Backup Data Sekolah'}</strong>.
+                {lastDriveBackup.drive_web_view_link ? (
+                  <a className="ml-2 font-bold text-emerald-700 underline" href={lastDriveBackup.drive_web_view_link} target="_blank" rel="noreferrer">Buka file</a>
+                ) : null}
+              </div>
+            ) : driveStatus?.last_error ? (
+              <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                Catatan Drive: {driveStatus.last_error}
+              </div>
+            ) : null}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -883,7 +1108,7 @@ export default function BackupAdmin() {
             <button
               type="button"
               onClick={handlePreview}
-              disabled={loading || downloading}
+              disabled={loading || downloading || driveSaving}
               className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
             >
               {loading ? 'Membuat Preview...' : 'Preview Backup'}
@@ -891,10 +1116,19 @@ export default function BackupAdmin() {
             <button
               type="button"
               onClick={handleDownload}
-              disabled={loading || downloading}
+              disabled={loading || downloading || driveSaving}
               className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
             >
               {downloading ? 'Menyiapkan File...' : 'Backup & Download'}
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveToGoogleDrive}
+              disabled={loading || downloading || driveSaving || !driveReady}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              <UploadCloud className="h-4 w-4" />
+              {driveSaving ? 'Menyimpan ke Drive...' : 'Simpan JSON ke Google Drive'}
             </button>
           </div>
 
