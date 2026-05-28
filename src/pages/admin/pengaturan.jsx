@@ -3108,30 +3108,6 @@ export default function APengaturan() {
                     </div>
                   )}
 
-                  <div className="rounded-xl border border-orange-200 bg-orange-50/70 p-4">
-                    <label htmlFor="max-ekskul-per-siswa" className="block text-sm font-semibold text-orange-900">
-                      Batas Ekstrakurikuler per Siswa
-                    </label>
-                    <p className="mt-1 text-xs text-orange-700">
-                      Siswa tidak dikunci 3 ekskul lagi. Admin sekolah bisa menentukan batas aktif sesuai kebijakan sekolah.
-                    </p>
-                    <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-                      <input
-                        id="max-ekskul-per-siswa"
-                        type="number"
-                        min="1"
-                        max="99"
-                        name="max_ekskul_per_siswa"
-                        value={form.max_ekskul_per_siswa}
-                        onChange={handleChange}
-                        onBlur={() => saveSettings(true)}
-                        className="w-full rounded-lg border border-orange-200 bg-white px-4 py-3 text-sm font-bold text-slate-900 focus:border-orange-400 focus:ring-2 focus:ring-orange-200 sm:max-w-[160px]"
-                      />
-                      <span className="text-sm font-medium text-orange-800">
-                        Maksimal {normalizeEskulLimit(form.max_ekskul_per_siswa)} ekskul aktif per siswa.
-                      </span>
-                    </div>
-                  </div>
                 </div>
               </div>
               )}

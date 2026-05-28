@@ -55,7 +55,9 @@ const toIsoFromDateTimeLocal = (value) => {
   return date.toISOString()
 }
 
-const SETTINGS_PERIOD_COLUMNS = 'tahun_ajaran, semester_aktif, periode_mulai, periode_selesai, periode_ganjil_mulai, periode_ganjil_selesai, periode_genap_mulai, periode_genap_selesai'
+const SETTINGS_PERIOD_COLUMNS = 'id, tahun_ajaran, semester_aktif, periode_mulai, periode_selesai, periode_ganjil_mulai, periode_ganjil_selesai, periode_genap_mulai, periode_genap_selesai, max_ekskul_per_siswa'
+const DEFAULT_MAX_ESKUL_PER_SISWA = 3
+const normalizeEskulLimit = (value) => Math.max(1, Math.min(99, Number.parseInt(value, 10) || DEFAULT_MAX_ESKUL_PER_SISWA))
 
 const getPeriodEndDateTime = (period) => {
   const raw = period?.endsAt || period?.periodeSelesai || ''
@@ -186,6 +188,9 @@ export default function AHome() {
   })
 
   const [isLoading, setIsLoading] = useState(true)
+  const [settingsId, setSettingsId] = useState(null)
+  const [maxEskulPerSiswa, setMaxEskulPerSiswa] = useState(DEFAULT_MAX_ESKUL_PER_SISWA)
+  const [savingMaxEskul, setSavingMaxEskul] = useState(false)
 
   /* --- Statistics --- */
   const [stats, setStats] = useState({
@@ -212,6 +217,8 @@ export default function AHome() {
       .maybeSingle()
 
     const period = resolveAcademicPeriod(data || {})
+    setSettingsId(data?.id || null)
+    setMaxEskulPerSiswa(normalizeEskulLimit(data?.max_ekskul_per_siswa))
     setActiveEskulPeriod(period)
     return period
   }, [])
@@ -604,6 +611,7 @@ export default function AHome() {
   })
   const [eskulAnggota, setEskulAnggota] = useState([])
   const [eskulAbsensiStats, setEskulAbsensiStats] = useState({})
+  const [isAddMemberModalOpen, setIsAddMemberModalOpen] = useState(false)
   const [addMemberUid, setAddMemberUid] = useState('')
   const [addMemberMode, setAddMemberMode] = useState('single')
   const [addMemberClass, setAddMemberClass] = useState('')
@@ -848,6 +856,34 @@ export default function AHome() {
     }))
   }, [activeEskulPeriod])
 
+  const saveMaxEskulPerSiswa = useCallback(async () => {
+    const nextLimit = normalizeEskulLimit(maxEskulPerSiswa)
+    setMaxEskulPerSiswa(nextLimit)
+
+    if (!settingsId) {
+      pushToast('error', 'Pengaturan sekolah belum siap. Muat ulang halaman lalu coba lagi.')
+      return
+    }
+
+    setSavingMaxEskul(true)
+    try {
+      const { error } = await supabase
+        .from('settings')
+        .update({
+          max_ekskul_per_siswa: nextLimit,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', settingsId)
+
+      if (error) throw error
+      pushToast('success', `Batas ekskul siswa disimpan: maksimal ${nextLimit} ekskul.`)
+    } catch (error) {
+      pushToast('error', error?.message || 'Gagal menyimpan batas ekskul')
+    } finally {
+      setSavingMaxEskul(false)
+    }
+  }, [maxEskulPerSiswa, pushToast, settingsId])
+
   const simpanEskul = useCallback(async () => {
     if (isViewingArchivePeriod) {
       pushToast('warning', 'Data arsip hanya untuk dilihat. Buat atau ubah ekskul dari periode aktif sekolah.')
@@ -985,7 +1021,6 @@ export default function AHome() {
     : false
   const registrationDeadlinePastPeriod = isAfterPeriodEnd(registrationDeadlineIso, activeEskulPeriod)
   const activePeriodEndInput = getPeriodEndDateTimeLocal(activeEskulPeriod)
-  const activePeriodEndLabel = formatDateTimeLabel(getPeriodEndDateTime(activeEskulPeriod)?.toISOString())
   const addMemberLocked = isViewingArchivePeriod || !registrationDeadlineIso || registrationDeadlineClosed || registrationDeadlinePastPeriod
 
   const normalizeStudentRows = useCallback((rows = []) => (
@@ -1093,6 +1128,7 @@ export default function AHome() {
       if (error) throw error
       pushToast('success', `${rowsToInsert.length} anggota berhasil ditambahkan.`)
       setAddMemberUid('')
+      setIsAddMemberModalOpen(false)
       loadEskulAnggota()
     } catch (error) {
       pushToast('error', error?.message || 'Gagal menambah anggota')
@@ -1324,6 +1360,33 @@ export default function AHome() {
                     Mode arsip aktif. Data ekskul periode lama tetap tersimpan, tetapi pembuatan, perubahan, hapus, dan tambah anggota hanya dibuka pada periode aktif.
                   </div>
                 )}
+
+                <div className="mb-6 rounded-2xl border border-orange-100 bg-gradient-to-r from-orange-50 to-amber-50 p-4">
+                  <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
+                    <div>
+                      <p className="text-xs font-black uppercase tracking-wide text-orange-700">Aturan Pendaftaran</p>
+                      <h3 className="mt-1 text-base font-extrabold text-slate-900">Batas Ekstrakurikuler per Siswa</h3>
+                    </div>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                      <input
+                        type="number"
+                        min="1"
+                        max="99"
+                        value={maxEskulPerSiswa}
+                        onChange={(event) => setMaxEskulPerSiswa(event.target.value)}
+                        className="h-12 w-full rounded-xl border-2 border-orange-200 bg-white px-4 text-sm font-extrabold text-slate-900 focus:border-orange-400 focus:ring-2 focus:ring-orange-200 sm:w-28"
+                      />
+                      <button
+                        type="button"
+                        onClick={saveMaxEskulPerSiswa}
+                        disabled={savingMaxEskul}
+                        className="h-12 rounded-xl bg-orange-600 px-5 text-sm font-extrabold text-white shadow-sm transition hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {savingMaxEskul ? 'Menyimpan...' : 'Simpan'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
 
                 <div className="grid grid-cols-1 gap-4 mb-6 lg:grid-cols-[1fr_auto] lg:items-end">
                   <div>
@@ -1577,14 +1640,7 @@ export default function AHome() {
                       <span className="text-gray-500">
                         Batas: {registrationDeadlineLabel}
                       </span>
-                      <span className="text-gray-500">
-                        Periode aktif: {activeEskulPeriod.label} sampai {activePeriodEndLabel}
-                      </span>
                     </div>
-                    <p className="mt-2 text-xs text-gray-500">
-                      Setelah batas lewat, siswa tidak bisa daftar atau membatalkan
-                      keikutsertaan eskul. Batas pendaftaran dikunci agar tidak melewati akhir periode aktif.
-                    </p>
                   </div>
 
                   <div className="md:col-span-2">
@@ -1627,8 +1683,18 @@ export default function AHome() {
                         </p>
                       </div>
                     </div>
-                    <div className="px-4 py-2 bg-white/20 text-white rounded-full text-sm font-medium">
-                      🎯 {anggotaDisplay.length} Anggota
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                      <div className="px-4 py-2 bg-white/20 text-white rounded-full text-sm font-medium">
+                        🎯 {anggotaDisplay.length} Anggota
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsAddMemberModalOpen(true)}
+                        disabled={isViewingArchivePeriod}
+                        className="rounded-xl bg-white px-4 py-2 text-sm font-extrabold text-emerald-700 shadow-sm transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        + Tambah Anggota
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -1646,100 +1712,122 @@ export default function AHome() {
                     className="mb-6"
                   />
 
-                  <div className="mb-8 rounded-2xl border border-emerald-100 bg-emerald-50/50 p-4 sm:p-5">
-                    <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                      <div>
-                        <h4 className="text-sm font-extrabold text-slate-900">Tambah Anggota</h4>
-                        <p className="mt-1 text-xs leading-5 text-slate-500">
-                          Pilih satu siswa, satu kelas, atau semua siswa aktif. Sistem otomatis melewati siswa yang sudah terdaftar.
-                        </p>
+                  {isAddMemberModalOpen && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm">
+                      <div className="w-full max-w-2xl overflow-hidden rounded-3xl bg-white shadow-2xl">
+                        <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5">
+                          <div>
+                            <p className="text-xs font-black uppercase tracking-wide text-emerald-600">Anggota Ekstrakurikuler</p>
+                            <h3 className="mt-1 text-xl font-extrabold text-slate-950">Tambah Anggota</h3>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setIsAddMemberModalOpen(false)}
+                            className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-bold text-slate-600 transition hover:bg-slate-50"
+                          >
+                            Tutup
+                          </button>
+                        </div>
+
+                        <div className="space-y-5 px-6 py-5">
+                          <div className={`rounded-2xl border px-4 py-3 text-sm font-semibold ${addMemberLocked ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+                            {addMemberLocked ? 'Pendaftaran terkunci. Periksa batas pendaftaran atau periode aktif.' : 'Pendaftaran dibuka. Pilih satu siswa, per kelas, atau semua siswa aktif.'}
+                          </div>
+
+                          <div className="grid grid-cols-3 gap-2">
+                            {[
+                              ['single', 'Satu siswa'],
+                              ['class', 'Per kelas'],
+                              ['all', 'Semua siswa']
+                            ].map(([value, label]) => (
+                              <button
+                                key={value}
+                                type="button"
+                                onClick={() => setAddMemberMode(value)}
+                                disabled={addMemberLocked}
+                                className={`min-h-[42px] rounded-xl border px-3 text-xs font-bold transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-60 ${
+                                  addMemberMode === value
+                                    ? 'border-emerald-500 bg-emerald-600 text-white shadow-sm'
+                                    : 'border-emerald-200 bg-white text-slate-700 hover:border-emerald-300 hover:bg-emerald-50'
+                                }`}
+                              >
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+
+                          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_1fr]">
+                            <div className={addMemberMode === 'all' ? 'hidden' : ''}>
+                              <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-slate-500">
+                                Kelas
+                              </label>
+                              <select
+                                className="w-full rounded-xl border-2 border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-slate-800 transition-all duration-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100"
+                                value={addMemberClass}
+                                onFocus={() => loadStudentOptions({ force: !studentOptionsLoaded, all: true })}
+                                onChange={(e) => setAddMemberClass(e.target.value)}
+                                disabled={addMemberLocked || addMemberMode === 'all'}
+                              >
+                                <option value="">Semua kelas</option>
+                                {kelasOptions.map((kelas) => (
+                                  <option key={kelas} value={kelas}>{kelas}</option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div className={addMemberMode === 'single' ? '' : 'hidden'}>
+                              <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-slate-500">
+                                Siswa
+                              </label>
+                              <select
+                                className="w-full rounded-xl border-2 border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-slate-800 transition-all duration-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100"
+                                value={addMemberUid}
+                                onFocus={() => loadStudentOptions({ force: !studentOptionsLoaded, all: true, kelas: addMemberClass })}
+                                onChange={(e) => setAddMemberUid(e.target.value)}
+                                disabled={addMemberLocked || addMemberMode !== 'single'}
+                              >
+                                <option value="">
+                                  {studentOptionsLoading
+                                    ? 'Memuat siswa...'
+                                    : studentOptionsLoaded || availableSiswaOptions.length
+                                      ? 'Pilih siswa'
+                                      : 'Klik untuk memuat siswa'}
+                                </option>
+                                {availableSiswaOptions.map((s) => (
+                                  <option key={s.uid} value={s.uid}>
+                                    {s.nama} ({s.kelas || 'Tanpa kelas'})
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col-reverse gap-3 border-t border-slate-100 bg-slate-50 px-6 py-5 sm:flex-row sm:justify-end">
+                          <button
+                            type="button"
+                            onClick={() => setIsAddMemberModalOpen(false)}
+                            className="min-h-[44px] rounded-xl border border-slate-200 bg-white px-5 text-sm font-extrabold text-slate-700 transition hover:bg-slate-100"
+                          >
+                            Batal
+                          </button>
+                          <button
+                            type="button"
+                            className="min-h-[44px] rounded-xl bg-emerald-600 px-6 text-sm font-extrabold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            onClick={tambahAnggotaEskul}
+                            disabled={
+                              addMemberLocked ||
+                              studentOptionsLoading ||
+                              (addMemberMode === 'single' && !addMemberUid) ||
+                              (addMemberMode === 'class' && !addMemberClass)
+                            }
+                          >
+                            {studentOptionsLoading ? 'Memuat...' : addMemberMode === 'single' ? 'Tambah Siswa' : addMemberMode === 'class' ? 'Tambah Kelas' : 'Tambah Semua'}
+                          </button>
+                        </div>
                       </div>
-                      <span className={`inline-flex w-fit rounded-full px-3 py-1 text-[11px] font-bold ${addMemberLocked ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                        {addMemberLocked ? 'Terkunci' : 'Pendaftaran dibuka'}
-                      </span>
                     </div>
-
-                    <div className="mb-4 grid grid-cols-3 gap-2">
-                      {[
-                        ['single', 'Satu siswa'],
-                        ['class', 'Per kelas'],
-                        ['all', 'Semua siswa']
-                      ].map(([value, label]) => (
-                        <button
-                          key={value}
-                          type="button"
-                          onClick={() => setAddMemberMode(value)}
-                          disabled={addMemberLocked}
-                          className={`min-h-[42px] rounded-xl border px-3 text-xs font-bold transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-60 ${
-                            addMemberMode === value
-                              ? 'border-emerald-500 bg-emerald-600 text-white shadow-sm'
-                              : 'border-emerald-200 bg-white text-slate-700 hover:border-emerald-300 hover:bg-emerald-50'
-                          }`}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-
-                    <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_1fr_auto] lg:items-end">
-                      <div className={addMemberMode === 'all' ? 'hidden' : ''}>
-                        <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-slate-500">
-                          Kelas
-                        </label>
-                        <select
-                          className="w-full rounded-xl border-2 border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-slate-800 transition-all duration-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100"
-                          value={addMemberClass}
-                          onFocus={() => loadStudentOptions({ force: !studentOptionsLoaded, all: true })}
-                          onChange={(e) => setAddMemberClass(e.target.value)}
-                          disabled={addMemberLocked || addMemberMode === 'all'}
-                        >
-                          <option value="">Semua kelas</option>
-                          {kelasOptions.map((kelas) => (
-                            <option key={kelas} value={kelas}>{kelas}</option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div className={addMemberMode === 'single' ? '' : 'hidden'}>
-                        <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-slate-500">
-                          Siswa
-                        </label>
-                        <select
-                          className="w-full rounded-xl border-2 border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-slate-800 transition-all duration-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100"
-                          value={addMemberUid}
-                          onFocus={() => loadStudentOptions({ force: !studentOptionsLoaded, all: true, kelas: addMemberClass })}
-                          onChange={(e) => setAddMemberUid(e.target.value)}
-                          disabled={addMemberLocked || addMemberMode !== 'single'}
-                        >
-                          <option value="">
-                            {studentOptionsLoading
-                              ? 'Memuat siswa...'
-                              : studentOptionsLoaded || availableSiswaOptions.length
-                                ? 'Pilih siswa'
-                                : 'Klik untuk memuat siswa'}
-                          </option>
-                          {availableSiswaOptions.map((s) => (
-                            <option key={s.uid} value={s.uid}>
-                              {s.nama} ({s.kelas || 'Tanpa kelas'})
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <button
-                        className="min-h-[48px] rounded-xl border-2 border-emerald-300 bg-white px-6 py-3 text-sm font-extrabold text-emerald-700 transition-all duration-200 hover:bg-emerald-50 hover:shadow-md focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                        onClick={tambahAnggotaEskul}
-                        disabled={
-                          addMemberLocked ||
-                          studentOptionsLoading ||
-                          (addMemberMode === 'single' && !addMemberUid) ||
-                          (addMemberMode === 'class' && !addMemberClass)
-                        }
-                      >
-                        {studentOptionsLoading ? 'Memuat...' : addMemberMode === 'single' ? 'Tambah Siswa' : addMemberMode === 'class' ? 'Tambah Kelas' : 'Tambah Semua'}
-                      </button>
-                    </div>
-                  </div>
+                  )}
 
                   <div className="border-t pt-8">
                     <h4 className="text-lg font-bold text-gray-900 mb-6 flex items-center gap-3">
