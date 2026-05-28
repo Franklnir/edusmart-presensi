@@ -516,12 +516,14 @@ class StorageSecurityTest extends TestCase
         $this->assertStringContainsString('gambar tugas maksimal', (string) $response->json('error'));
     }
 
-    public function test_quiz_media_upload_uses_google_drive_when_connected_and_can_be_rendered(): void
+    public function test_quiz_media_upload_requires_object_storage_even_when_google_drive_is_connected(): void
     {
         config([
             'services.google.drive.enabled' => true,
             'services.google.drive.client_id' => 'client-id',
             'services.google.drive.client_secret' => 'client-secret',
+            'services.object_storage.enabled' => false,
+            'services.object_storage.direct_upload_buckets' => [],
         ]);
 
         $tenantId = $this->defaultTenantId();
@@ -633,26 +635,13 @@ class StorageSecurityTest extends TestCase
             'file' => UploadedFile::fake()->create('question.jpg', 10, 'image/jpeg'),
         ]);
 
-        $upload->assertOk();
-        $upload->assertJsonPath('data.provider', 'google_drive');
-        $driveUrl = (string) $upload->json('data.path');
-        $this->assertSame('https://drive.google.com/file/d/quiz-image-file/view', $driveUrl);
-
-        $this->assertDatabaseHas('tenant_google_drive_files', [
+        $upload->assertStatus(422);
+        $upload->assertJsonPath('code', 'OBJECT_STORAGE_REQUIRED');
+        $this->assertDatabaseMissing('tenant_google_drive_files', [
             'tenant_id' => $tenantId,
             'bucket' => 'quiz-media',
-            'drive_file_id' => 'quiz-image-file',
             'source_path' => $objectPath,
-            'kelas' => 'X-1',
-            'tahun_ajaran' => '2025/2026',
-            'semester' => 'Ganjil',
-            'angkatan' => '2025',
         ]);
-
-        $image = $this->get('/api/storage/object?bucket=quiz-media&path='.urlencode($driveUrl));
-        $image->assertOk();
-        $this->assertSame('image/jpeg', $image->headers->get('Content-Type'));
-        $this->assertSame('image-bytes', $image->getContent());
     }
 
     public function test_admin_storage_summary_is_scoped_to_its_own_school_even_when_filtered(): void
