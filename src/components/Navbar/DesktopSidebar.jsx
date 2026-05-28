@@ -24,7 +24,6 @@ const renderNavItems = (items, collapsed, menuExpansion) => (
 const DesktopSidebar = React.memo(({
   avatarUrl,
   collapsed,
-  effectiveRole,
   menuExpansion,
   navItems,
   onAvatarError,
@@ -34,6 +33,7 @@ const DesktopSidebar = React.memo(({
   onlineCount,
   roleBadge,
   schoolName,
+  showMonitoring = false,
   userInitial,
   userName
 }) => (
@@ -64,7 +64,7 @@ const DesktopSidebar = React.memo(({
         </button>
       </div>
 
-      {effectiveRole === 'admin' && (
+      {showMonitoring && (
         <div className={`px-3 pt-3 ${collapsed ? 'flex justify-center' : ''}`}>
           <button
             onClick={onOpenMonitoring}

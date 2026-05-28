@@ -39,6 +39,7 @@ const Navbar = () => {
   const role = profile?.role
   const hasSuperAdminAccess = Boolean(isSuperAdmin && role === 'admin')
   const effectiveRole = hasSuperAdminAccess ? 'admin' : role
+  const showMonitoring = effectiveRole === 'admin' && !hasSuperAdminAccess
   const isWaliKelas = useWaliKelasFlag(role, user?.id)
   const navItems = useNavigationMenu({ effectiveRole, isSuperAdmin: hasSuperAdminAccess, isWaliKelas, role })
   const menuExpansion = useMenuExpansion(navItems, location.pathname, location.search)
@@ -76,8 +77,9 @@ const Navbar = () => {
   }, [])
 
   const handleOpenMonitoring = useCallback(() => {
+    if (!showMonitoring) return
     setMonitorOpen(true)
-  }, [setMonitorOpen])
+  }, [setMonitorOpen, showMonitoring])
 
   const handleCloseMonitoring = useCallback(() => {
     setMonitorOpen(false)
@@ -103,7 +105,6 @@ const Navbar = () => {
       <DesktopSidebar
         avatarUrl={avatarUrl}
         collapsed={isCollapsed}
-        effectiveRole={effectiveRole}
         menuExpansion={menuExpansion}
         navItems={navItems}
         onAvatarError={clearAvatarUrl}
@@ -113,13 +114,13 @@ const Navbar = () => {
         onlineCount={onlineCount}
         roleBadge={roleBadge}
         schoolName={schoolName}
+        showMonitoring={showMonitoring}
         userInitial={userInitial}
         userName={userName}
       />
 
       <MobileNav
         avatarUrl={avatarUrl}
-        effectiveRole={effectiveRole}
         menuExpansion={menuExpansion}
         navItems={navItems}
         onAvatarError={clearAvatarUrl}
@@ -128,18 +129,21 @@ const Navbar = () => {
         onlineCount={onlineCount}
         roleBadge={roleBadge}
         schoolName={schoolName}
+        showMonitoring={showMonitoring}
         userInitial={userInitial}
       />
 
-      <MonitoringModal
-        data={monitorData}
-        error={monitorError}
-        loading={monitorLoading}
-        onClose={handleCloseMonitoring}
-        onRefresh={loadMonitoring}
-        onlineCount={onlineCount}
-        open={monitorOpen}
-      />
+      {showMonitoring && (
+        <MonitoringModal
+          data={monitorData}
+          error={monitorError}
+          loading={monitorLoading}
+          onClose={handleCloseMonitoring}
+          onRefresh={loadMonitoring}
+          onlineCount={onlineCount}
+          open={monitorOpen}
+        />
+      )}
     </>
   )
 }

@@ -117,7 +117,6 @@ MobileBottomLink.displayName = 'MobileBottomLink'
 
 const MobileNav = React.memo(({
   avatarUrl,
-  effectiveRole,
   menuExpansion,
   navItems,
   onAvatarError,
@@ -126,6 +125,7 @@ const MobileNav = React.memo(({
   onlineCount,
   roleBadge,
   schoolName,
+  showMonitoring = false,
   userInitial
 }) => {
   const [menuOpen, setMenuOpen] = useState(false)
@@ -153,7 +153,7 @@ const MobileNav = React.memo(({
           </div>
 
           <div className="flex items-center gap-2">
-            {effectiveRole === 'admin' && (
+            {showMonitoring && (
               <button
                 onClick={onOpenMonitoring}
                 className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-brand-50 text-brand-700 text-xs font-bold"
