@@ -200,6 +200,7 @@ class StorageController extends ApiController
                 return $this->uploadObjectStorageViaServer($request, $bucket, $path, $file);
             } catch (\Throwable $e) {
                 $objectStorageRelayError = $e->getMessage();
+
                 return response()->json([
                     'error' => 'Upload Neva Cloud S3 gagal: '.$this->shortError($objectStorageRelayError).'. File belum disimpan, silakan coba lagi.',
                     'code' => 'OBJECT_STORAGE_RELAY_FAILED',
