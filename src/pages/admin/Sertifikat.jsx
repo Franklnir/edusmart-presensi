@@ -227,6 +227,13 @@ const nowIsoCompact = () => {
   return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
 }
 
+const buildCertificateNumber = ({ eventDate, batchStamp, index }) => {
+  const datePart = String(eventDate || new Date().toISOString().slice(0, 10)).replace(/-/g, '')
+  const batchPart = String(batchStamp || nowIsoCompact()).replace(/[^0-9]/g, '').slice(-6)
+  const serial = String(Number(index || 0) + 1).padStart(4, '0')
+  return `SERT-${datePart}-${batchPart}-${serial}`
+}
+
 const hexToRgb = (hex) => {
   if (!hex) return [0, 0, 0]
   let c = hex.replace('#', '')
@@ -434,16 +441,20 @@ const getCertificateFieldText = (key, data) => {
   if (key === 'nama') return data.nama || ''
   if (key === 'event') return data.event || ''
   if (key === 'tanggal') return data.dateDisplay || ''
-  if (key === 'nomor') return data.nomor || `NO: ${Math.floor(Math.random() * 10000)}/SERT/${new Date().getFullYear()}`
+  if (key === 'nomor') return data.nomor || data.certificate_number || ''
   return ''
 }
+
+const shouldRenderCertificateField = (key, field, data = {}) => (
+  Boolean(field?.active) || (key === 'nomor' && Boolean(data?.nomor || data?.certificate_number))
+)
 
 const drawCertificateTextOnCanvas = ({ ctx, data, template, width, height, scale }) => {
   const fields = template.fields || defaultFields
 
   Object.keys(fields).forEach((key) => {
     const field = fields[key]
-    if (!field?.active) return
+    if (!shouldRenderCertificateField(key, field, data)) return
 
     let text = getCertificateFieldText(key, data)
     if (!text) return
@@ -533,14 +544,14 @@ const defaultFields = {
     label: 'No. Sertifikat',
     x: A4_WIDTH / 2,
     y: 450,
-    active: false,
+    active: true,
     fontSize: 12,
     fontStyle: 'normal',
     color: '#000000',
     fontFamily: 'Courier',
     textTransform: 'none',
     textDecoration: 'none',
-    simulationText: 'NO: 123/SERT/XI/2025'
+    simulationText: 'SERT-20260528-093000-0001'
   }
 }
 
@@ -947,7 +958,7 @@ const GeneratorSection = ({ templateVersion }) => {
 
     Object.keys(fields).forEach((key) => {
       const field = fields[key]
-      if (!field?.active) return
+      if (!shouldRenderCertificateField(key, field, data)) return
 
       let text = getCertificateFieldText(key, data)
       if (!text) return
@@ -1041,6 +1052,9 @@ const GeneratorSection = ({ templateVersion }) => {
     try {
       const selectedOutput = getOutputFormat(outputFormat)
       const bgDataUrl = await resolveTemplateBackgroundDataUrl(selectedTemplate)
+      if ((selectedTemplate.background_url || selectedTemplate.__bgUrl) && !bgDataUrl) {
+        throw new Error('Template sertifikat gagal dibaca. Cek file background template lalu coba generate ulang.')
+      }
 
       const dateDisplay = new Date(eventDate).toLocaleDateString('id-ID', {
         day: 'numeric',
@@ -1048,6 +1062,7 @@ const GeneratorSection = ({ templateVersion }) => {
         year: 'numeric'
       })
 
+      const batchStamp = nowIsoCompact()
       const targets = isPreview
         ? [
             {
@@ -1055,15 +1070,16 @@ const GeneratorSection = ({ templateVersion }) => {
               nama: selectedTemplate.fields?.nama?.simulationText || 'Contoh Nama Peserta',
               event: eventName.trim(),
               dateDisplay,
-              nomor: selectedTemplate.fields?.nomor?.simulationText || ''
+              nomor: selectedTemplate.fields?.nomor?.simulationText || buildCertificateNumber({ eventDate, batchStamp, index: 0 })
             }
           ]
         : peserta
             .filter((p) => selectedIds.includes(p.id))
-            .map((p) => ({
+            .map((p, index) => ({
               ...p,
               event: eventName.trim(),
-              dateDisplay
+              dateDisplay,
+              nomor: buildCertificateNumber({ eventDate, batchStamp, index })
             }))
 
       if (targets.length === 0) throw new Error('Pilih minimal satu peserta')
@@ -1094,7 +1110,7 @@ const GeneratorSection = ({ templateVersion }) => {
           break
         }
 
-        const fileName = `${nowIsoCompact()}_${p.id}.${selectedOutput.extension}`
+        const fileName = `${batchStamp}_${p.id}.${selectedOutput.extension}`
         const uploadFile = new File([blob], fileName, { type: selectedOutput.contentType })
         const filePath = `${baseFolder}/${fileName}`
 
@@ -1107,17 +1123,23 @@ const GeneratorSection = ({ templateVersion }) => {
 
         // IMPORTANT: schema kamu cuma punya file_url (NOT NULL)
         // Kita simpan "path" ke file_url, lalu download pakai signed URL.
-        const { error: insErr } = await supabase.from('certificates').insert({
+        const insertPayload = {
           user_id: p.id,
           nama_penerima: p.nama,
           email: p.email || null,
           kelas: p.kelas || null,
           event: eventName.trim(),
           event_date: eventDate,
+          certificate_number: p.nomor,
           file_url: filePath,
           sent: true,
           sent_at: new Date().toISOString()
-        })
+        }
+        let { error: insErr } = await supabase.from('certificates').insert(insertPayload)
+        if (insErr && /certificate_number/i.test(insErr.message || '')) {
+          const { certificate_number, ...legacyPayload } = insertPayload
+          ; ({ error: insErr } = await supabase.from('certificates').insert(legacyPayload))
+        }
         if (insErr) throw insErr
 
         success++
@@ -2110,6 +2132,7 @@ const HistorySection = () => {
           <thead className="bg-white text-gray-500 border-b">
             <tr>
               <th className="p-4 font-medium">Tanggal Dibuat</th>
+              <th className="p-4 font-medium">Nomor</th>
               <th className="p-4 font-medium">Nama Penerima</th>
               <th className="p-4 font-medium">Event</th>
               <th className="p-4 font-medium text-center">File</th>
@@ -2122,6 +2145,11 @@ const HistorySection = () => {
               <tr key={d.id} className="hover:bg-blue-50/50 transition-colors">
                 <td className="p-4 text-gray-600">
                   {d.issued_at ? new Date(d.issued_at).toLocaleDateString('id-ID') : '-'}
+                </td>
+                <td className="p-4">
+                  <span className="rounded-full bg-slate-100 px-2.5 py-1 font-mono text-xs font-semibold text-slate-700">
+                    {d.certificate_number || '-'}
+                  </span>
                 </td>
                 <td className="p-4 font-semibold text-gray-800">{d.nama_penerima}</td>
                 <td className="p-4 text-gray-600">{d.event}</td>

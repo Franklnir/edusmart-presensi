@@ -62,6 +62,16 @@ const parseSortTime = (value) => {
   return Number.isNaN(time) ? 0 : time
 }
 
+const getTaskFilterDate = (task) => {
+  const candidates = [task?.mulai, task?.deadline, task?.created_at, task?.updated_at]
+  for (const value of candidates) {
+    if (!value) continue
+    const date = new Date(value)
+    if (!Number.isNaN(date.getTime())) return date
+  }
+  return null
+}
+
 const compareNewestTask = (a, b) => {
   const createdDiff = parseSortTime(b?.created_at || b?.updated_at) - parseSortTime(a?.created_at || a?.updated_at)
   if (createdDiff !== 0) return createdDiff
@@ -691,42 +701,6 @@ export default function TugasSiswa() {
         const weekAgo = new Date(now)
         weekAgo.setDate(now.getDate() - 7)
         query = query.gte('created_at', weekAgo.toISOString())
-      } else if (timeRange === 'all') {
-	        if (dateFilterPeriod.startsAt && dateFilterPeriod.endsAt) {
-	          const start = new Date(`${dateFilterPeriod.startsAt}T00:00:00`)
-	          const end = new Date(`${dateFilterPeriod.endsAt}T00:00:00`)
-	          end.setDate(end.getDate() + 1)
-	          query = query.gte('created_at', start.toISOString()).lt('created_at', end.toISOString())
-	        }
-      } else if (timeRange === 'custom_months') {
-        if (selectedMonths.length > 0) {
-          let minYear = Infinity
-          let minMonth = Infinity
-          let maxYear = -Infinity
-          let maxMonth = -Infinity
-
-          selectedMonths.forEach((ym) => {
-            const [ys, ms] = ym.split('-')
-            const y = parseInt(ys, 10)
-            const m = parseInt(ms, 10)
-            if (!Number.isNaN(y) && !Number.isNaN(m)) {
-              if (y < minYear || (y === minYear && m < minMonth)) {
-                minYear = y
-                minMonth = m
-              }
-              if (y > maxYear || (y === maxYear && m > maxMonth)) {
-                maxYear = y
-                maxMonth = m
-              }
-            }
-          })
-
-          if (minYear !== Infinity) {
-            const start = new Date(minYear, minMonth - 1, 1)
-            const end = new Date(maxYear, maxMonth, 1)
-            query = query.gte('created_at', start.toISOString()).lt('created_at', end.toISOString())
-          }
-        }
       }
 
       query = query.order('created_at', { ascending: false })
@@ -748,9 +722,8 @@ export default function TugasSiswa() {
       if (timeRange === 'custom_months' && selectedMonths.length > 0) {
         const setMonths = new Set(selectedMonths)
         tugasArr = tugasArr.filter((t) => {
-          if (!t.created_at) return false
-          const d = new Date(t.created_at)
-          if (!isValidDate(d)) return false
+          const d = getTaskFilterDate(t)
+          if (!d) return false
           const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
           return setMonths.has(ym)
         })

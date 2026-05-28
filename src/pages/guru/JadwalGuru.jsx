@@ -4,9 +4,9 @@ import { apiFetch, supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import {
+  downloadCertificateFile,
   getCertificateDisplayUrl,
-  hydrateCertificateFileUrls,
-  resolveCertificateFileUrl
+  hydrateCertificateFileUrls
 } from '../../utils/certificateFiles'
 import { loadExcelJsBrowser } from '../../utils/excelBrowser'
 import { resolveAcademicPeriod } from '../../utils/academicPeriod'
@@ -165,6 +165,12 @@ const SertifikatDetailOverlay = ({ sertifikat, onClose, onDownload }) => {
                     <span className="text-blue-700 font-medium">Nama Penerima:</span>
                     <p className="text-blue-900 font-semibold">{sertifikat.nama_penerima}</p>
                   </div>
+                  {sertifikat.certificate_number && (
+                    <div>
+                      <span className="text-blue-700 font-medium">Nomor Sertifikat:</span>
+                      <p className="font-mono text-blue-900 font-semibold">{sertifikat.certificate_number}</p>
+                    </div>
+                  )}
                   <div>
                     <span className="text-blue-700 font-medium">Acara/Event:</span>
                     <p className="text-blue-900">{sertifikat.event}</p>
@@ -2017,33 +2023,11 @@ export default function JadwalGuru() {
   const handleDownloadSertifikat = async (sertifikat) => {
     try {
       setLoading(true)
-      const resolvedUrl =
-        getCertificateDisplayUrl(sertifikat) ||
-        (await resolveCertificateFileUrl(sertifikat?.file_url))
-      if (!resolvedUrl) throw new Error('File sertifikat tidak ditemukan')
-
-      const response = await fetch(resolvedUrl, { credentials: 'include' })
-      if (!response.ok) throw new Error('File sertifikat tidak dapat diakses')
-      const blob = await response.blob()
-
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.style.display = 'none'
-      a.href = url
-
-      const fileExtensionSource = String(sertifikat.file_url || resolvedUrl).split('?')[0]
-      const fileExtension = fileExtensionSource.split('.').pop() || 'pdf'
-      const fileName = `Sertifikat_${sertifikat.event}_${sertifikat.nama_penerima}.${fileExtension}`
-
-      a.download = fileName
-      document.body.appendChild(a)
-      a.click()
-      window.URL.revokeObjectURL(url)
-
+      await downloadCertificateFile(sertifikat)
       pushToast('success', 'Sertifikat berhasil diunduh')
     } catch (error) {
       console.error('Error downloading sertifikat:', error)
-      pushToast('error', 'Gagal mengunduh sertifikat')
+      pushToast('error', error?.message || 'Gagal mengunduh sertifikat')
     } finally {
       setLoading(false)
     }
@@ -2250,6 +2234,11 @@ export default function JadwalGuru() {
                     <p className="text-sm text-gray-600 mt-1">
                       {sertifikat.nama_penerima}
                     </p>
+                    {sertifikat.certificate_number && (
+                      <p className="mt-1 font-mono text-[11px] font-semibold text-slate-500">
+                        {sertifikat.certificate_number}
+                      </p>
+                    )}
                   </div>
                   <span className={`text-xs px-2 py-1 rounded-full ${
                     sertifikat.sent

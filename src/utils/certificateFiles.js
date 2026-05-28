@@ -67,3 +67,53 @@ export const hydrateCertificateFileUrls = async (rows = []) => {
 
 export const getCertificateDisplayUrl = (row) =>
   row?.file_url_resolved || row?.file_url || ''
+
+const sanitizeDownloadName = (value) =>
+  String(value || '')
+    .replace(/[\\/:*?"<>|]+/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120)
+
+export const downloadCertificateFile = async (row) => {
+  const raw = normalizePath(row?.file_url || row?.file_url_resolved || '')
+  if (!raw) throw new Error('File sertifikat tidak ditemukan')
+
+  const extension = String(raw.split('?')[0].split('.').pop() || 'pdf').toLowerCase()
+  const baseName = sanitizeDownloadName([
+    'Sertifikat',
+    row?.certificate_number,
+    row?.event,
+    row?.nama_penerima
+  ].filter(Boolean).join(' - ')) || 'Sertifikat'
+
+  let lastError = null
+  for (const bucket of CERT_BUCKET_CANDIDATES) {
+    const objectPathCandidates = Array.from(new Set([
+      extractObjectPath(bucket, raw),
+      raw
+    ].filter(Boolean)))
+
+    for (const objectPath of objectPathCandidates) {
+      const { data, error } = await supabase.storage.from(bucket).download(objectPath)
+      if (error || !data) {
+        lastError = error
+        continue
+      }
+
+      const url = URL.createObjectURL(data)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = `${baseName}.${extension}`
+      anchor.style.display = 'none'
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+
+      return { filename: anchor.download }
+    }
+  }
+
+  throw lastError || new Error('File sertifikat tidak dapat diakses')
+}

@@ -5,9 +5,9 @@ import { supabase } from '../../lib/supabase'
 
 import { useUIStore } from '../../store/useUIStore'
 import {
+  downloadCertificateFile,
   getCertificateDisplayUrl,
-  hydrateCertificateFileUrls,
-  resolveCertificateFileUrl
+  hydrateCertificateFileUrls
 } from '../../utils/certificateFiles'
 import {
   normalizeAcademicYear,
@@ -19,8 +19,10 @@ const DASHBOARD_TASK_LIMIT = 6
 const DASHBOARD_TASK_QUERY_LIMIT = 80
 const DASHBOARD_TASK_COLUMNS = 'id, kelas, judul, mapel, deadline, keterangan, file_url, link'
 const ACADEMIC_PERIOD_STORAGE_KEY = 'edusmart.siswa.home.periodFilter'
+const DEFAULT_EKSKUL_LIMIT = 3
 
 const isValidDate = (date) => date instanceof Date && !Number.isNaN(date.getTime())
+const normalizeEskulLimit = (value) => Math.max(1, Math.min(99, Number.parseInt(value, 10) || DEFAULT_EKSKUL_LIMIT))
 
 const getTaskDeadlineTime = (task) => {
   const deadline = task?.deadline ? new Date(task.deadline) : null
@@ -297,6 +299,12 @@ const SertifikatModal = ({ sertifikat, isOpen, onClose, onDownload }) => {
                     <span className="text-blue-700 font-medium">Nama Penerima:</span>
                     <p className="text-blue-900 font-semibold">{sertifikat.nama_penerima}</p>
                   </div>
+                  {sertifikat.certificate_number && (
+                    <div>
+                      <span className="text-blue-700 font-medium">Nomor Sertifikat:</span>
+                      <p className="font-mono text-blue-900 font-semibold">{sertifikat.certificate_number}</p>
+                    </div>
+                  )}
                   <div>
                     <span className="text-blue-700 font-medium">Acara/Event:</span>
                     <p className="text-blue-900">{sertifikat.event}</p>
@@ -558,6 +566,7 @@ export default function SHome() {
   const [pengumuman, setPengumuman] = useState([])
   const [ekskul, setEkskul] = useState([])
   const [myEskul, setMyEkskul] = useState(new Set())
+  const [maxEskulPerStudent, setMaxEskulPerStudent] = useState(DEFAULT_EKSKUL_LIMIT)
   const [organisasi, setOrganisasi] = useState([])
   const [selectedOrganisasi, setSelectedOrganisasi] = useState(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -606,12 +615,14 @@ export default function SHome() {
 
     const { data } = await supabase
       .from('settings')
-      .select('tahun_ajaran, semester_aktif, periode_mulai, periode_selesai, periode_ganjil_mulai, periode_ganjil_selesai, periode_genap_mulai, periode_genap_selesai')
+      .select('tahun_ajaran, semester_aktif, periode_mulai, periode_selesai, periode_ganjil_mulai, periode_ganjil_selesai, periode_genap_mulai, periode_genap_selesai, max_ekskul_per_siswa')
       .order('id')
       .limit(1)
       .maybeSingle()
 
     const activePeriod = resolveAcademicPeriod(data || {})
+    const maxEskul = normalizeEskulLimit(data?.max_ekskul_per_siswa)
+    setMaxEskulPerStudent(maxEskul)
     const storedPeriod = readStoredAcademicPeriodFilter(activePeriod)
     const period = storedPeriod
       ? resolveAcademicPeriod({
@@ -623,6 +634,7 @@ export default function SHome() {
         periode_genap_selesai: activePeriod.periodeGenapSelesai
       })
       : activePeriod
+    period.maxEskulPerStudent = maxEskul
     activeAcademicPeriodRef.current = period
     return period
   }
@@ -718,35 +730,11 @@ export default function SHome() {
   // Handler untuk download sertifikat
   const handleDownloadSertifikat = async (sertifikat) => {
     try {
-      const resolvedUrl =
-        getCertificateDisplayUrl(sertifikat) ||
-        (await resolveCertificateFileUrl(sertifikat?.file_url))
-      if (!resolvedUrl) throw new Error('File sertifikat tidak ditemukan')
-
-      const response = await fetch(resolvedUrl, { credentials: 'include' })
-      if (!response.ok) throw new Error('File sertifikat tidak dapat diakses')
-      const blob = await response.blob()
-
-      // Create download link
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.style.display = 'none'
-      a.href = url
-
-      // Extract file extension from URL
-      const fileExtensionSource = String(sertifikat.file_url || resolvedUrl).split('?')[0]
-      const fileExtension = fileExtensionSource.split('.').pop() || 'pdf'
-      const fileName = `Sertifikat_${sertifikat.event}_${sertifikat.nama_penerima}.${fileExtension}`
-
-      a.download = fileName
-      document.body.appendChild(a)
-      a.click()
-      window.URL.revokeObjectURL(url)
-
+      await downloadCertificateFile(sertifikat)
       pushToast('success', 'Sertifikat berhasil diunduh')
     } catch (error) {
       console.error('Error downloading sertifikat:', error)
-      pushToast('error', 'Gagal mengunduh sertifikat')
+      pushToast('error', error?.message || 'Gagal mengunduh sertifikat')
     }
   }
 
@@ -1079,8 +1067,9 @@ export default function SHome() {
       return
     }
 
-    if (!joined && myEskul.size >= 3) {
-      pushToast('error', 'Maksimal 3 ekstrakurikuler yang bisa diikuti')
+    const maxAllowed = normalizeEskulLimit(period?.maxEskulPerStudent || maxEskulPerStudent)
+    if (!joined && myEskul.size >= maxAllowed) {
+      pushToast('error', `Maksimal ${maxAllowed} ekstrakurikuler yang bisa diikuti`)
       return
     }
 
@@ -1349,10 +1338,10 @@ export default function SHome() {
                   <div className="w-2 h-8 bg-orange-500 rounded-full" />
                   <div>
                     <h2 className="text-base font-bold text-slate-900">Ekstrakurikuler</h2>
-                    <p className="text-slate-500 text-xs">Maks. <span className="font-semibold text-orange-600">3 ekskul</span></p>
+                    <p className="text-slate-500 text-xs">Maks. <span className="font-semibold text-orange-600">{maxEskulPerStudent} ekskul</span></p>
                   </div>
                 </div>
-                <span className="px-3 py-1 bg-orange-50 text-orange-700 rounded-full text-xs font-semibold">{myEskul.size}/3 Terdaftar</span>
+                <span className="px-3 py-1 bg-orange-50 text-orange-700 rounded-full text-xs font-semibold">{myEskul.size}/{maxEskulPerStudent} Terdaftar</span>
               </div>
               <div className="p-5">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -1460,7 +1449,7 @@ export default function SHome() {
 	                </button>
                 <div className="flex justify-between items-center p-2.5 bg-slate-50 rounded-lg">
                   <span className="text-sm text-slate-600 font-medium">Ekskul Diikuti</span>
-                  <span className="px-2 py-0.5 bg-orange-100 text-orange-700 rounded-lg text-xs font-bold">{myEskul.size}/3</span>
+                  <span className="px-2 py-0.5 bg-orange-100 text-orange-700 rounded-lg text-xs font-bold">{myEskul.size}/{maxEskulPerStudent}</span>
                 </div>
                 <div className="flex justify-between items-center p-2.5 bg-slate-50 rounded-lg">
                   <span className="text-sm text-slate-600 font-medium">Sertifikat</span>
@@ -1492,6 +1481,9 @@ export default function SHome() {
                         Download
                       </button>
                     </div>
+                    {sertifikat.certificate_number && (
+                      <p className="mt-1 font-mono text-[10px] font-semibold text-slate-500">{sertifikat.certificate_number}</p>
+                    )}
                   </div>
                 ))}
                 {sertifikatList.length > 5 && (

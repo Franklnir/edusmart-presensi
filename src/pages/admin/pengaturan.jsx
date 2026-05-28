@@ -60,6 +60,7 @@ const SETTINGS_SELECT_COLUMNS = [
   'registrasi_siswa_aktif',
   'registrasi_guru_aktif',
   'registrasi_admin_aktif',
+  'max_ekskul_per_siswa',
   'tahun_ajaran',
   'semester_aktif',
   'periode_mulai',
@@ -73,6 +74,7 @@ const SETTINGS_SELECT_COLUMNS = [
 const SETTINGS_QUERY_KEY = ['admin', 'settings', 'system']
 const SETTINGS_STALE_TIME = 5 * 60 * 1000
 const SETTINGS_SESSION_CACHE_KEY = 'edusmart_settings_cache:system'
+const normalizeEskulLimit = (value) => Math.max(1, Math.min(99, Number.parseInt(value, 10) || 3))
 
 function getSettingsStorage() {
   if (typeof window === 'undefined') return null
@@ -540,7 +542,8 @@ export default function APengaturan() {
     link_tiktok: '',
     registrasi_siswa_aktif: true,
     registrasi_guru_aktif: false,
-    registrasi_admin_aktif: false
+    registrasi_admin_aktif: false,
+    max_ekskul_per_siswa: 3
   })
 
   // ✅ Pisahkan PATH vs URL runtime
@@ -754,7 +757,8 @@ export default function APengaturan() {
         link_tiktok: data.link_tiktok || '',
         registrasi_siswa_aktif: data.registrasi_siswa_aktif ?? true,
         registrasi_guru_aktif: data.registrasi_guru_aktif ?? false,
-        registrasi_admin_aktif: data.registrasi_admin_aktif ?? false
+        registrasi_admin_aktif: data.registrasi_admin_aktif ?? false,
+        max_ekskul_per_siswa: normalizeEskulLimit(data.max_ekskul_per_siswa)
       }))
 
       const nextPeriodForm = resolvePeriodForm(data)
@@ -802,7 +806,8 @@ export default function APengaturan() {
             link_tiktok: data.link_tiktok || '',
             registrasi_siswa_aktif: data.registrasi_siswa_aktif ?? true,
             registrasi_guru_aktif: data.registrasi_guru_aktif ?? false,
-            registrasi_admin_aktif: data.registrasi_admin_aktif ?? false
+            registrasi_admin_aktif: data.registrasi_admin_aktif ?? false,
+            max_ekskul_per_siswa: normalizeEskulLimit(data.max_ekskul_per_siswa)
           }))
           const nextPeriodForm = resolvePeriodForm(data)
           setPeriodForm(nextPeriodForm)
@@ -941,7 +946,8 @@ export default function APengaturan() {
             link_tiktok: row.link_tiktok || '',
             registrasi_siswa_aktif: row.registrasi_siswa_aktif ?? true,
             registrasi_guru_aktif: row.registrasi_guru_aktif ?? false,
-            registrasi_admin_aktif: row.registrasi_admin_aktif ?? false
+            registrasi_admin_aktif: row.registrasi_admin_aktif ?? false,
+            max_ekskul_per_siswa: normalizeEskulLimit(row.max_ekskul_per_siswa)
           }))
           const nextPeriodForm = resolvePeriodForm(row)
           setPeriodForm(nextPeriodForm)
@@ -1255,7 +1261,8 @@ export default function APengaturan() {
       link_instagram,
       link_facebook,
       link_youtube,
-      link_tiktok
+      link_tiktok,
+      max_ekskul_per_siswa
     } = form
 
     const hasContent =
@@ -1269,7 +1276,8 @@ export default function APengaturan() {
       link_instagram ||
       link_facebook ||
       link_youtube ||
-      link_tiktok
+      link_tiktok ||
+      max_ekskul_per_siswa
 
     if (!hasContent) return
 
@@ -1296,7 +1304,8 @@ export default function APengaturan() {
     form.link_instagram,
     form.link_facebook,
     form.link_youtube,
-    form.link_tiktok
+    form.link_tiktok,
+    form.max_ekskul_per_siswa
   ])
 
   async function handleCheckboxChange(e) {
@@ -1348,6 +1357,7 @@ export default function APengaturan() {
         registrasi_siswa_aktif: form.registrasi_siswa_aktif,
         registrasi_guru_aktif: form.registrasi_guru_aktif,
         registrasi_admin_aktif: form.registrasi_admin_aktif,
+        max_ekskul_per_siswa: normalizeEskulLimit(form.max_ekskul_per_siswa),
         updated_at: new Date().toISOString()
       }
 
@@ -3097,6 +3107,31 @@ export default function APengaturan() {
                       </p>
                     </div>
                   )}
+
+                  <div className="rounded-xl border border-orange-200 bg-orange-50/70 p-4">
+                    <label htmlFor="max-ekskul-per-siswa" className="block text-sm font-semibold text-orange-900">
+                      Batas Ekstrakurikuler per Siswa
+                    </label>
+                    <p className="mt-1 text-xs text-orange-700">
+                      Siswa tidak dikunci 3 ekskul lagi. Admin sekolah bisa menentukan batas aktif sesuai kebijakan sekolah.
+                    </p>
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+                      <input
+                        id="max-ekskul-per-siswa"
+                        type="number"
+                        min="1"
+                        max="99"
+                        name="max_ekskul_per_siswa"
+                        value={form.max_ekskul_per_siswa}
+                        onChange={handleChange}
+                        onBlur={() => saveSettings(true)}
+                        className="w-full rounded-lg border border-orange-200 bg-white px-4 py-3 text-sm font-bold text-slate-900 focus:border-orange-400 focus:ring-2 focus:ring-orange-200 sm:max-w-[160px]"
+                      />
+                      <span className="text-sm font-medium text-orange-800">
+                        Maksimal {normalizeEskulLimit(form.max_ekskul_per_siswa)} ekskul aktif per siswa.
+                      </span>
+                    </div>
+                  </div>
                 </div>
               </div>
               )}

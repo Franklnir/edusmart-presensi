@@ -3674,6 +3674,22 @@ class DbController extends ApiController
         return $this->academicPeriodCache[$cacheKey];
     }
 
+    private function maxEskulPerSiswaForTenant(?string $tenantId): int
+    {
+        if (! $this->isSelectableColumn('settings', 'max_ekskul_per_siswa')) {
+            return 3;
+        }
+
+        $settingsQuery = DB::table('settings')->orderBy('id');
+        if ($tenantId && $this->isSelectableColumn('settings', 'tenant_id')) {
+            $settingsQuery->where('tenant_id', $tenantId);
+        }
+
+        $value = $settingsQuery->value('max_ekskul_per_siswa');
+
+        return max(1, min(99, (int) ($value ?: 3)));
+    }
+
     private function tableHasAcademicPeriodColumns(string $table): bool
     {
         return $this->isSelectableColumn($table, 'tahun_ajaran')
@@ -4327,8 +4343,9 @@ class DbController extends ApiController
 
         $totalIds = array_values(array_unique(array_merge($existingIds, $ekskulIds)));
 
-        if (count($totalIds) > 3) {
-            return 'Maksimal 3 ekstrakurikuler yang bisa diikuti';
+        $maxEskul = $this->maxEskulPerSiswaForTenant($this->currentTenantId);
+        if (count($totalIds) > $maxEskul) {
+            return "Maksimal {$maxEskul} ekstrakurikuler yang bisa diikuti";
         }
 
         return null;
