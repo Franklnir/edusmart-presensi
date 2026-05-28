@@ -1128,7 +1128,6 @@ export default function AHome() {
       if (error) throw error
       pushToast('success', `${rowsToInsert.length} anggota berhasil ditambahkan.`)
       setAddMemberUid('')
-      setIsAddMemberModalOpen(false)
       loadEskulAnggota()
     } catch (error) {
       pushToast('error', error?.message || 'Gagal menambah anggota')
@@ -1699,26 +1698,14 @@ export default function AHome() {
                   </div>
                 </div>
 
-                <div className="p-6">
-                  <AcademicPeriodArchiveFilter
-                    activeAcademicPeriod={activeSchoolPeriod}
-                    periodFilter={eskulPeriodFilter}
-                    academicYearOptions={academicYearOptions}
-                    semesterOptions={semesterOptions}
-                    setAcademicYear={setAcademicYear}
-                    setSemester={setSemester}
-                    resetToActivePeriod={resetToActivePeriod}
-                    title="Periode Keanggotaan"
-                    className="mb-6"
-                  />
-
+                <div>
                   {isAddMemberModalOpen && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm">
-                      <div className="w-full max-w-2xl overflow-hidden rounded-3xl bg-white shadow-2xl">
+                      <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
                         <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5">
                           <div>
                             <p className="text-xs font-black uppercase tracking-wide text-emerald-600">Anggota Ekstrakurikuler</p>
-                            <h3 className="mt-1 text-xl font-extrabold text-slate-950">Tambah Anggota</h3>
+                            <h3 className="mt-1 text-xl font-extrabold text-slate-950">Kelola Anggota</h3>
                           </div>
                           <button
                             type="button"
@@ -1729,7 +1716,7 @@ export default function AHome() {
                           </button>
                         </div>
 
-                        <div className="space-y-5 px-6 py-5">
+                        <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
                           <div className={`rounded-2xl border px-4 py-3 text-sm font-semibold ${addMemberLocked ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
                             {addMemberLocked ? 'Pendaftaran terkunci. Periksa batas pendaftaran atau periode aktif.' : 'Pendaftaran dibuka. Pilih satu siswa, per kelas, atau semua siswa aktif.'}
                           </div>
@@ -1801,6 +1788,73 @@ export default function AHome() {
                               </select>
                             </div>
                           </div>
+
+                          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                              <h4 className="flex items-center gap-3 text-lg font-bold text-gray-900">
+                                <span className="rounded-lg bg-emerald-100 p-2 text-emerald-600">
+                                  📊
+                                </span>
+                                Daftar Anggota
+                              </h4>
+                              <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
+                                {anggotaDisplay.length} siswa
+                              </span>
+                            </div>
+                            <div className="space-y-4">
+                              {anggotaDisplay.map((a) => (
+                                <div
+                                  key={a.id}
+                                  className="flex flex-col gap-4 rounded-xl border-2 border-gray-200 p-4 transition-all duration-200 hover:border-emerald-300 hover:bg-emerald-50 sm:flex-row sm:items-center sm:justify-between"
+                                >
+                                  <div className="flex items-center gap-4">
+                                    <div className="rounded-lg bg-emerald-100 p-3 text-emerald-600">
+                                      👤
+                                    </div>
+                                    <div>
+                                      <div className="font-semibold text-gray-900">
+                                        {a.nama}
+                                      </div>
+                                      <div className="mt-1 text-sm text-gray-500">
+                                        Kelas:{' '}
+                                        <span className="font-medium">{a.kelas}</span>
+                                        <span className="mx-1">•</span>
+                                        Angkatan: <span className="font-medium">{a.angkatan}</span>
+                                      </div>
+                                      <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                                        <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-700">
+                                          ✅ Hadir:
+                                          <span className="ml-1">{a.hadirCount}</span>
+                                        </span>
+                                        <span className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-1 font-semibold text-amber-700">
+                                          📝 Izin:
+                                          <span className="ml-1">{a.izinCount}</span>
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <button
+                                    className="rounded-lg bg-red-50 px-4 py-2 text-xs font-semibold text-red-600 transition-all duration-200 hover:bg-red-100 focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                                    onClick={() => hapusAnggotaEskul(a.id)}
+                                    disabled={isViewingArchivePeriod}
+                                  >
+                                    🗑️ Hapus
+                                  </button>
+                                </div>
+                              ))}
+                              {anggotaDisplay.length === 0 && (
+                                <div className="py-12 text-center">
+                                  <div className="mb-4 text-6xl text-gray-300">👥</div>
+                                  <p className="text-lg font-medium text-gray-500">
+                                    Belum ada anggota
+                                  </p>
+                                  <p className="mt-2 text-gray-400">
+                                    Tambahkan siswa ke ekskul ini
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                          </div>
                         </div>
 
                         <div className="flex flex-col-reverse gap-3 border-t border-slate-100 bg-slate-50 px-6 py-5 sm:flex-row sm:justify-end">
@@ -1828,69 +1882,6 @@ export default function AHome() {
                       </div>
                     </div>
                   )}
-
-                  <div className="border-t pt-8">
-                    <h4 className="text-lg font-bold text-gray-900 mb-6 flex items-center gap-3">
-                      <span className="p-2 bg-emerald-100 text-emerald-600 rounded-lg">
-                        📊
-                      </span>
-                      Daftar Anggota
-                    </h4>
-                    <div className="space-y-4 max-h-80 overflow-y-auto pr-2">
-                      {anggotaDisplay.map((a) => (
-                        <div
-                          key={a.id}
-                          className="flex items-center justify-between p-4 border-2 border-gray-200 rounded-xl hover:border-emerald-300 hover:bg-emerald-50 transition-all duration-200 group"
-                        >
-                          <div className="flex items-center gap-4">
-                            <div className="p-3 bg-emerald-100 text-emerald-600 rounded-lg group-hover:bg-emerald-200 transition-colors">
-                              👤
-                            </div>
-                            <div>
-                              <div className="font-semibold text-gray-900 group-hover:text-emerald-700 transition-colors">
-                                {a.nama}
-                              </div>
-                              <div className="text-sm text-gray-500 mt-1">
-                                Kelas:{' '}
-                                <span className="font-medium">{a.kelas}</span>
-                                <span className="mx-1">•</span>
-                                Angkatan: <span className="font-medium">{a.angkatan}</span>
-                              </div>
-                              {/* Status kehadiran & izin (total semua bulan) */}
-                              <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                                <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 font-semibold">
-                                  ✅ Hadir:
-                                  <span className="ml-1">{a.hadirCount}</span>
-                                </span>
-                                <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 font-semibold">
-                                  📝 Izin:
-                                  <span className="ml-1">{a.izinCount}</span>
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                          <button
-                            className="px-4 py-2 text-xs font-semibold text-red-600 bg-red-50 rounded-lg hover:bg-red-100 focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-all duration-200 hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
-                            onClick={() => hapusAnggotaEskul(a.id)}
-                            disabled={isViewingArchivePeriod}
-                          >
-                            🗑️ Hapus
-                          </button>
-                        </div>
-                      ))}
-                      {anggotaDisplay.length === 0 && (
-                        <div className="text-center py-12">
-                          <div className="text-gray-300 text-6xl mb-4">👥</div>
-                          <p className="text-gray-500 text-lg font-medium">
-                            Belum ada anggota
-                          </p>
-                          <p className="text-gray-400 mt-2">
-                            Tambahkan siswa ke ekskul ini
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
                 </div>
               </div>
             )}
