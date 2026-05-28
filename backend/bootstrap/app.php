@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\BlockSuspiciousRequests;
+use App\Http\Middleware\DenyRootDomainAuthAccess;
 use App\Http\Middleware\EnsureSuperAdminAccess;
 use App\Http\Middleware\EnsureSuperAdminDomain;
 use App\Http\Middleware\EnsureTenantMatchesProfile;
@@ -45,6 +46,7 @@ return Application::configure(basePath: dirname(__DIR__))
         });
 
         $middleware->alias([
+            'auth.not_root_domain' => DenyRootDomainAuthAccess::class,
             'super.admin' => EnsureSuperAdminAccess::class,
             'super.domain' => EnsureSuperAdminDomain::class,
         ]);

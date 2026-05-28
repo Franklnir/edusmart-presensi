@@ -164,6 +164,24 @@ class AuthSuperAdminHardeningTest extends TestCase
         $wrongTenantPassword->assertJsonPath('error', 'Password tidak sesuai. Periksa kembali password akun Anda.');
     }
 
+    public function test_root_domain_cannot_be_used_for_public_auth_login(): void
+    {
+        config()->set('tenancy.root_domain', 'edusmart.test');
+        config()->set('tenancy.admin_subdomain', 'admin');
+        config()->set('tenancy.admin_hosts', []);
+        config()->set('tenancy.allow_root_for_super_admin', false);
+
+        $response = $this
+            ->withServerVariables(['REMOTE_ADDR' => '10.10.20.4'])
+            ->postJson('http://edusmart.test/api/auth/login', [
+                'email' => 'student@example.com',
+                'password' => 'Student123!',
+            ]);
+
+        $response->assertStatus(403);
+        $response->assertJsonPath('code', 'ROOT_DOMAIN_AUTH_DISABLED');
+    }
+
     public function test_public_register_checks_duplicate_email_inside_current_tenant_only(): void
     {
         config()->set('tenancy.allow_header_override', true);

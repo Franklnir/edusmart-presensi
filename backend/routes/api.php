@@ -47,13 +47,13 @@ Route::get('/mobile/schools', [MobileDirectoryController::class, 'schools'])
     ]);
 
 Route::post('/auth/register', [AuthController::class, 'register'])
-    ->middleware('throttle:auth')
+    ->middleware(['throttle:auth', 'auth.not_root_domain'])
     ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
 Route::post('/auth/login', [AuthController::class, 'login'])
-    ->middleware('throttle:auth')
+    ->middleware(['throttle:auth', 'auth.not_root_domain'])
     ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
 Route::get('/auth/google/redirect', [AuthController::class, 'googleRedirect'])
-    ->middleware(['web', 'throttle:auth'])
+    ->middleware(['web', 'throttle:auth', 'auth.not_root_domain'])
     ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
 Route::get('/auth/google/mobile/redirect', [AuthController::class, 'googleMobileRedirect'])
     ->middleware(['web', 'throttle:auth'])
@@ -65,10 +65,10 @@ Route::get('/auth/google/popup-context', [AuthController::class, 'googlePopupCon
         EnsureTenantMatchesProfile::class,
     ]);
 Route::post('/auth/google/code-login', [AuthController::class, 'googleCodeLogin'])
-    ->middleware('throttle:auth')
+    ->middleware(['throttle:auth', 'auth.not_root_domain'])
     ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
 Route::post('/auth/google/credential-login', [AuthController::class, 'googleCredentialLogin'])
-    ->middleware('throttle:auth')
+    ->middleware(['throttle:auth', 'auth.not_root_domain'])
     ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
 Route::post('/auth/google/mobile/exchange', [AuthController::class, 'googleMobileExchange'])
     ->middleware('throttle:auth')
@@ -83,10 +83,10 @@ Route::get('/auth/google/finalize-login', [AuthController::class, 'googleFinaliz
     ->middleware(['web', 'throttle:auth'])
     ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
 Route::post('/auth/forgot-password', [AuthController::class, 'forgotPassword'])
-    ->middleware('throttle:auth')
+    ->middleware(['throttle:auth', 'auth.not_root_domain'])
     ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
 Route::post('/auth/reset-password', [AuthController::class, 'resetPassword'])
-    ->middleware('throttle:auth')
+    ->middleware(['throttle:auth', 'auth.not_root_domain'])
     ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
 Route::get('/auth/verify-email/{id}/{hash}', [AuthController::class, 'verifyEmail'])
     ->name('verification.verify')

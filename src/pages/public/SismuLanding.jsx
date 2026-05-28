@@ -47,9 +47,11 @@ import {
   XCircle,
   Zap
 } from 'lucide-react'
+import { getAdminSubdomain, getRootDomain } from '../../utils/marketingHost'
 
 const whatsappUrl =
   'https://wa.me/6289531832365?text=Halo%20SISMU%2C%20saya%20ingin%20konsultasi%20paket%20untuk%20sekolah'
+const adminLoginUrl = `https://${getAdminSubdomain()}.${getRootDomain()}/login`
 
 const iconMap = {
   activity: Activity,
@@ -516,7 +518,7 @@ const SismuLanding = () => {
           </div>
 
           <div className="hidden items-center gap-3 lg:flex">
-            <MarketingButton variant="secondary" href="/login">
+            <MarketingButton variant="secondary" href={adminLoginUrl}>
               Masuk Aplikasi
             </MarketingButton>
             <MarketingButton href={whatsappUrl} className="px-4" target="_blank">
@@ -553,7 +555,7 @@ const SismuLanding = () => {
                 </button>
               ))}
               <div className="my-2 h-px bg-slate-100" />
-              <MarketingButton variant="secondary" href="/login" className="w-full">
+              <MarketingButton variant="secondary" href={adminLoginUrl} className="w-full">
                 Masuk Aplikasi
               </MarketingButton>
               <MarketingButton href={whatsappUrl} className="mt-2 w-full">

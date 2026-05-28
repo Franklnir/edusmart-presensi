@@ -65,17 +65,23 @@ const RootRoute = () => (
     : <Navigate to="/login" replace />
 )
 
+const TenantAuthRoute = ({ children }) => (
+  isMarketingRootHost()
+    ? <Navigate to="/" replace />
+    : children
+)
+
 const AppRoutes = () => (
   <Routes>
     {/* Public marketing */}
     <Route path="/landing" element={lazyElement(SismuLanding)} />
 
     {/* Auth (tidak butuh login) */}
-    <Route path="/login" element={lazyElement(Login)} />
+    <Route path="/login" element={<TenantAuthRoute>{lazyElement(Login)}</TenantAuthRoute>} />
     <Route path="/auth/google/popup" element={lazyElement(GoogleAuthPopup)} />
-    <Route path="/register" element={lazyElement(Register)} />
-    <Route path="/forgot-password" element={lazyElement(ForgotPassword)} />
-    <Route path="/reset-password" element={lazyElement(ResetPassword)} />
+    <Route path="/register" element={<TenantAuthRoute>{lazyElement(Register)}</TenantAuthRoute>} />
+    <Route path="/forgot-password" element={<TenantAuthRoute>{lazyElement(ForgotPassword)}</TenantAuthRoute>} />
+    <Route path="/reset-password" element={<TenantAuthRoute>{lazyElement(ResetPassword)}</TenantAuthRoute>} />
 
     {/* SISWA */}
     <Route
