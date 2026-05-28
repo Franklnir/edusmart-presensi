@@ -25,6 +25,7 @@ export default function AcademicPeriodArchiveFilter({
   const dialogTitleId = `academic-period-filter-title-${generatedId}`
   const academicYearSelectId = `academic-period-year-${generatedId}`
   const isArchive = selectedYear !== (activeAcademicPeriod?.tahunAjaran || '')
+  const periodHint = isArchive ? 'Arsip dipilih' : 'Periode aktif'
   const normalizedYearOptions = useMemo(
     () => normalizeYearOptions(academicYearOptions),
     [academicYearOptions]
@@ -84,21 +85,21 @@ export default function AcademicPeriodArchiveFilter({
           onClick={handleOpen}
           disabled={disabled}
           className={`sismu-filter-control text-left hover:border-indigo-300 hover:bg-indigo-50/50 disabled:cursor-not-allowed disabled:opacity-60 ${
-            compact ? 'px-3 py-2.5' : 'px-4 py-3'
+            compact ? 'sismu-filter-control--compact' : ''
           }`}
           aria-label={`Buka pengaturan ${title.toLowerCase()}`}
         >
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex min-h-0 items-center justify-between gap-3">
             <div className="min-w-0">
-              <div className="truncate text-sm font-bold text-slate-900">
+              <div className="truncate text-sm font-bold leading-5 text-slate-900">
                 {selectedYear || '-'}
               </div>
-              <div className="mt-0.5 truncate text-[11px] font-medium text-slate-500">
-                {isArchive ? 'Periode arsip dipilih' : 'Mengikuti periode aktif sekolah'}
+              <div className="truncate text-[11px] font-medium leading-4 text-slate-500">
+                {periodHint}
               </div>
             </div>
             <span
-              className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold ${
+              className={`shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-bold leading-5 ${
                 isArchive ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-700'
               }`}
             >
