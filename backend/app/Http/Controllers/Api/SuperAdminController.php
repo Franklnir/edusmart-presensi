@@ -855,6 +855,131 @@ class SuperAdminController extends ApiController
         ]);
     }
 
+    public function monitoringOverview(Request $request)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
+        }
+
+        if (! $this->hasTable('profiles') || ! $this->hasTable('tenants')) {
+            return $this->ok($this->emptyMonitoringOverview());
+        }
+
+        $activeCutoff = now()->subMinutes(5);
+        $recentCutoff = now()->subDay();
+
+        $roleStats = DB::table('profiles')
+            ->selectRaw("sum(case when role = 'siswa' then 1 else 0 end) as siswa")
+            ->selectRaw("sum(case when role in ('guru', 'teacher') then 1 else 0 end) as guru")
+            ->selectRaw("sum(case when role = 'admin' then 1 else 0 end) as admin")
+            ->selectRaw("sum(case when status = 'active' then 1 else 0 end) as active_status")
+            ->first();
+
+        $tenantCount = DB::table('tenants')->count();
+
+        $presenceRows = $this->monitoringPresenceRows($recentCutoff);
+        $activeUsers = $presenceRows
+            ->filter(fn ($row) => $this->carbonFromValue($row->last_seen_at)?->gte($activeCutoff) ?? false)
+            ->values();
+
+        $activeByRole = [
+            'siswa' => 0,
+            'guru' => 0,
+            'admin' => 0,
+        ];
+
+        foreach ($activeUsers as $row) {
+            $role = $this->normalizeMonitoringRole((string) ($row->role ?? ''));
+            if (isset($activeByRole[$role])) {
+                $activeByRole[$role]++;
+            }
+        }
+
+        $tenants = $this->monitoringTenantStats($presenceRows, $activeCutoff);
+
+        return $this->ok([
+            'generated_at' => now()->toIso8601String(),
+            'active_window_minutes' => 5,
+            'totals' => [
+                'tenants' => (int) $tenantCount,
+                'students' => (int) ($roleStats->siswa ?? 0),
+                'teachers' => (int) ($roleStats->guru ?? 0),
+                'admins' => (int) ($roleStats->admin ?? 0),
+                'active_status' => (int) ($roleStats->active_status ?? 0),
+                'online_now' => $activeUsers->count(),
+            ],
+            'active_by_role' => $activeByRole,
+            'role_distribution' => [
+                ['label' => 'Siswa', 'value' => (int) ($roleStats->siswa ?? 0), 'color' => '#2563eb'],
+                ['label' => 'Guru', 'value' => (int) ($roleStats->guru ?? 0), 'color' => '#059669'],
+                ['label' => 'Admin Sekolah', 'value' => (int) ($roleStats->admin ?? 0), 'color' => '#d97706'],
+            ],
+            'top_tenants' => [
+                'students' => $tenants->sortByDesc('active_students')->take(8)->values(),
+                'teachers' => $tenants->sortByDesc('active_teachers')->take(8)->values(),
+                'admins' => $tenants->sortByDesc('active_admins')->take(8)->values(),
+                'overall' => $tenants->sortByDesc('online_now')->take(10)->values(),
+            ],
+            'active_users' => $activeUsers
+                ->sortByDesc('last_seen_at')
+                ->take(30)
+                ->map(fn ($row) => [
+                    'id' => (string) ($row->user_id ?? ''),
+                    'name' => (string) ($row->name ?? '-'),
+                    'role' => $this->normalizeMonitoringRole((string) ($row->role ?? '')),
+                    'tenant_id' => (string) ($row->tenant_id ?? ''),
+                    'tenant_name' => (string) ($row->tenant_name ?? '-'),
+                    'tenant_slug' => (string) ($row->tenant_slug ?? ''),
+                    'last_seen_at' => $row->last_seen_at,
+                    'activity_count' => (int) ($row->activity_count ?? 0),
+                    'device_count' => (int) ($row->device_count ?? 0),
+                ])
+                ->values(),
+            'charts' => [
+                'presence_24h' => $this->monitoringPresenceTimeline($presenceRows),
+                'tenant_counts' => $tenants->sortByDesc('total_users')->take(10)->values(),
+                'tenant_online' => $tenants->sortByDesc('online_now')->take(10)->values(),
+            ],
+        ]);
+    }
+
+    public function serverMonitoring(Request $request)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
+        }
+
+        $startedAt = microtime(true);
+        $memory = $this->serverMemoryStats();
+        $disk = $this->serverDiskStats();
+        $network = $this->serverNetworkStats();
+        $load = $this->serverLoadStats();
+        $runtimeMs = (int) round((microtime(true) - $startedAt) * 1000);
+        $prediction = $this->serverCapacityPrediction($memory, $disk, $load, $runtimeMs);
+
+        return $this->ok([
+            'generated_at' => now()->toIso8601String(),
+            'server' => [
+                'public_ip' => (string) (config('tenancy.dns_a_record') ?: $request->server('SERVER_ADDR') ?: gethostbyname(gethostname())),
+                'hostname' => gethostname() ?: 'server',
+                'app_url' => (string) config('app.url'),
+                'environment' => (string) config('app.env'),
+                'php_version' => PHP_VERSION,
+            ],
+            'runtime' => [
+                'response_ms' => $runtimeMs,
+                'status' => $prediction['status'],
+                'status_label' => $prediction['status_label'],
+                'health_score' => $prediction['health_score'],
+            ],
+            'memory' => $memory,
+            'disk' => $disk,
+            'network' => $network,
+            'load' => $load,
+            'prediction' => $prediction,
+        ]);
+    }
+
     public function store(Request $request)
     {
         if (! $this->isSuperAdmin($request)) {
@@ -1377,6 +1502,347 @@ class SuperAdminController extends ApiController
                 'temporary_password' => $newPassword,
             ],
         ]);
+    }
+
+    private function emptyMonitoringOverview(): array
+    {
+        return [
+            'generated_at' => now()->toIso8601String(),
+            'active_window_minutes' => 5,
+            'totals' => [
+                'tenants' => 0,
+                'students' => 0,
+                'teachers' => 0,
+                'admins' => 0,
+                'active_status' => 0,
+                'online_now' => 0,
+            ],
+            'active_by_role' => ['siswa' => 0, 'guru' => 0, 'admin' => 0],
+            'role_distribution' => [],
+            'top_tenants' => ['students' => [], 'teachers' => [], 'admins' => [], 'overall' => []],
+            'active_users' => [],
+            'charts' => ['presence_24h' => [], 'tenant_counts' => [], 'tenant_online' => []],
+        ];
+    }
+
+    private function monitoringPresenceRows(Carbon $since)
+    {
+        if (! $this->hasTable('user_presence')) {
+            return collect();
+        }
+
+        $query = DB::table('user_presence as up')
+            ->leftJoin('profiles as p', 'p.id', '=', 'up.user_id')
+            ->leftJoin('tenants as t', 't.id', '=', 'up.tenant_id')
+            ->whereNotNull('up.last_seen_at')
+            ->where('up.last_seen_at', '>=', $since->toDateTimeString())
+            ->select(
+                'up.tenant_id',
+                'up.user_id',
+                DB::raw('max(up.role) as role'),
+                DB::raw('max(p.nama) as name'),
+                DB::raw('max(t.name) as tenant_name'),
+                DB::raw('max(t.slug) as tenant_slug'),
+                DB::raw('max(up.last_seen_at) as last_seen_at'),
+                DB::raw('sum(coalesce(up.activity_count, 0)) as activity_count'),
+                DB::raw('count(distinct up.device_id) as device_count')
+            )
+            ->groupBy('up.tenant_id', 'up.user_id')
+            ->limit(5000);
+
+        return $query->get();
+    }
+
+    private function monitoringTenantStats($presenceRows, Carbon $activeCutoff)
+    {
+        $tenantCounts = DB::table('profiles')
+            ->leftJoin('tenants as t', 't.id', '=', 'profiles.tenant_id')
+            ->select('profiles.tenant_id', 't.name as tenant_name', 't.slug as tenant_slug')
+            ->selectRaw("sum(case when profiles.role = 'siswa' then 1 else 0 end) as total_students")
+            ->selectRaw("sum(case when profiles.role in ('guru', 'teacher') then 1 else 0 end) as total_teachers")
+            ->selectRaw("sum(case when profiles.role = 'admin' then 1 else 0 end) as total_admins")
+            ->selectRaw('count(*) as total_users')
+            ->groupBy('profiles.tenant_id', 't.name', 't.slug')
+            ->get()
+            ->keyBy(fn ($row) => (string) ($row->tenant_id ?? ''));
+
+        $activeMap = [];
+        foreach ($presenceRows as $row) {
+            $lastSeen = $this->carbonFromValue($row->last_seen_at);
+            if (! $lastSeen || $lastSeen->lt($activeCutoff)) {
+                continue;
+            }
+
+            $tenantId = (string) ($row->tenant_id ?? '');
+            if ($tenantId === '') {
+                continue;
+            }
+
+            $role = $this->normalizeMonitoringRole((string) ($row->role ?? ''));
+            $activeMap[$tenantId] ??= [
+                'online_now' => 0,
+                'active_students' => 0,
+                'active_teachers' => 0,
+                'active_admins' => 0,
+            ];
+            $activeMap[$tenantId]['online_now']++;
+
+            if ($role === 'siswa') {
+                $activeMap[$tenantId]['active_students']++;
+            } elseif ($role === 'guru') {
+                $activeMap[$tenantId]['active_teachers']++;
+            } elseif ($role === 'admin') {
+                $activeMap[$tenantId]['active_admins']++;
+            }
+        }
+
+        return $tenantCounts->map(function ($row) use ($activeMap) {
+            $tenantId = (string) ($row->tenant_id ?? '');
+            $active = $activeMap[$tenantId] ?? [];
+
+            return [
+                'tenant_id' => $tenantId,
+                'name' => (string) ($row->tenant_name ?? '-'),
+                'slug' => (string) ($row->tenant_slug ?? ''),
+                'total_students' => (int) ($row->total_students ?? 0),
+                'total_teachers' => (int) ($row->total_teachers ?? 0),
+                'total_admins' => (int) ($row->total_admins ?? 0),
+                'total_users' => (int) ($row->total_users ?? 0),
+                'online_now' => (int) ($active['online_now'] ?? 0),
+                'active_students' => (int) ($active['active_students'] ?? 0),
+                'active_teachers' => (int) ($active['active_teachers'] ?? 0),
+                'active_admins' => (int) ($active['active_admins'] ?? 0),
+            ];
+        })->values();
+    }
+
+    private function monitoringPresenceTimeline($presenceRows): array
+    {
+        $hours = [];
+        $start = now()->subHours(23)->startOfHour();
+        for ($index = 0; $index < 24; $index++) {
+            $hour = $start->copy()->addHours($index);
+            $key = $hour->format('Y-m-d H:00:00');
+            $hours[$key] = [
+                'label' => $hour->format('H:i'),
+                'siswa' => 0,
+                'guru' => 0,
+                'admin' => 0,
+                'total' => 0,
+            ];
+        }
+
+        foreach ($presenceRows as $row) {
+            $seen = $this->carbonFromValue($row->last_seen_at);
+            if (! $seen) {
+                continue;
+            }
+
+            $key = $seen->copy()->startOfHour()->format('Y-m-d H:00:00');
+            if (! isset($hours[$key])) {
+                continue;
+            }
+
+            $role = $this->normalizeMonitoringRole((string) ($row->role ?? ''));
+            if (isset($hours[$key][$role])) {
+                $hours[$key][$role]++;
+            }
+            $hours[$key]['total']++;
+        }
+
+        return array_values($hours);
+    }
+
+    private function normalizeMonitoringRole(string $role): string
+    {
+        $normalized = strtolower(trim($role));
+        if ($normalized === 'teacher') {
+            return 'guru';
+        }
+        if (in_array($normalized, ['siswa', 'guru', 'admin'], true)) {
+            return $normalized;
+        }
+
+        return 'lainnya';
+    }
+
+    private function carbonFromValue($value): ?Carbon
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        try {
+            return Carbon::parse($value);
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    private function serverMemoryStats(): array
+    {
+        $meminfo = $this->readProcKeyValueFile('/proc/meminfo');
+        $total = (int) (($meminfo['MemTotal'] ?? 0) * 1024);
+        $available = (int) (($meminfo['MemAvailable'] ?? $meminfo['MemFree'] ?? 0) * 1024);
+        $used = max(0, $total - $available);
+        $percent = $total > 0 ? round(($used / $total) * 100, 2) : null;
+
+        return [
+            'total_bytes' => $total,
+            'used_bytes' => $used,
+            'available_bytes' => $available,
+            'percent' => $percent,
+            'total_label' => $this->formatBytes($total),
+            'used_label' => $this->formatBytes($used),
+            'available_label' => $this->formatBytes($available),
+        ];
+    }
+
+    private function serverDiskStats(): array
+    {
+        $path = base_path();
+        $total = (int) @disk_total_space($path);
+        $free = (int) @disk_free_space($path);
+        $used = max(0, $total - $free);
+
+        return [
+            'path' => $path,
+            'total_bytes' => $total,
+            'used_bytes' => $used,
+            'free_bytes' => $free,
+            'percent' => $total > 0 ? round(($used / $total) * 100, 2) : null,
+            'total_label' => $this->formatBytes($total),
+            'used_label' => $this->formatBytes($used),
+            'free_label' => $this->formatBytes($free),
+        ];
+    }
+
+    private function serverNetworkStats(): array
+    {
+        $interfaces = [];
+        $rx = 0;
+        $tx = 0;
+
+        if (is_readable('/proc/net/dev')) {
+            foreach (file('/proc/net/dev') ?: [] as $line) {
+                if (! str_contains($line, ':')) {
+                    continue;
+                }
+
+                [$name, $payload] = array_map('trim', explode(':', $line, 2));
+                if ($name === '' || $name === 'lo') {
+                    continue;
+                }
+
+                $parts = preg_split('/\s+/', trim($payload)) ?: [];
+                $rxBytes = (int) ($parts[0] ?? 0);
+                $txBytes = (int) ($parts[8] ?? 0);
+                $rx += $rxBytes;
+                $tx += $txBytes;
+                $interfaces[] = [
+                    'name' => $name,
+                    'rx_bytes' => $rxBytes,
+                    'tx_bytes' => $txBytes,
+                    'rx_label' => $this->formatBytes($rxBytes),
+                    'tx_label' => $this->formatBytes($txBytes),
+                ];
+            }
+        }
+
+        return [
+            'rx_bytes' => $rx,
+            'tx_bytes' => $tx,
+            'rx_label' => $this->formatBytes($rx),
+            'tx_label' => $this->formatBytes($tx),
+            'interfaces' => $interfaces,
+        ];
+    }
+
+    private function serverLoadStats(): array
+    {
+        $load = function_exists('sys_getloadavg') ? (sys_getloadavg() ?: [0, 0, 0]) : [0, 0, 0];
+        $cores = $this->cpuCoreCount();
+        $oneMinutePercent = $cores > 0 ? round(((float) ($load[0] ?? 0) / $cores) * 100, 2) : null;
+
+        return [
+            'cores' => $cores,
+            'one_minute' => round((float) ($load[0] ?? 0), 2),
+            'five_minutes' => round((float) ($load[1] ?? 0), 2),
+            'fifteen_minutes' => round((float) ($load[2] ?? 0), 2),
+            'one_minute_percent' => $oneMinutePercent,
+        ];
+    }
+
+    private function serverCapacityPrediction(array $memory, array $disk, array $load, int $responseMs): array
+    {
+        $memoryAvailableMb = max(0, (int) (($memory['available_bytes'] ?? 0) / 1024 / 1024));
+        $diskFreeGb = max(0, (float) (($disk['free_bytes'] ?? 0) / 1024 / 1024 / 1024));
+        $cores = max(1, (int) ($load['cores'] ?? 1));
+        $loadPercent = max(0, (float) ($load['one_minute_percent'] ?? 0));
+
+        $memoryCapacity = max(20, (int) floor($memoryAvailableMb / 10));
+        $cpuCapacity = max(20, (int) floor($cores * 180 * max(0.25, (100 - min(95, $loadPercent)) / 100)));
+        $latencyCapacity = $responseMs <= 50 ? 500 : ($responseMs <= 120 ? 300 : ($responseMs <= 250 ? 160 : 80));
+        $diskCapacity = $diskFreeGb >= 5 ? 500 : ($diskFreeGb >= 2 ? 250 : 90);
+        $estimatedUsers = max(20, min($memoryCapacity, $cpuCapacity, $latencyCapacity, $diskCapacity));
+
+        $healthScore = 100;
+        $healthScore -= min(45, (int) (($memory['percent'] ?? 0) * 0.35));
+        $healthScore -= min(30, (int) (($disk['percent'] ?? 0) * 0.25));
+        $healthScore -= min(25, (int) ($loadPercent * 0.25));
+        $healthScore -= $responseMs > 250 ? 15 : ($responseMs > 120 ? 8 : 0);
+        $healthScore = max(0, min(100, $healthScore));
+
+        $status = $healthScore >= 75 ? 'healthy' : ($healthScore >= 50 ? 'warning' : 'critical');
+
+        return [
+            'status' => $status,
+            'status_label' => $status === 'healthy' ? 'Sehat' : ($status === 'warning' ? 'Perlu dipantau' : 'Kritis'),
+            'health_score' => $healthScore,
+            'estimated_concurrent_users' => $estimatedUsers,
+            'estimated_concurrent_users_label' => number_format($estimatedUsers, 0, ',', '.').' user bersamaan',
+            'basis' => [
+                'memory_capacity' => $memoryCapacity,
+                'cpu_capacity' => $cpuCapacity,
+                'latency_capacity' => $latencyCapacity,
+                'disk_capacity' => $diskCapacity,
+            ],
+            'notes' => [
+                'Estimasi dihitung dari sisa RAM, beban CPU, ruang disk, dan waktu respon endpoint.',
+                'Angka ini adalah indikator operasional, bukan hasil load test penuh.',
+            ],
+        ];
+    }
+
+    private function readProcKeyValueFile(string $path): array
+    {
+        if (! is_readable($path)) {
+            return [];
+        }
+
+        $result = [];
+        foreach (file($path) ?: [] as $line) {
+            if (! str_contains($line, ':')) {
+                continue;
+            }
+            [$key, $value] = array_map('trim', explode(':', $line, 2));
+            $result[$key] = (int) preg_replace('/[^0-9]/', '', $value);
+        }
+
+        return $result;
+    }
+
+    private function cpuCoreCount(): int
+    {
+        if (is_readable('/proc/cpuinfo')) {
+            $contents = file_get_contents('/proc/cpuinfo') ?: '';
+            $count = substr_count($contents, 'processor');
+            if ($count > 0) {
+                return $count;
+            }
+        }
+
+        return 1;
     }
 
     private function normalizeSlug(string $slug): string

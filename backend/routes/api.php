@@ -247,6 +247,8 @@ Route::middleware(['auth:sanctum', 'throttle:super', 'super.domain'])->group(fun
     Route::get('/super/tenants', [SuperAdminController::class, 'index']);
     Route::post('/super/tenants', [SuperAdminController::class, 'store']);
     Route::get('/super/tenants/{id}', [SuperAdminController::class, 'showTenant']);
+    Route::get('/super/monitoring', [SuperAdminController::class, 'monitoringOverview']);
+    Route::get('/super/monitoring/server', [SuperAdminController::class, 'serverMonitoring']);
     Route::get('/super/storage', [StorageManagementController::class, 'superOverview']);
     Route::post('/super/storage/object-storage/sync', [StorageManagementController::class, 'superObjectStorageSync']);
     Route::post('/super/storage/trash/purge-expired', [StorageManagementController::class, 'superPurgeExpiredTrash']);

@@ -83,6 +83,15 @@ export const superAdminGroup = {
   group: 'Super Admin',
   icon: 'shield',
   items: [
+    {
+      id: 'super-monitoring-group',
+      group: 'Monitoring',
+      icon: 'monitor',
+      items: [
+        { id: 'super-monitoring', to: '/admin/monitoring', label: 'Monitoring', icon: 'signal' },
+        { id: 'super-monitoring-server', to: '/admin/monitoring-server', label: 'Monitoring Server', icon: 'monitor' },
+      ],
+    },
     { id: 'super-tenants', to: '/admin/tenants', label: 'Sekolah', icon: 'school' },
     { id: 'super-storage', to: '/admin/storage', label: 'Storage VPS & S3', icon: 'storage' },
     { id: 'super-whatsapp', to: '/admin/whatsapp', label: 'WA Pusat', icon: 'chat' },

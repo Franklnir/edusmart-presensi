@@ -2960,6 +2960,24 @@ const auth = {
       const res = await apiFetch(`/api/super/admins/${id}`, { method: 'DELETE' })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
+    async monitoringOverview() {
+      const res = await apiFetch('/api/super/monitoring', {
+        method: 'GET',
+        cacheTtlMs: 5000,
+        staleKey: 'super.monitoring',
+        timeoutMs: 20000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async serverMonitoring() {
+      const res = await apiFetch('/api/super/monitoring/server', {
+        method: 'GET',
+        cacheTtlMs: 3000,
+        staleKey: 'super.monitoring-server',
+        timeoutMs: 15000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
     async storageOverview() {
       const res = await apiFetch('/api/super/storage', {
         method: 'GET',
