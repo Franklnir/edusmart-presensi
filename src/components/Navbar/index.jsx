@@ -17,6 +17,7 @@ import {
 
 const ROLE_BADGE = {
   admin: { bg: 'bg-violet-100', text: 'text-violet-700', label: 'Admin' },
+  super_admin: { bg: 'bg-indigo-100', text: 'text-indigo-700', label: 'Super Admin' },
   guru: { bg: 'bg-sky-100', text: 'text-sky-700', label: 'Guru' },
   siswa: { bg: 'bg-emerald-100', text: 'text-emerald-700', label: 'Siswa' }
 }
@@ -53,7 +54,9 @@ const Navbar = () => {
     setMonitorOpen
   } = useMonitoring(effectiveRole)
 
-  const roleBadge = ROLE_BADGE[role] || { bg: 'bg-slate-100', text: 'text-slate-600', label: role || 'User' }
+  const roleBadge = hasSuperAdminAccess
+    ? ROLE_BADGE.super_admin
+    : ROLE_BADGE[role] || { bg: 'bg-slate-100', text: 'text-slate-600', label: role || 'User' }
   const schoolName = settings?.nama_sekolah || 'EduSmart'
   const userName = profile?.nama || user?.email?.split('@')[0] || 'User'
   const userInitial = (profile?.nama?.[0] || user?.email?.[0] || 'U').toUpperCase()

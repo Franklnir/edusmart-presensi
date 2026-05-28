@@ -109,14 +109,14 @@ function addItemToGroup(items, groupId, itemToAdd) {
 }
 
 export function buildNavigationMenu({ effectiveRole, isSuperAdmin, isWaliKelas, role }) {
+  if (isSuperAdmin) {
+    return cloneMenuItems([superAdminGroup])
+  }
+
   let items = cloneMenuItems(menuConfig[effectiveRole] || [])
 
   if (role === 'guru' && isWaliKelas) {
     items = addItemToGroup(items, 'guru-akademik', waliKelasItem)
-  }
-
-  if (isSuperAdmin) {
-    items = [...items, cloneMenuItems([superAdminGroup])[0]]
   }
 
   return items

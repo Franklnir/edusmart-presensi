@@ -30,6 +30,16 @@ const initialForm = {
   confirmPassword: ''
 }
 
+const isAdminHost = () => {
+  const adminSubdomain = String(import.meta.env.VITE_ADMIN_SUBDOMAIN || 'admin26')
+    .trim()
+    .toLowerCase()
+  const runtimeHost = typeof window !== 'undefined' ? String(window.location.hostname || '').toLowerCase() : ''
+  const hostParts = runtimeHost.split('.').filter(Boolean)
+
+  return runtimeHost === adminSubdomain || (hostParts.length >= 2 && hostParts[0] === adminSubdomain)
+}
+
 export default function Register() {
   const nav = useNavigate()
 
@@ -44,6 +54,10 @@ export default function Register() {
   const [submitting, setSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
+
+  useEffect(() => {
+    if (isAdminHost()) nav('/login', { replace: true })
+  }, [nav])
 
   // ========= LOAD SETTINGS =========
   useEffect(() => {

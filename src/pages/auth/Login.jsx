@@ -681,15 +681,17 @@ const Login = () => {
               </div>
             </form>
 
-            <div className="login__form-footer">
-              <p>
-                Belum punya akun?
-                <Link to="/register" className="login__register-link">
-                  {' '}
-                  Daftar Sekarang
-                </Link>
-              </p>
-            </div>
+            {!isAdminHost && (
+              <div className="login__form-footer">
+                <p>
+                  Belum punya akun?
+                  <Link to="/register" className="login__register-link">
+                    {' '}
+                    Daftar Sekarang
+                  </Link>
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </div>
