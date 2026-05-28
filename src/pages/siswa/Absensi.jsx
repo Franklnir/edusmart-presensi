@@ -347,7 +347,7 @@ export default function SAbsensi() {
                         Pilih mata pelajaran yang diajar hari itu, lalu lakukan absensi.
                       </p>
                     </div>
-                    <div className="p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                    <div className="p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 items-end">
                       <AcademicPeriodArchiveFilter
                         activeAcademicPeriod={activeAcademicPeriod}
                         periodFilter={periodFilter}
@@ -367,7 +367,7 @@ export default function SAbsensi() {
                         <div className="flex min-w-0 gap-2">
                           <input
                             type="date"
-                            className="min-w-0 flex-1 px-3 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-white text-sm"
+                            className="sismu-toolbar-control min-w-0 flex-1 border border-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-white text-sm"
                             value={tgl}
                             onChange={(e) => setTgl(e.target.value)}
                             max={getToday()}
@@ -375,7 +375,7 @@ export default function SAbsensi() {
                           <button
                             type="button"
                             onClick={() => setTgl(getToday())}
-                            className="shrink-0 px-3 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold text-sm shadow-sm whitespace-nowrap"
+                            className="sismu-toolbar-button shrink-0 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm shadow-sm"
                           >
                             Hari Ini
                           </button>
@@ -386,7 +386,7 @@ export default function SAbsensi() {
                           Mata Pelajaran
                         </label>
                         <select
-                          className="w-full min-w-0 px-3 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-white text-sm"
+                          className="sismu-toolbar-control w-full min-w-0 border border-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-white text-sm"
                           value={mapel}
                           onChange={(e) => setMapel(e.target.value)}
                         >

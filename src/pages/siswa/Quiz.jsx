@@ -3106,10 +3106,10 @@ export default function SiswaQuiz() {
                 <p className="page-title-description">Kerjakan quiz sesuai jadwal yang ditentukan guru.</p>
               </div>
             </div>
-            <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
-              <div className="bg-gradient-to-r from-slate-50 to-indigo-50 border border-indigo-100 rounded-2xl px-4 py-3">
+            <div className="sismu-toolbar-filters sismu-toolbar-filters--student w-full lg:w-auto">
+              <div className="sismu-toolbar-card bg-gradient-to-r from-slate-50 to-indigo-50 border-indigo-100">
                 <div className="text-xs text-slate-500">Siswa</div>
-                <div className="font-semibold text-slate-800">{profile?.nama || '-'}</div>
+                <div className="truncate font-semibold text-slate-800">{profile?.nama || '-'}</div>
                 <div className="text-xs text-slate-500 mt-1">Kelas: {kelasId || '-'}</div>
               </div>
               <AcademicPeriodArchiveFilter
@@ -3121,13 +3121,13 @@ export default function SiswaQuiz() {
                 setSemester={setSemester}
                 resetToActivePeriod={resetToActivePeriod}
                 title="Periode Quiz"
-                className="min-w-[17rem]"
+                className="min-w-0"
                 compact
               />
               <select
                 name="quiz_mapel_filter"
                 aria-label="Filter mapel quiz"
-                className="border border-slate-200 rounded-2xl px-4 py-3 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="sismu-toolbar-control border border-slate-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 value={selectedMapel}
                 onChange={(e) => setSelectedMapel(e.target.value)}
               >
@@ -3141,7 +3141,7 @@ export default function SiswaQuiz() {
               <select
                 name="quiz_month_filter"
                 aria-label="Filter bulan quiz"
-                className="border border-slate-200 rounded-2xl px-4 py-3 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="sismu-toolbar-control border border-slate-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 value={selectedMonth}
                 onChange={(e) => setSelectedMonth(e.target.value)}
               >
@@ -3155,7 +3155,7 @@ export default function SiswaQuiz() {
               <button
                 type="button"
                 onClick={loadQuizzes}
-                className="px-4 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold shadow-sm transition-colors"
+                className="sismu-toolbar-button bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold shadow-sm transition-colors"
               >
                 Muat Ulang
               </button>

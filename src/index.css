@@ -791,7 +791,7 @@ body.quiz-strict-active img {
 }
 
 .sismu-filter-control--compact {
-  min-height: 3.25rem;
+  min-height: 3.5rem;
   padding: 0.625rem 0.875rem;
 }
 
@@ -805,6 +805,52 @@ body.quiz-strict-active img {
   background: rgb(248 250 252);
   color: rgb(71 85 105);
   opacity: 1;
+}
+
+.sismu-toolbar-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11.5rem, 1fr));
+  align-items: end;
+  gap: 0.75rem;
+}
+
+.sismu-toolbar-filters--student {
+  grid-template-columns: minmax(13.5rem, 1.1fr) minmax(11rem, 0.9fr) minmax(10rem, 0.8fr) minmax(13rem, 1fr) auto;
+}
+
+.sismu-toolbar-filters--compact {
+  grid-template-columns: minmax(13.5rem, 1.1fr) minmax(11rem, 0.9fr) auto;
+}
+
+.sismu-toolbar-card {
+  min-height: 3.5rem;
+  width: 100%;
+  border-radius: 1rem;
+  border: 1px solid rgb(203 213 225);
+  background: rgb(248 250 252);
+  padding: 0.625rem 1rem;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+}
+
+.sismu-toolbar-control {
+  min-height: 3.5rem;
+  border-radius: 1rem;
+  padding: 0.75rem 1rem;
+}
+
+.sismu-toolbar-button {
+  min-height: 3.5rem;
+  border-radius: 1rem;
+  padding: 0.75rem 1.125rem;
+  white-space: nowrap;
+}
+
+@media (max-width: 1023px) {
+  .sismu-toolbar-filters,
+  .sismu-toolbar-filters--student,
+  .sismu-toolbar-filters--compact {
+    grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  }
 }
 
 .sismu-filter-help {

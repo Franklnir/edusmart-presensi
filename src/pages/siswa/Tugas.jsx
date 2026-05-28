@@ -1591,10 +1591,10 @@ export default function TugasSiswa() {
               </div>
             </div>
 
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-              <div className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3">
+            <div className="sismu-toolbar-filters sismu-toolbar-filters--compact w-full lg:w-auto">
+              <div className="sismu-toolbar-card">
                 <div className="text-xs text-slate-500">Siswa</div>
-                <div className="font-semibold text-slate-800">{profile?.nama || '-'}</div>
+                <div className="truncate font-semibold text-slate-800">{profile?.nama || '-'}</div>
                 <div className="text-xs text-slate-500 mt-1">Kelas: {kelasSiswa || '-'}</div>
               </div>
               <AcademicPeriodArchiveFilter
@@ -1606,7 +1606,7 @@ export default function TugasSiswa() {
                 setSemester={setSemester}
                 resetToActivePeriod={resetToActivePeriod}
                 title="Periode Tugas"
-                className="min-w-[17rem]"
+                className="min-w-0"
                 compact
               />
 
@@ -1618,7 +1618,7 @@ export default function TugasSiswa() {
                   pushToast('success', 'Data diperbarui')
                 }}
                 disabled={isListLoading}
-                className="px-4 py-3 bg-white border border-slate-200 rounded-2xl hover:bg-slate-50 transition-colors font-semibold text-slate-700 shadow-sm disabled:opacity-60"
+                className="sismu-toolbar-button bg-white border border-slate-200 hover:bg-slate-50 transition-colors font-semibold text-slate-700 shadow-sm disabled:opacity-60"
               >
                 {isListLoading ? '⏳ Memuat...' : '🔄 Refresh'}
               </button>
