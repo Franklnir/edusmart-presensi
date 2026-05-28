@@ -2536,27 +2536,6 @@ export default function GuruQuiz() {
                     )}
                   </div>
                 </div>
-                <div className="grid grid-cols-1 gap-3 p-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
-                  <div className="rounded-lg border border-slate-200 px-3 py-2 text-slate-700">
-                    Total siswa mapel: <span className="font-semibold text-slate-900">{totalStudents}</span>
-                  </div>
-                  <div className="rounded-lg border border-slate-200 px-3 py-2 text-slate-700">
-                    Sudah mengerjakan: <span className="font-semibold text-slate-900">{joinedCount}</span>
-                  </div>
-                  <div className="rounded-lg border border-slate-200 px-3 py-2 text-slate-700">
-                    Belum mengerjakan: <span className="font-semibold text-slate-900">{notStartedCount}</span>
-                  </div>
-                  <div className={`rounded-lg border px-3 py-2 ${
-                    quizContentLocked
-                      ? 'border-orange-200 bg-orange-50 text-orange-700'
-                      : 'border-slate-200 text-slate-700'
-                  }`}>
-                    Sedang mengerjakan: <span className="font-semibold">
-                      {activeWorkingStudents.length} siswa
-                      {ongoingOnlineCount > 0 ? ` • ${ongoingOnlineCount} online` : ''}
-                    </span>
-                  </div>
-                </div>
               </div>
 
               <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">

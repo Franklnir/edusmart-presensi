@@ -689,26 +689,26 @@ export default function ProfileGuru() {
         : 'border-blue-200/70 bg-blue-50/70'
         }`}
     >
-      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
+          <p className={`text-xs font-bold uppercase tracking-[0.18em] ${
+            needsAccountSetup ? 'text-amber-700' : 'text-blue-700'
+          }`}>
+            Akses Akun
+          </p>
           <h2
-            className={`text-xl font-bold mb-2 ${needsAccountSetup ? 'text-amber-900' : 'text-blue-900'
+            className={`mt-1 text-xl font-bold ${needsAccountSetup ? 'text-amber-900' : 'text-blue-900'
               }`}
           >
             {needsAccountSetup ? 'Lengkapi Akun (Wajib)' : 'Keamanan Akun'}
           </h2>
-          <p className={`text-sm ${needsAccountSetup ? 'text-amber-800' : 'text-blue-800'}`}>
-            {needsAccountSetup
-              ? 'Password awal buatan sistem bisa diganti langsung. Jika email sistem ingin diganti ke email aktif, email baru akan diverifikasi dulu dengan kode 6 digit.'
-              : 'Untuk mengganti email atau password, sistem akan mengirim kode verifikasi 6 digit. Jika email masih tertaut ke Google, lepas tautan dulu sebelum mengganti email lagi.'}
-          </p>
         </div>
-        <div
-          className={`text-xs px-4 py-2 rounded-xl ${needsAccountSetup ? 'text-amber-800 bg-amber-100/80' : 'text-blue-800 bg-blue-100/80'
+        <span
+          className={`inline-flex w-fit rounded-full px-3 py-1 text-xs font-semibold ${needsAccountSetup ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-700'
             }`}
         >
-          <span className="font-semibold">Login awal:</span> Siswa pakai NIS + tanggal lahir, guru pakai email + tanggal lahir.
-        </div>
+          {needsAccountSetup ? 'Perlu Setup' : 'Aktif'}
+        </span>
       </div>
 
       <div className="mt-6 grid gap-4 md:grid-cols-3">
@@ -777,17 +777,7 @@ export default function ProfileGuru() {
               ? 'Simpan Setup Akun'
               : 'Simpan Perubahan Akun'}
         </button>
-        <p className="text-xs text-amber-800">
-          {needsAccountSetup
-            ? 'Password awal masih bisa diganti langsung. Saat Anda memasukkan email aktif baru, sistem akan mengirim kode 6 digit ke email baru tersebut.'
-            : 'Perubahan email atau password akan meminta kode verifikasi 6 digit. Jika Google masih tertaut, email tidak bisa diganti sebelum tautannya dilepas.'}
-        </p>
       </div>
-      {needsAccountSetup && (
-        <p className="mt-3 text-xs text-amber-700">
-          Anda boleh mengganti password dulu, email dulu, atau keduanya sekaligus. Jika email sistem diganti ke email aktif, email baru harus lolos verifikasi 6 digit terlebih dahulu. Akun tetap dianggap tahap awal sampai email aktif dan password awal sudah diganti.
-        </p>
-      )}
       {googleLinked && hasRealLoginEmail(email) && (
         <p className="mt-3 text-xs text-red-700">
           Email akun sedang tertaut dengan Google. Lepas tautan Google terlebih dahulu jika ingin mengganti email akun ini.
@@ -798,12 +788,6 @@ export default function ProfileGuru() {
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
             <h3 className="text-sm font-semibold text-slate-900">Tautkan Login Google</h3>
-            <p className="text-xs text-slate-600 mt-1">
-              Saat akun Google tertaut, login bisa pakai Google dan status email terverifikasi ikut tersinkron.
-            </p>
-            <p className="text-xs text-slate-600 mt-1">
-              Syarat: email akun harus sama persis dengan email Google.
-            </p>
           </div>
 
           <div className="flex flex-col items-stretch gap-2 md:items-end">
@@ -975,17 +959,12 @@ export default function ProfileGuru() {
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-8">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between mb-6">
                 <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-600">Profil Guru</p>
                   <h3 className="text-2xl font-bold text-gray-900">Informasi Pribadi</h3>
-                  <p className="text-gray-600 mt-1">
-                    Data ini sinkron dengan profil guru di admin sekolah. Field identitas admin tampil sebagai referensi, sedangkan data pribadi bisa Anda perbarui di form ini.
-                  </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">
                     {statusLabel(profile?.status)}
-                  </span>
-                  <span className="rounded-xl bg-gray-50 px-3 py-2 text-xs text-gray-500">
-                    Foto maks. 100KB
                   </span>
                 </div>
               </div>
