@@ -301,7 +301,6 @@ class StorageManagementController extends ApiController
         return [
             ...$this->filters($request),
             'older_than_days' => $request->input('older_than_days', $request->query('older_than_days')),
-            'largest_percent' => $request->input('largest_percent', $request->query('largest_percent')),
             'mode' => $request->input('mode', $request->query('mode', 'cleanup')),
         ];
     }

@@ -20,25 +20,6 @@ import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import { formatDateTime } from '../../lib/time'
 
-const CATEGORIES = [
-  { value: '', label: 'Semua kategori' },
-  { value: 'tugas', label: 'Tugas' },
-  { value: 'kuis', label: 'Kuis' },
-  { value: 'materi', label: 'Materi' },
-  { value: 'video', label: 'Video' },
-  { value: 'dokumen', label: 'Dokumen' },
-  { value: 'lampiran', label: 'Lampiran' },
-  { value: 'arsip', label: 'Arsip' }
-]
-const categoryLabel = (value) => CATEGORIES.find((item) => item.value === value)?.label || value || 'Semua kategori'
-
-const CLEANUP_CATEGORIES = [
-  { value: '', label: 'Tugas, quiz, lampiran' },
-  { value: 'tugas', label: 'Tugas' },
-  { value: 'kuis', label: 'Quiz' },
-  { value: 'lampiran', label: 'Lampiran tugas' }
-]
-
 const CLEANUP_PROVIDER_OPTIONS = [
   { value: 'object_storage', label: 'Neva Cloud S3' }
 ]
@@ -46,22 +27,19 @@ const CLEANUP_PROVIDER_OPTIONS = [
 const CLEANUP_BUCKET_OPTIONS = [
   { value: '', label: 'Pilih bucket storage' },
   { value: 'assignments', label: 'Tugas / Assignments' },
-  { value: 'quiz-media', label: 'Media Quiz' }
+  { value: 'quiz-media', label: 'Media Quiz' },
+  { value: 'certificates', label: 'Sertifikat' },
+  { value: 'sertifikat-files', label: 'File Sertifikat' }
 ]
 
 const CLEANUP_AGE_OPTIONS = [
-  { value: '60', label: 'Minimal 2 bulan' },
+  { value: '2', label: 'Lebih dari 2 hari' },
+  { value: '7', label: 'Lebih dari 7 hari' },
+  { value: '30', label: 'Lebih dari 30 hari' },
+  { value: '60', label: 'Lebih dari 2 bulan' },
   { value: '90', label: 'Lebih dari 90 hari' },
   { value: '180', label: 'Lebih dari 180 hari' },
   { value: '365', label: 'Lebih dari 1 tahun' }
-]
-
-const CLEANUP_PERCENT_OPTIONS = [
-  { value: '', label: 'Semua ukuran' },
-  { value: '10', label: '10% file terbesar' },
-  { value: '20', label: '20% file terbesar' },
-  { value: '30', label: '30% file terbesar' },
-  { value: '50', label: '50% file terbesar' }
 ]
 
 const NEVA_BUCKET_LABELS = {
@@ -72,6 +50,7 @@ const NEVA_BUCKET_LABELS = {
   'certificate-templates': 'Template Sertifikat',
   'sertifikat-templates': 'Template Sertifikat'
 }
+const bucketLabel = (value) => NEVA_BUCKET_LABELS[value] || value || 'Semua bucket'
 
 const numberFormatter = new Intl.NumberFormat('id-ID')
 const formatBytesLabel = (bytes) => {
@@ -100,21 +79,8 @@ const selectedTenantFromUrl = () => {
   if (typeof window === 'undefined') return ''
   return new URLSearchParams(window.location.search).get('tenant') || ''
 }
-const periodValue = (tahunAjaran, semester) => (
-  tahunAjaran && semester ? `${tahunAjaran}|${semester}` : ''
-)
 const storagePeriodValue = (tahunAjaran) => String(tahunAjaran || '')
 const parseStoragePeriodValue = (value) => ({ tahun_ajaran: String(value || ''), semester: '' })
-const parsePeriodValue = (value) => {
-  const [tahunAjaran = '', semester = ''] = String(value || '').split('|')
-  return { tahun_ajaran: tahunAjaran, semester }
-}
-const periodRank = (tahunAjaran, semester) => {
-  const match = String(tahunAjaran || '').match(/^(\d{4})\/\d{4}$/)
-  if (!match) return null
-  if (semester !== 'Ganjil' && semester !== 'Genap') return null
-  return (Number(match[1]) * 2) + (semester === 'Genap' ? 1 : 0)
-}
 const providerPercentLabel = (quota) => (
   quota?.percent !== null && quota?.percent !== undefined ? `${quota.percent}%` : 'Belum dibatasi'
 )
@@ -129,8 +95,8 @@ const filterScopeLabel = (filters) => {
   if (filters?.tahun_ajaran) {
     parts.push(filters.tahun_ajaran)
   }
-  if (filters?.category) {
-    parts.push(categoryLabel(filters.category))
+  if (filters?.bucket) {
+    parts.push(bucketLabel(filters.bucket))
   }
   return parts.length > 0 ? parts.join(' · ') : 'Semua metadata sekolah'
 }
@@ -238,16 +204,14 @@ function StorageManager() {
     nevaQuotaGb: '',
     notes: ''
   })
-  const [storageFilters, setStorageFilters] = useState({ tahun_ajaran: '', semester: '', category: '' })
-  const [storageFilterDraft, setStorageFilterDraft] = useState({ tahun_ajaran: '', semester: '', category: '' })
+  const [storageFilters, setStorageFilters] = useState({ tahun_ajaran: '', semester: '', bucket: '' })
+  const [storageFilterDraft, setStorageFilterDraft] = useState({ tahun_ajaran: '', semester: '', bucket: '' })
   const [cleanupForm, setCleanupForm] = useState({
     provider: 'object_storage',
     bucket: '',
     tahun_ajaran: '',
     semester: '',
-    category: '',
-    older_than_days: '60',
-    largest_percent: ''
+    older_than_days: '2'
   })
   const [cleanupPreview, setCleanupPreview] = useState(null)
   const [savingQuota, setSavingQuota] = useState(false)
@@ -266,10 +230,8 @@ function StorageManager() {
   const allQuota = activeSummary?.quota || {}
   const vpsQuota = activeSummary?.providers?.vps || allQuota?.providers?.vps || vpsSummary?.quota || {}
   const nevaQuota = activeSummary?.providers?.neva_s3 || allQuota?.providers?.neva_s3 || nevaSummary?.quota || {}
-  const categories = Array.isArray(usage?.by_category) ? usage.by_category : []
   const periods = Array.isArray(usage?.by_period) ? usage.by_period : []
   const periodCatalog = Array.isArray(activeSummary?.period_options) ? activeSummary.period_options : []
-  const categoryCatalog = Array.isArray(activeSummary?.category_options) ? activeSummary.category_options : []
   const largestFiles = Array.isArray(activeProviderSummary?.largest_files)
     ? activeProviderSummary.largest_files
     : Array.isArray(activeSummary?.largest_files)
@@ -386,14 +348,14 @@ function StorageManager() {
     periodCatalog,
     periods
   ])
-  const categoryOptions = useMemo(() => {
+  const bucketOptions = useMemo(() => {
     const map = new Map()
-    const addCategory = (value, label, meta = {}) => {
+    const addBucket = (value, label, meta = {}) => {
       const normalized = String(value || '')
       if (!normalized) return
       const existing = map.get(normalized) || {
         value: normalized,
-        label: label || categoryLabel(normalized),
+        label: label || bucketLabel(normalized),
         bytes: 0,
         bytes_label: '',
         files: 0
@@ -407,18 +369,19 @@ function StorageManager() {
       })
     }
 
-    categoryCatalog.forEach((item) => addCategory(item.value || item.category, item.label, item))
-    categories.forEach((item) => addCategory(item.category, item.label, item))
-    if (storageFilterDraft.category) {
-      addCategory(storageFilterDraft.category, categoryLabel(storageFilterDraft.category))
+    ;[...vpsBucketRows, ...nevaBucketRows, ...activeBucketRows].forEach((item) => {
+      addBucket(item.bucket, item.label || bucketLabel(item.bucket), item)
+    })
+    if (storageFilterDraft.bucket) {
+      addBucket(storageFilterDraft.bucket, bucketLabel(storageFilterDraft.bucket))
     }
 
     return [
-      { value: '', label: 'Semua kategori/bucket' },
+      { value: '', label: 'Semua bucket' },
       ...Array.from(map.values()).sort((a, b) => (b.bytes || 0) - (a.bytes || 0))
     ]
-  }, [categories, categoryCatalog, storageFilterDraft.category])
-  const cleanupPeriodValue = periodValue(cleanupForm.tahun_ajaran, cleanupForm.semester)
+  }, [activeBucketRows, nevaBucketRows, storageFilterDraft.bucket, vpsBucketRows])
+  const cleanupPeriodValue = storagePeriodValue(cleanupForm.tahun_ajaran)
   const cleanupHasProviderBucket = Boolean(cleanupForm.provider && cleanupForm.bucket)
   const cleanupReady = cleanupHasProviderBucket
 
@@ -725,7 +688,7 @@ function StorageManager() {
         ...prev,
         tahun_ajaran: nextFilters.tahun_ajaran,
         semester: nextFilters.semester,
-        category: ['tugas', 'kuis', 'lampiran'].includes(nextFilters.category) ? nextFilters.category : ''
+        bucket: nextFilters.bucket || prev.bucket
       }))
       if (isSuperAdmin) {
         if (selectedTenantId) {
@@ -751,7 +714,7 @@ function StorageManager() {
   }
 
   const handleResetStorageFilters = () => {
-    const next = { tahun_ajaran: '', semester: '', category: '' }
+    const next = { tahun_ajaran: '', semester: '', bucket: '' }
     setStorageFilterDraft(next)
     loadStorageWithFilters(next)
   }
@@ -762,12 +725,12 @@ function StorageManager() {
         <div className="max-w-3xl">
           <h2 className="text-sm font-bold text-slate-900">Cleanup Aman ke Trash</h2>
           <p className="mt-1 text-xs text-slate-500">
-            Cleanup hanya untuk file Neva S3 kategori tugas, quiz, dan lampiran yang sudah berumur minimal 2 bulan. Data tugas, quiz, nilai, siswa, guru, dan VPS Storage tetap aman.
+            Cleanup hanya untuk file storage Neva S3 pada bucket yang dipilih dan sudah berumur minimal 2 hari. Data tugas, quiz, nilai, siswa, guru, dan VPS Storage tetap aman.
           </p>
         </div>
         <div className="flex flex-wrap gap-2 text-xs">
           <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 font-semibold text-emerald-700">Trash 30 hari</span>
-          <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 font-semibold text-amber-800">Minimal 2 bulan</span>
+          <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 font-semibold text-amber-800">Minimal 2 hari</span>
           <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 font-semibold text-slate-700">VPS read-only</span>
         </div>
       </div>
@@ -801,13 +764,13 @@ function StorageManager() {
               Periode
               <select
                 value={cleanupPeriodValue}
-                onChange={(event) => updateCleanupForm(parsePeriodValue(event.target.value))}
+                onChange={(event) => updateCleanupForm(parseStoragePeriodValue(event.target.value))}
                 className="mt-1 min-h-10 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
               >
                 <option value="">Semua periode</option>
                 {periodOptions.map((item) => (
                   <option key={item.value} value={item.value}>
-                    {item.tahun_ajaran} - {item.semester}{item.isActive ? ' (Aktif)' : ''}{item.bytes_label ? ` (${item.bytes_label})` : ''}
+                    {item.tahun_ajaran}{item.isActive ? ' (Aktif)' : ''}{item.bytes_label ? ` (${item.bytes_label})` : ''}
                   </option>
                 ))}
                 {periodOptions.length === 0 && (
@@ -815,18 +778,8 @@ function StorageManager() {
                 )}
               </select>
               <span className="mt-1 block text-[11px] font-normal text-slate-500">
-                Opsional. Kosongkan untuk cleanup semua file aman yang sudah lewat minimal 2 bulan.
+                Opsional. Kosongkan untuk cleanup berdasarkan umur file saja.
               </span>
-            </label>
-            <label className="block text-xs font-semibold text-slate-600">
-              Kategori
-              <select
-                value={cleanupForm.category}
-                onChange={(e) => updateCleanupForm({ category: e.target.value })}
-                className="mt-1 min-h-10 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
-              >
-                {CLEANUP_CATEGORIES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-              </select>
             </label>
             <label className="block text-xs font-semibold text-slate-600">
               Umur file
@@ -838,16 +791,6 @@ function StorageManager() {
                 {CLEANUP_AGE_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
               </select>
             </label>
-            <label className="block text-xs font-semibold text-slate-600">
-              Prioritas ukuran
-              <select
-                value={cleanupForm.largest_percent}
-                onChange={(e) => updateCleanupForm({ largest_percent: e.target.value })}
-                className="mt-1 min-h-10 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
-              >
-                {CLEANUP_PERCENT_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-              </select>
-            </label>
           </div>
         </div>
 
@@ -855,12 +798,12 @@ function StorageManager() {
           <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">Pengaman aktif</h3>
           <div className="mt-3 space-y-2 text-sm text-slate-600">
             {[
-              'Tidak bisa untuk file di bawah 2 bulan',
-              'Periode opsional, mengikuti tahun ajaran aktif jika umur file sudah aman',
-              'Hanya bucket assignments dan quiz-media',
+              'Tidak bisa untuk file di bawah 2 hari',
+              'Periode opsional, bisa memilih satu tahun ajaran penuh',
+              'Target berdasarkan bucket, bukan kategori manual',
+              'Bucket aman: tugas, media quiz, dan sertifikat',
               'Hanya berlaku untuk Neva Cloud S3',
               'VPS Storage tidak bisa dihapus dari Storage Manager',
-              'Hanya dokumen/gambar tugas atau quiz',
               'Preview wajib sebelum pindah ke Trash'
             ].map((item) => (
               <div key={item} className="flex items-start gap-2">
@@ -899,7 +842,44 @@ function StorageManager() {
       )}
       {cleanupPreview && (
         <div className={`mt-4 rounded-lg border px-4 py-3 text-sm ${cleanupPreview.allowed ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
-          {cleanupPreview.message} Kandidat: {numberFormatter.format(cleanupPreview.files || 0)} file ({cleanupPreview.bytes_label || '0 B'}).
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="font-semibold">{cleanupPreview.message}</p>
+              <p className="mt-1 text-xs opacity-80">
+                Kandidat: {numberFormatter.format(cleanupPreview.files || 0)} file ({cleanupPreview.bytes_label || '0 B'}). Bucket: {cleanupPreview.bucket_label || bucketLabel(cleanupForm.bucket)}. Umur minimal: {cleanupPreview.minimum_age_days || cleanupForm.older_than_days} hari.
+              </p>
+            </div>
+          </div>
+          {Array.isArray(cleanupPreview.candidates) && cleanupPreview.candidates.length > 0 && (
+            <div className="mt-3 overflow-x-auto rounded-lg border border-white/70 bg-white text-slate-700">
+              <div className="min-w-[620px]">
+              <div className="grid grid-cols-[minmax(180px,1fr)_110px_90px_120px] gap-3 border-b border-slate-100 bg-slate-50 px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                <span>File</span>
+                <span>Ukuran</span>
+                <span>Umur</span>
+                <span>Jenis</span>
+              </div>
+              <div className="max-h-64 overflow-y-auto">
+                {cleanupPreview.candidates.map((file) => (
+                  <div key={file.id || `${file.bucket}-${file.path}`} className="grid grid-cols-[minmax(180px,1fr)_110px_90px_120px] gap-3 border-b border-slate-100 px-3 py-2 text-xs last:border-b-0">
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold text-slate-900">{file.file_name || file.path || '-'}</p>
+                      <p className="truncate text-[11px] text-slate-500">{file.bucket_label || bucketLabel(file.bucket)} · {file.path || '-'}</p>
+                    </div>
+                    <span className="font-semibold text-slate-800">{file.size_label || formatBytesLabel(file.size_bytes)}</span>
+                    <span>{file.age_days !== null && file.age_days !== undefined ? `${file.age_days} hari` : '-'}</span>
+                    <span className="truncate">{file.extension ? `.${file.extension}` : file.category_label || '-'}</span>
+                  </div>
+                ))}
+              </div>
+              {(cleanupPreview.files || 0) > cleanupPreview.candidates.length && (
+                <p className="bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                  Menampilkan {cleanupPreview.candidates.length} dari {numberFormatter.format(cleanupPreview.files || 0)} kandidat. Semua kandidat tetap ikut diproses saat cleanup dijalankan.
+                </p>
+              )}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </section>
@@ -1010,11 +990,11 @@ function StorageManager() {
             {periodOptions.length === 0 && <option value="" disabled>Belum ada periode tercatat</option>}
           </select>
           <select
-            value={storageFilterDraft.category}
-            onChange={(event) => setStorageFilterDraft((prev) => ({ ...prev, category: event.target.value }))}
+            value={storageFilterDraft.bucket}
+            onChange={(event) => setStorageFilterDraft((prev) => ({ ...prev, bucket: event.target.value }))}
             className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm"
           >
-            {categoryOptions.map((item) => (
+            {bucketOptions.map((item) => (
               <option key={item.value || 'all'} value={item.value}>
                 {item.label}{item.bytes_label ? ` · ${item.bytes_label}` : ''}
               </option>

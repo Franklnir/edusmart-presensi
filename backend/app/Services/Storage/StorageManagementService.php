@@ -4,11 +4,13 @@ namespace App\Services\Storage;
 
 use App\Support\AcademicPeriod;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Throwable;
 
 class StorageManagementService
 {
@@ -23,11 +25,9 @@ class StorageManagementService
         self::PROVIDER_NEVA_S3 => 'Neva Cloud S3',
     ];
 
-    private const CLEANUP_MINIMUM_FILE_AGE_DAYS = 60;
+    private const CLEANUP_MINIMUM_FILE_AGE_DAYS = 2;
 
-    private const CLEANUP_SAFE_CATEGORIES = ['tugas', 'kuis', 'lampiran'];
-
-    private const CLEANUP_SAFE_BUCKETS = ['assignments', 'quiz-media'];
+    private const CLEANUP_SAFE_BUCKETS = ['assignments', 'quiz-media', 'certificates', 'sertifikat-files'];
 
     private const CLEANUP_SAFE_EXTENSIONS = [
         'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'odt', 'ods', 'odp', 'rtf',
@@ -42,8 +42,8 @@ class StorageManagementService
         'dokumen' => 'Dokumen',
         'lampiran' => 'Lampiran',
         'arsip' => 'Arsip',
-        'profil' => 'Profil',
         'sertifikat' => 'Sertifikat',
+        'profil' => 'Profil',
     ];
 
     public function __construct(
@@ -585,7 +585,7 @@ class StorageManagementService
                 try {
                     $page = $this->objectStorageSigner->listObjects($logicalBucket, $prefix, $token);
                     $pages++;
-                } catch (\Throwable $e) {
+                } catch (Throwable $e) {
                     $error = $this->shortError($e->getMessage());
                     Log::warning('object_storage_inventory_scan_failed', [
                         'tenant_id' => $tenantId,
@@ -698,15 +698,26 @@ class StorageManagementService
         $provider = $this->normalizeProvider((string) ($filters['provider'] ?? self::PROVIDER_VPS));
         $providerLabel = self::PROVIDER_LABELS[$provider] ?? 'Storage';
         $bucket = trim((string) ($filters['bucket'] ?? ''));
+        $bucketLabel = $this->bucketLabel($bucket);
+        $year = AcademicPeriod::normalizeAcademicYear($filters['tahun_ajaran'] ?? null);
+        $semester = AcademicPeriod::normalizeSemester($filters['semester'] ?? null);
+        $periodLabel = $year
+            ? $year.($semester ? ' '.$semester : ' semua semester')
+            : 'semua periode';
 
         return [
             'allowed' => true,
-            'message' => 'Cleanup aman untuk '.$providerLabel.' bucket '.$bucket.'. Hanya file tugas/quiz/lampiran yang sesuai periode dan berumur minimal '.$minimumAgeDays.' hari yang dipilih.',
+            'message' => 'Preview cleanup '.$providerLabel.' bucket '.$bucketLabel.' untuk '.$periodLabel.'. Hanya file storage yang berumur minimal '.$minimumAgeDays.' hari yang dipilih dan akan masuk Trash terlebih dahulu.',
             'files' => count($candidates),
             'bytes' => $bytes,
             'bytes_label' => $this->formatBytes($bytes),
             'minimum_age_days' => $minimumAgeDays,
-            'safe_categories' => self::CLEANUP_SAFE_CATEGORIES,
+            'bucket' => $bucket,
+            'bucket_label' => $bucketLabel,
+            'provider' => $provider,
+            'provider_label' => $providerLabel,
+            'period_label' => $periodLabel,
+            'safe_buckets' => self::CLEANUP_SAFE_BUCKETS,
             'safe_extensions' => self::CLEANUP_SAFE_EXTENSIONS,
             'candidates' => array_slice($candidates, 0, 50),
         ];
@@ -1535,7 +1546,6 @@ class StorageManagementService
             'provider' => $provider,
             'bucket' => $bucket,
         ])->where('status', 'active');
-        $query->whereIn('category', self::CLEANUP_SAFE_CATEGORIES);
         $query->whereIn('bucket', self::CLEANUP_SAFE_BUCKETS);
 
         $minimumAgeDays = $this->cleanupMinimumAgeDays($filters);
@@ -1557,11 +1567,6 @@ class StorageManagementService
             ->filter(fn ($row) => $this->isSafeCleanupFile($row) && $this->cleanupFileIsAvailable($row))
             ->values()
             ->all();
-        $percent = max(0, min(100, (int) ($filters['largest_percent'] ?? 0)));
-        if ($percent > 0 && ! empty($rows)) {
-            $take = max(1, (int) ceil(count($rows) * ($percent / 100)));
-            $rows = array_slice($rows, 0, $take);
-        }
 
         return $rows;
     }
@@ -1579,13 +1584,16 @@ class StorageManagementService
             }
         }
         if ($hasPeriodFilter) {
-            if (! $year || ! $semester) {
-                return 'Periode cleanup tidak valid. Pilih tahun ajaran dan semester lengkap, atau kosongkan periode untuk cleanup berdasarkan umur file.';
+            if (! $year) {
+                return 'Periode cleanup belum valid. Pilih tahun ajaran yang tersedia, atau kosongkan periode jika ingin cleanup berdasarkan umur file saja.';
             }
-            foreach (['tahun_ajaran', 'semester'] as $column) {
+            foreach (['tahun_ajaran'] as $column) {
                 if (! $this->tableHasColumn('storage_files', $column)) {
                     return 'Metadata periode storage belum lengkap. Kosongkan filter periode atau jalankan migrasi storage terlebih dahulu.';
                 }
+            }
+            if ($semester && ! $this->tableHasColumn('storage_files', 'semester')) {
+                return 'Metadata semester storage belum lengkap. Pilih periode tahunan saja atau jalankan migrasi storage terlebih dahulu.';
             }
         }
 
@@ -1605,12 +1613,7 @@ class StorageManagementService
 
         $bucket = trim((string) ($filters['bucket'] ?? ''));
         if ($bucket === '' || $bucket === 'all' || ! in_array($bucket, self::CLEANUP_SAFE_BUCKETS, true)) {
-            return 'Pilih bucket yang aman untuk cleanup: assignments atau quiz-media.';
-        }
-
-        $category = trim((string) ($filters['category'] ?? ''));
-        if ($category !== '' && $category !== 'all' && ! in_array($category, self::CLEANUP_SAFE_CATEGORIES, true)) {
-            return 'Cleanup hanya boleh untuk file storage tugas, quiz, atau lampiran tugas.';
+            return 'Pilih bucket yang aman untuk cleanup: Tugas, Media Quiz, atau Sertifikat.';
         }
 
         return null;
@@ -1689,8 +1692,10 @@ class StorageManagementService
         return [
             'id' => (string) ($row->id ?? ''),
             'bucket' => $bucket,
+            'bucket_label' => $this->bucketLabel($bucket),
             'path' => $path,
             'provider' => (string) ($row->provider ?? 'local'),
+            'provider_label' => self::PROVIDER_LABELS[$this->normalizeProvider((string) ($row->provider ?? 'local'))] ?? 'Storage',
             'category' => $category,
             'category_label' => self::CATEGORY_LABELS[$category] ?? Str::title($category),
             'file_name' => ($row->file_name ?? null) ?: basename($path),
@@ -1704,7 +1709,21 @@ class StorageManagementService
             'kelas' => $row->kelas ?? null,
             'status' => $row->status ?? 'active',
             'uploaded_at' => $row->uploaded_at ?? null,
+            'age_days' => $this->storageFileAgeDays($row->uploaded_at ?? null),
         ];
+    }
+
+    private function storageFileAgeDays($uploadedAt): ?int
+    {
+        if (! $uploadedAt) {
+            return null;
+        }
+
+        try {
+            return (int) Carbon::parse($uploadedAt)->diffInDays(now());
+        } catch (Throwable) {
+            return null;
+        }
     }
 
     private function isSafeCleanupFile(array $row): bool
@@ -1716,7 +1735,6 @@ class StorageManagementService
 
         return in_array((string) ($row['provider'] ?? ''), [self::PROVIDER_VPS, self::PROVIDER_NEVA_S3], true)
             && in_array((string) ($row['bucket'] ?? ''), self::CLEANUP_SAFE_BUCKETS, true)
-            && in_array((string) ($row['category'] ?? ''), self::CLEANUP_SAFE_CATEGORIES, true)
             && in_array($extension, self::CLEANUP_SAFE_EXTENSIONS, true);
     }
 
@@ -1858,7 +1876,7 @@ class StorageManagementService
         } elseif ($provider === self::PROVIDER_VPS) {
             try {
                 $capacity = $this->serverCapacity();
-            } catch (\Throwable $e) {
+            } catch (Throwable $e) {
                 Log::warning('storage_manager_capacity_check_failed', [
                     'tenant_id' => $tenantId,
                     'provider' => $provider,
@@ -2234,7 +2252,7 @@ class StorageManagementService
     {
         try {
             return $callback();
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             Log::warning('storage_manager_section_failed', [
                 ...$context,
                 'section' => $section,
