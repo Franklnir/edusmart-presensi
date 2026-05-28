@@ -238,7 +238,7 @@ Route::post('/whatsapp/webhook/{secret}/{event?}', [WhatsAppWebhookController::c
         EnsureTenantMatchesProfile::class,
     ]);
 
-Route::middleware(['auth:sanctum', 'throttle:super', 'super.domain'])->group(function () {
+Route::middleware(['auth:sanctum', 'throttle:super', 'super.domain', 'super.admin'])->group(function () {
     Route::get('/super/me', [SuperAdminController::class, 'me']);
     Route::get('/super/domains', [SuperAdminController::class, 'platformDomains']);
     Route::post('/super/domains', [SuperAdminController::class, 'storePlatformDomain']);

@@ -21,7 +21,7 @@ class StorageManagementService
     private const PROVIDER_NEVA_S3 = 'object_storage';
 
     private const PROVIDER_LABELS = [
-        self::PROVIDER_VPS => 'VPS',
+        self::PROVIDER_VPS => 'Legacy Local',
         self::PROVIDER_NEVA_S3 => 'Neva Cloud S3',
     ];
 
@@ -141,8 +141,8 @@ class StorageManagementService
             : null;
 
         $providers = $this->providerQuotasForTenant($tenantId, $row);
-        $quotaBytes = $this->sumNullableBytes(array_column($providers, 'quota_bytes'));
-        $usedBytes = $this->tenantUsedBytes($tenantId);
+        $quotaBytes = $providers['neva_s3']['quota_bytes'] ?? null;
+        $usedBytes = $providers['neva_s3']['used_bytes'] ?? $this->tenantUsedBytes($tenantId, self::PROVIDER_NEVA_S3);
         $remainingBytes = $quotaBytes !== null ? max(0, $quotaBytes - $usedBytes) : null;
 
         return [
@@ -160,7 +160,7 @@ class StorageManagementService
         ];
     }
 
-    public function assertUploadAllowed(string $tenantId, int $incomingBytes, string $provider = self::PROVIDER_VPS): ?string
+    public function assertUploadAllowed(string $tenantId, int $incomingBytes, string $provider = self::PROVIDER_NEVA_S3): ?string
     {
         if ($tenantId === '' || $incomingBytes <= 0 || ! $this->tablesReady()) {
             return null;
@@ -327,6 +327,10 @@ class StorageManagementService
     public function tenantSummary(string $tenantId, array $filters = []): array
     {
         $context = ['tenant_id' => $tenantId];
+        $filters = [
+            ...$filters,
+            'provider' => self::PROVIDER_NEVA_S3,
+        ];
         $usage = $this->safeSection('tenant_usage', $this->emptyUsage(), fn () => $this->tenantUsage($tenantId, $filters), $context);
         $quota = $this->safeSection('tenant_quota', $this->emptyQuota($tenantId), fn () => $this->quotaForTenant($tenantId), $context);
         $recommendations = $this->safeSection('tenant_recommendations', [], fn () => $this->recommendations($tenantId, $usage, $quota), $context);
@@ -334,7 +338,6 @@ class StorageManagementService
         $byUser = $this->safeSection('by_uploader', [], fn () => $this->byUploader($tenantId, $filters), $context);
         $duplicates = $this->safeSection('duplicate_groups', [], fn () => $this->duplicateGroups($tenantId), $context);
         $providerSummaries = $this->safeSection('provider_summaries', $this->emptyProviderSummaries($tenantId), fn () => [
-            'vps' => $this->providerSummary($tenantId, self::PROVIDER_VPS, $filters),
             'neva_s3' => $this->providerSummary($tenantId, self::PROVIDER_NEVA_S3, $filters),
         ], $context);
 
@@ -362,7 +365,7 @@ class StorageManagementService
 
     private function tenantOverviewSummary(string $tenantId): array
     {
-        $usage = $this->tenantUsage($tenantId, [], false);
+        $usage = $this->tenantUsage($tenantId, ['provider' => self::PROVIDER_NEVA_S3], false);
         $quota = $this->quotaForTenant($tenantId);
 
         return [
@@ -383,37 +386,24 @@ class StorageManagementService
         $now = now();
         $exists = DB::table('tenant_storage_quotas')->where('tenant_id', $tenantId)->exists();
         $values = [];
-        $hasVpsQuotaPayload = array_key_exists('vps_quota_bytes', $payload) || array_key_exists('quota_bytes', $payload);
-        $hasNevaQuotaPayload = array_key_exists('neva_s3_quota_bytes', $payload);
-        $vpsQuota = $payload['vps_quota_bytes'] ?? $payload['quota_bytes'] ?? null;
-        $nevaQuota = $payload['neva_s3_quota_bytes'] ?? null;
-        $normalizedVpsQuota = $this->nullableBytes($vpsQuota);
+        $hasNevaQuotaPayload = array_key_exists('neva_s3_quota_bytes', $payload) || array_key_exists('quota_bytes', $payload);
+        $nevaQuota = $payload['neva_s3_quota_bytes'] ?? $payload['quota_bytes'] ?? null;
         $normalizedNevaQuota = $this->nullableBytes($nevaQuota);
 
-        if ($hasVpsQuotaPayload && $normalizedVpsQuota === null) {
-            throw new \InvalidArgumentException('Kuota VPS wajib diisi dan harus lebih dari 0 GB agar alokasi platform bisa dihitung aman.');
-        }
         if ($hasNevaQuotaPayload && $normalizedNevaQuota === null) {
             throw new \InvalidArgumentException('Kuota Neva S3 wajib diisi dan harus lebih dari 0 GB agar alokasi platform bisa dihitung aman.');
         }
 
-        if ($hasVpsQuotaPayload) {
-            $this->assertQuotaNotBelowUsage($tenantId, self::PROVIDER_VPS, $normalizedVpsQuota);
-            $this->assertQuotaAllocationWithinCapacity($tenantId, self::PROVIDER_VPS, $normalizedVpsQuota);
-        }
         if ($hasNevaQuotaPayload) {
             $this->assertQuotaNotBelowUsage($tenantId, self::PROVIDER_NEVA_S3, $normalizedNevaQuota);
             $this->assertQuotaAllocationWithinCapacity($tenantId, self::PROVIDER_NEVA_S3, $normalizedNevaQuota);
         }
 
-        if ($hasVpsQuotaPayload && $this->tableHasColumn('tenant_storage_quotas', 'quota_bytes')) {
-            $values['quota_bytes'] = $normalizedVpsQuota;
+        if ($hasNevaQuotaPayload && $this->tableHasColumn('tenant_storage_quotas', 'quota_bytes')) {
+            $values['quota_bytes'] = $normalizedNevaQuota;
         }
         if ($this->tableHasColumn('tenant_storage_quotas', 'max_upload_bytes')) {
             $values['max_upload_bytes'] = null;
-        }
-        if ($hasVpsQuotaPayload && $this->tableHasColumn('tenant_storage_quotas', 'vps_quota_bytes')) {
-            $values['vps_quota_bytes'] = $normalizedVpsQuota;
         }
         if ($this->tableHasColumn('tenant_storage_quotas', 'vps_max_upload_bytes')) {
             $values['vps_max_upload_bytes'] = null;
@@ -450,7 +440,6 @@ class StorageManagementService
     private function providerQuotasForTenant(string $tenantId, ?object $row = null): array
     {
         return [
-            'vps' => $this->providerQuotaForTenant($tenantId, self::PROVIDER_VPS, $row),
             'neva_s3' => $this->providerQuotaForTenant($tenantId, self::PROVIDER_NEVA_S3, $row),
         ];
     }
@@ -695,7 +684,7 @@ class StorageManagementService
         $minimumAgeDays = $this->cleanupMinimumAgeDays($filters);
         $candidates = $this->cleanupCandidates($tenantId, $filters);
         $bytes = array_sum(array_map(fn ($row) => (int) ($row['size_bytes'] ?? 0), $candidates));
-        $provider = $this->normalizeProvider((string) ($filters['provider'] ?? self::PROVIDER_VPS));
+        $provider = $this->normalizeProvider((string) ($filters['provider'] ?? self::PROVIDER_NEVA_S3));
         $providerLabel = self::PROVIDER_LABELS[$provider] ?? 'Storage';
         $bucket = trim((string) ($filters['bucket'] ?? ''));
         $bucketLabel = $this->bucketLabel($bucket);
@@ -1538,7 +1527,7 @@ class StorageManagementService
             return [];
         }
 
-        $provider = $this->normalizeProvider((string) ($filters['provider'] ?? self::PROVIDER_VPS));
+        $provider = $this->normalizeProvider((string) ($filters['provider'] ?? self::PROVIDER_NEVA_S3));
         $bucket = trim((string) ($filters['bucket'] ?? ''));
 
         $query = $this->storageRowsQuery($tenantId, [
@@ -1603,12 +1592,12 @@ class StorageManagementService
         }
 
         if (! in_array(strtolower($rawProvider), ['local', 'vps', 'neva', 'neva_s3', 's3', 'object-storage', 'object_storage'], true)) {
-            return 'Cleanup hanya boleh untuk Neva Cloud S3. VPS Storage berisi data penting dan hanya boleh dimonitor, bukan dihapus.';
+            return 'Cleanup hanya boleh untuk Neva Cloud S3. File server legacy tidak dikelola dari Storage Manager.';
         }
 
         $provider = $this->normalizeProvider($rawProvider);
         if ($provider !== self::PROVIDER_NEVA_S3) {
-            return 'Cleanup hanya boleh untuk Neva Cloud S3. VPS Storage berisi data penting dan hanya boleh dimonitor, bukan dihapus.';
+            return 'Cleanup hanya boleh untuk Neva Cloud S3. File server legacy tidak dikelola dari Storage Manager.';
         }
 
         $bucket = trim((string) ($filters['bucket'] ?? ''));
@@ -1733,7 +1722,7 @@ class StorageManagementService
             $extension = strtolower(pathinfo((string) (($row['file_name'] ?? '') ?: ($row['path'] ?? '')), PATHINFO_EXTENSION));
         }
 
-        return in_array((string) ($row['provider'] ?? ''), [self::PROVIDER_VPS, self::PROVIDER_NEVA_S3], true)
+        return (string) ($row['provider'] ?? '') === self::PROVIDER_NEVA_S3
             && in_array((string) ($row['bucket'] ?? ''), self::CLEANUP_SAFE_BUCKETS, true)
             && in_array($extension, self::CLEANUP_SAFE_EXTENSIONS, true);
     }
@@ -2137,7 +2126,7 @@ class StorageManagementService
         return match ($provider) {
             'neva', 'neva_s3', 's3', 'object-storage', 'object_storage' => self::PROVIDER_NEVA_S3,
             'local', 'vps' => self::PROVIDER_VPS,
-            default => self::PROVIDER_VPS,
+            default => self::PROVIDER_NEVA_S3,
         };
     }
 
@@ -2340,7 +2329,6 @@ class StorageManagementService
     private function emptyProviderQuotas(string $tenantId): array
     {
         return [
-            'vps' => $this->emptyProviderQuota($tenantId, self::PROVIDER_VPS, 'vps'),
             'neva_s3' => $this->emptyProviderQuota($tenantId, self::PROVIDER_NEVA_S3, 'neva_s3'),
         ];
     }
@@ -2368,15 +2356,6 @@ class StorageManagementService
     private function emptyProviderSummaries(string $tenantId): array
     {
         return [
-            'vps' => [
-                'provider' => self::PROVIDER_VPS,
-                'label' => self::PROVIDER_LABELS[self::PROVIDER_VPS],
-                'quota' => $this->emptyProviderQuota($tenantId, self::PROVIDER_VPS, 'vps'),
-                'usage' => $this->emptyUsage(),
-                'top_category' => null,
-                'largest_files' => [],
-                'by_uploader' => [],
-            ],
             'neva_s3' => [
                 'provider' => self::PROVIDER_NEVA_S3,
                 'label' => self::PROVIDER_LABELS[self::PROVIDER_NEVA_S3],

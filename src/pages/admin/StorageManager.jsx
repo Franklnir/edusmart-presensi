@@ -72,8 +72,7 @@ const toBytesFromGb = (value) => {
 }
 const bytesToGbInput = (bytes) => bytes ? String(Math.round((Number(bytes) / 1024 / 1024 / 1024) * 100) / 100) : ''
 const activeTabFromUrl = () => {
-  if (typeof window === 'undefined') return 'storage'
-  return new URLSearchParams(window.location.search).get('tab') === 'neva' ? 'neva' : 'storage'
+  return 'neva'
 }
 const selectedTenantFromUrl = () => {
   if (typeof window === 'undefined') return ''
@@ -138,9 +137,7 @@ function ProgressLine({ label, value, percent }) {
 
 function TenantStorageCard({ tenant, selected, onClick }) {
   const providers = tenant.providers || tenant.quota?.providers || {}
-  const vps = providers.vps || {}
   const neva = providers.neva_s3 || {}
-  const vpsPercent = vps.percent !== null && vps.percent !== undefined ? Number(vps.percent) : null
   const nevaPercent = neva.percent !== null && neva.percent !== undefined ? Number(neva.percent) : null
 
   return (
@@ -159,17 +156,8 @@ function TenantStorageCard({ tenant, selected, onClick }) {
         </span>
       </div>
 
-      <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-bold uppercase tracking-wide text-slate-500">VPS</span>
-            <span className="text-xs font-semibold text-slate-500">{vpsPercent !== null ? `${vpsPercent}%` : 'Bebas'}</span>
-          </div>
-          <p className="mt-1 text-sm font-bold text-slate-900">{vps.used_label || tenant.usage?.total_label || '0 B'}</p>
-          <p className="mt-0.5 text-xs text-slate-500">Kuota {vps.quota_label || 'Tidak dibatasi'}</p>
-          <p className="mt-0.5 text-xs text-slate-500">Sisa {vps.remaining_label || 'Tidak dibatasi'}</p>
-        </div>
-        <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+      <div className="mt-4">
+        <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 p-3">
           <div className="flex items-center justify-between gap-2">
             <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Neva S3</span>
             <span className="text-xs font-semibold text-slate-500">{nevaPercent !== null ? `${nevaPercent}%` : 'Bebas'}</span>
@@ -200,7 +188,6 @@ function StorageManager() {
   const [storageOverlayOpen, setStorageOverlayOpen] = useState(() => Boolean(selectedTenantFromUrl()))
   const [tenantDetail, setTenantDetail] = useState(null)
   const [quotaForm, setQuotaForm] = useState({
-    vpsQuotaGb: '',
     nevaQuotaGb: '',
     notes: ''
   })
@@ -222,13 +209,11 @@ function StorageManager() {
 
   const activeSummary = tenantDetail || summary || {}
   const providerSummaries = activeSummary?.provider_summaries || {}
-  const vpsSummary = providerSummaries?.vps || {}
   const nevaSummary = providerSummaries?.neva_s3 || activeSummary?.object_storage || {}
-  const activeProviderSummary = activeTab === 'neva' ? nevaSummary : vpsSummary
+  const activeProviderSummary = nevaSummary
   const usage = activeProviderSummary?.usage || activeSummary?.usage || {}
   const quota = activeProviderSummary?.quota || activeSummary?.quota || {}
   const allQuota = activeSummary?.quota || {}
-  const vpsQuota = activeSummary?.providers?.vps || allQuota?.providers?.vps || vpsSummary?.quota || {}
   const nevaQuota = activeSummary?.providers?.neva_s3 || allQuota?.providers?.neva_s3 || nevaSummary?.quota || {}
   const periods = Array.isArray(usage?.by_period) ? usage.by_period : []
   const periodCatalog = Array.isArray(activeSummary?.period_options) ? activeSummary.period_options : []
@@ -292,7 +277,6 @@ function StorageManager() {
     nevaQuota?.quota_label,
     nevaQuota?.remaining_label
   ])
-  const vpsBucketRows = Array.isArray(vpsSummary?.bucket_usage) ? vpsSummary.bucket_usage : []
   const combinedUsage = activeSummary?.usage || {}
   const combinedCategories = Array.isArray(combinedUsage?.by_category) ? combinedUsage.by_category : []
   const combinedPeriods = Array.isArray(combinedUsage?.by_period) ? combinedUsage.by_period : []
@@ -302,15 +286,9 @@ function StorageManager() {
   const selectedTenant = tenants.find((tenant) => tenant.id === selectedTenantId)
   const selectedTenantName = selectedTenant?.name || tenantDetail?.tenant?.name || 'Sekolah dipilih'
   const canManageStorageScope = !isSuperAdmin || Boolean(selectedTenantId)
-  const vpsUsedBytes = Number(vpsQuota?.used_bytes || 0)
   const nevaUsedBytes = Number(nevaQuota?.used_bytes || 0)
-  const currentVpsQuotaBytes = Number(vpsQuota?.quota_bytes || 0)
   const currentNevaQuotaBytes = Number(nevaQuota?.quota_bytes || 0)
-  const platformVpsRemainingBytes = Number(superSummary?.server?.remaining_after_allocated_bytes)
   const platformNevaRemainingBytes = Number(nevaPlatform?.remaining_after_allocated_bytes)
-  const maxVpsQuotaForSelectedBytes = Number.isFinite(platformVpsRemainingBytes)
-    ? platformVpsRemainingBytes + currentVpsQuotaBytes
-    : null
   const maxNevaQuotaForSelectedBytes = Number.isFinite(platformNevaRemainingBytes)
     ? platformNevaRemainingBytes + currentNevaQuotaBytes
     : null
@@ -369,7 +347,7 @@ function StorageManager() {
       })
     }
 
-    ;[...vpsBucketRows, ...nevaBucketRows, ...activeBucketRows].forEach((item) => {
+    ;[...nevaBucketRows, ...activeBucketRows].forEach((item) => {
       addBucket(item.bucket, item.label || bucketLabel(item.bucket), item)
     })
     if (storageFilterDraft.bucket) {
@@ -380,7 +358,7 @@ function StorageManager() {
       { value: '', label: 'Semua bucket' },
       ...Array.from(map.values()).sort((a, b) => (b.bytes || 0) - (a.bytes || 0))
     ]
-  }, [activeBucketRows, nevaBucketRows, storageFilterDraft.bucket, vpsBucketRows])
+  }, [activeBucketRows, nevaBucketRows, storageFilterDraft.bucket])
   const cleanupPeriodValue = storagePeriodValue(cleanupForm.tahun_ajaran)
   const cleanupHasProviderBucket = Boolean(cleanupForm.provider && cleanupForm.bucket)
   const cleanupReady = cleanupHasProviderBucket
@@ -413,10 +391,8 @@ function StorageManager() {
   const applyTenantDetail = (data) => {
     setTenantDetail(data || null)
     const providerQuotas = data?.quota?.providers || data?.providers || {}
-    const vps = providerQuotas?.vps || {}
     const neva = providerQuotas?.neva_s3 || {}
     setQuotaForm({
-      vpsQuotaGb: bytesToGbInput(vps?.quota_bytes ?? data?.quota?.quota_bytes),
       nevaQuotaGb: bytesToGbInput(neva?.quota_bytes),
       notes: data?.quota?.notes || ''
     })
@@ -603,22 +579,13 @@ function StorageManager() {
     if (!selectedTenantId) return
     setSavingQuota(true)
     try {
-      const vpsQuotaBytes = toBytesFromGb(quotaForm.vpsQuotaGb)
       const nevaQuotaBytes = toBytesFromGb(quotaForm.nevaQuotaGb)
-      if (!vpsQuotaBytes || !nevaQuotaBytes) {
-        pushToast('warning', 'Kuota VPS dan Neva S3 wajib diisi lebih dari 0 GB.')
-        return
-      }
-      if (vpsQuotaBytes < vpsUsedBytes) {
-        pushToast('warning', `Kuota VPS tidak boleh lebih kecil dari pemakaian saat ini (${vpsQuota?.used_label || formatBytesLabel(vpsUsedBytes)}).`)
+      if (!nevaQuotaBytes) {
+        pushToast('warning', 'Kuota Neva S3 wajib diisi lebih dari 0 GB.')
         return
       }
       if (nevaQuotaBytes < nevaUsedBytes) {
         pushToast('warning', `Kuota Neva S3 tidak boleh lebih kecil dari pemakaian saat ini (${nevaQuota?.used_label || formatBytesLabel(nevaUsedBytes)}).`)
-        return
-      }
-      if (maxVpsQuotaForSelectedBytes !== null && vpsQuotaBytes > maxVpsQuotaForSelectedBytes) {
-        pushToast('warning', `Kuota VPS melebihi sisa platform. Maksimal untuk sekolah ini ${formatBytesLabel(maxVpsQuotaForSelectedBytes)}.`)
         return
       }
       if (maxNevaQuotaForSelectedBytes !== null && nevaQuotaBytes > maxNevaQuotaForSelectedBytes) {
@@ -626,14 +593,13 @@ function StorageManager() {
         return
       }
       const payload = {
-        quota_bytes: vpsQuotaBytes,
-        vps_quota_bytes: vpsQuotaBytes,
+        quota_bytes: nevaQuotaBytes,
         neva_s3_quota_bytes: nevaQuotaBytes,
         notes: quotaForm.notes
       }
       const { error } = await supabase.super.updateTenantStorageQuota(selectedTenantId, payload)
       if (error) throw error
-      pushToast('success', 'Kuota storage sekolah disimpan')
+      pushToast('success', 'Kuota Neva S3 sekolah disimpan')
       await reloadActiveStorage()
     } catch (error) {
       pushToast('error', error?.message || 'Gagal menyimpan kuota')
@@ -662,7 +628,7 @@ function StorageManager() {
 
   const handlePurgeExpiredTrash = async () => {
     if (!isSuperAdmin) return
-    const confirmed = window.confirm('Hapus permanen file Neva S3 di Trash yang sudah kedaluwarsa lebih dari 30 hari? VPS Storage tidak akan disentuh.')
+    const confirmed = window.confirm('Hapus permanen file Neva S3 di Trash yang sudah kedaluwarsa lebih dari 30 hari? Data database tetap aman.')
     if (!confirmed) return
 
     setPurgingTrash(true)
@@ -725,13 +691,13 @@ function StorageManager() {
         <div className="max-w-3xl">
           <h2 className="text-sm font-bold text-slate-900">Cleanup Aman ke Trash</h2>
           <p className="mt-1 text-xs text-slate-500">
-            Cleanup hanya untuk file storage Neva S3 pada bucket yang dipilih dan sudah berumur minimal 2 hari. Data tugas, quiz, nilai, siswa, guru, dan VPS Storage tetap aman.
+            Cleanup hanya untuk file storage Neva S3 pada bucket yang dipilih dan sudah berumur minimal 2 hari. Data tugas, quiz, nilai, siswa, dan guru tetap aman.
           </p>
         </div>
         <div className="flex flex-wrap gap-2 text-xs">
           <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 font-semibold text-emerald-700">Trash 30 hari</span>
           <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 font-semibold text-amber-800">Minimal 2 hari</span>
-          <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 font-semibold text-slate-700">VPS read-only</span>
+          <span className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 font-semibold text-indigo-700">Neva S3 only</span>
         </div>
       </div>
 
@@ -803,7 +769,6 @@ function StorageManager() {
               'Target berdasarkan bucket, bukan kategori manual',
               'Bucket aman: tugas, media quiz, dan sertifikat',
               'Hanya berlaku untuk Neva Cloud S3',
-              'VPS Storage tidak bisa dihapus dari Storage Manager',
               'Preview wajib sebelum pindah ke Trash'
             ].map((item) => (
               <div key={item} className="flex items-start gap-2">
@@ -887,23 +852,11 @@ function StorageManager() {
 
   const quotaSection = (
     <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-      <h2 className="text-sm font-bold text-slate-900">Pembagian Kuota Sekolah</h2>
+      <h2 className="text-sm font-bold text-slate-900">Pembagian Kuota Neva S3 Sekolah</h2>
       <p className="mt-1 text-xs text-slate-500">
-        {selectedTenant?.name || tenantDetail?.tenant?.name || 'Sekolah dipilih'} mendapat jatah VPS dan Neva S3 secara terpisah, tapi dikelola dari panel yang sama.
+        {selectedTenant?.name || tenantDetail?.tenant?.name || 'Sekolah dipilih'} mendapat jatah Neva S3 dari kapasitas platform. Kuota tidak bisa lebih kecil dari pemakaian sekolah saat ini.
       </p>
-      <div className="mt-4 grid gap-3 md:grid-cols-2">
-        <label className="block text-xs font-semibold text-slate-600">
-          Kuota VPS (GB)
-          <input
-            type="number"
-            min="0.1"
-            step="0.1"
-            value={quotaForm.vpsQuotaGb}
-            onChange={(e) => setQuotaForm((prev) => ({ ...prev, vpsQuotaGb: e.target.value }))}
-            placeholder="contoh: 20"
-            className="mt-1 min-h-10 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          />
-        </label>
+      <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <label className="block text-xs font-semibold text-slate-600">
           Kuota Neva S3 (GB)
           <input
@@ -916,17 +869,13 @@ function StorageManager() {
             className="mt-1 min-h-10 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
           />
         </label>
-      </div>
-      <div className="mt-3 grid gap-3 md:grid-cols-2">
-        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-          <p className="font-bold uppercase tracking-wide text-slate-500">Indikator VPS</p>
-          <div className="mt-2 space-y-1">
-            <p>Pemakaian sekolah: <span className="font-semibold text-slate-900">{vpsQuota?.used_label || formatBytesLabel(vpsUsedBytes)}</span></p>
-            <p>Kuota saat ini: <span className="font-semibold text-slate-900">{vpsQuota?.quota_label || 'Belum diset'}</span></p>
-            <p>Sisa platform bisa dibagi: <span className="font-semibold text-slate-900">{superSummary?.server?.remaining_after_allocated_label || '0 B'}</span></p>
-            <p>Maksimal untuk sekolah ini: <span className="font-semibold text-slate-900">{maxVpsQuotaForSelectedBytes !== null ? formatBytesLabel(maxVpsQuotaForSelectedBytes) : 'Mengikuti kapasitas VPS'}</span></p>
-          </div>
+        <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-3 text-xs text-indigo-800">
+          <p className="font-bold uppercase tracking-wide">Sisa platform bisa dibagi</p>
+          <p className="mt-2 text-lg font-extrabold text-indigo-950">{nevaPlatform?.remaining_after_allocated_label || 'Belum diset'}</p>
+          <p className="mt-1">Maksimal untuk sekolah ini: <span className="font-semibold">{maxNevaQuotaForSelectedBytes !== null ? formatBytesLabel(maxNevaQuotaForSelectedBytes) : 'Set APP_OBJECT_STORAGE_CAPACITY_GB'}</span></p>
         </div>
+      </div>
+      <div className="mt-3 grid gap-3">
         <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
           <p className="font-bold uppercase tracking-wide text-slate-500">Indikator Neva S3</p>
           <div className="mt-2 space-y-1">
@@ -938,7 +887,7 @@ function StorageManager() {
         </div>
       </div>
       <div className="mt-3 rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-xs text-indigo-800">
-        Kuota tidak bisa disimpan jika lebih kecil dari pemakaian saat ini atau lebih besar dari sisa kapasitas platform. Storage Manager tidak memasang batas ukuran per-file.
+        Kuota tidak bisa disimpan jika lebih kecil dari pemakaian saat ini atau lebih besar dari sisa kapasitas platform Neva S3. Storage Manager tidak memasang batas ukuran per-file.
       </div>
       <label className="mt-3 block text-xs font-semibold text-slate-600">
         Catatan
@@ -1063,10 +1012,7 @@ function StorageManager() {
             </div>
           ) : (
             <div className="space-y-5">
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
-                <StatTile icon={HardDrive} label="VPS Terpakai" value={vpsQuota?.used_label || '0 B'} hint={`Total sekolah · ${providerPercentLabel(vpsQuota)}`} />
-                <StatTile icon={Database} label="Kuota VPS" value={vpsQuota?.quota_label || 'Tidak dibatasi'} />
-                <StatTile icon={Archive} label="Sisa VPS" value={vpsQuota?.remaining_label || 'Tidak dibatasi'} />
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <StatTile icon={Cloud} label="S3 Terpakai" value={nevaQuota?.used_label || '0 B'} hint={`Total sekolah · ${providerPercentLabel(nevaQuota)}`} />
                 <StatTile icon={ShieldCheck} label="Kuota S3" value={nevaQuota?.quota_label || 'Tidak dibatasi'} />
                 <StatTile icon={Archive} label="Sisa S3" value={nevaQuota?.remaining_label || 'Tidak dibatasi'} />
@@ -1099,26 +1045,7 @@ function StorageManager() {
 
               {storageFilterSection}
 
-              <div className="grid gap-4 xl:grid-cols-2">
-                <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                  <h2 className="text-sm font-bold text-slate-900">Bucket VPS</h2>
-                  <div className="mt-3 grid gap-3 md:grid-cols-2">
-                    {vpsBucketRows.map((bucket) => (
-                      <div key={bucket.bucket} className="rounded-lg border border-slate-100 p-3">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-semibold text-slate-900">{bucket.label || NEVA_BUCKET_LABELS[bucket.bucket] || bucket.bucket}</p>
-                            <p className="text-xs text-slate-500">{numberFormatter.format(bucket.files || 0)} file</p>
-                          </div>
-                          <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-700">{bucket.bytes_label || '0 B'}</span>
-                        </div>
-                        <p className="mt-2 text-xs text-slate-500">Sisa sekolah: {bucket.remaining_after_provider_label || 'Tidak dibatasi'}</p>
-                      </div>
-                    ))}
-                    {vpsBucketRows.length === 0 && <p className="text-sm text-slate-500">Belum ada bucket VPS tercatat.</p>}
-                  </div>
-                </section>
-
+              <div className="grid gap-4">
                 <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
                   <h2 className="text-sm font-bold text-slate-900">Bucket Neva S3</h2>
                   <div className="mt-3 grid gap-3 md:grid-cols-2">
@@ -1260,10 +1187,7 @@ function StorageManager() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
-        <StatTile icon={HardDrive} label="VPS Terpakai" value={vpsQuota?.used_label || vpsSummary?.usage?.total_label || '0 B'} hint={`Total sekolah · ${providerPercentLabel(vpsQuota)}`} />
-        <StatTile icon={Database} label="Kuota VPS" value={vpsQuota?.quota_label || 'Tidak dibatasi'} />
-        <StatTile icon={Archive} label="Sisa VPS" value={vpsQuota?.remaining_label || 'Tidak dibatasi'} />
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatTile icon={Cloud} label="S3 Terpakai" value={nevaQuota?.used_label || nevaSummary?.usage?.total_label || '0 B'} hint={`Total sekolah · ${providerPercentLabel(nevaQuota)}`} />
         <StatTile icon={ShieldCheck} label="Kuota S3" value={nevaQuota?.quota_label || 'Tidak dibatasi'} />
         <StatTile icon={Archive} label="Sisa S3" value={nevaQuota?.remaining_label || 'Tidak dibatasi'} />
@@ -1271,12 +1195,7 @@ function StorageManager() {
       </div>
 
       <section className="rounded-2xl border border-indigo-100 bg-white p-5 shadow-card">
-        <div className="grid gap-4 lg:grid-cols-2">
-          <ProgressLine
-            label="Pemakaian VPS sekolah"
-            value={`${vpsQuota?.used_label || '0 B'} dari ${vpsQuota?.quota_label || 'kuota tidak dibatasi'}`}
-            percent={vpsQuota?.percent || 0}
-          />
+        <div className="grid gap-4">
           <ProgressLine
             label="Pemakaian Neva S3 sekolah"
             value={`${nevaQuota?.used_label || '0 B'} dari ${nevaQuota?.quota_label || 'kuota tidak dibatasi'}`}
@@ -1295,32 +1214,10 @@ function StorageManager() {
           <div className="flex flex-col gap-1">
             <h2 className="text-sm font-bold text-slate-900">Bucket Storage Sekolah</h2>
             <p className="text-xs text-slate-500">
-              Pantau pemakaian bucket VPS dan Neva S3 milik sekolah ini saja. Total S3 sekolah: <span className="font-semibold text-slate-700">{nevaQuota?.used_label || nevaSummary?.usage?.total_label || '0 B'}</span>, sisa kuota S3: <span className="font-semibold text-slate-700">{nevaQuota?.remaining_label || 'Tidak dibatasi'}</span>.
+              Pantau pemakaian bucket Neva S3 milik sekolah ini saja. Total S3 sekolah: <span className="font-semibold text-slate-700">{nevaQuota?.used_label || nevaSummary?.usage?.total_label || '0 B'}</span>, sisa kuota S3: <span className="font-semibold text-slate-700">{nevaQuota?.remaining_label || 'Tidak dibatasi'}</span>.
             </p>
           </div>
-          <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">VPS Storage</h3>
-                <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-600">{numberFormatter.format(vpsBucketRows.length)} bucket</span>
-              </div>
-              <div className="space-y-3">
-                {vpsBucketRows.map((bucket) => (
-                  <div key={bucket.bucket} className="rounded-xl border border-slate-100 bg-white p-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-slate-900">{bucket.label || NEVA_BUCKET_LABELS[bucket.bucket] || bucket.bucket}</p>
-                        <p className="text-xs text-slate-500">{numberFormatter.format(bucket.files || 0)} file</p>
-                      </div>
-                      <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-700">{bucket.bytes_label || '0 B'}</span>
-                    </div>
-                    <p className="mt-2 text-xs text-slate-500">Sisa sekolah: {bucket.remaining_after_provider_label || 'Tidak dibatasi'}</p>
-                  </div>
-                ))}
-                {vpsBucketRows.length === 0 && <p className="text-sm text-slate-500">Belum ada bucket VPS tercatat.</p>}
-              </div>
-            </div>
-
+          <div className="mt-4 grid gap-4">
             <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">Neva Cloud S3</h3>
@@ -1352,7 +1249,6 @@ function StorageManager() {
           <p className="mt-1 text-xs text-slate-500">Ringkasan jalur penyimpanan yang sedang dipakai sekolah.</p>
           <div className="mt-4 space-y-3">
             {[
-              ['VPS Storage', true, 'Aktif sebagai storage lokal aplikasi'],
               ['Neva Cloud S3', nevaEnabled, nevaPlatform?.endpoint || 'Endpoint diambil dari server'],
               ['Direct upload', nevaDirectEnabled, nevaDirectEnabled ? 'Aktif untuk upload cepat' : 'Fallback backend tetap aman'],
               ['Verifikasi object', Boolean(nevaPlatform?.verify_objects), nevaPlatform?.verify_objects ? 'Aktif' : 'Opsional belum aktif']
@@ -1472,7 +1368,7 @@ function StorageManager() {
           <div>
             <h2 className="text-sm font-bold text-slate-900">Platform Storage</h2>
             <p className="mt-1 text-xs text-slate-500">
-              VPS dan Neva Cloud S3 digabung di satu dashboard. Klik kartu sekolah untuk pengaturan, monitoring, dan cleanup.
+              Neva Cloud S3 menjadi storage utama. Klik kartu sekolah untuk pembagian kuota, monitoring bucket, scan inventaris, dan cleanup aman.
             </p>
           </div>
           <button
@@ -1485,13 +1381,11 @@ function StorageManager() {
             {syncingObjectStorage ? 'Membaca S3...' : 'Scan Platform Neva'}
           </button>
         </div>
-        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
-          <StatTile icon={HardDrive} label="Total VPS" value={superSummary?.server?.total_label} hint={`${superSummary?.server?.disk_percent || 0}% disk`} />
-          <StatTile icon={ShieldCheck} label="VPS Dibagikan" value={superSummary?.server?.allocated_quota_label} hint="Total kuota sekolah" />
-          <StatTile icon={Archive} label="Sisa VPS Bisa Dibagi" value={superSummary?.server?.remaining_after_allocated_label || '0 B'} hint="Belum dialokasikan" />
+        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <StatTile icon={Cloud} label="Total Neva S3" value={nevaPlatform?.capacity_label || 'Belum diset'} hint={nevaPlatform?.endpoint || 'Neva Cloud S3'} />
           <StatTile icon={ShieldCheck} label="S3 Dibagikan" value={nevaPlatform?.allocated_quota_label || '0 B'} hint="Total kuota sekolah" />
           <StatTile icon={Database} label="Sisa S3 Bisa Dibagi" value={nevaPlatform?.remaining_after_allocated_label || 'Belum diset'} hint="Belum dialokasikan" />
+          <StatTile icon={Archive} label="Terbaca di S3" value={nevaPlatform?.tracked_label || nevaPlatform?.total_label || '0 B'} hint={`${numberFormatter.format(nevaPlatform?.tracked_files || nevaPlatform?.total_files || 0)} file`} />
         </div>
       </section>
 
@@ -1539,11 +1433,11 @@ function StorageManager() {
               </div>
               <div>
                 <p className="text-xs font-bold uppercase tracking-wide text-indigo-600">Storage Manager</p>
-                <h1 className="page-title-heading">Storage VPS & Neva Cloud S3</h1>
+                <h1 className="page-title-heading">Storage Neva Cloud S3</h1>
                 <p className="page-title-description">
                   {isSuperAdmin
-                    ? 'Kelola kuota, monitoring, cleanup aman Neva S3, dan Trash semua sekolah dari satu halaman.'
-                    : 'Pantau pemakaian VPS dan Neva Cloud S3 sekolah secara ringkas, responsif, dan read-only.'}
+                    ? 'Kelola kuota, monitoring bucket, scan inventaris, cleanup aman, dan Trash Neva S3 semua sekolah dari satu halaman.'
+                    : 'Pantau pemakaian Neva Cloud S3 sekolah secara ringkas, responsif, dan read-only.'}
                 </p>
               </div>
             </div>
@@ -1580,7 +1474,7 @@ function StorageManager() {
               className={`inline-flex min-w-max items-center gap-2 rounded-md px-4 py-2 text-sm font-semibold ${activeTab === 'storage' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
             >
               <HardDrive size={16} />
-              VPS Storage
+              Legacy Storage
             </button>
             <button
               type="button"
@@ -1687,7 +1581,7 @@ function StorageManager() {
               <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
                 <h2 className="text-sm font-bold text-slate-900">Bucket Neva Aktif</h2>
                 <p className="mt-1 text-xs text-slate-500">
-                  Setiap bucket memakai kuota Neva S3 sekolah. Sisa kuota dihitung dari jatah Neva sekolah, bukan dari VPS.
+                  Setiap bucket memakai kuota Neva S3 sekolah. Sisa kuota dihitung dari jatah Neva sekolah.
                 </p>
                 <div className="mt-3 space-y-3">
                   {nevaBucketRows.map((bucket) => (
@@ -1790,24 +1684,24 @@ function StorageManager() {
         {false && activeTab === 'storage' && !isSuperAdmin && (
           <>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <StatTile icon={HardDrive} label="VPS Terpakai" value={usage.total_label || quota.used_label} hint={`${numberFormatter.format(usage.total_files || 0)} file`} />
-          <StatTile icon={Database} label="Kuota VPS" value={quota.quota_label} hint={quota.percent !== null && quota.percent !== undefined ? `${quota.percent}% terpakai` : 'Belum dibatasi'} />
-          <StatTile icon={Archive} label="Sisa VPS" value={quota.remaining_label} />
+          <StatTile icon={HardDrive} label="Legacy Terpakai" value={usage.total_label || quota.used_label} hint={`${numberFormatter.format(usage.total_files || 0)} file`} />
+          <StatTile icon={Database} label="Kuota Legacy" value={quota.quota_label} hint={quota.percent !== null && quota.percent !== undefined ? `${quota.percent}% terpakai` : 'Belum dibatasi'} />
+          <StatTile icon={Archive} label="Sisa Legacy" value={quota.remaining_label} />
           <StatTile icon={Trash2} label="Trash" value={activeSummary?.trash?.bytes_label || '0 B'} hint={`${numberFormatter.format(activeSummary?.trash?.files || 0)} file`} />
         </div>
 
         {quota.percent !== null && quota.percent !== undefined && (
           <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-            <ProgressLine label="Pemakaian kuota VPS sekolah" value={`${quota.percent}%`} percent={quota.percent} />
+            <ProgressLine label="Pemakaian kuota legacy sekolah" value={`${quota.percent}%`} percent={quota.percent} />
           </section>
         )}
 
         {activeBucketRows.length > 0 && (
           <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex flex-col gap-1">
-              <h2 className="text-sm font-bold text-slate-900">Bucket VPS Sekolah</h2>
+              <h2 className="text-sm font-bold text-slate-900">Bucket Legacy Sekolah</h2>
               <p className="text-xs text-slate-500">
-                Bucket ini memakai kuota VPS sekolah. Cleanup aman hanya tersedia untuk bucket tugas dan media quiz.
+                Bucket ini hanya arsip legacy. Cleanup aktif memakai Neva Cloud S3.
               </p>
             </div>
             <div className="mt-3 grid gap-3 md:grid-cols-2">

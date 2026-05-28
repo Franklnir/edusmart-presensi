@@ -122,6 +122,15 @@ class StorageController extends ApiController
         'sertifikat-templates',
     ];
 
+    private array $objectStorageRequiredBuckets = [
+        'assignments',
+        'quiz-media',
+        'certificates',
+        'sertifikat-files',
+        'certificate-templates',
+        'sertifikat-templates',
+    ];
+
     public function upload(Request $request)
     {
         $bucket = $request->input('bucket');
@@ -177,7 +186,7 @@ class StorageController extends ApiController
             return $imageRuleError;
         }
 
-        if ($fastLocal && $this->objectStorageEnabledForBucket($bucket)) {
+        if ($this->objectStorageEnabledForBucket($bucket)) {
             $quotaError = $this->storageManagementService->assertUploadAllowed(
                 (string) ($this->tenantId($request) ?? ''),
                 (int) ($file->getSize() ?: 0),
@@ -191,7 +200,20 @@ class StorageController extends ApiController
                 return $this->uploadObjectStorageViaServer($request, $bucket, $path, $file);
             } catch (\Throwable $e) {
                 $objectStorageRelayError = $e->getMessage();
+                return response()->json([
+                    'error' => 'Upload Neva Cloud S3 gagal: '.$this->shortError($objectStorageRelayError).'. File belum disimpan, silakan coba lagi.',
+                    'code' => 'OBJECT_STORAGE_RELAY_FAILED',
+                    'retryable' => true,
+                ], 422);
             }
+        }
+
+        if ($this->requiresObjectStorage($bucket)) {
+            return response()->json([
+                'error' => 'Bucket '.$bucket.' wajib memakai Neva Cloud S3. File belum disimpan karena object storage belum siap untuk bucket ini.',
+                'code' => 'OBJECT_STORAGE_REQUIRED',
+                'retryable' => true,
+            ], 422);
         }
 
         if (! $fastLocal) {
@@ -210,7 +232,7 @@ class StorageController extends ApiController
                     $bucket,
                     $file,
                     false,
-                    'Google Drive sekolah tidak terhubung/penuh. Karena file akan disimpan di VPS, '
+                    'Google Drive sekolah tidak terhubung/penuh. Karena file akan disimpan di server legacy, '
                 );
                 if ($localLimitError) {
                     return $localLimitError;
@@ -266,7 +288,7 @@ class StorageController extends ApiController
                 'fullPath' => $path,
                 'bucket' => $bucket,
                 'provider' => 'local',
-                'providerLabel' => 'VPS',
+                'providerLabel' => 'Server legacy',
                 'uploadedSizeBytes' => $uploadedSizeBytes,
                 'uploadedSizeLabel' => $this->formatBytes($uploadedSizeBytes),
                 'fallbackReason' => $objectStorageRelayError ? 'object_storage_relay_failed' : null,
@@ -313,7 +335,7 @@ class StorageController extends ApiController
 
         if (($verification['verified'] ?? false) && ! ($verification['exists'] ?? false)) {
             // PUT server-side sudah sukses. Pada S3-compatible storage tertentu, HEAD bisa terlambat
-            // beberapa ratus milidetik; jangan jatuhkan upload kecil ke VPS hanya karena propagasi HEAD.
+            // beberapa ratus milidetik; jangan jatuhkan upload kecil hanya karena propagasi HEAD.
             $verificationWarning = 'object_not_ready_after_server_put';
         }
 
@@ -592,6 +614,12 @@ class StorageController extends ApiController
             ]);
         }
 
+        if ($this->requiresObjectStorage($bucket)) {
+            return response()->json([
+                'error' => 'Bucket '.$bucket.' wajib memakai Neva Cloud S3. Periksa konfigurasi object storage sebelum upload.',
+            ], 422);
+        }
+
         $usesDrive = $this->googleDriveService->canUploadStorageFileMetadata(
             $request,
             $bucket,
@@ -603,7 +631,7 @@ class StorageController extends ApiController
             'data' => [
                 'bucket' => $bucket,
                 'provider' => $usesDrive ? 'google_drive' : 'local',
-                'providerLabel' => $usesDrive ? 'Google Drive' : 'VPS',
+                'providerLabel' => $usesDrive ? 'Google Drive' : 'Server legacy',
             ],
         ]);
     }
@@ -1635,6 +1663,11 @@ class StorageController extends ApiController
     private function objectStorageEnabledForBucket(string $bucket): bool
     {
         return $this->objectStorageSigner->isEnabledForBucket($bucket);
+    }
+
+    private function requiresObjectStorage(string $bucket): bool
+    {
+        return in_array($bucket, $this->objectStorageRequiredBuckets, true);
     }
 
     private function shouldProxyObjectStorageRead(string $bucket): bool

@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\BlockSuspiciousRequests;
+use App\Http\Middleware\EnsureSuperAdminAccess;
 use App\Http\Middleware\EnsureSuperAdminDomain;
 use App\Http\Middleware\EnsureTenantMatchesProfile;
 use App\Http\Middleware\ResolveTenant;
@@ -44,6 +45,7 @@ return Application::configure(basePath: dirname(__DIR__))
         });
 
         $middleware->alias([
+            'super.admin' => EnsureSuperAdminAccess::class,
             'super.domain' => EnsureSuperAdminDomain::class,
         ]);
 
