@@ -13,9 +13,7 @@ class AdminBackupController extends ApiController
     use HasTenantBackupLogic;
     use HasTenantRestoreLogic;
 
-    public function __construct(private readonly GoogleDriveService $googleDriveService)
-    {
-    }
+    public function __construct(private readonly GoogleDriveService $googleDriveService) {}
 
     public function backup(Request $request)
     {
