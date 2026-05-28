@@ -684,150 +684,165 @@ export default function ProfileGuru() {
 
   const securityAccountCard = canManageAccount ? (
     <div
-      className={`rounded-2xl border p-6 shadow-sm ${needsAccountSetup
-        ? 'border-amber-200/70 bg-amber-50/80'
-        : 'border-blue-200/70 bg-blue-50/70'
+      className={`overflow-hidden rounded-3xl border bg-white shadow-sm ${needsAccountSetup
+        ? 'border-amber-200'
+        : 'border-blue-200'
         }`}
     >
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className={`text-xs font-bold uppercase tracking-[0.18em] ${
-            needsAccountSetup ? 'text-amber-700' : 'text-blue-700'
-          }`}>
-            Akses Akun
-          </p>
-          <h2
-            className={`mt-1 text-xl font-bold ${needsAccountSetup ? 'text-amber-900' : 'text-blue-900'
+      <div className={`h-1.5 ${needsAccountSetup ? 'bg-amber-400' : 'bg-blue-500'}`} />
+      <div className="p-5 sm:p-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${
+              needsAccountSetup ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
+            }`}>
+              <span className="text-lg">🔐</span>
+            </div>
+            <div>
+              <p className={`text-xs font-bold uppercase tracking-[0.18em] ${
+                needsAccountSetup ? 'text-amber-700' : 'text-blue-700'
+              }`}>
+                Akses Akun
+              </p>
+              <h2
+                className={`mt-1 text-xl font-bold ${needsAccountSetup ? 'text-amber-900' : 'text-blue-900'
+                  }`}
+              >
+                {needsAccountSetup ? 'Lengkapi Akun' : 'Keamanan Akun'}
+              </h2>
+            </div>
+          </div>
+          <span
+            className={`inline-flex w-fit rounded-full px-3 py-1 text-xs font-semibold ${needsAccountSetup ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-700'
               }`}
           >
-            {needsAccountSetup ? 'Lengkapi Akun (Wajib)' : 'Keamanan Akun'}
-          </h2>
-        </div>
-        <span
-          className={`inline-flex w-fit rounded-full px-3 py-1 text-xs font-semibold ${needsAccountSetup ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-700'
-            }`}
-        >
-          {needsAccountSetup ? 'Perlu Setup' : 'Aktif'}
-        </span>
-      </div>
-
-      <div className="mt-6 grid gap-4 md:grid-cols-3">
-        <div className="space-y-1">
-          <label className="text-sm font-medium text-amber-900">Email Akun</label>
-          <input
-            type="email"
-            value={accountForm.email}
-            onChange={(e) =>
-              setAccountForm((prev) => ({ ...prev, email: e.target.value }))
-            }
-            placeholder="nama@email.com"
-            className="w-full rounded-xl border border-amber-200 bg-white px-4 py-2 text-sm focus:border-amber-400 focus:ring-2 focus:ring-amber-200"
-          />
-          {!isEmailFormat(accountForm.email) && accountForm.email && (
-            <p className="text-xs text-red-600">Format email tidak valid</p>
-          )}
+            {needsAccountSetup ? 'Perlu Setup' : 'Aktif'}
+          </span>
         </div>
 
-        {showPasswordFields && (
-          <div className="space-y-1">
-            <label className="text-sm font-medium text-amber-900">Password Baru</label>
-            <PasswordInput
-              value={accountForm.password}
-              onChange={(e) =>
-                setAccountForm((prev) => ({ ...prev, password: e.target.value }))
-              }
-              placeholder="Minimal 6 karakter"
-              className="w-full rounded-xl border border-amber-200 bg-white px-4 py-2 text-sm focus:border-amber-400 focus:ring-2 focus:ring-amber-200"
-            />
-          </div>
-        )}
-
-        {showPasswordFields && (
-          <div className="space-y-1">
-            <label className="text-sm font-medium text-amber-900">Ulangi Password</label>
-            <PasswordInput
-              value={accountForm.confirmPassword}
-              onChange={(e) =>
-                setAccountForm((prev) => ({ ...prev, confirmPassword: e.target.value }))
-              }
-              placeholder="Ulangi password"
-              className="w-full rounded-xl border border-amber-200 bg-white px-4 py-2 text-sm focus:border-amber-400 focus:ring-2 focus:ring-amber-200"
-            />
-          </div>
-        )}
-      </div>
-
-      <div className="mt-5 flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          onClick={handleTogglePasswordFields}
-          className="inline-flex items-center gap-2 rounded-xl bg-slate-700 px-5 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-        >
-          {showPasswordFields ? 'Batal Ganti Password' : 'Ganti Password'}
-        </button>
-        <button
-          type="button"
-          onClick={handleCompleteAccount}
-          disabled={accountSaving}
-          className="inline-flex items-center gap-2 rounded-xl bg-amber-600 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-amber-200/70 hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-70"
-        >
-          {accountSaving
-            ? 'Menyimpan...'
-            : needsAccountSetup
-              ? 'Simpan Setup Akun'
-              : 'Simpan Perubahan Akun'}
-        </button>
-      </div>
-      {googleLinked && hasRealLoginEmail(email) && (
-        <p className="mt-3 text-xs text-red-700">
-          Email akun sedang tertaut dengan Google. Lepas tautan Google terlebih dahulu jika ingin mengganti email akun ini.
-        </p>
-      )}
-
-      <div className="mt-6 rounded-xl border border-blue-200/70 bg-white px-4 py-4">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h3 className="text-sm font-semibold text-slate-900">Tautkan Login Google</h3>
-          </div>
-
-          <div className="flex flex-col items-stretch gap-2 md:items-end">
-            <span
-              className={`px-3 py-1 rounded-full text-xs font-semibold ${googleLinked
-                ? 'bg-emerald-100 text-emerald-700'
-                : 'bg-slate-100 text-slate-700'
-                }`}
-            >
-              {googleLinked ? 'Google Tertaut' : 'Belum Tertaut'}
-            </span>
-            {!googleLinked && !googleLinkBlockedReason && (
-              <GoogleCredentialButton
-                mode="link"
-                onCredential={handleLinkGoogle}
-                onOAuthSuccess={handleLinkGoogleOAuthSuccess}
-                busy={linkingGoogle}
-                className="w-full md:w-[260px]"
-                buttonClassName="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-70"
-                noteClassName="text-xs text-slate-600"
-                label="Tautkan Google"
-                busyLabel="Memproses tautan Google..."
-                expectedEmail={email}
+        <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="space-y-1">
+              <label className="text-sm font-semibold text-slate-900">Email Akun</label>
+              <input
+                type="email"
+                value={accountForm.email}
+                onChange={(e) =>
+                  setAccountForm((prev) => ({ ...prev, email: e.target.value }))
+                }
+                placeholder="nama@email.com"
+                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
               />
-            )}
-            {!googleLinked && googleLinkBlockedReason && (
-              <div className="w-full md:w-[260px] rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-800">
-                {googleLinkBlockedReason}
+              {!isEmailFormat(accountForm.email) && accountForm.email && (
+                <p className="text-xs text-red-600">Format email tidak valid</p>
+              )}
+            </div>
+
+            {showPasswordFields && (
+              <div className="space-y-1">
+                <label className="text-sm font-semibold text-slate-900">Password Baru</label>
+                <PasswordInput
+                  value={accountForm.password}
+                  onChange={(e) =>
+                    setAccountForm((prev) => ({ ...prev, password: e.target.value }))
+                  }
+                  placeholder="Minimal 6 karakter"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                />
               </div>
             )}
-            {googleLinked && (
-              <button
-                type="button"
-                onClick={handleUnlinkGoogle}
-                disabled={unlinkingGoogle || linkingGoogle}
-                className="inline-flex items-center gap-2 rounded-xl border border-red-300 bg-white px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                {unlinkingGoogle ? 'Melepas...' : 'Lepas Tautan'}
-              </button>
+
+            {showPasswordFields && (
+              <div className="space-y-1">
+                <label className="text-sm font-semibold text-slate-900">Ulangi Password</label>
+                <PasswordInput
+                  value={accountForm.confirmPassword}
+                  onChange={(e) =>
+                    setAccountForm((prev) => ({ ...prev, confirmPassword: e.target.value }))
+                  }
+                  placeholder="Ulangi password"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                />
+              </div>
             )}
+          </div>
+
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:justify-end">
+            <button
+              type="button"
+              onClick={handleTogglePasswordFields}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-800 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-900"
+            >
+              {showPasswordFields ? 'Batal Ganti Password' : 'Ganti Password'}
+            </button>
+            <button
+              type="button"
+              onClick={handleCompleteAccount}
+              disabled={accountSaving}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {accountSaving
+                ? 'Menyimpan...'
+                : needsAccountSetup
+                  ? 'Simpan Setup Akun'
+                  : 'Simpan Perubahan Akun'}
+            </button>
+          </div>
+        </div>
+        {googleLinked && hasRealLoginEmail(email) && (
+          <p className="mt-3 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-xs text-red-700">
+            Email akun sedang tertaut dengan Google. Lepas tautan Google terlebih dahulu jika ingin mengganti email akun ini.
+          </p>
+        )}
+
+        <div className="mt-5 rounded-2xl border border-blue-100 bg-white px-4 py-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-50 text-sm font-bold text-slate-700">
+                G
+              </div>
+              <h3 className="text-sm font-semibold text-slate-900">Tautkan Login Google</h3>
+            </div>
+
+            <div className="flex flex-col items-stretch gap-2 md:items-end">
+              <span
+                className={`px-3 py-1 rounded-full text-xs font-semibold ${googleLinked
+                  ? 'bg-emerald-100 text-emerald-700'
+                  : 'bg-slate-100 text-slate-700'
+                  }`}
+              >
+                {googleLinked ? 'Google Tertaut' : 'Belum Tertaut'}
+              </span>
+              {!googleLinked && !googleLinkBlockedReason && (
+                <GoogleCredentialButton
+                  mode="link"
+                  onCredential={handleLinkGoogle}
+                  onOAuthSuccess={handleLinkGoogleOAuthSuccess}
+                  busy={linkingGoogle}
+                  className="w-full md:w-[260px]"
+                  buttonClassName="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-70"
+                  noteClassName="text-xs text-slate-600"
+                  label="Tautkan Google"
+                  busyLabel="Memproses tautan Google..."
+                  expectedEmail={email}
+                />
+              )}
+              {!googleLinked && googleLinkBlockedReason && (
+                <div className="w-full md:w-[260px] rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-800">
+                  {googleLinkBlockedReason}
+                </div>
+              )}
+              {googleLinked && (
+                <button
+                  type="button"
+                  onClick={handleUnlinkGoogle}
+                  disabled={unlinkingGoogle || linkingGoogle}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-300 bg-white px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {unlinkingGoogle ? 'Melepas...' : 'Lepas Tautan'}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -956,36 +971,44 @@ export default function ProfileGuru() {
 
           {/* ========== FORM EDIT PROFIL ========== */}
           <div className="lg:col-span-3 space-y-6">
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-8">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between mb-6">
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-600">Profil Guru</p>
-                  <h3 className="text-2xl font-bold text-gray-900">Informasi Pribadi</h3>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">
-                    {statusLabel(profile?.status)}
-                  </span>
-                </div>
-              </div>
-
-              <div className="mb-8 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                {identityRows.map((item) => (
-                  <div key={item.label} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                    <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{item.label}</div>
-                    <div className="mt-1 break-words text-sm font-semibold text-slate-900">{item.value}</div>
+            <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+              <div className="border-b border-slate-100 bg-gradient-to-r from-blue-50 via-white to-white p-5 sm:p-6">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-200">
+                      <span className="text-lg">📝</span>
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-600">Profil Guru</p>
+                      <h3 className="text-2xl font-bold text-gray-900">Informasi Pribadi</h3>
+                    </div>
                   </div>
-                ))}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">
+                      {statusLabel(profile?.status)}
+                    </span>
+                  </div>
+                </div>
               </div>
 
-              <div className="grid md:grid-cols-2 gap-8">
+              <div className="p-5 sm:p-6">
+                <div className="mb-8 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  {identityRows.map((item) => (
+                    <div key={item.label} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                      <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{item.label}</div>
+                      <div className="mt-1 break-words text-sm font-semibold text-slate-900">{item.value}</div>
+                    </div>
+                  ))}
+                </div>
+
+              <div className="grid gap-5 md:grid-cols-2">
                 <div className="space-y-2">
                   <label className="block text-sm font-semibold text-gray-900">
                     Nama Lengkap <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="text"
-                    className="w-full px-4 py-3.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all duration-200 placeholder-gray-400"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 placeholder-gray-400 transition-all duration-200 hover:border-blue-300 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
                     value={form.nama}
                     onChange={(e) => handleFieldChange('nama', e.target.value)}
                     placeholder="Masukkan nama lengkap"
@@ -997,7 +1020,7 @@ export default function ProfileGuru() {
                     Jenis Kelamin <span className="text-red-500">*</span>
                   </label>
                   <select
-                    className="w-full px-4 py-3.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all duration-200"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 transition-all duration-200 hover:border-blue-300 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
                     value={form.jk}
                     onChange={(e) => handleFieldChange('jk', e.target.value)}
                   >
@@ -1010,7 +1033,7 @@ export default function ProfileGuru() {
                 <div className="space-y-2">
                   <label className="block text-sm font-semibold text-gray-900">Agama</label>
                   <select
-                    className="w-full px-4 py-3.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all duration-200"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 transition-all duration-200 hover:border-blue-300 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
                     value={form.agama}
                     onChange={(e) => handleFieldChange('agama', e.target.value)}
                   >
@@ -1026,7 +1049,7 @@ export default function ProfileGuru() {
                   <label className="block text-sm font-semibold text-gray-900">Nomor Telepon/HP</label>
                   <input
                     type="tel"
-                    className="w-full px-4 py-3.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all duration-200 placeholder-gray-400"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 placeholder-gray-400 transition-all duration-200 hover:border-blue-300 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
                     value={form.telp}
                     onChange={(e) => handleFieldChange('telp', e.target.value)}
                     placeholder="08xxxxxxxxxx"
@@ -1037,7 +1060,7 @@ export default function ProfileGuru() {
                   <label className="block text-sm font-semibold text-gray-900">Email</label>
                   <input
                     type="text"
-                    className="w-full px-4 py-3.5 border border-gray-300 rounded-xl bg-gray-50 text-gray-700"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3.5 text-gray-700"
                     value={email || '-'}
                     readOnly
                   />
@@ -1089,6 +1112,7 @@ export default function ProfileGuru() {
 
             </div>
           </div>
+        </div>
         </div>
         {securityAccountCard}
         <VerificationCodeModal

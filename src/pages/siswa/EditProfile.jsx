@@ -853,145 +853,160 @@ export default function EditProfile() {
 
   const securityAccountCard = (
     <div
-      className={`rounded-2xl shadow-sm border p-6 ${needsAccountSetup
-        ? 'bg-amber-50/80 border-amber-200/60'
-        : 'bg-purple-50/70 border-purple-200/60'
+      className={`overflow-hidden rounded-3xl border bg-white shadow-sm ${needsAccountSetup
+        ? 'border-amber-200'
+        : 'border-purple-200'
         }`}
     >
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Akses Akun</p>
-          <h2 className="mt-1 text-xl font-bold text-slate-900">
-            {needsAccountSetup ? 'Lengkapi Akun (Wajib)' : 'Keamanan Akun'}
-          </h2>
-        </div>
-        <span
-          className={`inline-flex w-fit rounded-full px-3 py-1 text-xs font-semibold ${
-            needsAccountSetup ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-700'
-          }`}
-        >
-          {needsAccountSetup ? 'Perlu Setup' : 'Aktif'}
-        </span>
-      </div>
-
-      <div className="mt-6 grid gap-4 md:grid-cols-3">
-        <div className="space-y-1">
-          <label className="text-sm font-medium text-slate-900">Email Akun</label>
-          <input
-            type="email"
-            value={accountForm.email}
-            onChange={(e) =>
-              setAccountForm((prev) => ({ ...prev, email: e.target.value }))
-            }
-            placeholder="nama@email.com"
-            className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
-          />
-          {!isEmailFormat(accountForm.email) && accountForm.email && (
-            <p className="text-xs text-red-600">Format email tidak valid</p>
-          )}
+      <div className={`h-1.5 ${needsAccountSetup ? 'bg-amber-400' : 'bg-purple-500'}`} />
+      <div className="p-5 sm:p-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${
+              needsAccountSetup ? 'bg-amber-100 text-amber-700' : 'bg-purple-100 text-purple-700'
+            }`}>
+              <span className="text-lg">🔐</span>
+            </div>
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Akses Akun</p>
+              <h2 className="mt-1 text-xl font-bold text-slate-900">
+                {needsAccountSetup ? 'Lengkapi Akun' : 'Keamanan Akun'}
+              </h2>
+            </div>
+          </div>
+          <span
+            className={`inline-flex w-fit rounded-full px-3 py-1 text-xs font-semibold ${
+              needsAccountSetup ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-700'
+            }`}
+          >
+            {needsAccountSetup ? 'Perlu Setup' : 'Aktif'}
+          </span>
         </div>
 
-        {showPasswordFields && (
-          <div className="space-y-1">
-            <label className="text-sm font-medium text-slate-900">Password Baru</label>
-            <PasswordInput
-              value={accountForm.password}
-              onChange={(e) =>
-                setAccountForm((prev) => ({ ...prev, password: e.target.value }))
-              }
-              placeholder="Minimal 6 karakter"
-              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
-            />
+        <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="space-y-1">
+              <label className="text-sm font-semibold text-slate-900">Email Akun</label>
+              <input
+                type="email"
+                value={accountForm.email}
+                onChange={(e) =>
+                  setAccountForm((prev) => ({ ...prev, email: e.target.value }))
+                }
+                placeholder="nama@email.com"
+                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
+              />
+              {!isEmailFormat(accountForm.email) && accountForm.email && (
+                <p className="text-xs text-red-600">Format email tidak valid</p>
+              )}
+            </div>
+
+            {showPasswordFields && (
+              <div className="space-y-1">
+                <label className="text-sm font-semibold text-slate-900">Password Baru</label>
+                <PasswordInput
+                  value={accountForm.password}
+                  onChange={(e) =>
+                    setAccountForm((prev) => ({ ...prev, password: e.target.value }))
+                  }
+                  placeholder="Minimal 6 karakter"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
+                />
+              </div>
+            )}
+
+            {showPasswordFields && (
+              <div className="space-y-1">
+                <label className="text-sm font-semibold text-slate-900">Ulangi Password</label>
+                <PasswordInput
+                  value={accountForm.confirmPassword}
+                  onChange={(e) =>
+                    setAccountForm((prev) => ({ ...prev, confirmPassword: e.target.value }))
+                  }
+                  placeholder="Ulangi password"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
+                />
+              </div>
+            )}
           </div>
+
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:justify-end">
+            <button
+              type="button"
+              onClick={handleTogglePasswordFields}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-800 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-900"
+            >
+              {showPasswordFields ? 'Batal Ganti Password' : 'Ganti Password'}
+            </button>
+            <button
+              type="button"
+              onClick={handleCompleteAccount}
+              disabled={accountSaving}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-purple-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {accountSaving
+                ? 'Menyimpan...'
+                : needsAccountSetup
+                  ? 'Simpan Setup Akun'
+                  : 'Simpan Perubahan Akun'}
+            </button>
+          </div>
+        </div>
+
+        {googleLinked && hasRealLoginEmail(email) && (
+          <p className="mt-3 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-xs text-red-700">
+            Email akun sedang tertaut dengan Google. Lepas tautan Google terlebih dahulu jika ingin mengganti email akun ini.
+          </p>
         )}
 
-        {showPasswordFields && (
-          <div className="space-y-1">
-            <label className="text-sm font-medium text-slate-900">Ulangi Password</label>
-            <PasswordInput
-              value={accountForm.confirmPassword}
-              onChange={(e) =>
-                setAccountForm((prev) => ({ ...prev, confirmPassword: e.target.value }))
-              }
-              placeholder="Ulangi password"
-              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
-            />
-          </div>
-        )}
-      </div>
+        <div className="mt-5 rounded-2xl border border-purple-100 bg-white px-4 py-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-50 text-sm font-bold text-slate-700">
+                G
+              </div>
+              <h3 className="text-sm font-semibold text-slate-900">Tautkan Login Google</h3>
+            </div>
 
-      <div className="mt-5 flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          onClick={handleTogglePasswordFields}
-          className="inline-flex items-center gap-2 rounded-xl bg-slate-700 px-5 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-        >
-          {showPasswordFields ? 'Batal Ganti Password' : 'Ganti Password'}
-        </button>
-        <button
-          type="button"
-          onClick={handleCompleteAccount}
-          disabled={accountSaving}
-          className="inline-flex items-center gap-2 rounded-xl bg-purple-600 px-5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-70"
-        >
-          {accountSaving
-            ? 'Menyimpan...'
-            : needsAccountSetup
-              ? 'Simpan Setup Akun'
-              : 'Simpan Perubahan Akun'}
-        </button>
-      </div>
-
-      {googleLinked && hasRealLoginEmail(email) && (
-        <p className="mt-3 text-xs text-red-700">
-          Email akun sedang tertaut dengan Google. Lepas tautan Google terlebih dahulu jika ingin mengganti email akun ini.
-        </p>
-      )}
-
-      <div className="mt-6 rounded-xl border border-purple-200/70 bg-white px-4 py-4">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h3 className="text-sm font-semibold text-slate-900">Tautkan Login Google</h3>
-          </div>
-
-          <div className="flex flex-col items-stretch gap-2 md:items-end">
-            <span
-              className={`px-3 py-1 rounded-full text-xs font-semibold ${googleLinked
+            <div className="flex flex-col items-stretch gap-2 md:items-end">
+              <span
+                className={`px-3 py-1 rounded-full text-xs font-semibold ${googleLinked
                   ? 'bg-emerald-100 text-emerald-700'
                   : 'bg-slate-100 text-slate-700'
                 }`}
-            >
-              {googleLinked ? 'Google Tertaut' : 'Belum Tertaut'}
-            </span>
-            {!googleLinked && !googleLinkBlockedReason && (
-              <GoogleCredentialButton
-                mode="link"
-                onCredential={handleLinkGoogle}
-                onOAuthSuccess={handleLinkGoogleOAuthSuccess}
-                busy={linkingGoogle}
-                className="w-full md:w-[260px]"
-                buttonClassName="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-70"
-                noteClassName="text-xs text-slate-600"
-                label="Tautkan Google"
-                busyLabel="Memproses tautan Google..."
-                expectedEmail={email}
-              />
-            )}
-            {!googleLinked && googleLinkBlockedReason && (
-              <div className="w-full md:w-[260px] rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-800">
-                {googleLinkBlockedReason}
-              </div>
-            )}
-            {googleLinked && (
-              <button
-                type="button"
-                onClick={handleUnlinkGoogle}
-                disabled={unlinkingGoogle || linkingGoogle}
-                className="inline-flex items-center gap-2 rounded-xl border border-red-300 bg-white px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-70"
               >
-                {unlinkingGoogle ? 'Melepas...' : 'Lepas Tautan'}
-              </button>
-            )}
+                {googleLinked ? 'Google Tertaut' : 'Belum Tertaut'}
+              </span>
+              {!googleLinked && !googleLinkBlockedReason && (
+                <GoogleCredentialButton
+                  mode="link"
+                  onCredential={handleLinkGoogle}
+                  onOAuthSuccess={handleLinkGoogleOAuthSuccess}
+                  busy={linkingGoogle}
+                  className="w-full md:w-[260px]"
+                  buttonClassName="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-70"
+                  noteClassName="text-xs text-slate-600"
+                  label="Tautkan Google"
+                  busyLabel="Memproses tautan Google..."
+                  expectedEmail={email}
+                />
+              )}
+              {!googleLinked && googleLinkBlockedReason && (
+                <div className="w-full md:w-[260px] rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-800">
+                  {googleLinkBlockedReason}
+                </div>
+              )}
+              {googleLinked && (
+                <button
+                  type="button"
+                  onClick={handleUnlinkGoogle}
+                  disabled={unlinkingGoogle || linkingGoogle}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-300 bg-white px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {unlinkingGoogle ? 'Melepas...' : 'Lepas Tautan'}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -1207,29 +1222,31 @@ export default function EditProfile() {
 
           {/* MAIN FORM */}
           <div className="lg:col-span-3">
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-6">
-              <div className="flex items-center justify-between gap-4 mb-6">
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg shadow-purple-500/25">
-                    <span className="text-lg text-white">📝</span>
+            <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+              <div className="border-b border-slate-100 bg-gradient-to-r from-purple-50 via-white to-white p-5 sm:p-6">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-purple-600 text-white shadow-lg shadow-purple-200">
+                      <span className="text-lg">📝</span>
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-[0.18em] text-purple-600">Profil Siswa</p>
+                      <h3 className="text-2xl font-bold text-slate-900">Informasi Pribadi</h3>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-xs font-bold uppercase tracking-[0.18em] text-purple-600">Profil Siswa</p>
-                    <h3 className="text-xl font-bold text-slate-800">Informasi Pribadi</h3>
-                  </div>
-                </div>
 
-                {isFormDirty && (
-                  <button
-                    onClick={handleResetForm}
-                    className="px-4 py-2 border border-slate-300 text-slate-700 rounded-xl hover:bg-slate-50 transition-all duration-300 font-medium text-sm"
-                  >
-                    Reset
-                  </button>
-                )}
+                  {isFormDirty && (
+                    <button
+                      onClick={handleResetForm}
+                      className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
               </div>
 
-              <div className="grid md:grid-cols-2 gap-6">
+              <div className="grid gap-5 p-5 sm:p-6 md:grid-cols-2">
                 {/* NAMA */}
                 <div>
                   <label className="flex text-sm font-semibold text-slate-700 mb-2 items-center gap-2">
@@ -1238,7 +1255,7 @@ export default function EditProfile() {
                   </label>
                   <input
                     type="text"
-                    className="w-full px-4 py-3 border border-slate-200 rounded-xl bg-slate-50 text-slate-700 cursor-not-allowed"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700 cursor-not-allowed"
                     value={form.nama}
                     readOnly
                     disabled
@@ -1253,7 +1270,7 @@ export default function EditProfile() {
                   </label>
                   <input
                     type="text"
-                    className="w-full px-4 py-3 border border-slate-200 rounded-xl bg-slate-50 text-slate-700"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700"
                     value={getDisplayKelas(form.kelas)}
                     readOnly
                   />
@@ -1266,7 +1283,7 @@ export default function EditProfile() {
                     Jenis Kelamin <span className="text-red-500">*</span>
                   </label>
                   <select
-                    className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-3 focus:ring-blue-500/20 focus:border-blue-500 bg-white transition-all duration-300 hover:border-blue-300"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 transition-all duration-300 hover:border-purple-300 focus:border-purple-500 focus:outline-none focus:ring-3 focus:ring-purple-500/20"
                     value={form.jk}
                     onChange={(e) => handleFieldChange('jk', e.target.value)}
                   >
@@ -1284,7 +1301,7 @@ export default function EditProfile() {
                   </label>
                   <input
                     type="text"
-                    className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-3 focus:ring-blue-500/20 focus:border-blue-500 bg-white transition-all duration-300 hover:border-blue-300 placeholder-slate-400"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 placeholder-slate-400 transition-all duration-300 hover:border-purple-300 focus:border-purple-500 focus:outline-none focus:ring-3 focus:ring-purple-500/20"
                     value={form.nis}
                     onChange={(e) => handleFieldChange('nis', e.target.value)}
                     placeholder="16 digit (opsional)"
@@ -1302,7 +1319,7 @@ export default function EditProfile() {
                     type="number"
                     min="10"
                     max="30"
-                    className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-3 focus:ring-blue-500/20 focus:border-blue-500 bg-white transition-all duration-300 hover:border-blue-300 placeholder-slate-400"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 placeholder-slate-400 transition-all duration-300 hover:border-purple-300 focus:border-purple-500 focus:outline-none focus:ring-3 focus:ring-purple-500/20"
                     value={form.usia}
                     onChange={(e) => handleFieldChange('usia', e.target.value)}
                     placeholder="10-30 tahun (opsional)"
@@ -1315,7 +1332,7 @@ export default function EditProfile() {
                     <span className="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
                     Email
                   </label>
-                  <div className="w-full px-4 py-3 border border-slate-200 rounded-xl bg-slate-50 text-slate-600 break-all">
+                  <div className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-600 break-all">
                     {email || 'Email tidak tersedia'}
                   </div>
                 </div>
