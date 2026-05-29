@@ -25,6 +25,7 @@ const GTugas = lazyRoute('/guru/tugas')
 const GLaporan = lazyRoute('/guru/laporan')
 const GProfile = lazyRoute('/guru/profile')
 const GQuiz = lazyRoute('/guru/quiz')
+const GRapotSiswa = lazyRoute('/guru/rapot-siswa')
 
 const AHome = lazyRoute('/admin/home')
 const AKelas = lazyRoute('/admin/kelas')
@@ -113,6 +114,7 @@ const AppRoutes = () => (
       <Route path="/guru/tugas" element={lazyElement(GTugas)} />
       <Route path="/guru/laporan" element={lazyElement(GLaporan)} />
       <Route path="/guru/siswa" element={lazyElement(ASiswa)} />
+      <Route path="/guru/rapot-siswa" element={lazyElement(GRapotSiswa)} />
       <Route path="/guru/profile" element={lazyElement(GProfile)} />
     </Route>
 

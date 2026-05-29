@@ -18,6 +18,7 @@ trait HasTenantBackupLogic
         return [
             'users',
             'settings', 'profiles', 'admin_users', 'kelas', 'mata_pelajaran', 'guru_mapel_bobot',
+            'guru_mapel_manual_nilai', 'rapot_siswa', 'rapot_siswa_items',
             'struktur_sekolah', 'kelas_struktur', 'jadwal', 'pengumuman',
             'ekskul', 'ekskul_anggota', 'organisasi', 'organisasi_anggota', 'osis_anggota',
             'absensi_settings', 'absensi_rfid_settings', 'absensi', 'absensi_ajuan',
@@ -106,6 +107,9 @@ trait HasTenantBackupLogic
             'kelas',
             'mata_pelajaran',
             'guru_mapel_bobot',
+            'guru_mapel_manual_nilai',
+            'rapot_siswa',
+            'rapot_siswa_items',
             'kelas_struktur',
             'struktur_sekolah',
             'ekskul',

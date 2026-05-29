@@ -4854,10 +4854,10 @@ class DbController extends ApiController
 
         $error = null;
         $weightRules = [
-            'bobot_tugas_pr' => ['min' => 20, 'max' => 40, 'label' => 'Bobot Tugas/PR'],
-            'bobot_quiz_reguler' => ['min' => 10, 'max' => 30, 'label' => 'Bobot Quiz Reguler'],
-            'bobot_quiz_uts' => ['min' => 20, 'max' => 30, 'label' => 'Bobot Quiz UTS'],
-            'bobot_quiz_uas' => ['min' => 30, 'max' => 40, 'label' => 'Bobot Quiz UAS'],
+            'bobot_tugas_pr' => ['min' => 0, 'max' => 100, 'label' => 'Bobot Tugas/PR'],
+            'bobot_quiz_reguler' => ['min' => 0, 'max' => 100, 'label' => 'Bobot Quiz Reguler'],
+            'bobot_quiz_uts' => ['min' => 0, 'max' => 100, 'label' => 'Bobot Quiz UTS'],
+            'bobot_quiz_uas' => ['min' => 0, 'max' => 100, 'label' => 'Bobot Quiz UAS'],
         ];
 
         $this->mapPayload($payload, function ($row) use (&$error, $weightRules, $requireAllFields) {
@@ -4914,8 +4914,8 @@ class DbController extends ApiController
 
             if (count($weights) === count($weightRules)) {
                 $total = array_sum($weights);
-                if (abs($total - 100) > 0.01) {
-                    $error = 'Total bobot Tugas/PR + Quiz Reguler + Quiz UTS + Quiz UAS harus tepat 100%';
+                if ($total > 100.01) {
+                    $error = 'Total bobot Tugas/PR + Quiz Reguler + Quiz UTS + Quiz UAS tidak boleh lebih dari 100%';
 
                     return $row;
                 }

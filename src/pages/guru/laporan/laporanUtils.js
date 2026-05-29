@@ -196,10 +196,10 @@ export const DEFAULT_RANKING_POLICY = {
   coreMapel: []
 }
 export const MAPEL_COMPONENT_WEIGHT_RULES = [
-  { key: 'bobot_tugas_pr', label: 'Tugas/PR', min: 20, max: 40, default: 30 },
-  { key: 'bobot_quiz_reguler', label: 'Quiz Reguler', min: 10, max: 30, default: 20 },
-  { key: 'bobot_quiz_uts', label: 'Quiz UTS', min: 20, max: 30, default: 20 },
-  { key: 'bobot_quiz_uas', label: 'Quiz UAS', min: 30, max: 40, default: 30 }
+  { key: 'bobot_tugas_pr', label: 'Tugas/PR', min: 0, max: 100, default: 30 },
+  { key: 'bobot_quiz_reguler', label: 'Quiz Reguler', min: 0, max: 100, default: 20 },
+  { key: 'bobot_quiz_uts', label: 'Quiz UTS', min: 0, max: 100, default: 20 },
+  { key: 'bobot_quiz_uas', label: 'Quiz UAS', min: 0, max: 100, default: 30 }
 ]
 export const DEFAULT_MAPEL_COMPONENT_WEIGHTS = MAPEL_COMPONENT_WEIGHT_RULES.reduce((acc, item) => {
   acc[item.key] = item.default
@@ -404,7 +404,7 @@ export const normalizeMapelComponentWeights = (source) => {
     (sum, rule) => sum + Number(normalized[rule.key] || 0),
     0
   )
-  if (Math.abs(total - 100) > 0.01) {
+  if (total > 100.01) {
     return { ...DEFAULT_MAPEL_COMPONENT_WEIGHTS }
   }
 
@@ -433,13 +433,15 @@ export const getMapelWeightValidation = (source) => {
     (sum, rule) => sum + Number(normalized[rule.key] || 0),
     0
   )
-  if (Math.abs(total - 100) > 0.01) {
-    errors.push('Total bobot komponen mapel harus tepat 100%')
+  if (total > 100.01) {
+    errors.push('Total bobot komponen mapel tidak boleh lebih dari 100%')
   }
+  const remaining = Math.max(0, round2(100 - total))
 
   return {
     normalized,
     total: round2(total),
+    remaining,
     isValid: errors.length === 0,
     errors
   }

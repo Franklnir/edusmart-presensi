@@ -116,7 +116,10 @@ export function buildNavigationMenu({ effectiveRole, isSuperAdmin, isWaliKelas, 
   let items = cloneMenuItems(menuConfig[effectiveRole] || [])
 
   if (role === 'guru' && isWaliKelas) {
-    items = addItemToGroup(items, 'guru-akademik', waliKelasItem)
+    const profileIndex = items.findIndex((item) => item.id === 'guru-profile')
+    items = profileIndex >= 0
+      ? [...items.slice(0, profileIndex), waliKelasItem, ...items.slice(profileIndex)]
+      : [...items, waliKelasItem]
   }
 
   return items

@@ -18,6 +18,7 @@ const routeLoaders = {
   '/guru/tugas': () => import('../pages/guru/TugasGuru'),
   '/guru/laporan': () => import('../pages/guru/Laporan'),
   '/guru/siswa': () => import('../pages/admin/Siswa'),
+  '/guru/rapot-siswa': () => import('../pages/guru/RapotSiswa'),
   '/guru/profile': () => import('../pages/guru/profile'),
   '/admin/home': () => import('../pages/admin/Home'),
   '/admin/kelas': () => import('../pages/admin/Kelas'),

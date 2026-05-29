@@ -72,6 +72,26 @@ export const menuConfig = {
 }
 
 export const waliKelasItem = {
+  id: 'guru-wali-kelas',
+  group: 'Wali Kelas',
+  icon: 'users',
+  items: [
+    {
+      id: 'guru-siswa-wali',
+      to: '/guru/siswa',
+      label: 'Siswa Wali',
+      icon: 'users',
+    },
+    {
+      id: 'guru-rapot-siswa',
+      to: '/guru/rapot-siswa',
+      label: 'Rapot Siswa',
+      icon: 'certificate',
+    },
+  ],
+}
+
+export const legacyWaliKelasItem = {
   id: 'guru-siswa-wali',
   to: '/guru/siswa',
   label: 'Siswa Wali',
