@@ -2919,16 +2919,16 @@ export default function APengaturan() {
                       <img
                         src={logoSignedUrl}
                         alt="Logo Sekolah"
-                        className="w-24 h-24 object-contain bg-gray-50 rounded-lg p-2 border border-gray-200 transition-all duration-200 hover:shadow-md"
+                        className="w-24 h-24 object-cover bg-gray-50 rounded-full p-1.5 border border-gray-200 transition-all duration-200 hover:shadow-md"
                       />
                       {uploadingLogo && (
-                        <div className="absolute inset-0 bg-black bg-opacity-50 rounded-lg flex items-center justify-center">
+                        <div className="absolute inset-0 bg-black bg-opacity-50 rounded-full flex items-center justify-center">
                           <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white"></div>
                         </div>
                       )}
                     </div>
                   ) : (
-                    <div className="w-24 h-24 flex items-center justify-center bg-gray-50 rounded-lg border-2 border-dashed border-gray-300 text-gray-400 transition-all duration-200 hover:border-gray-400">
+                    <div className="w-24 h-24 flex items-center justify-center bg-gray-50 rounded-full border-2 border-dashed border-gray-300 text-gray-400 transition-all duration-200 hover:border-gray-400">
                       <div className="text-center">
                         <div className="text-lg">🏫</div>
                         <div className="text-xs mt-1">Belum ada logo</div>
