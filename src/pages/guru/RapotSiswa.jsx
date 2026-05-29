@@ -69,6 +69,7 @@ export default function RapotSiswa() {
   const [averageManual, setAverageManual] = useState('')
   const [useManualAverage, setUseManualAverage] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [loadingClassData, setLoadingClassData] = useState(false)
 
   const activeTahunPelajaran = period?.tahunAjaran || ''
   const selectedHistory = useMemo(
@@ -167,41 +168,51 @@ export default function RapotSiswa() {
   const loadClassData = useCallback(async () => {
     if (!selectedKelas) return
     try {
-      setLoading(true)
+      setLoadingClassData(true)
       const aliases = buildKelasAliases(selectedKelas, selectedKelasMeta)
       const aliasSet = new Set(aliases.map((value) => normalizeKelasKey(value)))
-      const { data: rapotRowsForPeriod, error: rapotRowsError } = await supabase
+      const rapotQuery = supabase
         .from('rapot_siswa')
         .select('id, siswa_id, jenis, semester, tahun_pelajaran, jumlah, rata_rata, rata_rata_manual, created_by, updated_by, created_at, updated_at')
         .eq('kelas_id', selectedKelas)
         .eq('tahun_pelajaran', tahunPelajaran)
-      if (rapotRowsError) throw rapotRowsError
-      const rapotStudentIds = Array.from(new Set((rapotRowsForPeriod || []).map((row) => row.siswa_id).filter(Boolean)))
 
       let siswaQuery = supabase
         .from('profiles')
         .select('id, nama, nis, nisn, kelas')
         .eq('role', 'siswa')
         .order('nama')
-      if (selectedHistory?.status === 'riwayat' && rapotStudentIds.length) {
-        siswaQuery = siswaQuery.in('id', rapotStudentIds)
+      if (selectedHistory?.status === 'riwayat') {
+        siswaQuery = siswaQuery.limit(1)
       } else {
         siswaQuery = aliases.length === 1 ? siswaQuery.eq('kelas', aliases[0]) : siswaQuery.in('kelas', aliases)
       }
-      const [{ data: siswaRows, error: siswaError }, { data: jadwalRows, error: jadwalError }] = await Promise.all([
-        siswaQuery,
-        supabase
-          .from('jadwal')
-          .select('mapel, kelas_id')
-          .eq('kelas_id', selectedKelas)
+
+      const batch = await supabase.batch([
+        { key: 'rapot', query: rapotQuery },
+        { key: 'siswa', query: siswaQuery },
+        {
+          key: 'jadwal',
+          query: supabase
+            .from('jadwal')
+            .select('mapel, kelas_id')
+            .eq('kelas_id', selectedKelas)
+        }
       ])
-      if (siswaError) throw siswaError
-      if (jadwalError) throw jadwalError
+      const rapotResult = batch.data?.rapot
+      const siswaResult = batch.data?.siswa
+      const jadwalResult = batch.data?.jadwal
+      if (rapotResult?.error) throw rapotResult.error
+      if (siswaResult?.error) throw siswaResult.error
+      if (jadwalResult?.error) throw jadwalResult.error
+      const rapotRowsForPeriod = rapotResult?.data || []
+      const rapotStudentIds = Array.from(new Set(rapotRowsForPeriod.map((row) => row.siswa_id).filter(Boolean)))
+      const jadwalRows = jadwalResult?.data || []
 
       let nextStudents = selectedHistory?.status === 'riwayat'
-        ? (siswaRows || [])
-        : (siswaRows || []).filter((row) => aliasSet.has(normalizeKelasKey(row.kelas)))
-      if (!nextStudents.length && rapotStudentIds.length) {
+        ? []
+        : (siswaResult?.data || []).filter((row) => aliasSet.has(normalizeKelasKey(row.kelas)))
+      if ((selectedHistory?.status === 'riwayat' || !nextStudents.length) && rapotStudentIds.length) {
         const { data: historyStudents, error: historyStudentsError } = await supabase
           .from('profiles')
           .select('id, nama, nis, nisn, kelas')
@@ -243,9 +254,9 @@ export default function RapotSiswa() {
       console.error(error)
       pushToast('error', error?.message || 'Gagal memuat data rapot.')
     } finally {
-      setLoading(false)
+      setLoadingClassData(false)
     }
-  }, [pushToast, selectedHistory?.status, selectedKelas, selectedKelasMeta, setLoading, tahunPelajaran])
+  }, [pushToast, selectedHistory?.status, selectedKelas, selectedKelasMeta, tahunPelajaran])
 
   useEffect(() => {
     loadMaster()
@@ -328,8 +339,21 @@ export default function RapotSiswa() {
 
     try {
       setSaving(true)
-      const rapotId = activeModal.rapot?.id || makeLocalId()
       const nowIso = new Date().toISOString()
+      let existingRapot = activeModal.rapot || null
+      if (!existingRapot?.id) {
+        const { data: foundRapot, error: foundRapotError } = await supabase
+          .from('rapot_siswa')
+          .select('id, siswa_id, kelas_id, jenis, semester, tahun_pelajaran, jumlah, rata_rata, rata_rata_manual, created_by, updated_by, created_at, updated_at')
+          .eq('siswa_id', activeModal.student.id)
+          .eq('kelas_id', selectedKelas)
+          .eq('jenis', activeModal.type)
+          .eq('tahun_pelajaran', tahunPelajaran)
+          .maybeSingle()
+        if (foundRapotError) throw foundRapotError
+        existingRapot = foundRapot || null
+      }
+      const rapotId = existingRapot?.id || makeLocalId()
       const rapotPayload = {
         id: rapotId,
         siswa_id: activeModal.student.id,
@@ -340,9 +364,9 @@ export default function RapotSiswa() {
         jumlah: computedTotal,
         rata_rata: useManualAverage ? toNumberOrNull(averageManual) : computedAverage,
         rata_rata_manual: useManualAverage,
-        created_by: activeModal.rapot?.created_by || user?.id || null,
+        created_by: existingRapot?.created_by || user?.id || null,
         updated_by: user?.id || null,
-        created_at: activeModal.rapot?.created_at || nowIso,
+        created_at: existingRapot?.created_at || nowIso,
         updated_at: nowIso
       }
       const { error: rapotError } = await supabase
@@ -466,6 +490,14 @@ export default function RapotSiswa() {
             <p className="text-sm text-slate-500">Klik detail UTS atau UAS untuk membuka overlay pengisian rapot siswa.</p>
           </div>
 
+          {loadingClassData && (
+            <div className="mb-4 grid gap-3">
+              {[0, 1, 2].map((item) => (
+                <div key={item} className="h-16 animate-pulse rounded-2xl bg-slate-100" />
+              ))}
+            </div>
+          )}
+
           <div className="overflow-x-auto">
             <table className="w-full min-w-[720px] text-sm">
               <thead className="bg-slate-50 text-slate-700">
@@ -477,7 +509,7 @@ export default function RapotSiswa() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {students.map((student) => (
+                {!loadingClassData && students.map((student) => (
                   <tr key={student.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3">
                       <div className="font-semibold text-slate-900">{student.nama}</div>
@@ -504,7 +536,7 @@ export default function RapotSiswa() {
                     })}
                   </tr>
                 ))}
-                {!students.length && (
+                {!loadingClassData && !students.length && (
                   <tr>
                     <td colSpan="4" className="px-4 py-12 text-center text-slate-500">
                       Belum ada siswa pada kelas wali ini.

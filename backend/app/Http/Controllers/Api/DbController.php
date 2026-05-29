@@ -5251,7 +5251,7 @@ class DbController extends ApiController
 
         $allowedMapelLookup = $this->getGuruAmpuMapelLookup($guruId);
         if (empty($allowedMapelLookup)) {
-            return 'Anda belum memiliki mapel di jadwal mengajar, sehingga bobot mapel belum bisa disimpan';
+            return null;
         }
 
         $error = null;

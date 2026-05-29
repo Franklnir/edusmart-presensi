@@ -303,10 +303,37 @@ export default function LaporanRekap() {
     const load = async () => {
       if (!user?.id) return
       try {
-	        let query = supabase.from('jadwal').select('*').eq('guru_id', user.id)
-	        query = applyReportAcademicFilters(query)
-	        const { data } = await query
-	        setJadwalGuru(data || [])
+	        let jadwalQuery = supabase.from('jadwal').select('*').eq('guru_id', user.id)
+	        jadwalQuery = applyReportAcademicFilters(jadwalQuery)
+	        let tugasQuery = supabase.from('tugas').select('kelas, mapel').eq('created_by', user.id)
+	        tugasQuery = applyReportAcademicFilters(tugasQuery)
+	        let quizQuery = supabase.from('quizzes').select('kelas_id, mapel').eq('guru_id', user.id)
+	        quizQuery = applyReportAcademicFilters(quizQuery)
+	        const batch = await supabase.batch([
+	          { key: 'jadwal', query: jadwalQuery },
+	          { key: 'tugas', query: tugasQuery },
+	          { key: 'quiz', query: quizQuery }
+	        ])
+	        const jadwalResult = batch.data?.jadwal
+	        const tugasResult = batch.data?.tugas
+	        const quizResult = batch.data?.quiz
+	        if (jadwalResult?.error) throw jadwalResult.error
+	        if (tugasResult?.error) throw tugasResult.error
+	        if (quizResult?.error) throw quizResult.error
+	        const rows = [
+	          ...(jadwalResult?.data || []),
+	          ...(tugasResult?.data || []).map((row) => ({
+	            kelas_id: row.kelas,
+	            mapel: row.mapel,
+	            source: 'tugas'
+	          })),
+	          ...(quizResult?.data || []).map((row) => ({
+	            kelas_id: row.kelas_id,
+	            mapel: row.mapel,
+	            source: 'quiz'
+	          }))
+	        ].filter((row) => String(row?.mapel || '').trim())
+	        setJadwalGuru(rows)
 	      } catch (e) {
         console.error(e)
       }
@@ -389,11 +416,18 @@ export default function LaporanRekap() {
       setSelectedMapel('')
       return
     }
-    const mapels = jadwalGuru
-      .filter((j) => j.kelas_id === selectedKelas && j.mapel)
+    let mapels = jadwalGuru
+      .filter((j) => String(j.kelas_id || '') === String(selectedKelas || '') && j.mapel)
       .map((j) => j.mapel)
       .filter((v, i, s) => s.indexOf(v) === i)
       .sort()
+    if (!mapels.length) {
+      mapels = jadwalGuru
+        .filter((j) => j.mapel)
+        .map((j) => j.mapel)
+        .filter((v, i, s) => s.indexOf(v) === i)
+        .sort()
+    }
     setMapelList(mapels)
     setSelectedMapel((prev) => {
       if (prev && mapels.includes(prev)) return prev
@@ -765,25 +799,42 @@ export default function LaporanRekap() {
 
       if (kelasAliases.length === 1) siswaQuery = siswaQuery.eq('kelas', kelasAliases[0])
       else siswaQuery = siswaQuery.in('kelas', kelasAliases)
-      const { data: siswaRows, error: siswaError } = await siswaQuery
-      if (siswaError) throw siswaError
-      const kelasAliasSet = new Set(kelasAliases.map((value) => normalizeKelasKey(value)))
-      const students = (siswaRows || []).filter((s) => kelasAliasSet.has(normalizeKelasKey(s.kelas)))
-      const studentIds = students.map((s) => s.id).filter(Boolean)
-
       let tugasQuery = supabase
         .from('tugas')
         .select('id, judul, mapel, kelas, created_at')
-        .eq('kelas', selectedKelas)
         .eq('mapel', selectedMapel)
+        .in('kelas', kelasAliases)
         .gte('created_at', startDate)
         .lte('created_at', endDate)
       tugasQuery = applyReportAcademicFilters(tugasQuery)
-      const { data: tugasRows, error: tugasError } = await tugasQuery
-      if (tugasError) throw tugasError
+      let quizQuery = supabase
+        .from('quizzes')
+        .select('id, nama, mapel, mode, is_live, created_at')
+        .in('kelas_id', kelasAliases)
+        .eq('mapel', selectedMapel)
+        .gte('created_at', startDate)
+        .lte('created_at', endDate)
+      quizQuery = applyReportAcademicFilters(quizQuery)
+      const initialBatch = await supabase.batch([
+        { key: 'siswa', query: siswaQuery },
+        { key: 'tugas', query: tugasQuery },
+        { key: 'quiz', query: quizQuery }
+      ])
+      const siswaResult = initialBatch.data?.siswa
+      const tugasResult = initialBatch.data?.tugas
+      const quizResult = initialBatch.data?.quiz
+      if (siswaResult?.error) throw siswaResult.error
+      if (tugasResult?.error) throw tugasResult.error
+      if (quizResult?.error) throw quizResult.error
+      const siswaRows = siswaResult?.data || []
+      const kelasAliasSet = new Set(kelasAliases.map((value) => normalizeKelasKey(value)))
+      const students = siswaRows.filter((s) => kelasAliasSet.has(normalizeKelasKey(s.kelas)))
+      const studentIds = students.map((s) => s.id).filter(Boolean)
+
+      const tugasRows = (tugasResult?.data || []).filter((row) => kelasAliasSet.has(normalizeKelasKey(row.kelas)))
       const tugasIds = (tugasRows || []).map((row) => row.id).filter(Boolean)
 
-      let jawabanRows = []
+      const detailBatchItems = []
       if (tugasIds.length && studentIds.length) {
         let jawabanQuery = supabase
           .from('tugas_jawaban')
@@ -791,24 +842,12 @@ export default function LaporanRekap() {
           .in('tugas_id', tugasIds)
           .in('user_id', studentIds)
         jawabanQuery = applyReportAcademicFilters(jawabanQuery)
-        const { data, error } = await jawabanQuery
-        if (error) throw error
-        jawabanRows = data || []
+        detailBatchItems.push({ key: 'jawaban', query: jawabanQuery })
       }
 
-      let quizQuery = supabase
-        .from('quizzes')
-        .select('id, nama, mapel, mode, is_live, created_at')
-        .eq('kelas_id', selectedKelas)
-        .eq('mapel', selectedMapel)
-        .gte('created_at', startDate)
-        .lte('created_at', endDate)
-      quizQuery = applyReportAcademicFilters(quizQuery)
-      const { data: quizRows, error: quizError } = await quizQuery
-      if (quizError) throw quizError
+      const quizRows = quizResult?.data || []
       const quizIds = (quizRows || []).map((row) => row.id).filter(Boolean)
 
-      let submissionRows = []
       if (quizIds.length && studentIds.length) {
         let submissionQuery = supabase
           .from('quiz_submissions')
@@ -816,15 +855,14 @@ export default function LaporanRekap() {
           .in('quiz_id', quizIds)
           .in('siswa_id', studentIds)
         submissionQuery = applyReportAcademicFilters(submissionQuery)
-        const { data, error } = await submissionQuery
-        if (error) throw error
-        submissionRows = data || []
+        detailBatchItems.push({ key: 'submissions', query: submissionQuery })
       }
 
       const tahunAjaran = selectedTahunAjaran || reportPeriod.tahunAjaran
-      let manualRows = []
       if (studentIds.length) {
-        const { data, error } = await supabase
+        detailBatchItems.push({
+          key: 'manual',
+          query: supabase
           .from('guru_mapel_manual_nilai')
           .select('*')
           .eq('guru_id', user.id)
@@ -832,9 +870,18 @@ export default function LaporanRekap() {
           .eq('mapel', selectedMapel)
           .eq('tahun_ajaran', tahunAjaran)
           .in('siswa_id', studentIds)
-        if (error) throw error
-        manualRows = data || []
+        })
       }
+      const detailBatch = detailBatchItems.length ? await supabase.batch(detailBatchItems) : { data: {} }
+      const jawabanResult = detailBatch.data?.jawaban
+      const submissionResult = detailBatch.data?.submissions
+      const manualResult = detailBatch.data?.manual
+      if (jawabanResult?.error) throw jawabanResult.error
+      if (submissionResult?.error) throw submissionResult.error
+      if (manualResult?.error) throw manualResult.error
+      const jawabanRows = jawabanResult?.data || []
+      const submissionRows = submissionResult?.data || []
+      const manualRows = manualResult?.data || []
 
       const bobotMapel = mapelWeightByMapelKey.get(normalizeMapelKey(selectedMapel))
         || { ...DEFAULT_MAPEL_COMPONENT_WEIGHTS }

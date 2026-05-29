@@ -136,6 +136,14 @@ class DbUpsertExecutor
         }
 
         $updateColumns = array_keys($rows[0]);
+        if (! empty($uniqueBy)) {
+            $updateColumns = array_values(array_filter(
+                $updateColumns,
+                fn ($column) => ! in_array($column, $uniqueBy, true)
+                    && ($column !== 'id' || in_array('id', $uniqueBy, true))
+                    && $column !== 'created_at'
+            ));
+        }
         if (in_array($table, ['absensi', 'absensi_settings', 'absensi_scan_temp'], true) && ! empty($uniqueBy)) {
             $resolved = [];
             try {
