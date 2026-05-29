@@ -2026,6 +2026,7 @@ class StorageManagementService
     private function bucketLabel(string $bucket): string
     {
         return match ($bucket) {
+            'profile-photos' => 'Logo & Foto Profil',
             'assignments' => 'Tugas',
             'quiz-media' => 'Media Quiz',
             'certificates' => 'Sertifikat',

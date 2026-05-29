@@ -95,6 +95,7 @@ return [
         'region' => env('APP_OBJECT_STORAGE_REGION', env('ASSIGNMENT_OBJECT_STORAGE_REGION', env('AWS_DEFAULT_REGION', 'us-east-1'))),
         'bucket' => env('APP_OBJECT_STORAGE_BUCKET', env('ASSIGNMENT_OBJECT_STORAGE_BUCKET', env('AWS_BUCKET'))),
         'bucket_map' => [
+            'profile-photos' => env('APP_OBJECT_STORAGE_BUCKET_PROFILE_PHOTOS', env('APP_OBJECT_STORAGE_PROFILE_PHOTOS_BUCKET', env('APP_OBJECT_STORAGE_BUCKET', env('ASSIGNMENT_OBJECT_STORAGE_BUCKET', env('AWS_BUCKET', 'profile-photos'))))),
             'assignments' => env('APP_OBJECT_STORAGE_BUCKET_ASSIGNMENTS', env('APP_OBJECT_STORAGE_ASSIGNMENTS_BUCKET', env('APP_OBJECT_STORAGE_BUCKET', env('ASSIGNMENT_OBJECT_STORAGE_BUCKET', env('AWS_BUCKET'))))),
             'quiz-media' => env('APP_OBJECT_STORAGE_BUCKET_QUIZ_MEDIA', env('APP_OBJECT_STORAGE_QUIZ_MEDIA_BUCKET', env('APP_OBJECT_STORAGE_BUCKET', env('ASSIGNMENT_OBJECT_STORAGE_BUCKET', env('AWS_BUCKET'))))),
             'certificates' => env('APP_OBJECT_STORAGE_BUCKET_CERTIFICATES', env('APP_OBJECT_STORAGE_CERTIFICATES_BUCKET', env('APP_OBJECT_STORAGE_BUCKET', env('ASSIGNMENT_OBJECT_STORAGE_BUCKET', env('AWS_BUCKET'))))),
@@ -127,7 +128,7 @@ return [
                     'APP_DIRECT_UPLOAD_BUCKETS',
                     env(
                         'ASSIGNMENT_DIRECT_UPLOAD_BUCKETS',
-                        'assignments,quiz-media,certificates,sertifikat-files,certificate-templates,sertifikat-templates'
+                        'profile-photos,assignments,quiz-media,certificates,sertifikat-files,certificate-templates,sertifikat-templates'
                     )
                 )
             )

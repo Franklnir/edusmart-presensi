@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Http;
 class S3CompatibleStorageSigner
 {
     private const DEFAULT_DIRECT_UPLOAD_BUCKETS = [
+        'profile-photos',
         'assignments',
         'quiz-media',
         'certificates',

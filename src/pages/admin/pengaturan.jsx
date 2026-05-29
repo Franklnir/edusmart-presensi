@@ -22,7 +22,7 @@ import {
   Users,
   XCircle
 } from 'lucide-react'
-import { supabase, PROFILE_BUCKET, getSignedUrlForValue } from '../../lib/supabase'
+import { CURRENT_TENANT_SLUG, supabase, PROFILE_BUCKET, getSignedUrlForValue } from '../../lib/supabase'
 import { queryClient } from '../../lib/queryClient'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
@@ -44,6 +44,9 @@ import { SCHEDULE_SCOPE_YEAR } from '../../utils/schedulePeriodScope'
 
 const SUPABASE_BUCKET = 'profile-photos'
 const LOGO_FILE_PATH = 'logo_sekolah.png'
+const TENANT_LOGO_FILE_PATH = CURRENT_TENANT_SLUG
+  ? `logos/${CURRENT_TENANT_SLUG}/logo_sekolah.jpg`
+  : LOGO_FILE_PATH
 const SETTINGS_SELECT_COLUMNS = [
   'id',
   'nama_sekolah',
@@ -1383,11 +1386,11 @@ export default function APengaturan() {
       const compressedFile = await compressImage(selectedLogoFile, 300)
 
       // (Opsional) hapus file lama, upsert sebenarnya sudah cukup
-      await supabase.storage.from(SUPABASE_BUCKET).remove([LOGO_FILE_PATH])
+      await supabase.storage.from(SUPABASE_BUCKET).remove([TENANT_LOGO_FILE_PATH])
 
       const { error: uploadError } = await supabase.storage
         .from(SUPABASE_BUCKET)
-        .upload(LOGO_FILE_PATH, compressedFile, {
+        .upload(TENANT_LOGO_FILE_PATH, compressedFile, {
           upsert: true,
           cacheControl: '3600',
           contentType: 'image/jpeg'
@@ -1396,7 +1399,7 @@ export default function APengaturan() {
       if (uploadError) throw uploadError
 
       // ✅ DB simpan PATH saja
-      const newLogoPath = LOGO_FILE_PATH
+      const newLogoPath = TENANT_LOGO_FILE_PATH
       setForm((prev) => ({ ...prev, logo_url: newLogoPath }))
 
       if (settingsId) {

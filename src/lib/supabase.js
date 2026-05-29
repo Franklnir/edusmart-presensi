@@ -98,6 +98,7 @@ const normalizeApiUrl = (rawApiUrl, runtimeHost) => {
 
 const API_URL = normalizeApiUrl(import.meta.env.VITE_API_URL, RUNTIME_HOST)
 const TENANT_SLUG = import.meta.env.VITE_TENANT_SLUG || deriveTenantSlug(RUNTIME_HOST)
+export const CURRENT_TENANT_SLUG = TENANT_SLUG
 const GOOGLE_AUTH_ENABLED = String(import.meta.env.VITE_GOOGLE_AUTH_ENABLED || 'false')
   .trim()
   .toLowerCase() === 'true'
@@ -486,6 +487,7 @@ export const QUIZ_MEDIA_BUCKET = 'quiz-media'
 export const CERT_BUCKET = 'certificates'
 export const CERT_TEMPLATE_BUCKET = 'certificate-templates'
 const DIRECT_UPLOAD_BUCKETS = new Set([
+  PROFILE_BUCKET,
   ASSIGNMENT_BUCKET,
   QUIZ_MEDIA_BUCKET,
   CERT_BUCKET,

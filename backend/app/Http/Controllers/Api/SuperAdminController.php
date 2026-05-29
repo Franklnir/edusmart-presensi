@@ -42,6 +42,7 @@ class SuperAdminController extends ApiController
     private const MONITORED_STORAGE_BUCKETS = [
         'profile-photos',
         'assignments',
+        'quiz-media',
         'certificates',
         'sertifikat-files',
         'certificate-templates',

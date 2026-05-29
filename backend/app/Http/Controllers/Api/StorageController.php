@@ -123,6 +123,7 @@ class StorageController extends ApiController
     ];
 
     private array $objectStorageRequiredBuckets = [
+        'profile-photos',
         'assignments',
         'quiz-media',
         'certificates',
