@@ -29,7 +29,7 @@ export const useNavbarSettings = (authSettings) => {
       try {
         let { data, error } = await supabase
           .from('settings')
-          .select('id,nama_sekolah,updated_at')
+          .select('id,nama_sekolah,logo_url,logo_path,updated_at')
           .order('id', { ascending: true })
           .limit(1)
           .single()
@@ -112,6 +112,41 @@ export const useAvatarUrl = (profile) => {
   }, [])
 
   return { avatarUrl, clearAvatarUrl }
+}
+
+export const useSchoolLogoUrl = (settings) => {
+  const [logoUrl, setLogoUrl] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    const raw = settings?.logo_url || settings?.logo_path || ''
+
+    const resolveLogo = async () => {
+      if (!raw) {
+        if (!cancelled) setLogoUrl('')
+        return
+      }
+
+      try {
+        const signed = await getSignedUrlForValue(PROFILE_BUCKET, raw, 60 * 60)
+        if (!cancelled) setLogoUrl(addCacheBuster(signed))
+      } catch {
+        if (!cancelled) setLogoUrl(isHttpUrl(raw) ? addCacheBuster(raw) : '')
+      }
+    }
+
+    resolveLogo()
+
+    return () => {
+      cancelled = true
+    }
+  }, [settings?.logo_url, settings?.logo_path, settings?.updated_at])
+
+  const clearLogoUrl = useCallback(() => {
+    setLogoUrl('')
+  }, [])
+
+  return { logoUrl, clearLogoUrl }
 }
 
 export const useWaliKelasFlag = (role, userId) => {

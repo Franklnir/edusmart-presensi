@@ -613,6 +613,8 @@ class S3CompatibleStorageSigner
             $buckets = self::DEFAULT_DIRECT_UPLOAD_BUCKETS;
         }
 
+        $buckets = array_merge(self::DEFAULT_DIRECT_UPLOAD_BUCKETS, $buckets);
+
         return array_values(array_unique(array_filter(array_map(
             fn ($bucket) => trim((string) $bucket),
             $buckets

@@ -27,12 +27,14 @@ const DesktopSidebar = React.memo(({
   menuExpansion,
   navItems,
   onAvatarError,
+  onLogoError,
   onLogout,
   onOpenMonitoring,
   onToggleCollapsed,
   onlineCount,
   roleBadge,
   schoolName,
+  schoolLogoUrl,
   showMonitoring = false,
   userInitial,
   userName
@@ -42,8 +44,17 @@ const DesktopSidebar = React.memo(({
 
     <aside className={`theme-sidebar hidden md:flex fixed inset-y-0 left-0 flex-col min-h-0 z-40 bg-white border-r border-slate-100 shadow-sidebar transition-all duration-300 ease-in-out ${collapsed ? 'w-[64px]' : 'w-52'}`}>
       <div className="flex items-center gap-2 px-3 pt-3 pb-2 border-b border-slate-100">
-        <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 shadow-brand-sm flex-shrink-0">
-          <span className="font-extrabold text-white text-[15px]">{schoolName.charAt(0).toUpperCase()}</span>
+        <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 shadow-brand-sm flex-shrink-0 overflow-hidden">
+          {schoolLogoUrl ? (
+            <img
+              src={schoolLogoUrl}
+              alt=""
+              className="h-full w-full object-cover"
+              onError={onLogoError}
+            />
+          ) : (
+            <span className="font-extrabold text-white text-[15px]">{schoolName.charAt(0).toUpperCase()}</span>
+          )}
         </div>
 
         {!collapsed && (

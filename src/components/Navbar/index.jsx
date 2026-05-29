@@ -12,6 +12,7 @@ import {
   useMonitoring,
   useNavbarSettings,
   useNavigationMenu,
+  useSchoolLogoUrl,
   useWaliKelasFlag
 } from './hooks'
 
@@ -36,6 +37,7 @@ const Navbar = () => {
   const [isCollapsed, setIsCollapsed] = useState(false)
   const { settings, isLoading } = useNavbarSettings(authSettings)
   const { avatarUrl, clearAvatarUrl } = useAvatarUrl(profile)
+  const { logoUrl, clearLogoUrl } = useSchoolLogoUrl(settings)
 
   const role = profile?.role
   const hasSuperAdminAccess = Boolean(isSuperAdmin && role === 'admin')
@@ -111,12 +113,14 @@ const Navbar = () => {
         menuExpansion={menuExpansion}
         navItems={navItems}
         onAvatarError={clearAvatarUrl}
+        onLogoError={clearLogoUrl}
         onLogout={handleLogout}
         onOpenMonitoring={handleOpenMonitoring}
         onToggleCollapsed={handleToggleCollapsed}
         onlineCount={onlineCount}
         roleBadge={roleBadge}
         schoolName={schoolName}
+        schoolLogoUrl={logoUrl}
         showMonitoring={showMonitoring}
         userInitial={userInitial}
         userName={userName}
@@ -127,11 +131,13 @@ const Navbar = () => {
         menuExpansion={menuExpansion}
         navItems={navItems}
         onAvatarError={clearAvatarUrl}
+        onLogoError={clearLogoUrl}
         onLogout={handleLogout}
         onOpenMonitoring={handleOpenMonitoring}
         onlineCount={onlineCount}
         roleBadge={roleBadge}
         schoolName={schoolName}
+        schoolLogoUrl={logoUrl}
         showMonitoring={showMonitoring}
         userInitial={userInitial}
       />

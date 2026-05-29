@@ -120,11 +120,13 @@ const MobileNav = React.memo(({
   menuExpansion,
   navItems,
   onAvatarError,
+  onLogoError,
   onLogout,
   onOpenMonitoring,
   onlineCount,
   roleBadge,
   schoolName,
+  schoolLogoUrl,
   showMonitoring = false,
   userInitial
 }) => {
@@ -143,8 +145,17 @@ const MobileNav = React.memo(({
       <div className="theme-mobile-bar md:hidden sticky top-0 z-30 glass border-b border-slate-100 shadow-navbar">
         <div className="flex items-center justify-between px-4 h-14">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center flex-shrink-0">
-              <span className="font-extrabold text-white text-xs">{schoolName.charAt(0).toUpperCase()}</span>
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center flex-shrink-0 overflow-hidden">
+              {schoolLogoUrl ? (
+                <img
+                  src={schoolLogoUrl}
+                  alt=""
+                  className="h-full w-full object-cover"
+                  onError={onLogoError}
+                />
+              ) : (
+                <span className="font-extrabold text-white text-xs">{schoolName.charAt(0).toUpperCase()}</span>
+              )}
             </div>
             <div className="min-w-0">
               <p className="text-sm font-bold text-slate-900 leading-tight truncate">{schoolName}</p>
