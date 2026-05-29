@@ -543,6 +543,26 @@ class DbController extends ApiController
                             });
                         }
 
+                        if (Schema::hasTable('rapot_siswa')) {
+                            $tenantId = $this->currentTenantId;
+                            $q->orWhereIn('id', function ($sub) use ($kelas, $userId, $tenantId) {
+                                $sub->select('siswa_id')
+                                    ->from('rapot_siswa')
+                                    ->where(function ($owner) use ($kelas, $userId) {
+                                        if (! empty($kelas)) {
+                                            $owner->whereIn('kelas_id', $kelas);
+                                        } else {
+                                            $owner->whereRaw('1 = 0');
+                                        }
+                                        $owner->orWhere('created_by', $userId)
+                                            ->orWhere('updated_by', $userId);
+                                    });
+                                if ($tenantId) {
+                                    $sub->where('tenant_id', $tenantId);
+                                }
+                            });
+                        }
+
                         $ekskulIds = $this->guruEskulIds($userId);
                         if (! empty($ekskulIds)) {
                             $q->orWhere(function ($q2) use ($ekskulIds) {
@@ -2241,13 +2261,21 @@ class DbController extends ApiController
 
             if ($this->isGuru($request)) {
                 $wali = $this->guruWaliKelasIds($userId);
-                if (empty($wali)) {
-                    return $this->deny('Anda belum menjadi wali kelas', 403);
-                }
-                $query->whereIn('kelas_id', $wali);
+                $query->where(function ($scope) use ($wali, $userId) {
+                    if (! empty($wali)) {
+                        $scope->whereIn('kelas_id', $wali);
+                    } else {
+                        $scope->whereRaw('1 = 0');
+                    }
+                    $scope->orWhere('created_by', $userId)
+                        ->orWhere('updated_by', $userId);
+                });
 
                 if (in_array($action, ['insert', 'upsert'], true)) {
                     $rows = $this->normalizeRows($payload);
+                    if (empty($wali)) {
+                        return $this->deny('Anda belum menjadi wali kelas aktif', 403);
+                    }
                     foreach ($rows as $row) {
                         if (! in_array((string) ($row['kelas_id'] ?? ''), array_map('strval', $wali), true)) {
                             return $this->deny('Kelas rapot bukan kelas wali Anda', 403);
@@ -2314,14 +2342,19 @@ class DbController extends ApiController
 
             if ($this->isGuru($request)) {
                 $wali = $this->guruWaliKelasIds($userId);
-                if (empty($wali)) {
-                    return $this->deny('Anda belum menjadi wali kelas', 403);
-                }
 
-                $query->whereIn('rapot_id', function ($q) use ($wali, $tenantId) {
+                $query->whereIn('rapot_id', function ($q) use ($wali, $userId, $tenantId) {
                     $q->select('id')
                         ->from('rapot_siswa')
-                        ->whereIn('kelas_id', $wali);
+                        ->where(function ($owner) use ($wali, $userId) {
+                            if (! empty($wali)) {
+                                $owner->whereIn('kelas_id', $wali);
+                            } else {
+                                $owner->whereRaw('1 = 0');
+                            }
+                            $owner->orWhere('created_by', $userId)
+                                ->orWhere('updated_by', $userId);
+                        });
                     if ($tenantId) {
                         $q->where('tenant_id', $tenantId);
                     }
@@ -2339,7 +2372,15 @@ class DbController extends ApiController
 
                     $allowedRapotQuery = DB::table('rapot_siswa')
                         ->whereIn('id', $rapotIds)
-                        ->whereIn('kelas_id', $wali);
+                        ->where(function ($owner) use ($wali, $userId) {
+                            if (! empty($wali)) {
+                                $owner->whereIn('kelas_id', $wali);
+                            } else {
+                                $owner->whereRaw('1 = 0');
+                            }
+                            $owner->orWhere('created_by', $userId)
+                                ->orWhere('updated_by', $userId);
+                        });
                     if ($tenantId) {
                         $allowedRapotQuery->where('tenant_id', $tenantId);
                     }
@@ -5148,17 +5189,54 @@ class DbController extends ApiController
             return [];
         }
 
+        $period = $this->currentAcademicPeriodForTenant($this->currentTenantId);
+        $tahunAjaran = (string) ($period['tahun_ajaran'] ?? '');
+        $normalizeMapel = static fn ($mapel): string => strtolower(trim((string) $mapel));
         $jadwalQuery = DB::table('jadwal')
             ->where('guru_id', $guruId)
             ->whereNotNull('mapel');
         $this->applyTenantFilter($jadwalQuery);
-        $this->applyCurrentAcademicPeriodToQuery($jadwalQuery, 'jadwal');
+        if ($tahunAjaran !== '' && $this->isSelectableColumn('jadwal', 'tahun_ajaran')) {
+            $jadwalQuery->where('tahun_ajaran', $tahunAjaran);
+        }
 
         $lookup = [];
         foreach ($jadwalQuery->pluck('mapel')->all() as $mapel) {
-            $normalized = strtolower(trim((string) $mapel));
+            $normalized = $normalizeMapel($mapel);
             if ($normalized !== '') {
                 $lookup[$normalized] = true;
+            }
+        }
+
+        if ($this->isSelectableColumn('tugas', 'mapel') && $this->isSelectableColumn('tugas', 'created_by')) {
+            $tugasQuery = DB::table('tugas')
+                ->where('created_by', $guruId)
+                ->whereNotNull('mapel');
+            $this->applyTenantFilter($tugasQuery);
+            if ($tahunAjaran !== '' && $this->isSelectableColumn('tugas', 'tahun_ajaran')) {
+                $tugasQuery->where('tahun_ajaran', $tahunAjaran);
+            }
+            foreach ($tugasQuery->distinct()->pluck('mapel')->all() as $mapel) {
+                $normalized = $normalizeMapel($mapel);
+                if ($normalized !== '') {
+                    $lookup[$normalized] = true;
+                }
+            }
+        }
+
+        if ($this->isSelectableColumn('quizzes', 'mapel') && $this->isSelectableColumn('quizzes', 'guru_id')) {
+            $quizQuery = DB::table('quizzes')
+                ->where('guru_id', $guruId)
+                ->whereNotNull('mapel');
+            $this->applyTenantFilter($quizQuery);
+            if ($tahunAjaran !== '' && $this->isSelectableColumn('quizzes', 'tahun_ajaran')) {
+                $quizQuery->where('tahun_ajaran', $tahunAjaran);
+            }
+            foreach ($quizQuery->distinct()->pluck('mapel')->all() as $mapel) {
+                $normalized = $normalizeMapel($mapel);
+                if ($normalized !== '') {
+                    $lookup[$normalized] = true;
+                }
             }
         }
 

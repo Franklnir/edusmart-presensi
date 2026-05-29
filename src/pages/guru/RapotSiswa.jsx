@@ -58,7 +58,8 @@ export default function RapotSiswa() {
   const { pushToast, setLoading } = useUIStore()
   const { period } = useActiveAcademicPeriod({ storageKey: 'edusmart.guru.rapot.periodFilter' })
   const [waliKelasList, setWaliKelasList] = useState([])
-  const [selectedKelas, setSelectedKelas] = useState('')
+  const [waliHistoryOptions, setWaliHistoryOptions] = useState([])
+  const [selectedContext, setSelectedContext] = useState('')
   const [students, setStudents] = useState([])
   const [mapelOptions, setMapelOptions] = useState([])
   const [rapotIndex, setRapotIndex] = useState({})
@@ -69,25 +70,42 @@ export default function RapotSiswa() {
   const [useManualAverage, setUseManualAverage] = useState(false)
   const [saving, setSaving] = useState(false)
 
-  const tahunPelajaran = period?.tahunAjaran || ''
+  const activeTahunPelajaran = period?.tahunAjaran || ''
+  const selectedHistory = useMemo(
+    () => waliHistoryOptions.find((item) => item.key === selectedContext) || waliHistoryOptions[0] || null,
+    [selectedContext, waliHistoryOptions]
+  )
+  const selectedKelas = selectedHistory?.kelasId || ''
+  const tahunPelajaran = selectedHistory?.tahunPelajaran || activeTahunPelajaran || ''
   const selectedKelasMeta = useMemo(
-    () => waliKelasList.find((kelas) => String(kelas.id) === String(selectedKelas)) || null,
-    [selectedKelas, waliKelasList]
+    () => selectedHistory?.kelasMeta || waliKelasList.find((kelas) => String(kelas.id) === String(selectedKelas)) || null,
+    [selectedHistory, selectedKelas, waliKelasList]
   )
 
   const loadMaster = useCallback(async () => {
     if (!user?.id) return
     try {
       setLoading(true)
-      const { data: strukturRows, error: strukturError } = await supabase
-        .from('kelas_struktur')
-        .select('kelas_id')
-        .eq('wali_guru_id', user.id)
+      const [{ data: strukturRows, error: strukturError }, { data: rapotHistoryRows, error: rapotHistoryError }] = await Promise.all([
+        supabase
+          .from('kelas_struktur')
+          .select('kelas_id')
+          .eq('wali_guru_id', user.id),
+        supabase
+          .from('rapot_siswa')
+          .select('kelas_id, tahun_pelajaran, jenis, siswa_id, created_at, updated_at')
+          .order('tahun_pelajaran', { ascending: false })
+      ])
       if (strukturError) throw strukturError
-      const kelasIds = (strukturRows || []).map((row) => row.kelas_id).filter(Boolean)
+      if (rapotHistoryError) throw rapotHistoryError
+      const activeKelasIds = (strukturRows || []).map((row) => row.kelas_id).filter(Boolean)
+      const historyKelasIds = (rapotHistoryRows || []).map((row) => row.kelas_id).filter(Boolean)
+      const kelasIds = Array.from(new Set([...activeKelasIds, ...historyKelasIds].map(String).filter(Boolean)))
+
       if (!kelasIds.length) {
         setWaliKelasList([])
-        setSelectedKelas('')
+        setWaliHistoryOptions([])
+        setSelectedContext('')
         setStudents([])
         return
       }
@@ -99,17 +117,52 @@ export default function RapotSiswa() {
         .order('nama')
       if (kelasError) throw kelasError
       const nextKelas = kelasRows || []
+      const kelasById = new Map(nextKelas.map((kelas) => [String(kelas.id), kelas]))
+      const optionMap = new Map()
+      activeKelasIds.forEach((kelasId) => {
+        const normalizedId = String(kelasId || '')
+        const year = activeTahunPelajaran || ''
+        const key = `${normalizedId}|${year}`
+        optionMap.set(key, {
+          key,
+          kelasId: normalizedId,
+          tahunPelajaran: year,
+          status: 'aktif',
+          kelasMeta: kelasById.get(normalizedId) || { id: normalizedId, nama: normalizedId },
+          rapotCount: 0
+        })
+      })
+      ;(rapotHistoryRows || []).forEach((row) => {
+        const normalizedId = String(row.kelas_id || '')
+        const year = String(row.tahun_pelajaran || '').trim()
+        if (!normalizedId || !year) return
+        const key = `${normalizedId}|${year}`
+        const existing = optionMap.get(key)
+        optionMap.set(key, {
+          key,
+          kelasId: normalizedId,
+          tahunPelajaran: year,
+          status: existing?.status === 'aktif' ? 'aktif' : 'riwayat',
+          kelasMeta: kelasById.get(normalizedId) || existing?.kelasMeta || { id: normalizedId, nama: normalizedId },
+          rapotCount: (existing?.rapotCount || 0) + 1
+        })
+      })
+      const options = Array.from(optionMap.values()).sort((a, b) => {
+        if (a.status !== b.status) return a.status === 'aktif' ? -1 : 1
+        const yearCompare = String(b.tahunPelajaran || '').localeCompare(String(a.tahunPelajaran || ''), 'id')
+        if (yearCompare !== 0) return yearCompare
+        return getKelasDisplayName(a.kelasMeta).localeCompare(getKelasDisplayName(b.kelasMeta), 'id')
+      })
       setWaliKelasList(nextKelas)
-      setSelectedKelas((prev) => nextKelas.some((kelas) => String(kelas.id) === String(prev))
-        ? prev
-        : String(nextKelas[0]?.id || ''))
+      setWaliHistoryOptions(options)
+      setSelectedContext((prev) => options.some((item) => item.key === prev) ? prev : (options[0]?.key || ''))
     } catch (error) {
       console.error(error)
       pushToast('error', error?.message || 'Gagal memuat kelas wali.')
     } finally {
       setLoading(false)
     }
-  }, [pushToast, setLoading, user?.id])
+  }, [activeTahunPelajaran, pushToast, setLoading, user?.id])
 
   const loadClassData = useCallback(async () => {
     if (!selectedKelas) return
@@ -117,13 +170,24 @@ export default function RapotSiswa() {
       setLoading(true)
       const aliases = buildKelasAliases(selectedKelas, selectedKelasMeta)
       const aliasSet = new Set(aliases.map((value) => normalizeKelasKey(value)))
+      const { data: rapotRowsForPeriod, error: rapotRowsError } = await supabase
+        .from('rapot_siswa')
+        .select('id, siswa_id, jenis, semester, tahun_pelajaran, jumlah, rata_rata, rata_rata_manual, created_by, updated_by, created_at, updated_at')
+        .eq('kelas_id', selectedKelas)
+        .eq('tahun_pelajaran', tahunPelajaran)
+      if (rapotRowsError) throw rapotRowsError
+      const rapotStudentIds = Array.from(new Set((rapotRowsForPeriod || []).map((row) => row.siswa_id).filter(Boolean)))
 
       let siswaQuery = supabase
         .from('profiles')
         .select('id, nama, nis, nisn, kelas')
         .eq('role', 'siswa')
         .order('nama')
-      siswaQuery = aliases.length === 1 ? siswaQuery.eq('kelas', aliases[0]) : siswaQuery.in('kelas', aliases)
+      if (selectedHistory?.status === 'riwayat' && rapotStudentIds.length) {
+        siswaQuery = siswaQuery.in('id', rapotStudentIds)
+      } else {
+        siswaQuery = aliases.length === 1 ? siswaQuery.eq('kelas', aliases[0]) : siswaQuery.in('kelas', aliases)
+      }
       const [{ data: siswaRows, error: siswaError }, { data: jadwalRows, error: jadwalError }] = await Promise.all([
         siswaQuery,
         supabase
@@ -134,7 +198,18 @@ export default function RapotSiswa() {
       if (siswaError) throw siswaError
       if (jadwalError) throw jadwalError
 
-      const nextStudents = (siswaRows || []).filter((row) => aliasSet.has(normalizeKelasKey(row.kelas)))
+      let nextStudents = selectedHistory?.status === 'riwayat'
+        ? (siswaRows || [])
+        : (siswaRows || []).filter((row) => aliasSet.has(normalizeKelasKey(row.kelas)))
+      if (!nextStudents.length && rapotStudentIds.length) {
+        const { data: historyStudents, error: historyStudentsError } = await supabase
+          .from('profiles')
+          .select('id, nama, nis, nisn, kelas')
+          .in('id', rapotStudentIds)
+          .order('nama')
+        if (historyStudentsError) throw historyStudentsError
+        nextStudents = historyStudents || []
+      }
       setStudents(nextStudents)
       let nextJadwalRows = jadwalRows || []
       let mapels = Array.from(new Set((nextJadwalRows || [])
@@ -155,16 +230,9 @@ export default function RapotSiswa() {
       }
       setMapelOptions(mapels)
 
-      if (nextStudents.length) {
-        const { data, error } = await supabase
-          .from('rapot_siswa')
-          .select('id, siswa_id, jenis, semester, tahun_pelajaran, jumlah, rata_rata, rata_rata_manual, created_by, created_at')
-          .eq('kelas_id', selectedKelas)
-          .eq('tahun_pelajaran', tahunPelajaran)
-          .in('siswa_id', nextStudents.map((student) => student.id))
-        if (error) throw error
+      if (nextStudents.length || rapotRowsForPeriod?.length) {
         const nextIndex = {}
-        ;(data || []).forEach((row) => {
+        ;(rapotRowsForPeriod || []).forEach((row) => {
           nextIndex[`${row.siswa_id}|${row.jenis}`] = row
         })
         setRapotIndex(nextIndex)
@@ -177,7 +245,7 @@ export default function RapotSiswa() {
     } finally {
       setLoading(false)
     }
-  }, [pushToast, selectedKelas, selectedKelasMeta, setLoading, tahunPelajaran])
+  }, [pushToast, selectedHistory?.status, selectedKelas, selectedKelasMeta, setLoading, tahunPelajaran])
 
   useEffect(() => {
     loadMaster()
@@ -341,23 +409,28 @@ export default function RapotSiswa() {
                 <p className="page-title-description">Kelola rapot UTS dan UAS siswa wali secara terstruktur.</p>
               </div>
             </div>
-            <div className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 sm:w-[320px]">
-              <label className="text-xs font-bold uppercase tracking-wide text-slate-500">Kelas Wali</label>
+            <div className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 sm:w-[380px]">
+              <label className="text-xs font-bold uppercase tracking-wide text-slate-500">Kelas / Riwayat Wali</label>
               <select
-                value={selectedKelas}
-                onChange={(event) => setSelectedKelas(event.target.value)}
+                value={selectedContext}
+                onChange={(event) => setSelectedContext(event.target.value)}
                 className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 font-semibold text-slate-900 outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100"
               >
-                {waliKelasList.map((kelas) => (
-                  <option key={kelas.id} value={kelas.id}>{getKelasDisplayName(kelas)}</option>
+                {waliHistoryOptions.map((item) => (
+                  <option key={item.key} value={item.key}>
+                    {getKelasDisplayName(item.kelasMeta)} - {item.tahunPelajaran || 'Tanpa periode'}{item.status === 'aktif' ? ' (Aktif)' : ' (Riwayat)'}
+                  </option>
                 ))}
               </select>
+              {!waliHistoryOptions.length && (
+                <p className="mt-2 text-xs text-slate-500">Belum ada kelas wali atau riwayat rapot.</p>
+              )}
             </div>
           </div>
         </section>
 
         <section className="rounded-2xl border border-slate-200/60 bg-white p-5 shadow-sm">
-          <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <p className="text-xs font-bold uppercase text-slate-500">Kelas</p>
               <p className="mt-1 text-lg font-black text-slate-950">{getKelasDisplayName(selectedKelasMeta) || '-'}</p>
@@ -365,6 +438,18 @@ export default function RapotSiswa() {
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <p className="text-xs font-bold uppercase text-slate-500">Tahun Pelajaran</p>
               <p className="mt-1 text-lg font-black text-slate-950">{tahunPelajaran || '-'}</p>
+            </div>
+            <div className={`rounded-2xl border p-4 ${
+              selectedHistory?.status === 'riwayat'
+                ? 'border-amber-200 bg-amber-50'
+                : 'border-emerald-200 bg-emerald-50'
+            }`}>
+              <p className={`text-xs font-bold uppercase ${
+                selectedHistory?.status === 'riwayat' ? 'text-amber-700' : 'text-emerald-700'
+              }`}>Status Wali</p>
+              <p className="mt-1 text-lg font-black text-slate-950">
+                {selectedHistory?.status === 'riwayat' ? 'Riwayat' : 'Aktif'}
+              </p>
             </div>
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <p className="text-xs font-bold uppercase text-slate-500">Jumlah Siswa</p>

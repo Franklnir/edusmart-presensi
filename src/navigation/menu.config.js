@@ -88,18 +88,6 @@ export const waliKelasItem = {
       label: 'Rapot Siswa',
       icon: 'certificate',
     },
-    {
-      id: 'guru-rekap-wali',
-      to: '/guru/laporan?tab=rekap',
-      label: 'Rekap Wali Kelas',
-      icon: 'chart',
-    },
-    {
-      id: 'guru-rekap-eskul',
-      to: '/guru/laporan?tab=rekap_eskul',
-      label: 'Rekap Ekskul',
-      icon: 'activity',
-    },
   ],
 }
 

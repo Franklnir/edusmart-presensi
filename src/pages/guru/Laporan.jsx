@@ -306,13 +306,13 @@ export default function LaporanRekap() {
 	        let query = supabase.from('jadwal').select('*').eq('guru_id', user.id)
 	        query = applyReportAcademicFilters(query)
 	        const { data } = await query
-	        setJadwalGuru(filterSchedulesForSemester(data || [], selectedSemester))
+	        setJadwalGuru(data || [])
 	      } catch (e) {
         console.error(e)
       }
     }
     load()
-	  }, [applyReportAcademicFilters, selectedSemester, user?.id])
+	  }, [applyReportAcademicFilters, user?.id])
 
   useEffect(() => {
     const loadWaliKelas = async () => {
