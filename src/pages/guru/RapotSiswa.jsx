@@ -10,6 +10,30 @@ const RAPOT_TYPES = [
   { key: 'uas', label: 'UAS' }
 ]
 
+const SEMESTER_OPTIONS = ['Ganjil', 'Genap']
+
+const buildKelasAliases = (kelasId, kelasMeta) => {
+  const base = [
+    String(kelasId || '').trim(),
+    String(getKelasDisplayName(kelasMeta) || '').trim(),
+    String(kelasMeta?.nama || '').trim()
+  ].filter(Boolean)
+
+  const expanded = new Set()
+  base.forEach((value) => {
+    const raw = String(value || '').trim()
+    const dash = raw.replace(/\s+/g, '-')
+    const spaced = raw.replace(/-/g, ' ')
+    ;[raw, dash, spaced, raw.toLowerCase(), dash.toLowerCase(), spaced.toLowerCase(), normalizeKelasKey(raw)]
+      .forEach((item) => {
+        const next = String(item || '').trim()
+        if (next) expanded.add(next)
+      })
+  })
+
+  return Array.from(expanded)
+}
+
 const getPredikat = (nilai, kkm = 75) => {
   const score = toNumberOrNull(nilai)
   const min = toNumberOrNull(kkm) ?? 75
@@ -91,13 +115,7 @@ export default function RapotSiswa() {
     if (!selectedKelas) return
     try {
       setLoading(true)
-      const kelasName = getKelasDisplayName(selectedKelasMeta)
-      const aliases = Array.from(new Set([
-        String(selectedKelas || '').trim(),
-        String(kelasName || '').trim(),
-        String(kelasName || '').trim().replace(/\s+/g, '-'),
-        String(kelasName || '').trim().replace(/-/g, ' ')
-      ].filter(Boolean)))
+      const aliases = buildKelasAliases(selectedKelas, selectedKelasMeta)
       const aliasSet = new Set(aliases.map((value) => normalizeKelasKey(value)))
 
       let siswaQuery = supabase
@@ -110,7 +128,7 @@ export default function RapotSiswa() {
         siswaQuery,
         supabase
           .from('jadwal')
-          .select('mapel')
+          .select('mapel, kelas_id, kelas')
           .eq('kelas_id', selectedKelas)
       ])
       if (siswaError) throw siswaError
@@ -118,7 +136,19 @@ export default function RapotSiswa() {
 
       const nextStudents = (siswaRows || []).filter((row) => aliasSet.has(normalizeKelasKey(row.kelas)))
       setStudents(nextStudents)
-      const mapels = Array.from(new Set((jadwalRows || []).map((row) => String(row.mapel || '').trim()).filter(Boolean)))
+      let nextJadwalRows = jadwalRows || []
+      if (!nextJadwalRows.length && aliases.length) {
+        const { data: fallbackJadwalRows, error: fallbackJadwalError } = await supabase
+          .from('jadwal')
+          .select('mapel, kelas_id, kelas')
+          .in('kelas', aliases)
+        if (fallbackJadwalError) throw fallbackJadwalError
+        nextJadwalRows = fallbackJadwalRows || []
+      }
+      const mapels = Array.from(new Set((nextJadwalRows || [])
+        .filter((row) => !row.kelas || aliasSet.has(normalizeKelasKey(row.kelas)) || String(row.kelas_id || '') === String(selectedKelas))
+        .map((row) => String(row.mapel || '').trim())
+        .filter(Boolean)))
         .sort((a, b) => a.localeCompare(b, 'id'))
       setMapelOptions(mapels)
 
@@ -157,7 +187,7 @@ export default function RapotSiswa() {
   const openRapot = useCallback(async (student, type) => {
     const rapot = rapotIndex[`${student.id}|${type}`] || null
     setActiveModal({ student, type, rapot })
-    setSemesterText(rapot?.semester || '')
+    setSemesterText(rapot?.semester || period?.semester || 'Genap')
     setAverageManual(rapot?.rata_rata_manual ? (rapot?.rata_rata ?? '') : '')
     setUseManualAverage(Boolean(rapot?.rata_rata_manual))
 
@@ -195,7 +225,7 @@ export default function RapotSiswa() {
     } finally {
       setLoading(false)
     }
-  }, [mapelOptions, pushToast, rapotIndex, setLoading])
+  }, [mapelOptions, period?.semester, pushToast, rapotIndex, setLoading])
 
   const computedTotal = useMemo(() => {
     return round2(rapotRows.reduce((sum, row) => sum + (toNumberOrNull(row.nilai) ?? 0), 0))
@@ -294,7 +324,7 @@ export default function RapotSiswa() {
   ])
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto w-full max-w-7xl space-y-6 px-3 sm:px-4 lg:px-6">
       <section className="page-title-card">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-start gap-4">
@@ -305,7 +335,7 @@ export default function RapotSiswa() {
               <p className="page-title-description">Kelola rapot UTS dan UAS siswa wali secara terstruktur.</p>
             </div>
           </div>
-          <div className="min-w-[260px] rounded-2xl border border-slate-200 bg-white/80 p-4 shadow-sm">
+          <div className="w-full rounded-2xl border border-slate-200 bg-white/80 p-4 shadow-sm sm:w-[320px]">
             <label className="text-xs font-bold uppercase tracking-wide text-slate-500">Kelas Wali</label>
             <select
               value={selectedKelas}
@@ -409,12 +439,15 @@ export default function RapotSiswa() {
                   <span>Tahun: <b>{tahunPelajaran || '-'}</b></span>
                   <label className="flex items-center gap-2">
                     Semester:
-                    <input
+                    <select
                       value={semesterText}
                       onChange={(event) => setSemesterText(event.target.value)}
-                      className="min-w-0 rounded-lg border border-slate-300 px-2 py-1 font-semibold text-slate-900"
-                      placeholder="mis. Ganjil"
-                    />
+                      className="min-w-[120px] rounded-lg border border-slate-300 bg-white px-2 py-1 font-semibold text-slate-900"
+                    >
+                      {SEMESTER_OPTIONS.map((semester) => (
+                        <option key={semester} value={semester}>{semester}</option>
+                      ))}
+                    </select>
                   </label>
                 </div>
               </div>
