@@ -1,5 +1,6 @@
 ﻿// src/pages/guru/LaporanRekap.jsx
 import React, { startTransition, useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { queryClient, queryKeys } from '../../lib/queryClient'
 import { useAuthStore } from '../../store/useAuthStore'
@@ -102,9 +103,17 @@ const getQuizColumnLabel = (quiz, index) => {
 export default function LaporanRekap() {
   const { user } = useAuthStore()
   const { pushToast, setLoading } = useUIStore()
+  const [searchParams] = useSearchParams()
 
   // -- UI State --
-  const [activeTab, setActiveTab] = useState('absensi')
+  const [activeTab, setActiveTab] = useState(() => {
+    const tab = new URLSearchParams(
+      typeof window !== 'undefined' ? window.location.search : ''
+    ).get('tab')
+    return ['absensi', 'tugas', 'quiz', 'mapel', 'rekap', 'rekap_eskul'].includes(tab)
+      ? tab
+      : 'absensi'
+  })
   const isRekapTab = activeTab === 'rekap' || activeTab === 'rekap_eskul'
   const [showBulanDropdown, setShowBulanDropdown] = useState(false)
   const dropdownRef = useRef(null)
@@ -182,6 +191,13 @@ export default function LaporanRekap() {
   )
 
   const selectedFilterKelasMeta = isRekapTab ? selectedWaliKelasMeta : selectedKelasMeta
+
+  useEffect(() => {
+    const tab = searchParams.get('tab')
+    if (['absensi', 'tugas', 'quiz', 'mapel', 'rekap', 'rekap_eskul'].includes(tab) && tab !== activeTab) {
+      setActiveTab(tab)
+    }
+  }, [activeTab, searchParams])
 
   const reportPeriodLabel = `${reportPeriod.tahunAjaran} - Tahun Ajaran`
   const isActiveReportPeriod = !isViewingArchivePeriod
@@ -3800,28 +3816,6 @@ export default function LaporanRekap() {
           >
             Laporan Mapel
           </button>
-          {waliKelasList.length > 0 && (
-            <>
-              <button
-                className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${activeTab === 'rekap'
-                  ? 'bg-white shadow text-blue-700'
-                  : 'text-gray-600 hover:bg-slate-300'
-                  }`}
-                onClick={() => setActiveTab('rekap')}
-              >
-                Rekap Wali Kelas
-              </button>
-              <button
-                className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${activeTab === 'rekap_eskul'
-                  ? 'bg-white shadow text-blue-700'
-                  : 'text-gray-600 hover:bg-slate-300'
-                  }`}
-                onClick={() => setActiveTab('rekap_eskul')}
-              >
-                Rekap Ekstrakurikuler Siswa
-              </button>
-            </>
-          )}
         </div>
 
         {/* === EMPTY STATES === */}

@@ -2182,6 +2182,216 @@ class DbController extends ApiController
             }
         }
 
+        // GURU_MAPEL_MANUAL_NILAI
+        if ($table === 'guru_mapel_manual_nilai') {
+            if ($this->isAdmin($request)) {
+                return true;
+            }
+
+            if ($this->isGuru($request)) {
+                $query->where('guru_id', $userId);
+
+                if (in_array($action, ['insert', 'upsert'], true)) {
+                    $this->mapPayload($payload, function ($row) use ($userId) {
+                        $row = $this->filterPayload($row, [
+                            'id',
+                            'siswa_id',
+                            'kelas_id',
+                            'mapel',
+                            'tahun_ajaran',
+                            'nilai_manual',
+                            'catatan',
+                            'created_at',
+                            'updated_at',
+                        ]);
+                        $row['guru_id'] = $userId;
+                        $row['updated_at'] = now();
+                        if (! isset($row['created_at'])) {
+                            $row['created_at'] = now();
+                        }
+
+                        return $row;
+                    });
+                }
+
+                if ($action === 'update') {
+                    $this->mapPayload($payload, function ($row) {
+                        $row = $this->filterPayload($row, [
+                            'nilai_manual',
+                            'catatan',
+                            'updated_at',
+                        ]);
+                        $row['updated_at'] = now();
+
+                        return $row;
+                    });
+                }
+
+                return true;
+            }
+
+            return $this->deny();
+        }
+
+        // RAPOT_SISWA
+        if ($table === 'rapot_siswa') {
+            if ($this->isAdmin($request)) {
+                return true;
+            }
+
+            if ($this->isGuru($request)) {
+                $wali = $this->guruWaliKelasIds($userId);
+                if (empty($wali)) {
+                    return $this->deny('Anda belum menjadi wali kelas', 403);
+                }
+                $query->whereIn('kelas_id', $wali);
+
+                if (in_array($action, ['insert', 'upsert'], true)) {
+                    $rows = $this->normalizeRows($payload);
+                    foreach ($rows as $row) {
+                        if (! in_array((string) ($row['kelas_id'] ?? ''), array_map('strval', $wali), true)) {
+                            return $this->deny('Kelas rapot bukan kelas wali Anda', 403);
+                        }
+                    }
+
+                    $this->mapPayload($payload, function ($row) use ($userId) {
+                        $row = $this->filterPayload($row, [
+                            'id',
+                            'siswa_id',
+                            'kelas_id',
+                            'jenis',
+                            'semester',
+                            'tahun_pelajaran',
+                            'jumlah',
+                            'rata_rata',
+                            'rata_rata_manual',
+                            'created_by',
+                            'updated_by',
+                            'created_at',
+                            'updated_at',
+                        ]);
+                        if (! isset($row['created_by'])) {
+                            $row['created_by'] = $userId;
+                        }
+                        $row['updated_by'] = $userId;
+                        $row['updated_at'] = now();
+                        if (! isset($row['created_at'])) {
+                            $row['created_at'] = now();
+                        }
+
+                        return $row;
+                    });
+                }
+
+                if ($action === 'update') {
+                    $this->mapPayload($payload, function ($row) use ($userId) {
+                        $row = $this->filterPayload($row, [
+                            'semester',
+                            'jumlah',
+                            'rata_rata',
+                            'rata_rata_manual',
+                            'updated_by',
+                            'updated_at',
+                        ]);
+                        $row['updated_by'] = $userId;
+                        $row['updated_at'] = now();
+
+                        return $row;
+                    });
+                }
+
+                return true;
+            }
+
+            return $this->deny();
+        }
+
+        // RAPOT_SISWA_ITEMS
+        if ($table === 'rapot_siswa_items') {
+            if ($this->isAdmin($request)) {
+                return true;
+            }
+
+            if ($this->isGuru($request)) {
+                $wali = $this->guruWaliKelasIds($userId);
+                if (empty($wali)) {
+                    return $this->deny('Anda belum menjadi wali kelas', 403);
+                }
+
+                $query->whereIn('rapot_id', function ($q) use ($wali, $tenantId) {
+                    $q->select('id')
+                        ->from('rapot_siswa')
+                        ->whereIn('kelas_id', $wali);
+                    if ($tenantId) {
+                        $q->where('tenant_id', $tenantId);
+                    }
+                });
+
+                if (in_array($action, ['insert', 'upsert'], true)) {
+                    $rows = $this->normalizeRows($payload);
+                    $rapotIds = array_values(array_unique(array_filter(array_map(
+                        fn ($row) => (string) ($row['rapot_id'] ?? ''),
+                        $rows
+                    ))));
+                    if (empty($rapotIds)) {
+                        return $this->deny('Rapot belum dipilih', 422);
+                    }
+
+                    $allowedRapotQuery = DB::table('rapot_siswa')
+                        ->whereIn('id', $rapotIds)
+                        ->whereIn('kelas_id', $wali);
+                    if ($tenantId) {
+                        $allowedRapotQuery->where('tenant_id', $tenantId);
+                    }
+                    $allowedRapotCount = $allowedRapotQuery->distinct()->count('id');
+                    if ($allowedRapotCount !== count($rapotIds)) {
+                        return $this->deny('Detail rapot bukan milik kelas wali Anda', 403);
+                    }
+
+                    $this->mapPayload($payload, function ($row) {
+                        $row = $this->filterPayload($row, [
+                            'id',
+                            'rapot_id',
+                            'nomor',
+                            'mapel',
+                            'kkm',
+                            'nilai',
+                            'predikat',
+                            'keterangan',
+                            'created_at',
+                            'updated_at',
+                        ]);
+                        $row['updated_at'] = now();
+                        if (! isset($row['created_at'])) {
+                            $row['created_at'] = now();
+                        }
+
+                        return $row;
+                    });
+                }
+
+                if ($action === 'update') {
+                    $this->mapPayload($payload, function ($row) {
+                        $row = $this->filterPayload($row, [
+                            'mapel',
+                            'kkm',
+                            'nilai',
+                            'predikat',
+                            'keterangan',
+                            'updated_at',
+                        ]);
+                        $row['updated_at'] = now();
+
+                        return $row;
+                    });
+                }
+
+                return true;
+            }
+
+            return $this->deny();
+        }
+
         return $this->deny('Policy belum ditentukan', 403);
     }
 

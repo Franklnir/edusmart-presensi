@@ -295,22 +295,22 @@ export default function RapotSiswa() {
 
   return (
     <div className="space-y-6">
-      <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <section className="page-title-card">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-start gap-4">
-            <div className="h-14 w-14 rounded-2xl bg-indigo-50 text-indigo-700 grid place-items-center text-2xl">📘</div>
+            <div className="h-14 w-2 rounded-full bg-gradient-to-b from-indigo-500 to-violet-600" />
             <div>
-              <p className="text-xs font-bold uppercase tracking-[0.2em] text-indigo-600">Wali Kelas</p>
-              <h1 className="text-2xl font-black text-slate-950">Rapot Siswa</h1>
-              <p className="text-sm text-slate-500">Kelola rapot UTS dan UAS siswa wali secara terstruktur.</p>
+              <p className="page-title-kicker">Wali Kelas</p>
+              <h1 className="page-title-heading">Rapot Siswa</h1>
+              <p className="page-title-description">Kelola rapot UTS dan UAS siswa wali secara terstruktur.</p>
             </div>
           </div>
-          <div className="min-w-[260px]">
-            <label className="text-xs font-bold uppercase text-slate-500">Kelas Wali</label>
+          <div className="min-w-[260px] rounded-2xl border border-slate-200 bg-white/80 p-4 shadow-sm">
+            <label className="text-xs font-bold uppercase tracking-wide text-slate-500">Kelas Wali</label>
             <select
               value={selectedKelas}
               onChange={(event) => setSelectedKelas(event.target.value)}
-              className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 font-semibold text-slate-900"
+              className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 font-semibold text-slate-900 outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100"
             >
               {waliKelasList.map((kelas) => (
                 <option key={kelas.id} value={kelas.id}>{getKelasDisplayName(kelas)}</option>
@@ -320,9 +320,33 @@ export default function RapotSiswa() {
         </div>
       </section>
 
-      <section className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-xs font-bold uppercase text-slate-500">Kelas</p>
+            <p className="mt-1 text-lg font-black text-slate-950">{getKelasDisplayName(selectedKelasMeta) || '-'}</p>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-xs font-bold uppercase text-slate-500">Tahun Pelajaran</p>
+            <p className="mt-1 text-lg font-black text-slate-950">{tahunPelajaran || '-'}</p>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-xs font-bold uppercase text-slate-500">Jumlah Siswa</p>
+            <p className="mt-1 text-lg font-black text-slate-950">{students.length}</p>
+          </div>
+          <div className="rounded-2xl border border-indigo-200 bg-indigo-50 p-4">
+            <p className="text-xs font-bold uppercase text-indigo-600">Format Rapot</p>
+            <p className="mt-1 text-lg font-black text-slate-950">UTS & UAS</p>
+          </div>
+        </div>
+
+        <div className="mb-4 flex flex-col gap-1 border-b border-slate-100 pb-4">
+          <h2 className="text-xl font-black text-slate-950">Daftar Siswa Wali</h2>
+          <p className="text-sm text-slate-500">Klik detail UTS atau UAS untuk membuka overlay pengisian rapot siswa.</p>
+        </div>
+
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[720px] text-sm">
             <thead className="bg-slate-50 text-slate-700">
               <tr>
                 <th className="px-4 py-3 text-left">Nama</th>
@@ -334,7 +358,10 @@ export default function RapotSiswa() {
             <tbody className="divide-y divide-slate-100">
               {students.map((student) => (
                 <tr key={student.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-3 font-semibold text-slate-900">{student.nama}</td>
+                  <td className="px-4 py-3">
+                    <div className="font-semibold text-slate-900">{student.nama}</div>
+                    <div className="text-xs text-slate-500">{student.kelas || getKelasDisplayName(selectedKelasMeta) || '-'}</div>
+                  </td>
                   <td className="px-4 py-3 text-slate-600">{student.nis || '-'}</td>
                   {RAPOT_TYPES.map((type) => {
                     const rapot = rapotIndex[`${student.id}|${type.key}`]
@@ -371,7 +398,7 @@ export default function RapotSiswa() {
       {activeModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/60 p-4 overflow-y-auto">
           <div className="mx-auto my-6 max-w-6xl rounded-2xl bg-white shadow-2xl overflow-hidden">
-            <div className="border-b border-slate-200 p-5 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div className="border-b border-slate-200 bg-slate-50/80 p-5 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.2em] text-indigo-600">Rapot {String(activeModal.type).toUpperCase()}</p>
                 <h2 className="text-2xl font-black text-slate-950">{activeModal.student.nama}</h2>
