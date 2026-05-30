@@ -2350,6 +2350,7 @@ class DbController extends ApiController
             }
 
             if ($this->isGuru($request)) {
+                $tenantId = $this->currentTenantId;
                 $wali = $this->guruWaliKelasIds($userId);
                 $kelasAmpu = $this->guruRapotKelasIds($userId);
                 $kelasAllowed = $this->expandKelasAccessValues(array_merge($wali, $kelasAmpu));
