@@ -2382,22 +2382,14 @@ class DbController extends ApiController
                         return $this->deny('Rapot belum dipilih', 422);
                     }
 
-                    $allowedRapotRows = DB::table('rapot_siswa')
-                        ->whereIn('id', $rapotIds)
-                        ->where(function ($owner) use ($kelasAllowed, $userId) {
-                            if (! empty($kelasAllowed)) {
-                                $owner->whereIn('kelas_id', $kelasAllowed);
-                            } else {
-                                $owner->whereRaw('1 = 0');
-                            }
-                            $owner->orWhere('created_by', $userId)
-                                ->orWhere('updated_by', $userId);
-                        })
-                        ->when($tenantId, fn ($q) => $q->where('tenant_id', $tenantId))
-                        ->get(['id', 'kelas_id', 'locked_at'])
+                    $allowedRapotQuery = DB::table('rapot_siswa')
+                        ->whereIn('id', $rapotIds);
+                    $this->applyTenantFilterAllowingLegacyNull($allowedRapotQuery);
+                    $allowedRapotRows = $allowedRapotQuery
+                        ->get(['id', 'siswa_id', 'kelas_id', 'locked_at', 'created_by', 'updated_by'])
                         ->keyBy('id');
                     if ($allowedRapotRows->count() !== count($rapotIds)) {
-                        return $this->deny('Detail rapot bukan milik kelas wali Anda', 403);
+                        return $this->deny('Rapot tidak ditemukan untuk tenant sekolah ini', 404);
                     }
                     foreach ($rows as $row) {
                         $rapot = $allowedRapotRows->get((string) ($row['rapot_id'] ?? ''));
@@ -2405,7 +2397,22 @@ class DbController extends ApiController
                             return $this->deny('Rapot tidak ditemukan', 404);
                         }
                         $mapel = (string) ($row['mapel'] ?? '');
-                        $isWaliClass = in_array($this->normalizeKelasAccessValue($rapot->kelas_id), $waliKeys, true);
+                        $rapotPayloadRow = [
+                            'kelas_id' => $rapot->kelas_id,
+                            'siswa_id' => $rapot->siswa_id,
+                        ];
+                        $isRapotEditor = (string) ($rapot->created_by ?? '') === $userId
+                            || (string) ($rapot->updated_by ?? '') === $userId;
+                        $isSubjectDelivery = (string) ($row['source'] ?? '') === 'laporan_mapel';
+                        $isAllowedClass = in_array($this->normalizeKelasAccessValue($rapot->kelas_id), $this->normalizeKelasAccessValues(array_merge($wali, $kelasAmpu)), true)
+                            || $isRapotEditor
+                            || $this->guruCanManageRapotRow($userId, $rapotPayloadRow);
+                        if (! $isAllowedClass) {
+                            return $this->deny('Detail rapot bukan milik kelas wali atau kelas mengajar Anda', 403);
+                        }
+                        $isWaliClass = in_array($this->normalizeKelasAccessValue($rapot->kelas_id), $waliKeys, true)
+                            || (! $isSubjectDelivery && $isRapotEditor)
+                            || $this->guruCanManageRapotRowAsWali($userId, $rapotPayloadRow);
                         if ($rapot->locked_at && ! $isWaliClass) {
                             return $this->deny('Rapot dikunci wali kelas. Harap hubungi wali kelas untuk membuka kunci.', 423);
                         }
@@ -5577,6 +5584,35 @@ class DbController extends ApiController
         }
 
         return false;
+    }
+
+    private function guruCanManageRapotRowAsWali(string $guruId, array $row): bool
+    {
+        $kelasId = trim((string) ($row['kelas_id'] ?? ''));
+        $siswaId = trim((string) ($row['siswa_id'] ?? ''));
+        if ($guruId === '' || $kelasId === '' || $siswaId === '' || ! Schema::hasTable('kelas_struktur')) {
+            return false;
+        }
+
+        $kelasAliases = $this->expandKelasAccessValues([$kelasId]);
+        $kelasKeys = $this->normalizeKelasAccessValues([$kelasId]);
+        if (empty($kelasAliases) || empty($kelasKeys) || ! Schema::hasTable('profiles')) {
+            return false;
+        }
+
+        $studentQuery = DB::table('profiles')->where('id', $siswaId);
+        $this->applyTenantFilterAllowingLegacyNull($studentQuery);
+        $student = $studentQuery->first(['id', 'role', 'kelas']);
+        if (! $student || ! in_array($this->normalizeKelasAccessValue($student->kelas ?? ''), $kelasKeys, true)) {
+            return false;
+        }
+
+        $waliQuery = DB::table('kelas_struktur')
+            ->where('wali_guru_id', $guruId)
+            ->whereIn('kelas_id', $kelasAliases);
+        $this->applyTenantFilterAllowingLegacyNull($waliQuery);
+
+        return $waliQuery->exists();
     }
 
     private function quizIdsHaveOngoingSubmissions(array $quizIds): bool
