@@ -733,7 +733,13 @@ class DbController extends ApiController
                     return true;
                 }
                 if ($this->isGuru($request)) {
-                    $query->where('guru_id', $userId);
+                    $wali = $this->guruWaliKelasIds($userId);
+                    $query->where(function ($scope) use ($userId, $wali) {
+                        $scope->where('guru_id', $userId);
+                        if (! empty($wali)) {
+                            $scope->orWhereIn('kelas_id', $wali);
+                        }
+                    });
 
                     return true;
                 }

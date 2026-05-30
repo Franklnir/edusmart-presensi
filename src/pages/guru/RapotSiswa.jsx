@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../lib/supabase'
+import { queryClient } from '../../lib/queryClient'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
@@ -63,6 +64,7 @@ export default function RapotSiswa() {
   const [students, setStudents] = useState([])
   const [mapelOptions, setMapelOptions] = useState([])
   const [rapotIndex, setRapotIndex] = useState({})
+  const [rapotItemsByRapotId, setRapotItemsByRapotId] = useState({})
   const [activeModal, setActiveModal] = useState(null)
   const [rapotRows, setRapotRows] = useState([])
   const [semesterText, setSemesterText] = useState('')
@@ -83,27 +85,141 @@ export default function RapotSiswa() {
     [selectedHistory, selectedKelas, waliKelasList]
   )
 
+  const applyClassData = useCallback((data) => {
+    setStudents(data?.students || [])
+    setMapelOptions(data?.mapels || [])
+    setRapotIndex(data?.rapotIndex || {})
+    setRapotItemsByRapotId(data?.itemsByRapotId || {})
+  }, [])
+
+  const makeDefaultRapotRows = useCallback(() => (
+    (mapelOptions.length ? mapelOptions : ['']).map((mapel, index) => ({
+      id: makeLocalId(),
+      nomor: index + 1,
+      mapel,
+      kkm: 75,
+      nilai: '',
+      keterangan: ''
+    }))
+  ), [mapelOptions])
+
+  const mapSavedRapotItems = useCallback((items = []) => (
+    items.map((row) => ({
+      id: row.id,
+      nomor: row.nomor,
+      mapel: row.mapel,
+      kkm: row.kkm ?? 75,
+      nilai: row.nilai ?? '',
+      keterangan: row.keterangan || '',
+      created_at: row.created_at
+    }))
+  ), [])
+
+  const rapotMasterQueryKey = useMemo(
+    () => ['guru', 'rapot-siswa', 'master', user?.id || '', activeTahunPelajaran || ''],
+    [activeTahunPelajaran, user?.id]
+  )
+
+  const rapotClassQueryKey = useMemo(
+    () => [
+      'guru',
+      'rapot-siswa',
+      'class',
+      selectedKelas || '',
+      tahunPelajaran || '',
+      selectedHistory?.status || 'aktif',
+      getKelasDisplayName(selectedKelasMeta) || ''
+    ],
+    [selectedHistory?.status, selectedKelas, selectedKelasMeta, tahunPelajaran]
+  )
+
   const loadMaster = useCallback(async () => {
     if (!user?.id) return
     try {
-      setLoading(true)
-      const [{ data: strukturRows, error: strukturError }, { data: rapotHistoryRows, error: rapotHistoryError }] = await Promise.all([
-        supabase
-          .from('kelas_struktur')
-          .select('kelas_id')
-          .eq('wali_guru_id', user.id),
-        supabase
-          .from('rapot_siswa')
-          .select('kelas_id, tahun_pelajaran, jenis, siswa_id, created_at, updated_at')
-          .order('tahun_pelajaran', { ascending: false })
-      ])
-      if (strukturError) throw strukturError
-      if (rapotHistoryError) throw rapotHistoryError
-      const activeKelasIds = (strukturRows || []).map((row) => row.kelas_id).filter(Boolean)
-      const historyKelasIds = (rapotHistoryRows || []).map((row) => row.kelas_id).filter(Boolean)
-      const kelasIds = Array.from(new Set([...activeKelasIds, ...historyKelasIds].map(String).filter(Boolean)))
+      const cached = queryClient.getQueryData(rapotMasterQueryKey)
+      setLoading(!cached)
+      if (cached) {
+        setWaliKelasList(cached.kelas || [])
+        setWaliHistoryOptions(cached.options || [])
+        setSelectedContext((prev) => cached.options?.some((item) => item.key === prev) ? prev : (cached.options?.[0]?.key || ''))
+      }
 
-      if (!kelasIds.length) {
+      const masterData = await queryClient.fetchQuery({
+        queryKey: rapotMasterQueryKey,
+        queryFn: async () => {
+          const [{ data: strukturRows, error: strukturError }, { data: rapotHistoryRows, error: rapotHistoryError }] = await Promise.all([
+            supabase
+              .from('kelas_struktur')
+              .select('kelas_id')
+              .eq('wali_guru_id', user.id),
+            supabase
+              .from('rapot_siswa')
+              .select('kelas_id, tahun_pelajaran, jenis, siswa_id, created_at, updated_at')
+              .order('tahun_pelajaran', { ascending: false })
+          ])
+          if (strukturError) throw strukturError
+          if (rapotHistoryError) throw rapotHistoryError
+          const activeKelasIds = (strukturRows || []).map((row) => row.kelas_id).filter(Boolean)
+          const historyKelasIds = (rapotHistoryRows || []).map((row) => row.kelas_id).filter(Boolean)
+          const kelasIds = Array.from(new Set([...activeKelasIds, ...historyKelasIds].map(String).filter(Boolean)))
+
+          if (!kelasIds.length) {
+            return { kelas: [], options: [], activeKelasIds: [], historyRows: [] }
+          }
+
+          const { data: kelasRows, error: kelasError } = await supabase
+            .from('kelas')
+            .select('id, nama, tingkat, jurusan, angkatan')
+            .in('id', kelasIds)
+            .order('nama')
+          if (kelasError) throw kelasError
+          const nextKelas = kelasRows || []
+          const kelasById = new Map(nextKelas.map((kelas) => [String(kelas.id), kelas]))
+          const optionMap = new Map()
+          activeKelasIds.forEach((kelasId) => {
+            const normalizedId = String(kelasId || '')
+            const year = activeTahunPelajaran || ''
+            const key = `${normalizedId}|${year}`
+            optionMap.set(key, {
+              key,
+              kelasId: normalizedId,
+              tahunPelajaran: year,
+              status: 'aktif',
+              kelasMeta: kelasById.get(normalizedId) || { id: normalizedId, nama: normalizedId },
+              rapotCount: 0
+            })
+          })
+          ;(rapotHistoryRows || []).forEach((row) => {
+            const normalizedId = String(row.kelas_id || '')
+            const year = String(row.tahun_pelajaran || '').trim()
+            if (!normalizedId || !year) return
+            const key = `${normalizedId}|${year}`
+            const existing = optionMap.get(key)
+            optionMap.set(key, {
+              key,
+              kelasId: normalizedId,
+              tahunPelajaran: year,
+              status: existing?.status === 'aktif' ? 'aktif' : 'riwayat',
+              kelasMeta: kelasById.get(normalizedId) || existing?.kelasMeta || { id: normalizedId, nama: normalizedId },
+              rapotCount: (existing?.rapotCount || 0) + 1
+            })
+          })
+          const options = Array.from(optionMap.values()).sort((a, b) => {
+            if (a.status !== b.status) return a.status === 'aktif' ? -1 : 1
+            const yearCompare = String(b.tahunPelajaran || '').localeCompare(String(a.tahunPelajaran || ''), 'id')
+            if (yearCompare !== 0) return yearCompare
+            return getKelasDisplayName(a.kelasMeta).localeCompare(getKelasDisplayName(b.kelasMeta), 'id')
+          })
+
+          return { kelas: nextKelas, options }
+        },
+        staleTime: 60 * 1000
+      })
+
+      const nextKelas = masterData.kelas || []
+      const options = masterData.options || []
+
+      if (!options.length) {
         setWaliKelasList([])
         setWaliHistoryOptions([])
         setSelectedContext('')
@@ -111,49 +227,6 @@ export default function RapotSiswa() {
         return
       }
 
-      const { data: kelasRows, error: kelasError } = await supabase
-        .from('kelas')
-        .select('id, nama, tingkat, jurusan, angkatan')
-        .in('id', kelasIds)
-        .order('nama')
-      if (kelasError) throw kelasError
-      const nextKelas = kelasRows || []
-      const kelasById = new Map(nextKelas.map((kelas) => [String(kelas.id), kelas]))
-      const optionMap = new Map()
-      activeKelasIds.forEach((kelasId) => {
-        const normalizedId = String(kelasId || '')
-        const year = activeTahunPelajaran || ''
-        const key = `${normalizedId}|${year}`
-        optionMap.set(key, {
-          key,
-          kelasId: normalizedId,
-          tahunPelajaran: year,
-          status: 'aktif',
-          kelasMeta: kelasById.get(normalizedId) || { id: normalizedId, nama: normalizedId },
-          rapotCount: 0
-        })
-      })
-      ;(rapotHistoryRows || []).forEach((row) => {
-        const normalizedId = String(row.kelas_id || '')
-        const year = String(row.tahun_pelajaran || '').trim()
-        if (!normalizedId || !year) return
-        const key = `${normalizedId}|${year}`
-        const existing = optionMap.get(key)
-        optionMap.set(key, {
-          key,
-          kelasId: normalizedId,
-          tahunPelajaran: year,
-          status: existing?.status === 'aktif' ? 'aktif' : 'riwayat',
-          kelasMeta: kelasById.get(normalizedId) || existing?.kelasMeta || { id: normalizedId, nama: normalizedId },
-          rapotCount: (existing?.rapotCount || 0) + 1
-        })
-      })
-      const options = Array.from(optionMap.values()).sort((a, b) => {
-        if (a.status !== b.status) return a.status === 'aktif' ? -1 : 1
-        const yearCompare = String(b.tahunPelajaran || '').localeCompare(String(a.tahunPelajaran || ''), 'id')
-        if (yearCompare !== 0) return yearCompare
-        return getKelasDisplayName(a.kelasMeta).localeCompare(getKelasDisplayName(b.kelasMeta), 'id')
-      })
       setWaliKelasList(nextKelas)
       setWaliHistoryOptions(options)
       setSelectedContext((prev) => options.some((item) => item.key === prev) ? prev : (options[0]?.key || ''))
@@ -163,100 +236,131 @@ export default function RapotSiswa() {
     } finally {
       setLoading(false)
     }
-  }, [activeTahunPelajaran, pushToast, setLoading, user?.id])
+  }, [activeTahunPelajaran, pushToast, rapotMasterQueryKey, setLoading, user?.id])
 
   const loadClassData = useCallback(async () => {
     if (!selectedKelas) return
     try {
-      setLoadingClassData(true)
-      const aliases = buildKelasAliases(selectedKelas, selectedKelasMeta)
-      const aliasSet = new Set(aliases.map((value) => normalizeKelasKey(value)))
-      const rapotQuery = supabase
-        .from('rapot_siswa')
-        .select('id, siswa_id, jenis, semester, tahun_pelajaran, jumlah, rata_rata, rata_rata_manual, created_by, updated_by, created_at, updated_at')
-        .eq('kelas_id', selectedKelas)
-        .eq('tahun_pelajaran', tahunPelajaran)
+      const cached = queryClient.getQueryData(rapotClassQueryKey)
+      setLoadingClassData(!cached)
+      if (cached) applyClassData(cached)
 
-      let siswaQuery = supabase
-        .from('profiles')
-        .select('id, nama, nis, nisn, kelas')
-        .eq('role', 'siswa')
-        .order('nama')
-      if (selectedHistory?.status === 'riwayat') {
-        siswaQuery = siswaQuery.limit(1)
-      } else {
-        siswaQuery = aliases.length === 1 ? siswaQuery.eq('kelas', aliases[0]) : siswaQuery.in('kelas', aliases)
-      }
+      const classData = await queryClient.fetchQuery({
+        queryKey: rapotClassQueryKey,
+        queryFn: async () => {
+          const aliases = buildKelasAliases(selectedKelas, selectedKelasMeta)
+          const aliasSet = new Set(aliases.map((value) => normalizeKelasKey(value)))
+          const rapotQuery = supabase
+            .from('rapot_siswa')
+            .select('id, siswa_id, jenis, semester, tahun_pelajaran, jumlah, rata_rata, rata_rata_manual, created_by, updated_by, created_at, updated_at')
+            .eq('kelas_id', selectedKelas)
+            .eq('tahun_pelajaran', tahunPelajaran)
 
-      const batch = await supabase.batch([
-        { key: 'rapot', query: rapotQuery },
-        { key: 'siswa', query: siswaQuery },
-        {
-          key: 'jadwal',
-          query: supabase
-            .from('jadwal')
-            .select('mapel, kelas_id')
-            .in('kelas_id', aliases)
-        }
-      ])
-      const rapotResult = batch.data?.rapot
-      const siswaResult = batch.data?.siswa
-      const jadwalResult = batch.data?.jadwal
-      if (rapotResult?.error) throw rapotResult.error
-      if (siswaResult?.error) throw siswaResult.error
-      if (jadwalResult?.error) throw jadwalResult.error
-      const rapotRowsForPeriod = rapotResult?.data || []
-      const rapotStudentIds = Array.from(new Set(rapotRowsForPeriod.map((row) => row.siswa_id).filter(Boolean)))
-      const jadwalRows = jadwalResult?.data || []
+          let siswaQuery = supabase
+            .from('profiles')
+            .select('id, nama, nis, nisn, kelas')
+            .eq('role', 'siswa')
+            .order('nama')
+          if (selectedHistory?.status === 'riwayat') {
+            siswaQuery = siswaQuery.limit(1)
+          } else {
+            siswaQuery = aliases.length === 1 ? siswaQuery.eq('kelas', aliases[0]) : siswaQuery.in('kelas', aliases)
+          }
 
-      let nextStudents = selectedHistory?.status === 'riwayat'
-        ? []
-        : (siswaResult?.data || []).filter((row) => aliasSet.has(normalizeKelasKey(row.kelas)))
-      if ((selectedHistory?.status === 'riwayat' || !nextStudents.length) && rapotStudentIds.length) {
-        const { data: historyStudents, error: historyStudentsError } = await supabase
-          .from('profiles')
-          .select('id, nama, nis, nisn, kelas')
-          .in('id', rapotStudentIds)
-          .order('nama')
-        if (historyStudentsError) throw historyStudentsError
-        nextStudents = historyStudents || []
-      }
-      setStudents(nextStudents)
-      let nextJadwalRows = jadwalRows || []
-      let mapels = Array.from(new Set((nextJadwalRows || [])
-        .filter((row) => aliasSet.has(normalizeKelasKey(row.kelas_id)))
-        .map((row) => String(row.mapel || '').trim())
-        .filter(Boolean)))
-        .sort((a, b) => a.localeCompare(b, 'id'))
-      if (!mapels.length) {
-        const { data: fallbackMapelRows, error: fallbackMapelError } = await supabase
-          .from('mata_pelajaran')
-          .select('nama')
-          .order('nama')
-        if (fallbackMapelError) throw fallbackMapelError
-        mapels = Array.from(new Set((fallbackMapelRows || [])
-          .map((row) => String(row.nama || '').trim())
-          .filter(Boolean)))
-          .sort((a, b) => a.localeCompare(b, 'id'))
-      }
-      setMapelOptions(mapels)
+          const batch = await supabase.batch([
+            { key: 'rapot', query: rapotQuery },
+            { key: 'siswa', query: siswaQuery },
+            {
+              key: 'jadwal',
+              query: supabase
+                .from('jadwal')
+                .select('mapel, kelas_id')
+                .in('kelas_id', aliases)
+            },
+            {
+              key: 'mapelMaster',
+              query: supabase
+                .from('mata_pelajaran')
+                .select('nama')
+                .order('nama')
+            }
+          ])
+          if (batch.error && !batch.data) throw batch.error
+          const rapotResult = batch.data?.rapot
+          const siswaResult = batch.data?.siswa
+          const jadwalResult = batch.data?.jadwal
+          const mapelMasterResult = batch.data?.mapelMaster
+          if (rapotResult?.error) throw rapotResult.error
+          if (siswaResult?.error) throw siswaResult.error
+          const rapotRowsForPeriod = rapotResult?.data || []
+          const rapotStudentIds = Array.from(new Set(rapotRowsForPeriod.map((row) => row.siswa_id).filter(Boolean)))
+          const jadwalRows = jadwalResult?.error ? [] : (jadwalResult?.data || [])
 
-      if (nextStudents.length || rapotRowsForPeriod?.length) {
-        const nextIndex = {}
-        ;(rapotRowsForPeriod || []).forEach((row) => {
-          nextIndex[`${row.siswa_id}|${row.jenis}`] = row
-        })
-        setRapotIndex(nextIndex)
-      } else {
-        setRapotIndex({})
-      }
+          let nextStudents = selectedHistory?.status === 'riwayat'
+            ? []
+            : (siswaResult?.data || []).filter((row) => aliasSet.has(normalizeKelasKey(row.kelas)))
+          if ((selectedHistory?.status === 'riwayat' || !nextStudents.length) && rapotStudentIds.length) {
+            const { data: historyStudents, error: historyStudentsError } = await supabase
+              .from('profiles')
+              .select('id, nama, nis, nisn, kelas')
+              .in('id', rapotStudentIds)
+              .order('nama')
+            if (historyStudentsError) throw historyStudentsError
+            nextStudents = historyStudents || []
+          }
+
+          let mapels = Array.from(new Set((jadwalRows || [])
+            .filter((row) => aliasSet.has(normalizeKelasKey(row.kelas_id)))
+            .map((row) => String(row.mapel || '').trim())
+            .filter(Boolean)))
+            .sort((a, b) => a.localeCompare(b, 'id'))
+          if (!mapels.length && !mapelMasterResult?.error) {
+            mapels = Array.from(new Set((mapelMasterResult?.data || [])
+              .map((row) => String(row.nama || '').trim())
+              .filter(Boolean)))
+              .sort((a, b) => a.localeCompare(b, 'id'))
+          }
+
+          const nextIndex = {}
+          ;(rapotRowsForPeriod || []).forEach((row) => {
+            nextIndex[`${row.siswa_id}|${row.jenis}`] = row
+          })
+
+          const rapotIds = rapotRowsForPeriod.map((row) => row.id).filter(Boolean)
+          let itemsByRapotId = {}
+          if (rapotIds.length) {
+            const { data: itemRows, error: itemError } = await supabase
+              .from('rapot_siswa_items')
+              .select('id, rapot_id, nomor, mapel, kkm, nilai, predikat, keterangan, created_at, updated_at')
+              .in('rapot_id', rapotIds)
+              .order('nomor')
+            if (itemError) throw itemError
+            ;(itemRows || []).forEach((row) => {
+              const key = String(row.rapot_id || '')
+              if (!key) return
+              if (!itemsByRapotId[key]) itemsByRapotId[key] = []
+              itemsByRapotId[key].push(row)
+            })
+          }
+
+          return {
+            students: nextStudents,
+            mapels,
+            rapotIndex: nextIndex,
+            itemsByRapotId
+          }
+        },
+        staleTime: 60 * 1000
+      })
+
+      applyClassData(classData)
     } catch (error) {
       console.error(error)
       pushToast('error', error?.message || 'Gagal memuat data rapot.')
     } finally {
       setLoadingClassData(false)
     }
-  }, [pushToast, selectedHistory?.status, selectedKelas, selectedKelasMeta, tahunPelajaran])
+  }, [applyClassData, pushToast, rapotClassQueryKey, selectedHistory?.status, selectedKelas, selectedKelasMeta, tahunPelajaran])
 
   useEffect(() => {
     loadMaster()
@@ -274,14 +378,13 @@ export default function RapotSiswa() {
     setUseManualAverage(Boolean(rapot?.rata_rata_manual))
 
     if (!rapot?.id) {
-      setRapotRows((mapelOptions.length ? mapelOptions : ['']).map((mapel, index) => ({
-        id: makeLocalId(),
-        nomor: index + 1,
-        mapel,
-        kkm: 75,
-        nilai: '',
-        keterangan: ''
-      })))
+      setRapotRows(makeDefaultRapotRows())
+      return
+    }
+
+    const cachedItems = rapotItemsByRapotId[rapot.id] || []
+    if (cachedItems.length) {
+      setRapotRows(mapSavedRapotItems(cachedItems))
       return
     }
 
@@ -295,31 +398,26 @@ export default function RapotSiswa() {
       if (error) throw error
       const savedItems = data || []
       if (!savedItems.length) {
-        setRapotRows((mapelOptions.length ? mapelOptions : ['']).map((mapel, index) => ({
-          id: makeLocalId(),
-          nomor: index + 1,
-          mapel,
-          kkm: 75,
-          nilai: '',
-          keterangan: ''
-        })))
+        setRapotRows(makeDefaultRapotRows())
         return
       }
-      setRapotRows(savedItems.map((row) => ({
-        id: row.id,
-        nomor: row.nomor,
-        mapel: row.mapel,
-        kkm: row.kkm ?? 75,
-        nilai: row.nilai ?? '',
-        keterangan: row.keterangan || ''
-      })))
+      setRapotRows(mapSavedRapotItems(savedItems))
+      setRapotItemsByRapotId((prev) => ({ ...prev, [rapot.id]: savedItems }))
     } catch (error) {
       console.error(error)
       pushToast('error', error?.message || 'Gagal memuat detail rapot.')
     } finally {
       setLoading(false)
     }
-  }, [mapelOptions, period?.semester, pushToast, rapotIndex, setLoading])
+  }, [
+    makeDefaultRapotRows,
+    mapSavedRapotItems,
+    period?.semester,
+    pushToast,
+    rapotIndex,
+    rapotItemsByRapotId,
+    setLoading
+  ])
 
   const computedTotal = useMemo(() => {
     return round2(rapotRows.reduce((sum, row) => sum + (toNumberOrNull(row.nilai) ?? 0), 0))
@@ -413,15 +511,32 @@ export default function RapotSiswa() {
         .upsert(itemPayloads, { onConflict: 'tenant_id,rapot_id,nomor' })
       if (itemsError) throw itemsError
       pushToast('success', 'Rapot siswa berhasil disimpan.')
+      const savedRapot = {
+        ...existingRapot,
+        ...rapotPayload,
+        id: rapotId
+      }
       setRapotIndex((prev) => ({
         ...prev,
-        [`${activeModal.student.id}|${activeModal.type}`]: {
-          ...existingRapot,
-          ...rapotPayload,
-          id: rapotId
-        }
+        [`${activeModal.student.id}|${activeModal.type}`]: savedRapot
       }))
+      setRapotItemsByRapotId((prev) => ({ ...prev, [rapotId]: itemPayloads }))
+      queryClient.setQueryData(rapotClassQueryKey, (prev) => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          rapotIndex: {
+            ...(prev.rapotIndex || {}),
+            [`${activeModal.student.id}|${activeModal.type}`]: savedRapot
+          },
+          itemsByRapotId: {
+            ...(prev.itemsByRapotId || {}),
+            [rapotId]: itemPayloads
+          }
+        }
+      })
       setActiveModal(null)
+      queryClient.invalidateQueries({ queryKey: rapotClassQueryKey })
       loadClassData().catch((refreshError) => {
         console.error(refreshError)
         pushToast('warning', 'Rapot sudah tersimpan. Daftar akan diperbarui saat halaman dimuat ulang.')
@@ -439,6 +554,7 @@ export default function RapotSiswa() {
     computedTotal,
     loadClassData,
     pushToast,
+    rapotClassQueryKey,
     rapotRows,
     selectedKelas,
     semesterText,
