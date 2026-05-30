@@ -477,7 +477,7 @@ export default function LaporanRekap() {
           .from('guru_mapel_bobot')
           .select('*')
           .eq('guru_id', user.id)
-          .order('mapel')
+          .order('updated_at', { ascending: false })
 
         if (error) throw error
         setMapelComponentWeightRows(data || [])
@@ -500,15 +500,33 @@ export default function LaporanRekap() {
         dedup.set(key, mapel)
       }
     })
+    ;(mapelList || []).forEach((item) => {
+      const mapel = normalizeMapelName(item)
+      const key = normalizeMapelKey(mapel)
+      if (!key) return
+      if (!dedup.has(key)) {
+        dedup.set(key, mapel)
+      }
+    })
+    ;(mapelComponentWeightRows || []).forEach((item) => {
+      const mapel = normalizeMapelName(item?.mapel)
+      const key = normalizeMapelKey(mapel)
+      if (!key) return
+      if (!dedup.has(key)) {
+        dedup.set(key, mapel)
+      }
+    })
     return Array.from(dedup.values()).sort((a, b) => String(a || '').localeCompare(String(b || ''), 'id'))
-  }, [jadwalGuru])
+  }, [jadwalGuru, mapelComponentWeightRows, mapelList])
 
   const mapelWeightByMapelKey = useMemo(() => {
     const lookup = new Map()
     ;(mapelComponentWeightRows || []).forEach((row) => {
       const mapelKey = normalizeMapelKey(row?.mapel)
       if (!mapelKey) return
-      lookup.set(mapelKey, normalizeMapelComponentWeights(row))
+      if (!lookup.has(mapelKey)) {
+        lookup.set(mapelKey, normalizeMapelComponentWeights(row))
+      }
     })
     return lookup
   }, [mapelComponentWeightRows])
@@ -589,13 +607,17 @@ export default function LaporanRekap() {
         .select('*')
         .single()
       if (error) throw error
+      const savedRow = data || payload
 
       setMapelComponentWeightRows((prev) => {
-        const next = [...(prev || [])]
-        const idx = next.findIndex((row) => normalizeMapelKey(row?.mapel) === selectedMapelKey)
-        if (idx >= 0) next[idx] = data
-        else next.push(data)
-        return next
+        const others = [...(prev || [])].filter((row) => normalizeMapelKey(row?.mapel) !== selectedMapelKey)
+        return [savedRow, ...others]
+      })
+      setMapelWeightForm({
+        bobot_tugas_pr: savedRow.bobot_tugas_pr,
+        bobot_quiz_reguler: savedRow.bobot_quiz_reguler,
+        bobot_quiz_uts: savedRow.bobot_quiz_uts,
+        bobot_quiz_uas: savedRow.bobot_quiz_uas
       })
 
       pushToast('success', `Bobot mapel ${selectedWeightMapel} berhasil disimpan.`)

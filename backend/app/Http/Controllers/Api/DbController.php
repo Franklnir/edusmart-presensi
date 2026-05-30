@@ -2267,7 +2267,7 @@ class DbController extends ApiController
 
             if ($this->isGuru($request)) {
                 $wali = $this->guruWaliKelasIds($userId);
-                $kelasAmpu = $this->guruKelasIds($userId);
+                $kelasAmpu = $this->guruRapotKelasIds($userId);
                 $query->where(function ($scope) use ($wali, $kelasAmpu, $userId) {
                     if (! empty($wali)) {
                         $scope->whereIn('kelas_id', $wali);
@@ -2357,7 +2357,7 @@ class DbController extends ApiController
 
             if ($this->isGuru($request)) {
                 $wali = $this->guruWaliKelasIds($userId);
-                $kelasAmpu = $this->guruKelasIds($userId);
+                $kelasAmpu = $this->guruRapotKelasIds($userId);
 
                 $query->whereIn('rapot_id', function ($q) use ($wali, $kelasAmpu, $userId, $tenantId) {
                     $q->select('id')
@@ -4471,6 +4471,46 @@ class DbController extends ApiController
         return $wali;
     }
 
+    private function guruRapotKelasIds(string $userId): array
+    {
+        $userId = trim($userId);
+        if ($userId === '') {
+            return [];
+        }
+
+        $kelas = $this->guruKelasIds($userId);
+
+        $jadwalQuery = DB::table('jadwal')->where('guru_id', $userId);
+        $this->applyTenantFilter($jadwalQuery);
+        foreach ($jadwalQuery->distinct()->pluck('kelas_id')->all() as $kelasId) {
+            if ($kelasId !== null && trim((string) $kelasId) !== '') {
+                $kelas[] = $kelasId;
+            }
+        }
+
+        if ($this->isSelectableColumn('tugas', 'kelas_id') && $this->isSelectableColumn('tugas', 'created_by')) {
+            $tugasQuery = DB::table('tugas')->where('created_by', $userId);
+            $this->applyTenantFilter($tugasQuery);
+            foreach ($tugasQuery->distinct()->pluck('kelas_id')->all() as $kelasId) {
+                if ($kelasId !== null && trim((string) $kelasId) !== '') {
+                    $kelas[] = $kelasId;
+                }
+            }
+        }
+
+        if ($this->isSelectableColumn('quizzes', 'kelas_id') && $this->isSelectableColumn('quizzes', 'guru_id')) {
+            $quizQuery = DB::table('quizzes')->where('guru_id', $userId);
+            $this->applyTenantFilter($quizQuery);
+            foreach ($quizQuery->distinct()->pluck('kelas_id')->all() as $kelasId) {
+                if ($kelasId !== null && trim((string) $kelasId) !== '') {
+                    $kelas[] = $kelasId;
+                }
+            }
+        }
+
+        return array_values(array_unique(array_map('strval', array_filter($kelas, fn ($kelasId) => trim((string) $kelasId) !== ''))));
+    }
+
     private function guruQuizIdsForWali(string $userId): array
     {
         $quizIds = $this->guruQuizIds($userId);
@@ -5233,16 +5273,11 @@ class DbController extends ApiController
             return [];
         }
 
-        $period = $this->currentAcademicPeriodForTenant($this->currentTenantId);
-        $tahunAjaran = (string) ($period['tahun_ajaran'] ?? '');
         $normalizeMapel = static fn ($mapel): string => strtolower(trim((string) $mapel));
         $jadwalQuery = DB::table('jadwal')
             ->where('guru_id', $guruId)
             ->whereNotNull('mapel');
         $this->applyTenantFilter($jadwalQuery);
-        if ($tahunAjaran !== '' && $this->isSelectableColumn('jadwal', 'tahun_ajaran')) {
-            $jadwalQuery->where('tahun_ajaran', $tahunAjaran);
-        }
 
         $lookup = [];
         foreach ($jadwalQuery->pluck('mapel')->all() as $mapel) {
@@ -5257,9 +5292,6 @@ class DbController extends ApiController
                 ->where('created_by', $guruId)
                 ->whereNotNull('mapel');
             $this->applyTenantFilter($tugasQuery);
-            if ($tahunAjaran !== '' && $this->isSelectableColumn('tugas', 'tahun_ajaran')) {
-                $tugasQuery->where('tahun_ajaran', $tahunAjaran);
-            }
             foreach ($tugasQuery->distinct()->pluck('mapel')->all() as $mapel) {
                 $normalized = $normalizeMapel($mapel);
                 if ($normalized !== '') {
@@ -5273,9 +5305,6 @@ class DbController extends ApiController
                 ->where('guru_id', $guruId)
                 ->whereNotNull('mapel');
             $this->applyTenantFilter($quizQuery);
-            if ($tahunAjaran !== '' && $this->isSelectableColumn('quizzes', 'tahun_ajaran')) {
-                $quizQuery->where('tahun_ajaran', $tahunAjaran);
-            }
             foreach ($quizQuery->distinct()->pluck('mapel')->all() as $mapel) {
                 $normalized = $normalizeMapel($mapel);
                 if ($normalized !== '') {
@@ -5335,12 +5364,37 @@ class DbController extends ApiController
             ->where('guru_id', $guruId)
             ->where('kelas_id', $kelasId);
         $this->applyTenantFilter($jadwalQuery);
-        $this->applyCurrentAcademicPeriodToQuery($jadwalQuery, 'jadwal');
         $mapelRows = $jadwalQuery->pluck('mapel')->filter()->all();
 
         foreach ($mapelRows as $mapelRow) {
             if (strtolower(trim((string) $mapelRow)) === $mapelNeedle) {
                 return true;
+            }
+        }
+
+        if ($this->isSelectableColumn('tugas', 'kelas_id') && $this->isSelectableColumn('tugas', 'mapel') && $this->isSelectableColumn('tugas', 'created_by')) {
+            $tugasQuery = DB::table('tugas')
+                ->where('created_by', $guruId)
+                ->where('kelas_id', $kelasId)
+                ->whereNotNull('mapel');
+            $this->applyTenantFilter($tugasQuery);
+            foreach ($tugasQuery->distinct()->pluck('mapel')->all() as $mapelRow) {
+                if (strtolower(trim((string) $mapelRow)) === $mapelNeedle) {
+                    return true;
+                }
+            }
+        }
+
+        if ($this->isSelectableColumn('quizzes', 'kelas_id') && $this->isSelectableColumn('quizzes', 'mapel') && $this->isSelectableColumn('quizzes', 'guru_id')) {
+            $quizQuery = DB::table('quizzes')
+                ->where('guru_id', $guruId)
+                ->where('kelas_id', $kelasId)
+                ->whereNotNull('mapel');
+            $this->applyTenantFilter($quizQuery);
+            foreach ($quizQuery->distinct()->pluck('mapel')->all() as $mapelRow) {
+                if (strtolower(trim((string) $mapelRow)) === $mapelNeedle) {
+                    return true;
+                }
             }
         }
 

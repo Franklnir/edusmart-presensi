@@ -4,6 +4,7 @@ import { queryClient } from '../../lib/queryClient'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
+import { loadExcelJsBrowser } from '../../utils/excelBrowser'
 import { getKelasDisplayName, normalizeKelasKey, toNumberOrNull, round2, makeLocalId } from './laporan/laporanUtils'
 
 const RAPOT_TYPES = [
@@ -72,6 +73,7 @@ export default function RapotSiswa() {
   const [useManualAverage, setUseManualAverage] = useState(false)
   const [saving, setSaving] = useState(false)
   const [loadingClassData, setLoadingClassData] = useState(false)
+  const [exportingRapot, setExportingRapot] = useState(false)
 
   const activeTahunPelajaran = period?.tahunAjaran || ''
   const selectedHistory = useMemo(
@@ -638,6 +640,86 @@ export default function RapotSiswa() {
     user?.id
   ])
 
+  const exportActiveRapotToExcel = useCallback(async () => {
+    if (!activeModal) return
+    try {
+      setExportingRapot(true)
+      const ExcelJS = await loadExcelJsBrowser()
+      const workbook = new ExcelJS.Workbook()
+      const worksheet = workbook.addWorksheet(`Rapot ${String(activeModal.type).toUpperCase()}`)
+      const borderAll = {
+        top: { style: 'thin' },
+        left: { style: 'thin' },
+        bottom: { style: 'thin' },
+        right: { style: 'thin' }
+      }
+
+      worksheet.addRow([`RAPOT ${String(activeModal.type).toUpperCase()}`])
+      worksheet.mergeCells(1, 1, 1, 6)
+      worksheet.getCell('A1').font = { bold: true, size: 15 }
+      worksheet.getCell('A1').alignment = { horizontal: 'center' }
+      worksheet.addRow([`Nama`, activeModal.student.nama || '-', `NIS`, activeModal.student.nis || '-', `NISN`, activeModal.student.nisn || '-'])
+      worksheet.addRow([`Kelas`, getKelasDisplayName(selectedKelasMeta) || '-', `Semester`, semesterText || '-', `Tahun Pelajaran`, tahunPelajaran || '-'])
+      worksheet.addRow([`Jumlah`, computedTotal ?? '-', `Rata-rata`, displayedAverage ?? '-', `Status`, activeModal.rapot?.locked_at ? 'Dikunci' : 'Terbuka'])
+      worksheet.addRow([])
+
+      const header = worksheet.addRow(['No', 'Mapel', 'KKM', 'Nilai', 'Predikat', 'Keterangan'])
+      header.font = { bold: true }
+      header.eachCell((cell) => {
+        cell.border = borderAll
+        cell.alignment = { horizontal: 'center' }
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } }
+      })
+
+      rapotRows.forEach((row, index) => {
+        const excelRow = worksheet.addRow([
+          index + 1,
+          row.mapel || '',
+          row.kkm ?? '',
+          row.nilai ?? '',
+          getPredikat(row.nilai, row.kkm) || '',
+          row.keterangan || ''
+        ])
+        excelRow.eachCell((cell, colNumber) => {
+          cell.border = borderAll
+          cell.alignment = { horizontal: colNumber === 2 || colNumber === 6 ? 'left' : 'center' }
+        })
+      })
+
+      worksheet.columns.forEach((column) => {
+        let maxLength = 12
+        column.eachCell({ includeEmpty: true }, (cell) => {
+          maxLength = Math.max(maxLength, String(cell.value ?? '').length + 2)
+        })
+        column.width = Math.min(Math.max(maxLength, 12), 42)
+      })
+
+      const buffer = await workbook.xlsx.writeBuffer()
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      const safeName = String(activeModal.student.nama || 'siswa').replace(/[^\w-]+/g, '_')
+      anchor.href = url
+      anchor.download = `Rapot_${String(activeModal.type).toUpperCase()}_${safeName}_${tahunPelajaran || 'tahun'}.xlsx`
+      anchor.click()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error(error)
+      pushToast('error', error?.message || 'Gagal export rapot.')
+    } finally {
+      setExportingRapot(false)
+    }
+  }, [
+    activeModal,
+    computedTotal,
+    displayedAverage,
+    pushToast,
+    rapotRows,
+    selectedKelasMeta,
+    semesterText,
+    tahunPelajaran
+  ])
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50/30 p-4 sm:p-6">
       <div className="mx-auto max-w-full space-y-6">
@@ -900,6 +982,14 @@ export default function RapotSiswa() {
             </div>
 
             <div className="border-t border-slate-200 p-5 flex justify-end gap-3">
+              <button
+                type="button"
+                disabled={exportingRapot}
+                onClick={exportActiveRapotToExcel}
+                className="rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-3 font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-60"
+              >
+                {exportingRapot ? 'Menyiapkan...' : 'Export Excel'}
+              </button>
               <button
                 type="button"
                 disabled={saving}
