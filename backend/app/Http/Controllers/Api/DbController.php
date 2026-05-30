@@ -3930,6 +3930,17 @@ class DbController extends ApiController
         }
     }
 
+    private function applyTenantFilterAllowingLegacyNull($query, string $tenantColumn = 'tenant_id'): void
+    {
+        if ($this->currentTenantId) {
+            $tenantId = $this->currentTenantId;
+            $query->where(function ($scope) use ($tenantColumn, $tenantId) {
+                $scope->where($tenantColumn, $tenantId)
+                    ->orWhereNull($tenantColumn);
+            });
+        }
+    }
+
     private function currentAcademicPeriodForTenant(?string $tenantId): array
     {
         $cacheKey = $tenantId ?: '__default__';
@@ -4413,7 +4424,7 @@ class DbController extends ApiController
         }
 
         $kelasQuery = DB::table('jadwal')->where('guru_id', $userId);
-        $this->applyTenantFilter($kelasQuery);
+        $this->applyTenantFilterAllowingLegacyNull($kelasQuery);
         $this->applyCurrentAcademicPeriodToQuery($kelasQuery, 'jadwal');
         $kelas = $kelasQuery
             ->distinct()
@@ -4423,7 +4434,7 @@ class DbController extends ApiController
             ->all();
 
         $waliQuery = DB::table('kelas_struktur')->where('wali_guru_id', $userId);
-        $this->applyTenantFilter($waliQuery);
+        $this->applyTenantFilterAllowingLegacyNull($waliQuery);
         $wali = $waliQuery
             ->distinct()
             ->pluck('kelas_id')
@@ -4444,7 +4455,7 @@ class DbController extends ApiController
         }
 
         $waliQuery = DB::table('kelas_struktur')->where('wali_guru_id', $userId);
-        $this->applyTenantFilter($waliQuery);
+        $this->applyTenantFilterAllowingLegacyNull($waliQuery);
         $wali = $waliQuery
             ->distinct()
             ->pluck('kelas_id')
@@ -4467,7 +4478,7 @@ class DbController extends ApiController
         $kelas = $this->guruKelasIds($userId);
 
         $jadwalQuery = DB::table('jadwal')->where('guru_id', $userId);
-        $this->applyTenantFilter($jadwalQuery);
+        $this->applyTenantFilterAllowingLegacyNull($jadwalQuery);
         foreach ($jadwalQuery->distinct()->pluck('kelas_id')->all() as $kelasId) {
             if ($kelasId !== null && trim((string) $kelasId) !== '') {
                 $kelas[] = $kelasId;
@@ -4476,7 +4487,7 @@ class DbController extends ApiController
 
         if ($this->isSelectableColumn('tugas', 'kelas_id') && $this->isSelectableColumn('tugas', 'created_by')) {
             $tugasQuery = DB::table('tugas')->where('created_by', $userId);
-            $this->applyTenantFilter($tugasQuery);
+            $this->applyTenantFilterAllowingLegacyNull($tugasQuery);
             foreach ($tugasQuery->distinct()->pluck('kelas_id')->all() as $kelasId) {
                 if ($kelasId !== null && trim((string) $kelasId) !== '') {
                     $kelas[] = $kelasId;
@@ -4486,7 +4497,7 @@ class DbController extends ApiController
 
         if ($this->isSelectableColumn('tugas', 'kelas') && $this->isSelectableColumn('tugas', 'created_by')) {
             $tugasKelasQuery = DB::table('tugas')->where('created_by', $userId);
-            $this->applyTenantFilter($tugasKelasQuery);
+            $this->applyTenantFilterAllowingLegacyNull($tugasKelasQuery);
             foreach ($tugasKelasQuery->distinct()->pluck('kelas')->all() as $kelasId) {
                 if ($kelasId !== null && trim((string) $kelasId) !== '') {
                     $kelas[] = $kelasId;
@@ -4496,7 +4507,7 @@ class DbController extends ApiController
 
         if ($this->isSelectableColumn('quizzes', 'kelas_id') && $this->isSelectableColumn('quizzes', 'guru_id')) {
             $quizQuery = DB::table('quizzes')->where('guru_id', $userId);
-            $this->applyTenantFilter($quizQuery);
+            $this->applyTenantFilterAllowingLegacyNull($quizQuery);
             foreach ($quizQuery->distinct()->pluck('kelas_id')->all() as $kelasId) {
                 if ($kelasId !== null && trim((string) $kelasId) !== '') {
                     $kelas[] = $kelasId;
@@ -4541,7 +4552,7 @@ class DbController extends ApiController
 
         if (Schema::hasTable('kelas')) {
             $kelasQuery = DB::table('kelas');
-            $this->applyTenantFilter($kelasQuery);
+            $this->applyTenantFilterAllowingLegacyNull($kelasQuery);
             $kelasRows = $kelasQuery
                 ->where(function ($query) use ($rawValues) {
                     $query->whereIn('id', $rawValues);
@@ -5340,7 +5351,7 @@ class DbController extends ApiController
         $jadwalQuery = DB::table('jadwal')
             ->where('guru_id', $guruId)
             ->whereNotNull('mapel');
-        $this->applyTenantFilter($jadwalQuery);
+        $this->applyTenantFilterAllowingLegacyNull($jadwalQuery);
 
         $lookup = [];
         foreach ($jadwalQuery->pluck('mapel')->all() as $mapel) {
@@ -5354,7 +5365,7 @@ class DbController extends ApiController
             $tugasQuery = DB::table('tugas')
                 ->where('created_by', $guruId)
                 ->whereNotNull('mapel');
-            $this->applyTenantFilter($tugasQuery);
+            $this->applyTenantFilterAllowingLegacyNull($tugasQuery);
             foreach ($tugasQuery->distinct()->pluck('mapel')->all() as $mapel) {
                 $normalized = $normalizeMapel($mapel);
                 if ($normalized !== '') {
@@ -5367,7 +5378,7 @@ class DbController extends ApiController
             $quizQuery = DB::table('quizzes')
                 ->where('guru_id', $guruId)
                 ->whereNotNull('mapel');
-            $this->applyTenantFilter($quizQuery);
+            $this->applyTenantFilterAllowingLegacyNull($quizQuery);
             foreach ($quizQuery->distinct()->pluck('mapel')->all() as $mapel) {
                 $normalized = $normalizeMapel($mapel);
                 if ($normalized !== '') {
@@ -5427,7 +5438,7 @@ class DbController extends ApiController
         $jadwalQuery = DB::table('jadwal')
             ->where('guru_id', $guruId)
             ->whereIn('kelas_id', $this->expandKelasAccessValues([$kelasId]));
-        $this->applyTenantFilter($jadwalQuery);
+        $this->applyTenantFilterAllowingLegacyNull($jadwalQuery);
         $mapelRows = $jadwalQuery->pluck('mapel')->filter()->all();
 
         foreach ($mapelRows as $mapelRow) {
@@ -5441,7 +5452,7 @@ class DbController extends ApiController
                 ->where('created_by', $guruId)
                 ->whereIn('kelas_id', $this->expandKelasAccessValues([$kelasId]))
                 ->whereNotNull('mapel');
-            $this->applyTenantFilter($tugasQuery);
+            $this->applyTenantFilterAllowingLegacyNull($tugasQuery);
             foreach ($tugasQuery->distinct()->pluck('mapel')->all() as $mapelRow) {
                 if (strtolower(trim((string) $mapelRow)) === $mapelNeedle) {
                     return true;
@@ -5453,7 +5464,7 @@ class DbController extends ApiController
             $tugasKelasQuery = DB::table('tugas')
                 ->where('created_by', $guruId)
                 ->whereNotNull('mapel');
-            $this->applyTenantFilter($tugasKelasQuery);
+            $this->applyTenantFilterAllowingLegacyNull($tugasKelasQuery);
             foreach ($tugasKelasQuery->distinct()->get(['kelas', 'mapel']) as $row) {
                 if (
                     in_array($this->normalizeKelasAccessValue($row->kelas ?? ''), $kelasNeedles, true) &&
@@ -5469,7 +5480,7 @@ class DbController extends ApiController
                 ->where('guru_id', $guruId)
                 ->whereIn('kelas_id', $this->expandKelasAccessValues([$kelasId]))
                 ->whereNotNull('mapel');
-            $this->applyTenantFilter($quizQuery);
+            $this->applyTenantFilterAllowingLegacyNull($quizQuery);
             foreach ($quizQuery->distinct()->pluck('mapel')->all() as $mapelRow) {
                 if (strtolower(trim((string) $mapelRow)) === $mapelNeedle) {
                     return true;
