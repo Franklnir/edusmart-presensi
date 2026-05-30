@@ -252,7 +252,7 @@ export default function RapotSiswa() {
           const aliasSet = new Set(aliases.map((value) => normalizeKelasKey(value)))
           const rapotQuery = supabase
             .from('rapot_siswa')
-            .select('id, siswa_id, jenis, semester, tahun_pelajaran, jumlah, rata_rata, rata_rata_manual, created_by, updated_by, created_at, updated_at')
+            .select('id, siswa_id, jenis, semester, tahun_pelajaran, jumlah, rata_rata, rata_rata_manual, locked_at, locked_by, created_by, updated_by, created_at, updated_at')
             .eq('kelas_id', selectedKelas)
             .eq('tahun_pelajaran', tahunPelajaran)
 
@@ -331,7 +331,7 @@ export default function RapotSiswa() {
           if (rapotIds.length) {
             const { data: itemRows, error: itemError } = await supabase
               .from('rapot_siswa_items')
-              .select('id, rapot_id, nomor, mapel, kkm, nilai, predikat, keterangan, created_at, updated_at')
+              .select('id, rapot_id, nomor, mapel, kkm, nilai, predikat, keterangan, source, sent_by, sent_at, created_at, updated_at')
               .in('rapot_id', rapotIds)
               .order('nomor')
             if (itemError) {
@@ -465,7 +465,7 @@ export default function RapotSiswa() {
       if (!existingRapot?.id) {
         const { data: foundRapot, error: foundRapotError } = await supabase
           .from('rapot_siswa')
-          .select('id, siswa_id, kelas_id, jenis, semester, tahun_pelajaran, jumlah, rata_rata, rata_rata_manual, created_by, updated_by, created_at, updated_at')
+          .select('id, siswa_id, kelas_id, jenis, semester, tahun_pelajaran, jumlah, rata_rata, rata_rata_manual, locked_at, locked_by, created_by, updated_by, created_at, updated_at')
           .eq('siswa_id', activeModal.student.id)
           .eq('kelas_id', selectedKelas)
           .eq('jenis', activeModal.type)
@@ -485,6 +485,8 @@ export default function RapotSiswa() {
         jumlah: computedTotal,
         rata_rata: useManualAverage ? toNumberOrNull(averageManual) : computedAverage,
         rata_rata_manual: useManualAverage,
+        locked_at: existingRapot?.locked_at || null,
+        locked_by: existingRapot?.locked_by || null,
         created_by: existingRapot?.created_by || user?.id || null,
         updated_by: user?.id || null,
         created_at: existingRapot?.created_at || nowIso,
@@ -563,6 +565,72 @@ export default function RapotSiswa() {
     pushToast,
     rapotClassQueryKey,
     rapotRows,
+    selectedKelas,
+    semesterText,
+    tahunPelajaran,
+    useManualAverage,
+    user?.id
+  ])
+
+  const toggleRapotLock = useCallback(async () => {
+    if (!activeModal?.student || !activeModal?.type || !selectedKelas || !tahunPelajaran) return
+
+    try {
+      setSaving(true)
+      const nowIso = new Date().toISOString()
+      let rapot = activeModal.rapot || null
+      if (!rapot?.id) {
+        const rapotId = makeLocalId()
+        rapot = {
+          id: rapotId,
+          siswa_id: activeModal.student.id,
+          kelas_id: selectedKelas,
+          jenis: activeModal.type,
+          semester: String(semesterText || '').trim() || null,
+          tahun_pelajaran: tahunPelajaran,
+          jumlah: computedTotal,
+          rata_rata: displayedAverage,
+          rata_rata_manual: useManualAverage,
+          created_by: user?.id || null,
+          updated_by: user?.id || null,
+          created_at: nowIso,
+          updated_at: nowIso
+        }
+      }
+
+      const isLocked = Boolean(rapot.locked_at)
+      const payload = {
+        ...rapot,
+        locked_at: isLocked ? null : nowIso,
+        locked_by: isLocked ? null : (user?.id || null),
+        updated_by: user?.id || null,
+        updated_at: nowIso
+      }
+
+      const { error } = await supabase
+        .from('rapot_siswa')
+        .upsert(payload, { onConflict: 'tenant_id,siswa_id,kelas_id,jenis,tahun_pelajaran' })
+      if (error) throw error
+
+      setActiveModal((prev) => prev ? { ...prev, rapot: payload } : prev)
+      setRapotIndex((prev) => ({
+        ...prev,
+        [`${activeModal.student.id}|${activeModal.type}`]: payload
+      }))
+      queryClient.invalidateQueries({ queryKey: rapotClassQueryKey })
+      pushToast('success', isLocked ? 'Kunci rapot dibuka.' : 'Rapot dikunci. Guru pengampu tidak bisa mengirim nilai.')
+    } catch (error) {
+      console.error(error)
+      pushToast('error', error?.message || 'Gagal memperbarui kunci rapot.')
+    } finally {
+      setSaving(false)
+    }
+  }, [
+    activeModal,
+    computedTotal,
+    displayedAverage,
+    pushToast,
+    rapotClassQueryKey,
     selectedKelas,
     semesterText,
     tahunPelajaran,
@@ -832,6 +900,18 @@ export default function RapotSiswa() {
             </div>
 
             <div className="border-t border-slate-200 p-5 flex justify-end gap-3">
+              <button
+                type="button"
+                disabled={saving}
+                onClick={toggleRapotLock}
+                className={`rounded-xl px-5 py-3 font-semibold disabled:opacity-60 ${
+                  activeModal.rapot?.locked_at
+                    ? 'border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                    : 'border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'
+                }`}
+              >
+                {activeModal.rapot?.locked_at ? 'Buka Kunci' : 'Kunci Rapot'}
+              </button>
               <button
                 type="button"
                 onClick={() => setActiveModal(null)}

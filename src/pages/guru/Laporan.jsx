@@ -159,6 +159,8 @@ export default function LaporanRekap() {
   const [mapelReportData, setMapelReportData] = useState(null)
   const [mapelManualDrafts, setMapelManualDrafts] = useState({})
   const [savingMapelManualId, setSavingMapelManualId] = useState('')
+  const [mapelRapotTargetType, setMapelRapotTargetType] = useState('uts')
+  const [sendingMapelToWali, setSendingMapelToWali] = useState(false)
   const [rekapWaliData, setRekapWaliData] = useState(null)
   const [rankingPolicy, setRankingPolicy] = useState(DEFAULT_RANKING_POLICY)
   const [editingNilai, setEditingNilai] = useState(null)
@@ -900,17 +902,45 @@ export default function LaporanRekap() {
           .eq('tahun_ajaran', tahunAjaran)
           .in('siswa_id', studentIds)
         })
+        detailBatchItems.push({
+          key: 'rapot',
+          query: supabase
+            .from('rapot_siswa')
+            .select('id, siswa_id, kelas_id, jenis, semester, tahun_pelajaran, locked_at')
+            .eq('kelas_id', selectedKelas)
+            .eq('jenis', mapelRapotTargetType)
+            .eq('tahun_pelajaran', tahunAjaran)
+            .in('siswa_id', studentIds)
+        })
       }
       const detailBatch = detailBatchItems.length ? await supabase.batch(detailBatchItems) : { data: {} }
       const jawabanResult = detailBatch.data?.jawaban
       const submissionResult = detailBatch.data?.submissions
       const manualResult = detailBatch.data?.manual
+      const rapotResult = detailBatch.data?.rapot
       if (jawabanResult?.error) throw jawabanResult.error
       if (submissionResult?.error) throw submissionResult.error
       if (manualResult?.error) throw manualResult.error
+      if (rapotResult?.error) throw rapotResult.error
       const jawabanRows = jawabanResult?.data || []
       const submissionRows = submissionResult?.data || []
       const manualRows = manualResult?.data || []
+      const rapotRows = rapotResult?.data || []
+      const rapotByStudent = new Map((rapotRows || []).map((row) => [String(row.siswa_id), row]))
+
+      let sentItemByRapotId = new Map()
+      const rapotIds = rapotRows.map((row) => row.id).filter(Boolean)
+      if (rapotIds.length) {
+        const { data: sentItems, error: sentItemsError } = await supabase
+          .from('rapot_siswa_items')
+          .select('id, rapot_id, mapel, nilai, sent_at, source')
+          .in('rapot_id', rapotIds)
+        if (!sentItemsError) {
+          sentItemByRapotId = new Map((sentItems || [])
+            .filter((item) => normalizeMapelKey(item.mapel) === normalizeMapelKey(selectedMapel))
+            .map((item) => [String(item.rapot_id), item]))
+        }
+      }
 
       const bobotMapel = mapelWeightByMapelKey.get(normalizeMapelKey(selectedMapel))
         || { ...DEFAULT_MAPEL_COMPONENT_WEIGHTS }
@@ -949,6 +979,8 @@ export default function LaporanRekap() {
         const utsAvg = hitungRataSederhana(quizBucket.uts)
         const uasAvg = hitungRataSederhana(quizBucket.uas)
         const manualRow = manualByStudent.get(String(student.id)) || null
+        const rapotRow = rapotByStudent.get(String(student.id)) || null
+        const sentItem = rapotRow?.id ? sentItemByRapotId.get(String(rapotRow.id)) : null
         const manualScore = toNumberOrNull(manualRow?.nilai_manual)
         const manualWeighted = manualScore != null && sisaBobot > 0 ? manualScore * sisaBobot / 100 : 0
         const componentScore =
@@ -972,6 +1004,10 @@ export default function LaporanRekap() {
           baseScore: round2(componentScore),
           hasAnyScore,
           nilaiAkhir: hasAnyScore ? totalWeighted : null,
+          rapotId: rapotRow?.id || null,
+          sentToWali: Boolean(sentItem),
+          sentAt: sentItem?.sent_at || null,
+          rapotLocked: Boolean(rapotRow?.locked_at),
           manualRow,
           catatan: manualRow?.catatan || ''
         }
@@ -995,6 +1031,7 @@ export default function LaporanRekap() {
         tahunAjaran,
         bobot: bobotMapel,
         sisaBobot,
+        targetType: mapelRapotTargetType,
         totals: {
           siswa: students.length,
           tugas: tugasRows?.length || 0,
@@ -1014,6 +1051,7 @@ export default function LaporanRekap() {
     applyReportAcademicFilters,
     kelasList,
     mapelWeightByMapelKey,
+    mapelRapotTargetType,
     monthLabelByValue,
     pushToast,
     reportPeriod.tahunAjaran,
@@ -1079,6 +1117,141 @@ export default function LaporanRekap() {
     reportPeriod.tahunAjaran,
     selectedKelas,
     selectedMapel,
+    selectedTahunAjaran,
+    user?.id
+  ])
+
+  const handleSendMapelToWali = useCallback(async () => {
+    if (!user?.id || !mapelReportData?.rows?.length || !selectedKelas || !selectedMapel) return
+
+    const rowsToSend = mapelReportData.rows
+      .map((row) => ({ row, preview: getMapelManualPreview(row) }))
+      .filter(({ preview }) => preview.nilaiAkhir != null && !preview.invalid)
+
+    if (!rowsToSend.length) {
+      pushToast('error', 'Belum ada nilai akhir yang bisa dikirim ke wali kelas.')
+      return
+    }
+
+    const lockedRows = mapelReportData.rows.filter((row) => row.rapotLocked)
+    if (lockedRows.length) {
+      pushToast('error', 'Rapot dikunci wali kelas. Harap hubungi wali kelas untuk membuka kunci.')
+      return
+    }
+
+    const nowIso = new Date().toISOString()
+    const tahunAjaran = mapelReportData.tahunAjaran || selectedTahunAjaran || reportPeriod.tahunAjaran
+    const semesterLabel = selectedSemester || reportPeriod.semester || 'Genap'
+
+    try {
+      setSendingMapelToWali(true)
+      const rapotPayloads = rowsToSend.map(({ row }) => {
+        const existingId = row.rapotId || null
+        const payload = {
+          id: existingId || makeLocalId(),
+          siswa_id: row.id,
+          kelas_id: selectedKelas,
+          jenis: mapelRapotTargetType,
+          semester: semesterLabel,
+          tahun_pelajaran: tahunAjaran,
+          updated_by: user.id,
+          updated_at: nowIso
+        }
+        if (!existingId) {
+          payload.jumlah = null
+          payload.rata_rata = null
+          payload.rata_rata_manual = false
+          payload.created_by = user.id
+          payload.created_at = nowIso
+        }
+        return payload
+      })
+
+      const { error: rapotError } = await supabase
+        .from('rapot_siswa')
+        .upsert(rapotPayloads, { onConflict: 'tenant_id,siswa_id,kelas_id,jenis,tahun_pelajaran' })
+      if (rapotError) throw rapotError
+
+      const { data: savedRapots, error: savedRapotsError } = await supabase
+        .from('rapot_siswa')
+        .select('id, siswa_id, locked_at')
+        .eq('kelas_id', selectedKelas)
+        .eq('jenis', mapelRapotTargetType)
+        .eq('tahun_pelajaran', tahunAjaran)
+        .in('siswa_id', rowsToSend.map(({ row }) => row.id))
+      if (savedRapotsError) throw savedRapotsError
+
+      const lockedAfterSave = (savedRapots || []).filter((row) => row.locked_at)
+      if (lockedAfterSave.length) {
+        pushToast('error', 'Rapot dikunci wali kelas. Nilai mapel tidak dikirim.')
+        return
+      }
+
+      const rapotByStudent = new Map((savedRapots || []).map((row) => [String(row.siswa_id), row]))
+      const rapotIds = (savedRapots || []).map((row) => row.id).filter(Boolean)
+      let existingItems = []
+      if (rapotIds.length) {
+        const { data, error } = await supabase
+          .from('rapot_siswa_items')
+          .select('id, rapot_id, nomor, mapel')
+          .in('rapot_id', rapotIds)
+        if (error) throw error
+        existingItems = data || []
+      }
+
+      const itemsByRapot = new Map()
+      existingItems.forEach((item) => {
+        const key = String(item.rapot_id || '')
+        if (!itemsByRapot.has(key)) itemsByRapot.set(key, [])
+        itemsByRapot.get(key).push(item)
+      })
+
+      const itemPayloads = rowsToSend.map(({ row, preview }) => {
+        const rapot = rapotByStudent.get(String(row.id))
+        const existingForRapot = itemsByRapot.get(String(rapot?.id || '')) || []
+        const existingMapel = existingForRapot.find((item) => normalizeMapelKey(item.mapel) === normalizeMapelKey(selectedMapel))
+        const maxNomor = existingForRapot.reduce((max, item) => Math.max(max, Number(item.nomor || 0)), 0)
+        return {
+          id: existingMapel?.id || makeLocalId(),
+          rapot_id: rapot?.id,
+          nomor: existingMapel?.nomor || maxNomor + 1,
+          mapel: selectedMapel,
+          kkm: KKM_NILAI_TUGAS,
+          nilai: preview.nilaiAkhir,
+          predikat: getGrade(preview.nilaiAkhir),
+          keterangan: row.catatan || null,
+          source: 'laporan_mapel',
+          sent_by: user.id,
+          sent_at: nowIso,
+          created_at: nowIso,
+          updated_at: nowIso
+        }
+      }).filter((item) => item.rapot_id)
+
+      const { error: itemsError } = await supabase
+        .from('rapot_siswa_items')
+        .upsert(itemPayloads, { onConflict: 'tenant_id,rapot_id,nomor' })
+      if (itemsError) throw itemsError
+
+      pushToast('success', `${itemPayloads.length} nilai ${selectedMapel} dikirim ke wali kelas.`)
+      await loadLaporanMapel()
+    } catch (error) {
+      console.error(error)
+      pushToast('error', error?.message || 'Gagal mengirim nilai ke wali kelas.')
+    } finally {
+      setSendingMapelToWali(false)
+    }
+  }, [
+    getMapelManualPreview,
+    loadLaporanMapel,
+    mapelRapotTargetType,
+    mapelReportData,
+    pushToast,
+    reportPeriod.semester,
+    reportPeriod.tahunAjaran,
+    selectedKelas,
+    selectedMapel,
+    selectedSemester,
     selectedTahunAjaran,
     user?.id
   ])
@@ -2164,10 +2337,12 @@ export default function LaporanRekap() {
     if (activeTab === 'absensi') loadRekapAbsensi()
     else if (activeTab === 'tugas') loadRekapTugas()
     else if (activeTab === 'quiz') loadRekapQuiz()
+    else if (activeTab === 'mapel') loadLaporanMapel()
   }, [
     activeTab,
     isRekapTab,
     loadRekapAbsensi,
+    loadLaporanMapel,
     loadRekapQuiz,
     loadRekapTugas,
     loadRekapWali,
@@ -3921,7 +4096,7 @@ export default function LaporanRekap() {
         {!mapelReportData && activeTab === 'mapel' && (
           <div className="text-center py-12 bg-white rounded-2xl border border-dashed border-slate-300">
             <p className="text-gray-500">
-              Silakan pilih Kelas, Mapel, dan Bulan lalu klik Muat Ulang untuk melihat laporan mapel.
+              Laporan mapel akan tampil otomatis setelah Kelas, Mapel, dan Bulan tersedia.
             </p>
           </div>
         )}
@@ -3945,6 +4120,26 @@ export default function LaporanRekap() {
                 </p>
               </div>
               <div className="flex flex-wrap gap-2 print:hidden">
+                <select
+                  value={mapelRapotTargetType}
+                  onChange={(event) => setMapelRapotTargetType(event.target.value)}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+                >
+                  <option value="uts">Kirim ke Rapot UTS</option>
+                  <option value="uas">Kirim ke Rapot UAS</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={handleSendMapelToWali}
+                  disabled={sendingMapelToWali}
+                  className="text-xs bg-indigo-600 text-white px-3 py-2 rounded hover:bg-indigo-700 disabled:opacity-60"
+                >
+                  {sendingMapelToWali
+                    ? 'Mengirim...'
+                    : mapelReportData.rows?.some((row) => row.sentToWali)
+                      ? 'Kirim Ulang ke Wali Kelas'
+                      : 'Kirim ke Wali Kelas'}
+                </button>
                 <button
                   type="button"
                   onClick={exportMapelReportToExcel}
@@ -3962,7 +4157,8 @@ export default function LaporanRekap() {
                 [`Quiz Reguler (${mapelReportData.bobot.bobot_quiz_reguler}%)`, mapelReportData.totals.quizReguler],
                 [`Quiz UTS (${mapelReportData.bobot.bobot_quiz_uts}%)`, mapelReportData.totals.quizUts],
                 [`Quiz UAS (${mapelReportData.bobot.bobot_quiz_uas}%)`, mapelReportData.totals.quizUas],
-                [`Tambahan Manual (${mapelReportData.sisaBobot}%)`, mapelReportData.sisaBobot > 0 ? 'Bisa diisi' : 'Tidak ada']
+                [`Tambahan Manual (${mapelReportData.sisaBobot}%)`, mapelReportData.sisaBobot > 0 ? 'Bisa diisi' : 'Tidak ada'],
+                [`Terkirim ke Rapot ${String(mapelReportData.targetType || '').toUpperCase()}`, mapelReportData.rows.filter((row) => row.sentToWali).length]
               ].map(([label, value]) => (
                 <div key={label} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                   <div className="text-xs font-semibold text-slate-500">{label}</div>
@@ -4045,6 +4241,16 @@ export default function LaporanRekap() {
                           <span className={`inline-flex min-w-[64px] justify-center rounded-lg border px-2 py-1 text-sm font-bold ${getNilaiToneClass(manualPreview.nilaiAkhir)}`}>
                             {manualPreview.nilaiAkhir ?? '-'}
                           </span>
+                          {row.sentToWali && (
+                            <div className="mt-1 text-[11px] font-semibold text-emerald-700">
+                              Terkirim
+                            </div>
+                          )}
+                          {row.rapotLocked && (
+                            <div className="mt-1 text-[11px] font-semibold text-red-600">
+                              Dikunci wali
+                            </div>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-center print:hidden">
                           <button

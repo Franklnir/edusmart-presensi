@@ -2267,11 +2267,15 @@ class DbController extends ApiController
 
             if ($this->isGuru($request)) {
                 $wali = $this->guruWaliKelasIds($userId);
-                $query->where(function ($scope) use ($wali, $userId) {
+                $kelasAmpu = $this->guruKelasIds($userId);
+                $query->where(function ($scope) use ($wali, $kelasAmpu, $userId) {
                     if (! empty($wali)) {
                         $scope->whereIn('kelas_id', $wali);
                     } else {
                         $scope->whereRaw('1 = 0');
+                    }
+                    if (! empty($kelasAmpu)) {
+                        $scope->orWhereIn('kelas_id', $kelasAmpu);
                     }
                     $scope->orWhere('created_by', $userId)
                         ->orWhere('updated_by', $userId);
@@ -2279,12 +2283,13 @@ class DbController extends ApiController
 
                 if (in_array($action, ['insert', 'upsert'], true)) {
                     $rows = $this->normalizeRows($payload);
-                    if (empty($wali)) {
-                        return $this->deny('Anda belum menjadi wali kelas aktif', 403);
-                    }
                     foreach ($rows as $row) {
-                        if (! in_array((string) ($row['kelas_id'] ?? ''), array_map('strval', $wali), true)) {
-                            return $this->deny('Kelas rapot bukan kelas wali Anda', 403);
+                        $kelasId = (string) ($row['kelas_id'] ?? '');
+                        if (
+                            ! in_array($kelasId, array_map('strval', $wali), true) &&
+                            ! in_array($kelasId, array_map('strval', $kelasAmpu), true)
+                        ) {
+                            return $this->deny('Kelas rapot bukan kelas wali atau kelas mengajar Anda', 403);
                         }
                     }
 
@@ -2299,6 +2304,8 @@ class DbController extends ApiController
                             'jumlah',
                             'rata_rata',
                             'rata_rata_manual',
+                            'locked_at',
+                            'locked_by',
                             'created_by',
                             'updated_by',
                             'created_at',
@@ -2324,6 +2331,8 @@ class DbController extends ApiController
                             'jumlah',
                             'rata_rata',
                             'rata_rata_manual',
+                            'locked_at',
+                            'locked_by',
                             'updated_by',
                             'updated_at',
                         ]);
@@ -2348,15 +2357,19 @@ class DbController extends ApiController
 
             if ($this->isGuru($request)) {
                 $wali = $this->guruWaliKelasIds($userId);
+                $kelasAmpu = $this->guruKelasIds($userId);
 
-                $query->whereIn('rapot_id', function ($q) use ($wali, $userId, $tenantId) {
+                $query->whereIn('rapot_id', function ($q) use ($wali, $kelasAmpu, $userId, $tenantId) {
                     $q->select('id')
                         ->from('rapot_siswa')
-                        ->where(function ($owner) use ($wali, $userId) {
+                        ->where(function ($owner) use ($wali, $kelasAmpu, $userId) {
                             if (! empty($wali)) {
                                 $owner->whereIn('kelas_id', $wali);
                             } else {
                                 $owner->whereRaw('1 = 0');
+                            }
+                            if (! empty($kelasAmpu)) {
+                                $owner->orWhereIn('kelas_id', $kelasAmpu);
                             }
                             $owner->orWhere('created_by', $userId)
                                 ->orWhere('updated_by', $userId);
@@ -2376,26 +2389,42 @@ class DbController extends ApiController
                         return $this->deny('Rapot belum dipilih', 422);
                     }
 
-                    $allowedRapotQuery = DB::table('rapot_siswa')
+                    $allowedRapotRows = DB::table('rapot_siswa')
                         ->whereIn('id', $rapotIds)
-                        ->where(function ($owner) use ($wali, $userId) {
+                        ->where(function ($owner) use ($wali, $kelasAmpu, $userId) {
                             if (! empty($wali)) {
                                 $owner->whereIn('kelas_id', $wali);
                             } else {
                                 $owner->whereRaw('1 = 0');
                             }
+                            if (! empty($kelasAmpu)) {
+                                $owner->orWhereIn('kelas_id', $kelasAmpu);
+                            }
                             $owner->orWhere('created_by', $userId)
                                 ->orWhere('updated_by', $userId);
-                        });
-                    if ($tenantId) {
-                        $allowedRapotQuery->where('tenant_id', $tenantId);
-                    }
-                    $allowedRapotCount = $allowedRapotQuery->distinct()->count('id');
-                    if ($allowedRapotCount !== count($rapotIds)) {
+                        })
+                        ->when($tenantId, fn ($q) => $q->where('tenant_id', $tenantId))
+                        ->get(['id', 'kelas_id', 'locked_at'])
+                        ->keyBy('id');
+                    if ($allowedRapotRows->count() !== count($rapotIds)) {
                         return $this->deny('Detail rapot bukan milik kelas wali Anda', 403);
                     }
+                    foreach ($rows as $row) {
+                        $rapot = $allowedRapotRows->get((string) ($row['rapot_id'] ?? ''));
+                        if (! $rapot) {
+                            return $this->deny('Rapot tidak ditemukan', 404);
+                        }
+                        $mapel = (string) ($row['mapel'] ?? '');
+                        $isWaliClass = in_array((string) $rapot->kelas_id, array_map('strval', $wali), true);
+                        if ($rapot->locked_at && ! $isWaliClass) {
+                            return $this->deny('Rapot dikunci wali kelas. Harap hubungi wali kelas untuk membuka kunci.', 423);
+                        }
+                        if (! $isWaliClass && ! $this->guruCanTeachMapelInKelas($userId, (string) $rapot->kelas_id, $mapel)) {
+                            return $this->deny('Mapel rapot bukan mapel yang Anda ampu di kelas ini', 403);
+                        }
+                    }
 
-                    $this->mapPayload($payload, function ($row) {
+                    $this->mapPayload($payload, function ($row) use ($userId) {
                         $row = $this->filterPayload($row, [
                             'id',
                             'rapot_id',
@@ -2405,9 +2434,18 @@ class DbController extends ApiController
                             'nilai',
                             'predikat',
                             'keterangan',
+                            'source',
+                            'sent_by',
+                            'sent_at',
                             'created_at',
                             'updated_at',
                         ]);
+                        if (! isset($row['sent_by']) && (($row['source'] ?? null) === 'laporan_mapel')) {
+                            $row['sent_by'] = $userId;
+                        }
+                        if (! isset($row['sent_at']) && (($row['source'] ?? null) === 'laporan_mapel')) {
+                            $row['sent_at'] = now();
+                        }
                         $row['updated_at'] = now();
                         if (! isset($row['created_at'])) {
                             $row['created_at'] = now();
