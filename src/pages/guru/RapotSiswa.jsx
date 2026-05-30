@@ -334,13 +334,16 @@ export default function RapotSiswa() {
               .select('id, rapot_id, nomor, mapel, kkm, nilai, predikat, keterangan, created_at, updated_at')
               .in('rapot_id', rapotIds)
               .order('nomor')
-            if (itemError) throw itemError
-            ;(itemRows || []).forEach((row) => {
-              const key = String(row.rapot_id || '')
-              if (!key) return
-              if (!itemsByRapotId[key]) itemsByRapotId[key] = []
-              itemsByRapotId[key].push(row)
-            })
+            if (itemError) {
+              console.warn('Gagal memuat detail item rapot, daftar tetap ditampilkan:', itemError)
+            } else {
+              ;(itemRows || []).forEach((row) => {
+                const key = String(row.rapot_id || '')
+                if (!key) return
+                if (!itemsByRapotId[key]) itemsByRapotId[key] = []
+                itemsByRapotId[key].push(row)
+              })
+            }
           }
 
           return {
@@ -395,7 +398,11 @@ export default function RapotSiswa() {
         .select('*')
         .eq('rapot_id', rapot.id)
         .order('nomor')
-      if (error) throw error
+      if (error) {
+        console.warn('Gagal memuat detail rapot, memakai daftar mapel default:', error)
+        setRapotRows(makeDefaultRapotRows())
+        return
+      }
       const savedItems = data || []
       if (!savedItems.length) {
         setRapotRows(makeDefaultRapotRows())

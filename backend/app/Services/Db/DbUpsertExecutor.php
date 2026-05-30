@@ -144,7 +144,16 @@ class DbUpsertExecutor
                     && $column !== 'created_at'
             ));
         }
-        if (in_array($table, ['absensi', 'absensi_settings', 'absensi_scan_temp'], true) && ! empty($uniqueBy)) {
+        $manualFallbackTables = [
+            'absensi',
+            'absensi_settings',
+            'absensi_scan_temp',
+            'guru_mapel_manual_nilai',
+            'rapot_siswa',
+            'rapot_siswa_items',
+        ];
+
+        if (in_array($table, $manualFallbackTables, true) && ! empty($uniqueBy)) {
             $resolved = [];
             try {
                 DB::table($table)->upsert($rows, $uniqueBy, $updateColumns);
