@@ -174,6 +174,35 @@ export default function LaporanRekap() {
   const [selectedEskulRowId, setSelectedEskulRowId] = useState(null)
   const [selectedDetailNilaiRowKey, setSelectedDetailNilaiRowKey] = useState(null)
 
+  const getMapelManualPreview = useCallback((row) => {
+    if (!row || !mapelReportData) {
+      return {
+        manualScore: null,
+        manualWeighted: 0,
+        nilaiAkhir: row?.nilaiAkhir ?? null,
+        invalid: false
+      }
+    }
+
+    const draft = mapelManualDrafts[row.id] || {}
+    const hasDraftValue = draft.nilai_manual !== '' && draft.nilai_manual !== null && draft.nilai_manual !== undefined
+    const manualScore = hasDraftValue ? toNumberOrNull(draft.nilai_manual) : null
+    const invalid = hasDraftValue && (manualScore == null || manualScore < 0 || manualScore > 100)
+    const sisaBobot = Number(mapelReportData.sisaBobot || 0)
+    const manualWeighted = !invalid && manualScore != null && sisaBobot > 0
+      ? manualScore * sisaBobot / 100
+      : 0
+    const baseScore = Number(row.baseScore || 0)
+    const hasAnyScore = row.hasAnyScore || (manualScore != null && !invalid)
+
+    return {
+      manualScore,
+      manualWeighted,
+      nilaiAkhir: hasAnyScore ? round2(baseScore + manualWeighted) : null,
+      invalid
+    }
+  }, [mapelManualDrafts, mapelReportData])
+
   // Pencarian siswa di tab Absensi
   const [searchNama, setSearchNama] = useState('')
   const [searchRekapWali, setSearchRekapWali] = useState('')
@@ -940,6 +969,8 @@ export default function LaporanRekap() {
           quizUts: utsAvg,
           quizUas: uasAvg,
           nilaiManual: manualScore,
+          baseScore: round2(componentScore),
+          hasAnyScore,
           nilaiAkhir: hasAnyScore ? totalWeighted : null,
           manualRow,
           catatan: manualRow?.catatan || ''
@@ -3924,13 +3955,14 @@ export default function LaporanRekap() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 p-4 border-b border-slate-100">
+            <div className="grid grid-cols-2 xl:grid-cols-6 gap-3 p-4 border-b border-slate-100">
               {[
                 ['Siswa', mapelReportData.totals.siswa],
                 [`Tugas/PR (${mapelReportData.bobot.bobot_tugas_pr}%)`, mapelReportData.totals.tugas],
                 [`Quiz Reguler (${mapelReportData.bobot.bobot_quiz_reguler}%)`, mapelReportData.totals.quizReguler],
-                [`UTS/UAS (${mapelReportData.bobot.bobot_quiz_uts}%/${mapelReportData.bobot.bobot_quiz_uas}%)`, `${mapelReportData.totals.quizUts}/${mapelReportData.totals.quizUas}`],
-                [`Sisa Manual (${mapelReportData.sisaBobot}%)`, mapelReportData.sisaBobot > 0 ? 'Aktif' : 'Tidak ada']
+                [`Quiz UTS (${mapelReportData.bobot.bobot_quiz_uts}%)`, mapelReportData.totals.quizUts],
+                [`Quiz UAS (${mapelReportData.bobot.bobot_quiz_uas}%)`, mapelReportData.totals.quizUas],
+                [`Tambahan Manual (${mapelReportData.sisaBobot}%)`, mapelReportData.sisaBobot > 0 ? 'Bisa diisi' : 'Tidak ada']
               ].map(([label, value]) => (
                 <div key={label} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                   <div className="text-xs font-semibold text-slate-500">{label}</div>
@@ -3945,11 +3977,11 @@ export default function LaporanRekap() {
                   <tr>
                     <th className="px-4 py-3 text-left">Siswa</th>
                     <th className="px-4 py-3 text-center">NIS</th>
-                    <th className="px-4 py-3 text-center">Tugas/PR</th>
-                    <th className="px-4 py-3 text-center">Quiz Reguler</th>
-                    <th className="px-4 py-3 text-center">Quiz UTS</th>
-                    <th className="px-4 py-3 text-center">Quiz UAS</th>
-                    <th className="px-4 py-3 text-center min-w-[180px]">Tambahan Manual</th>
+                    <th className="px-4 py-3 text-center">Tugas/PR ({mapelReportData.bobot.bobot_tugas_pr}%)</th>
+                    <th className="px-4 py-3 text-center">Quiz Reguler ({mapelReportData.bobot.bobot_quiz_reguler}%)</th>
+                    <th className="px-4 py-3 text-center">Quiz UTS ({mapelReportData.bobot.bobot_quiz_uts}%)</th>
+                    <th className="px-4 py-3 text-center">Quiz UAS ({mapelReportData.bobot.bobot_quiz_uas}%)</th>
+                    <th className="px-4 py-3 text-center min-w-[180px]">Tambahan Manual ({mapelReportData.sisaBobot}%)</th>
                     <th className="px-4 py-3 text-center">Nilai Akhir</th>
                     <th className="px-4 py-3 text-center print:hidden">Aksi</th>
                   </tr>
@@ -3957,6 +3989,8 @@ export default function LaporanRekap() {
                 <tbody className="divide-y divide-slate-100">
                   {mapelReportData.rows.map((row) => {
                     const draft = mapelManualDrafts[row.id] || {}
+                    const manualPreview = getMapelManualPreview(row)
+                    const manualDisabled = Number(mapelReportData.sisaBobot || 0) <= 0
                     return (
                       <tr key={row.id} className="hover:bg-slate-50">
                         <td className="px-4 py-3 font-semibold text-slate-900">{row.nama}</td>
@@ -3975,14 +4009,16 @@ export default function LaporanRekap() {
                               min="0"
                               max="100"
                               step="0.01"
-                              disabled={mapelReportData.sisaBobot <= 0}
+                              disabled={manualDisabled}
                               value={draft.nilai_manual ?? ''}
                               onChange={(e) => setMapelManualDrafts((prev) => ({
                                 ...prev,
                                 [row.id]: { ...(prev[row.id] || {}), nilai_manual: e.target.value }
                               }))}
-                              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-100"
-                              placeholder="0-100"
+                              className={`w-full rounded-lg border px-3 py-2 text-sm disabled:bg-slate-100 ${
+                                manualPreview.invalid ? 'border-red-300 bg-red-50 text-red-700' : 'border-slate-300'
+                              }`}
+                              placeholder={manualDisabled ? 'Bobot penuh' : '0-100'}
                             />
                             <input
                               type="text"
@@ -3994,17 +4030,26 @@ export default function LaporanRekap() {
                               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs"
                               placeholder="Catatan opsional"
                             />
+                            {manualDisabled ? (
+                              <span className="text-[11px] text-slate-500">Total bobot sudah 100%, nilai manual tidak dipakai.</span>
+                            ) : (
+                              <span className="text-[11px] text-slate-500">
+                                Bobot manual {mapelReportData.sisaBobot}% {manualPreview.manualScore != null && !manualPreview.invalid
+                                  ? `= +${round2(manualPreview.manualWeighted)} poin`
+                                  : ''}
+                              </span>
+                            )}
                           </div>
                         </td>
                         <td className="px-4 py-3 text-center">
-                          <span className={`inline-flex min-w-[64px] justify-center rounded-lg border px-2 py-1 text-sm font-bold ${getNilaiToneClass(row.nilaiAkhir)}`}>
-                            {row.nilaiAkhir ?? '-'}
+                          <span className={`inline-flex min-w-[64px] justify-center rounded-lg border px-2 py-1 text-sm font-bold ${getNilaiToneClass(manualPreview.nilaiAkhir)}`}>
+                            {manualPreview.nilaiAkhir ?? '-'}
                           </span>
                         </td>
                         <td className="px-4 py-3 text-center print:hidden">
                           <button
                             type="button"
-                            disabled={savingMapelManualId === row.id || mapelReportData.sisaBobot <= 0}
+                            disabled={savingMapelManualId === row.id || manualDisabled || manualPreview.invalid}
                             onClick={() => handleSaveMapelManual(row)}
                             className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
                           >

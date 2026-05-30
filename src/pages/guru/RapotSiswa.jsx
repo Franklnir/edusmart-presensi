@@ -196,7 +196,7 @@ export default function RapotSiswa() {
           query: supabase
             .from('jadwal')
             .select('mapel, kelas_id')
-            .eq('kelas_id', selectedKelas)
+            .in('kelas_id', aliases)
         }
       ])
       const rapotResult = batch.data?.rapot
@@ -224,7 +224,7 @@ export default function RapotSiswa() {
       setStudents(nextStudents)
       let nextJadwalRows = jadwalRows || []
       let mapels = Array.from(new Set((nextJadwalRows || [])
-        .filter((row) => String(row.kelas_id || '') === String(selectedKelas))
+        .filter((row) => aliasSet.has(normalizeKelasKey(row.kelas_id)))
         .map((row) => String(row.mapel || '').trim())
         .filter(Boolean)))
         .sort((a, b) => a.localeCompare(b, 'id'))
@@ -293,7 +293,19 @@ export default function RapotSiswa() {
         .eq('rapot_id', rapot.id)
         .order('nomor')
       if (error) throw error
-      setRapotRows((data || []).map((row) => ({
+      const savedItems = data || []
+      if (!savedItems.length) {
+        setRapotRows((mapelOptions.length ? mapelOptions : ['']).map((mapel, index) => ({
+          id: makeLocalId(),
+          nomor: index + 1,
+          mapel,
+          kkm: 75,
+          nilai: '',
+          keterangan: ''
+        })))
+        return
+      }
+      setRapotRows(savedItems.map((row) => ({
         id: row.id,
         nomor: row.nomor,
         mapel: row.mapel,
@@ -334,6 +346,10 @@ export default function RapotSiswa() {
     })
     if (invalid) {
       pushToast('error', 'Nilai dan KKM harus berada di rentang 0 sampai 100.')
+      return
+    }
+    if (!rapotRows.some((row) => String(row.mapel || '').trim())) {
+      pushToast('error', 'Minimal satu mapel harus diisi sebelum menyimpan rapot.')
       return
     }
 
@@ -388,15 +404,28 @@ export default function RapotSiswa() {
           updated_at: nowIso,
           created_at: row.created_at || nowIso
         }))
-      if (itemPayloads.length) {
-        const { error: itemsError } = await supabase
-          .from('rapot_siswa_items')
-          .upsert(itemPayloads, { onConflict: 'tenant_id,rapot_id,nomor' })
-        if (itemsError) throw itemsError
+      if (!itemPayloads.length) {
+        pushToast('error', 'Minimal satu mapel harus diisi sebelum menyimpan rapot.')
+        return
       }
+      const { error: itemsError } = await supabase
+        .from('rapot_siswa_items')
+        .upsert(itemPayloads, { onConflict: 'tenant_id,rapot_id,nomor' })
+      if (itemsError) throw itemsError
       pushToast('success', 'Rapot siswa berhasil disimpan.')
+      setRapotIndex((prev) => ({
+        ...prev,
+        [`${activeModal.student.id}|${activeModal.type}`]: {
+          ...existingRapot,
+          ...rapotPayload,
+          id: rapotId
+        }
+      }))
       setActiveModal(null)
-      await loadClassData()
+      loadClassData().catch((refreshError) => {
+        console.error(refreshError)
+        pushToast('warning', 'Rapot sudah tersimpan. Daftar akan diperbarui saat halaman dimuat ulang.')
+      })
     } catch (error) {
       console.error(error)
       pushToast('error', error?.message || 'Gagal menyimpan rapot siswa.')
