@@ -148,6 +148,7 @@ class DbUpsertExecutor
             'absensi',
             'absensi_settings',
             'absensi_scan_temp',
+            'guru_mapel_bobot',
             'guru_mapel_manual_nilai',
             'rapot_siswa',
             'rapot_siswa_items',

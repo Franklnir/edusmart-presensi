@@ -929,7 +929,7 @@ export default function LaporanRekap() {
           query: supabase
             .from('rapot_siswa')
             .select('id, siswa_id, kelas_id, jenis, semester, tahun_pelajaran, locked_at')
-            .eq('kelas_id', selectedKelas)
+            .in('kelas_id', kelasAliases)
             .eq('jenis', mapelRapotTargetType)
             .eq('tahun_pelajaran', tahunAjaran)
             .in('siswa_id', studentIds)
@@ -1143,10 +1143,11 @@ export default function LaporanRekap() {
     user?.id
   ])
 
-  const handleSendMapelToWali = useCallback(async () => {
+  const handleSendMapelToWali = useCallback(async (targetRows = null) => {
     if (!user?.id || !mapelReportData?.rows?.length || !selectedKelas || !selectedMapel) return
 
-    const rowsToSend = mapelReportData.rows
+    const sourceRows = Array.isArray(targetRows) && targetRows.length ? targetRows : mapelReportData.rows
+    const rowsToSend = sourceRows
       .map((row) => ({ row, preview: getMapelManualPreview(row) }))
       .filter(({ preview }) => preview.nilaiAkhir != null && !preview.invalid)
 
@@ -1155,7 +1156,7 @@ export default function LaporanRekap() {
       return
     }
 
-    const lockedRows = mapelReportData.rows.filter((row) => row.rapotLocked)
+    const lockedRows = sourceRows.filter((row) => row.rapotLocked)
     if (lockedRows.length) {
       pushToast('error', 'Rapot dikunci wali kelas. Harap hubungi wali kelas untuk membuka kunci.')
       return
@@ -1164,6 +1165,13 @@ export default function LaporanRekap() {
     const nowIso = new Date().toISOString()
     const tahunAjaran = mapelReportData.tahunAjaran || selectedTahunAjaran || reportPeriod.tahunAjaran
     const semesterLabel = selectedSemester || reportPeriod.semester || 'Genap'
+    const kelasNama = getNamaKelasFromList(selectedKelas, kelasList)
+    const kelasAliases = Array.from(new Set([
+      String(selectedKelas || '').trim(),
+      String(kelasNama || '').trim(),
+      String(kelasNama || '').trim().replace(/\s+/g, '-'),
+      String(kelasNama || '').trim().replace(/-/g, ' ')
+    ].filter(Boolean)))
 
     try {
       setSendingMapelToWali(true)
@@ -1197,7 +1205,7 @@ export default function LaporanRekap() {
       const { data: savedRapots, error: savedRapotsError } = await supabase
         .from('rapot_siswa')
         .select('id, siswa_id, locked_at')
-        .eq('kelas_id', selectedKelas)
+        .in('kelas_id', kelasAliases)
         .eq('jenis', mapelRapotTargetType)
         .eq('tahun_pelajaran', tahunAjaran)
         .in('siswa_id', rowsToSend.map(({ row }) => row.id))
@@ -1255,7 +1263,7 @@ export default function LaporanRekap() {
         .upsert(itemPayloads, { onConflict: 'tenant_id,rapot_id,nomor' })
       if (itemsError) throw itemsError
 
-      pushToast('success', `${itemPayloads.length} nilai ${selectedMapel} dikirim ke wali kelas.`)
+      pushToast('success', `${itemPayloads.length} nilai ${selectedMapel} dikirim ke Rapot ${String(mapelRapotTargetType).toUpperCase()}.`)
       await loadLaporanMapel()
     } catch (error) {
       console.error(error)
@@ -1271,6 +1279,7 @@ export default function LaporanRekap() {
     pushToast,
     reportPeriod.semester,
     reportPeriod.tahunAjaran,
+    kelasList,
     selectedKelas,
     selectedMapel,
     selectedSemester,
@@ -4159,8 +4168,8 @@ export default function LaporanRekap() {
                   {sendingMapelToWali
                     ? 'Mengirim...'
                     : mapelReportData.rows?.some((row) => row.sentToWali)
-                      ? 'Kirim Ulang ke Wali Kelas'
-                      : 'Kirim ke Wali Kelas'}
+                      ? 'Kirim Ulang Semua'
+                      : 'Kirim Semua'}
                 </button>
                 <button
                   type="button"
@@ -4275,14 +4284,24 @@ export default function LaporanRekap() {
                           )}
                         </td>
                         <td className="px-4 py-3 text-center print:hidden">
-                          <button
-                            type="button"
-                            disabled={savingMapelManualId === row.id || manualDisabled || manualPreview.invalid}
-                            onClick={() => handleSaveMapelManual(row)}
-                            className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
-                          >
-                            {savingMapelManualId === row.id ? 'Simpan...' : 'Simpan'}
-                          </button>
+                          <div className="flex flex-col items-center gap-2">
+                            <button
+                              type="button"
+                              disabled={savingMapelManualId === row.id || manualDisabled || manualPreview.invalid}
+                              onClick={() => handleSaveMapelManual(row)}
+                              className="w-full min-w-[92px] rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                            >
+                              {savingMapelManualId === row.id ? 'Simpan...' : 'Simpan'}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={sendingMapelToWali || manualPreview.nilaiAkhir == null || manualPreview.invalid || row.rapotLocked}
+                              onClick={() => handleSendMapelToWali([row])}
+                              className="w-full min-w-[92px] rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
+                            >
+                              {row.sentToWali ? `Kirim Ulang ${String(mapelRapotTargetType).toUpperCase()}` : `Kirim ${String(mapelRapotTargetType).toUpperCase()}`}
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     )

@@ -733,13 +733,7 @@ class DbController extends ApiController
                     return true;
                 }
                 if ($this->isGuru($request)) {
-                    $wali = $this->guruWaliKelasIds($userId);
-                    $query->where(function ($scope) use ($userId, $wali) {
-                        $scope->where('guru_id', $userId);
-                        if (! empty($wali)) {
-                            $scope->orWhereIn('kelas_id', $wali);
-                        }
-                    });
+                    $query->where('guru_id', $userId);
 
                     return true;
                 }
@@ -2268,14 +2262,12 @@ class DbController extends ApiController
             if ($this->isGuru($request)) {
                 $wali = $this->guruWaliKelasIds($userId);
                 $kelasAmpu = $this->guruRapotKelasIds($userId);
-                $query->where(function ($scope) use ($wali, $kelasAmpu, $userId) {
-                    if (! empty($wali)) {
-                        $scope->whereIn('kelas_id', $wali);
+                $kelasAllowed = $this->expandKelasAccessValues(array_merge($wali, $kelasAmpu));
+                $query->where(function ($scope) use ($kelasAllowed, $userId) {
+                    if (! empty($kelasAllowed)) {
+                        $scope->whereIn('kelas_id', $kelasAllowed);
                     } else {
                         $scope->whereRaw('1 = 0');
-                    }
-                    if (! empty($kelasAmpu)) {
-                        $scope->orWhereIn('kelas_id', $kelasAmpu);
                     }
                     $scope->orWhere('created_by', $userId)
                         ->orWhere('updated_by', $userId);
@@ -2283,12 +2275,10 @@ class DbController extends ApiController
 
                 if (in_array($action, ['insert', 'upsert'], true)) {
                     $rows = $this->normalizeRows($payload);
+                    $kelasAllowedKeys = $this->normalizeKelasAccessValues(array_merge($wali, $kelasAmpu));
                     foreach ($rows as $row) {
                         $kelasId = (string) ($row['kelas_id'] ?? '');
-                        if (
-                            ! in_array($kelasId, array_map('strval', $wali), true) &&
-                            ! in_array($kelasId, array_map('strval', $kelasAmpu), true)
-                        ) {
+                        if (! in_array($this->normalizeKelasAccessValue($kelasId), $kelasAllowedKeys, true)) {
                             return $this->deny('Kelas rapot bukan kelas wali atau kelas mengajar Anda', 403);
                         }
                     }
@@ -2358,18 +2348,17 @@ class DbController extends ApiController
             if ($this->isGuru($request)) {
                 $wali = $this->guruWaliKelasIds($userId);
                 $kelasAmpu = $this->guruRapotKelasIds($userId);
+                $kelasAllowed = $this->expandKelasAccessValues(array_merge($wali, $kelasAmpu));
+                $waliKeys = $this->normalizeKelasAccessValues($wali);
 
-                $query->whereIn('rapot_id', function ($q) use ($wali, $kelasAmpu, $userId, $tenantId) {
+                $query->whereIn('rapot_id', function ($q) use ($kelasAllowed, $userId, $tenantId) {
                     $q->select('id')
                         ->from('rapot_siswa')
-                        ->where(function ($owner) use ($wali, $kelasAmpu, $userId) {
-                            if (! empty($wali)) {
-                                $owner->whereIn('kelas_id', $wali);
+                        ->where(function ($owner) use ($kelasAllowed, $userId) {
+                            if (! empty($kelasAllowed)) {
+                                $owner->whereIn('kelas_id', $kelasAllowed);
                             } else {
                                 $owner->whereRaw('1 = 0');
-                            }
-                            if (! empty($kelasAmpu)) {
-                                $owner->orWhereIn('kelas_id', $kelasAmpu);
                             }
                             $owner->orWhere('created_by', $userId)
                                 ->orWhere('updated_by', $userId);
@@ -2391,14 +2380,11 @@ class DbController extends ApiController
 
                     $allowedRapotRows = DB::table('rapot_siswa')
                         ->whereIn('id', $rapotIds)
-                        ->where(function ($owner) use ($wali, $kelasAmpu, $userId) {
-                            if (! empty($wali)) {
-                                $owner->whereIn('kelas_id', $wali);
+                        ->where(function ($owner) use ($kelasAllowed, $userId) {
+                            if (! empty($kelasAllowed)) {
+                                $owner->whereIn('kelas_id', $kelasAllowed);
                             } else {
                                 $owner->whereRaw('1 = 0');
-                            }
-                            if (! empty($kelasAmpu)) {
-                                $owner->orWhereIn('kelas_id', $kelasAmpu);
                             }
                             $owner->orWhere('created_by', $userId)
                                 ->orWhere('updated_by', $userId);
@@ -2415,7 +2401,7 @@ class DbController extends ApiController
                             return $this->deny('Rapot tidak ditemukan', 404);
                         }
                         $mapel = (string) ($row['mapel'] ?? '');
-                        $isWaliClass = in_array((string) $rapot->kelas_id, array_map('strval', $wali), true);
+                        $isWaliClass = in_array($this->normalizeKelasAccessValue($rapot->kelas_id), $waliKeys, true);
                         if ($rapot->locked_at && ! $isWaliClass) {
                             return $this->deny('Rapot dikunci wali kelas. Harap hubungi wali kelas untuk membuka kunci.', 423);
                         }
@@ -4498,6 +4484,16 @@ class DbController extends ApiController
             }
         }
 
+        if ($this->isSelectableColumn('tugas', 'kelas') && $this->isSelectableColumn('tugas', 'created_by')) {
+            $tugasKelasQuery = DB::table('tugas')->where('created_by', $userId);
+            $this->applyTenantFilter($tugasKelasQuery);
+            foreach ($tugasKelasQuery->distinct()->pluck('kelas')->all() as $kelasId) {
+                if ($kelasId !== null && trim((string) $kelasId) !== '') {
+                    $kelas[] = $kelasId;
+                }
+            }
+        }
+
         if ($this->isSelectableColumn('quizzes', 'kelas_id') && $this->isSelectableColumn('quizzes', 'guru_id')) {
             $quizQuery = DB::table('quizzes')->where('guru_id', $userId);
             $this->applyTenantFilter($quizQuery);
@@ -4509,6 +4505,73 @@ class DbController extends ApiController
         }
 
         return array_values(array_unique(array_map('strval', array_filter($kelas, fn ($kelasId) => trim((string) $kelasId) !== ''))));
+    }
+
+    private function normalizeKelasAccessValue($value): string
+    {
+        $normalized = strtolower($this->normalizeWhitespace(str_replace('-', ' ', (string) $value)));
+
+        return $normalized;
+    }
+
+    private function normalizeKelasAccessValues(array $values): array
+    {
+        return array_values(array_unique(array_filter(array_map(
+            fn ($value) => $this->normalizeKelasAccessValue($value),
+            $this->expandKelasAccessValues($values)
+        ))));
+    }
+
+    private function expandKelasAccessValues(array $values): array
+    {
+        $rawValues = array_values(array_unique(array_filter(array_map(
+            fn ($value) => trim((string) $value),
+            $values
+        ))));
+        if (empty($rawValues)) {
+            return [];
+        }
+
+        $expanded = [];
+        foreach ($rawValues as $value) {
+            $expanded[] = $value;
+            $expanded[] = str_replace('-', ' ', $value);
+            $expanded[] = str_replace(' ', '-', $value);
+        }
+
+        if (Schema::hasTable('kelas')) {
+            $kelasQuery = DB::table('kelas');
+            $this->applyTenantFilter($kelasQuery);
+            $kelasRows = $kelasQuery
+                ->where(function ($query) use ($rawValues) {
+                    $query->whereIn('id', $rawValues);
+                    if ($this->isSelectableColumn('kelas', 'nama')) {
+                        $query->orWhereIn('nama', $rawValues);
+                    }
+                })
+                ->get(['id', 'nama', 'grade', 'suffix']);
+
+            foreach ($kelasRows as $kelas) {
+                foreach ([
+                    $kelas->id ?? null,
+                    $kelas->nama ?? null,
+                    trim((string) (($kelas->grade ?? '').' '.($kelas->suffix ?? ''))),
+                ] as $alias) {
+                    $alias = trim((string) $alias);
+                    if ($alias === '') {
+                        continue;
+                    }
+                    $expanded[] = $alias;
+                    $expanded[] = str_replace('-', ' ', $alias);
+                    $expanded[] = str_replace(' ', '-', $alias);
+                }
+            }
+        }
+
+        return array_values(array_unique(array_filter(array_map(
+            fn ($value) => trim((string) $value),
+            $expanded
+        ))));
     }
 
     private function guruQuizIdsForWali(string $userId): array
@@ -5359,10 +5422,11 @@ class DbController extends ApiController
         if ($kelasId === '' || $mapelNeedle === '') {
             return false;
         }
+        $kelasNeedles = $this->normalizeKelasAccessValues([$kelasId]);
 
         $jadwalQuery = DB::table('jadwal')
             ->where('guru_id', $guruId)
-            ->where('kelas_id', $kelasId);
+            ->whereIn('kelas_id', $this->expandKelasAccessValues([$kelasId]));
         $this->applyTenantFilter($jadwalQuery);
         $mapelRows = $jadwalQuery->pluck('mapel')->filter()->all();
 
@@ -5375,7 +5439,7 @@ class DbController extends ApiController
         if ($this->isSelectableColumn('tugas', 'kelas_id') && $this->isSelectableColumn('tugas', 'mapel') && $this->isSelectableColumn('tugas', 'created_by')) {
             $tugasQuery = DB::table('tugas')
                 ->where('created_by', $guruId)
-                ->where('kelas_id', $kelasId)
+                ->whereIn('kelas_id', $this->expandKelasAccessValues([$kelasId]))
                 ->whereNotNull('mapel');
             $this->applyTenantFilter($tugasQuery);
             foreach ($tugasQuery->distinct()->pluck('mapel')->all() as $mapelRow) {
@@ -5385,10 +5449,25 @@ class DbController extends ApiController
             }
         }
 
+        if ($this->isSelectableColumn('tugas', 'kelas') && $this->isSelectableColumn('tugas', 'mapel') && $this->isSelectableColumn('tugas', 'created_by')) {
+            $tugasKelasQuery = DB::table('tugas')
+                ->where('created_by', $guruId)
+                ->whereNotNull('mapel');
+            $this->applyTenantFilter($tugasKelasQuery);
+            foreach ($tugasKelasQuery->distinct()->get(['kelas', 'mapel']) as $row) {
+                if (
+                    in_array($this->normalizeKelasAccessValue($row->kelas ?? ''), $kelasNeedles, true) &&
+                    strtolower(trim((string) ($row->mapel ?? ''))) === $mapelNeedle
+                ) {
+                    return true;
+                }
+            }
+        }
+
         if ($this->isSelectableColumn('quizzes', 'kelas_id') && $this->isSelectableColumn('quizzes', 'mapel') && $this->isSelectableColumn('quizzes', 'guru_id')) {
             $quizQuery = DB::table('quizzes')
                 ->where('guru_id', $guruId)
-                ->where('kelas_id', $kelasId)
+                ->whereIn('kelas_id', $this->expandKelasAccessValues([$kelasId]))
                 ->whereNotNull('mapel');
             $this->applyTenantFilter($quizQuery);
             foreach ($quizQuery->distinct()->pluck('mapel')->all() as $mapelRow) {
