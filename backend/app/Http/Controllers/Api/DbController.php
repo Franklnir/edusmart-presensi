@@ -2277,8 +2277,12 @@ class DbController extends ApiController
                     $rows = $this->normalizeRows($payload);
                     $kelasAllowedKeys = $this->normalizeKelasAccessValues(array_merge($wali, $kelasAmpu));
                     foreach ($rows as $row) {
+                        if (! is_array($row)) {
+                            continue;
+                        }
                         $kelasId = (string) ($row['kelas_id'] ?? '');
-                        if (! in_array($this->normalizeKelasAccessValue($kelasId), $kelasAllowedKeys, true)) {
+                        $isAllowedClass = in_array($this->normalizeKelasAccessValue($kelasId), $kelasAllowedKeys, true);
+                        if (! $isAllowedClass && ! $this->guruCanManageRapotRow($userId, $row)) {
                             return $this->deny('Kelas rapot bukan kelas wali atau kelas mengajar Anda', 403);
                         }
                     }
@@ -5485,6 +5489,90 @@ class DbController extends ApiController
                 if (strtolower(trim((string) $mapelRow)) === $mapelNeedle) {
                     return true;
                 }
+            }
+        }
+
+        return false;
+    }
+
+    private function guruCanManageRapotRow(string $guruId, array $row): bool
+    {
+        $kelasId = trim((string) ($row['kelas_id'] ?? ''));
+        $siswaId = trim((string) ($row['siswa_id'] ?? ''));
+        if ($guruId === '' || $kelasId === '' || $siswaId === '') {
+            return false;
+        }
+
+        $kelasAliases = $this->expandKelasAccessValues([$kelasId]);
+        $kelasKeys = $this->normalizeKelasAccessValues([$kelasId]);
+        if (empty($kelasAliases) || empty($kelasKeys) || ! Schema::hasTable('profiles')) {
+            return false;
+        }
+
+        $studentQuery = DB::table('profiles')->where('id', $siswaId);
+        $this->applyTenantFilterAllowingLegacyNull($studentQuery);
+        $student = $studentQuery->first(['id', 'role', 'kelas']);
+        if (! $student) {
+            return false;
+        }
+
+        $role = strtolower(trim((string) ($student->role ?? '')));
+        if ($role !== '' && $role !== 'siswa') {
+            return false;
+        }
+        if (! in_array($this->normalizeKelasAccessValue($student->kelas ?? ''), $kelasKeys, true)) {
+            return false;
+        }
+
+        if (Schema::hasTable('kelas_struktur')) {
+            $waliQuery = DB::table('kelas_struktur')
+                ->where('wali_guru_id', $guruId)
+                ->whereIn('kelas_id', $kelasAliases);
+            $this->applyTenantFilterAllowingLegacyNull($waliQuery);
+            if ($waliQuery->exists()) {
+                return true;
+            }
+        }
+
+        if (Schema::hasTable('jadwal')) {
+            $jadwalQuery = DB::table('jadwal')
+                ->where('guru_id', $guruId)
+                ->whereIn('kelas_id', $kelasAliases);
+            $this->applyTenantFilterAllowingLegacyNull($jadwalQuery);
+            if ($jadwalQuery->exists()) {
+                return true;
+            }
+        }
+
+        if ($this->isSelectableColumn('tugas', 'kelas_id') && $this->isSelectableColumn('tugas', 'created_by')) {
+            $tugasQuery = DB::table('tugas')
+                ->where('created_by', $guruId)
+                ->whereIn('kelas_id', $kelasAliases);
+            $this->applyTenantFilterAllowingLegacyNull($tugasQuery);
+            if ($tugasQuery->exists()) {
+                return true;
+            }
+        }
+
+        if ($this->isSelectableColumn('tugas', 'kelas') && $this->isSelectableColumn('tugas', 'created_by')) {
+            $tugasKelasQuery = DB::table('tugas')
+                ->where('created_by', $guruId)
+                ->whereNotNull('kelas');
+            $this->applyTenantFilterAllowingLegacyNull($tugasKelasQuery);
+            foreach ($tugasKelasQuery->distinct()->pluck('kelas')->all() as $kelas) {
+                if (in_array($this->normalizeKelasAccessValue($kelas), $kelasKeys, true)) {
+                    return true;
+                }
+            }
+        }
+
+        if ($this->isSelectableColumn('quizzes', 'kelas_id') && $this->isSelectableColumn('quizzes', 'guru_id')) {
+            $quizQuery = DB::table('quizzes')
+                ->where('guru_id', $guruId)
+                ->whereIn('kelas_id', $kelasAliases);
+            $this->applyTenantFilterAllowingLegacyNull($quizQuery);
+            if ($quizQuery->exists()) {
+                return true;
             }
         }
 

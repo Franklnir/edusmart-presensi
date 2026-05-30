@@ -36,6 +36,14 @@ const buildKelasAliases = (kelasId, kelasMeta) => {
   return Array.from(expanded)
 }
 
+const toArray = (value) => {
+  if (Array.isArray(value)) return value
+  if (Array.isArray(value?.data)) return value.data
+  if (Array.isArray(value?.rows)) return value.rows
+  if (Array.isArray(value?.items)) return value.items
+  return []
+}
+
 const getPredikat = (nilai, kkm = 75) => {
   const score = toNumberOrNull(nilai)
   const min = toNumberOrNull(kkm) ?? 75
@@ -88,8 +96,8 @@ export default function RapotSiswa() {
   )
 
   const applyClassData = useCallback((data) => {
-    setStudents(data?.students || [])
-    setMapelOptions(data?.mapels || [])
+    setStudents(toArray(data?.students ?? data?.siswa))
+    setMapelOptions(toArray(data?.mapels ?? data?.mapel))
     setRapotIndex(data?.rapotIndex || {})
     setRapotItemsByRapotId(data?.itemsByRapotId || {})
   }, [])
@@ -141,9 +149,11 @@ export default function RapotSiswa() {
       const cached = queryClient.getQueryData(rapotMasterQueryKey)
       setLoading(!cached)
       if (cached) {
-        setWaliKelasList(cached.kelas || [])
-        setWaliHistoryOptions(cached.options || [])
-        setSelectedContext((prev) => cached.options?.some((item) => item.key === prev) ? prev : (cached.options?.[0]?.key || ''))
+        const cachedKelas = toArray(cached.kelas)
+        const cachedOptions = toArray(cached.options)
+        setWaliKelasList(cachedKelas)
+        setWaliHistoryOptions(cachedOptions)
+        setSelectedContext((prev) => cachedOptions.some((item) => item.key === prev) ? prev : (cachedOptions[0]?.key || ''))
       }
 
       const masterData = await queryClient.fetchQuery({
@@ -161,8 +171,8 @@ export default function RapotSiswa() {
           ])
           if (strukturError) throw strukturError
           if (rapotHistoryError) throw rapotHistoryError
-          const activeKelasIds = (strukturRows || []).map((row) => row.kelas_id).filter(Boolean)
-          const historyKelasIds = (rapotHistoryRows || []).map((row) => row.kelas_id).filter(Boolean)
+          const activeKelasIds = toArray(strukturRows).map((row) => row.kelas_id).filter(Boolean)
+          const historyKelasIds = toArray(rapotHistoryRows).map((row) => row.kelas_id).filter(Boolean)
           const kelasIds = Array.from(new Set([...activeKelasIds, ...historyKelasIds].map(String).filter(Boolean)))
 
           if (!kelasIds.length) {
@@ -175,7 +185,7 @@ export default function RapotSiswa() {
             .in('id', kelasIds)
             .order('nama')
           if (kelasError) throw kelasError
-          const nextKelas = kelasRows || []
+          const nextKelas = toArray(kelasRows)
           const kelasById = new Map(nextKelas.map((kelas) => [String(kelas.id), kelas]))
           const optionMap = new Map()
           activeKelasIds.forEach((kelasId) => {
@@ -191,7 +201,7 @@ export default function RapotSiswa() {
               rapotCount: 0
             })
           })
-          ;(rapotHistoryRows || []).forEach((row) => {
+          toArray(rapotHistoryRows).forEach((row) => {
             const normalizedId = String(row.kelas_id || '')
             const year = String(row.tahun_pelajaran || '').trim()
             if (!normalizedId || !year) return
@@ -218,8 +228,8 @@ export default function RapotSiswa() {
         staleTime: 60 * 1000
       })
 
-      const nextKelas = masterData.kelas || []
-      const options = masterData.options || []
+      const nextKelas = toArray(masterData.kelas)
+      const options = toArray(masterData.options)
 
       if (!options.length) {
         setWaliKelasList([])
@@ -294,13 +304,13 @@ export default function RapotSiswa() {
           const mapelMasterResult = batch.data?.mapelMaster
           if (rapotResult?.error) throw rapotResult.error
           if (siswaResult?.error) throw siswaResult.error
-          const rapotRowsForPeriod = rapotResult?.data || []
+          const rapotRowsForPeriod = toArray(rapotResult?.data ?? rapotResult)
           const rapotStudentIds = Array.from(new Set(rapotRowsForPeriod.map((row) => row.siswa_id).filter(Boolean)))
-          const jadwalRows = jadwalResult?.error ? [] : (jadwalResult?.data || [])
+          const jadwalRows = jadwalResult?.error ? [] : toArray(jadwalResult?.data ?? jadwalResult)
 
           let nextStudents = selectedHistory?.status === 'riwayat'
             ? []
-            : (siswaResult?.data || []).filter((row) => aliasSet.has(normalizeKelasKey(row.kelas)))
+            : toArray(siswaResult?.data ?? siswaResult).filter((row) => aliasSet.has(normalizeKelasKey(row.kelas)))
           if ((selectedHistory?.status === 'riwayat' || !nextStudents.length) && rapotStudentIds.length) {
             const { data: historyStudents, error: historyStudentsError } = await supabase
               .from('profiles')
@@ -308,7 +318,7 @@ export default function RapotSiswa() {
               .in('id', rapotStudentIds)
               .order('nama')
             if (historyStudentsError) throw historyStudentsError
-            nextStudents = historyStudents || []
+            nextStudents = toArray(historyStudents)
           }
 
           let mapels = Array.from(new Set((jadwalRows || [])
@@ -317,14 +327,14 @@ export default function RapotSiswa() {
             .filter(Boolean)))
             .sort((a, b) => a.localeCompare(b, 'id'))
           if (!mapels.length && !mapelMasterResult?.error) {
-            mapels = Array.from(new Set((mapelMasterResult?.data || [])
+            mapels = Array.from(new Set(toArray(mapelMasterResult?.data ?? mapelMasterResult)
               .map((row) => String(row.nama || '').trim())
               .filter(Boolean)))
               .sort((a, b) => a.localeCompare(b, 'id'))
           }
 
           const nextIndex = {}
-          ;(rapotRowsForPeriod || []).forEach((row) => {
+          rapotRowsForPeriod.forEach((row) => {
             nextIndex[`${row.siswa_id}|${row.jenis}`] = row
           })
 
@@ -339,7 +349,7 @@ export default function RapotSiswa() {
             if (itemError) {
               console.warn('Gagal memuat detail item rapot, daftar tetap ditampilkan:', itemError)
             } else {
-              ;(itemRows || []).forEach((row) => {
+              toArray(itemRows).forEach((row) => {
                 const key = String(row.rapot_id || '')
                 if (!key) return
                 if (!itemsByRapotId[key]) itemsByRapotId[key] = []

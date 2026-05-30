@@ -78,6 +78,22 @@ const loadExcelLibrary = async () => {
   }
 }
 
+const toArray = (value) => {
+  if (Array.isArray(value)) return value
+  if (Array.isArray(value?.data)) return value.data
+  if (Array.isArray(value?.rows)) return value.rows
+  if (Array.isArray(value?.items)) return value.items
+  return []
+}
+
+const normalizeTeacherSummaryData = (data) => ({
+  ...(data || {}),
+  siswa: toArray(data?.siswa),
+  tugas: toArray(data?.tugas),
+  quiz: toArray(data?.quiz),
+  dateStrings: toArray(data?.dateStrings)
+})
+
 const getCurrentMonthValue = () => {
   const now = new Date()
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
@@ -716,11 +732,11 @@ export default function LaporanRekap() {
             throw aborted
           }
           if (error) throw error
-          return data
+          return normalizeTeacherSummaryData(data)
         },
         staleTime: 60 * 1000,
       })
-      startTransition(() => setAbsensiData(data))
+      startTransition(() => setAbsensiData(normalizeTeacherSummaryData(data)))
     } catch (e) {
       if (e?.code === 'REQUEST_ABORTED') return
       console.error(e)
@@ -757,11 +773,11 @@ export default function LaporanRekap() {
             throw aborted
           }
           if (error) throw error
-          return data
+          return normalizeTeacherSummaryData(data)
         },
         staleTime: 60 * 1000,
       })
-      startTransition(() => setTugasData(data))
+      startTransition(() => setTugasData(normalizeTeacherSummaryData(data)))
     } catch (e) {
       if (e?.code === 'REQUEST_ABORTED') return
       console.error(e)
@@ -797,11 +813,11 @@ export default function LaporanRekap() {
             throw aborted
           }
           if (error) throw error
-          return data
+          return normalizeTeacherSummaryData(data)
         },
         staleTime: 60 * 1000,
       })
-      startTransition(() => setQuizData(data))
+      startTransition(() => setQuizData(normalizeTeacherSummaryData(data)))
     } catch (e) {
       if (e?.code === 'REQUEST_ABORTED') return
       console.error(e)
