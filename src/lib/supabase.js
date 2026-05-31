@@ -2987,6 +2987,24 @@ const auth = {
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
+    async monitoringLogs(params = {}) {
+      const res = await apiFetch(`/api/super/monitoring/logs${buildQueryString(params)}`, {
+        method: 'GET',
+        cacheTtlMs: 3000,
+        staleKey: `super.monitoring-logs.${JSON.stringify(params || {})}`,
+        timeoutMs: 20000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async monitoringLogDetail(id) {
+      const res = await apiFetch(`/api/super/monitoring/logs/${encodeURIComponent(id)}`, {
+        method: 'GET',
+        cacheTtlMs: 3000,
+        staleKey: `super.monitoring-log.${id}`,
+        timeoutMs: 20000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
     async storageOverview() {
       const res = await apiFetch('/api/super/storage', {
         method: 'GET',

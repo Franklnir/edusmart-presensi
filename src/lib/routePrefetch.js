@@ -34,6 +34,7 @@ const routeLoaders = {
   '/admin/pengaturan': () => import('../pages/admin/pengaturan'),
   '/admin/monitoring': () => import('../pages/admin/SuperMonitoring'),
   '/admin/monitoring-server': () => import('../pages/admin/SuperServerMonitoring'),
+  '/admin/monitoring-log': () => import('../pages/admin/SuperMonitorLog'),
   '/admin/tenants': () => import('../pages/admin/Tenants'),
   '/admin/super-admins': () => import('../pages/admin/SuperAdmins'),
   '/admin/approvals': () => import('../pages/admin/Approvals'),

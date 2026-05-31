@@ -20,6 +20,7 @@ use App\Http\Controllers\Api\SettingsController;
 use App\Http\Controllers\Api\StorageController;
 use App\Http\Controllers\Api\StorageManagementController;
 use App\Http\Controllers\Api\SuperAdminController;
+use App\Http\Controllers\Api\SuperLogController;
 use App\Http\Controllers\Api\SuperPluginController;
 use App\Http\Controllers\Api\TugasController;
 use App\Http\Controllers\Api\WhatsAppController;
@@ -250,6 +251,8 @@ Route::middleware(['auth:sanctum', 'throttle:super', 'super.domain', 'super.admi
     Route::get('/super/tenants/{id}', [SuperAdminController::class, 'showTenant']);
     Route::get('/super/monitoring', [SuperAdminController::class, 'monitoringOverview']);
     Route::get('/super/monitoring/server', [SuperAdminController::class, 'serverMonitoring']);
+    Route::get('/super/monitoring/logs', [SuperLogController::class, 'index']);
+    Route::get('/super/monitoring/logs/{id}', [SuperLogController::class, 'show']);
     Route::get('/super/storage', [StorageManagementController::class, 'superOverview']);
     Route::post('/super/storage/object-storage/sync', [StorageManagementController::class, 'superObjectStorageSync']);
     Route::post('/super/storage/trash/purge-expired', [StorageManagementController::class, 'superPurgeExpiredTrash']);

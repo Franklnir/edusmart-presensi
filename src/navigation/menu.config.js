@@ -110,6 +110,7 @@ export const superAdminGroup = {
       items: [
         { id: 'super-monitoring', to: '/admin/monitoring', label: 'Monitoring', icon: 'signal' },
         { id: 'super-monitoring-server', to: '/admin/monitoring-server', label: 'Monitoring Server', icon: 'monitor' },
+        { id: 'super-monitoring-log', to: '/admin/monitoring-log', label: 'Monitor Log', icon: 'terminal' },
       ],
     },
     { id: 'super-tenants', to: '/admin/tenants', label: 'Sekolah', icon: 'school' },
