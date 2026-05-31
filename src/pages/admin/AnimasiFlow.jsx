@@ -22,52 +22,52 @@ function PageGate({ superAdminChecked, isSuperAdmin, children }) {
    Flow Data – EduSmart Process Flow
    ═══════════════════════════════════════════════ */
 const FLOW_NODES = [
-  // Auth
-  { id: 'login',        x: 50,   y: 350, label: '🔐 Autentikasi',   color: '#8b5cf6' },
-  { id: 'gateway',      x: 250,  y: 350, label: '🚦 Role Gateway',  color: '#6366f1' },
+  // Auth Layer
+  { id: 'login',        x: 40,   y: 380, label: '🔐 Autentikasi',   color: '#8b5cf6' },
+  { id: 'gateway',      x: 220,  y: 380, label: '🚦 Role Gateway',  color: '#6366f1' },
 
-  // SISWA (Top)
-  { id: 'siswa_dash',   x: 450,  y: 100, label: '👨‍🎓 Dash Siswa',   color: '#0ea5e9' },
-  { id: 'siswa_profil', x: 650,  y: 40,  label: '👤 Profil Siswa',  color: '#38bdf8' },
-  { id: 'siswa_absen',  x: 650,  y: 100, label: '📋 Absensi',       color: '#0ea5e9' },
-  { id: 'siswa_quiz',   x: 650,  y: 160, label: '🧠 Kerjakan Quiz', color: '#0ea5e9' },
-  { id: 'siswa_tugas',  x: 650,  y: 220, label: '✏️ Kumpul Tugas',  color: '#0ea5e9' },
+  // --- SISWA PATH ---
+  { id: 'siswa_dash',   x: 420,  y: 100, label: '👨‍🎓 Dash Siswa',   color: '#0ea5e9' },
+  { id: 'siswa_profil', x: 620,  y: 40,  label: '👤 Profil Siswa',  color: '#38bdf8' },
+  { id: 'siswa_absen',  x: 620,  y: 100, label: '📋 Absensi',       color: '#0ea5e9' },
+  { id: 'siswa_quiz',   x: 620,  y: 160, label: '🧠 Kerjakan Quiz', color: '#0ea5e9' },
+  { id: 'siswa_tugas',  x: 820,  y: 100, label: '✏️ Kumpul Tugas',  color: '#0ea5e9' },
 
-  // GURU (Mid-Top)
-  { id: 'guru_dash',    x: 450,  y: 350, label: '👨‍🏫 Dash Guru',   color: '#10b981' },
-  { id: 'guru_profil',  x: 650,  y: 280, label: '👤 Profil Guru',   color: '#34d399' },
-  { id: 'guru_jadwal',  x: 650,  y: 340, label: '📅 Jadwal Ajar',   color: '#10b981' },
-  { id: 'guru_absen',   x: 650,  y: 400, label: '✅ Cek Absensi',   color: '#10b981' },
-  { id: 'guru_quiz',    x: 650,  y: 460, label: '📝 Buat Quiz',     color: '#10b981' },
-  { id: 'guru_tugas',   x: 650,  y: 520, label: '📚 Buat Tugas',    color: '#10b981' },
-  { id: 'guru_laporan', x: 650,  y: 580, label: '📊 Laporan Nilai', color: '#059669' },
-  { id: 'guru_rapot',   x: 650,  y: 640, label: '🎓 Rapot (Wali)',  color: '#047857' },
+  // --- GURU PATH ---
+  { id: 'guru_dash',    x: 420,  y: 300, label: '👨‍🏫 Dash Guru',   color: '#10b981' },
+  { id: 'guru_profil',  x: 620,  y: 240, label: '👤 Profil Guru',   color: '#34d399' },
+  { id: 'guru_jadwal',  x: 620,  y: 300, label: '📅 Jadwal Ajar',   color: '#10b981' },
+  { id: 'guru_absen',   x: 620,  y: 360, label: '✅ Cek Absensi',   color: '#10b981' },
+  { id: 'guru_quiz',    x: 820,  y: 240, label: '📝 Buat Quiz',     color: '#10b981' },
+  { id: 'guru_tugas',   x: 820,  y: 300, label: '📚 Buat Tugas',    color: '#10b981' },
+  { id: 'guru_laporan', x: 820,  y: 360, label: '📊 Laporan Nilai', color: '#059669' },
+  { id: 'guru_rapot',   x: 1020, y: 300, label: '🎓 Rapot (Wali)',  color: '#047857' },
 
-  // ADMIN (Mid-Bottom)
-  { id: 'admin_dash',   x: 450,  y: 700, label: '💼 Dash Admin',    color: '#f59e0b' },
-  { id: 'admin_sekolah',x: 650,  y: 700, label: '🏫 Kelola Kelas',  color: '#fbbf24' },
-  { id: 'admin_users',  x: 650,  y: 760, label: '👥 Kelola Users',  color: '#fbbf24' },
-  { id: 'admin_scan',   x: 650,  y: 820, label: '📱 Scan Absensi',  color: '#f59e0b' },
-  { id: 'admin_sertif', x: 650,  y: 880, label: '🏆 Sertifikat',    color: '#d97706' },
-  { id: 'admin_set',    x: 650,  y: 940, label: '⚙️ Pengaturan',    color: '#b45309' },
-  { id: 'admin_wa',     x: 650,  y: 1000,label: '💬 WhatsApp',      color: '#b45309' },
+  // --- ADMIN PATH ---
+  { id: 'admin_dash',   x: 420,  y: 500, label: '💼 Dash Admin',    color: '#f59e0b' },
+  { id: 'admin_sekolah',x: 620,  y: 440, label: '🏫 Kelola Kelas',  color: '#fbbf24' },
+  { id: 'admin_users',  x: 620,  y: 500, label: '👥 Kelola Users',  color: '#fbbf24' },
+  { id: 'admin_scan',   x: 620,  y: 560, label: '📱 Scan Absensi',  color: '#f59e0b' },
+  { id: 'admin_sertif', x: 820,  y: 440, label: '🏆 Sertifikat',    color: '#d97706' },
+  { id: 'admin_set',    x: 820,  y: 500, label: '⚙️ Pengaturan',    color: '#b45309' },
+  { id: 'admin_wa',     x: 820,  y: 560, label: '💬 WhatsApp',      color: '#b45309' },
 
-  // SUPER ADMIN (Bottom)
-  { id: 'sa_dash',      x: 450,  y: 1100,label: '🛡️ Dash Super',    color: '#ef4444' },
-  { id: 'sa_tenant',    x: 650,  y: 1060,label: '🏢 Kelola Tenants',color: '#f87171' },
-  { id: 'sa_monitor',   x: 650,  y: 1120,label: '📈 Monitoring App',color: '#ef4444' },
-  { id: 'sa_server',    x: 650,  y: 1180,label: '🖥️ Monitor Server',color: '#ef4444' },
-  { id: 'sa_logs',      x: 650,  y: 1240,label: '📜 System Logs',   color: '#dc2626' },
-  { id: 'sa_audit',     x: 650,  y: 1300,label: '🔍 Audit Trail',   color: '#b91c1c' },
+  // --- SUPER ADMIN PATH ---
+  { id: 'sa_dash',      x: 420,  y: 700, label: '🛡️ Dash Super',    color: '#ef4444' },
+  { id: 'sa_tenant',    x: 620,  y: 640, label: '🏢 Kelola Tenants',color: '#f87171' },
+  { id: 'sa_monitor',   x: 620,  y: 700, label: '📈 Monitor App',   color: '#ef4444' },
+  { id: 'sa_server',    x: 620,  y: 760, label: '🖥️ Monitor Server',color: '#ef4444' },
+  { id: 'sa_logs',      x: 820,  y: 640, label: '📜 System Logs',   color: '#dc2626' },
+  { id: 'sa_audit',     x: 820,  y: 700, label: '🔍 Audit Trail',   color: '#b91c1c' },
 
-  // INFRA & STORAGE (Right)
-  { id: 'db_main',      x: 900,  y: 500, label: '🗄️ Database',      color: '#64748b' },
-  { id: 'storage',      x: 900,  y: 650, label: '☁️ S3 Storage',    color: '#64748b' },
-  { id: 'backup',       x: 900,  y: 800, label: '🔄 Auto Backup',   color: '#475569' },
+  // --- INFRASTRUCTURE & STORAGE ---
+  { id: 'db_main',      x: 1020, y: 500, label: '🗄️ Database',      color: '#64748b' },
+  { id: 'storage',      x: 1020, y: 600, label: '☁️ S3 Storage',    color: '#64748b' },
+  { id: 'backup',       x: 1020, y: 700, label: '🔄 Auto Backup',   color: '#475569' },
   
-  // OUTPUT (Far Right)
-  { id: 'out_nilai',    x: 900,  y: 350, label: '💯 Nilai Keluar',  color: '#ec4899' },
-  { id: 'out_lulus',    x: 1100, y: 450, label: '🌟 Selesai',       color: '#22c55e' },
+  // --- OUTPUTS ---
+  { id: 'out_nilai',    x: 1020, y: 160, label: '💯 Nilai Keluar',  color: '#ec4899' },
+  { id: 'out_lulus',    x: 1220, y: 380, label: '🌟 Selesai',       color: '#22c55e' },
 ]
 
 const FLOW_EDGES = [
@@ -240,7 +240,7 @@ function DotBackground() {
    ═══════════════════════════════════════════════ */
 function FlowCanvas() {
   const [nodes, setNodes] = useState(() => FLOW_NODES.map((n) => ({ ...n })))
-  const [transform, setTransform] = useState({ x: 40, y: 20, scale: 0.85 })
+  const [transform, setTransform] = useState({ x: 30, y: 30, scale: 0.8 })
   const dragRef = useRef(null)
   const panRef = useRef(null)
   const canvasRef = useRef(null)
@@ -335,10 +335,10 @@ function FlowCanvas() {
   /* ── Controls ── */
   const zoomIn = () => setTransform((p) => ({ ...p, scale: Math.min(2.5, p.scale * 1.2) }))
   const zoomOut = () => setTransform((p) => ({ ...p, scale: Math.max(0.3, p.scale / 1.2) }))
-  const fitView = () => setTransform({ x: 40, y: 20, scale: 0.85 })
+  const fitView = () => setTransform({ x: 30, y: 30, scale: 0.8 })
   const resetNodes = () => {
     setNodes(FLOW_NODES.map((n) => ({ ...n })))
-    setTransform({ x: 40, y: 20, scale: 0.85 })
+    setTransform({ x: 30, y: 30, scale: 0.8 })
   }
 
   return (
