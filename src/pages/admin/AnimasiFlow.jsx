@@ -22,26 +22,115 @@ function PageGate({ superAdminChecked, isSuperAdmin, children }) {
    Flow Data – EduSmart Process Flow
    ═══════════════════════════════════════════════ */
 const FLOW_NODES = [
-  { id: 'login',      x: 80,   y: 220, label: '🔐 Login',       color: '#8b5cf6' },
-  { id: 'dashboard',  x: 300,  y: 140, label: '🏠 Dashboard',   color: '#6366f1' },
-  { id: 'absensi',    x: 520,  y: 50,  label: '📋 Absensi',     color: '#0ea5e9' },
-  { id: 'quiz',       x: 520,  y: 220, label: '🧠 Quiz',        color: '#14b8a6' },
-  { id: 'tugas',      x: 520,  y: 390, label: '✏️ Tugas',       color: '#f59e0b' },
-  { id: 'laporan',    x: 740,  y: 130, label: '📊 Laporan',     color: '#ec4899' },
-  { id: 'sertifikat', x: 740,  y: 320, label: '🏆 Sertifikat',  color: '#10b981' },
-  { id: 'selesai',    x: 960,  y: 220, label: '✅ Selesai',     color: '#22c55e' },
+  // Authentication Layer
+  { id: 'login',        x: 50,   y: 400, label: '🔐 Autentikasi',   color: '#8b5cf6' },
+  { id: 'gateway',      x: 250,  y: 400, label: '🚦 Role Gateway',  color: '#6366f1' },
+
+  // --- SISWA (Top path) ---
+  { id: 'siswa_dash',   x: 450,  y: 100, label: '👨‍🎓 Dash Siswa',   color: '#0ea5e9' },
+  { id: 'siswa_profil', x: 680,  y: 40,  label: '👤 Profil Siswa',  color: '#38bdf8' },
+  { id: 'siswa_absen',  x: 680,  y: 100, label: '📋 Absensi',       color: '#0ea5e9' },
+  { id: 'siswa_quiz',   x: 680,  y: 160, label: '🧠 Kerjakan Quiz', color: '#0ea5e9' },
+  { id: 'siswa_tugas',  x: 680,  y: 220, label: '✏️ Kumpul Tugas',  color: '#0ea5e9' },
+
+  // --- GURU (Middle path) ---
+  { id: 'guru_dash',    x: 450,  y: 400, label: '👨‍🏫 Dash Guru',   color: '#10b981' },
+  { id: 'guru_profil',  x: 680,  y: 280, label: '👤 Profil Guru',   color: '#34d399' },
+  { id: 'guru_jadwal',  x: 680,  y: 340, label: '📅 Jadwal Ajar',   color: '#10b981' },
+  { id: 'guru_absen',   x: 680,  y: 400, label: '✅ Cek Absensi',   color: '#10b981' },
+  { id: 'guru_quiz',    x: 680,  y: 460, label: '📝 Buat Quiz',     color: '#10b981' },
+  { id: 'guru_tugas',   x: 680,  y: 520, label: '📚 Buat Tugas',    color: '#10b981' },
+  { id: 'guru_laporan', x: 680,  y: 580, label: '📊 Laporan Nilai', color: '#059669' },
+  { id: 'guru_rapot',   x: 680,  y: 640, label: '🎓 Rapot (Wali)',  color: '#047857' },
+
+  // --- ADMIN (Bottom path) ---
+  { id: 'admin_dash',   x: 450,  y: 850, label: '💼 Dash Admin',    color: '#f59e0b' },
+  { id: 'admin_sekolah',x: 680,  y: 730, label: '🏫 Kelola Kelas',  color: '#fbbf24' },
+  { id: 'admin_users',  x: 680,  y: 790, label: '👥 Kelola Users',  color: '#fbbf24' },
+  { id: 'admin_scan',   x: 680,  y: 850, label: '📱 Scan Absensi',  color: '#f59e0b' },
+  { id: 'admin_sertif', x: 680,  y: 910, label: '🏆 Sertifikat',    color: '#d97706' },
+  { id: 'admin_set',    x: 680,  y: 970, label: '⚙️ Pengaturan',    color: '#b45309' },
+  { id: 'admin_wa',     x: 680,  y: 1030,label: '💬 WhatsApp',      color: '#b45309' },
+
+  // --- SUPER ADMIN (Lowest path) ---
+  { id: 'sa_dash',      x: 450,  y: 1240,label: '🛡️ Dash Super',    color: '#ef4444' },
+  { id: 'sa_tenant',    x: 680,  y: 1120,label: '🏢 Kelola Tenants',color: '#f87171' },
+  { id: 'sa_monitor',   x: 680,  y: 1180,label: '📈 Monitoring App',color: '#ef4444' },
+  { id: 'sa_server',    x: 680,  y: 1240,label: '🖥️ Monitor Server',color: '#ef4444' },
+  { id: 'sa_logs',      x: 680,  y: 1300,label: '📜 System Logs',   color: '#dc2626' },
+  { id: 'sa_audit',     x: 680,  y: 1360,label: '🔍 Audit Trail',   color: '#b91c1c' },
+
+  // --- INFRASTRUCTURE & STORAGE ---
+  { id: 'db_main',      x: 950,  y: 600, label: '🗄️ Database',      color: '#64748b' },
+  { id: 'storage',      x: 950,  y: 850, label: '☁️ S3 Storage',    color: '#64748b' },
+  { id: 'backup',       x: 950,  y: 1000,label: '🔄 Auto Backup',   color: '#475569' },
+  
+  // --- OUTPUT ---
+  { id: 'out_nilai',    x: 950,  y: 190, label: '💯 Nilai Keluar',  color: '#ec4899' },
+  { id: 'out_lulus',    x: 1200, y: 550, label: '🌟 Lulus/Selesai', color: '#22c55e' },
 ]
 
 const FLOW_EDGES = [
-  { id: 'e1', from: 'login',      to: 'dashboard'  },
-  { id: 'e2', from: 'dashboard',  to: 'absensi'    },
-  { id: 'e3', from: 'dashboard',  to: 'quiz'       },
-  { id: 'e4', from: 'dashboard',  to: 'tugas'      },
-  { id: 'e5', from: 'absensi',    to: 'laporan'    },
-  { id: 'e6', from: 'quiz',       to: 'laporan'    },
-  { id: 'e7', from: 'tugas',      to: 'sertifikat' },
-  { id: 'e8', from: 'laporan',    to: 'selesai'    },
-  { id: 'e9', from: 'sertifikat', to: 'selesai'    },
+  // Auth flow
+  { id: 'e_auth1', from: 'login', to: 'gateway' },
+
+  // Gateway to Roles
+  { id: 'e_gate_s', from: 'gateway', to: 'siswa_dash' },
+  { id: 'e_gate_g', from: 'gateway', to: 'guru_dash' },
+  { id: 'e_gate_a', from: 'gateway', to: 'admin_dash' },
+  { id: 'e_gate_sa',from: 'gateway', to: 'sa_dash' },
+
+  // Siswa features
+  { id: 'e_s1', from: 'siswa_dash', to: 'siswa_profil' },
+  { id: 'e_s2', from: 'siswa_dash', to: 'siswa_absen' },
+  { id: 'e_s3', from: 'siswa_dash', to: 'siswa_quiz' },
+  { id: 'e_s4', from: 'siswa_dash', to: 'siswa_tugas' },
+
+  // Guru features
+  { id: 'e_g1', from: 'guru_dash', to: 'guru_profil' },
+  { id: 'e_g2', from: 'guru_dash', to: 'guru_jadwal' },
+  { id: 'e_g3', from: 'guru_dash', to: 'guru_absen' },
+  { id: 'e_g4', from: 'guru_dash', to: 'guru_quiz' },
+  { id: 'e_g5', from: 'guru_dash', to: 'guru_tugas' },
+  { id: 'e_g6', from: 'guru_dash', to: 'guru_laporan' },
+  { id: 'e_g7', from: 'guru_dash', to: 'guru_rapot' },
+
+  // Admin features
+  { id: 'e_a1', from: 'admin_dash', to: 'admin_sekolah' },
+  { id: 'e_a2', from: 'admin_dash', to: 'admin_users' },
+  { id: 'e_a3', from: 'admin_dash', to: 'admin_scan' },
+  { id: 'e_a4', from: 'admin_dash', to: 'admin_sertif' },
+  { id: 'e_a5', from: 'admin_dash', to: 'admin_set' },
+  { id: 'e_a6', from: 'admin_dash', to: 'admin_wa' },
+
+  // Super Admin features
+  { id: 'e_sa1', from: 'sa_dash', to: 'sa_tenant' },
+  { id: 'e_sa2', from: 'sa_dash', to: 'sa_monitor' },
+  { id: 'e_sa3', from: 'sa_dash', to: 'sa_server' },
+  { id: 'e_sa4', from: 'sa_dash', to: 'sa_logs' },
+  { id: 'e_sa5', from: 'sa_dash', to: 'sa_audit' },
+
+  // Cross-role interactions
+  { id: 'e_cross1', from: 'guru_quiz', to: 'siswa_quiz' },
+  { id: 'e_cross2', from: 'guru_tugas', to: 'siswa_tugas' },
+  { id: 'e_cross3', from: 'siswa_quiz', to: 'out_nilai' },
+  { id: 'e_cross4', from: 'siswa_tugas', to: 'out_nilai' },
+  { id: 'e_cross5', from: 'out_nilai', to: 'guru_laporan' },
+  { id: 'e_cross6', from: 'guru_laporan', to: 'guru_rapot' },
+  { id: 'e_cross7', from: 'admin_scan', to: 'siswa_absen' },
+  { id: 'e_cross8', from: 'siswa_absen', to: 'guru_absen' },
+
+  // Infrastructure links
+  { id: 'e_db1', from: 'admin_users', to: 'db_main' },
+  { id: 'e_db2', from: 'guru_laporan', to: 'db_main' },
+  { id: 'e_st1', from: 'siswa_tugas', to: 'storage' },
+  { id: 'e_st2', from: 'admin_sertif', to: 'storage' },
+  { id: 'e_bk1', from: 'db_main', to: 'backup' },
+  { id: 'e_bk2', from: 'admin_set', to: 'backup' },
+
+  // Final outputs
+  { id: 'e_end1', from: 'guru_rapot', to: 'out_lulus' },
+  { id: 'e_end2', from: 'admin_sertif', to: 'out_lulus' },
 ]
 
 const NODE_WIDTH = 150
@@ -150,7 +239,7 @@ function FlowNode({ node, onDragStart, style }) {
    ═══════════════════════════════════════════════ */
 function DotBackground() {
   return (
-    <svg className="absolute inset-0 h-full w-full" style={{ minWidth: 1200, minHeight: 500 }}>
+    <svg className="absolute inset-0 h-full w-full" style={{ minWidth: 1600, minHeight: 1600 }}>
       <defs>
         <pattern id="dotPattern" x="0" y="0" width="24" height="24" patternUnits="userSpaceOnUse">
           <circle cx="2" cy="2" r="1" fill="rgba(148,163,184,0.12)" />
@@ -270,8 +359,8 @@ function FlowCanvas() {
         style={{
           transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
           transformOrigin: '0 0',
-          width: 1200,
-          height: 500,
+          width: 1600,
+          height: 1600,
         }}
       >
         <DotBackground />
@@ -279,7 +368,7 @@ function FlowCanvas() {
         {/* SVG Edges */}
         <svg
           className="absolute inset-0"
-          style={{ width: 1200, height: 500, overflow: 'visible' }}
+          style={{ width: 1600, height: 1600, overflow: 'visible' }}
         >
           {FLOW_EDGES.map((edge, i) => {
             const fromNode = nodeMap[edge.from]
@@ -340,7 +429,7 @@ function FlowCanvas() {
 
       {/* Mini-map */}
       <div className="absolute bottom-4 right-4 z-10 rounded-lg border border-violet-500/20 bg-slate-900/90 p-2 backdrop-blur-sm">
-        <svg width="160" height="70" viewBox="0 0 1200 500">
+        <svg width="160" height="160" viewBox="0 0 1600 1600">
           {FLOW_EDGES.map((edge) => {
             const from = nodeMap[edge.from]
             const to = nodeMap[edge.to]
