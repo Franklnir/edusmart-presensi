@@ -1845,7 +1845,6 @@ body.quiz-strict-active img {
     opacity 760ms var(--sismu-ease),
     transform 760ms var(--sismu-ease);
   transition-delay: var(--sismu-reveal-delay, 0ms);
-  will-change: opacity, transform;
 }
 
 .sismu-reveal.is-visible {
@@ -1905,7 +1904,6 @@ body.quiz-strict-active img {
 
 .sismu-grid-drift {
   animation: sismuGridDrift 28s linear infinite;
-  will-change: background-position;
 }
 
 .sismu-soft-orb {
@@ -1939,7 +1937,6 @@ body.quiz-strict-active img {
   transform-origin: bottom;
   animation: sismuBarGrow 920ms var(--sismu-ease) both;
   animation-delay: var(--sismu-bar-delay, 0ms);
-  will-change: transform, opacity;
 }
 
 .sismu-progress-line {
@@ -2060,5 +2057,84 @@ body.quiz-strict-active img {
   .sismu-reveal {
     opacity: 1;
     transform: none;
+  }
+}
+
+@media (max-width: 768px), (hover: none) and (pointer: coarse) {
+  .sismu-marketing-page {
+    scroll-behavior: auto;
+  }
+
+  .sismu-marketing-page *,
+  .sismu-marketing-page *::before,
+  .sismu-marketing-page *::after {
+    backface-visibility: visible;
+  }
+
+  .sismu-nav {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  .sismu-grid-drift {
+    animation: none !important;
+    background-image: linear-gradient(rgba(37, 99, 235, 0.055) 1px, transparent 1px) !important;
+    background-size: 56px 56px !important;
+    opacity: 0.58;
+  }
+
+  .sismu-soft-orb {
+    animation: none !important;
+    filter: none !important;
+    opacity: 0.22;
+    transform: none !important;
+  }
+
+  .sismu-dashboard-card {
+    animation: none !important;
+    transform: none !important;
+  }
+
+  .sismu-shine::after {
+    animation: none !important;
+    opacity: 0;
+  }
+
+  .sismu-hero-kicker,
+  .sismu-hero-title,
+  .sismu-hero-subtitle,
+  .sismu-hero-actions,
+  .sismu-hero-tags,
+  .sismu-dashboard-preview {
+    animation-duration: 420ms;
+  }
+
+  .sismu-reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+
+  .sismu-chart-bar,
+  .sismu-progress-line,
+  .sismu-activity-row {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+  }
+
+  .sismu-button:hover,
+  .sismu-card:hover,
+  .sismu-price-card:hover,
+  .sismu-stat-card:hover {
+    transform: none;
+  }
+}
+
+@supports (content-visibility: auto) {
+  @media (max-width: 768px), (hover: none) and (pointer: coarse) {
+    .sismu-marketing-page section:not(#home) {
+      content-visibility: auto;
+      contain-intrinsic-size: 720px;
+    }
   }
 }
