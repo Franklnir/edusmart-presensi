@@ -30,6 +30,7 @@ import {
   TerminalSquare,
   UserRound,
   UsersRound,
+  Workflow,
   X,
 } from 'lucide-react'
 
@@ -63,6 +64,7 @@ const iconComponents = {
   storage: HardDrive,
   menu: Menu,
   x: X,
+  workflow: Workflow,
 }
 
 export const Icon = React.memo(({ name, className = 'w-5 h-5' }) => {
