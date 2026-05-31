@@ -22,52 +22,52 @@ function PageGate({ superAdminChecked, isSuperAdmin, children }) {
    Flow Data – EduSmart Process Flow
    ═══════════════════════════════════════════════ */
 const FLOW_NODES = [
-  // Authentication Layer
-  { id: 'login',        x: 50,   y: 400, label: '🔐 Autentikasi',   color: '#8b5cf6' },
-  { id: 'gateway',      x: 250,  y: 400, label: '🚦 Role Gateway',  color: '#6366f1' },
+  // Auth
+  { id: 'login',        x: 50,   y: 350, label: '🔐 Autentikasi',   color: '#8b5cf6' },
+  { id: 'gateway',      x: 250,  y: 350, label: '🚦 Role Gateway',  color: '#6366f1' },
 
-  // --- SISWA (Top path) ---
+  // SISWA (Top)
   { id: 'siswa_dash',   x: 450,  y: 100, label: '👨‍🎓 Dash Siswa',   color: '#0ea5e9' },
-  { id: 'siswa_profil', x: 680,  y: 40,  label: '👤 Profil Siswa',  color: '#38bdf8' },
-  { id: 'siswa_absen',  x: 680,  y: 100, label: '📋 Absensi',       color: '#0ea5e9' },
-  { id: 'siswa_quiz',   x: 680,  y: 160, label: '🧠 Kerjakan Quiz', color: '#0ea5e9' },
-  { id: 'siswa_tugas',  x: 680,  y: 220, label: '✏️ Kumpul Tugas',  color: '#0ea5e9' },
+  { id: 'siswa_profil', x: 650,  y: 40,  label: '👤 Profil Siswa',  color: '#38bdf8' },
+  { id: 'siswa_absen',  x: 650,  y: 100, label: '📋 Absensi',       color: '#0ea5e9' },
+  { id: 'siswa_quiz',   x: 650,  y: 160, label: '🧠 Kerjakan Quiz', color: '#0ea5e9' },
+  { id: 'siswa_tugas',  x: 650,  y: 220, label: '✏️ Kumpul Tugas',  color: '#0ea5e9' },
 
-  // --- GURU (Middle path) ---
-  { id: 'guru_dash',    x: 450,  y: 400, label: '👨‍🏫 Dash Guru',   color: '#10b981' },
-  { id: 'guru_profil',  x: 680,  y: 280, label: '👤 Profil Guru',   color: '#34d399' },
-  { id: 'guru_jadwal',  x: 680,  y: 340, label: '📅 Jadwal Ajar',   color: '#10b981' },
-  { id: 'guru_absen',   x: 680,  y: 400, label: '✅ Cek Absensi',   color: '#10b981' },
-  { id: 'guru_quiz',    x: 680,  y: 460, label: '📝 Buat Quiz',     color: '#10b981' },
-  { id: 'guru_tugas',   x: 680,  y: 520, label: '📚 Buat Tugas',    color: '#10b981' },
-  { id: 'guru_laporan', x: 680,  y: 580, label: '📊 Laporan Nilai', color: '#059669' },
-  { id: 'guru_rapot',   x: 680,  y: 640, label: '🎓 Rapot (Wali)',  color: '#047857' },
+  // GURU (Mid-Top)
+  { id: 'guru_dash',    x: 450,  y: 350, label: '👨‍🏫 Dash Guru',   color: '#10b981' },
+  { id: 'guru_profil',  x: 650,  y: 280, label: '👤 Profil Guru',   color: '#34d399' },
+  { id: 'guru_jadwal',  x: 650,  y: 340, label: '📅 Jadwal Ajar',   color: '#10b981' },
+  { id: 'guru_absen',   x: 650,  y: 400, label: '✅ Cek Absensi',   color: '#10b981' },
+  { id: 'guru_quiz',    x: 650,  y: 460, label: '📝 Buat Quiz',     color: '#10b981' },
+  { id: 'guru_tugas',   x: 650,  y: 520, label: '📚 Buat Tugas',    color: '#10b981' },
+  { id: 'guru_laporan', x: 650,  y: 580, label: '📊 Laporan Nilai', color: '#059669' },
+  { id: 'guru_rapot',   x: 650,  y: 640, label: '🎓 Rapot (Wali)',  color: '#047857' },
 
-  // --- ADMIN (Bottom path) ---
-  { id: 'admin_dash',   x: 450,  y: 850, label: '💼 Dash Admin',    color: '#f59e0b' },
-  { id: 'admin_sekolah',x: 680,  y: 730, label: '🏫 Kelola Kelas',  color: '#fbbf24' },
-  { id: 'admin_users',  x: 680,  y: 790, label: '👥 Kelola Users',  color: '#fbbf24' },
-  { id: 'admin_scan',   x: 680,  y: 850, label: '📱 Scan Absensi',  color: '#f59e0b' },
-  { id: 'admin_sertif', x: 680,  y: 910, label: '🏆 Sertifikat',    color: '#d97706' },
-  { id: 'admin_set',    x: 680,  y: 970, label: '⚙️ Pengaturan',    color: '#b45309' },
-  { id: 'admin_wa',     x: 680,  y: 1030,label: '💬 WhatsApp',      color: '#b45309' },
+  // ADMIN (Mid-Bottom)
+  { id: 'admin_dash',   x: 450,  y: 700, label: '💼 Dash Admin',    color: '#f59e0b' },
+  { id: 'admin_sekolah',x: 650,  y: 700, label: '🏫 Kelola Kelas',  color: '#fbbf24' },
+  { id: 'admin_users',  x: 650,  y: 760, label: '👥 Kelola Users',  color: '#fbbf24' },
+  { id: 'admin_scan',   x: 650,  y: 820, label: '📱 Scan Absensi',  color: '#f59e0b' },
+  { id: 'admin_sertif', x: 650,  y: 880, label: '🏆 Sertifikat',    color: '#d97706' },
+  { id: 'admin_set',    x: 650,  y: 940, label: '⚙️ Pengaturan',    color: '#b45309' },
+  { id: 'admin_wa',     x: 650,  y: 1000,label: '💬 WhatsApp',      color: '#b45309' },
 
-  // --- SUPER ADMIN (Lowest path) ---
-  { id: 'sa_dash',      x: 450,  y: 1240,label: '🛡️ Dash Super',    color: '#ef4444' },
-  { id: 'sa_tenant',    x: 680,  y: 1120,label: '🏢 Kelola Tenants',color: '#f87171' },
-  { id: 'sa_monitor',   x: 680,  y: 1180,label: '📈 Monitoring App',color: '#ef4444' },
-  { id: 'sa_server',    x: 680,  y: 1240,label: '🖥️ Monitor Server',color: '#ef4444' },
-  { id: 'sa_logs',      x: 680,  y: 1300,label: '📜 System Logs',   color: '#dc2626' },
-  { id: 'sa_audit',     x: 680,  y: 1360,label: '🔍 Audit Trail',   color: '#b91c1c' },
+  // SUPER ADMIN (Bottom)
+  { id: 'sa_dash',      x: 450,  y: 1100,label: '🛡️ Dash Super',    color: '#ef4444' },
+  { id: 'sa_tenant',    x: 650,  y: 1060,label: '🏢 Kelola Tenants',color: '#f87171' },
+  { id: 'sa_monitor',   x: 650,  y: 1120,label: '📈 Monitoring App',color: '#ef4444' },
+  { id: 'sa_server',    x: 650,  y: 1180,label: '🖥️ Monitor Server',color: '#ef4444' },
+  { id: 'sa_logs',      x: 650,  y: 1240,label: '📜 System Logs',   color: '#dc2626' },
+  { id: 'sa_audit',     x: 650,  y: 1300,label: '🔍 Audit Trail',   color: '#b91c1c' },
 
-  // --- INFRASTRUCTURE & STORAGE ---
-  { id: 'db_main',      x: 950,  y: 600, label: '🗄️ Database',      color: '#64748b' },
-  { id: 'storage',      x: 950,  y: 850, label: '☁️ S3 Storage',    color: '#64748b' },
-  { id: 'backup',       x: 950,  y: 1000,label: '🔄 Auto Backup',   color: '#475569' },
+  // INFRA & STORAGE (Right)
+  { id: 'db_main',      x: 900,  y: 500, label: '🗄️ Database',      color: '#64748b' },
+  { id: 'storage',      x: 900,  y: 650, label: '☁️ S3 Storage',    color: '#64748b' },
+  { id: 'backup',       x: 900,  y: 800, label: '🔄 Auto Backup',   color: '#475569' },
   
-  // --- OUTPUT ---
-  { id: 'out_nilai',    x: 950,  y: 190, label: '💯 Nilai Keluar',  color: '#ec4899' },
-  { id: 'out_lulus',    x: 1200, y: 550, label: '🌟 Lulus/Selesai', color: '#22c55e' },
+  // OUTPUT (Far Right)
+  { id: 'out_nilai',    x: 900,  y: 350, label: '💯 Nilai Keluar',  color: '#ec4899' },
+  { id: 'out_lulus',    x: 1100, y: 450, label: '🌟 Selesai',       color: '#22c55e' },
 ]
 
 const FLOW_EDGES = [
@@ -176,25 +176,10 @@ function FlowEdge({ fromNode, toNode, index }) {
         stroke={`url(#${gradId})`}
         strokeWidth="2.5"
         strokeLinecap="round"
-        strokeDasharray="8 5"
+        strokeDasharray="8 6"
         className="flow-edge-animated"
         style={{ animationDelay: `${index * 0.15}s` }}
       />
-      {/* Animated particle dot */}
-      <circle r="4" fill={toNode.color} opacity="0.9" className="flow-particle">
-        <animateMotion
-          dur={`${2.5 + index * 0.3}s`}
-          repeatCount="indefinite"
-          path={d}
-        />
-      </circle>
-      <circle r="7" fill={toNode.color} opacity="0.2" className="flow-particle-glow">
-        <animateMotion
-          dur={`${2.5 + index * 0.3}s`}
-          repeatCount="indefinite"
-          path={d}
-        />
-      </circle>
     </g>
   )
 }
@@ -255,7 +240,7 @@ function DotBackground() {
    ═══════════════════════════════════════════════ */
 function FlowCanvas() {
   const [nodes, setNodes] = useState(() => FLOW_NODES.map((n) => ({ ...n })))
-  const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 })
+  const [transform, setTransform] = useState({ x: 40, y: 20, scale: 0.85 })
   const dragRef = useRef(null)
   const panRef = useRef(null)
   const canvasRef = useRef(null)
@@ -276,15 +261,20 @@ function FlowCanvas() {
     const origX = node.x
     const origY = node.y
 
+    let frameId;
     const onMove = (ev) => {
-      const dx = (ev.clientX - startX) / transform.scale
-      const dy = (ev.clientY - startY) / transform.scale
-      setNodes((prev) =>
-        prev.map((n) => (n.id === nodeId ? { ...n, x: origX + dx, y: origY + dy } : n))
-      )
+      if (frameId) cancelAnimationFrame(frameId);
+      frameId = requestAnimationFrame(() => {
+        const dx = (ev.clientX - startX) / transform.scale
+        const dy = (ev.clientY - startY) / transform.scale
+        setNodes((prev) =>
+          prev.map((n) => (n.id === nodeId ? { ...n, x: origX + dx, y: origY + dy } : n))
+        )
+      });
     }
 
     const onUp = () => {
+      if (frameId) cancelAnimationFrame(frameId);
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
     }
@@ -302,15 +292,20 @@ function FlowCanvas() {
     const origTx = transform.x
     const origTy = transform.y
 
+    let frameId;
     const onMove = (ev) => {
-      setTransform((prev) => ({
-        ...prev,
-        x: origTx + (ev.clientX - startX),
-        y: origTy + (ev.clientY - startY),
-      }))
+      if (frameId) cancelAnimationFrame(frameId);
+      frameId = requestAnimationFrame(() => {
+        setTransform((prev) => ({
+          ...prev,
+          x: origTx + (ev.clientX - startX),
+          y: origTy + (ev.clientY - startY),
+        }))
+      });
     }
 
     const onUp = () => {
+      if (frameId) cancelAnimationFrame(frameId);
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
     }
@@ -340,10 +335,10 @@ function FlowCanvas() {
   /* ── Controls ── */
   const zoomIn = () => setTransform((p) => ({ ...p, scale: Math.min(2.5, p.scale * 1.2) }))
   const zoomOut = () => setTransform((p) => ({ ...p, scale: Math.max(0.3, p.scale / 1.2) }))
-  const fitView = () => setTransform({ x: 0, y: 0, scale: 1 })
+  const fitView = () => setTransform({ x: 40, y: 20, scale: 0.85 })
   const resetNodes = () => {
     setNodes(FLOW_NODES.map((n) => ({ ...n })))
-    setTransform({ x: 0, y: 0, scale: 1 })
+    setTransform({ x: 40, y: 20, scale: 0.85 })
   }
 
   return (
