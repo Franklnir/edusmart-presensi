@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
   Bug,
@@ -18,7 +18,40 @@ import { formatDateTime } from '../../lib/time'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 
-const todayInput = () => new Date().toISOString().slice(0, 10)
+const LOG_FILTER_STORAGE_KEY = 'edusmart.super.monitor-log.filters.v1'
+
+const defaultFilters = () => ({
+  from: '',
+  to: '',
+  level: '',
+  endpoint: '',
+  q: '',
+  per_page: 20,
+  page: 1
+})
+
+const normalizeSavedFilters = (value) => ({
+  ...defaultFilters(),
+  ...(value && typeof value === 'object' ? value : {}),
+  page: 1,
+  per_page: Number(value?.per_page || 20)
+})
+
+const loadSavedFilters = () => {
+  if (typeof window === 'undefined') return defaultFilters()
+  try {
+    const raw = window.localStorage.getItem(LOG_FILTER_STORAGE_KEY)
+    return normalizeSavedFilters(raw ? JSON.parse(raw) : null)
+  } catch {
+    return defaultFilters()
+  }
+}
+
+const saveFilters = (filters) => {
+  if (typeof window === 'undefined') return
+  const payload = normalizeSavedFilters(filters)
+  window.localStorage.setItem(LOG_FILTER_STORAGE_KEY, JSON.stringify(payload))
+}
 
 const levelTone = {
   emergency: 'border-rose-200 bg-rose-50 text-rose-700',
@@ -179,15 +212,9 @@ export default function SuperMonitorLog() {
   const [loading, setLoading] = useState(false)
   const [detail, setDetail] = useState(null)
   const [detailLoading, setDetailLoading] = useState(false)
-  const [filters, setFilters] = useState({
-    from: todayInput(),
-    to: todayInput(),
-    level: '',
-    endpoint: '',
-    q: '',
-    per_page: 20,
-    page: 1
-  })
+  const [filters, setFilters] = useState(() => loadSavedFilters())
+  const filtersRef = useRef(filters)
+  const pageRef = useRef(1)
 
   const canPrev = Number(pagination.page || 1) > 1
   const canNext = Number(pagination.page || 1) < Number(pagination.last_page || 1)
@@ -197,6 +224,14 @@ export default function SuperMonitorLog() {
     page: pagination.page || filters.page || 1,
     per_page: filters.per_page || 20
   }), [filters, pagination.page])
+
+  useEffect(() => {
+    filtersRef.current = filters
+  }, [filters])
+
+  useEffect(() => {
+    pageRef.current = pagination.page || 1
+  }, [pagination.page])
 
   const loadLogs = async (nextFilters = queryFilters, { silent = false } = {}) => {
     if (!silent) setLoading(true)
@@ -216,10 +251,11 @@ export default function SuperMonitorLog() {
 
   useEffect(() => {
     if (!superAdminChecked || !isSuperAdmin) return undefined
-    loadLogs({ ...filters, page: 1 })
+    const initialFilters = { ...filters, page: 1 }
+    loadLogs(initialFilters)
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible') {
-        loadLogs(queryFilters, { silent: true })
+        loadLogs({ ...filtersRef.current, page: pageRef.current }, { silent: true })
       }
     }, 8000)
     return () => window.clearInterval(timer)
@@ -234,20 +270,14 @@ export default function SuperMonitorLog() {
   const applyFilters = async (event) => {
     event.preventDefault()
     const next = { ...filters, page: 1 }
+    saveFilters(next)
     setPagination((prev) => ({ ...prev, page: 1 }))
     await loadLogs(next)
   }
 
   const resetFilters = async () => {
-    const next = {
-      from: todayInput(),
-      to: todayInput(),
-      level: '',
-      endpoint: '',
-      q: '',
-      per_page: 20,
-      page: 1
-    }
+    const next = defaultFilters()
+    saveFilters(next)
     setFilters(next)
     setPagination((prev) => ({ ...prev, page: 1 }))
     await loadLogs(next)
@@ -255,6 +285,7 @@ export default function SuperMonitorLog() {
 
   const goPage = async (page) => {
     const next = { ...filters, page }
+    saveFilters(next)
     setPagination((prev) => ({ ...prev, page }))
     await loadLogs(next)
   }
@@ -322,6 +353,7 @@ export default function SuperMonitorLog() {
             <label className="space-y-1.5">
               <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Sampai Tanggal</span>
               <input id="log-to" name="to" type="date" value={filters.to} onChange={updateFilter('to')} className="h-12 w-full rounded-2xl border border-slate-200 px-4 text-sm font-semibold text-slate-800 outline-none focus:border-indigo-400" />
+              <span className="block text-[11px] font-semibold text-slate-400">Kosong = sampai log terbaru saat ini.</span>
             </label>
             <label className="space-y-1.5">
               <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Level</span>
