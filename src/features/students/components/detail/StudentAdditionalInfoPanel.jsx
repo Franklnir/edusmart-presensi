@@ -2,6 +2,7 @@ import React, { memo } from 'react'
 import { formatDate } from '../../../../lib/time'
 import { Button } from '../../../../pages/admin/siswa/SiswaUi'
 import { calculateAgeFromIsoDate, JK_LABEL } from '../../utils/studentFormatters'
+import { religionSelectOptions } from '../../../../constants/religionOptions'
 
 function AdditionalTextInput({
   label,
@@ -81,6 +82,16 @@ function StudentAdditionalInfoPanel({
               />
             </div>
 
+            <AdditionalTextInput
+              label="NIS"
+              name="nis"
+              value={form.nis}
+              error={errors.nis}
+              onChange={onChange}
+              placeholder="Masukkan NIS siswa"
+              maxLength={40}
+            />
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Jenis Kelamin
@@ -105,14 +116,23 @@ function StudentAdditionalInfoPanel({
               onChange={onChange}
             />
 
-            <AdditionalTextInput
-              label="Agama"
-              name="agama"
-              value={form.agama}
-              onChange={onChange}
-              placeholder="Contoh: Islam"
-              maxLength={50}
-            />
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Agama
+              </label>
+              <select
+                name="agama"
+                value={form.agama}
+                onChange={onChange}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-white"
+              >
+                {religionSelectOptions(form.agama).map((option) => (
+                  <option key={option.value || 'empty'} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
 
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -143,6 +163,10 @@ function StudentAdditionalInfoPanel({
           <div>
             <p className="text-sm font-medium text-gray-700">Nama Siswa</p>
             <p className="text-sm text-gray-900">{detailUser?.nama || '-'}</p>
+          </div>
+          <div>
+            <p className="text-sm font-medium text-gray-700">NIS</p>
+            <p className="text-sm text-gray-900">{detailUser?.nis || '-'}</p>
           </div>
           <div>
             <p className="text-sm font-medium text-gray-700">Jenis Kelamin</p>

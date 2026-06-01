@@ -1341,8 +1341,12 @@ export default function APengaturan() {
 
   async function saveSettings(showToast = false) {
     if (!isAuthorized) return
+    setSaving(true)
     try {
-      if (!settingsId) return
+      if (!settingsId) {
+        if (showToast) pushToast('warning', 'Data pengaturan belum siap. Tunggu sebentar lalu coba lagi.')
+        return
+      }
 
       // ✅ logo_url adalah PATH, bukan URL
       const dataToSave = {
@@ -1375,6 +1379,8 @@ export default function APengaturan() {
       if (showToast) pushToast('success', 'Pengaturan berhasil disimpan.')
     } catch (err) {
       if (showToast) pushToast('error', 'Gagal menyimpan: ' + err.message)
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -2369,6 +2375,23 @@ export default function APengaturan() {
                     <p className="text-xs text-gray-500 mt-2">
                       Link media sosial akan ditampilkan di halaman publik sekolah
                     </p>
+                  </div>
+
+                  <div className="flex flex-col gap-2 rounded-2xl border border-blue-100 bg-blue-50/60 p-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm font-bold text-slate-900">Simpan Identitas Sekolah</p>
+                      <p className="text-xs text-slate-600">
+                        Gunakan tombol ini jika perubahan belum tersimpan otomatis.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => saveSettings(true)}
+                      disabled={saving || loading || !settingsId}
+                      className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {saving ? 'Menyimpan...' : 'Simpan Identitas'}
+                    </button>
                   </div>
                 </div>
               </div>

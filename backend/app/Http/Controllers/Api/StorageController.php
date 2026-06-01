@@ -92,23 +92,23 @@ class StorageController extends ApiController
         ],
         'certificates' => [
             'max_bytes' => 10 * 1024 * 1024,
-            'extensions' => ['pdf', 'jpg', 'jpeg', 'png'],
-            'mimes' => ['application/pdf', 'image/jpeg', 'image/png'],
+            'extensions' => ['pdf', 'jpg', 'jpeg', 'png', 'webp'],
+            'mimes' => ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'],
         ],
         'sertifikat-files' => [
             'max_bytes' => 10 * 1024 * 1024,
-            'extensions' => ['pdf', 'jpg', 'jpeg', 'png'],
-            'mimes' => ['application/pdf', 'image/jpeg', 'image/png'],
+            'extensions' => ['pdf', 'jpg', 'jpeg', 'png', 'webp'],
+            'mimes' => ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'],
         ],
         'certificate-templates' => [
             'max_bytes' => 8 * 1024 * 1024,
-            'extensions' => ['pdf', 'jpg', 'jpeg', 'png'],
-            'mimes' => ['application/pdf', 'image/jpeg', 'image/png'],
+            'extensions' => ['pdf', 'jpg', 'jpeg', 'png', 'webp'],
+            'mimes' => ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'],
         ],
         'sertifikat-templates' => [
             'max_bytes' => 8 * 1024 * 1024,
-            'extensions' => ['pdf', 'jpg', 'jpeg', 'png'],
-            'mimes' => ['application/pdf', 'image/jpeg', 'image/png'],
+            'extensions' => ['pdf', 'jpg', 'jpeg', 'png', 'webp'],
+            'mimes' => ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'],
         ],
     ];
 
@@ -1541,6 +1541,12 @@ class StorageController extends ApiController
         if ($mime === '') {
             return response()->json(['error' => 'MIME type file tidak valid'], 422);
         }
+        if ($mime === 'application/octet-stream') {
+            $mimeFromExtension = $this->mimeForExtension($extension);
+            if ($mimeFromExtension !== '') {
+                $mime = $mimeFromExtension;
+            }
+        }
 
         $allowedMimes = array_map('strtolower', (array) ($policy['mimes'] ?? []));
         if (! empty($allowedMimes) && ! in_array($mime, $allowedMimes, true)) {
@@ -1584,7 +1590,16 @@ class StorageController extends ApiController
 
         $mime = strtolower(trim($mime));
         if ($mime === '') {
+            $mime = $this->mimeForExtension($extension);
+        }
+        if ($mime === '') {
             return response()->json(['error' => 'MIME type file tidak valid'], 422);
+        }
+        if ($mime === 'application/octet-stream') {
+            $mimeFromExtension = $this->mimeForExtension($extension);
+            if ($mimeFromExtension !== '') {
+                $mime = $mimeFromExtension;
+            }
         }
 
         $allowedMimes = array_map('strtolower', (array) ($policy['mimes'] ?? []));

@@ -7,6 +7,7 @@ const buildEmptyStudentForm = () => ({
   kelas: '',
   nis: '',
   jk: '',
+  agama: '',
   password: '',
   confirmPassword: '',
 })
@@ -78,6 +79,7 @@ export function useStudentAccountActions({
         kelas: form.kelas || '',
         nis: form.nis || '',
         jk: form.jk || '',
+        agama: form.agama || null,
         password: form.password,
         role: 'siswa',
         status: 'active',

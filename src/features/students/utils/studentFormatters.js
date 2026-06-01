@@ -108,6 +108,7 @@ export const formatDateInputValue = (value) => {
 
 export const buildAdditionalInfoForm = (item = null) => ({
   nama: String(item?.nama || ''),
+  nis: String(item?.nis || ''),
   jk: normalizeGender(item?.jk) || '',
   tanggal_lahir: formatDateInputValue(item?.tanggal_lahir),
   agama: String(item?.agama || ''),

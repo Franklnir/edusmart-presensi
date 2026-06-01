@@ -12,7 +12,9 @@ const RAPOT_TYPES = [
   { key: 'uas', label: 'UAS' }
 ]
 
-const SEMESTER_OPTIONS = ['Ganjil', 'Genap']
+const SOURCE_LABELS = {
+  laporan_mapel: 'Dikirim guru mapel'
+}
 
 const buildKelasAliases = (kelasId, kelasMeta) => {
   const base = [
@@ -77,8 +79,6 @@ export default function RapotSiswa() {
   const [activeModal, setActiveModal] = useState(null)
   const [rapotRows, setRapotRows] = useState([])
   const [semesterText, setSemesterText] = useState('')
-  const [averageManual, setAverageManual] = useState('')
-  const [useManualAverage, setUseManualAverage] = useState(false)
   const [saving, setSaving] = useState(false)
   const [loadingClassData, setLoadingClassData] = useState(false)
   const [exportingRapot, setExportingRapot] = useState(false)
@@ -109,7 +109,9 @@ export default function RapotSiswa() {
       mapel,
       kkm: 75,
       nilai: '',
-      keterangan: ''
+      keterangan: '',
+      source: null,
+      sent_at: null
     }))
   ), [mapelOptions])
 
@@ -121,9 +123,30 @@ export default function RapotSiswa() {
       kkm: row.kkm ?? 75,
       nilai: row.nilai ?? '',
       keterangan: row.keterangan || '',
+      source: row.source || null,
+      sent_at: row.sent_at || null,
+      sent_by: row.sent_by || null,
       created_at: row.created_at
     }))
   ), [])
+
+  const mergeSavedRapotItems = useCallback((items = []) => {
+    const savedRows = mapSavedRapotItems(items)
+    const savedByMapel = new Map(savedRows.map((row) => [normalizeKelasKey(row.mapel), row]))
+    const merged = makeDefaultRapotRows().map((row) => {
+      const saved = savedByMapel.get(normalizeKelasKey(row.mapel))
+      return saved ? { ...row, ...saved, id: saved.id || row.id } : row
+    })
+    const mergedKeys = new Set(merged.map((row) => normalizeKelasKey(row.mapel)))
+    savedRows.forEach((row) => {
+      const key = normalizeKelasKey(row.mapel)
+      if (key && !mergedKeys.has(key)) {
+        merged.push({ ...row, nomor: Number(row.nomor || 0) || merged.length + 1 })
+        mergedKeys.add(key)
+      }
+    })
+    return merged.map((row, index) => ({ ...row, nomor: index + 1 }))
+  }, [makeDefaultRapotRows, mapSavedRapotItems])
 
   const rapotMasterQueryKey = useMemo(
     () => ['guru', 'rapot-siswa', 'master', user?.id || '', activeTahunPelajaran || ''],
@@ -389,8 +412,6 @@ export default function RapotSiswa() {
     const rapot = rapotIndex[`${student.id}|${type}`] || null
     setActiveModal({ student, type, rapot })
     setSemesterText(rapot?.semester || period?.semester || 'Genap')
-    setAverageManual(rapot?.rata_rata_manual ? (rapot?.rata_rata ?? '') : '')
-    setUseManualAverage(Boolean(rapot?.rata_rata_manual))
 
     if (!rapot?.id) {
       setRapotRows(makeDefaultRapotRows())
@@ -399,7 +420,7 @@ export default function RapotSiswa() {
 
     const cachedItems = rapotItemsByRapotId[rapot.id] || []
     if (cachedItems.length) {
-      setRapotRows(mapSavedRapotItems(cachedItems))
+      setRapotRows(mergeSavedRapotItems(cachedItems))
       return
     }
 
@@ -420,7 +441,7 @@ export default function RapotSiswa() {
         setRapotRows(makeDefaultRapotRows())
         return
       }
-      setRapotRows(mapSavedRapotItems(savedItems))
+      setRapotRows(mergeSavedRapotItems(savedItems))
       setRapotItemsByRapotId((prev) => ({ ...prev, [rapot.id]: savedItems }))
     } catch (error) {
       console.error(error)
@@ -430,7 +451,7 @@ export default function RapotSiswa() {
     }
   }, [
     makeDefaultRapotRows,
-    mapSavedRapotItems,
+    mergeSavedRapotItems,
     period?.semester,
     pushToast,
     rapotIndex,
@@ -448,7 +469,7 @@ export default function RapotSiswa() {
     return round2(values.reduce((sum, value) => sum + value, 0) / values.length)
   }, [rapotRows])
 
-  const displayedAverage = useManualAverage ? toNumberOrNull(averageManual) : computedAverage
+  const displayedAverage = computedAverage
 
   const updateRow = (rowId, field, value) => {
     setRapotRows((prev) => prev.map((row) => row.id === rowId ? { ...row, [field]: value } : row))
@@ -495,8 +516,8 @@ export default function RapotSiswa() {
         semester: String(semesterText || '').trim() || null,
         tahun_pelajaran: tahunPelajaran,
         jumlah: computedTotal,
-        rata_rata: useManualAverage ? toNumberOrNull(averageManual) : computedAverage,
-        rata_rata_manual: useManualAverage,
+        rata_rata: computedAverage,
+        rata_rata_manual: false,
         locked_at: existingRapot?.locked_at || null,
         locked_by: existingRapot?.locked_by || null,
         created_by: existingRapot?.created_by || user?.id || null,
@@ -514,17 +535,20 @@ export default function RapotSiswa() {
         .map((row, index) => ({
           id: row.id || makeLocalId(),
           rapot_id: rapotId,
-          nomor: index + 1,
+          nomor: Number(row.nomor || 0) || index + 1,
           mapel: String(row.mapel || '').trim(),
           kkm: toNumberOrNull(row.kkm),
           nilai: toNumberOrNull(row.nilai),
           predikat: getPredikat(row.nilai, row.kkm) || null,
           keterangan: String(row.keterangan || '').trim() || null,
+          source: row.source || null,
+          sent_by: row.sent_by || null,
+          sent_at: row.sent_at || null,
           updated_at: nowIso,
           created_at: row.created_at || nowIso
         }))
       if (!itemPayloads.length) {
-        pushToast('error', 'Minimal satu mapel harus diisi sebelum menyimpan rapot.')
+        pushToast('error', 'Belum ada mapel yang bisa disimpan untuk rapot ini.')
         return
       }
       const { error: itemsError } = await supabase
@@ -570,7 +594,6 @@ export default function RapotSiswa() {
     }
   }, [
     activeModal,
-    averageManual,
     computedAverage,
     computedTotal,
     loadClassData,
@@ -580,7 +603,6 @@ export default function RapotSiswa() {
     selectedKelas,
     semesterText,
     tahunPelajaran,
-    useManualAverage,
     user?.id
   ])
 
@@ -601,8 +623,8 @@ export default function RapotSiswa() {
           semester: String(semesterText || '').trim() || null,
           tahun_pelajaran: tahunPelajaran,
           jumlah: computedTotal,
-          rata_rata: displayedAverage,
-          rata_rata_manual: useManualAverage,
+          rata_rata: computedAverage,
+          rata_rata_manual: false,
           created_by: user?.id || null,
           updated_by: user?.id || null,
           created_at: nowIso,
@@ -640,13 +662,12 @@ export default function RapotSiswa() {
   }, [
     activeModal,
     computedTotal,
-    displayedAverage,
     pushToast,
     rapotClassQueryKey,
     selectedKelas,
     semesterText,
     tahunPelajaran,
-    useManualAverage,
+    computedAverage,
     user?.id
   ])
 
@@ -872,18 +893,7 @@ export default function RapotSiswa() {
                   <span>NISN: <b>{activeModal.student.nisn || '-'}</b></span>
                   <span>Kelas: <b>{getKelasDisplayName(selectedKelasMeta)}</b></span>
                   <span>Tahun: <b>{tahunPelajaran || '-'}</b></span>
-                  <label className="flex items-center gap-2">
-                    Semester:
-                    <select
-                      value={semesterText}
-                      onChange={(event) => setSemesterText(event.target.value)}
-                      className="min-w-[120px] rounded-lg border border-slate-300 bg-white px-2 py-1 font-semibold text-slate-900"
-                    >
-                      {SEMESTER_OPTIONS.map((semester) => (
-                        <option key={semester} value={semester}>{semester}</option>
-                      ))}
-                    </select>
-                  </label>
+                  <span>Semester: <b>{semesterText || '-'}</b></span>
                 </div>
               </div>
               <button
@@ -912,31 +922,30 @@ export default function RapotSiswa() {
                     <tr key={row.id}>
                       <td className="px-3 py-3 text-center font-semibold">{index + 1}</td>
                       <td className="px-3 py-3">
-                        <input
-                          value={row.mapel}
-                          onChange={(event) => updateRow(row.id, 'mapel', event.target.value)}
-                          className="w-full rounded-lg border border-slate-300 px-3 py-2"
-                        />
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                          <div className="font-semibold text-slate-900">{row.mapel || '-'}</div>
+                          <div className="mt-1 text-[11px] text-slate-500">
+                            {SOURCE_LABELS[row.source] || (toNumberOrNull(row.nilai) != null ? 'Tersimpan di rapot' : 'Belum dikirim guru mapel')}
+                            {row.sent_at ? ` • ${new Date(row.sent_at).toLocaleString('id-ID')}` : ''}
+                          </div>
+                        </div>
                       </td>
                       <td className="px-3 py-3">
                         <input
                           type="number"
                           min="0"
                           max="100"
+                          step="0.01"
                           value={row.kkm ?? ''}
                           onChange={(event) => updateRow(row.id, 'kkm', event.target.value)}
-                          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-center"
+                          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-center font-semibold text-slate-900"
+                          placeholder="KKM"
                         />
                       </td>
                       <td className="px-3 py-3">
-                        <input
-                          type="number"
-                          min="0"
-                          max="100"
-                          value={row.nilai ?? ''}
-                          onChange={(event) => updateRow(row.id, 'nilai', event.target.value)}
-                          className={`w-full rounded-lg border px-3 py-2 text-center font-bold ${buildScoreTone(row.nilai, row.kkm)}`}
-                        />
+                        <div className={`rounded-lg border px-3 py-2 text-center font-bold ${buildScoreTone(row.nilai, row.kkm)}`}>
+                          {toNumberOrNull(row.nilai) != null ? row.nilai : '-'}
+                        </div>
                       </td>
                       <td className="px-3 py-3 text-center">
                         <span className={`inline-flex min-w-[42px] justify-center rounded-lg border px-2 py-1 font-bold ${buildScoreTone(row.nilai, row.kkm)}`}>
@@ -967,27 +976,9 @@ export default function RapotSiswa() {
                     <div className="text-2xl font-black text-slate-950">{displayedAverage ?? '-'}</div>
                   </div>
                 </div>
-                <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700 sm:flex-row sm:items-center">
-                  <span className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={useManualAverage}
-                      onChange={(event) => setUseManualAverage(event.target.checked)}
-                      className="rounded text-indigo-600"
-                    />
-                    Edit rata-rata manual
-                  </span>
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    disabled={!useManualAverage}
-                    value={averageManual}
-                    onChange={(event) => setAverageManual(event.target.value)}
-                    className="w-36 rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-100"
-                    placeholder="0-100"
-                  />
-                </label>
+                <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm font-semibold text-indigo-700">
+                  Nilai rapot otomatis dari kiriman guru mapel. Wali kelas dapat mengatur KKM, keterangan, dan mengunci arsip rapot.
+                </div>
               </div>
             </div>
 

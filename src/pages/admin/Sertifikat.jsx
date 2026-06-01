@@ -42,8 +42,8 @@ const A4_HEIGHT = 595
 // Signed URL expiry (seconds)
 const SIGNED_EXPIRES = 60 * 60 * 24 * 7 // 7 hari
 
-const TEMPLATE_UPLOAD_ACCEPT = 'application/pdf,image/png,image/jpeg'
-const TEMPLATE_ALLOWED_EXTENSIONS = ['pdf', 'png', 'jpg', 'jpeg']
+const TEMPLATE_UPLOAD_ACCEPT = 'application/pdf,image/png,image/jpeg,image/webp'
+const TEMPLATE_ALLOWED_EXTENSIONS = ['pdf', 'png', 'jpg', 'jpeg', 'webp']
 const OUTPUT_FORMATS = [
   { value: 'pdf', label: 'PDF', extension: 'pdf', contentType: 'application/pdf' },
   { value: 'png', label: 'PNG', extension: 'png', contentType: 'image/png' },
@@ -199,13 +199,13 @@ const validateTemplateFile = (file) => {
   if (!file) return 'File tidak ditemukan'
   const ext = getFileExtension(file)
   if (!TEMPLATE_ALLOWED_EXTENSIONS.includes(ext)) {
-    return 'Format template harus PDF, PNG, JPG, atau JPEG'
+    return 'Format template harus PDF, PNG, JPG, JPEG, atau WEBP'
   }
 
   const mime = String(file.type || '').toLowerCase()
-  const allowedMimes = ['application/pdf', 'image/png', 'image/jpeg']
+  const allowedMimes = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp']
   if (mime && !allowedMimes.includes(mime)) {
-    return 'Tipe file template tidak sesuai. Gunakan PDF, PNG, JPG, atau JPEG'
+    return 'Tipe file template tidak sesuai. Gunakan PDF, PNG, JPG, JPEG, atau WEBP'
   }
 
   return ''

@@ -2952,10 +2952,15 @@ export default function GuruQuiz() {
               </div>
 
               <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden transition-all duration-300 hover:shadow-md">
-                <div className="p-4 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-white">
-                  <div className="flex items-center gap-3">
-                    <div className="w-2 h-8 bg-purple-600 rounded-full"></div>
-                    <h3 className="text-lg font-bold text-slate-900">Status Siswa</h3>
+                <div className="p-4 border-b border-gray-100 bg-gradient-to-r from-slate-50 to-white">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-2 h-8 bg-purple-600 rounded-full"></div>
+                      <div>
+                        <h3 className="text-lg font-bold text-slate-900">Status Siswa</h3>
+                        <p className="text-xs text-slate-500">Pantau progres, koreksi esai, device aktif, dan riwayat peringatan.</p>
+                      </div>
+                    </div>
                   </div>
                 </div>
                 <div className="p-4 space-y-4">
@@ -2967,17 +2972,25 @@ export default function GuruQuiz() {
                   {!!participants.length && (
                     <>
                       <div>
-                        <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-600 mb-2">
-                          <span>Siswa sudah mengerjakan ({attemptedStudents.length})</span>
-                          <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200">
-                            Sedang mengerjakan: {ongoingStudents.length}
-                          </span>
-                          <span className="px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 border border-orange-200">
-                            Online: {ongoingOnlineCount}
-                          </span>
-                          <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
-                            Device aktif: {ongoingStudents.reduce((sum, student) => sum + Number(presenceByStudent[student.id]?.active_devices || 0), 0)}
-                          </span>
+                        <div className="grid gap-2 mb-3 sm:grid-cols-2 lg:grid-cols-4">
+                          <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2">
+                            <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-700">Sudah mengerjakan</p>
+                            <p className="text-lg font-black text-emerald-800">{attemptedStudents.length}</p>
+                          </div>
+                          <div className="rounded-xl border border-amber-100 bg-amber-50 px-3 py-2">
+                            <p className="text-[10px] font-bold uppercase tracking-wide text-amber-700">Sedang mengerjakan</p>
+                            <p className="text-lg font-black text-amber-800">{ongoingStudents.length}</p>
+                          </div>
+                          <div className="rounded-xl border border-orange-100 bg-orange-50 px-3 py-2">
+                            <p className="text-[10px] font-bold uppercase tracking-wide text-orange-700">Online</p>
+                            <p className="text-lg font-black text-orange-800">{ongoingOnlineCount}</p>
+                          </div>
+                          <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                            <p className="text-[10px] font-bold uppercase tracking-wide text-slate-600">Device aktif</p>
+                            <p className="text-lg font-black text-slate-900">
+                              {ongoingStudents.reduce((sum, student) => sum + Number(presenceByStudent[student.id]?.active_devices || 0), 0)}
+                            </p>
+                          </div>
                         </div>
                         <div className="space-y-2">
                           {!attemptedStudents.length && (
@@ -3006,7 +3019,7 @@ export default function GuruQuiz() {
                             return (
                               <div
                                 key={p.id}
-                                className={`flex items-center justify-between p-3 border rounded-xl bg-white transition-all duration-300 ${
+                                className={`grid gap-4 p-4 border rounded-2xl bg-white transition-all duration-300 lg:grid-cols-[minmax(0,1fr)_auto] ${
                                   isOnline
                                     ? 'border-orange-300 bg-orange-50/40 hover:border-orange-400'
                                     : 'border-slate-200 hover:border-emerald-200'
@@ -3054,9 +3067,9 @@ export default function GuruQuiz() {
                                   )}
                                   </div>
                                 </div>
-                                <div className="flex items-center gap-3">
+                                <div className="flex flex-wrap items-center gap-2 lg:justify-end">
                                   <span
-                                    className={`text-xs px-2 py-1 rounded-full ${
+                                    className={`text-xs px-3 py-1.5 rounded-full font-semibold ${
                                       sub?.status === 'finished'
                                         ? 'bg-green-100 text-green-700'
                                         : hasMultipleDevices
@@ -3070,7 +3083,7 @@ export default function GuruQuiz() {
                                   </span>
                                   {showCorrectionStatus && (
                                     <span
-                                      className={`text-xs px-2 py-1 rounded-full border ${
+                                      className={`text-xs px-3 py-1.5 rounded-full border font-semibold ${
                                         isEssayCorrected
                                           ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
                                           : 'bg-amber-100 text-amber-700 border-amber-200'
@@ -3080,15 +3093,15 @@ export default function GuruQuiz() {
                                     </span>
                                   )}
                                   {showCorrectionStatus && !isEssayCorrected && essayPendingCount > 0 && (
-                                    <span className="text-xs px-2 py-1 rounded-full border bg-red-100 text-red-700 border-red-200">
-                                      Pending nilai esai: {essayPendingCount}
+                                    <span className="text-xs px-3 py-1.5 rounded-full border bg-red-100 text-red-700 border-red-200 font-semibold">
+                                      Esai pending: {essayPendingCount}
                                     </span>
                                   )}
-                                  <div className="text-sm font-semibold text-slate-700 min-w-16 text-right">
+                                  <div className="min-w-14 rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-center text-sm font-bold text-slate-800">
                                     {sub?.score != null ? `${sub.score}` : '-'}
                                   </div>
                                   <span
-                                    className={`text-xs px-2 py-1 rounded-full border ${
+                                    className={`text-xs px-3 py-1.5 rounded-full border font-semibold ${
                                       warningCount > 0
                                         ? 'bg-red-100 text-red-700 border-red-200'
                                         : 'bg-slate-100 text-slate-600 border-slate-200'

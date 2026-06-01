@@ -15,6 +15,7 @@ import {
 import { completeGoogleLinkOAuthFlow } from '../../utils/googleLinking'
 import { sanitizeText } from '../../utils/sanitize'
 import { validatePassword } from '../../utils/passwordPolicy'
+import { religionSelectOptions } from '../../constants/religionOptions'
 
 // ==================== STORAGE CONFIG ====================
 const SIGNED_URL_EXPIRES_IN = 60 * 60 // 1 jam (aman, jangan simpan signed-url ke DB)
@@ -176,6 +177,7 @@ export default function EditProfile() {
   const [form, setForm] = useState({
     nama: '',
     jk: '',
+    agama: '',
     nis: '',
     usia: '',
     kelas: '',
@@ -349,6 +351,7 @@ export default function EditProfile() {
     const initialForm = {
       nama: profile.nama || '',
       jk: profile.jk || '',
+      agama: profile.agama || '',
       nis: profile.nis || '',
       usia: profile.usia || '',
       kelas: profile.kelas || '',
@@ -586,6 +589,7 @@ export default function EditProfile() {
     try {
       const updateData = {
         jk: form.jk,
+        agama: form.agama || null,
         nis: form.nis ? form.nis.trim() : null,
         usia: form.usia ? parseInt(form.usia, 10) : null,
         no_hp_siswa: form.no_hp_siswa ? form.no_hp_siswa.trim() : null,
@@ -609,6 +613,7 @@ export default function EditProfile() {
         const rollback = {
           nama: profile.nama || '',
           jk: profile.jk || '',
+          agama: profile.agama || '',
           nis: profile.nis || '',
           usia: profile.usia || '',
           kelas: profile.kelas || '',
@@ -1290,6 +1295,25 @@ export default function EditProfile() {
                     <option value="">Pilih Jenis Kelamin</option>
                     <option value="L">Laki-laki</option>
                     <option value="P">Perempuan</option>
+                  </select>
+                </div>
+
+                {/* AGAMA */}
+                <div>
+                  <label className="flex text-sm font-semibold text-slate-700 mb-2 items-center gap-2">
+                    <span className="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
+                    Agama
+                  </label>
+                  <select
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 transition-all duration-300 hover:border-purple-300 focus:border-purple-500 focus:outline-none focus:ring-3 focus:ring-purple-500/20"
+                    value={form.agama}
+                    onChange={(e) => handleFieldChange('agama', e.target.value)}
+                  >
+                    {religionSelectOptions(form.agama).map((option) => (
+                      <option key={option.value || 'empty'} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
 

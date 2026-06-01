@@ -4563,6 +4563,14 @@ class DbController extends ApiController
         }
 
         if (Schema::hasTable('kelas')) {
+            $kelasSelectColumns = array_values(array_filter(
+                ['id', 'nama', 'grade', 'suffix', 'tingkat', 'jurusan'],
+                fn ($column) => $this->isSelectableColumn('kelas', $column)
+            ));
+            if (empty($kelasSelectColumns)) {
+                $kelasSelectColumns = ['id'];
+            }
+
             $kelasQuery = DB::table('kelas');
             $this->applyTenantFilterAllowingLegacyNull($kelasQuery);
             $kelasRows = $kelasQuery
@@ -4572,14 +4580,54 @@ class DbController extends ApiController
                         $query->orWhereIn('nama', $rawValues);
                     }
                 })
-                ->get(['id', 'nama', 'grade', 'suffix']);
+                ->get($kelasSelectColumns);
 
             foreach ($kelasRows as $kelas) {
                 foreach ([
                     $kelas->id ?? null,
                     $kelas->nama ?? null,
                     trim((string) (($kelas->grade ?? '').' '.($kelas->suffix ?? ''))),
+                    trim((string) (($kelas->tingkat ?? '').' '.($kelas->jurusan ?? ''))),
                 ] as $alias) {
+                    $alias = trim((string) $alias);
+                    if ($alias === '') {
+                        continue;
+                    }
+                    $expanded[] = $alias;
+                    $expanded[] = str_replace('-', ' ', $alias);
+                    $expanded[] = str_replace(' ', '-', $alias);
+                }
+            }
+
+            // Be tolerant with class identity. Some legacy rows store class ids
+            // (x-a-mipa), while student/profile rows often store display names
+            // (X A MIPA). Matching the normalized display avoids false 403s for
+            // valid wali kelas/guru pengampu actions.
+            $rawKeys = array_flip(array_map(
+                fn ($value) => $this->normalizeKelasAccessValue($value),
+                $rawValues
+            ));
+            $allKelasQuery = DB::table('kelas');
+            $this->applyTenantFilterAllowingLegacyNull($allKelasQuery);
+            foreach ($allKelasQuery->get($kelasSelectColumns) as $kelas) {
+                $aliases = [
+                    $kelas->id ?? null,
+                    $kelas->nama ?? null,
+                    trim((string) (($kelas->grade ?? '').' '.($kelas->suffix ?? ''))),
+                    trim((string) (($kelas->tingkat ?? '').' '.($kelas->jurusan ?? ''))),
+                ];
+                $matches = false;
+                foreach ($aliases as $alias) {
+                    $alias = trim((string) $alias);
+                    if ($alias !== '' && isset($rawKeys[$this->normalizeKelasAccessValue($alias)])) {
+                        $matches = true;
+                        break;
+                    }
+                }
+                if (! $matches) {
+                    continue;
+                }
+                foreach ($aliases as $alias) {
                     $alias = trim((string) $alias);
                     if ($alias === '') {
                         continue;

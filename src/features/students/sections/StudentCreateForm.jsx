@@ -1,5 +1,6 @@
 import React, { memo } from 'react'
 import { Button, Card, Input, Select } from '../../../pages/admin/siswa/SiswaUi'
+import { religionSelectOptions } from '../../../constants/religionOptions'
 
 function StudentCreateForm({
   form,
@@ -68,6 +69,13 @@ function StudentCreateForm({
               { value: 'L', label: 'Laki-laki' },
               { value: 'P', label: 'Perempuan' }
             ]}
+          />
+          <Select
+            label="Agama"
+            name="agama"
+            value={form.agama}
+            onChange={onChange}
+            options={religionSelectOptions(form.agama)}
           />
           <Input
             label="Password *"

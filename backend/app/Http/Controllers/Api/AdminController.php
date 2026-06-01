@@ -1833,6 +1833,7 @@ class AdminController extends ApiController
         $payload = $request->all();
         $validator = Validator::make($payload, [
             'nama' => ['sometimes', 'string', 'max:120'],
+            'nis' => ['sometimes', 'nullable', 'string', 'max:40'],
             'jk' => ['sometimes', 'nullable', 'string', 'max:20'],
             'tanggal_lahir' => ['sometimes', 'nullable', 'date'],
             'agama' => ['sometimes', 'nullable', 'string', 'max:50'],
@@ -1842,7 +1843,7 @@ class AdminController extends ApiController
             return response()->json(['error' => $validator->errors()->first()], 422);
         }
 
-        $allowedKeys = ['nama', 'jk', 'tanggal_lahir', 'agama', 'alamat'];
+        $allowedKeys = ['nama', 'nis', 'jk', 'tanggal_lahir', 'agama', 'alamat'];
         $hasAnyField = false;
         foreach ($allowedKeys as $key) {
             if (array_key_exists($key, $payload)) {
@@ -1863,6 +1864,24 @@ class AdminController extends ApiController
                 return $this->deny('Nama siswa wajib diisi.', 422);
             }
             $data['nama'] = $nama;
+        }
+
+        if (array_key_exists('nis', $payload)) {
+            $nis = $this->nullableString($payload['nis'] ?? null);
+            if ($nis !== null) {
+                $exists = DB::table('profiles')
+                    ->where('tenant_id', $tenantId)
+                    ->where('role', 'siswa')
+                    ->where('id', '!=', $id)
+                    ->whereRaw('UPPER(nis) = ?', [strtoupper($nis)])
+                    ->exists();
+
+                if ($exists) {
+                    return $this->deny('NIS sudah dipakai siswa lain di sekolah ini.', 422);
+                }
+            }
+
+            $data['nis'] = $nis;
         }
 
         if (array_key_exists('jk', $payload)) {
@@ -1887,6 +1906,7 @@ class AdminController extends ApiController
             'nama' => $student->nama,
             'jk' => $student->jk,
             'usia' => $student->usia,
+            'nis' => $student->nis,
             'tanggal_lahir' => $student->tanggal_lahir,
             'agama' => $student->agama,
             'alamat' => $student->alamat,

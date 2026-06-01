@@ -166,6 +166,7 @@ export function useStudentDetailActions({
     try {
       const payload = {
         nama: nextName,
+        nis: String(editAdditionalInfoForm.nis || '').trim() || null,
         jk: nextGender || null,
         tanggal_lahir: editAdditionalInfoForm.tanggal_lahir || null,
         agama: String(editAdditionalInfoForm.agama || '').trim() || null,

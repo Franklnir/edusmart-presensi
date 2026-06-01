@@ -1239,7 +1239,7 @@ export default function LaporanRekap() {
       if (rapotIds.length) {
         const { data, error } = await supabase
           .from('rapot_siswa_items')
-          .select('id, rapot_id, nomor, mapel')
+          .select('id, rapot_id, nomor, mapel, kkm')
           .in('rapot_id', rapotIds)
         if (error) throw error
         existingItems = data || []
@@ -1262,7 +1262,7 @@ export default function LaporanRekap() {
           rapot_id: rapot?.id,
           nomor: existingMapel?.nomor || maxNomor + 1,
           mapel: selectedMapel,
-          kkm: KKM_NILAI_TUGAS,
+          kkm: toNumberOrNull(existingMapel?.kkm) ?? KKM_NILAI_TUGAS,
           nilai: preview.nilaiAkhir,
           predikat: getGrade(preview.nilaiAkhir),
           keterangan: row.catatan || null,
