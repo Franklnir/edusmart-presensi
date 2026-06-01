@@ -592,6 +592,7 @@ export default function APengaturan() {
 
   const autoSaveTimerRef = useRef(null)
   const initialLoadDoneRef = useRef(false)
+  const lastSaveTimestampRef = useRef('')
 
   const handlePasswordConfirm = async (password) => {
     setPasswordLoading(true)
@@ -931,6 +932,15 @@ export default function APengaturan() {
         (payload) => {
           const row = payload.new
           if (!row) return
+
+          // Guard: skip form overwrite while user is still typing
+          // (auto-save timer is pending). This prevents a loop where
+          // realtime echo resets the form mid-edit.
+          if (autoSaveTimerRef.current) return
+
+          // Guard: skip self-echo — the realtime event is from our own save
+          const rowUpdatedAt = String(row.updated_at || '')
+          if (lastSaveTimestampRef.current && rowUpdatedAt === lastSaveTimestampRef.current) return
 
           const logoPath = extractObjectKeyFromMaybeUrl(row.logo_url || '', SUPABASE_BUCKET)
 
@@ -1367,6 +1377,9 @@ export default function APengaturan() {
         max_ekskul_per_siswa: normalizeEskulLimit(form.max_ekskul_per_siswa),
         updated_at: new Date().toISOString()
       }
+
+      // Track our own save timestamp so the realtime handler can skip self-echo
+      lastSaveTimestampRef.current = dataToSave.updated_at
 
       const { error } = await supabase
         .from('settings')

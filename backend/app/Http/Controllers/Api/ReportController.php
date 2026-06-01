@@ -263,7 +263,7 @@ class ReportController extends ApiController
     {
         $ids = array_values(array_unique(array_filter(array_map('strval', $extraIds))));
 
-        return DB::table('profiles')
+        $query = DB::table('profiles')
             ->where('tenant_id', $tenantId)
             ->where('role', 'siswa')
             ->where(function ($query) use ($kelas, $ids) {
@@ -273,8 +273,20 @@ class ReportController extends ApiController
                 }
             })
             ->select($this->existingColumns('profiles', ['id', 'nama', 'nis', 'kelas', 'status']))
-            ->orderBy('nama')
-            ->get();
+            ->orderBy('nama');
+
+        // Only include active students, but keep legacy rows that have
+        // submissions/attendance even if their status is missing.
+        if (Schema::hasColumn('profiles', 'status')) {
+            $query->where(function ($q) use ($ids) {
+                $q->where('status', 'active');
+                if (! empty($ids)) {
+                    $q->orWhereIn('id', $ids);
+                }
+            });
+        }
+
+        return $query->get();
     }
 
     private function averageAndGrade(array $nilaiRows): array
@@ -320,14 +332,15 @@ class ReportController extends ApiController
     private function applyAcademicFilters($query, string $table, Request $request): void
     {
         $tahunAjaran = trim((string) $request->query('tahun_ajaran', ''));
-        $semester = trim((string) $request->query('semester', ''));
 
         if ($tahunAjaran !== '' && Schema::hasColumn($table, 'tahun_ajaran')) {
             $query->where('tahun_ajaran', $tahunAjaran);
         }
-        if ($semester !== '' && Schema::hasColumn($table, 'semester')) {
-            $query->where('semester', $semester);
-        }
+
+        // Semester filter intentionally omitted for report queries.
+        // Tugas and quizzes are scoped by tahun_ajaran + date range already;
+        // adding semester makes values disappear when records were created
+        // before semester was consistently populated.
     }
 
     private function tenantQuery(string $table, string $tenantId)

@@ -1051,7 +1051,18 @@ const GeneratorSection = ({ templateVersion }) => {
 
     try {
       const selectedOutput = getOutputFormat(outputFormat)
-      const bgDataUrl = await resolveTemplateBackgroundDataUrl(selectedTemplate)
+      let bgDataUrl = null
+      try {
+        bgDataUrl = await resolveTemplateBackgroundDataUrl(selectedTemplate)
+      } catch (bgErr) {
+        console.warn('resolveTemplateBackgroundDataUrl gagal, mencoba fallback __previewUrl:', bgErr)
+      }
+
+      // Fallback: use the pre-rendered preview that was loaded when template list initialized
+      if (!bgDataUrl && selectedTemplate.__previewUrl) {
+        bgDataUrl = selectedTemplate.__previewUrl
+      }
+
       if ((selectedTemplate.background_url || selectedTemplate.__bgUrl) && !bgDataUrl) {
         throw new Error('Template sertifikat gagal dibaca. Cek file background template lalu coba generate ulang.')
       }
