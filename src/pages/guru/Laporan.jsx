@@ -1,4 +1,4 @@
-﻿// src/pages/guru/LaporanRekap.jsx
+// src/pages/guru/LaporanRekap.jsx
 import React, { startTransition, useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
@@ -287,13 +287,29 @@ export default function LaporanRekap() {
     })
   }, [reportMonthOptionValues])
 
+  // Tables that are already scoped by parent IDs (tugas_id IN [...]) — do NOT
+  // add extra tahun_ajaran filter here because the column is frequently null
+  // for older records, causing all historical data to vanish silently.
+  const SKIP_TAHUN_AJARAN_FILTER_TABLES = useMemo(
+    () => new Set([
+      'tugas_jawaban',
+      'quiz_submissions',
+      'quiz_answers',
+      'ekskul_anggota',
+      'absensi_ekskul',
+    ]),
+    []
+  )
+
   const applyReportAcademicFilters = useCallback(
-    (query) => {
+    (query, tableHint = '') => {
+      // Skip for child tables that are scoped via parent IDs already
+      if (tableHint && SKIP_TAHUN_AJARAN_FILTER_TABLES.has(tableHint)) return query
       let next = query
       if (reportPeriod.tahunAjaran) next = next.eq('tahun_ajaran', reportPeriod.tahunAjaran)
       return next
     },
-    [reportPeriod.tahunAjaran]
+    [reportPeriod.tahunAjaran, SKIP_TAHUN_AJARAN_FILTER_TABLES]
   )
 
   const loadSiswaForReport = useCallback(
@@ -910,7 +926,7 @@ export default function LaporanRekap() {
           .select('tugas_id, user_id, nilai')
           .in('tugas_id', tugasIds)
           .in('user_id', studentIds)
-        jawabanQuery = applyReportAcademicFilters(jawabanQuery)
+        jawabanQuery = applyReportAcademicFilters(jawabanQuery, 'tugas_jawaban')
         detailBatchItems.push({ key: 'jawaban', query: jawabanQuery })
       }
 
@@ -923,7 +939,7 @@ export default function LaporanRekap() {
           .select('quiz_id, siswa_id, score')
           .in('quiz_id', quizIds)
           .in('siswa_id', studentIds)
-        submissionQuery = applyReportAcademicFilters(submissionQuery)
+        submissionQuery = applyReportAcademicFilters(submissionQuery, 'quiz_submissions')
         detailBatchItems.push({ key: 'submissions', query: submissionQuery })
       }
 
@@ -1468,7 +1484,7 @@ export default function LaporanRekap() {
         .from('tugas_jawaban')
         .select('*')
         .in('tugas_id', tugasIds.length ? tugasIds : [-1])
-      jawabanQuery = applyReportAcademicFilters(jawabanQuery)
+      jawabanQuery = applyReportAcademicFilters(jawabanQuery, 'tugas_jawaban')
       const { data: jawabanList } = await jawabanQuery
 
       let quizQuery = supabase
@@ -1502,7 +1518,7 @@ export default function LaporanRekap() {
         .from('quiz_submissions')
         .select('*')
         .in('quiz_id', quizIds.length ? quizIds : [-1])
-      submissionQuery = applyReportAcademicFilters(submissionQuery)
+      submissionQuery = applyReportAcademicFilters(submissionQuery, 'quiz_submissions')
       const { data: submissionList } = await submissionQuery
 
       let absensiQuery = supabase
@@ -1549,7 +1565,7 @@ export default function LaporanRekap() {
           .from('ekskul_anggota')
           .select('user_id, ekskul_id')
           .in('user_id', siswaIds)
-        ekskulAnggotaQuery = applyReportAcademicFilters(ekskulAnggotaQuery)
+        ekskulAnggotaQuery = applyReportAcademicFilters(ekskulAnggotaQuery, 'ekskul_anggota')
         const { data, error } = await ekskulAnggotaQuery
         if (error) throw error
         ekskulAnggotaList = data || []
@@ -1578,7 +1594,7 @@ export default function LaporanRekap() {
           .in('ekskul_id', ekskulIds)
           .gte('tanggal', dateStrings[0])
           .lte('tanggal', dateStrings[dateStrings.length - 1])
-        absensiEskulQuery = applyReportAcademicFilters(absensiEskulQuery)
+        absensiEskulQuery = applyReportAcademicFilters(absensiEskulQuery, 'absensi_ekskul')
         const { data, error } = await absensiEskulQuery
         if (error) throw error
         absensiEskulList = data || []
@@ -2148,7 +2164,7 @@ export default function LaporanRekap() {
             .select('tugas_id, nilai')
             .eq('user_id', siswa.id)
             .in('tugas_id', tugasIds)
-          jawabanDetailQuery = applyReportAcademicFilters(jawabanDetailQuery)
+          jawabanDetailQuery = applyReportAcademicFilters(jawabanDetailQuery, 'tugas_jawaban')
           const { data, error } = await jawabanDetailQuery
           if (error) throw error
           jawabanList = data || []
@@ -2161,7 +2177,7 @@ export default function LaporanRekap() {
             .select('quiz_id, score')
             .eq('siswa_id', siswa.id)
             .in('quiz_id', quizIds)
-          submissionDetailQuery = applyReportAcademicFilters(submissionDetailQuery)
+          submissionDetailQuery = applyReportAcademicFilters(submissionDetailQuery, 'quiz_submissions')
           const { data, error } = await submissionDetailQuery
           if (error) throw error
           submissionList = data || []
@@ -2601,7 +2617,7 @@ export default function LaporanRekap() {
         .select('id')
         .eq('user_id', siswaId)
         .eq('tugas_id', tugasId)
-      existingJawabanQuery = applyReportAcademicFilters(existingJawabanQuery)
+      existingJawabanQuery = applyReportAcademicFilters(existingJawabanQuery, 'tugas_jawaban')
       const { data: existing, error: fetchErr } = await existingJawabanQuery.maybeSingle()
       if (fetchErr) throw fetchErr
 
@@ -2664,7 +2680,7 @@ export default function LaporanRekap() {
         .select('id, status, created_at')
         .eq('siswa_id', siswaId)
         .eq('quiz_id', quizId)
-      existingSubmissionQuery = applyReportAcademicFilters(existingSubmissionQuery)
+      existingSubmissionQuery = applyReportAcademicFilters(existingSubmissionQuery, 'quiz_submissions')
       const { data: existing, error: fetchErr } = await existingSubmissionQuery.maybeSingle()
       if (fetchErr) throw fetchErr
 
