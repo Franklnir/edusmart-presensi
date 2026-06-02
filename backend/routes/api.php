@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\AdminBackupController;
 use App\Http\Controllers\Api\AdminController;
+use App\Http\Controllers\Api\AdminFeaturePermissionController;
 use App\Http\Controllers\Api\ApprovalController;
 use App\Http\Controllers\Api\AttendanceQrController;
 use App\Http\Controllers\Api\AuthController;
@@ -106,6 +107,7 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::post('/auth/google/unlink', [AuthController::class, 'googleUnlink']);
     Route::post('/presence/ping', [PresenceController::class, 'ping']);
     Route::post('/guru/jam-kosong/{id}/replacement', [JadwalController::class, 'updateJamKosongReplacement']);
+    Route::get('/guru/admin-permissions', [AdminFeaturePermissionController::class, 'mine']);
     Route::post('/attendance-qr/session', [AttendanceQrController::class, 'session']);
     Route::post('/attendance-qr/scan', [AttendanceQrController::class, 'scan']);
     Route::patch('/students/{id}/additional-info', [AdminController::class, 'updateStudentAdditionalInfo']);
@@ -195,6 +197,10 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'throttle:api'])->group(func
     Route::get('/teachers', [AdminController::class, 'teachers']);
     Route::get('/certificates', [AdminController::class, 'certificates']);
     Route::get('/scan-session-summary', [AdminController::class, 'scanSessionSummary']);
+    Route::get('/feature-permissions', [AdminFeaturePermissionController::class, 'index']);
+    Route::post('/feature-permissions', [AdminFeaturePermissionController::class, 'store']);
+    Route::patch('/feature-permissions/{id}', [AdminFeaturePermissionController::class, 'update']);
+    Route::delete('/feature-permissions/{id}', [AdminFeaturePermissionController::class, 'destroy']);
     Route::get('/classes/deleted-history', [ClassHistoryController::class, 'index']);
     Route::delete('/classes/{id}', [ClassHistoryController::class, 'destroyClass']);
     Route::post('/classes/deleted-history/{id}/restore', [ClassHistoryController::class, 'restore']);

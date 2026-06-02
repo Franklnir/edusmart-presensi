@@ -147,6 +147,19 @@ const getCssFontFamily = (fontFamily) => {
 
 /* ================== UTILS ================== */
 const isHttpUrl = (v) => typeof v === 'string' && /^https?:\/\//i.test(v)
+const isSameOriginUrl = (value = '') => {
+  if (typeof window === 'undefined') return false
+  try {
+    return new URL(String(value || ''), window.location.origin).origin === window.location.origin
+  } catch {
+    return false
+  }
+}
+const fetchCredentialsForUrl = (value = '') => {
+  const raw = String(value || '')
+  if (!isHttpUrl(raw)) return 'same-origin'
+  return isSameOriginUrl(raw) ? 'same-origin' : 'omit'
+}
 const clamp = (n, min, max) => Math.min(Math.max(n, min), max)
 const uniqueNonEmpty = (values = []) =>
   Array.from(new Set(values.map((value) => String(value || '').trim()).filter(Boolean)))
@@ -255,7 +268,7 @@ const applyTextTransform = (text, transform) => {
 const fetchImageAsDataUrl = async (url) => {
   try {
     const res = await fetch(url + (url.includes('?') ? '&' : '?') + 't=' + Date.now(), {
-      credentials: 'include'
+      credentials: fetchCredentialsForUrl(url)
     })
     if (!res.ok) throw new Error('Gagal fetch background')
     const blob = await res.blob()
@@ -282,10 +295,7 @@ const sourceToArrayBuffer = async (source) => {
   if (typeof Blob !== 'undefined' && source instanceof Blob) return source.arrayBuffer()
 
   const raw = String(source || '')
-  const fetchOptions =
-    /^https?:\/\//i.test(raw) || raw.startsWith('/')
-      ? { credentials: 'include' }
-      : undefined
+  const fetchOptions = raw ? { credentials: fetchCredentialsForUrl(raw) } : undefined
   const res = await fetch(raw, fetchOptions)
   if (!res.ok) throw new Error('Gagal membaca PDF template')
   return res.arrayBuffer()
@@ -398,7 +408,7 @@ const canAccessSignedUrl = async (signedUrl) => {
   try {
     const response = await fetch(signedUrl, {
       method: 'HEAD',
-      credentials: 'include'
+      credentials: 'omit'
     })
     return response.ok
   } catch {

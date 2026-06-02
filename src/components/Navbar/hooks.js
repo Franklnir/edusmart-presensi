@@ -185,10 +185,41 @@ export const useWaliKelasFlag = (role, userId) => {
   return isWaliKelas
 }
 
-export const useNavigationMenu = ({ effectiveRole, isSuperAdmin, isWaliKelas, role }) => (
+export const useDelegatedAdminFeatures = (role, userId) => {
+  const [features, setFeatures] = useState([])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadFeatures = async () => {
+      if (role !== 'guru' || !userId) {
+        if (!cancelled) setFeatures([])
+        return
+      }
+
+      try {
+        const { data, error } = await supabase.admin.delegatedPermissions()
+        if (error) throw error
+        if (!cancelled) setFeatures(Array.isArray(data?.features) ? data.features : [])
+      } catch {
+        if (!cancelled) setFeatures([])
+      }
+    }
+
+    loadFeatures()
+
+    return () => {
+      cancelled = true
+    }
+  }, [role, userId])
+
+  return features
+}
+
+export const useNavigationMenu = ({ effectiveRole, isSuperAdmin, isWaliKelas, role, delegatedAdminFeatures }) => (
   useMemo(
-    () => buildNavigationMenu({ effectiveRole, isSuperAdmin, isWaliKelas, role }),
-    [effectiveRole, isSuperAdmin, isWaliKelas, role]
+    () => buildNavigationMenu({ effectiveRole, isSuperAdmin, isWaliKelas, role, delegatedAdminFeatures }),
+    [effectiveRole, isSuperAdmin, isWaliKelas, role, delegatedAdminFeatures]
   )
 )
 

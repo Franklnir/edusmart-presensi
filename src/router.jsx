@@ -1,6 +1,7 @@
 import React, { Suspense } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import AdminLockGate from './components/AdminLockGate'
+import DelegatedAdminGate from './components/DelegatedAdminGate'
 import ProtectedRoute from './components/ProtectedRoute'
 import RoleGate from './components/RoleGate'
 import { lazyRoute } from './lib/routePrefetch'
@@ -49,6 +50,7 @@ const AApprovals = lazyRoute('/admin/approvals')
 const AAuditTrail = lazyRoute('/admin/audit-trail')
 const APlugins = lazyRoute('/admin/plugins')
 const AWhatsApp = lazyRoute('/admin/whatsapp')
+const APermissionAdmin = lazyRoute('/admin/permission-admin')
 
 const RouteFallback = () => (
   <div className="w-full min-h-[40vh] grid place-items-center">
@@ -118,6 +120,17 @@ const AppRoutes = () => (
       <Route path="/guru/siswa" element={lazyElement(ASiswa)} />
       <Route path="/guru/rapot-siswa" element={lazyElement(GRapotSiswa)} />
       <Route path="/guru/profile" element={lazyElement(GProfile)} />
+      <Route element={<DelegatedAdminGate />}>
+        <Route path="/guru/admin/home" element={lazyElement(AHome)} />
+        <Route path="/guru/admin/kelas" element={lazyElement(AKelas)} />
+        <Route path="/guru/admin/jadwal" element={lazyElement(AJadwal)} />
+        <Route path="/guru/admin/struktur-sekolah" element={lazyElement(AStrukturSekolah)} />
+        <Route path="/guru/admin/organisasi" element={lazyElement(AOrganisasi)} />
+        <Route path="/guru/admin/guru" element={lazyElement(AGuru)} />
+        <Route path="/guru/admin/sertifikat" element={lazyElement(Sertifikat)} />
+        <Route path="/guru/admin/siswa" element={lazyElement(ASiswa)} />
+        <Route path="/guru/admin/scan" element={lazyElement(AScan)} />
+      </Route>
     </Route>
 
     {/* ADMIN */}
@@ -149,6 +162,7 @@ const AppRoutes = () => (
         <Route path="/admin/scan" element={lazyElement(AScan)} />
         <Route path="/admin/backup" element={lazyElement(ABackup)} />
         <Route path="/admin/approvals" element={lazyElement(AApprovals)} />
+        <Route path="/admin/permission-admin" element={lazyElement(APermissionAdmin)} />
         <Route path="/admin/sertifikat" element={lazyElement(Sertifikat)} />
         <Route path="/admin/whatsapp" element={lazyElement(AWhatsApp)} />
       </Route>

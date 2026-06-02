@@ -65,6 +65,7 @@ export const menuConfig = {
         { id: 'admin-approvals', to: '/admin/approvals', label: 'Approval', icon: 'shield' },
         { id: 'admin-storage', to: '/admin/storage', label: 'Storage', icon: 'storage' },
         { id: 'admin-backup', to: '/admin/backup', label: 'Backup', icon: 'backup' },
+        { id: 'admin-permission-admin', to: '/admin/permission-admin', label: 'Permission Admin', icon: 'shield' },
         { id: 'admin-pengaturan', to: '/admin/pengaturan?menu=identity', label: 'Pengaturan', icon: 'cog' },
       ],
     },

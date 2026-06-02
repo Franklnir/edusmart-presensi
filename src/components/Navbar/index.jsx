@@ -9,6 +9,7 @@ import MobileNav from './MobileNav'
 import MonitoringModal from './MonitoringModal'
 import {
   useAvatarUrl,
+  useDelegatedAdminFeatures,
   useMonitoring,
   useNavbarSettings,
   useNavigationMenu,
@@ -44,7 +45,14 @@ const Navbar = () => {
   const effectiveRole = hasSuperAdminAccess ? 'admin' : role
   const showMonitoring = effectiveRole === 'admin' && !hasSuperAdminAccess
   const isWaliKelas = useWaliKelasFlag(role, user?.id)
-  const navItems = useNavigationMenu({ effectiveRole, isSuperAdmin: hasSuperAdminAccess, isWaliKelas, role })
+  const delegatedAdminFeatures = useDelegatedAdminFeatures(role, user?.id)
+  const navItems = useNavigationMenu({
+    effectiveRole,
+    isSuperAdmin: hasSuperAdminAccess,
+    isWaliKelas,
+    role,
+    delegatedAdminFeatures
+  })
   const menuExpansion = useMenuExpansion(navItems, location.pathname, location.search)
   const {
     loadMonitoring,

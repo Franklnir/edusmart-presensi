@@ -1,4 +1,5 @@
 // src/lib/supabase.js
+import { resolveDelegatedAdminFeatureFromPath } from '../constants/adminFeaturePermissions'
 
 /* ===================== API BASE ===================== */
 const getRuntimeHostname = () => {
@@ -854,6 +855,13 @@ const runApiFetch = async (path, options = {}) => {
     headers['X-Tenant'] = TENANT_SLUG
   }
 
+  const delegatedFeature = typeof window !== 'undefined'
+    ? resolveDelegatedAdminFeatureFromPath(window.location?.pathname || '')
+    : null
+  if (delegatedFeature?.key) {
+    headers['X-Admin-Feature'] = delegatedFeature.key
+  }
+
   const xsrf = getCookie('XSRF-TOKEN')
   if (xsrf) headers['X-XSRF-TOKEN'] = decodeURIComponent(xsrf)
 
@@ -1211,6 +1219,7 @@ const apiUploadDirectObject = async (upload, file, options = {}) => new Promise(
       method: upload.method || 'PUT',
       headers: upload.headers || {},
       body: file,
+      credentials: 'omit',
       signal: options.signal
     })
       .then((response) => {
@@ -2653,6 +2662,44 @@ const auth = {
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
+    async featurePermissions() {
+      const res = await apiFetch('/api/admin/feature-permissions', {
+        method: 'GET',
+        cacheTtlMs: 10 * 1000,
+        staleKey: 'admin.feature-permissions',
+        timeoutMs: 15000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async createFeaturePermission(payload = {}) {
+      const res = await apiFetch('/api/admin/feature-permissions', {
+        method: 'POST',
+        body: payload,
+        cacheTtlMs: 0,
+        timeoutMs: 15000
+      })
+      if (!res.error) invalidateDbSelectCache()
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async updateFeaturePermission(id, payload = {}) {
+      const res = await apiFetch(`/api/admin/feature-permissions/${encodeURIComponent(String(id || ''))}`, {
+        method: 'PATCH',
+        body: payload,
+        cacheTtlMs: 0,
+        timeoutMs: 15000
+      })
+      if (!res.error) invalidateDbSelectCache()
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async deleteFeaturePermission(id) {
+      const res = await apiFetch(`/api/admin/feature-permissions/${encodeURIComponent(String(id || ''))}`, {
+        method: 'DELETE',
+        cacheTtlMs: 0,
+        timeoutMs: 15000
+      })
+      if (!res.error) invalidateDbSelectCache()
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
     async backup(options = {}) {
       const params = new URLSearchParams()
       const mode = String(options?.mode || '').trim()
@@ -2686,6 +2733,15 @@ const auth = {
     },
     async monitoring() {
       const res = await apiFetch('/api/admin/monitoring', { method: 'GET' })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async delegatedPermissions() {
+      const res = await apiFetch('/api/guru/admin-permissions', {
+        method: 'GET',
+        cacheTtlMs: 30 * 1000,
+        staleKey: 'guru.admin-permissions',
+        timeoutMs: 12000
+      })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
     async scanSettings() {

@@ -13,7 +13,7 @@ const canAccessSignedUrl = async (signedUrl) => {
   try {
     const response = await fetch(signedUrl, {
       method: 'HEAD',
-      credentials: 'include'
+      credentials: 'omit'
     })
     return response.ok
   } catch {

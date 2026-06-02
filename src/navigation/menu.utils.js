@@ -1,4 +1,5 @@
 import { menuConfig, superAdminGroup, waliKelasItem } from './menu.config'
+import { ADMIN_FEATURE_BY_KEY } from '../constants/adminFeaturePermissions'
 
 export const hasMenuChildren = (item) => Array.isArray(item?.items) && item.items.length > 0
 
@@ -108,12 +109,33 @@ function addItemToGroup(items, groupId, itemToAdd) {
   })
 }
 
-export function buildNavigationMenu({ effectiveRole, isSuperAdmin, isWaliKelas, role }) {
+export function buildNavigationMenu({ effectiveRole, isSuperAdmin, isWaliKelas, role, delegatedAdminFeatures = [] }) {
   if (isSuperAdmin) {
     return cloneMenuItems([superAdminGroup])
   }
 
   let items = cloneMenuItems(menuConfig[effectiveRole] || [])
+
+  if (role === 'guru' && Array.isArray(delegatedAdminFeatures) && delegatedAdminFeatures.length > 0) {
+    const delegatedItems = delegatedAdminFeatures
+      .map((featureKey) => ADMIN_FEATURE_BY_KEY[featureKey])
+      .filter(Boolean)
+      .map((feature) => ({
+        id: `guru-admin-${feature.key}`,
+        to: feature.guruPath,
+        label: feature.label,
+        icon: feature.icon,
+      }))
+
+    if (delegatedItems.length > 0) {
+      items.push({
+        id: 'guru-delegasi-admin',
+        group: 'Delegasi Admin',
+        icon: 'shield',
+        items: delegatedItems,
+      })
+    }
+  }
 
   if (role === 'guru' && isWaliKelas) {
     const profileIndex = items.findIndex((item) => item.id === 'guru-profile')

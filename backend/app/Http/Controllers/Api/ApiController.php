@@ -51,7 +51,16 @@ class ApiController extends Controller
             return true;
         }
 
-        return $this->role($request) === 'admin';
+        $role = $this->role($request);
+        if ($role === 'admin') {
+            return true;
+        }
+
+        if ($role === 'guru' || $role === 'teacher') {
+            return $this->hasDelegatedAdminFeatureAccess($request);
+        }
+
+        return false;
     }
 
     protected function isSuperAdmin(Request $request): bool
@@ -77,6 +86,31 @@ class ApiController extends Controller
         $role = $this->role($request);
 
         return $role === 'guru' || $role === 'teacher';
+    }
+
+    protected function hasDelegatedAdminFeatureAccess(Request $request, ?string $featureKey = null): bool
+    {
+        $user = $this->user($request);
+        if (! $user?->id) {
+            return false;
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId || ! Schema::hasTable('admin_feature_permissions')) {
+            return false;
+        }
+
+        $feature = trim((string) ($featureKey ?: $request->headers->get('X-Admin-Feature', '')));
+        if ($feature === '') {
+            return false;
+        }
+
+        return DB::table('admin_feature_permissions')
+            ->where('tenant_id', $tenantId)
+            ->where('target_teacher_id', (string) $user->id)
+            ->where('feature_key', $feature)
+            ->where('is_active', true)
+            ->exists();
     }
 
     protected function isSiswa(Request $request): bool
