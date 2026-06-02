@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import {
   CheckCircle2,
+  Eye,
   Plus,
   RefreshCw,
   ShieldCheck,
@@ -29,9 +30,9 @@ const initialForm = {
   is_active: true,
 }
 
-const statCardClass = 'page-card min-h-[132px] p-5'
+const statCardClass = 'min-h-[136px] rounded-2xl border border-slate-100 bg-white p-5 shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:shadow-card-hover'
 const formControlClass = 'h-14 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-black text-slate-900 outline-none transition focus:border-brand-400 focus:ring-4 focus:ring-brand-100'
-const actionButtonClass = 'inline-flex h-12 items-center justify-center gap-2 rounded-2xl px-4 text-sm font-black transition disabled:cursor-not-allowed disabled:opacity-60'
+const actionButtonClass = 'inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60'
 
 const Badge = ({ children, active = true }) => (
   <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-bold ${
@@ -169,15 +170,18 @@ const PermissionAdmin = () => {
     .filter((feature) => !(form.target_type === 'homeroom' && feature.key === 'siswa'))
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6">
-      <section className="page-card p-6 shadow-card">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-start gap-4">
-            <div className="page-title-accent" />
+    <div className="page-wrapper">
+      <div className="w-full space-y-6">
+        <section className="page-title-card">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-center gap-4">
+              <div className="grid h-12 w-12 place-items-center rounded-2xl bg-indigo-100 text-indigo-700">
+                <ShieldCheck size={26} />
+              </div>
             <div>
-              <p className="page-title-kicker">Sistem</p>
-              <h1 className="page-title">Permission Admin</h1>
-              <p className="page-title-description max-w-3xl">
+              <p className="text-xs font-bold uppercase tracking-wide text-indigo-600">Sistem</p>
+              <h1 className="page-title-heading">Permission Admin</h1>
+              <p className="page-title-description">
                 Delegasikan fitur admin sekolah tertentu ke guru, jabatan, atau wali kelas tanpa mengubah role akun utama.
               </p>
             </div>
@@ -204,31 +208,49 @@ const PermissionAdmin = () => {
         </div>
       </section>
 
-      <section className="grid gap-4 md:grid-cols-4">
-        {[
-          ['Target', groups.length, UserPlus, 'bg-blue-50 text-blue-700'],
-          ['Fitur aktif', activeTotal, CheckCircle2, 'bg-emerald-50 text-emerald-700'],
-          ['Nonaktif', inactiveTotal, ToggleLeft, 'bg-amber-50 text-amber-700'],
-          ['Fitur tersedia', ADMIN_FEATURES.length, ShieldCheck, 'bg-violet-50 text-violet-700'],
-        ].map(([label, value, Icon, iconClass]) => (
-          <div key={label} className={statCardClass}>
-            <div className="flex h-full items-center justify-between gap-4">
-              <div>
-                <p className="text-xs font-black uppercase tracking-wider text-slate-500">{label}</p>
-                <p className="mt-2 text-3xl font-black text-slate-950">{value}</p>
-              </div>
-              <div className={`rounded-2xl p-3 ${iconClass}`}>
-                <Icon className="h-5 w-5" />
+      <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h2 className="text-sm font-bold text-slate-900">Ringkasan Permission</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              Kelola delegasi akses halaman admin secara aman. Setiap target tetap memakai role guru, hanya menu terpilih yang ditampilkan.
+            </p>
+          </div>
+          <span className="inline-flex min-h-8 items-center rounded-full border border-indigo-100 bg-indigo-50 px-3 text-xs font-bold text-indigo-700">
+            {groups.length} target
+          </span>
+        </div>
+
+        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {[
+            ['Target', groups.length, UserPlus, 'bg-blue-50 text-blue-700', 'Guru/jabatan/wali kelas'],
+            ['Fitur Aktif', activeTotal, CheckCircle2, 'bg-emerald-50 text-emerald-700', 'Menu sedang tampil'],
+            ['Nonaktif', inactiveTotal, ToggleLeft, 'bg-amber-50 text-amber-700', 'Masih tersimpan'],
+            ['Fitur Tersedia', ADMIN_FEATURES.length, ShieldCheck, 'bg-violet-50 text-violet-700', 'Pilihan delegasi'],
+          ].map(([label, value, Icon, iconClass, hint]) => (
+            <div key={label} className={statCardClass}>
+              <div className="flex h-full items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</p>
+                  <p className="mt-2 text-3xl font-black leading-tight text-slate-950">{value}</p>
+                  <p className="mt-4 text-xs text-slate-500">{hint}</p>
+                </div>
+                <span className={`grid h-12 w-12 shrink-0 place-items-center rounded-2xl ${iconClass}`}>
+                  <Icon className="h-5 w-5" />
+                </span>
               </div>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </section>
 
-      <section className="page-card overflow-hidden shadow-card">
-        <div className="border-b border-slate-100 px-6 py-5">
-          <h2 className="text-lg font-black text-slate-950">Daftar Permission</h2>
-          <p className="mt-1 text-sm text-slate-500">Setiap target bisa memiliki lebih dari satu fitur admin yang aktif.</p>
+      <section className="rounded-2xl border border-slate-100 bg-white shadow-card">
+        <div className="flex flex-col gap-1 border-b border-slate-100 px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-sm font-bold text-slate-900">Daftar Permission</h2>
+            <p className="mt-1 text-xs text-slate-500">Setiap target bisa memiliki lebih dari satu fitur admin yang aktif.</p>
+          </div>
+          <span className="text-xs font-semibold text-slate-500">{groups.length} target</span>
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-[960px] w-full text-left text-sm">
@@ -284,7 +306,7 @@ const PermissionAdmin = () => {
                             }`}
                             title={`${feature.active ? 'Nonaktifkan' : 'Aktifkan'} ${feature.label}`}
                           >
-                            {feature.active ? <ToggleRight className="h-4 w-4" /> : <ToggleLeft className="h-4 w-4" />}
+                            {feature.active ? <Eye className="h-4 w-4" /> : <ToggleLeft className="h-4 w-4" />}
                             {feature.label}
                           </button>
                           <button
@@ -462,6 +484,7 @@ const PermissionAdmin = () => {
           </form>
         </div>
       )}
+      </div>
     </div>
   )
 }
