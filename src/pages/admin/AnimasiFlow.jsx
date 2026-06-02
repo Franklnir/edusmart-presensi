@@ -269,12 +269,21 @@ function DotBackground() {
 /* ═══════════════════════════════════════════════
    Main Canvas Component
    ═══════════════════════════════════════════════ */
-function FlowCanvas() {
+function FlowCanvas({ theme = 'dark' }) {
   const [nodes, setNodes] = useState(() => FLOW_NODES.map((n) => ({ ...n })))
   const [transform, setTransform] = useState({ x: 20, y: 20, scale: 0.55 })
-  const dragRef = useRef(null)
-  const panRef = useRef(null)
+  const transformLayerRef = useRef(null)
+  const transformRef = useRef({ x: 20, y: 20, scale: 0.55 })
   const canvasRef = useRef(null)
+
+  /** Directly patch the DOM — no React re-render during pan/zoom */
+  const applyTransform = useCallback((t) => {
+    transformRef.current = t
+    if (transformLayerRef.current) {
+      transformLayerRef.current.style.transform =
+        `translate(${t.x}px, ${t.y}px) scale(${t.scale})`
+    }
+  }, [])
 
   const nodeMap = useMemo(() => {
     const map = {}
@@ -296,8 +305,8 @@ function FlowCanvas() {
     const onMove = (ev) => {
       if (frameId) cancelAnimationFrame(frameId);
       frameId = requestAnimationFrame(() => {
-        const dx = (ev.clientX - startX) / transform.scale
-        const dy = (ev.clientY - startY) / transform.scale
+        const dx = (ev.clientX - startX) / transformRef.current.scale
+        const dy = (ev.clientY - startY) / transformRef.current.scale
         setNodes((prev) =>
           prev.map((n) => (n.id === nodeId ? { ...n, x: origX + dx, y: origY + dy } : n))
         )
@@ -314,36 +323,37 @@ function FlowCanvas() {
     window.addEventListener('pointerup', onUp)
   }, [nodes, transform.scale])
 
-  /* ── Canvas panning ── */
+  /* ── Canvas panning (ref-based: no React re-render during drag) ── */
   const handleCanvasPanStart = useCallback((e) => {
     if (e.target !== e.currentTarget && !e.target.closest('.flow-bg-layer')) return
 
     const startX = e.clientX
     const startY = e.clientY
-    const origTx = transform.x
-    const origTy = transform.y
+    const origTx = transformRef.current.x
+    const origTy = transformRef.current.y
 
-    let frameId;
+    let frameId
     const onMove = (ev) => {
-      if (frameId) cancelAnimationFrame(frameId);
+      if (frameId) cancelAnimationFrame(frameId)
       frameId = requestAnimationFrame(() => {
-        setTransform((prev) => ({
-          ...prev,
+        applyTransform({
+          ...transformRef.current,
           x: origTx + (ev.clientX - startX),
           y: origTy + (ev.clientY - startY),
-        }))
-      });
+        })
+      })
     }
 
     const onUp = () => {
-      if (frameId) cancelAnimationFrame(frameId);
+      if (frameId) cancelAnimationFrame(frameId)
+      setTransform({ ...transformRef.current }) // sync state for minimap
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
     }
 
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
-  }, [transform.x, transform.y])
+  }, [applyTransform])
 
   /* ── Zoom via scroll ── */
   useEffect(() => {
@@ -353,40 +363,46 @@ function FlowCanvas() {
     const handleWheel = (e) => {
       e.preventDefault()
       const delta = e.deltaY > 0 ? 0.92 : 1.08
-      setTransform((prev) => ({
-        ...prev,
-        scale: Math.max(0.3, Math.min(2.5, prev.scale * delta)),
-      }))
+      const newT = {
+        ...transformRef.current,
+        scale: Math.max(0.3, Math.min(2.5, transformRef.current.scale * delta)),
+      }
+      applyTransform(newT)
+      setTransform({ ...newT })
     }
 
     el.addEventListener('wheel', handleWheel, { passive: false })
     return () => el.removeEventListener('wheel', handleWheel)
-  }, [])
+  }, [applyTransform])
 
   /* ── Controls ── */
-  const zoomIn = () => setTransform((p) => ({ ...p, scale: Math.min(2.5, p.scale * 1.2) }))
-  const zoomOut = () => setTransform((p) => ({ ...p, scale: Math.max(0.3, p.scale / 1.2) }))
-  const fitView = () => setTransform({ x: 20, y: 20, scale: 0.55 })
+  const zoomIn = () => { const t = { ...transformRef.current, scale: Math.min(2.5, transformRef.current.scale * 1.2) }; applyTransform(t); setTransform({ ...t }) }
+  const zoomOut = () => { const t = { ...transformRef.current, scale: Math.max(0.3, transformRef.current.scale / 1.2) }; applyTransform(t); setTransform({ ...t }) }
+  const fitView = () => { const t = { x: 20, y: 20, scale: 0.55 }; applyTransform(t); setTransform({ ...t }) }
   const resetNodes = () => {
     setNodes(FLOW_NODES.map((n) => ({ ...n })))
-    setTransform({ x: 20, y: 20, scale: 0.55 })
+    const t = { x: 20, y: 20, scale: 0.55 }
+    applyTransform(t)
+    setTransform({ ...t })
   }
 
   return (
     <div
       ref={canvasRef}
       className="relative h-full w-full overflow-hidden"
-      style={{ minHeight: 640, cursor: 'grab', background: '#0a0f1e' }}
+      style={{ minHeight: 640, cursor: 'grab', background: theme === 'dark' ? '#0a0f1e' : '#e8edf5' }}
       onPointerDown={handleCanvasPanStart}
     >
       {/* Transform layer */}
       <div
+        ref={transformLayerRef}
         className="absolute flow-bg-layer"
         style={{
           transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
           transformOrigin: '0 0',
           width: 1600,
           height: 2000,
+          willChange: 'transform',
         }}
       >
         <DotBackground />
@@ -506,6 +522,8 @@ function FlowCanvas() {
    ═══════════════════════════════════════════════ */
 export default function AnimasiFlow() {
   const { isSuperAdmin, superAdminChecked } = useAuthStore()
+  const [theme, setTheme] = useState('dark')
+  const [themeOpen, setThemeOpen] = useState(false)
 
   return (
     <PageGate superAdminChecked={superAdminChecked} isSuperAdmin={isSuperAdmin}>
@@ -513,6 +531,37 @@ export default function AnimasiFlow() {
         {/* ── Header ── */}
         <div className="page-title-card">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-center gap-3 ml-auto relative">
+              <button
+                type="button"
+                onClick={() => setThemeOpen((o) => !o)}
+                className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-violet-400 hover:text-violet-600"
+                style={{ minWidth: 120 }}
+              >
+                <span>{theme === 'dark' ? '🌙' : '☀️'}</span>
+                <span>{theme === 'dark' ? 'Dark' : 'Light'}</span>
+                <span className="ml-auto opacity-50">▾</span>
+              </button>
+              {themeOpen && (
+                <div className="absolute right-0 top-11 z-50 w-36 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+                  {[
+                    { value: 'dark', emoji: '🌙', label: 'Dark' },
+                    { value: 'light', emoji: '☀️', label: 'Light' },
+                  ].map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => { setTheme(opt.value); setThemeOpen(false) }}
+                      className={`flex w-full items-center gap-3 px-4 py-2.5 text-sm font-medium transition hover:bg-violet-50 hover:text-violet-700 ${theme === opt.value ? 'bg-violet-50 text-violet-700' : 'text-slate-700'}`}
+                    >
+                      <span>{opt.emoji}</span>
+                      <span>{opt.label}</span>
+                      {theme === opt.value && <span className="ml-auto text-violet-500">✓</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <div className="flex items-center gap-4">
               <div className="grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 text-white shadow-lg">
                 <Workflow size={24} />
@@ -533,9 +582,10 @@ export default function AnimasiFlow() {
         {/* ── Flow Canvas ── */}
         <div
           className="relative overflow-hidden rounded-2xl border border-slate-700/50 shadow-2xl"
+          data-flow-theme={theme}
           style={{ minHeight: 640 }}
         >
-          <FlowCanvas />
+          <FlowCanvas theme={theme} />
         </div>
 
         {/* ── Info cards ── */}
@@ -658,6 +708,21 @@ export default function AnimasiFlow() {
             transform: translateY(0) scale(1);
           }
         }
+        /* Light theme overrides */
+        [data-flow-theme="light"] .flow-node-card {
+          background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+          border-color: rgba(99, 102, 241, 0.25);
+          color: #1e293b;
+          box-shadow: 0 4px 16px rgba(0,0,0,0.08), 0 0 0 1px rgba(99,102,241,0.06);
+        }
+        [data-flow-theme="light"] .flow-node-card:hover {
+          border-color: var(--node-color, rgba(99, 102, 241, 0.6));
+          box-shadow: 0 8px 24px rgba(99,102,241,0.15), 0 0 0 2px rgba(99,102,241,0.1);
+        }
+        [data-flow-theme="light"] .flow-handle {
+          border-color: #f8fafc;
+        }
+
         @keyframes pulse-dot {
           0%, 100% { opacity: 1; transform: scale(1); }
           50% { opacity: 0.5; transform: scale(0.7); }
