@@ -2769,6 +2769,24 @@ const auth = {
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
+    async backupMonthlyStatus() {
+      const res = await apiFetch('/api/admin/backup/monthly-status', {
+        method: 'GET',
+        cacheTtlMs: 10 * 1000,
+        staleKey: 'admin.backup-monthly-status',
+        timeoutMs: 20000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async saveMonthlyBackupToGoogleDrive(payload = {}) {
+      const res = await apiFetch('/api/admin/backup/google-drive/monthly', {
+        method: 'POST',
+        body: payload,
+        cacheTtlMs: 0,
+        timeoutMs: 60000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
     async approvals(params = {}) {
       const query = new URLSearchParams()
       Object.entries(params || {}).forEach(([key, value]) => {
@@ -2965,6 +2983,32 @@ const auth = {
       }
       const query = params.toString() ? `?${params.toString()}` : ''
       const res = await apiFetch(`/api/super/tenants/${id}/backup${query}`, { method: 'GET' })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async saveTenantBackupToGoogleDrive(id, payload = {}) {
+      const res = await apiFetch(`/api/super/tenants/${id}/backup/google-drive`, {
+        method: 'POST',
+        body: payload,
+        timeoutMs: 60000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async tenantBackupMonthlyStatus(id) {
+      const res = await apiFetch(`/api/super/tenants/${id}/backup/monthly-status`, {
+        method: 'GET',
+        cacheTtlMs: 10 * 1000,
+        staleKey: `super.tenant-backup-monthly-status.${id}`,
+        timeoutMs: 20000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async saveTenantMonthlyBackupToGoogleDrive(id, payload = {}) {
+      const res = await apiFetch(`/api/super/tenants/${id}/backup/google-drive/monthly`, {
+        method: 'POST',
+        body: payload,
+        cacheTtlMs: 0,
+        timeoutMs: 60000
+      })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
     async restoreTenant(id, payload = {}) {

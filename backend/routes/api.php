@@ -211,7 +211,9 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'throttle:api'])->group(func
     Route::get('/scan-settings', [SettingsController::class, 'scanShow']);
     Route::patch('/scan-settings', [SettingsController::class, 'scanUpdate']);
     Route::get('/backup', [AdminBackupController::class, 'backup']);
+    Route::get('/backup/monthly-status', [AdminBackupController::class, 'monthlyStatus']);
     Route::post('/backup/google-drive', [AdminBackupController::class, 'saveToGoogleDrive']);
+    Route::post('/backup/google-drive/monthly', [AdminBackupController::class, 'saveMonthlyToGoogleDrive']);
     Route::post('/backup/restore', [AdminBackupController::class, 'restore']);
     Route::get('/approvals', [ApprovalController::class, 'index']);
     Route::post('/approvals/{id}/approve', [ApprovalController::class, 'approve']);
@@ -275,6 +277,9 @@ Route::middleware(['auth:sanctum', 'throttle:super', 'super.domain', 'super.admi
     Route::patch('/super/tenants/{tenantId}/rfid-mqtt', [SuperAdminController::class, 'updateTenantRfidMqtt']);
     Route::post('/super/tenants/{tenantId}/rfid-mqtt/mosquitto', [SuperAdminController::class, 'provisionTenantRfidMosquitto']);
     Route::get('/super/tenants/{id}/backup', [SuperAdminController::class, 'backupTenant']);
+    Route::get('/super/tenants/{id}/backup/monthly-status', [SuperAdminController::class, 'backupTenantMonthlyStatus']);
+    Route::post('/super/tenants/{id}/backup/google-drive', [SuperAdminController::class, 'saveTenantBackupToGoogleDrive']);
+    Route::post('/super/tenants/{id}/backup/google-drive/monthly', [SuperAdminController::class, 'saveTenantMonthlyBackupToGoogleDrive']);
     Route::post('/super/tenants/{id}/restore', [SuperAdminController::class, 'restoreTenant']);
     Route::patch('/super/tenants/{id}/status', [SuperAdminController::class, 'updateTenantStatus']);
     Route::get('/super/whatsapp', [WhatsAppController::class, 'superOverview']);

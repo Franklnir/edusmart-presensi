@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Models\Profile;
 use App\Models\User;
+use App\Services\Backup\TenantBackupService;
 use App\Services\GoogleDrive\GoogleDriveService;
 use App\Services\Rfid\RfidDeviceService;
 use App\Services\Rfid\TenantMqttConfigService;
@@ -103,7 +104,8 @@ class SuperAdminController extends ApiController
         private readonly TenantDomainService $tenantDomainService,
         private readonly RfidDeviceService $rfidDeviceService,
         private readonly TenantMqttConfigService $tenantMqttConfigService,
-        private readonly GoogleDriveService $googleDriveService
+        private readonly GoogleDriveService $googleDriveService,
+        private readonly TenantBackupService $tenantBackupService
     ) {}
 
     public function me(Request $request)
@@ -548,52 +550,143 @@ class SuperAdminController extends ApiController
             return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
         }
 
-        $mode = $this->normalizeBackupMode($request->query('mode', self::BACKUP_MODE_FULL));
-        $months = $this->normalizeBackupMonths($request->query('months'));
-        $periodStart = $months !== null ? now()->subMonths($months)->startOfDay() : null;
-        $periodStartDate = $periodStart ? $periodStart->toDateString() : null;
-        $periodStartDateTime = $periodStart ? $periodStart->toDateTimeString() : null;
-        $tenantId = (string) $tenant->id;
+        $payload = $this->tenantBackupService->buildPayload(
+            (string) $tenant->id,
+            $request->query(),
+            (string) ($request->user()?->id ?? ''),
+            'super_admin'
+        );
 
-        $tables = match ($mode) {
-            self::BACKUP_MODE_STUDENTS => $this->buildStudentBackupTables($tenantId, $periodStartDate, $periodStartDateTime),
-            self::BACKUP_MODE_TEACHERS => $this->buildTeacherBackupTables($tenantId),
-            default => $this->buildFullBackupTables($tenantId),
-        };
+        return response()->json([
+            'data' => $payload,
+        ]);
+    }
 
-        $totalRows = 0;
-        foreach ($tables as $tableInfo) {
-            $totalRows += (int) ($tableInfo['row_count'] ?? 0);
+    public function backupTenantMonthlyStatus(Request $request, string $id)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenant = $this->findTenantByIdOrSlug($id);
+        if (! $tenant) {
+            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
         }
 
         return response()->json([
+            'data' => $this->tenantBackupService->monthlyStatus((string) $tenant->id),
+        ]);
+    }
+
+    public function saveTenantBackupToGoogleDrive(Request $request, string $id)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenant = $this->findTenantByIdOrSlug($id);
+        if (! $tenant) {
+            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+        }
+
+        $payload = $this->tenantBackupService->buildPayload(
+            (string) $tenant->id,
+            $request->input(),
+            (string) ($request->user()?->id ?? ''),
+            'super_admin'
+        );
+
+        try {
+            $driveFile = $this->tenantBackupService->savePayloadToGoogleDrive(
+                (string) $tenant->id,
+                (string) ($request->user()?->id ?? ''),
+                $payload
+            );
+        } catch (\Throwable $e) {
+            return $this->deny('Gagal menyimpan backup tenant ke Google Drive: '.trim((string) $e->getMessage()), 422);
+        }
+
+        $this->logAudit(
+            $request,
+            'super_tenant_backup_google_drive',
+            'backup-'.$tenant->id,
+            'CREATE',
+            null,
+            [
+                'type' => 'super_tenant_backup_google_drive',
+                'tenant_id' => (string) $tenant->id,
+                'mode' => $payload['mode'] ?? 'full',
+                'period' => $payload['period'] ?? null,
+                'summary' => $payload['summary'] ?? [],
+                'drive_file_id' => $driveFile['drive_file_id'] ?? null,
+                'drive_folder_path' => $driveFile['drive_folder_path'] ?? null,
+            ],
+            (string) $tenant->id
+        );
+
+        return response()->json([
             'data' => [
-                'tenant' => [
-                    'id' => $tenant->id,
-                    'name' => $tenant->name,
-                    'slug' => $tenant->slug,
-                    'status' => $tenant->status,
-                    'status_reason' => $tenant->status_reason ?? null,
-                    'status_changed_at' => $tenant->status_changed_at ?? null,
-                    'status_changed_by' => $tenant->status_changed_by ?? null,
-                    'archived_at' => $tenant->archived_at ?? null,
-                    'created_at' => $tenant->created_at,
-                    'updated_at' => $tenant->updated_at,
+                'backup' => [
+                    'tenant' => $payload['tenant'],
+                    'mode' => $payload['mode'],
+                    'mode_label' => $payload['mode_label'],
+                    'period' => $payload['period'],
+                    'summary' => $payload['summary'],
+                    'manifest' => $payload['manifest'],
                 ],
-                'exported_at' => now()->toIso8601String(),
-                'mode' => $mode,
-                'mode_label' => $this->backupModeLabel($mode),
-                'period' => [
-                    'months' => $months,
-                    'label' => $this->backupPeriodLabel($months),
-                    'start_at' => $periodStart ? $periodStart->toIso8601String() : null,
-                    'end_at' => now()->toIso8601String(),
-                ],
-                'summary' => [
-                    'table_count' => count($tables),
-                    'total_rows' => $totalRows,
-                ],
-                'tables' => $tables,
+                'drive_file' => $driveFile,
+            ],
+        ]);
+    }
+
+    public function saveTenantMonthlyBackupToGoogleDrive(Request $request, string $id)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenant = $this->findTenantByIdOrSlug($id);
+        if (! $tenant) {
+            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+        }
+
+        $monthKey = trim((string) $request->input('month'));
+        if ($monthKey === '') {
+            return $this->deny('Bulan backup wajib dipilih.', 422);
+        }
+
+        try {
+            $driveFile = $this->tenantBackupService->saveMonthlyBackupToGoogleDrive(
+                (string) $tenant->id,
+                $monthKey,
+                (string) ($request->user()?->id ?? ''),
+                filter_var($request->input('force', false), FILTER_VALIDATE_BOOLEAN)
+            );
+        } catch (\Throwable $e) {
+            return $this->deny('Gagal menyimpan backup bulanan tenant ke Google Drive: '.trim((string) $e->getMessage()), 422);
+        }
+
+        $this->logAudit(
+            $request,
+            'super_tenant_monthly_backup_google_drive',
+            'backup-monthly-'.$tenant->id.'-'.$monthKey,
+            'CREATE',
+            null,
+            [
+                'type' => 'super_tenant_monthly_backup_google_drive',
+                'tenant_id' => (string) $tenant->id,
+                'month' => $monthKey,
+                'drive_file_id' => $driveFile['drive_file_id'] ?? null,
+                'drive_folder_path' => $driveFile['drive_folder_path'] ?? null,
+            ],
+            (string) $tenant->id
+        );
+
+        return response()->json([
+            'data' => [
+                'month' => $monthKey,
+                'drive_file' => $driveFile,
+                'monthly_status' => $this->tenantBackupService->monthlyStatus((string) $tenant->id),
             ],
         ]);
     }

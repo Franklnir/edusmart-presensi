@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import {
   Building2,
+  CalendarClock,
   CheckCircle2,
   Database,
   Filter,
@@ -12,6 +13,7 @@ import {
   School,
   Search,
   ShieldCheck,
+  UploadCloud,
   UserCog,
   XCircle
 } from 'lucide-react'
@@ -677,6 +679,10 @@ const Tenants = () => {
   const [backupLoading, setBackupLoading] = useState(false)
   const [backupMode, setBackupMode] = useState('full')
   const [backupMonths, setBackupMonths] = useState('all')
+  const [backupDriveSaving, setBackupDriveSaving] = useState(false)
+  const [backupMonthlyStatus, setBackupMonthlyStatus] = useState(null)
+  const [backupMonthlyLoading, setBackupMonthlyLoading] = useState(false)
+  const [backupMonthlySavingKey, setBackupMonthlySavingKey] = useState('')
   const [statusSaving, setStatusSaving] = useState(false)
   const [mqttForm, setMqttForm] = useState(RFID_MQTT_FORM_DEFAULTS)
   const [mqttSaving, setMqttSaving] = useState(false)
@@ -810,6 +816,12 @@ const Tenants = () => {
     return () => window.clearInterval(intervalId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTenantId])
+
+  useEffect(() => {
+    if (detailTab !== 'backup' || !selectedTenantId) return
+    loadTenantBackupMonthlyStatus({ silent: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detailTab, selectedTenantId])
 
   const handleChange = (field) => (e) => {
     const value = e.target.value
@@ -1257,6 +1269,70 @@ const Tenants = () => {
     }
   }
 
+  const loadTenantBackupMonthlyStatus = async ({ silent = false } = {}) => {
+    const tenantId = tenantDetail?.tenant?.id || selectedTenantId
+    if (!tenantId) return null
+
+    setBackupMonthlyLoading(true)
+    try {
+      const { data, error } = await supabase.super.tenantBackupMonthlyStatus(tenantId)
+      if (error) throw error
+      setBackupMonthlyStatus(data || null)
+      return data || null
+    } catch (err) {
+      if (!silent) pushToast('error', err?.message || 'Gagal memuat jadwal backup bulanan tenant')
+      return null
+    } finally {
+      setBackupMonthlyLoading(false)
+    }
+  }
+
+  const handleSaveTenantBackupToDrive = async () => {
+    const tenantId = tenantDetail?.tenant?.id || selectedTenantId
+    if (!tenantId || backupDriveSaving || backupLoading) return
+
+    setBackupDriveSaving(true)
+    try {
+      const selectedMode = String(backupMode || 'full').trim() || 'full'
+      const selectedMonths =
+        selectedMode === 'students' && backupMonths !== 'all' ? Number(backupMonths) : undefined
+      const { data, error } = await supabase.super.saveTenantBackupToGoogleDrive(tenantId, {
+        mode: selectedMode,
+        period_type: selectedMonths ? 'last_months' : 'all',
+        months: selectedMonths
+      })
+      if (error) throw error
+      await loadTenantBackupMonthlyStatus({ silent: true })
+      const fileName = data?.drive_file?.drive_file_name || 'backup.json'
+      pushToast('success', `Backup tenant tersimpan di Google Drive: ${fileName}`)
+    } catch (err) {
+      pushToast('error', err?.message || 'Gagal menyimpan backup tenant ke Google Drive')
+    } finally {
+      setBackupDriveSaving(false)
+    }
+  }
+
+  const handleSaveTenantMonthlyBackup = async (monthKey) => {
+    const tenantId = tenantDetail?.tenant?.id || selectedTenantId
+    if (!tenantId || !monthKey || backupMonthlySavingKey || backupDriveSaving || backupLoading) return
+
+    setBackupMonthlySavingKey(monthKey)
+    try {
+      const { data, error } = await supabase.super.saveTenantMonthlyBackupToGoogleDrive(tenantId, { month: monthKey })
+      if (error) throw error
+      if (data?.monthly_status) {
+        setBackupMonthlyStatus(data.monthly_status)
+      } else {
+        await loadTenantBackupMonthlyStatus({ silent: true })
+      }
+      pushToast('success', 'Backup bulanan tenant berhasil disimpan ke Google Drive')
+    } catch (err) {
+      pushToast('error', err?.message || 'Gagal menyimpan backup bulanan tenant')
+    } finally {
+      setBackupMonthlySavingKey('')
+    }
+  }
+
   const parseRestoreIncludeTables = () => {
     return restoreIncludeTables
       .split(/[,;\n\r]+/g)
@@ -1570,6 +1646,7 @@ const Tenants = () => {
   const detailAccess = tenantDetail?.access || {}
   const detailStats = tenantDetail?.stats || {}
   const detailAdmins = Array.isArray(tenantDetail?.admins) ? tenantDetail.admins : []
+  const backupMonthlyMonths = Array.isArray(backupMonthlyStatus?.months) ? backupMonthlyStatus.months : []
   const detailDomains = Array.isArray(tenantDetail?.domains) ? tenantDetail.domains : []
   const detailRfidNotes = Array.isArray(detailRfidTemplate?.notes) ? detailRfidTemplate.notes : []
   const primaryAdminUserId = String(detailTenant?.primary_admin_user_id || '')
@@ -2312,11 +2389,11 @@ const Tenants = () => {
                           ))}
                         </select>
                       )}
-                      <div className="grid gap-2 sm:grid-cols-2">
+                      <div className="grid gap-2 sm:grid-cols-3">
                         <button
                           type="button"
                           onClick={() => handleBackupTenant('xlsx')}
-                          disabled={backupLoading || detailLoading}
+                          disabled={backupLoading || backupDriveSaving || detailLoading}
                           className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 text-sm font-bold text-white transition hover:bg-emerald-700 disabled:opacity-60"
                         >
                           {backupLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Database className="h-4 w-4" />}
@@ -2325,12 +2402,94 @@ const Tenants = () => {
                         <button
                           type="button"
                           onClick={() => handleBackupTenant('json')}
-                          disabled={backupLoading || detailLoading}
+                          disabled={backupLoading || backupDriveSaving || detailLoading}
                           className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-white px-4 text-sm font-bold text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-60"
                         >
                           {backupLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Database className="h-4 w-4" />}
                           JSON Restore
                         </button>
+                        <button
+                          type="button"
+                          onClick={handleSaveTenantBackupToDrive}
+                          disabled={backupLoading || backupDriveSaving || detailLoading}
+                          className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 text-sm font-bold text-blue-700 transition hover:bg-blue-100 disabled:opacity-60"
+                        >
+                          {backupDriveSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
+                          {backupDriveSaving ? 'Menyimpan...' : 'Simpan Drive'}
+                        </button>
+                      </div>
+
+                      <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-start gap-2">
+                            <CalendarClock className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+                            <div>
+                              <p className="text-xs font-black uppercase tracking-wide text-amber-800">Backup Bulanan</p>
+                              <p className="mt-0.5 text-[11px] leading-relaxed text-amber-800">
+                                Auto backup lengkap akhir bulan jam 23.59 WIB. Kuning berarti bulan itu sudah tersimpan.
+                              </p>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => loadTenantBackupMonthlyStatus()}
+                            disabled={backupMonthlyLoading}
+                            className="inline-flex h-8 items-center justify-center gap-1 rounded-lg bg-white px-2 text-[11px] font-bold text-amber-800 ring-1 ring-amber-200 disabled:opacity-60"
+                          >
+                            <RefreshCw className={`h-3.5 w-3.5 ${backupMonthlyLoading ? 'animate-spin' : ''}`} />
+                            Refresh
+                          </button>
+                        </div>
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                          {backupMonthlyMonths.length ? backupMonthlyMonths.map((month) => {
+                            const backedUp = Boolean(month?.is_backed_up)
+                            const file = month?.drive_file || null
+                            return (
+                              <div
+                                key={month.key}
+                                className={`rounded-xl border px-3 py-2 ${
+                                  backedUp
+                                    ? 'border-amber-300 bg-amber-100 text-amber-950'
+                                    : 'border-slate-200 bg-white text-slate-700'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <p className="truncate text-xs font-black">{month.short_label || month.label}</p>
+                                    <p className="truncate text-[10px] font-semibold opacity-70">{backedUp ? file?.size_label || 'Tersimpan' : 'Belum backup'}</p>
+                                  </div>
+                                  {backedUp ? (
+                                    file?.drive_web_view_link ? (
+                                      <a
+                                        href={file.drive_web_view_link}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="shrink-0 rounded-lg bg-amber-200 px-2 py-1 text-[10px] font-black text-amber-900"
+                                      >
+                                        Buka
+                                      </a>
+                                    ) : (
+                                      <span className="shrink-0 rounded-lg bg-amber-200 px-2 py-1 text-[10px] font-black text-amber-900">Sudah</span>
+                                    )
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSaveTenantMonthlyBackup(month.key)}
+                                      disabled={backupMonthlySavingKey === month.key}
+                                      className="shrink-0 rounded-lg bg-slate-900 px-2 py-1 text-[10px] font-black text-white disabled:opacity-60"
+                                    >
+                                      {backupMonthlySavingKey === month.key ? '...' : 'Backup'}
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          }) : (
+                            <div className="col-span-full rounded-xl border border-dashed border-amber-200 bg-white/70 px-3 py-4 text-center text-xs text-amber-800">
+                              {backupMonthlyLoading ? 'Memuat jadwal...' : 'Jadwal bulanan belum dimuat.'}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>

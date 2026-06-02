@@ -23,6 +23,13 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
+Schedule::command('backup:monthly-google-drive')
+    ->dailyAt('23:59')
+    ->timezone('Asia/Jakarta')
+    ->when(fn () => now('Asia/Jakarta')->isSameDay(now('Asia/Jakarta')->copy()->endOfMonth()))
+    ->withoutOverlapping(30)
+    ->onOneServer();
+
 Artisan::command('super-admin:bootstrap {--force-password : Reset password user yang sudah ada}', function () {
     $email = strtolower(trim((string) env('SUPER_ADMIN_BOOTSTRAP_EMAIL', '')));
     if ($email === '') {

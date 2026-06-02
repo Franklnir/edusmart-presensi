@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Cloud, Database, ExternalLink, RefreshCw, ShieldCheck, UploadCloud } from 'lucide-react'
+import { AlertTriangle, CalendarClock, Cloud, Database, ExternalLink, RefreshCw, ShieldCheck, UploadCloud } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useUIStore } from '../../store/useUIStore'
 import { loadExcelJsBrowser } from '../../utils/excelBrowser'
@@ -487,6 +487,9 @@ export default function BackupAdmin() {
   const [driveSyncing, setDriveSyncing] = useState(false)
   const [driveSaving, setDriveSaving] = useState(false)
   const [lastDriveBackup, setLastDriveBackup] = useState(null)
+  const [monthlyStatus, setMonthlyStatus] = useState(null)
+  const [monthlyLoading, setMonthlyLoading] = useState(false)
+  const [monthlySavingKey, setMonthlySavingKey] = useState('')
 
   const resolvedMonths = useMemo(() => {
     if (periodType === 'all') return null
@@ -583,8 +586,24 @@ export default function BackupAdmin() {
     setDriveSyncing(true)
     try {
       await loadDriveStatus({ refresh: true })
+      await loadMonthlyStatus({ silent: true })
     } finally {
       setDriveSyncing(false)
+    }
+  }
+
+  const loadMonthlyStatus = async ({ silent = false } = {}) => {
+    setMonthlyLoading(true)
+    try {
+      const { data, error } = await supabase.admin.backupMonthlyStatus()
+      if (error) throw error
+      setMonthlyStatus(data || null)
+      return data || null
+    } catch (err) {
+      if (!silent) pushToast('error', err?.message || 'Gagal memuat jadwal backup bulanan')
+      return null
+    } finally {
+      setMonthlyLoading(false)
     }
   }
 
@@ -608,6 +627,7 @@ export default function BackupAdmin() {
       if (error) throw error
       setLastDriveBackup(data?.drive_file || null)
       await loadDriveStatus({ refresh: true, silent: true })
+      await loadMonthlyStatus({ silent: true })
       pushToast('success', 'Backup JSON berhasil disimpan ke Google Drive sekolah')
     } catch (err) {
       pushToast('error', err?.message || 'Gagal menyimpan backup ke Google Drive')
@@ -660,8 +680,30 @@ export default function BackupAdmin() {
     await exportBackup(activePayload)
   }
 
+  const handleSaveMonthlyBackup = async (monthKey, force = false) => {
+    if (!monthKey || monthlySavingKey || loading || downloading || driveSaving) return
+    setMonthlySavingKey(monthKey)
+    try {
+      const { data, error } = await supabase.admin.saveMonthlyBackupToGoogleDrive({ month: monthKey, force })
+      if (error) throw error
+      if (data?.monthly_status) {
+        setMonthlyStatus(data.monthly_status)
+      } else {
+        await loadMonthlyStatus({ silent: true })
+      }
+      setLastDriveBackup(data?.drive_file || null)
+      await loadDriveStatus({ refresh: true, silent: true })
+      pushToast('success', 'Backup bulanan berhasil disimpan ke Google Drive')
+    } catch (err) {
+      pushToast('error', err?.message || 'Gagal menyimpan backup bulanan')
+    } finally {
+      setMonthlySavingKey('')
+    }
+  }
+
   useEffect(() => {
     loadDriveStatus({ silent: true })
+    loadMonthlyStatus({ silent: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -798,6 +840,7 @@ export default function BackupAdmin() {
   const drivePercent = Number.isFinite(Number(driveQuota?.percent)) ? Number(driveQuota.percent) : null
   const driveReady = Boolean(driveStatus?.ready)
   const driveProviderReady = Boolean(driveStatus?.provider_configured)
+  const monthlyMonths = Array.isArray(monthlyStatus?.months) ? monthlyStatus.months : []
 
   const formatPreview = useMemo(() => {
     if (!payload) {
@@ -991,6 +1034,88 @@ export default function BackupAdmin() {
                 Catatan Drive: {driveStatus.last_error}
               </div>
             ) : null}
+          </div>
+
+          <div className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-4 shadow-sm">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div className="flex items-start gap-3">
+                <div className="rounded-2xl bg-amber-100 p-3 text-amber-700">
+                  <CalendarClock className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-sm font-bold text-slate-900">Jadwal Backup Bulanan Google Drive</h3>
+                    <span className="rounded-full border border-amber-200 bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-800">
+                      Otomatis 23.59 WIB
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs leading-relaxed text-slate-600">
+                    Sistem membuat backup lengkap setiap akhir bulan pada periode aktif. Bulan berwarna kuning berarti backup sudah tersimpan di Google Drive.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => loadMonthlyStatus()}
+                disabled={monthlyLoading}
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-amber-200 bg-white px-3 py-2 text-xs font-bold text-amber-800 shadow-sm hover:bg-amber-50 disabled:opacity-60"
+              >
+                <RefreshCw className={`h-4 w-4 ${monthlyLoading ? 'animate-spin' : ''}`} />
+                Refresh Jadwal
+              </button>
+            </div>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
+              {monthlyMonths.length ? monthlyMonths.map((month) => {
+                const backedUp = Boolean(month?.is_backed_up)
+                const file = month?.drive_file || null
+                return (
+                  <div
+                    key={month.key}
+                    className={`rounded-xl border p-3 ${
+                      backedUp
+                        ? 'border-amber-300 bg-amber-100/80 text-amber-950'
+                        : 'border-slate-200 bg-white text-slate-800'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-black">{month.short_label || month.label}</p>
+                        <p className="mt-0.5 text-[11px] font-semibold opacity-70">{month.start_date} - {month.end_date}</p>
+                      </div>
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${
+                        backedUp ? 'bg-amber-200 text-amber-900' : 'bg-slate-100 text-slate-500'
+                      }`}>
+                        {backedUp ? 'Sudah' : 'Belum'}
+                      </span>
+                    </div>
+                    {file?.drive_web_view_link ? (
+                      <a
+                        href={file.drive_web_view_link}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-2 block truncate text-[11px] font-bold text-amber-800 underline"
+                      >
+                        {file.drive_file_name || 'Buka backup'}
+                      </a>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleSaveMonthlyBackup(month.key)}
+                        disabled={!driveReady || monthlySavingKey === month.key}
+                        className="mt-2 inline-flex h-8 w-full items-center justify-center rounded-lg bg-slate-900 px-2 text-[11px] font-bold text-white hover:bg-slate-800 disabled:opacity-50"
+                      >
+                        {monthlySavingKey === month.key ? 'Menyimpan...' : 'Backup bulan ini'}
+                      </button>
+                    )}
+                  </div>
+                )
+              }) : (
+                <div className="col-span-full rounded-xl border border-dashed border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-500">
+                  {monthlyLoading ? 'Memuat jadwal backup bulanan...' : 'Jadwal backup bulanan belum tersedia.'}
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">

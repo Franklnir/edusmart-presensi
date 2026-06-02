@@ -2,18 +2,15 @@
 
 namespace App\Http\Controllers\Api;
 
-use App\Services\GoogleDrive\GoogleDriveService;
-use App\Traits\HasTenantBackupLogic;
+use App\Services\Backup\TenantBackupService;
 use App\Traits\HasTenantRestoreLogic;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 
 class AdminBackupController extends ApiController
 {
-    use HasTenantBackupLogic;
     use HasTenantRestoreLogic;
 
-    public function __construct(private readonly GoogleDriveService $googleDriveService) {}
+    public function __construct(private readonly TenantBackupService $tenantBackupService) {}
 
     public function backup(Request $request)
     {
@@ -26,66 +23,15 @@ class AdminBackupController extends ApiController
             return $this->deny('Tenant tidak valid', 400);
         }
 
-        $mode = $this->normalizeBackupMode($request->query('mode'));
-        $periodScope = $this->normalizeBackupPeriodScope((string) $tenantId, $request->query());
-
-        $tables = match ($mode) {
-            'students' => $this->buildStudentBackupTables($tenantId, $periodScope),
-            'teachers' => $this->buildTeacherBackupTables($tenantId, $periodScope),
-            'classes' => $this->buildClassBackupTables($tenantId, $periodScope),
-            default => $this->buildFullBackupTables($tenantId, $periodScope),
-        };
-
-        $totalRows = 0;
-        foreach ($tables as $tableInfo) {
-            $totalRows += (int) ($tableInfo['row_count'] ?? 0);
-        }
-
-        $tenantName = null;
-        try {
-            if ($this->hasTable('settings') && $this->tableHasColumn('settings', 'tenant_id')) {
-                $tenantName = DB::table('settings')
-                    ->where('tenant_id', $tenantId)
-                    ->orderBy('id')
-                    ->value('nama_sekolah');
-            }
-        } catch (\Throwable $e) {
-            $tenantName = null;
-        }
+        $payload = $this->tenantBackupService->buildPayload(
+            (string) $tenantId,
+            $request->query(),
+            (string) ($request->user()?->id ?? ''),
+            $this->role($request) ?: null
+        );
 
         return response()->json([
-            'data' => [
-                'tenant' => [
-                    'id' => $tenantId,
-                    'name' => $tenantName ?: 'Sekolah',
-                ],
-                'exported_at' => now()->toIso8601String(),
-                'mode' => $mode,
-                'mode_label' => $this->backupModeLabel($mode),
-                'period' => $this->backupPeriodPayload($periodScope),
-                'summary' => [
-                    'table_count' => count($tables),
-                    'total_rows' => $totalRows,
-                ],
-                'manifest' => [
-                    'version' => 2,
-                    'backup_type' => 'tenant_database',
-                    'tenant_scoped' => true,
-                    'contains_storage_files' => false,
-                    'contains_linked_users' => true,
-                    'restore_strategy' => 'id_or_unique_key_upsert',
-                    'notes' => [
-                        'Backup berisi data database tenant dan metadata file, bukan isi file storage.',
-                        'Restore mengarah ke tenant aktif admin, bukan tenant asal di file JSON.',
-                    ],
-                ],
-                'tables' => $tables,
-                'formats_supported' => ['xlsx', 'json', 'csv', 'html'],
-                'generated_by' => [
-                    'user_id' => (string) ($request->user()?->id ?? ''),
-                    'role' => $this->role($request) ?: null,
-                ],
-            ],
+            'data' => $payload,
         ]);
     }
 
@@ -164,68 +110,15 @@ class AdminBackupController extends ApiController
             return $this->deny('Tenant tidak valid', 400);
         }
 
-        $mode = $this->normalizeBackupMode($request->input('mode'));
-        $periodScope = $this->normalizeBackupPeriodScope((string) $tenantId, $request->input());
-
-        $tables = match ($mode) {
-            'students' => $this->buildStudentBackupTables($tenantId, $periodScope),
-            'teachers' => $this->buildTeacherBackupTables($tenantId, $periodScope),
-            'classes' => $this->buildClassBackupTables($tenantId, $periodScope),
-            default => $this->buildFullBackupTables($tenantId, $periodScope),
-        };
-
-        $totalRows = 0;
-        foreach ($tables as $tableInfo) {
-            $totalRows += (int) ($tableInfo['row_count'] ?? 0);
-        }
-
-        $tenantName = null;
-        try {
-            if ($this->hasTable('settings') && $this->tableHasColumn('settings', 'tenant_id')) {
-                $tenantName = DB::table('settings')
-                    ->where('tenant_id', $tenantId)
-                    ->orderBy('id')
-                    ->value('nama_sekolah');
-            }
-        } catch (\Throwable $e) {
-            $tenantName = null;
-        }
-
-        $payload = [
-            'tenant' => [
-                'id' => $tenantId,
-                'name' => $tenantName ?: 'Sekolah',
-            ],
-            'exported_at' => now()->toIso8601String(),
-            'mode' => $mode,
-            'mode_label' => $this->backupModeLabel($mode),
-            'period' => $this->backupPeriodPayload($periodScope),
-            'summary' => [
-                'table_count' => count($tables),
-                'total_rows' => $totalRows,
-            ],
-            'manifest' => [
-                'version' => 2,
-                'backup_type' => 'tenant_database',
-                'tenant_scoped' => true,
-                'contains_storage_files' => false,
-                'contains_linked_users' => true,
-                'restore_strategy' => 'id_or_unique_key_upsert',
-                'notes' => [
-                    'Backup berisi data database tenant dan metadata file, bukan isi file storage.',
-                    'Restore mengarah ke tenant aktif admin, bukan tenant asal di file JSON.',
-                ],
-            ],
-            'tables' => $tables,
-            'formats_supported' => ['json'],
-            'generated_by' => [
-                'user_id' => (string) ($request->user()?->id ?? ''),
-                'role' => $this->role($request) ?: null,
-            ],
-        ];
+        $payload = $this->tenantBackupService->buildPayload(
+            (string) $tenantId,
+            $request->input(),
+            (string) ($request->user()?->id ?? ''),
+            $this->role($request) ?: null
+        );
 
         try {
-            $driveFile = $this->googleDriveService->uploadTenantBackupJson(
+            $driveFile = $this->tenantBackupService->savePayloadToGoogleDrive(
                 (string) $tenantId,
                 (string) ($request->user()?->id ?? ''),
                 $payload
@@ -243,7 +136,7 @@ class AdminBackupController extends ApiController
             [
                 'type' => 'tenant_backup_google_drive',
                 'tenant_id' => $tenantId,
-                'mode' => $mode,
+                'mode' => $payload['mode'] ?? 'full',
                 'period' => $payload['period'] ?? null,
                 'summary' => $payload['summary'] ?? [],
                 'drive_file_id' => $driveFile['drive_file_id'] ?? null,
@@ -263,6 +156,74 @@ class AdminBackupController extends ApiController
                     'manifest' => $payload['manifest'],
                 ],
                 'drive_file' => $driveFile,
+            ],
+        ]);
+    }
+
+    public function monthlyStatus(Request $request)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny('Akses ditolak. Hanya admin sekolah yang bisa melihat jadwal backup.');
+        }
+
+        $tenantId = $this->resolveOwnedTenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        return response()->json([
+            'data' => $this->tenantBackupService->monthlyStatus((string) $tenantId),
+        ]);
+    }
+
+    public function saveMonthlyToGoogleDrive(Request $request)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny('Akses ditolak. Hanya admin sekolah yang bisa menyimpan backup.');
+        }
+
+        $tenantId = $this->resolveOwnedTenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        $monthKey = trim((string) $request->input('month'));
+        if ($monthKey === '') {
+            return $this->deny('Bulan backup wajib dipilih.', 422);
+        }
+
+        try {
+            $driveFile = $this->tenantBackupService->saveMonthlyBackupToGoogleDrive(
+                (string) $tenantId,
+                $monthKey,
+                (string) ($request->user()?->id ?? ''),
+                filter_var($request->input('force', false), FILTER_VALIDATE_BOOLEAN)
+            );
+        } catch (\Throwable $e) {
+            return $this->deny('Gagal menyimpan backup bulanan ke Google Drive: '.trim((string) $e->getMessage()), 422);
+        }
+
+        $this->logAudit(
+            $request,
+            'tenant_monthly_backup_google_drive',
+            'backup-monthly-'.$tenantId.'-'.$monthKey,
+            'CREATE',
+            null,
+            [
+                'type' => 'tenant_monthly_backup_google_drive',
+                'tenant_id' => $tenantId,
+                'month' => $monthKey,
+                'drive_file_id' => $driveFile['drive_file_id'] ?? null,
+                'drive_folder_path' => $driveFile['drive_folder_path'] ?? null,
+            ],
+            (string) $tenantId
+        );
+
+        return response()->json([
+            'data' => [
+                'month' => $monthKey,
+                'drive_file' => $driveFile,
+                'monthly_status' => $this->tenantBackupService->monthlyStatus((string) $tenantId),
             ],
         ]);
     }
