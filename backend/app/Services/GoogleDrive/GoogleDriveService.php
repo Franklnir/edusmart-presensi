@@ -41,6 +41,8 @@ class GoogleDriveService
         'quiz-media',
     ];
 
+    private const DRIVE_PROPERTY_BYTE_LIMIT = 124;
+
     public function providerConfigured(): bool
     {
         return (bool) $this->driveConfig('enabled', false)
@@ -1544,6 +1546,7 @@ class GoogleDriveService
 
     private function multipartUpload(string $accessToken, array $metadata, UploadedFile $file, string $mime): array
     {
+        $metadata = $this->sanitizeDriveMetadata($metadata);
         $boundary = 'edusmart_drive_'.Str::random(24);
         $contents = file_get_contents($file->getRealPath());
         if ($contents === false) {
@@ -1575,6 +1578,7 @@ class GoogleDriveService
 
     private function multipartUploadContents(string $accessToken, array $metadata, string $contents, string $mime): array
     {
+        $metadata = $this->sanitizeDriveMetadata($metadata);
         $boundary = 'edusmart_drive_'.Str::random(24);
 
         $body = "--{$boundary}\r\n"
@@ -1598,6 +1602,55 @@ class GoogleDriveService
         }
 
         return (array) $response->json();
+    }
+
+    private function sanitizeDriveMetadata(array $metadata): array
+    {
+        foreach (['appProperties', 'properties'] as $propertyKey) {
+            if (! isset($metadata[$propertyKey]) || ! is_array($metadata[$propertyKey])) {
+                continue;
+            }
+
+            $metadata[$propertyKey] = $this->sanitizeDriveProperties($metadata[$propertyKey]);
+        }
+
+        return $metadata;
+    }
+
+    private function sanitizeDriveProperties(array $properties): array
+    {
+        $safe = [];
+        foreach ($properties as $key => $value) {
+            $key = trim((string) $key);
+            if ($key === '') {
+                continue;
+            }
+
+            $value = is_scalar($value) ? (string) $value : json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            $safe[$key] = $this->limitDrivePropertyValue($key, (string) $value);
+        }
+
+        return $safe;
+    }
+
+    private function limitDrivePropertyValue(string $key, string $value): string
+    {
+        $maxValueBytes = max(0, self::DRIVE_PROPERTY_BYTE_LIMIT - strlen($key));
+        if (strlen($value) <= $maxValueBytes) {
+            return $value;
+        }
+
+        if ($maxValueBytes <= 1) {
+            return '';
+        }
+
+        $suffix = '...';
+        $sliceBytes = max(1, $maxValueBytes - strlen($suffix));
+        $truncated = function_exists('mb_strcut')
+            ? mb_strcut($value, 0, $sliceBytes, 'UTF-8')
+            : substr($value, 0, $sliceBytes);
+
+        return rtrim($truncated).$suffix;
     }
 
     private function shareFileWithLink(string $accessToken, string $fileId): void
