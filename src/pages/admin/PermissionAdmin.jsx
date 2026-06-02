@@ -29,6 +29,10 @@ const initialForm = {
   is_active: true,
 }
 
+const statCardClass = 'page-card min-h-[132px] p-5'
+const formControlClass = 'h-14 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-black text-slate-900 outline-none transition focus:border-brand-400 focus:ring-4 focus:ring-brand-100'
+const actionButtonClass = 'inline-flex h-12 items-center justify-center gap-2 rounded-2xl px-4 text-sm font-black transition disabled:cursor-not-allowed disabled:opacity-60'
+
 const Badge = ({ children, active = true }) => (
   <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-bold ${
     active
@@ -165,8 +169,8 @@ const PermissionAdmin = () => {
     .filter((feature) => !(form.target_type === 'homeroom' && feature.key === 'siswa'))
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6">
-      <section className="page-card p-6">
+    <div className="mx-auto max-w-7xl space-y-6">
+      <section className="page-card p-6 shadow-card">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-start gap-4">
             <div className="page-title-accent" />
@@ -182,7 +186,7 @@ const PermissionAdmin = () => {
             <button
               type="button"
               onClick={loadPermissions}
-              className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 shadow-sm hover:bg-slate-50"
+              className={`${actionButtonClass} border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-50`}
               disabled={loading}
             >
               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
@@ -191,7 +195,7 @@ const PermissionAdmin = () => {
             <button
               type="button"
               onClick={() => setShowCreate(true)}
-              className="inline-flex items-center gap-2 rounded-2xl bg-brand-600 px-4 py-3 text-sm font-bold text-white shadow-brand-sm hover:bg-brand-700"
+              className={`${actionButtonClass} bg-brand-600 text-white shadow-brand-sm hover:bg-brand-700`}
             >
               <Plus className="h-4 w-4" />
               Tambah Permission
@@ -207,8 +211,8 @@ const PermissionAdmin = () => {
           ['Nonaktif', inactiveTotal, ToggleLeft, 'bg-amber-50 text-amber-700'],
           ['Fitur tersedia', ADMIN_FEATURES.length, ShieldCheck, 'bg-violet-50 text-violet-700'],
         ].map(([label, value, Icon, iconClass]) => (
-          <div key={label} className="page-card p-5">
-            <div className="flex items-center justify-between">
+          <div key={label} className={statCardClass}>
+            <div className="flex h-full items-center justify-between gap-4">
               <div>
                 <p className="text-xs font-black uppercase tracking-wider text-slate-500">{label}</p>
                 <p className="mt-2 text-3xl font-black text-slate-950">{value}</p>
@@ -221,7 +225,7 @@ const PermissionAdmin = () => {
         ))}
       </section>
 
-      <section className="page-card overflow-hidden">
+      <section className="page-card overflow-hidden shadow-card">
         <div className="border-b border-slate-100 px-6 py-5">
           <h2 className="text-lg font-black text-slate-950">Daftar Permission</h2>
           <p className="mt-1 text-sm text-slate-500">Setiap target bisa memiliki lebih dari satu fitur admin yang aktif.</p>
@@ -299,7 +303,11 @@ const PermissionAdmin = () => {
               )) : (
                 <tr>
                   <td className="px-6 py-12 text-center text-slate-500" colSpan={5}>
-                    Belum ada permission admin. Klik Tambah Permission untuk mulai mengatur akses.
+                    <div className="mx-auto flex max-w-md flex-col items-center rounded-3xl border border-dashed border-slate-200 bg-slate-50 px-6 py-8">
+                      <ShieldCheck className="h-9 w-9 text-brand-500" />
+                      <p className="mt-3 font-black text-slate-900">Belum ada permission admin</p>
+                      <p className="mt-1 text-sm text-slate-500">Klik Tambah Permission untuk mulai mengatur akses fitur admin ke guru, jabatan, atau wali kelas.</p>
+                    </div>
                   </td>
                 </tr>
               )}
@@ -310,14 +318,19 @@ const PermissionAdmin = () => {
 
       {showCreate && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm">
-          <form onSubmit={handleSubmit} className="w-full max-w-3xl overflow-hidden rounded-[28px] bg-white shadow-2xl">
-            <div className="flex items-start justify-between border-b border-slate-100 p-6">
+          <form onSubmit={handleSubmit} className="w-full max-w-4xl overflow-hidden rounded-3xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 p-6">
               <div>
                 <p className="text-xs font-black uppercase tracking-[0.28em] text-brand-600">Permission Admin</p>
                 <h3 className="mt-2 text-2xl font-black text-slate-950">Tambah Akses Fitur</h3>
                 <p className="mt-1 text-sm text-slate-500">Pilih target, lalu centang fitur admin yang boleh tampil di panel guru.</p>
               </div>
-              <button type="button" onClick={resetForm} className="rounded-2xl border border-slate-200 p-3 text-slate-500 hover:bg-slate-50">
+              <button
+                type="button"
+                onClick={resetForm}
+                className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl border border-slate-200 text-slate-500 hover:bg-slate-50"
+                aria-label="Tutup permission admin"
+              >
                 <X className="h-5 w-5" />
               </button>
             </div>
@@ -327,7 +340,9 @@ const PermissionAdmin = () => {
                 <label className="space-y-2">
                   <span className="text-xs font-black uppercase tracking-wider text-slate-500">Tipe Target</span>
                   <select
-                    className="w-full rounded-2xl border border-slate-200 px-4 py-3 font-bold text-slate-900 outline-none focus:border-brand-400 focus:ring-4 focus:ring-brand-100"
+                    id="permission-target-type"
+                    name="target_type"
+                    className={formControlClass}
                     value={form.target_type}
                     onChange={(event) => setForm({ ...initialForm, target_type: event.target.value })}
                   >
@@ -341,7 +356,9 @@ const PermissionAdmin = () => {
                   <label className="space-y-2">
                     <span className="text-xs font-black uppercase tracking-wider text-slate-500">Nama Guru</span>
                     <select
-                      className="w-full rounded-2xl border border-slate-200 px-4 py-3 font-bold text-slate-900 outline-none focus:border-brand-400 focus:ring-4 focus:ring-brand-100"
+                      id="permission-teacher-id"
+                      name="teacher_id"
+                      className={formControlClass}
                       value={form.teacher_id}
                       onChange={(event) => setForm((prev) => ({ ...prev, teacher_id: event.target.value }))}
                       required
@@ -358,7 +375,9 @@ const PermissionAdmin = () => {
                   <label className="space-y-2">
                     <span className="text-xs font-black uppercase tracking-wider text-slate-500">Jabatan</span>
                     <select
-                      className="w-full rounded-2xl border border-slate-200 px-4 py-3 font-bold text-slate-900 outline-none focus:border-brand-400 focus:ring-4 focus:ring-brand-100"
+                      id="permission-position-id"
+                      name="position_id"
+                      className={formControlClass}
                       value={form.position_id}
                       onChange={(event) => setForm((prev) => ({ ...prev, position_id: event.target.value }))}
                       required
@@ -375,7 +394,9 @@ const PermissionAdmin = () => {
                   <label className="space-y-2">
                     <span className="text-xs font-black uppercase tracking-wider text-slate-500">Wali Kelas</span>
                     <select
-                      className="w-full rounded-2xl border border-slate-200 px-4 py-3 font-bold text-slate-900 outline-none focus:border-brand-400 focus:ring-4 focus:ring-brand-100"
+                      id="permission-class-id"
+                      name="class_id"
+                      className={formControlClass}
                       value={form.class_id}
                       onChange={(event) => setForm((prev) => ({ ...prev, class_id: event.target.value }))}
                       required
@@ -411,7 +432,7 @@ const PermissionAdmin = () => {
                         key={feature.key}
                         type="button"
                         onClick={() => toggleFeature(feature.key)}
-                        className={`flex items-center gap-3 rounded-2xl border p-4 text-left transition ${
+                        className={`flex min-h-[76px] items-center gap-3 rounded-2xl border p-4 text-left transition ${
                           checked
                             ? 'border-brand-300 bg-brand-50 text-brand-800'
                             : 'border-slate-200 bg-white text-slate-700 hover:border-brand-200'
@@ -431,10 +452,10 @@ const PermissionAdmin = () => {
             </div>
 
             <div className="flex justify-end gap-3 border-t border-slate-100 p-6">
-              <button type="button" onClick={resetForm} className="rounded-2xl border border-slate-200 px-5 py-3 font-bold text-slate-700 hover:bg-slate-50" disabled={saving}>
+              <button type="button" onClick={resetForm} className={`${actionButtonClass} border border-slate-200 bg-white text-slate-700 hover:bg-slate-50`} disabled={saving}>
                 Batal
               </button>
-              <button type="submit" className="rounded-2xl bg-brand-600 px-5 py-3 font-bold text-white shadow-brand-sm hover:bg-brand-700 disabled:opacity-60" disabled={saving}>
+              <button type="submit" className={`${actionButtonClass} bg-brand-600 text-white shadow-brand-sm hover:bg-brand-700`} disabled={saving}>
                 {saving ? 'Menyimpan...' : 'Simpan Permission'}
               </button>
             </div>
