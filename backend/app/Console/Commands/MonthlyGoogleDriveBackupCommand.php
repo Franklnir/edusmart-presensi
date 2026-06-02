@@ -41,6 +41,7 @@ class MonthlyGoogleDriveBackupCommand extends Command
             if ($tenantId === '') {
                 $failed++;
                 $this->error('FAIL: tenant tidak ditemukan.');
+
                 continue;
             }
 
@@ -58,6 +59,7 @@ class MonthlyGoogleDriveBackupCommand extends Command
                 if (str_contains(strtolower($message), 'sudah tersedia')) {
                     $skipped++;
                     $this->line("SKIP {$tenantId}: {$message}");
+
                     continue;
                 }
 
