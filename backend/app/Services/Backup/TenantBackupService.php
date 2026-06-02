@@ -14,9 +14,7 @@ class TenantBackupService
 {
     use HasTenantBackupLogic;
 
-    public function __construct(private readonly GoogleDriveService $googleDriveService)
-    {
-    }
+    public function __construct(private readonly GoogleDriveService $googleDriveService) {}
 
     public function buildPayload(string $tenantId, array $input = [], string $userId = '', ?string $role = null): array
     {
@@ -79,7 +77,7 @@ class TenantBackupService
     public function buildMonthlyPayload(string $tenantId, string $monthKey, string $userId = 'system', ?string $role = 'system'): array
     {
         $month = $this->findAcademicMonth($tenantId, $monthKey);
-        if (!$month) {
+        if (! $month) {
             throw new \RuntimeException('Bulan backup tidak berada dalam periode aktif sekolah.');
         }
 
@@ -103,12 +101,12 @@ class TenantBackupService
     public function saveMonthlyBackupToGoogleDrive(string $tenantId, string $monthKey, string $userId = 'system', bool $force = false): array
     {
         $month = $this->findAcademicMonth($tenantId, $monthKey);
-        if (!$month) {
+        if (! $month) {
             throw new \RuntimeException('Bulan backup tidak berada dalam periode aktif sekolah.');
         }
 
         $fileName = $this->monthlyBackupFileName($tenantId, $month['value']);
-        if (!$force && $this->monthlyBackupRecord($tenantId, $month['value'])) {
+        if (! $force && $this->monthlyBackupRecord($tenantId, $month['value'])) {
             throw new \RuntimeException('Backup bulan '.$month['label'].' sudah tersedia di Google Drive.');
         }
 
@@ -168,7 +166,7 @@ class TenantBackupService
 
     public function tenantsEligibleForMonthlyBackup(): array
     {
-        if (!Schema::hasTable('tenant_google_drive_configs')) {
+        if (! Schema::hasTable('tenant_google_drive_configs')) {
             return [];
         }
 
@@ -250,7 +248,7 @@ class TenantBackupService
     private function findAcademicMonth(string $tenantId, string $monthKey): ?array
     {
         $monthKey = trim($monthKey);
-        if (!preg_match('/^\d{4}-\d{2}$/', $monthKey)) {
+        if (! preg_match('/^\d{4}-\d{2}$/', $monthKey)) {
             return null;
         }
 
@@ -265,7 +263,7 @@ class TenantBackupService
 
     private function monthlyBackupRecord(string $tenantId, string $monthKey): ?TenantGoogleDriveFile
     {
-        if (!Schema::hasTable('tenant_google_drive_files')) {
+        if (! Schema::hasTable('tenant_google_drive_files')) {
             return null;
         }
 
