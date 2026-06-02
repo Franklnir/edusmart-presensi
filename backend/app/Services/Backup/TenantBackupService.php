@@ -15,7 +15,9 @@ class TenantBackupService
 {
     use HasTenantBackupLogic;
 
-    public function __construct(private readonly GoogleDriveService $googleDriveService) {}
+    public function __construct(private readonly GoogleDriveService $googleDriveService)
+    {
+    }
 
     public function buildPayload(string $tenantId, array $input = [], string $userId = '', ?string $role = null): array
     {
