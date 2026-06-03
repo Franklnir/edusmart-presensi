@@ -2,12 +2,17 @@
 
 namespace App\Services\Quiz;
 
+use App\Jobs\FinalizeQuizSubmissionJob;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class QuizScoringService
 {
+    public function __construct(
+        private readonly QuizContentCache $contentCache
+    ) {}
+
     public function finalizeSubmission(
         string $tenantId,
         string $submissionId,
@@ -42,10 +47,7 @@ class QuizScoringService
                 ];
             }
 
-            $questions = DB::table('quiz_questions')
-                ->where('quiz_id', $submission->quiz_id)
-                ->where('tenant_id', $tenantId)
-                ->get();
+            $questions = $this->contentCache->questions($tenantId, (string) $submission->quiz_id);
 
             $quiz = DB::table('quizzes')
                 ->where('id', $submission->quiz_id)
@@ -63,14 +65,12 @@ class QuizScoringService
                 ->get()
                 ->keyBy('question_id');
 
-            $optionsByQuestion = collect();
-            if (! empty($questionIds)) {
-                $optionsByQuestion = DB::table('quiz_options')
+            $optionsByQuestion = empty($questionIds)
+                ? collect()
+                : $this->contentCache
+                    ->options($tenantId, (string) $submission->quiz_id)
                     ->whereIn('question_id', $questionIds)
-                    ->where('tenant_id', $tenantId)
-                    ->get()
                     ->groupBy('question_id');
-            }
 
             [$score, $totalPoints] = $this->scoreSubmission(
                 $questions,
@@ -156,7 +156,12 @@ class QuizScoringService
             $submissionQuery->where('s.tenant_id', $tenantId);
         }
 
-        $rows = $submissionQuery->get();
+        // Scheduler berjalan setiap menit. Batasi pekerjaan per tick agar satu gelombang
+        // deadline besar tidak menahan worker terlalu lama; sisanya diproses tick berikutnya.
+        $rows = $submissionQuery
+            ->orderBy('s.updated_at')
+            ->limit(100)
+            ->get();
         foreach ($rows as $row) {
             $expired = false;
 
@@ -175,7 +180,29 @@ class QuizScoringService
                 continue;
             }
 
-            $result = $this->finalizeSubmission((string) $row->tenant_id, (string) $row->submission_id, $now, 'finished');
+            if (config('quiz.async_scoring_enabled', false)) {
+                try {
+                    DB::table('quiz_submissions')
+                        ->where('tenant_id', (string) $row->tenant_id)
+                        ->where('id', (string) $row->submission_id)
+                        ->update([
+                            'status' => 'finished',
+                            'finished_at' => $now,
+                            'updated_at' => $now,
+                        ]);
+                    FinalizeQuizSubmissionJob::dispatch(
+                        (string) $row->tenant_id,
+                        (string) $row->submission_id,
+                        $now->toISOString(),
+                        'finished'
+                    );
+                    $result = ['submission_id' => (string) $row->submission_id];
+                } catch (\Throwable) {
+                    $result = $this->finalizeSubmission((string) $row->tenant_id, (string) $row->submission_id, $now, 'finished');
+                }
+            } else {
+                $result = $this->finalizeSubmission((string) $row->tenant_id, (string) $row->submission_id, $now, 'finished');
+            }
             if ($result) {
                 $totalFinalized++;
             }
@@ -196,6 +223,7 @@ class QuizScoringService
         $achievedPoints = 0.0;
         $totalScaledQuestions = 0;
         $achievedScaledQuestions = 0.0;
+        $answerScoreUpdates = [];
 
         foreach ($questions as $question) {
             $questionId = (string) $question->id;
@@ -257,17 +285,22 @@ class QuizScoringService
             }
 
             if ($answer) {
-                DB::table('quiz_answers')
-                    ->where('id', $answer->id)
-                    ->where('tenant_id', $tenantId)
-                    ->update([
-                        'is_correct' => $answerIsCorrect,
-                        'poin' => $questionType === 'mcq' && $penilaian === 'skala_100'
-                            ? ($answerIsCorrect ? 1 : 0)
-                            : $answerPoint,
-                        'updated_at' => $now,
-                    ]);
+                $answerScoreUpdates[] = array_merge((array) $answer, [
+                    'is_correct' => $answerIsCorrect,
+                    'poin' => $questionType === 'mcq' && $penilaian === 'skala_100'
+                        ? ($answerIsCorrect ? 1 : 0)
+                        : $answerPoint,
+                    'updated_at' => $now,
+                ]);
             }
+        }
+
+        if (! empty($answerScoreUpdates)) {
+            DB::table('quiz_answers')->upsert(
+                $answerScoreUpdates,
+                ['id'],
+                ['is_correct', 'poin', 'updated_at']
+            );
         }
 
         $score = 0;

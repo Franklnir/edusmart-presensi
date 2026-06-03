@@ -1,5 +1,6 @@
 <?php
 
+use App\Jobs\QuizWorkerHeartbeatJob;
 use App\Models\Profile;
 use App\Models\User;
 use App\Services\Quiz\QuizScoringService;
@@ -28,6 +29,10 @@ Schedule::command('backup:monthly-google-drive')
     ->timezone('Asia/Jakarta')
     ->when(fn () => now('Asia/Jakarta')->isSameDay(now('Asia/Jakarta')->copy()->endOfMonth()))
     ->withoutOverlapping(30)
+    ->onOneServer();
+
+Schedule::job(new QuizWorkerHeartbeatJob, (string) config('quiz.scoring_queue', 'quiz-scoring'))
+    ->everyMinute()
     ->onOneServer();
 
 Artisan::command('super-admin:bootstrap {--force-password : Reset password user yang sudah ada}', function () {

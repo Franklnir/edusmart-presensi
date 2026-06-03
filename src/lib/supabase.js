@@ -3367,6 +3367,10 @@ const auth = {
       const res = await apiFetch('/api/quiz/answer', { method: 'POST', body: payload })
       return { data: res.raw?.data ?? res.data, error: res.error ? { ...res.error, ...(res.raw || {}) } : null }
     },
+    async saveAnswersBatch(payload) {
+      const res = await apiFetch('/api/quiz/answers/batch', { method: 'POST', body: payload })
+      return { data: res.raw?.data ?? res.data, error: res.error ? { ...res.error, ...(res.raw || {}) } : null }
+    },
     async submit(payload) {
       const res = await apiFetch('/api/quiz/submit', { method: 'POST', body: payload })
       return { data: res.raw?.data ?? res.data, error: res.error ? { ...res.error, ...(res.raw || {}) } : null }

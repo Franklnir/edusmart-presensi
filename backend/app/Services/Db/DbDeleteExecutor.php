@@ -13,7 +13,7 @@ class DbDeleteExecutor
         $tenantId = $context['tenant_id'] ?? null;
         $isAdmin = (bool) ($context['is_admin'] ?? false);
 
-        $beforeMutationRows = $callbacks['should_notify_whatsapp_for_table']($table)
+        $beforeMutationRows = ($callbacks['should_notify_whatsapp_for_table']($table) || $callbacks['should_capture_mutation_rows']($table))
             ? $callbacks['query_rows_to_array'](clone $query)
             : [];
         $beforeRows = [];
@@ -46,6 +46,7 @@ class DbDeleteExecutor
             if ($updated > 0) {
                 $afterMutationRows = $callbacks['query_rows_to_array'](clone $query);
                 $callbacks['notify_whatsapp_mutation']($tenantId, $table, 'delete', $beforeMutationRows, $afterMutationRows);
+                $callbacks['after_mutation']($tenantId, $table, $beforeMutationRows, $afterMutationRows);
             }
 
             return response()->json(['data' => $updated]);
@@ -55,6 +56,7 @@ class DbDeleteExecutor
 
         if ($deleted > 0) {
             $callbacks['notify_whatsapp_mutation']($tenantId, $table, 'delete', $beforeMutationRows, []);
+            $callbacks['after_mutation']($tenantId, $table, $beforeMutationRows, []);
         }
 
         if ($shouldAuditNilai && $deleted > 0) {

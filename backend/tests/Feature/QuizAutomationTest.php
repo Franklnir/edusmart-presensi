@@ -2,13 +2,16 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\FinalizeQuizSubmissionJob;
 use App\Models\User;
 use App\Services\Quiz\QuizScoringService;
+use App\Services\WhatsApp\WhatsAppNotificationService;
 use App\Support\AcademicPeriod;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -189,6 +192,90 @@ class QuizAutomationTest extends TestCase
             'score' => 67,
             'total_points' => 30,
             'tenant_id' => $tenantId,
+        ]);
+    }
+
+    public function test_async_submit_marks_submission_finished_and_queues_scoring(): void
+    {
+        config()->set('quiz.async_scoring_enabled', true);
+        Queue::fake();
+
+        $tenantId = $this->defaultTenantId();
+        [$siswa] = $this->createUserWithProfile($tenantId, 'siswa', 'X-1');
+        [$guru] = $this->createUserWithProfile($tenantId, 'guru', 'X-1');
+
+        $quizId = (string) Str::uuid();
+        $questionId = (string) Str::uuid();
+        $optionId = (string) Str::uuid();
+        DB::table('quizzes')->insert([
+            'id' => $quizId,
+            'tenant_id' => $tenantId,
+            'guru_id' => $guru->id,
+            'kelas_id' => 'X-1',
+            'mapel' => 'IPA',
+            'nama' => 'Quiz Queue',
+            'starts_at' => now()->subMinute(),
+            'deadline_at' => now()->addHour(),
+            'is_live' => false,
+            'is_active' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        DB::table('quiz_questions')->insert([
+            'id' => $questionId,
+            'tenant_id' => $tenantId,
+            'quiz_id' => $quizId,
+            'nomor' => 1,
+            'soal' => 'Soal queue',
+            'poin' => 10,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        DB::table('quiz_options')->insert([
+            'id' => $optionId,
+            'tenant_id' => $tenantId,
+            'question_id' => $questionId,
+            'label' => 'A',
+            'text' => 'Benar',
+            'is_correct' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $response = $this->actingAs($siswa)->postJson('/api/quiz/submit', [
+            'quiz_id' => $quizId,
+            'answers' => [
+                ['question_id' => $questionId, 'option_id' => $optionId],
+            ],
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('data.scoring_pending', true);
+        $response->assertJsonPath('data.score', null);
+        $this->assertDatabaseHas('quiz_submissions', [
+            'quiz_id' => $quizId,
+            'siswa_id' => $siswa->id,
+            'status' => 'finished',
+            'score' => null,
+        ]);
+        $queuedJob = null;
+        Queue::assertPushedOn('quiz-scoring', FinalizeQuizSubmissionJob::class, function (FinalizeQuizSubmissionJob $job) use (&$queuedJob) {
+            $queuedJob = $job;
+
+            return true;
+        });
+
+        $this->assertNotNull($queuedJob);
+        $queuedJob->handle(
+            app(QuizScoringService::class),
+            app(WhatsAppNotificationService::class)
+        );
+        $this->assertDatabaseHas('quiz_submissions', [
+            'quiz_id' => $quizId,
+            'siswa_id' => $siswa->id,
+            'status' => 'finished',
+            'score' => 100,
+            'total_points' => 10,
         ]);
     }
 
@@ -912,6 +999,104 @@ class QuizAutomationTest extends TestCase
             'question_id' => $questionA,
             'option_id' => $validOption,
             'tenant_id' => $tenantId,
+        ]);
+    }
+
+    public function test_batch_answer_endpoint_saves_multiple_answers_and_is_idempotent(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        [$siswa] = $this->createUserWithProfile($tenantId, 'siswa', 'X-1');
+        [$guru] = $this->createUserWithProfile($tenantId, 'guru', 'X-1');
+
+        $quizId = (string) Str::uuid();
+        DB::table('quizzes')->insert([
+            'id' => $quizId,
+            'tenant_id' => $tenantId,
+            'guru_id' => $guru->id,
+            'kelas_id' => 'X-1',
+            'mapel' => 'IPA',
+            'nama' => 'Quiz Batch',
+            'starts_at' => now()->subMinute(),
+            'deadline_at' => now()->addHour(),
+            'is_live' => false,
+            'is_active' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $mcqId = (string) Str::uuid();
+        $essayId = (string) Str::uuid();
+        DB::table('quiz_questions')->insert([
+            [
+                'id' => $mcqId,
+                'tenant_id' => $tenantId,
+                'quiz_id' => $quizId,
+                'nomor' => 1,
+                'question_type' => 'mcq',
+                'soal' => 'Pilihan',
+                'poin' => 10,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'id' => $essayId,
+                'tenant_id' => $tenantId,
+                'quiz_id' => $quizId,
+                'nomor' => 2,
+                'question_type' => 'essay',
+                'soal' => 'Esai',
+                'poin' => 20,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ]);
+
+        $optionId = (string) Str::uuid();
+        DB::table('quiz_options')->insert([
+            'id' => $optionId,
+            'tenant_id' => $tenantId,
+            'question_id' => $mcqId,
+            'label' => 'A',
+            'text' => 'Benar',
+            'is_correct' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $start = $this->actingAs($siswa)->postJson('/api/quiz/start', ['quiz_id' => $quizId]);
+        $start->assertOk();
+        $submissionId = $start->json('data.submission.id');
+
+        $payload = [
+            'quiz_id' => $quizId,
+            'submission_id' => $submissionId,
+            'answers' => [
+                ['question_id' => $mcqId, 'option_id' => $optionId],
+                ['question_id' => $essayId, 'essay_answer' => 'Jawaban pertama'],
+            ],
+        ];
+
+        $first = $this->actingAs($siswa)->postJson('/api/quiz/answers/batch', $payload);
+        $first->assertOk();
+        $first->assertJsonPath('data.saved_count', 2);
+
+        $payload['answers'][1]['essay_answer'] = 'Jawaban diperbarui';
+        $second = $this->actingAs($siswa)->postJson('/api/quiz/answers/batch', $payload);
+        $second->assertOk();
+        $second->assertJsonPath('data.saved_count', 2);
+
+        $this->assertSame(
+            2,
+            DB::table('quiz_answers')
+                ->where('tenant_id', $tenantId)
+                ->where('submission_id', $submissionId)
+                ->count()
+        );
+        $this->assertDatabaseHas('quiz_answers', [
+            'tenant_id' => $tenantId,
+            'submission_id' => $submissionId,
+            'question_id' => $essayId,
+            'essay_answer' => 'Jawaban diperbarui',
         ]);
     }
 

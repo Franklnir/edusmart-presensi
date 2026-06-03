@@ -102,6 +102,7 @@ class DbInsertExecutor
         }
 
         $callbacks['notify_whatsapp_mutation']($tenantId, $table, 'insert', [], $rows);
+        $callbacks['after_mutation']($tenantId, $table, [], $rows);
 
         if ($shouldAuditNilai) {
             $afterRows = $callbacks['fetch_tugas_jawaban_rows_for_payload']($rows, $tenantId);

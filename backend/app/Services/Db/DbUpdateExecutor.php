@@ -22,7 +22,7 @@ class DbUpdateExecutor
             return $callbacks['deny']('Payload tidak valid', 422);
         }
 
-        $beforeMutationRows = $callbacks['should_notify_whatsapp_for_table']($table)
+        $beforeMutationRows = ($callbacks['should_notify_whatsapp_for_table']($table) || $callbacks['should_capture_mutation_rows']($table))
             ? $callbacks['query_rows_to_array'](clone $query)
             : [];
         $beforeRows = [];
@@ -163,6 +163,7 @@ class DbUpdateExecutor
                 ? $callbacks['query_rows_to_array'](clone $query)
                 : [];
             $callbacks['notify_whatsapp_mutation']($tenantId, $table, 'update', $beforeMutationRows, $afterMutationRows);
+            $callbacks['after_mutation']($tenantId, $table, $beforeMutationRows, $afterMutationRows);
         }
 
         if ($shouldAuditNilai && $updated > 0) {

@@ -9,6 +9,7 @@ use App\Services\Db\DbSelectExecutor;
 use App\Services\Db\DbTableRegistry;
 use App\Services\Db\DbUpdateExecutor;
 use App\Services\Db\DbUpsertExecutor;
+use App\Services\Quiz\QuizContentCache;
 use App\Services\WhatsApp\WhatsAppNotificationService;
 use App\Support\AcademicPeriod;
 use Illuminate\Database\QueryException;
@@ -115,7 +116,8 @@ class DbController extends ApiController
         private readonly DbSelectExecutor $dbSelectExecutor,
         private readonly DbTableRegistry $dbTableRegistry,
         private readonly DbUpdateExecutor $dbUpdateExecutor,
-        private readonly DbUpsertExecutor $dbUpsertExecutor
+        private readonly DbUpsertExecutor $dbUpsertExecutor,
+        private readonly QuizContentCache $quizContentCache
     ) {}
 
     private ?string $currentTenantId = null;
@@ -434,6 +436,7 @@ class DbController extends ApiController
             'fetch_tugas_jawaban_rows_for_payload' => fn (array $rows, ?string $tenantId): array => $this->fetchTugasJawabanRowsForPayload($rows, $tenantId),
             'is_unique_constraint_exception' => fn (QueryException $e): bool => $this->isUniqueConstraintException($e),
             'notify_whatsapp_mutation' => fn (?string $tenantId, string $table, string $action, array $beforeRows = [], array $afterRows = []) => $this->notifyWhatsAppMutation($tenantId, $table, $action, $beforeRows, $afterRows),
+            'after_mutation' => fn (?string $tenantId, string $table, array $beforeRows = [], array $afterRows = []) => $this->afterDbMutation($tenantId, $table, $beforeRows, $afterRows),
             'log_audit' => fn (Request $request, string $table, string $recordId, string $action, $oldData = null, $newData = null, ?string $tenantId = null) => $this->logAudit($request, $table, $recordId, $action, $oldData, $newData, $tenantId),
         ];
     }
@@ -454,6 +457,8 @@ class DbController extends ApiController
             'sync_teacher_display_name_snapshots' => fn (string $tenantId, string $teacherId, string $displayName, Carbon $now): array => $this->syncTeacherDisplayNameSnapshots($tenantId, $teacherId, $displayName, $now),
             'sync_student_display_name_snapshots' => fn (string $tenantId, string $studentId, string $displayName, Carbon $now): array => $this->syncStudentDisplayNameSnapshots($tenantId, $studentId, $displayName, $now),
             'notify_whatsapp_mutation' => fn (?string $tenantId, string $table, string $action, array $beforeRows = [], array $afterRows = []) => $this->notifyWhatsAppMutation($tenantId, $table, $action, $beforeRows, $afterRows),
+            'should_capture_mutation_rows' => fn (string $table): bool => $this->isQuizContentTable($table),
+            'after_mutation' => fn (?string $tenantId, string $table, array $beforeRows = [], array $afterRows = []) => $this->afterDbMutation($tenantId, $table, $beforeRows, $afterRows),
             'log_audit' => fn (Request $request, string $table, string $recordId, string $action, $oldData = null, $newData = null, ?string $tenantId = null) => $this->logAudit($request, $table, $recordId, $action, $oldData, $newData, $tenantId),
         ];
     }
@@ -465,6 +470,8 @@ class DbController extends ApiController
             'query_rows_to_array' => fn ($query): array => $this->queryRowsToArray($query),
             'is_nilai_audit_actor' => fn (Request $request): bool => $this->isNilaiAuditActor($request),
             'notify_whatsapp_mutation' => fn (?string $tenantId, string $table, string $action, array $beforeRows = [], array $afterRows = []) => $this->notifyWhatsAppMutation($tenantId, $table, $action, $beforeRows, $afterRows),
+            'should_capture_mutation_rows' => fn (string $table): bool => $this->isQuizContentTable($table),
+            'after_mutation' => fn (?string $tenantId, string $table, array $beforeRows = [], array $afterRows = []) => $this->afterDbMutation($tenantId, $table, $beforeRows, $afterRows),
             'log_audit' => fn (Request $request, string $table, string $recordId, string $action, $oldData = null, $newData = null, ?string $tenantId = null) => $this->logAudit($request, $table, $recordId, $action, $oldData, $newData, $tenantId),
         ];
     }
@@ -488,6 +495,7 @@ class DbController extends ApiController
             'fetch_rows_by_keys' => fn (string $table, array $rows, array $uniqueBy, ?string $tenantId): array => $this->fetchRowsByKeys($table, $rows, $uniqueBy, $tenantId),
             'manual_upsert_by_keys' => fn (string $table, array $rows, array $uniqueBy, ?string $tenantId): array => $this->manualUpsertByKeys($table, $rows, $uniqueBy, $tenantId),
             'notify_whatsapp_mutation' => fn (?string $tenantId, string $table, string $action, array $beforeRows = [], array $afterRows = []) => $this->notifyWhatsAppMutation($tenantId, $table, $action, $beforeRows, $afterRows),
+            'after_mutation' => fn (?string $tenantId, string $table, array $beforeRows = [], array $afterRows = []) => $this->afterDbMutation($tenantId, $table, $beforeRows, $afterRows),
             'log_audit' => fn (Request $request, string $table, string $recordId, string $action, $oldData = null, $newData = null, ?string $tenantId = null) => $this->logAudit($request, $table, $recordId, $action, $oldData, $newData, $tenantId),
         ];
     }
@@ -2476,6 +2484,42 @@ class DbController extends ApiController
         }
 
         return $this->deny('Policy belum ditentukan', 403);
+    }
+
+    private function isQuizContentTable(string $table): bool
+    {
+        return in_array($table, ['quizzes', 'quiz_questions', 'quiz_options'], true);
+    }
+
+    private function afterDbMutation(?string $tenantId, string $table, array $beforeRows = [], array $afterRows = []): void
+    {
+        if (! $tenantId || ! $this->isQuizContentTable($table)) {
+            return;
+        }
+
+        $rows = array_merge($beforeRows, $afterRows);
+        $quizIds = [];
+
+        if ($table === 'quizzes') {
+            $quizIds = array_map(fn ($row) => (string) ($row['id'] ?? ''), $rows);
+        } elseif ($table === 'quiz_questions') {
+            $quizIds = array_map(fn ($row) => (string) ($row['quiz_id'] ?? ''), $rows);
+        } elseif ($table === 'quiz_options') {
+            $questionIds = array_values(array_unique(array_filter(array_map(
+                fn ($row) => (string) ($row['question_id'] ?? ''),
+                $rows
+            ))));
+            if (! empty($questionIds)) {
+                $quizIds = DB::table('quiz_questions')
+                    ->where('tenant_id', $tenantId)
+                    ->whereIn('id', $questionIds)
+                    ->pluck('quiz_id')
+                    ->map(fn ($id) => (string) $id)
+                    ->all();
+            }
+        }
+
+        $this->quizContentCache->forgetMany($tenantId, $quizIds);
     }
 
     private function applyFilters($query, $filters): void

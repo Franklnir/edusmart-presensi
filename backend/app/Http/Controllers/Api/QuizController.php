@@ -2,13 +2,17 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Jobs\FinalizeQuizSubmissionJob;
+use App\Services\Quiz\QuizContentCache;
 use App\Services\Quiz\QuizScoringService;
 use App\Services\WhatsApp\WhatsAppNotificationService;
 use App\Support\AcademicPeriod;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
@@ -20,6 +24,7 @@ class QuizController extends ApiController
 
     public function __construct(
         private readonly QuizScoringService $scoringService,
+        private readonly QuizContentCache $contentCache,
         private readonly WhatsAppNotificationService $whatsAppNotificationService
     ) {}
 
@@ -246,20 +251,12 @@ class QuizController extends ApiController
             }
         }
 
-        $questions = DB::table('quiz_questions')
-            ->select($this->selectExistingQuizColumns('quiz_questions', ['id', 'quiz_id', 'nomor', 'soal', 'question_type', 'type', 'poin', 'image_path', 'media_url', 'created_at', 'updated_at']))
-            ->where('quiz_id', $quizId)
-            ->orderBy('nomor')
-            ->orderBy('id')
-            ->get();
+        $questions = $this->contentCache->questions($tenantId, $quizId);
         $questions = $this->normalizeQuestionNumbersForPayload($questions);
         $questionIds = $questions->pluck('id')->filter()->values()->all();
-        $optionsByQuestion = empty($questionIds) ? collect() : DB::table('quiz_options')
-            ->select($this->selectExistingQuizColumns('quiz_options', ['id', 'question_id', 'label', 'text', 'image_path', 'is_correct', 'created_at', 'updated_at']))
-            ->whereIn('question_id', $questionIds)
-            ->orderBy('label')
-            ->get()
-            ->groupBy('question_id');
+        $optionsByQuestion = empty($questionIds)
+            ? collect()
+            : $this->contentCache->options($tenantId, $quizId)->groupBy('question_id');
 
         if ($this->isSiswa($request)) {
             $submission = $this->quizTenantTable('quiz_submissions', $tenantId)
@@ -462,7 +459,7 @@ class QuizController extends ApiController
             }
         }
 
-        $result = $this->finalizeQuizSubmissionWithNotifications($tenantId, $submission, $now, 'finished');
+        $result = $this->finalizeQuizSubmissionSafely($tenantId, $submission, $now, 'finished');
         if (! $result) {
             return response()->json(['error' => 'Gagal menyelesaikan quiz'], 500);
         }
@@ -472,6 +469,7 @@ class QuizController extends ApiController
                 'submission_id' => $result['submission_id'],
                 'score' => $result['score'],
                 'total_points' => $result['total_points'],
+                'scoring_pending' => (bool) ($result['scoring_pending'] ?? false),
             ],
         ]);
     }
@@ -630,6 +628,79 @@ class QuizController extends ApiController
         ]);
     }
 
+    public function saveAnswersBatch(Request $request)
+    {
+        if (! $this->isSiswa($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return response()->json(['error' => 'Tenant tidak valid'], 400);
+        }
+
+        $quizId = trim((string) $request->input('quiz_id', ''));
+        $submissionId = trim((string) $request->input('submission_id', ''));
+        $answers = $request->input('answers', []);
+        if ($quizId === '' || $submissionId === '') {
+            return response()->json(['error' => 'quiz_id dan submission_id wajib diisi'], 422);
+        }
+        if (! is_array($answers) || count($answers) === 0) {
+            return response()->json(['error' => 'Jawaban batch wajib berupa array yang tidak kosong'], 422);
+        }
+        if (count($answers) > 100) {
+            return response()->json(['error' => 'Maksimal 100 jawaban dalam satu batch'], 422);
+        }
+
+        $resolved = $this->resolveStudentQuiz($request, $tenantId, $quizId, $request->input('client_meta'));
+        if ($resolved['response'] !== null) {
+            return $resolved['response'];
+        }
+        $quiz = $resolved['quiz'];
+        $now = $this->quizNow($quiz);
+
+        $submission = DB::table('quiz_submissions')
+            ->where('id', $submissionId)
+            ->where('quiz_id', $quizId)
+            ->where('siswa_id', $request->user()?->id)
+            ->where('tenant_id', $tenantId)
+            ->first();
+        if (! $submission) {
+            return response()->json(['error' => 'Attempt quiz tidak ditemukan'], 404);
+        }
+        if ((string) ($submission->status ?? '') === 'finished') {
+            return response()->json(['error' => 'Quiz sudah selesai, jawaban tidak bisa diubah'], 422);
+        }
+
+        $sessionResponse = $this->ensureSubmissionDeviceSession($request, $tenantId, $submission, $request->input('client_meta'), $now);
+        if ($sessionResponse !== null) {
+            return $sessionResponse;
+        }
+
+        $availability = $this->quizAvailabilityForStudent($quiz, $now);
+        if (! $availability['ok']) {
+            if (in_array((string) ($availability['reason'] ?? ''), ['closed', 'ended'], true)) {
+                $this->scoringService->finalizeSubmission($tenantId, $submissionId, $now, 'finished');
+            }
+
+            return response()->json(['error' => $availability['message']], $availability['code']);
+        }
+
+        $stored = $this->storeSubmissionAnswersBatch($tenantId, $quizId, $submissionId, $answers, $now);
+        if (! $stored['ok']) {
+            return response()->json(['error' => $stored['message']], $stored['code']);
+        }
+
+        return response()->json([
+            'data' => [
+                'submission_id' => $submissionId,
+                'answers' => $stored['answers'],
+                'saved_count' => count($stored['answers']),
+                'saved_at' => $now->toISOString(),
+            ],
+        ]);
+    }
+
     public function logViolation(Request $request)
     {
         if (! $this->isSiswa($request)) {
@@ -673,6 +744,14 @@ class QuizController extends ApiController
         $eventTypeForStorage = Str::limit($eventType, 80, '');
         $incidentId = $this->metaStringValue($meta, 'incident_id');
         if ($incidentId !== '') {
+            $incidentCacheKey = "quiz-violation-incident:{$tenantId}:{$submissionId}:".sha1($eventTypeForStorage.'|'.$incidentId);
+            if (! Cache::add($incidentCacheKey, true, now()->addMinutes(30))) {
+                return response()->json(['data' => [
+                    'skipped' => true,
+                    'duplicate_incident' => true,
+                ]]);
+            }
+
             $recentLogs = DB::table('quiz_violation_logs')
                 ->where('tenant_id', $tenantId)
                 ->where('quiz_id', $quizId)
@@ -693,6 +772,15 @@ class QuizController extends ApiController
                 }
             }
         }
+
+        $rateKey = "quiz-violation-rate:{$tenantId}:{$submissionId}:".sha1($eventTypeForStorage);
+        if (RateLimiter::tooManyAttempts($rateKey, 3)) {
+            return response()->json(['data' => [
+                'skipped' => true,
+                'rate_limited' => true,
+            ]]);
+        }
+        RateLimiter::hit($rateKey, 10);
 
         $logId = (string) Str::uuid();
         DB::table('quiz_violation_logs')->insert([
@@ -1001,7 +1089,13 @@ class QuizController extends ApiController
 
         $finalized = 0;
         foreach ($submissionIds as $submissionId) {
-            $result = $this->scoringService->finalizeSubmission($tenantId, $submissionId, $now, 'finished');
+            $submission = DB::table('quiz_submissions')
+                ->where('tenant_id', $tenantId)
+                ->where('id', $submissionId)
+                ->first();
+            $result = $submission
+                ? $this->finalizeQuizSubmissionSafely($tenantId, $submission, $now, 'finished')
+                : null;
             if ($result) {
                 $finalized++;
             }
@@ -1825,6 +1919,40 @@ class QuizController extends ApiController
         $this->notifyQuizSubmissionMutation($tenantId, 'update', $beforeRows, $fresh ? [(array) $fresh] : []);
 
         return $result;
+    }
+
+    private function finalizeQuizSubmissionSafely(string $tenantId, object $submission, Carbon $now, string $status): ?array
+    {
+        if (! config('quiz.async_scoring_enabled', false)) {
+            return $this->finalizeQuizSubmissionWithNotifications($tenantId, $submission, $now, $status);
+        }
+
+        try {
+            DB::table('quiz_submissions')
+                ->where('tenant_id', $tenantId)
+                ->where('id', (string) $submission->id)
+                ->update([
+                    'status' => $status,
+                    'finished_at' => $now,
+                    'updated_at' => $now,
+                ]);
+
+            FinalizeQuizSubmissionJob::dispatch(
+                $tenantId,
+                (string) $submission->id,
+                $now->toISOString(),
+                $status
+            );
+
+            return [
+                'submission_id' => (string) $submission->id,
+                'score' => null,
+                'total_points' => null,
+                'scoring_pending' => true,
+            ];
+        } catch (\Throwable) {
+            return $this->finalizeQuizSubmissionWithNotifications($tenantId, $submission, $now, $status);
+        }
     }
 
     private function notifyQuizSubmissionMutation(string $tenantId, string $action, array $beforeRows, array $afterRows): void
@@ -2698,24 +2826,13 @@ class QuizController extends ApiController
 
     private function studentQuizDetail(string $tenantId, object $quiz, object $submission, Carbon $now): array
     {
-        $questions = DB::table('quiz_questions')
-            ->where('quiz_id', $quiz->id)
-            ->where('tenant_id', $tenantId)
-            ->orderBy('nomor')
-            ->orderBy('id')
-            ->get();
+        $questions = $this->contentCache->questions($tenantId, (string) $quiz->id);
         $questions = $this->normalizeQuestionNumbersForPayload($questions);
 
         $questionIds = $questions->pluck('id')->map(fn ($id) => (string) $id)->all();
         $optionsByQuestion = [];
         if (! empty($questionIds)) {
-            $options = DB::table('quiz_options')
-                ->whereIn('question_id', $questionIds)
-                ->where('tenant_id', $tenantId)
-                ->orderBy('question_id')
-                ->orderBy('label')
-                ->orderBy('id')
-                ->get();
+            $options = $this->contentCache->options($tenantId, (string) $quiz->id);
 
             foreach ($options as $option) {
                 $qid = (string) $option->question_id;
@@ -2950,33 +3067,213 @@ class QuizController extends ApiController
 
     private function storeSubmittedAnswers(string $tenantId, string $quizId, string $submissionId, array $answers, Carbon $now)
     {
-        foreach ($answers as $row) {
-            if (! is_array($row)) {
-                continue;
-            }
-            $questionId = isset($row['question_id']) ? (string) $row['question_id'] : '';
-            $optionId = isset($row['option_id']) ? (string) $row['option_id'] : '';
-            $essayAnswerRaw = $row['essay_answer'] ?? null;
-            if (! $questionId) {
-                continue;
-            }
-
-            $saved = $this->storeSubmissionAnswer(
-                $tenantId,
-                $quizId,
-                $submissionId,
-                $questionId,
-                $optionId,
-                $essayAnswerRaw,
-                $now,
-                isset($row['id']) ? (string) $row['id'] : null
-            );
-            if (! $saved['ok']) {
-                return response()->json(['error' => $saved['message']], $saved['code']);
-            }
+        $stored = $this->storeSubmissionAnswersBatch($tenantId, $quizId, $submissionId, $answers, $now);
+        if (! $stored['ok']) {
+            return response()->json(['error' => $stored['message']], $stored['code']);
         }
 
         return null;
+    }
+
+    private function storeSubmissionAnswersBatch(
+        string $tenantId,
+        string $quizId,
+        string $submissionId,
+        array $answers,
+        Carbon $now
+    ): array {
+        $normalizedRows = [];
+        foreach ($answers as $row) {
+            if (! is_array($row)) {
+                return [
+                    'ok' => false,
+                    'message' => 'Format salah satu jawaban tidak valid',
+                    'code' => 422,
+                ];
+            }
+
+            $questionId = trim((string) ($row['question_id'] ?? ''));
+            if ($questionId === '') {
+                return [
+                    'ok' => false,
+                    'message' => 'question_id wajib diisi pada setiap jawaban',
+                    'code' => 422,
+                ];
+            }
+
+            // Jawaban terbaru untuk soal yang sama menang agar retry batch tetap idempotent.
+            $normalizedRows[$questionId] = [
+                'question_id' => $questionId,
+                'option_id' => $row['option_id'] ?? null,
+                'essay_answer' => $row['essay_answer'] ?? null,
+            ];
+        }
+
+        if (empty($normalizedRows)) {
+            return [
+                'ok' => false,
+                'message' => 'Tidak ada jawaban valid untuk disimpan',
+                'code' => 422,
+            ];
+        }
+
+        $questionIds = array_keys($normalizedRows);
+        $questions = $this->contentCache
+            ->questions($tenantId, $quizId)
+            ->whereIn('id', $questionIds)
+            ->keyBy(fn ($question) => (string) $question->id);
+
+        if ($questions->count() !== count($questionIds)) {
+            return [
+                'ok' => false,
+                'message' => 'Salah satu soal tidak valid untuk quiz ini',
+                'code' => 422,
+            ];
+        }
+
+        $candidateOptionIds = [];
+        foreach ($normalizedRows as $row) {
+            $question = $questions->get($row['question_id']);
+            if ($this->normalizeQuestionType($question->question_type ?? null) !== 'mcq') {
+                continue;
+            }
+            if (is_array($row['option_id']) || is_object($row['option_id'])) {
+                return [
+                    'ok' => false,
+                    'message' => 'Pilihan jawaban tidak valid',
+                    'code' => 422,
+                ];
+            }
+            $candidate = trim((string) ($row['option_id'] ?? ''));
+            if ($candidate !== '') {
+                $candidateOptionIds[] = $candidate;
+            }
+        }
+
+        $validOptions = empty($candidateOptionIds)
+            ? collect()
+            : $this->contentCache
+                ->options($tenantId, $quizId)
+                ->whereIn('id', array_values(array_unique($candidateOptionIds)))
+                ->whereIn('question_id', $questionIds)
+                ->keyBy(fn ($option) => (string) $option->id);
+
+        $existingIds = DB::table('quiz_answers')
+            ->where('tenant_id', $tenantId)
+            ->where('submission_id', $submissionId)
+            ->whereIn('question_id', $questionIds)
+            ->pluck('id', 'question_id')
+            ->mapWithKeys(fn ($id, $questionId) => [(string) $questionId => (string) $id])
+            ->all();
+
+        $hasEssayAnswer = Schema::hasColumn('quiz_answers', 'essay_answer');
+        $hasSavedAt = Schema::hasColumn('quiz_answers', 'saved_at');
+        $upsertRows = [];
+        foreach ($normalizedRows as $questionId => $row) {
+            $question = $questions->get($questionId);
+            $questionType = $this->normalizeQuestionType($question->question_type ?? null);
+            $optionId = null;
+            $essayAnswer = null;
+
+            if ($questionType === 'essay') {
+                if (is_array($row['option_id']) || is_object($row['option_id']) || trim((string) ($row['option_id'] ?? '')) !== '') {
+                    return [
+                        'ok' => false,
+                        'message' => 'Jawaban esai tidak boleh memakai opsi pilihan',
+                        'code' => 422,
+                    ];
+                }
+                if (is_array($row['essay_answer']) || is_object($row['essay_answer'])) {
+                    return [
+                        'ok' => false,
+                        'message' => 'Jawaban esai tidak valid',
+                        'code' => 422,
+                    ];
+                }
+                $essayText = trim((string) ($row['essay_answer'] ?? ''));
+                $essayAnswer = $essayText === '' ? null : $essayText;
+            } else {
+                if (is_array($row['essay_answer']) || is_object($row['essay_answer']) || trim((string) ($row['essay_answer'] ?? '')) !== '') {
+                    return [
+                        'ok' => false,
+                        'message' => 'Jawaban pilihan ganda tidak menerima jawaban esai',
+                        'code' => 422,
+                    ];
+                }
+                $candidateOptionId = trim((string) ($row['option_id'] ?? ''));
+                if ($candidateOptionId !== '') {
+                    $option = $validOptions->get($candidateOptionId);
+                    if (! $option || (string) $option->question_id !== $questionId) {
+                        return [
+                            'ok' => false,
+                            'message' => 'Pilihan jawaban tidak valid',
+                            'code' => 422,
+                        ];
+                    }
+                    $optionId = $candidateOptionId;
+                }
+            }
+
+            $answerId = $existingIds[$questionId] ?? (string) Str::uuid();
+            $payload = [
+                'id' => $answerId,
+                'tenant_id' => $tenantId,
+                'submission_id' => $submissionId,
+                'question_id' => $questionId,
+                'option_id' => $optionId,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
+            if ($hasEssayAnswer) {
+                $payload['essay_answer'] = $essayAnswer;
+            }
+            if ($hasSavedAt) {
+                $payload['saved_at'] = $now;
+            }
+            $upsertRows[] = $payload;
+        }
+
+        $updateColumns = ['option_id', 'updated_at'];
+        if ($hasEssayAnswer) {
+            $updateColumns[] = 'essay_answer';
+        }
+        if ($hasSavedAt) {
+            $updateColumns[] = 'saved_at';
+        }
+
+        DB::transaction(function () use ($upsertRows, $updateColumns, $submissionId, $tenantId, $now) {
+            DB::table('quiz_answers')->upsert(
+                $upsertRows,
+                ['submission_id', 'question_id'],
+                $updateColumns
+            );
+
+            $submissionUpdates = ['updated_at' => $now];
+            if (Schema::hasColumn('quiz_submissions', 'last_saved_at')) {
+                $submissionUpdates['last_saved_at'] = $now;
+            }
+            DB::table('quiz_submissions')
+                ->where('id', $submissionId)
+                ->where('tenant_id', $tenantId)
+                ->update($submissionUpdates);
+        });
+
+        $storedAnswers = DB::table('quiz_answers')
+            ->where('tenant_id', $tenantId)
+            ->where('submission_id', $submissionId)
+            ->whereIn('question_id', $questionIds)
+            ->get(['id', 'question_id'])
+            ->map(fn ($answer) => [
+                'answer_id' => (string) $answer->id,
+                'question_id' => (string) $answer->question_id,
+            ])
+            ->values()
+            ->all();
+
+        return [
+            'ok' => true,
+            'answers' => $storedAnswers,
+        ];
     }
 
     private function storeSubmissionAnswer(

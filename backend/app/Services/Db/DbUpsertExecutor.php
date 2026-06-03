@@ -117,6 +117,7 @@ class DbUpsertExecutor
                 DB::table($table)->insert($rows);
 
                 $callbacks['notify_whatsapp_mutation']($tenantId, $table, 'upsert', [], $rows);
+                $callbacks['after_mutation']($tenantId, $table, [], $rows);
 
                 if ($shouldAuditNilai) {
                     $afterRows = $callbacks['fetch_tugas_jawaban_rows_for_payload']($rows, $tenantId);
@@ -169,6 +170,7 @@ class DbUpsertExecutor
             }
 
             $callbacks['notify_whatsapp_mutation']($tenantId, $table, 'upsert', [], $resolved);
+            $callbacks['after_mutation']($tenantId, $table, [], $resolved);
 
             return response()->json(['data' => $resolved]);
         }
@@ -176,6 +178,7 @@ class DbUpsertExecutor
         DB::table($table)->upsert($rows, $uniqueBy, $updateColumns);
 
         $callbacks['notify_whatsapp_mutation']($tenantId, $table, 'upsert', [], $rows);
+        $callbacks['after_mutation']($tenantId, $table, [], $rows);
 
         if ($shouldAuditNilai) {
             $afterRows = $callbacks['fetch_tugas_jawaban_rows_for_payload']($rows, $tenantId);

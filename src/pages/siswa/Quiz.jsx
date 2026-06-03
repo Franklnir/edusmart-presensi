@@ -87,6 +87,32 @@ const getStableQuizDeviceId = () => {
   return deviceId
 }
 
+const quizPendingAnswersStorageKey = (userId, quizId, submissionId) => (
+  `edusmart_quiz_pending_answers:${String(userId || '')}:${String(quizId || '')}:${String(submissionId || '')}`
+)
+
+const readPendingAnswersFromStorage = (userId, quizId, submissionId) => {
+  if (typeof window === 'undefined' || !userId || !quizId || !submissionId) return {}
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(quizPendingAnswersStorageKey(userId, quizId, submissionId)) || '{}')
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+const writePendingAnswersToStorage = (userId, quizId, submissionId, rows = {}) => {
+  if (typeof window === 'undefined' || !userId || !quizId || !submissionId) return
+  const key = quizPendingAnswersStorageKey(userId, quizId, submissionId)
+  try {
+    if (!Object.keys(rows || {}).length) {
+      window.localStorage.removeItem(key)
+      return
+    }
+    window.localStorage.setItem(key, JSON.stringify(rows))
+  } catch { }
+}
+
 const normalizeAnswerOrder = (value) => {
   if (!value) return null
   let parsed = value
@@ -230,6 +256,10 @@ const getQuizStatus = (quiz, submission, now = new Date()) => {
   const startsAt = safeDate(quiz?.starts_at)
   const deadline = safeDate(quiz?.deadline_at)
   const closedAt = safeDate(quiz?.closed_at)
+
+  if (submission?.status === 'finished' && submission?.score == null) {
+    return { label: 'Nilai diproses', tone: 'bg-blue-100 text-blue-700 border border-blue-200', canStart: false, kind: 'processing' }
+  }
 
   if (submission?.status === 'finished') {
     return { label: 'Selesai', tone: 'bg-green-100 text-green-700 border border-green-200', canStart: false, kind: 'done' }
@@ -515,6 +545,8 @@ export default function SiswaQuiz() {
   const trackedQuestionIdsRef = useRef(new Set())
   const essaySaveTimersRef = useRef({})
   const essayDraftMetaRef = useRef({})
+  const pendingAnswersRef = useRef({})
+  const batchFlushInFlightRef = useRef(false)
   const quizDetailRequestSeqRef = useRef(0)
   const quizReloadTimerRef = useRef(null)
   const quizDetailReloadTimerRef = useRef(null)
@@ -650,6 +682,7 @@ export default function SiswaQuiz() {
     Object.values(essaySaveTimersRef.current).forEach((timerId) => clearTimeout(timerId))
     essaySaveTimersRef.current = {}
     essayDraftMetaRef.current = {}
+    pendingAnswersRef.current = {}
     quizDetailRequestSeqRef.current += 1
     setActiveQuestionIndex(0)
     setShowResultDetail(false)
@@ -691,6 +724,7 @@ export default function SiswaQuiz() {
       Object.values(essaySaveTimersRef.current).forEach((timerId) => clearTimeout(timerId))
       essaySaveTimersRef.current = {}
       essayDraftMetaRef.current = {}
+      pendingAnswersRef.current = {}
       quizDetailRequestSeqRef.current += 1
     }
   }, [])
@@ -1428,6 +1462,16 @@ export default function SiswaQuiz() {
           answerIdMap[row.question_id] = row.id
           answerRowMap[row.question_id] = row
         })
+
+        const storedPendingAnswers = readPendingAnswersFromStorage(user?.id, targetQuizId, submissionRow.id)
+        Object.entries(storedPendingAnswers).forEach(([questionId, row]) => {
+          if (!questionTypeById[questionId] || !row || typeof row !== 'object') return
+          const questionType = questionTypeById[questionId]
+          answerMap[questionId] = questionType === 'essay'
+            ? String(row.raw_value ?? row.essay_answer ?? '')
+            : row.option_id
+          pendingAnswersRef.current[questionId] = row
+        })
       }
 
       const orderedDetail = applyQuizOrder(questionRows || [], grouped, submissionRow?.answer_order)
@@ -1559,6 +1603,85 @@ export default function SiswaQuiz() {
     })
   }
 
+  const flushPendingAnswers = async (options = {}) => {
+    if (batchFlushInFlightRef.current) return false
+    const pendingRows = Object.values(pendingAnswersRef.current)
+    if (!pendingRows.length) return true
+
+    const quizId = String(pendingRows[0]?.quiz_id || '')
+    const submissionId = String(pendingRows[0]?.submission_id || '')
+    if (!quizId || !submissionId) return false
+
+    const rowsToSend = pendingRows.filter((row) => (
+      String(row?.quiz_id || '') === quizId
+      && String(row?.submission_id || '') === submissionId
+    ))
+    rowsToSend.forEach((row) => {
+      delete pendingAnswersRef.current[String(row.question_id || '')]
+    })
+    writePendingAnswersToStorage(user?.id, quizId, submissionId, pendingAnswersRef.current)
+
+    batchFlushInFlightRef.current = true
+    try {
+      const { data, error } = await supabase.quiz.saveAnswersBatch({
+        quiz_id: quizId,
+        submission_id: submissionId,
+        answers: rowsToSend.map((row) => ({
+          id: row.id || '',
+          question_id: row.question_id,
+          option_id: row.option_id,
+          essay_answer: row.essay_answer
+        })),
+        client_meta: buildQuizClientMeta({
+          fullscreen: Boolean(document.fullscreenElement)
+        })
+      })
+      if (error) throw error
+
+      const answerIdByQuestion = Object.fromEntries(
+        (data?.answers || []).map((row) => [String(row?.question_id || ''), row?.answer_id || ''])
+      )
+      rowsToSend.forEach((row) => {
+        const questionId = String(row.question_id || '')
+        const savedAnswerId = answerIdByQuestion[questionId] || row.id || ''
+        if (savedAnswerId) {
+          setAnswerIds((prev) => ({ ...prev, [questionId]: savedAnswerId }))
+        }
+        setAnswerRowsByQuestion((prev) => ({
+          ...prev,
+          [questionId]: {
+            ...(prev[questionId] || {}),
+            id: savedAnswerId || prev[questionId]?.id,
+            submission_id: submissionId,
+            question_id: questionId,
+            option_id: row.option_id,
+            essay_answer: row.essay_answer,
+            saved_at: data?.saved_at || new Date().toISOString()
+          }
+        }))
+        if (row.question_type === 'essay') {
+          markEssayDraftSaved(questionId, row.raw_value, row.revision)
+        }
+      })
+      writePendingAnswersToStorage(user?.id, quizId, submissionId, pendingAnswersRef.current)
+      return true
+    } catch (err) {
+      rowsToSend.forEach((row) => {
+        const questionId = String(row.question_id || '')
+        if (!pendingAnswersRef.current[questionId]) {
+          pendingAnswersRef.current[questionId] = row
+        }
+      })
+      writePendingAnswersToStorage(user?.id, quizId, submissionId, pendingAnswersRef.current)
+      if (!handleQuizRequestError(err) && !options?.silent) {
+        pushToast('error', err?.message || 'Gagal menyimpan jawaban. Sistem akan mencoba lagi.')
+      }
+      return false
+    } finally {
+      batchFlushInFlightRef.current = false
+    }
+  }
+
   const saveAnswer = async (questionId, value, questionType = 'mcq', options = {}) => {
     if (!selectedQuiz) return
     if (answerInteractionLocked) return
@@ -1585,59 +1708,27 @@ export default function SiswaQuiz() {
     const essayRevision = mode === 'essay'
       ? Number(options?.revision || essayDraftMetaRef.current[String(questionId || '')]?.revision || 0)
       : 0
-    const { data, error } = await supabase.quiz.saveAnswer({
+    pendingAnswersRef.current[String(questionId)] = {
       id: answerId,
       quiz_id: selectedQuiz.id,
       submission_id: sub.id,
       question_id: questionId,
       option_id: optionId,
       essay_answer: essayAnswer,
-      client_meta: buildQuizClientMeta({
-        fullscreen: Boolean(document.fullscreenElement)
-      })
-    })
-
-    if (error) {
-      if (!handleQuizRequestError(error) && !options?.silent) {
-        pushToast('error', error?.message || 'Gagal menyimpan jawaban')
-      }
-      return
+      question_type: mode,
+      raw_value: String(value || ''),
+      revision: essayRevision
     }
+    writePendingAnswersToStorage(user?.id, selectedQuiz.id, sub.id, pendingAnswersRef.current)
 
-    let shouldApplyAnswerPayload = true
     if (mode === 'essay') {
-      const latestDraft = essayDraftMetaRef.current[String(questionId || '')]
-      const savedText = String(value || '')
-      const responseStillCurrent = !latestDraft
-        || Number(latestDraft.revision || 0) <= essayRevision
-        || String(latestDraft.value ?? '') === savedText
-
-      shouldApplyAnswerPayload = responseStillCurrent
-      if (responseStillCurrent) {
-        setAnswers((prev) => ({ ...prev, [questionId]: savedText }))
-      }
-      markEssayDraftSaved(questionId, savedText, essayRevision)
+      setAnswers((prev) => ({ ...prev, [questionId]: String(value || '') }))
     } else {
       setAnswers((prev) => ({ ...prev, [questionId]: optionId }))
     }
-    const savedAnswerId = data?.answer_id || answerId
-    if (savedAnswerId) {
-      setAnswerIds((prev) => ({ ...prev, [questionId]: savedAnswerId }))
-      setAnswerRowsByQuestion((prev) => ({
-        ...prev,
-        [questionId]: (() => {
-          const previousRow = prev[questionId] || {}
-          return {
-            ...previousRow,
-            id: savedAnswerId,
-            submission_id: sub.id,
-            question_id: questionId,
-            option_id: optionId,
-            essay_answer: mode === 'essay' && !shouldApplyAnswerPayload ? previousRow.essay_answer : essayAnswer,
-            saved_at: data?.saved_at || new Date().toISOString()
-          }
-        })()
-      }))
+
+    if (options?.flush) {
+      await flushPendingAnswers(options)
     }
   }
 
@@ -1662,8 +1753,17 @@ export default function SiswaQuiz() {
     const revision = currentDraft && String(currentDraft.value ?? '') === String(value ?? '')
       ? Number(currentDraft.revision || 0)
       : rememberEssayDraft(questionId, value)
-    void saveAnswer(questionId, value, 'essay', { revision })
+    void saveAnswer(questionId, value, 'essay', { revision, flush: true })
   }
+
+  useEffect(() => {
+    if (!isTaking) return undefined
+    const intervalId = window.setInterval(() => {
+      void flushPendingAnswers({ silent: true })
+    }, 5000)
+
+    return () => window.clearInterval(intervalId)
+  }, [isTaking, selectedQuiz?.id, activeSubmissionId])
 
   const buildSubmitAnswersPayload = () => (
     (questions || []).map((question) => {
@@ -1712,14 +1812,18 @@ export default function SiswaQuiz() {
       if (error) throw error
 
       const score = data?.score ?? null
+      const scoringPending = Boolean(data?.scoring_pending)
       const canShowScoreNow = Boolean(selectedQuiz?.result_visible_to_students)
       const updated = {
         ...(sub || {}),
         status: 'finished',
         score,
+        scoring_pending: scoringPending,
         finished_at: new Date().toISOString()
       }
 
+      pendingAnswersRef.current = {}
+      writePendingAnswersToStorage(user?.id, selectedQuiz.id, sub.id, {})
       setSubmission(updated)
       setQuizList((prev) => prev.map((q) => (
         q.id === selectedQuiz.id ? { ...q, submission: updated } : q
@@ -1739,14 +1843,18 @@ export default function SiswaQuiz() {
         title: timeExpired ? 'Waktu Quiz Habis' : 'Quiz Selesai',
         message: timeExpired
           ? 'Waktu pengerjaan sudah habis. Jawaban terakhir Anda sudah dikirim otomatis.'
-          : 'Jawaban Anda sudah dikirim.',
+          : scoringPending
+            ? 'Jawaban Anda sudah diterima. Nilai sedang dihitung oleh sistem.'
+            : 'Jawaban Anda sudah dikirim.',
         tone: timeExpired ? 'amber' : 'emerald'
       })
       pushToast(
         timeExpired ? 'warning' : 'success',
         timeExpired
           ? 'Waktu quiz habis. Jawaban dikirim otomatis.'
-          : canShowScoreNow ? 'Quiz selesai. Nilai sudah tersedia.' : 'Quiz selesai. Hasil menunggu publikasi dari guru.'
+          : scoringPending
+            ? 'Quiz selesai. Nilai sedang dihitung.'
+            : canShowScoreNow ? 'Quiz selesai. Nilai sudah tersedia.' : 'Quiz selesai. Hasil menunggu publikasi dari guru.'
       )
       if (isSessionPage) {
         navigate('/siswa/quiz', { replace: true })

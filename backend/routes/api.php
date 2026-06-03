@@ -153,6 +153,7 @@ Route::prefix('quiz')->middleware(['auth:sanctum', 'throttle:api'])->group(funct
     Route::post('/submit', [QuizController::class, 'submit']);
     Route::post('/start', [QuizController::class, 'startAttempt']);
     Route::post('/answer', [QuizController::class, 'saveAnswer']);
+    Route::post('/answers/batch', [QuizController::class, 'saveAnswersBatch']);
     Route::post('/violation', [QuizController::class, 'logViolation']);
     Route::post('/schedule', [QuizController::class, 'schedule']);
     Route::post('/publish', [QuizController::class, 'publish']);
