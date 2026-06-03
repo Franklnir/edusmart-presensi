@@ -298,10 +298,54 @@ class GoogleDriveService
         array $backupPayload,
         string $fileName = ''
     ): array {
+        return $this->uploadTenantBackupContents(
+            $tenantId,
+            $userId,
+            $backupPayload,
+            $fileName,
+            'json',
+            'application/json',
+            json_encode($backupPayload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '',
+            'Backup database EduSmart Presensi. File ini berisi data database tenant dan metadata file, bukan isi file storage.'
+        );
+    }
+
+    public function uploadTenantBackupExcel(
+        string $tenantId,
+        string $userId,
+        array $backupPayload,
+        string $fileName = ''
+    ): array {
+        return $this->uploadTenantBackupContents(
+            $tenantId,
+            $userId,
+            $backupPayload,
+            $fileName,
+            'xls',
+            'application/vnd.ms-excel; charset=utf-8',
+            $this->backupPayloadToExcelHtml($backupPayload),
+            'Backup database EduSmart Presensi dalam format Excel-compatible. File ini berisi data database tenant dan metadata file, bukan isi file storage.'
+        );
+    }
+
+    private function uploadTenantBackupContents(
+        string $tenantId,
+        string $userId,
+        array $backupPayload,
+        string $fileName,
+        string $extension,
+        string $mime,
+        string $contents,
+        string $description
+    ): array {
         $tenantId = trim($tenantId);
         $userId = trim($userId);
+        $extension = strtolower(trim($extension, '. '));
         if ($tenantId === '') {
             throw new RuntimeException('Tenant tidak valid.');
+        }
+        if ($extension === '') {
+            throw new RuntimeException('Format backup tidak valid.');
         }
         if (! $this->providerConfigured()) {
             throw new RuntimeException('Google Drive belum dikonfigurasi di server.');
@@ -331,20 +375,19 @@ class GoogleDriveService
         $folderPath = (string) ($targetFolder['path'] ?? 'Backup Data Sekolah');
 
         $safeName = $this->safeFilename($fileName ?: $this->defaultBackupFileName($backupPayload));
-        if (! str_ends_with(strtolower($safeName), '.json')) {
-            $safeName .= '.json';
+        if (! str_ends_with(strtolower($safeName), '.'.$extension)) {
+            $safeName = preg_replace('/\.(json|xls|xlsx|csv|html)$/i', '', $safeName) ?: $safeName;
+            $safeName .= '.'.$extension;
         }
 
-        $contents = json_encode($backupPayload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         if (! is_string($contents) || $contents === '') {
             throw new RuntimeException('Payload backup tidak bisa dibuat.');
         }
 
-        $mime = 'application/json';
         $metadata = [
             'name' => $safeName,
             'parents' => [$folderId],
-            'description' => 'Backup database EduSmart Presensi. File ini berisi data database tenant dan metadata file, bukan isi file storage.',
+            'description' => $description,
             'appProperties' => [
                 'tenant_id' => $tenantId,
                 'bucket' => 'backups',
@@ -353,6 +396,7 @@ class GoogleDriveService
                 'backup_mode' => (string) ($backupPayload['mode'] ?? 'full'),
                 'backup_period' => (string) ($backupPayload['period']['label'] ?? ''),
                 'backup_type' => (string) ($backupPayload['manifest']['backup_type'] ?? 'tenant_database'),
+                'format' => $extension,
             ],
         ];
 
@@ -396,7 +440,7 @@ class GoogleDriveService
             'drive_web_view_link' => $webViewLink,
             'drive_web_content_link' => (string) ($fileInfo['webContentLink'] ?? ''),
             'mime_type' => (string) ($fileInfo['mimeType'] ?? $mime),
-            'extension' => 'json',
+            'extension' => $extension,
             'size_bytes' => $sizeBytes,
             'uploaded_at' => now(),
         ]);
@@ -1615,6 +1659,86 @@ class GoogleDriveService
         }
 
         return $metadata;
+    }
+
+    private function backupPayloadToExcelHtml(array $payload): string
+    {
+        $escape = static fn ($value): string => htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $tables = is_array($payload['tables'] ?? null) ? $payload['tables'] : [];
+        $tenant = is_array($payload['tenant'] ?? null) ? $payload['tenant'] : [];
+        $period = is_array($payload['period'] ?? null) ? $payload['period'] : [];
+        $summary = is_array($payload['summary'] ?? null) ? $payload['summary'] : [];
+
+        $html = '<!doctype html><html><head><meta charset="UTF-8">'
+            .'<style>'
+            .'body{font-family:Arial,sans-serif;font-size:12px;color:#111827}'
+            .'h1{font-size:20px;margin:0 0 10px} h2{font-size:16px;margin:24px 0 8px}'
+            .'table{border-collapse:collapse;width:100%;margin-bottom:18px}'
+            .'th{background:#e2e8f0;font-weight:bold} th,td{border:1px solid #cbd5e1;padding:6px;vertical-align:top}'
+            .'.meta td:first-child{font-weight:bold;width:220px;background:#f8fafc}'
+            .'</style></head><body>';
+
+        $html .= '<h1>Backup Data Sekolah</h1><table class="meta">';
+        $metaRows = [
+            ['Tenant ID', $tenant['id'] ?? '-'],
+            ['Nama Sekolah', $tenant['name'] ?? '-'],
+            ['Mode Backup', $payload['mode_label'] ?? $payload['mode'] ?? '-'],
+            ['Periode', $period['label'] ?? '-'],
+            ['Dibuat Pada', $payload['exported_at'] ?? now()->toIso8601String()],
+            ['Jumlah Tabel', $summary['table_count'] ?? count($tables)],
+            ['Jumlah Baris', $summary['total_rows'] ?? 0],
+        ];
+        foreach ($metaRows as [$label, $value]) {
+            $html .= '<tr><td>'.$escape($label).'</td><td>'.$escape($value).'</td></tr>';
+        }
+        $html .= '</table>';
+
+        foreach ($tables as $table) {
+            if (! is_array($table)) {
+                continue;
+            }
+            $name = (string) ($table['name'] ?? 'Tabel');
+            $rows = is_array($table['rows'] ?? null) ? $table['rows'] : [];
+            $columns = is_array($table['columns'] ?? null) ? $table['columns'] : [];
+            if (empty($columns) && ! empty($rows)) {
+                $keys = [];
+                foreach ($rows as $row) {
+                    if (! is_array($row)) {
+                        continue;
+                    }
+                    foreach (array_keys($row) as $key) {
+                        $keys[$key] = $key;
+                    }
+                }
+                $columns = array_values($keys);
+            }
+
+            $html .= '<h2>'.$escape($name).' ('.$escape($table['row_count'] ?? count($rows)).' baris)</h2>';
+            $html .= '<table><thead><tr>';
+            foreach ($columns as $column) {
+                $html .= '<th>'.$escape($column).'</th>';
+            }
+            $html .= '</tr></thead><tbody>';
+            if (empty($rows)) {
+                $html .= '<tr><td colspan="'.max(1, count($columns)).'">Tidak ada data</td></tr>';
+            } else {
+                foreach ($rows as $row) {
+                    $row = is_array($row) ? $row : [];
+                    $html .= '<tr>';
+                    foreach ($columns as $column) {
+                        $value = $row[$column] ?? '';
+                        if (is_array($value) || is_object($value)) {
+                            $value = json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                        }
+                        $html .= '<td>'.$escape($value).'</td>';
+                    }
+                    $html .= '</tr>';
+                }
+            }
+            $html .= '</tbody></table>';
+        }
+
+        return $html.'</body></html>';
     }
 
     private function sanitizeDriveProperties(array $properties): array

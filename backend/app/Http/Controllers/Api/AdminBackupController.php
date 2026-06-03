@@ -118,7 +118,7 @@ class AdminBackupController extends ApiController
         );
 
         try {
-            $driveFile = $this->tenantBackupService->savePayloadToGoogleDrive(
+            $driveFile = $this->tenantBackupService->savePayloadFormatsToGoogleDrive(
                 (string) $tenantId,
                 (string) ($request->user()?->id ?? ''),
                 $payload
@@ -225,6 +225,45 @@ class AdminBackupController extends ApiController
                 'drive_file' => $driveFile,
                 'monthly_status' => $this->tenantBackupService->monthlyStatus((string) $tenantId),
             ],
+        ]);
+    }
+
+    public function autoMonthlyToGoogleDrive(Request $request)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny('Akses ditolak. Hanya admin sekolah yang bisa menyimpan backup.');
+        }
+
+        $tenantId = $this->resolveOwnedTenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        try {
+            $result = $this->tenantBackupService->autoMonthlyBackupToGoogleDrive(
+                (string) $tenantId,
+                (string) ($request->user()?->id ?? '')
+            );
+        } catch (\Throwable $e) {
+            return $this->deny('Gagal menjalankan auto backup bulanan ke Google Drive: '.trim((string) $e->getMessage()), 422);
+        }
+
+        $this->logAudit(
+            $request,
+            'tenant_monthly_auto_backup_google_drive',
+            'backup-monthly-auto-'.$tenantId,
+            'CREATE',
+            null,
+            [
+                'type' => 'tenant_monthly_auto_backup_google_drive',
+                'tenant_id' => $tenantId,
+                'summary' => $result['summary'] ?? [],
+            ],
+            (string) $tenantId
+        );
+
+        return response()->json([
+            'data' => $result,
         ]);
     }
 }

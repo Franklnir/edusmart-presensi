@@ -490,6 +490,8 @@ export default function BackupAdmin() {
   const [monthlyStatus, setMonthlyStatus] = useState(null)
   const [monthlyLoading, setMonthlyLoading] = useState(false)
   const [monthlySavingKey, setMonthlySavingKey] = useState('')
+  const [monthlyAutoSaving, setMonthlyAutoSaving] = useState(false)
+  const [monthlyProgress, setMonthlyProgress] = useState(null)
 
   const resolvedMonths = useMemo(() => {
     if (periodType === 'all') return null
@@ -681,11 +683,17 @@ export default function BackupAdmin() {
   }
 
   const handleSaveMonthlyBackup = async (monthKey, force = false) => {
-    if (!monthKey || monthlySavingKey || loading || downloading || driveSaving) return
+    if (!monthKey || monthlySavingKey || monthlyAutoSaving || loading || downloading || driveSaving) return
     setMonthlySavingKey(monthKey)
+    setMonthlyProgress({ label: 'Menyiapkan backup bulanan...', percent: 8 })
+    const timer = window.setInterval(() => {
+      setMonthlyProgress((prev) => prev ? { ...prev, percent: Math.min(92, prev.percent + 7) } : prev)
+    }, 650)
     try {
       const { data, error } = await supabase.admin.saveMonthlyBackupToGoogleDrive({ month: monthKey, force })
       if (error) throw error
+      window.clearInterval(timer)
+      setMonthlyProgress({ label: 'Backup bulanan berhasil disimpan.', percent: 100 })
       if (data?.monthly_status) {
         setMonthlyStatus(data.monthly_status)
       } else {
@@ -695,9 +703,39 @@ export default function BackupAdmin() {
       await loadDriveStatus({ refresh: true, silent: true })
       pushToast('success', 'Backup bulanan berhasil disimpan ke Google Drive')
     } catch (err) {
+      window.clearInterval(timer)
       pushToast('error', err?.message || 'Gagal menyimpan backup bulanan')
     } finally {
       setMonthlySavingKey('')
+      window.setTimeout(() => setMonthlyProgress(null), 900)
+    }
+  }
+
+  const handleAutoMonthlyBackup = async () => {
+    if (monthlyAutoSaving || monthlySavingKey || loading || downloading || driveSaving) return
+    setMonthlyAutoSaving(true)
+    setMonthlyProgress({ label: 'Auto backup berjalan dari awal periode sampai bulan ini...', percent: 5 })
+    const timer = window.setInterval(() => {
+      setMonthlyProgress((prev) => prev ? { ...prev, percent: Math.min(94, prev.percent + 4) } : prev)
+    }, 700)
+    try {
+      const { data, error } = await supabase.admin.autoMonthlyBackupToGoogleDrive()
+      if (error) throw error
+      window.clearInterval(timer)
+      setMonthlyProgress({ label: 'Auto backup selesai.', percent: 100 })
+      if (data?.monthly_status) setMonthlyStatus(data.monthly_status)
+      const summary = data?.summary || {}
+      const changed = Number(summary.changed || 0)
+      const failed = Number(summary.failed || 0)
+      const message = summary.message || (changed > 0 ? 'Auto backup berhasil.' : 'Tidak ada data baru yang perlu dibackup.')
+      pushToast(failed > 0 ? 'warning' : 'success', message)
+      await loadDriveStatus({ refresh: true, silent: true })
+    } catch (err) {
+      window.clearInterval(timer)
+      pushToast('error', err?.message || 'Gagal menjalankan auto backup')
+    } finally {
+      setMonthlyAutoSaving(false)
+      window.setTimeout(() => setMonthlyProgress(null), 1100)
     }
   }
 
@@ -864,6 +902,25 @@ export default function BackupAdmin() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 py-6">
+      {monthlyProgress ? (
+        <div className="fixed inset-x-0 top-4 z-[90] mx-auto w-[min(92vw,520px)] rounded-2xl border border-blue-100 bg-white p-4 shadow-2xl">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-black text-slate-900">Backup Google Drive</p>
+              <p className="mt-0.5 text-xs font-semibold text-slate-500">{monthlyProgress.label}</p>
+            </div>
+            <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">
+              {Math.round(Number(monthlyProgress.percent || 0))}%
+            </span>
+          </div>
+          <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-blue-600 to-emerald-500 transition-all duration-500"
+              style={{ width: `${Math.max(0, Math.min(100, Number(monthlyProgress.percent || 0)))}%` }}
+            />
+          </div>
+        </div>
+      ) : null}
       <div className="w-full space-y-8 px-4 sm:px-6 lg:px-8">
         <section className="page-title-card">
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
@@ -952,7 +1009,7 @@ export default function BackupAdmin() {
                     </span>
                   </div>
                   <p className="mt-1 text-xs leading-relaxed text-slate-600">
-                    Simpan salinan backup database sekolah ke folder Google Drive yang tertaut. File Drive memakai format JSON agar bisa dipakai restore.
+                    Simpan salinan backup database sekolah ke folder Google Drive yang tertaut. Drive menyimpan JSON untuk restore dan Excel-compatible untuk pemeriksaan cepat.
                   </p>
                 </div>
               </div>
@@ -1054,58 +1111,90 @@ export default function BackupAdmin() {
                   </p>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => loadMonthlyStatus()}
-                disabled={monthlyLoading}
-                className="inline-flex items-center justify-center gap-2 rounded-xl border border-amber-200 bg-white px-3 py-2 text-xs font-bold text-amber-800 shadow-sm hover:bg-amber-50 disabled:opacity-60"
-              >
-                <RefreshCw className={`h-4 w-4 ${monthlyLoading ? 'animate-spin' : ''}`} />
-                Refresh Jadwal
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleAutoMonthlyBackup}
+                  disabled={!driveReady || monthlyAutoSaving || monthlyLoading}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white shadow-sm hover:bg-blue-700 disabled:opacity-60"
+                >
+                  <UploadCloud className={`h-4 w-4 ${monthlyAutoSaving ? 'animate-bounce' : ''}`} />
+                  {monthlyAutoSaving ? 'Auto Backup...' : 'Auto'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => loadMonthlyStatus()}
+                  disabled={monthlyLoading || monthlyAutoSaving}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-amber-200 bg-white px-3 py-2 text-xs font-bold text-amber-800 shadow-sm hover:bg-amber-50 disabled:opacity-60"
+                >
+                  <RefreshCw className={`h-4 w-4 ${monthlyLoading ? 'animate-spin' : ''}`} />
+                  Refresh Jadwal
+                </button>
+              </div>
             </div>
 
             <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
               {monthlyMonths.length ? monthlyMonths.map((month) => {
                 const backedUp = Boolean(month?.is_backed_up)
+                const needsUpdate = month?.status === 'needs_update' || Boolean(month?.has_new_data)
+                const canBackup = Boolean(month?.can_backup)
                 const file = month?.drive_file || null
+                const cardClass = needsUpdate
+                  ? 'border-blue-300 bg-blue-50 text-blue-950'
+                  : backedUp
+                    ? 'border-amber-300 bg-amber-100/80 text-amber-950'
+                    : 'border-slate-200 bg-white text-slate-800'
+                const badgeClass = needsUpdate
+                  ? 'bg-blue-100 text-blue-800'
+                  : backedUp
+                    ? 'bg-amber-200 text-amber-900'
+                    : 'bg-slate-100 text-slate-500'
+                const badgeText = needsUpdate ? 'Data baru' : (backedUp ? 'Sudah' : 'Belum')
                 return (
                   <div
                     key={month.key}
-                    className={`rounded-xl border p-3 ${
-                      backedUp
-                        ? 'border-amber-300 bg-amber-100/80 text-amber-950'
-                        : 'border-slate-200 bg-white text-slate-800'
-                    }`}
+                    className={`rounded-xl border p-3 ${cardClass}`}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div>
                         <p className="text-sm font-black">{month.short_label || month.label}</p>
                         <p className="mt-0.5 text-[11px] font-semibold opacity-70">{month.start_date} - {month.end_date}</p>
                       </div>
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${
-                        backedUp ? 'bg-amber-200 text-amber-900' : 'bg-slate-100 text-slate-500'
-                      }`}>
-                        {backedUp ? 'Sudah' : 'Belum'}
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${badgeClass}`}>
+                        {badgeText}
                       </span>
                     </div>
+                    {month.last_backup_at ? (
+                      <p className="mt-2 text-[10px] font-semibold opacity-70">
+                        Backup: {new Date(month.last_backup_at).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}
+                      </p>
+                    ) : null}
                     {file?.drive_web_view_link ? (
                       <a
                         href={file.drive_web_view_link}
                         target="_blank"
                         rel="noreferrer"
-                        className="mt-2 block truncate text-[11px] font-bold text-amber-800 underline"
+                        className="mt-2 block truncate text-[11px] font-bold underline"
                       >
                         {file.drive_file_name || 'Buka backup'}
                       </a>
+                    ) : null}
+                    {canBackup ? (
+                      <button
+                        type="button"
+                        onClick={() => handleSaveMonthlyBackup(month.key, backedUp)}
+                        disabled={!driveReady || monthlySavingKey === month.key || monthlyAutoSaving}
+                        className="mt-2 inline-flex h-8 w-full items-center justify-center rounded-lg bg-slate-900 px-2 text-[11px] font-bold text-white hover:bg-slate-800 disabled:opacity-50"
+                      >
+                        {monthlySavingKey === month.key ? 'Menyimpan...' : (needsUpdate ? 'Backup data baru' : 'Backup bulan ini')}
+                      </button>
                     ) : (
                       <button
                         type="button"
-                        onClick={() => handleSaveMonthlyBackup(month.key)}
-                        disabled={!driveReady || monthlySavingKey === month.key}
-                        className="mt-2 inline-flex h-8 w-full items-center justify-center rounded-lg bg-slate-900 px-2 text-[11px] font-bold text-white hover:bg-slate-800 disabled:opacity-50"
+                        disabled
+                        className="mt-2 inline-flex h-8 w-full items-center justify-center rounded-lg bg-amber-200 px-2 text-[11px] font-black text-amber-900 opacity-80"
                       >
-                        {monthlySavingKey === month.key ? 'Menyimpan...' : 'Backup bulan ini'}
+                        Sudah dibackup
                       </button>
                     )}
                   </div>
@@ -1253,7 +1342,7 @@ export default function BackupAdmin() {
               className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-50"
             >
               <UploadCloud className="h-4 w-4" />
-              {driveSaving ? 'Menyimpan ke Drive...' : 'Simpan JSON ke Google Drive'}
+              {driveSaving ? 'Menyimpan ke Drive...' : 'Simpan JSON + Excel ke Google Drive'}
             </button>
           </div>
 

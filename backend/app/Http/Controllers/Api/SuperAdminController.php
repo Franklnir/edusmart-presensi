@@ -597,7 +597,7 @@ class SuperAdminController extends ApiController
         );
 
         try {
-            $driveFile = $this->tenantBackupService->savePayloadToGoogleDrive(
+            $driveFile = $this->tenantBackupService->savePayloadFormatsToGoogleDrive(
                 (string) $tenant->id,
                 (string) ($request->user()?->id ?? ''),
                 $payload
@@ -688,6 +688,45 @@ class SuperAdminController extends ApiController
                 'drive_file' => $driveFile,
                 'monthly_status' => $this->tenantBackupService->monthlyStatus((string) $tenant->id),
             ],
+        ]);
+    }
+
+    public function autoTenantMonthlyBackupToGoogleDrive(Request $request, string $id)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenant = $this->findTenantByIdOrSlug($id);
+        if (! $tenant) {
+            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+        }
+
+        try {
+            $result = $this->tenantBackupService->autoMonthlyBackupToGoogleDrive(
+                (string) $tenant->id,
+                (string) ($request->user()?->id ?? '')
+            );
+        } catch (\Throwable $e) {
+            return $this->deny('Gagal menjalankan auto backup bulanan tenant ke Google Drive: '.trim((string) $e->getMessage()), 422);
+        }
+
+        $this->logAudit(
+            $request,
+            'super_tenant_monthly_auto_backup_google_drive',
+            'backup-monthly-auto-'.$tenant->id,
+            'CREATE',
+            null,
+            [
+                'type' => 'super_tenant_monthly_auto_backup_google_drive',
+                'tenant_id' => (string) $tenant->id,
+                'summary' => $result['summary'] ?? [],
+            ],
+            (string) $tenant->id
+        );
+
+        return response()->json([
+            'data' => $result,
         ]);
     }
 

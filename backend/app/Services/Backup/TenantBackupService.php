@@ -6,6 +6,7 @@ use App\Models\TenantGoogleDriveFile;
 use App\Services\GoogleDrive\GoogleDriveService;
 use App\Support\AcademicPeriod;
 use App\Traits\HasTenantBackupLogic;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -74,6 +75,20 @@ class TenantBackupService
         return $this->googleDriveService->uploadTenantBackupJson($tenantId, $userId, $payload, $fileName);
     }
 
+    public function savePayloadFormatsToGoogleDrive(string $tenantId, string $userId, array $payload, string $fileName = ''): array
+    {
+        $jsonFile = $this->googleDriveService->uploadTenantBackupJson($tenantId, $userId, $payload, $fileName);
+        $excelFile = $this->googleDriveService->uploadTenantBackupExcel($tenantId, $userId, $payload, $fileName);
+
+        return array_merge($jsonFile, [
+            'formats' => [
+                'json' => $jsonFile,
+                'excel' => $excelFile,
+            ],
+            'excel_file' => $excelFile,
+        ]);
+    }
+
     public function buildMonthlyPayload(string $tenantId, string $monthKey, string $userId = 'system', ?string $role = 'system'): array
     {
         $month = $this->findAcademicMonth($tenantId, $monthKey);
@@ -105,14 +120,102 @@ class TenantBackupService
             throw new \RuntimeException('Bulan backup tidak berada dalam periode aktif sekolah.');
         }
 
-        $fileName = $this->monthlyBackupFileName($tenantId, $month['value']);
-        if (! $force && $this->monthlyBackupRecord($tenantId, $month['value'])) {
+        $record = $this->monthlyBackupRecord($tenantId, $month['value']);
+        $latestDataAt = $this->latestTenantDataAt(
+            $tenantId,
+            Carbon::parse($month['start_date'], 'Asia/Jakarta')->startOfDay(),
+            Carbon::parse($month['end_date'], 'Asia/Jakarta')->endOfDay()
+        );
+        $lastBackupAt = $this->recordUploadedAt($record);
+        $needsUpdate = $record && $latestDataAt && $lastBackupAt && $latestDataAt->greaterThan($lastBackupAt);
+        if (! $force && $record && ! $needsUpdate) {
             throw new \RuntimeException('Backup bulan '.$month['label'].' sudah tersedia di Google Drive.');
         }
 
+        $fileName = $this->monthlyBackupFileName($tenantId, $month['value'], (bool) $record);
         $payload = $this->buildMonthlyPayload($tenantId, $month['value'], $userId, $userId === 'system' ? 'system' : 'admin');
+        $payload['manifest']['backup_run'] = [
+            'kind' => $record ? 'monthly_update' : 'initial_monthly_snapshot',
+            'previous_backup_at' => optional($lastBackupAt)->toIso8601String(),
+            'latest_data_at' => optional($latestDataAt)->toIso8601String(),
+            'stores_json_and_excel' => true,
+        ];
 
-        return $this->savePayloadToGoogleDrive($tenantId, $userId, $payload, $fileName);
+        return $this->savePayloadFormatsToGoogleDrive($tenantId, $userId, $payload, $fileName);
+    }
+
+    public function autoMonthlyBackupToGoogleDrive(string $tenantId, string $userId = 'system'): array
+    {
+        $status = $this->monthlyStatus($tenantId);
+        $now = now('Asia/Jakarta')->endOfDay();
+        $results = [];
+
+        foreach ((array) ($status['months'] ?? []) as $month) {
+            $monthKey = (string) ($month['key'] ?? '');
+            if ($monthKey === '') {
+                continue;
+            }
+
+            try {
+                $monthStart = Carbon::parse((string) ($month['start_date'] ?? ''), 'Asia/Jakarta')->startOfDay();
+            } catch (\Throwable $e) {
+                continue;
+            }
+
+            if ($monthStart->greaterThan($now)) {
+                $results[] = array_merge($month, [
+                    'action' => 'skipped',
+                    'message' => 'Bulan belum berjalan.',
+                ]);
+
+                continue;
+            }
+
+            if (! (bool) ($month['can_backup'] ?? true)) {
+                $results[] = array_merge($month, [
+                    'action' => 'skipped',
+                    'message' => 'Tidak ada data baru sejak backup terakhir.',
+                ]);
+
+                continue;
+            }
+
+            try {
+                $file = $this->saveMonthlyBackupToGoogleDrive($tenantId, $monthKey, $userId, true);
+                $results[] = array_merge($month, [
+                    'action' => ($month['status'] ?? '') === 'needs_update' ? 'updated' : 'created',
+                    'message' => ($month['status'] ?? '') === 'needs_update'
+                        ? 'Data baru berhasil dibackup.'
+                        : 'Backup bulan berhasil dibuat.',
+                    'drive_file' => $file,
+                ]);
+            } catch (\Throwable $e) {
+                $results[] = array_merge($month, [
+                    'action' => 'failed',
+                    'message' => trim((string) $e->getMessage()) ?: 'Gagal membuat backup.',
+                ]);
+            }
+        }
+
+        $created = count(array_filter($results, static fn ($item) => ($item['action'] ?? '') === 'created'));
+        $updated = count(array_filter($results, static fn ($item) => ($item['action'] ?? '') === 'updated'));
+        $failed = count(array_filter($results, static fn ($item) => ($item['action'] ?? '') === 'failed'));
+        $skipped = count(array_filter($results, static fn ($item) => ($item['action'] ?? '') === 'skipped'));
+
+        return [
+            'summary' => [
+                'created' => $created,
+                'updated' => $updated,
+                'skipped' => $skipped,
+                'failed' => $failed,
+                'changed' => $created + $updated,
+                'message' => ($created + $updated) > 0
+                    ? 'Auto backup selesai. '.$created.' bulan baru dibuat, '.$updated.' bulan diperbarui.'
+                    : 'Tidak ada data baru yang perlu dibackup.',
+            ],
+            'months' => $results,
+            'monthly_status' => $this->monthlyStatus($tenantId),
+        ];
     }
 
     public function monthlyStatus(string $tenantId): array
@@ -125,14 +228,26 @@ class TenantBackupService
         $items = [];
         foreach ($months as $month) {
             $record = $this->monthlyBackupRecord($tenantId, (string) $month['value']);
+            $latestDataAt = $this->latestTenantDataAt(
+                $tenantId,
+                Carbon::parse($month['start_date'], 'Asia/Jakarta')->startOfDay(),
+                Carbon::parse($month['end_date'], 'Asia/Jakarta')->endOfDay()
+            );
+            $lastBackupAt = $this->recordUploadedAt($record);
+            $needsUpdate = $record && $latestDataAt && $lastBackupAt && $latestDataAt->greaterThan($lastBackupAt);
+            $status = $record ? ($needsUpdate ? 'needs_update' : 'backed_up') : 'pending';
             $items[] = [
                 'key' => (string) $month['value'],
                 'label' => (string) $month['label'],
                 'short_label' => (string) $month['short_label'],
                 'start_date' => (string) $month['start_date'],
                 'end_date' => (string) $month['end_date'],
-                'status' => $record ? 'backed_up' : 'pending',
+                'status' => $status,
                 'is_backed_up' => (bool) $record,
+                'can_backup' => ! $record || $needsUpdate,
+                'has_new_data' => (bool) $needsUpdate,
+                'last_data_at' => optional($latestDataAt)->toIso8601String(),
+                'last_backup_at' => optional($lastBackupAt)->toIso8601String(),
                 'drive_file' => $record ? $this->driveRecordPayload($record) : null,
             ];
         }
@@ -186,12 +301,13 @@ class TenantBackupService
         return now('Asia/Jakarta')->format('Y-m');
     }
 
-    public function monthlyBackupFileName(string $tenantId, string $monthKey): string
+    public function monthlyBackupFileName(string $tenantId, string $monthKey, bool $versioned = false): string
     {
         $tenant = $this->tenantSnapshot($tenantId);
         $slug = Str::slug((string) ($tenant['slug'] ?? $tenant['name'] ?? 'tenant')) ?: 'tenant';
+        $suffix = $versioned ? '-update-'.now('Asia/Jakarta')->format('Ymd-His') : '';
 
-        return 'backup-'.$slug.'-full-monthly-'.$monthKey.'.json';
+        return 'backup-'.$slug.'-full-monthly-'.$monthKey.$suffix.'.json';
     }
 
     private function tenantSnapshot(string $tenantId): array
@@ -269,14 +385,22 @@ class TenantBackupService
 
         $sourcePath = 'backup/'.$this->monthlyBackupFileName($tenantId, $monthKey);
 
-        return TenantGoogleDriveFile::query()
+        $query = TenantGoogleDriveFile::query()
             ->where('tenant_id', $tenantId)
-            ->where('bucket', 'backups')
-            ->where(function ($query) use ($monthKey, $sourcePath) {
-                $query->where('source_path', $sourcePath)
-                    ->orWhere('drive_file_name', 'like', '%monthly-'.$monthKey.'%')
-                    ->orWhere('source_path', 'like', '%monthly-'.$monthKey.'%');
-            })
+            ->where('bucket', 'backups');
+
+        if (Schema::hasColumn('tenant_google_drive_files', 'extension')) {
+            $query->where(function ($subQuery) {
+                $subQuery->where('extension', 'json')
+                    ->orWhereNull('extension');
+            });
+        }
+
+        return $query->where(function ($query) use ($monthKey, $sourcePath) {
+            $query->where('source_path', $sourcePath)
+                ->orWhere('drive_file_name', 'like', '%monthly-'.$monthKey.'%')
+                ->orWhere('source_path', 'like', '%monthly-'.$monthKey.'%');
+        })
             ->latest('uploaded_at')
             ->first();
     }
@@ -292,6 +416,77 @@ class TenantBackupService
             'size_label' => $this->formatBytes((int) ($record->size_bytes ?? 0)),
             'uploaded_at' => optional($record->uploaded_at)->toIso8601String(),
         ];
+    }
+
+    private function recordUploadedAt(?TenantGoogleDriveFile $record): ?Carbon
+    {
+        if (! $record || ! $record->uploaded_at) {
+            return null;
+        }
+
+        try {
+            return $record->uploaded_at instanceof Carbon
+                ? $record->uploaded_at->copy()
+                : Carbon::parse($record->uploaded_at, 'Asia/Jakarta');
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    private function latestTenantDataAt(string $tenantId, Carbon $startAt, Carbon $endAt): ?Carbon
+    {
+        $latest = null;
+        $ignoredTables = array_fill_keys([
+            'audit_log',
+            'tenant_google_drive_configs',
+            'tenant_google_drive_files',
+            'user_presence',
+            'whatsapp_message_logs',
+        ], true);
+        foreach ($this->backupTablesForTenant() as $table) {
+            if (
+                $table === 'users'
+                || isset($ignoredTables[$table])
+                || ! $this->hasTable($table)
+                || ! $this->tableHasColumn($table, 'tenant_id')
+            ) {
+                continue;
+            }
+
+            $timestampColumn = $this->firstExistingColumn($table, ['updated_at', 'created_at', 'uploaded_at', 'sent_at', 'tanggal']);
+            if (! $timestampColumn) {
+                continue;
+            }
+
+            $monthColumn = $this->firstExistingColumn($table, [
+                'tanggal', 'scan_at', 'scanned_at', 'uploaded_at', 'queued_at', 'sent_at', 'failed_at',
+                'requested_at', 'approved_at', 'rejected_at', 'printed_at', 'issued_at',
+                'waktu_submit', 'started_at', 'finished_at', 'live_started_at', 'created_at',
+            ]);
+
+            try {
+                $query = DB::table($table)->where('tenant_id', $tenantId);
+                $rangeColumn = $monthColumn ?: $timestampColumn;
+                $startValue = $rangeColumn === 'tanggal' ? $startAt->toDateString() : $startAt->toDateTimeString();
+                $endValue = $rangeColumn === 'tanggal' ? $endAt->toDateString() : $endAt->toDateTimeString();
+                $query->where($rangeColumn, '>=', $startValue)
+                    ->where($rangeColumn, '<=', $endValue);
+
+                $value = $query->max($timestampColumn);
+                if (! $value) {
+                    continue;
+                }
+
+                $candidate = Carbon::parse($value, 'Asia/Jakarta');
+                if (! $latest || $candidate->greaterThan($latest)) {
+                    $latest = $candidate;
+                }
+            } catch (\Throwable $e) {
+                continue;
+            }
+        }
+
+        return $latest;
     }
 
     private function formatBytes(int $bytes): string

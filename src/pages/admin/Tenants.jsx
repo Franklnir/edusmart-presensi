@@ -683,6 +683,7 @@ const Tenants = () => {
   const [backupMonthlyStatus, setBackupMonthlyStatus] = useState(null)
   const [backupMonthlyLoading, setBackupMonthlyLoading] = useState(false)
   const [backupMonthlySavingKey, setBackupMonthlySavingKey] = useState('')
+  const [backupMonthlyAutoSaving, setBackupMonthlyAutoSaving] = useState(false)
   const [statusSaving, setStatusSaving] = useState(false)
   const [mqttForm, setMqttForm] = useState(RFID_MQTT_FORM_DEFAULTS)
   const [mqttSaving, setMqttSaving] = useState(false)
@@ -1312,13 +1313,13 @@ const Tenants = () => {
     }
   }
 
-  const handleSaveTenantMonthlyBackup = async (monthKey) => {
+  const handleSaveTenantMonthlyBackup = async (monthKey, force = false) => {
     const tenantId = tenantDetail?.tenant?.id || selectedTenantId
-    if (!tenantId || !monthKey || backupMonthlySavingKey || backupDriveSaving || backupLoading) return
+    if (!tenantId || !monthKey || backupMonthlySavingKey || backupMonthlyAutoSaving || backupDriveSaving || backupLoading) return
 
     setBackupMonthlySavingKey(monthKey)
     try {
-      const { data, error } = await supabase.super.saveTenantMonthlyBackupToGoogleDrive(tenantId, { month: monthKey })
+      const { data, error } = await supabase.super.saveTenantMonthlyBackupToGoogleDrive(tenantId, { month: monthKey, force })
       if (error) throw error
       if (data?.monthly_status) {
         setBackupMonthlyStatus(data.monthly_status)
@@ -1330,6 +1331,24 @@ const Tenants = () => {
       pushToast('error', err?.message || 'Gagal menyimpan backup bulanan tenant')
     } finally {
       setBackupMonthlySavingKey('')
+    }
+  }
+
+  const handleAutoTenantMonthlyBackup = async () => {
+    const tenantId = tenantDetail?.tenant?.id || selectedTenantId
+    if (!tenantId || backupMonthlyAutoSaving || backupMonthlySavingKey || backupDriveSaving || backupLoading) return
+
+    setBackupMonthlyAutoSaving(true)
+    try {
+      const { data, error } = await supabase.super.autoTenantMonthlyBackupToGoogleDrive(tenantId)
+      if (error) throw error
+      if (data?.monthly_status) setBackupMonthlyStatus(data.monthly_status)
+      const summary = data?.summary || {}
+      pushToast(Number(summary.failed || 0) > 0 ? 'warning' : 'success', summary.message || 'Auto backup tenant selesai')
+    } catch (err) {
+      pushToast('error', err?.message || 'Gagal menjalankan auto backup tenant')
+    } finally {
+      setBackupMonthlyAutoSaving(false)
     }
   }
 
@@ -2415,7 +2434,7 @@ const Tenants = () => {
                           className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 text-sm font-bold text-blue-700 transition hover:bg-blue-100 disabled:opacity-60"
                         >
                           {backupDriveSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
-                          {backupDriveSaving ? 'Menyimpan...' : 'Simpan Drive'}
+                          {backupDriveSaving ? 'Menyimpan...' : 'Simpan JSON + Excel'}
                         </button>
                       </div>
 
@@ -2430,35 +2449,51 @@ const Tenants = () => {
                               </p>
                             </div>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => loadTenantBackupMonthlyStatus()}
-                            disabled={backupMonthlyLoading}
-                            className="inline-flex h-8 items-center justify-center gap-1 rounded-lg bg-white px-2 text-[11px] font-bold text-amber-800 ring-1 ring-amber-200 disabled:opacity-60"
-                          >
-                            <RefreshCw className={`h-3.5 w-3.5 ${backupMonthlyLoading ? 'animate-spin' : ''}`} />
-                            Refresh
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={handleAutoTenantMonthlyBackup}
+                              disabled={backupMonthlyAutoSaving || backupMonthlyLoading}
+                              className="inline-flex h-8 items-center justify-center gap-1 rounded-lg bg-blue-600 px-2 text-[11px] font-bold text-white disabled:opacity-60"
+                            >
+                              <UploadCloud className={`h-3.5 w-3.5 ${backupMonthlyAutoSaving ? 'animate-bounce' : ''}`} />
+                              Auto
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => loadTenantBackupMonthlyStatus()}
+                              disabled={backupMonthlyLoading || backupMonthlyAutoSaving}
+                              className="inline-flex h-8 items-center justify-center gap-1 rounded-lg bg-white px-2 text-[11px] font-bold text-amber-800 ring-1 ring-amber-200 disabled:opacity-60"
+                            >
+                              <RefreshCw className={`h-3.5 w-3.5 ${backupMonthlyLoading ? 'animate-spin' : ''}`} />
+                              Refresh
+                            </button>
+                          </div>
                         </div>
                         <div className="mt-3 grid gap-2 sm:grid-cols-2">
                           {backupMonthlyMonths.length ? backupMonthlyMonths.map((month) => {
                             const backedUp = Boolean(month?.is_backed_up)
+                            const needsUpdate = month?.status === 'needs_update' || Boolean(month?.has_new_data)
+                            const canBackup = Boolean(month?.can_backup)
                             const file = month?.drive_file || null
+                            const cardClass = needsUpdate
+                              ? 'border-blue-300 bg-blue-50 text-blue-950'
+                              : backedUp
+                                ? 'border-amber-300 bg-amber-100 text-amber-950'
+                                : 'border-slate-200 bg-white text-slate-700'
                             return (
                               <div
                                 key={month.key}
-                                className={`rounded-xl border px-3 py-2 ${
-                                  backedUp
-                                    ? 'border-amber-300 bg-amber-100 text-amber-950'
-                                    : 'border-slate-200 bg-white text-slate-700'
-                                }`}
+                                className={`rounded-xl border px-3 py-2 ${cardClass}`}
                               >
                                 <div className="flex items-center justify-between gap-2">
                                   <div className="min-w-0">
                                     <p className="truncate text-xs font-black">{month.short_label || month.label}</p>
-                                    <p className="truncate text-[10px] font-semibold opacity-70">{backedUp ? file?.size_label || 'Tersimpan' : 'Belum backup'}</p>
+                                    <p className="truncate text-[10px] font-semibold opacity-70">
+                                      {needsUpdate ? 'Ada data baru' : (backedUp ? file?.size_label || 'Tersimpan' : 'Belum backup')}
+                                    </p>
                                   </div>
-                                  {backedUp ? (
+                                  {!canBackup ? (
                                     file?.drive_web_view_link ? (
                                       <a
                                         href={file.drive_web_view_link}
@@ -2474,11 +2509,11 @@ const Tenants = () => {
                                   ) : (
                                     <button
                                       type="button"
-                                      onClick={() => handleSaveTenantMonthlyBackup(month.key)}
-                                      disabled={backupMonthlySavingKey === month.key}
+                                      onClick={() => handleSaveTenantMonthlyBackup(month.key, backedUp)}
+                                      disabled={backupMonthlySavingKey === month.key || backupMonthlyAutoSaving}
                                       className="shrink-0 rounded-lg bg-slate-900 px-2 py-1 text-[10px] font-black text-white disabled:opacity-60"
                                     >
-                                      {backupMonthlySavingKey === month.key ? '...' : 'Backup'}
+                                      {backupMonthlySavingKey === month.key ? '...' : (needsUpdate ? 'Update' : 'Backup')}
                                     </button>
                                   )}
                                 </div>

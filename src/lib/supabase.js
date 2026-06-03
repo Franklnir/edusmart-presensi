@@ -2787,6 +2787,15 @@ const auth = {
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
+    async autoMonthlyBackupToGoogleDrive(payload = {}) {
+      const res = await apiFetch('/api/admin/backup/google-drive/monthly/auto', {
+        method: 'POST',
+        body: payload,
+        cacheTtlMs: 0,
+        timeoutMs: 180000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
     async approvals(params = {}) {
       const query = new URLSearchParams()
       Object.entries(params || {}).forEach(([key, value]) => {
@@ -3008,6 +3017,15 @@ const auth = {
         body: payload,
         cacheTtlMs: 0,
         timeoutMs: 60000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async autoTenantMonthlyBackupToGoogleDrive(id, payload = {}) {
+      const res = await apiFetch(`/api/super/tenants/${id}/backup/google-drive/monthly/auto`, {
+        method: 'POST',
+        body: payload,
+        cacheTtlMs: 0,
+        timeoutMs: 180000
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
