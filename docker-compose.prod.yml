@@ -447,6 +447,8 @@ services:
       QUIZ_CONTENT_CACHE_TTL_SECONDS: ${QUIZ_CONTENT_CACHE_TTL_SECONDS:-300}
       QUIZ_ASYNC_SCORING_ENABLED: ${QUIZ_ASYNC_SCORING_ENABLED:-false}
       QUIZ_SCORING_QUEUE: ${QUIZ_SCORING_QUEUE:-quiz-scoring}
+      QUEUE_WORKER_PROCESSES: ${QUEUE_WORKER_PROCESSES:-1}
+      QUIZ_SCORING_WORKER_PROCESSES: ${QUIZ_SCORING_WORKER_PROCESSES:-0}
       QUIZ_WORKER_HEARTBEAT_MAX_AGE_SECONDS: ${QUIZ_WORKER_HEARTBEAT_MAX_AGE_SECONDS:-150}
       QUIZ_MONITOR_WARNING_QUEUE_SIZE: ${QUIZ_MONITOR_WARNING_QUEUE_SIZE:-100}
       QUIZ_MONITOR_CRITICAL_QUEUE_SIZE: ${QUIZ_MONITOR_CRITICAL_QUEUE_SIZE:-500}
@@ -514,7 +516,7 @@ services:
     volumes:
       - backend_storage:/var/www/html/storage
       - backend_bootstrap_cache:/var/www/html/bootstrap/cache
-    command: ["php", "artisan", "queue:work", "redis", "--queue=${QUIZ_SCORING_QUEUE:-quiz-scoring},default", "--sleep=1", "--tries=3", "--timeout=120", "--max-time=3600"]
+    command: ["/var/www/html/docker/run-queue-workers.sh"]
     networks:
       - internal
 

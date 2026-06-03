@@ -43,7 +43,7 @@ RUN apk add --no-cache --virtual .composer-deps git unzip \
 COPY backend/ .
 COPY backend/docker/opcache.prod.ini /usr/local/etc/php/conf.d/99-opcache.ini
 
-RUN chmod +x /var/www/html/docker/entrypoint.prod.sh \
+RUN chmod +x /var/www/html/docker/entrypoint.prod.sh /var/www/html/docker/run-queue-workers.sh \
     && rm -f /var/www/html/bootstrap/cache/*.php \
     && mkdir -p /var/www/html/storage /var/www/html/bootstrap/cache \
     && chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache

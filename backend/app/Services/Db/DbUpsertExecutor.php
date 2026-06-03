@@ -58,6 +58,7 @@ class DbUpsertExecutor
 
         if ($table === 'settings') {
             $saved = $callbacks['save_settings_singleton_rows']($rows, $tenantId, $tenantScoped);
+            $callbacks['after_mutation']($tenantId, $table, [], $saved);
 
             return response()->json(['data' => $saved]);
         }

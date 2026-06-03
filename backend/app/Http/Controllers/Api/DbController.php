@@ -16,6 +16,7 @@ use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -2493,6 +2494,10 @@ class DbController extends ApiController
 
     private function afterDbMutation(?string $tenantId, string $table, array $beforeRows = [], array $afterRows = []): void
     {
+        if ($tenantId && $table === 'settings') {
+            Cache::forget('attendance-qr:academic-period:'.$tenantId);
+        }
+
         if (! $tenantId || ! $this->isQuizContentTable($table)) {
             return;
         }

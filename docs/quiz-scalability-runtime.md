@@ -11,6 +11,8 @@ QUIZ_CONTENT_CACHE_TTL_SECONDS=300
 # Aktifkan setelah container worker dipastikan sehat.
 QUIZ_ASYNC_SCORING_ENABLED=true
 QUIZ_SCORING_QUEUE=quiz-scoring
+QUEUE_WORKER_PROCESSES=1
+QUIZ_SCORING_WORKER_PROCESSES=0
 QUIZ_WORKER_HEARTBEAT_MAX_AGE_SECONDS=150
 
 QUIZ_MONITOR_WARNING_QUEUE_SIZE=100
@@ -30,7 +32,7 @@ php artisan cache:clear
 php artisan quiz:monitor
 ```
 
-Pastikan `worker` dan `scheduler` aktif. Worker production mendengarkan `quiz-scoring,default`, dengan prioritas scoring quiz lebih dahulu.
+Pastikan `worker` dan `scheduler` aktif. Secara default satu proses worker tetap mendengarkan `quiz-scoring,default` agar kompatibel dengan VPS kecil. Saat `QUIZ_SCORING_WORKER_PROCESSES` lebih dari nol, container memisahkan proses queue umum dan proses khusus `quiz-scoring`. Jumlah proses dapat dinaikkan tanpa mengubah kode melalui `QUEUE_WORKER_PROCESSES` dan `QUIZ_SCORING_WORKER_PROCESSES`.
 
 Rollout yang aman:
 
@@ -54,6 +56,19 @@ Untuk memantau terus selama ujian:
 watch -n 5 php artisan quiz:monitor
 ```
 
+## Profil Kapasitas Tinggi
+
+Untuk target 1.000 siswa serentak, gunakan VPS minimal 8 vCPU / 16 GB RAM dan override:
+
+```bash
+docker compose --env-file .env.production \
+  -f docker-compose.prod.yml \
+  -f docker-compose.prod.high-capacity.yml \
+  up -d --force-recreate postgres redis backend worker scheduler nginx caddy
+```
+
+Override ini meningkatkan koneksi PostgreSQL, memory Redis, PHP-FPM children, dan jumlah worker scoring. Angka tersebut adalah titik awal, bukan jaminan kapasitas. Tetap ukur CPU, RAM, queue backlog, koneksi database, dan p95 response time.
+
 ## Load Test Staging
 
 Gunakan staging dengan akun siswa khusus. Siapkan satu token berbeda untuk setiap siswa virtual agar pengujian benar-benar mewakili 100-500 siswa, bukan satu siswa yang mengirim request berulang. Skrip menolak domain `*.sismu.biz.id` kecuali override production diisi secara sadar.
@@ -70,3 +85,30 @@ k6 run \
 Naikkan bertahap: `100`, `250`, lalu `500` virtual users. Pantau `quiz:monitor`, PostgreSQL, Redis, CPU, RAM, dan log worker selama pengujian.
 
 Untuk satu siswa saja, `AUTH_TOKEN` masih dapat dipakai dengan `VUS=1`.
+
+## Simulasi Hari Sekolah
+
+Skrip berikut menguji dua gelombang dengan akun yang sama: presensi QR pagi, lalu quiz siang. Siapkan QR yang masih aktif ketika skenario presensi dimulai dan quiz yang tersedia untuk seluruh akun pengujian.
+
+Untuk banyak kelas, gunakan `ATTENDANCE_QR_TOKENS` dan `QUIZ_IDS` dengan satu nilai per siswa dalam urutan yang sama dengan `AUTH_TOKENS`. Satu `ATTENDANCE_QR_TOKEN` atau `QUIZ_ID` hanya cocok untuk pengujian ketika seluruh akun memang memakai jadwal atau quiz yang sama.
+
+```bash
+k6 run \
+  -e BASE_URL=https://staging.example.test \
+  -e ATTENDANCE_QR_TOKENS="$(paste -sd, token-qr-per-siswa.txt)" \
+  -e QUIZ_IDS="$(paste -sd, quiz-id-per-siswa.txt)" \
+  -e AUTH_TOKENS="$(paste -sd, tokens-siswa-staging.txt)" \
+  -e STUDENTS=100 \
+  -e QUIZ_START_DELAY=2m \
+  scripts/load-tests/school-day-capacity.k6.js
+```
+
+Naikkan bertahap: `100`, `250`, `500`, `750`, lalu `1000`. Jangan melompat langsung ke 1.000. Target kelulusan awal:
+
+- error rate di bawah 2%;
+- p95 presensi di bawah 1,2 detik;
+- p95 quiz di bawah 1,5 detik;
+- tidak ada failed job;
+- antrean `quiz-scoring` kembali turun setelah gelombang submit.
+
+Jalankan k6 dari mesin terpisah yang cukup kuat agar generator beban tidak menjadi bottleneck. Untuk 1.000 VU, gunakan runner dengan resource memadai atau beberapa runner terdistribusi.

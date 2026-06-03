@@ -6,6 +6,7 @@ use App\Support\AcademicPeriod;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -13,6 +14,8 @@ use RuntimeException;
 
 class AttendanceQrController extends ApiController
 {
+    private static ?array $schemaCapabilities = null;
+
     private const TOKEN_PREFIX = 'ESPRESQR1.';
 
     private const TOKEN_TTL_SECONDS = 90;
@@ -232,10 +235,11 @@ class AttendanceQrController extends ApiController
                 ];
 
                 $period = $this->currentAcademicPeriodForTenant($tenantId);
-                if (Schema::hasColumn('absensi', 'tahun_ajaran')) {
+                $capabilities = $this->schemaCapabilities();
+                if ($capabilities['absensi_tahun_ajaran']) {
                     $insert['tahun_ajaran'] = $period['tahun_ajaran'];
                 }
-                if (Schema::hasColumn('absensi', 'semester')) {
+                if ($capabilities['absensi_semester']) {
                     $insert['semester'] = $period['semester'];
                 }
 
@@ -288,20 +292,55 @@ class AttendanceQrController extends ApiController
 
     private function currentAcademicPeriodForTenant(?string $tenantId): array
     {
+        $cacheKey = 'attendance-qr:academic-period:'.($tenantId ?: 'global');
+
+        try {
+            return Cache::remember($cacheKey, now()->addSeconds(60), function () use ($tenantId) {
+                return $this->readAcademicPeriodForTenant($tenantId);
+            });
+        } catch (\Throwable) {
+            return $this->readAcademicPeriodForTenant($tenantId);
+        }
+    }
+
+    private function readAcademicPeriodForTenant(?string $tenantId): array
+    {
         $settings = null;
-        if (Schema::hasTable('settings')) {
+        $capabilities = $this->schemaCapabilities();
+        if ($capabilities['settings_table']) {
             $query = DB::table('settings')->orderBy('id');
-            if ($tenantId && Schema::hasColumn('settings', 'tenant_id')) {
+            if ($tenantId && $capabilities['settings_tenant_id']) {
                 $query->where('tenant_id', $tenantId);
             }
             $columns = array_values(array_filter(
                 ['tahun_ajaran', 'semester_aktif', 'periode_mulai', 'periode_selesai'],
-                fn ($column) => Schema::hasColumn('settings', $column)
+                fn ($column) => $capabilities['settings_columns'][$column] ?? false
             ));
             $settings = $query->first($columns ?: ['tahun_ajaran', 'semester_aktif']);
         }
 
         return AcademicPeriod::fromSettings($settings);
+    }
+
+    private function schemaCapabilities(): array
+    {
+        if (self::$schemaCapabilities !== null) {
+            return self::$schemaCapabilities;
+        }
+
+        $settingsTable = Schema::hasTable('settings');
+        $settingsColumns = [];
+        foreach (['tahun_ajaran', 'semester_aktif', 'periode_mulai', 'periode_selesai'] as $column) {
+            $settingsColumns[$column] = $settingsTable && Schema::hasColumn('settings', $column);
+        }
+
+        return self::$schemaCapabilities = [
+            'absensi_tahun_ajaran' => Schema::hasColumn('absensi', 'tahun_ajaran'),
+            'absensi_semester' => Schema::hasColumn('absensi', 'semester'),
+            'settings_table' => $settingsTable,
+            'settings_tenant_id' => $settingsTable && Schema::hasColumn('settings', 'tenant_id'),
+            'settings_columns' => $settingsColumns,
+        ];
     }
 
     private function activeClassWindow(object $jadwal, Carbon $now): array

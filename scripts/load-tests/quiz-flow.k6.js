@@ -19,7 +19,7 @@ if (vus > 1 && authTokens.length < vus) {
   fail(`AUTH_TOKENS hanya berisi ${authTokens.length} token, tetapi VUS=${vus}. Siapkan satu token berbeda per siswa virtual.`)
 }
 
-if (!allowProduction && /(^|\\.)sismu\\.biz\\.id$/i.test(new URL(baseUrl).hostname)) {
+if (!allowProduction && /(^|\.)sismu\.biz\.id$/i.test(new URL(baseUrl).hostname)) {
   fail('Load test ke production diblokir. Gunakan staging atau isi ALLOW_PRODUCTION_LOAD_TEST=true dengan sadar.')
 }
 
