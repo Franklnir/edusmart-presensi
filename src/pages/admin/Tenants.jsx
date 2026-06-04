@@ -1344,7 +1344,8 @@ const Tenants = () => {
       if (error) throw error
       if (data?.monthly_status) setBackupMonthlyStatus(data.monthly_status)
       const summary = data?.summary || {}
-      pushToast(Number(summary.failed || 0) > 0 ? 'warning' : 'success', summary.message || 'Auto backup tenant selesai')
+      const serverTimeLabel = summary.server_time_label ? ` Diproses sampai ${summary.server_time_label}.` : ''
+      pushToast(Number(summary.failed || 0) > 0 ? 'warning' : 'success', `${summary.message || 'Auto backup tenant selesai'}${serverTimeLabel}`)
     } catch (err) {
       pushToast('error', err?.message || 'Gagal menjalankan auto backup tenant')
     } finally {
@@ -2446,6 +2447,7 @@ const Tenants = () => {
                               <p className="text-xs font-black uppercase tracking-wide text-amber-800">Backup Bulanan</p>
                               <p className="mt-0.5 text-[11px] leading-relaxed text-amber-800">
                                 Auto backup lengkap akhir bulan jam 23.59 WIB. Kuning berarti bulan itu sudah tersimpan.
+                                {backupMonthlyStatus?.schedule?.server_time_label ? ` Waktu server: ${backupMonthlyStatus.schedule.server_time_label}.` : ''}
                               </p>
                             </div>
                           </div>
@@ -2474,6 +2476,7 @@ const Tenants = () => {
                           {backupMonthlyMonths.length ? backupMonthlyMonths.map((month) => {
                             const backedUp = Boolean(month?.is_backed_up)
                             const needsUpdate = month?.status === 'needs_update' || Boolean(month?.has_new_data)
+                            const isFuture = month?.status === 'future'
                             const canBackup = Boolean(month?.can_backup)
                             const file = month?.drive_file || null
                             const cardClass = needsUpdate
@@ -2490,7 +2493,7 @@ const Tenants = () => {
                                   <div className="min-w-0">
                                     <p className="truncate text-xs font-black">{month.short_label || month.label}</p>
                                     <p className="truncate text-[10px] font-semibold opacity-70">
-                                      {needsUpdate ? 'Ada data baru' : (backedUp ? file?.size_label || 'Tersimpan' : 'Belum backup')}
+                                      {isFuture ? 'Belum berjalan' : (needsUpdate ? 'Ada data baru' : (backedUp ? file?.size_label || 'Tersimpan' : 'Belum backup'))}
                                     </p>
                                   </div>
                                   {!canBackup ? (
@@ -2504,7 +2507,7 @@ const Tenants = () => {
                                         Buka
                                       </a>
                                     ) : (
-                                      <span className="shrink-0 rounded-lg bg-amber-200 px-2 py-1 text-[10px] font-black text-amber-900">Sudah</span>
+                                      <span className="shrink-0 rounded-lg bg-amber-200 px-2 py-1 text-[10px] font-black text-amber-900">{isFuture ? 'Nanti' : 'Sudah'}</span>
                                     )
                                   ) : (
                                     <button

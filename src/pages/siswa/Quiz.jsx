@@ -113,6 +113,46 @@ const writePendingAnswersToStorage = (userId, quizId, submissionId, rows = {}) =
   } catch { }
 }
 
+const quizEssayDraftStorageKey = (userId, quizId, submissionId) => (
+  `edusmart_quiz_essay_drafts:${String(userId || '')}:${String(quizId || '')}:${String(submissionId || '')}`
+)
+
+const readEssayDraftsFromStorage = (userId, quizId, submissionId) => {
+  if (typeof window === 'undefined' || !userId || !quizId || !submissionId) return {}
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(quizEssayDraftStorageKey(userId, quizId, submissionId)) || '{}')
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+const writeEssayDraftToStorage = (userId, quizId, submissionId, questionId, value, revision = 0) => {
+  if (typeof window === 'undefined' || !userId || !quizId || !submissionId || !questionId) return
+  const key = quizEssayDraftStorageKey(userId, quizId, submissionId)
+  try {
+    const drafts = readEssayDraftsFromStorage(userId, quizId, submissionId)
+    drafts[String(questionId)] = {
+      value: String(value ?? ''),
+      revision: Number(revision || 0),
+      updatedAt: Date.now()
+    }
+    window.localStorage.setItem(key, JSON.stringify(drafts))
+  } catch { }
+}
+
+const clearEssayDraftsFromStorage = (userId, quizId, submissionId) => {
+  if (typeof window === 'undefined' || !userId || !quizId || !submissionId) return
+  try {
+    window.localStorage.removeItem(quizEssayDraftStorageKey(userId, quizId, submissionId))
+  } catch { }
+}
+
+const parseStoredDraftTime = (value) => {
+  const numeric = Number(value || 0)
+  return Number.isFinite(numeric) ? numeric : 0
+}
+
 const normalizeAnswerOrder = (value) => {
   if (!value) return null
   let parsed = value
@@ -1472,6 +1512,46 @@ export default function SiswaQuiz() {
             : row.option_id
           pendingAnswersRef.current[questionId] = row
         })
+
+        const storedEssayDrafts = readEssayDraftsFromStorage(user?.id, targetQuizId, submissionRow.id)
+        Object.entries(storedEssayDrafts).forEach(([questionId, draft]) => {
+          if (normalizeQuestionType(questionTypeById[questionId]) !== 'essay') return
+          if (!draft || typeof draft !== 'object') return
+          const draftValue = String(draft.value ?? '')
+          const draftUpdatedAt = parseStoredDraftTime(draft.updatedAt)
+          const serverUpdatedAt = (() => {
+            const row = answerRowMap[questionId] || {}
+            const raw = row.updated_at || row.saved_at || row.created_at || ''
+            const parsed = raw ? Date.parse(raw) : 0
+            return Number.isFinite(parsed) ? parsed : 0
+          })()
+          const serverValue = String(answerMap[questionId] ?? '')
+          const shouldUseDraft = draftValue !== serverValue && (
+            draftUpdatedAt >= serverUpdatedAt
+            || !serverValue
+            || pendingAnswersRef.current[questionId]
+          )
+          if (!shouldUseDraft) return
+          answerMap[questionId] = draftValue
+          const revision = Number(draft.revision || 0)
+          essayDraftMetaRef.current[questionId] = {
+            value: draftValue,
+            revision,
+            updatedAt: draftUpdatedAt || Date.now(),
+            savedAt: 0
+          }
+          pendingAnswersRef.current[questionId] = {
+            id: answerIdMap[questionId] || '',
+            quiz_id: targetQuizId,
+            submission_id: submissionRow.id,
+            question_id: questionId,
+            option_id: null,
+            essay_answer: draftValue.trim() ? draftValue : null,
+            question_type: 'essay',
+            raw_value: draftValue,
+            revision
+          }
+        })
       }
 
       const orderedDetail = applyQuizOrder(questionRows || [], grouped, submissionRow?.answer_order)
@@ -1720,6 +1800,9 @@ export default function SiswaQuiz() {
       revision: essayRevision
     }
     writePendingAnswersToStorage(user?.id, selectedQuiz.id, sub.id, pendingAnswersRef.current)
+    if (mode === 'essay') {
+      writeEssayDraftToStorage(user?.id, selectedQuiz.id, sub.id, questionId, value, essayRevision)
+    }
 
     if (mode === 'essay') {
       setAnswers((prev) => ({ ...prev, [questionId]: String(value || '') }))
@@ -1735,6 +1818,21 @@ export default function SiswaQuiz() {
   const handleEssayChange = (questionId, value) => {
     const revision = rememberEssayDraft(questionId, value)
     setAnswers((prev) => ({ ...prev, [questionId]: value }))
+    if (selectedQuiz?.id && activeSubmissionId) {
+      pendingAnswersRef.current[String(questionId)] = {
+        id: answerIds[questionId] || '',
+        quiz_id: selectedQuiz.id,
+        submission_id: activeSubmissionId,
+        question_id: questionId,
+        option_id: null,
+        essay_answer: String(value || '').trim() ? String(value || '') : null,
+        question_type: 'essay',
+        raw_value: String(value || ''),
+        revision
+      }
+      writePendingAnswersToStorage(user?.id, selectedQuiz.id, activeSubmissionId, pendingAnswersRef.current)
+      writeEssayDraftToStorage(user?.id, selectedQuiz.id, activeSubmissionId, questionId, value, revision)
+    }
     if (essaySaveTimersRef.current[questionId]) {
       clearTimeout(essaySaveTimersRef.current[questionId])
     }
@@ -1753,6 +1851,9 @@ export default function SiswaQuiz() {
     const revision = currentDraft && String(currentDraft.value ?? '') === String(value ?? '')
       ? Number(currentDraft.revision || 0)
       : rememberEssayDraft(questionId, value)
+    if (selectedQuiz?.id && activeSubmissionId) {
+      writeEssayDraftToStorage(user?.id, selectedQuiz.id, activeSubmissionId, questionId, value, revision)
+    }
     void saveAnswer(questionId, value, 'essay', { revision, flush: true })
   }
 
@@ -1824,6 +1925,8 @@ export default function SiswaQuiz() {
 
       pendingAnswersRef.current = {}
       writePendingAnswersToStorage(user?.id, selectedQuiz.id, sub.id, {})
+      clearEssayDraftsFromStorage(user?.id, selectedQuiz.id, sub.id)
+      essayDraftMetaRef.current = {}
       setSubmission(updated)
       setQuizList((prev) => prev.map((q) => (
         q.id === selectedQuiz.id ? { ...q, submission: updated } : q

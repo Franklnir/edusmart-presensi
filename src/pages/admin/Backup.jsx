@@ -727,7 +727,8 @@ export default function BackupAdmin() {
       const summary = data?.summary || {}
       const changed = Number(summary.changed || 0)
       const failed = Number(summary.failed || 0)
-      const message = summary.message || (changed > 0 ? 'Auto backup berhasil.' : 'Tidak ada data baru yang perlu dibackup.')
+      const serverTimeLabel = summary.server_time_label ? ` Diproses sampai ${summary.server_time_label}.` : ''
+      const message = `${summary.message || (changed > 0 ? 'Auto backup berhasil.' : 'Tidak ada data baru yang perlu dibackup.')}${serverTimeLabel}`
       pushToast(failed > 0 ? 'warning' : 'success', message)
       await loadDriveStatus({ refresh: true, silent: true })
     } catch (err) {
@@ -1108,6 +1109,7 @@ export default function BackupAdmin() {
                   </div>
                   <p className="mt-1 text-xs leading-relaxed text-slate-600">
                     Sistem membuat backup lengkap setiap akhir bulan pada periode aktif. Bulan berwarna kuning berarti backup sudah tersimpan di Google Drive.
+                    {monthlyStatus?.schedule?.server_time_label ? ` Waktu server: ${monthlyStatus.schedule.server_time_label}.` : ''}
                   </p>
                 </div>
               </div>
@@ -1137,6 +1139,7 @@ export default function BackupAdmin() {
               {monthlyMonths.length ? monthlyMonths.map((month) => {
                 const backedUp = Boolean(month?.is_backed_up)
                 const needsUpdate = month?.status === 'needs_update' || Boolean(month?.has_new_data)
+                const isFuture = month?.status === 'future'
                 const canBackup = Boolean(month?.can_backup)
                 const file = month?.drive_file || null
                 const cardClass = needsUpdate
@@ -1149,7 +1152,7 @@ export default function BackupAdmin() {
                   : backedUp
                     ? 'bg-amber-200 text-amber-900'
                     : 'bg-slate-100 text-slate-500'
-                const badgeText = needsUpdate ? 'Data baru' : (backedUp ? 'Sudah' : 'Belum')
+                const badgeText = isFuture ? 'Belum jalan' : (needsUpdate ? 'Data baru' : (backedUp ? 'Sudah' : 'Belum'))
                 return (
                   <div
                     key={month.key}
@@ -1194,7 +1197,7 @@ export default function BackupAdmin() {
                         disabled
                         className="mt-2 inline-flex h-8 w-full items-center justify-center rounded-lg bg-amber-200 px-2 text-[11px] font-black text-amber-900 opacity-80"
                       >
-                        Sudah dibackup
+                        {isFuture ? 'Belum berjalan' : 'Sudah dibackup'}
                       </button>
                     )}
                   </div>

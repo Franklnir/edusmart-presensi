@@ -23,6 +23,14 @@ class TenantBackupService
         $mode = $this->normalizeBackupMode($input['mode'] ?? null);
         $periodScope = $this->normalizeBackupPeriodScope($tenantId, $input);
 
+        return $this->buildPayloadForScope($tenantId, $mode, $periodScope, $userId, $role);
+    }
+
+    private function buildPayloadForScope(string $tenantId, string $mode, array $periodScope, string $userId = '', ?string $role = null): array
+    {
+        $tenantId = trim($tenantId);
+        $mode = $this->normalizeBackupMode($mode);
+
         $tables = match ($mode) {
             'students' => $this->buildStudentBackupTables($tenantId, $periodScope),
             'teachers' => $this->buildTeacherBackupTables($tenantId, $periodScope),
@@ -89,19 +97,42 @@ class TenantBackupService
         ]);
     }
 
-    public function buildMonthlyPayload(string $tenantId, string $monthKey, string $userId = 'system', ?string $role = 'system'): array
+    public function buildMonthlyPayload(
+        string $tenantId,
+        string $monthKey,
+        string $userId = 'system',
+        ?string $role = 'system',
+        ?Carbon $endAt = null,
+        ?Carbon $startAt = null,
+        string $runKind = 'initial_monthly_snapshot',
+        ?Carbon $serverTime = null
+    ): array
     {
         $month = $this->findAcademicMonth($tenantId, $monthKey);
         if (! $month) {
             throw new \RuntimeException('Bulan backup tidak berada dalam periode aktif sekolah.');
         }
 
-        $payload = $this->buildPayload($tenantId, [
-            'mode' => 'full',
-            'period_type' => 'date_range',
-            'start_date' => $month['start_date'],
-            'end_date' => $month['end_date'],
-        ], $userId, $role);
+        $window = $this->monthlyBackupWindow($tenantId, $month['value'], $serverTime ?: $endAt, $startAt);
+        if (! $window['can_backup']) {
+            throw new \RuntimeException((string) ($window['reason'] ?? 'Bulan backup belum bisa diproses.'));
+        }
+        if ($endAt) {
+            $window['end_at'] = $endAt->copy()->setTimezone('Asia/Jakarta');
+            $window['effective_end_at'] = $window['end_at'];
+        }
+
+        $periodScope = $this->makeBackupPeriodScope(
+            'date_range',
+            'Rentang '.$window['start_at']->toDateTimeString().' s/d '.$window['end_at']->toDateTimeString(),
+            null,
+            $window['start_at'],
+            $window['end_at'],
+            $this->activeAcademicYear($tenantId),
+            null
+        );
+
+        $payload = $this->buildPayloadForScope($tenantId, 'full', $periodScope, $userId, $role);
 
         $payload['period']['type'] = 'monthly';
         $payload['period']['label'] = 'Backup Bulanan '.$month['label'];
@@ -109,22 +140,42 @@ class TenantBackupService
         $payload['period']['month_label'] = $month['label'];
         $payload['period']['tahun_ajaran'] = $this->activeAcademicYear($tenantId);
         $payload['manifest']['scheduled_backup'] = true;
+        $payload['manifest']['backup_window'] = [
+            'month_key' => (string) $month['value'],
+            'month_label' => (string) $month['label'],
+            'start_at' => $window['start_at']->toIso8601String(),
+            'end_at' => $window['end_at']->toIso8601String(),
+            'server_time' => $window['server_time']->toIso8601String(),
+            'kind' => $runKind,
+        ];
 
         return $payload;
     }
 
-    public function saveMonthlyBackupToGoogleDrive(string $tenantId, string $monthKey, string $userId = 'system', bool $force = false): array
+    public function saveMonthlyBackupToGoogleDrive(
+        string $tenantId,
+        string $monthKey,
+        string $userId = 'system',
+        bool $force = false,
+        ?Carbon $runAt = null
+    ): array
     {
         $month = $this->findAcademicMonth($tenantId, $monthKey);
         if (! $month) {
             throw new \RuntimeException('Bulan backup tidak berada dalam periode aktif sekolah.');
         }
 
+        $runAt = ($runAt ?: now('Asia/Jakarta'))->copy()->setTimezone('Asia/Jakarta');
+        $window = $this->monthlyBackupWindow($tenantId, $month['value'], $runAt);
+        if (! $window['can_backup']) {
+            throw new \RuntimeException((string) ($window['reason'] ?? 'Bulan backup belum bisa diproses.'));
+        }
+
         $record = $this->monthlyBackupRecord($tenantId, $month['value']);
         $latestDataAt = $this->latestTenantDataAt(
             $tenantId,
-            Carbon::parse($month['start_date'], 'Asia/Jakarta')->startOfDay(),
-            Carbon::parse($month['end_date'], 'Asia/Jakarta')->endOfDay()
+            $window['month_start'],
+            $window['effective_end_at']
         );
         $lastBackupAt = $this->recordUploadedAt($record);
         $needsUpdate = $record && $latestDataAt && $lastBackupAt && $latestDataAt->greaterThan($lastBackupAt);
@@ -133,11 +184,27 @@ class TenantBackupService
         }
 
         $fileName = $this->monthlyBackupFileName($tenantId, $month['value'], (bool) $record);
-        $payload = $this->buildMonthlyPayload($tenantId, $month['value'], $userId, $userId === 'system' ? 'system' : 'admin');
+        $runKind = $record ? 'monthly_delta_update' : 'initial_monthly_snapshot';
+        $deltaStartAt = $record && $lastBackupAt && $needsUpdate
+            ? $lastBackupAt->copy()->setTimezone('Asia/Jakarta')->subSecond()
+            : $window['month_start'];
+        $payload = $this->buildMonthlyPayload(
+            $tenantId,
+            $month['value'],
+            $userId,
+            $userId === 'system' ? 'system' : 'admin',
+            $window['effective_end_at'],
+            $deltaStartAt,
+            $runKind,
+            $runAt
+        );
         $payload['manifest']['backup_run'] = [
-            'kind' => $record ? 'monthly_update' : 'initial_monthly_snapshot',
+            'kind' => $runKind,
             'previous_backup_at' => optional($lastBackupAt)->toIso8601String(),
             'latest_data_at' => optional($latestDataAt)->toIso8601String(),
+            'server_time' => $runAt->toIso8601String(),
+            'effective_start_at' => $deltaStartAt->toIso8601String(),
+            'effective_end_at' => $window['effective_end_at']->toIso8601String(),
             'stores_json_and_excel' => true,
         ];
 
@@ -147,10 +214,21 @@ class TenantBackupService
     public function autoMonthlyBackupToGoogleDrive(string $tenantId, string $userId = 'system'): array
     {
         $status = $this->monthlyStatus($tenantId);
-        $now = now('Asia/Jakarta')->endOfDay();
+        $now = now('Asia/Jakarta');
+        $statusMonths = array_values((array) ($status['months'] ?? []));
+        if (empty($statusMonths)) {
+            throw new \RuntimeException('Jadwal bulan backup periode aktif belum tersedia.');
+        }
+
+        $periodStart = Carbon::parse((string) (($statusMonths[0] ?? [])['start_date'] ?? ''), 'Asia/Jakarta')->startOfDay();
+        $periodEnd = Carbon::parse((string) (($statusMonths[count($statusMonths) - 1] ?? [])['end_date'] ?? ''), 'Asia/Jakarta')->endOfDay();
+        if ($now->lessThan($periodStart) || $now->greaterThan($periodEnd)) {
+            throw new \RuntimeException('Auto backup hanya bisa dijalankan saat waktu server masih berada dalam periode aktif sekolah.');
+        }
+
         $results = [];
 
-        foreach ((array) ($status['months'] ?? []) as $month) {
+        foreach ($statusMonths as $month) {
             $monthKey = (string) ($month['key'] ?? '');
             if ($monthKey === '') {
                 continue;
@@ -181,7 +259,7 @@ class TenantBackupService
             }
 
             try {
-                $file = $this->saveMonthlyBackupToGoogleDrive($tenantId, $monthKey, $userId, true);
+                $file = $this->saveMonthlyBackupToGoogleDrive($tenantId, $monthKey, $userId, true, $now);
                 $results[] = array_merge($month, [
                     'action' => ($month['status'] ?? '') === 'needs_update' ? 'updated' : 'created',
                     'message' => ($month['status'] ?? '') === 'needs_update'
@@ -212,6 +290,8 @@ class TenantBackupService
                 'message' => ($created + $updated) > 0
                     ? 'Auto backup selesai. '.$created.' bulan baru dibuat, '.$updated.' bulan diperbarui.'
                     : 'Tidak ada data baru yang perlu dibackup.',
+                'server_time' => $now->toIso8601String(),
+                'server_time_label' => $now->format('Y-m-d H:i:s').' WIB',
             ],
             'months' => $results,
             'monthly_status' => $this->monthlyStatus($tenantId),
@@ -224,27 +304,31 @@ class TenantBackupService
         $active = $this->tenantActiveAcademicPeriod($tenantId);
         $year = $this->activeAcademicYear($tenantId);
         $months = $this->academicYearMonths($year);
+        $now = now('Asia/Jakarta');
 
         $items = [];
         foreach ($months as $month) {
+            $window = $this->monthlyBackupWindow($tenantId, (string) $month['value'], $now);
             $record = $this->monthlyBackupRecord($tenantId, (string) $month['value']);
             $latestDataAt = $this->latestTenantDataAt(
                 $tenantId,
-                Carbon::parse($month['start_date'], 'Asia/Jakarta')->startOfDay(),
-                Carbon::parse($month['end_date'], 'Asia/Jakarta')->endOfDay()
+                $window['month_start'],
+                $window['effective_end_at']
             );
             $lastBackupAt = $this->recordUploadedAt($record);
             $needsUpdate = $record && $latestDataAt && $lastBackupAt && $latestDataAt->greaterThan($lastBackupAt);
-            $status = $record ? ($needsUpdate ? 'needs_update' : 'backed_up') : 'pending';
+            $isFuture = $window['is_future'] ?? false;
+            $status = $isFuture ? 'future' : ($record ? ($needsUpdate ? 'needs_update' : 'backed_up') : 'pending');
             $items[] = [
                 'key' => (string) $month['value'],
                 'label' => (string) $month['label'],
                 'short_label' => (string) $month['short_label'],
                 'start_date' => (string) $month['start_date'],
                 'end_date' => (string) $month['end_date'],
+                'effective_end_at' => $window['effective_end_at']->toIso8601String(),
                 'status' => $status,
                 'is_backed_up' => (bool) $record,
-                'can_backup' => ! $record || $needsUpdate,
+                'can_backup' => ! $isFuture && (! $record || $needsUpdate),
                 'has_new_data' => (bool) $needsUpdate,
                 'last_data_at' => optional($latestDataAt)->toIso8601String(),
                 'last_backup_at' => optional($lastBackupAt)->toIso8601String(),
@@ -263,6 +347,8 @@ class TenantBackupService
                 'rule' => 'Akhir bulan pada periode aktif sekolah',
                 'mode' => 'full',
                 'destination' => 'Google Drive sekolah',
+                'server_time' => $now->toIso8601String(),
+                'server_time_label' => $now->format('Y-m-d H:i:s').' WIB',
             ],
             'academic_period' => [
                 'tahun_ajaran' => $year,
@@ -299,6 +385,40 @@ class TenantBackupService
     public function currentMonthKey(): string
     {
         return now('Asia/Jakarta')->format('Y-m');
+    }
+
+    private function monthlyBackupWindow(string $tenantId, string $monthKey, ?Carbon $runAt = null, ?Carbon $startAt = null): array
+    {
+        $month = $this->findAcademicMonth($tenantId, $monthKey);
+        if (! $month) {
+            throw new \RuntimeException('Bulan backup tidak berada dalam periode aktif sekolah.');
+        }
+
+        $serverTime = ($runAt ?: now('Asia/Jakarta'))->copy()->setTimezone('Asia/Jakarta');
+        $monthStart = Carbon::parse((string) $month['start_date'], 'Asia/Jakarta')->startOfDay();
+        $monthEnd = Carbon::parse((string) $month['end_date'], 'Asia/Jakarta')->endOfDay();
+        $effectiveEnd = $serverTime->lessThan($monthEnd) ? $serverTime->copy() : $monthEnd->copy();
+        $effectiveStart = ($startAt ?: $monthStart)->copy()->setTimezone('Asia/Jakarta');
+        if ($effectiveStart->lessThan($monthStart)) {
+            $effectiveStart = $monthStart->copy();
+        }
+        if ($effectiveStart->greaterThan($effectiveEnd)) {
+            $effectiveStart = $effectiveEnd->copy();
+        }
+
+        $isFuture = $monthStart->greaterThan($serverTime);
+
+        return [
+            'month_start' => $monthStart,
+            'month_end' => $monthEnd,
+            'start_at' => $effectiveStart,
+            'end_at' => $effectiveEnd,
+            'effective_end_at' => $effectiveEnd,
+            'server_time' => $serverTime,
+            'is_future' => $isFuture,
+            'can_backup' => ! $isFuture && $effectiveEnd->greaterThanOrEqualTo($monthStart),
+            'reason' => $isFuture ? 'Bulan backup belum berjalan pada waktu server saat ini.' : null,
+        ];
     }
 
     public function monthlyBackupFileName(string $tenantId, string $monthKey, bool $versioned = false): string
