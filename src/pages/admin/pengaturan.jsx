@@ -659,7 +659,7 @@ export default function APengaturan() {
   useEffect(() => {
     if (!profile || !isAuthorized) return
 
-    const raw = profile.photo_url || profile.avatar || profile.foto || ''
+    const raw = profile.photo_path || profile.photo_url || profile.avatar || profile.foto || ''
     const extracted = extractObjectKeyFromMaybeUrl(raw, SUPABASE_BUCKET)
     setAvatarPath(extracted)
 
@@ -1625,7 +1625,7 @@ export default function APengaturan() {
         extractObjectKeyFromMaybeUrl(localStorage.getItem(`user_avatar_${user.id}`) || '', SUPABASE_BUCKET)
       : null
 
-  const fallbackAvatarPath = avatarPath || localStorageAvatarPath || extractObjectKeyFromMaybeUrl(profile?.photo_url || '', SUPABASE_BUCKET) || ''
+  const fallbackAvatarPath = avatarPath || localStorageAvatarPath || extractObjectKeyFromMaybeUrl(profile?.photo_path || profile?.photo_url || '', SUPABASE_BUCKET) || ''
 
   useEffect(() => {
     if (!isAuthorized || activeSettingsMenu !== 'admin') return

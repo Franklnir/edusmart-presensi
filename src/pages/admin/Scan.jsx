@@ -642,6 +642,7 @@ export default function Scan() {
               nama: row.siswa_nama,
               nis: row.siswa_nis,
               kelas: row.kelas,
+              photo_path: row.siswa_photo_path,
               photo_url: row.siswa_photo_url,
               rfid_uid: row.siswa_rfid_uid,
               scan_time: scanDate
@@ -817,7 +818,7 @@ export default function Scan() {
       try {
         const { data: student, error } = await supabase
           .from('profiles')
-          .select('id, nama, kelas, photo_url, rfid_uid, nis, status')
+          .select('id, nama, kelas, photo_url, photo_path, rfid_uid, nis, status')
           .eq('role', 'siswa')
           .eq('rfid_uid', cleanedUid)
           .single()
@@ -1275,7 +1276,7 @@ export default function Scan() {
           await supabase
             .from('profiles')
             .select(
-              'id,nama,kelas,photo_url,rfid_uid'
+              'id,nama,kelas,photo_url,photo_path,rfid_uid'
             )
             .eq('role', 'siswa')
             .eq('status', 'active')
@@ -1986,7 +1987,7 @@ export default function Scan() {
                               <td className="px-6 py-4">
                                 <div className="flex items-center gap-3">
                                   <ProfileAvatar
-                                    src={s.photo_url}
+                                    src={s.photo_path || s.photo_url}
                                     name={s.nama}
                                     size={32}
                                     className="border-gray-200"
@@ -2077,7 +2078,7 @@ export default function Scan() {
                               <td className="px-6 py-4">
                                 <div className="flex items-center gap-3">
                                   <ProfileAvatar
-                                    src={s.photo_url}
+                                    src={s.photo_path || s.photo_url}
                                     name={s.nama}
                                     size={32}
                                     className="border-gray-200"
@@ -2239,7 +2240,7 @@ export default function Scan() {
                             <td className="px-6 py-4">
                               <div className="flex items-center gap-3">
                                 <ProfileAvatar
-                                  src={student.photo_url}
+                                  src={student.photo_path || student.photo_url}
                                   name={student.nama}
                                   size={32}
                                   className="border-gray-200"

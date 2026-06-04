@@ -1313,6 +1313,7 @@ class AdminController extends ApiController
                     't.created_at',
                     'p.nama as siswa_nama',
                     'p.nis as siswa_nis',
+                    'p.photo_path as siswa_photo_path',
                     'p.photo_url as siswa_photo_url',
                     'p.rfid_uid as siswa_rfid_uid',
                 ])
