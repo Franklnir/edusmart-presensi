@@ -130,10 +130,7 @@ function clearCachedSettingsRow() {
   }
 }
 
-// ✅ Signed URL expire (detik). Bisa kamu naikkan/turunkan sesuai kebutuhan.
-// Catatan: karena DB sekarang menyimpan PATH saja, signed URL dibuat saat runtime.
-// Kalau banyak halaman publik menampilkan logo, pertimbangkan expiry lebih panjang (mis. 1-7 hari).
-const SIGNED_URL_EXPIRES_IN = 60 * 60 * 24 * 7 // 7 hari
+const SIGNED_URL_EXPIRES_IN = 60 * 60 * 24 * 7
 
 const formatBytesLabel = (bytes) => {
   const value = Number(bytes || 0)
@@ -286,10 +283,7 @@ const periodPayloadChanged = (nextPayload, previousPayload) => [
   'jadwal_periode_berlaku'
 ].some((key) => String(nextPayload?.[key] || '') !== String(previousPayload?.[key] || ''))
 
-/**
- * ✅ DB hanya simpan objectKey/path.
- * Namun kalau data lama masih nyimpen URL (public/signed), kita extract path-nya biar migrasi mulus.
- */
+
 function extractObjectKeyFromMaybeUrl(value, bucket) {
   if (!value || typeof value !== 'string') return ''
 
@@ -530,13 +524,12 @@ export default function APengaturan() {
   const [passwordModalOpen, setPasswordModalOpen] = useState(false)
   const [passwordLoading, setPasswordLoading] = useState(false)
 
-  // ✅ form.logo_url sekarang DIANGGAP objectKey/path (bukan URL)
   const [form, setForm] = useState({
     nama_sekolah: '',
     email: '',
     telepon: '',
     alamat: '',
-    logo_url: '', // ✅ SIMPAN PATH di DB (contoh: "logo_sekolah.png")
+    logo_url: '',
     visi: '',
     misi: '',
     link_instagram: '',
@@ -549,11 +542,9 @@ export default function APengaturan() {
     max_ekskul_per_siswa: 3
   })
 
-  // ✅ Pisahkan PATH vs URL runtime
-  const [avatarPath, setAvatarPath] = useState('')       // objectKey
-  const [avatarSignedUrl, setAvatarSignedUrl] = useState('') // runtime URL
-
-  const [logoSignedUrl, setLogoSignedUrl] = useState('') // runtime URL
+  const [avatarPath, setAvatarPath] = useState('')
+  const [avatarSignedUrl, setAvatarSignedUrl] = useState('')
+  const [logoSignedUrl, setLogoSignedUrl] = useState('')
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -665,7 +656,6 @@ export default function APengaturan() {
     window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`)
   }, [pushToast])
 
-  // ✅ Saat authorized: ambil PATH avatar dari profile (support data lama yg masih URL)
   useEffect(() => {
     if (!profile || !isAuthorized) return
 
@@ -673,23 +663,19 @@ export default function APengaturan() {
     const extracted = extractObjectKeyFromMaybeUrl(raw, SUPABASE_BUCKET)
     setAvatarPath(extracted)
 
-    // migrate localStorage (kalau sebelumnya simpan URL)
     if (typeof window !== 'undefined' && user?.id) {
-      const oldKey = `user_avatar_${user.id}` // versi lama: simpan URL
-      const newKey = `user_avatar_path_${user.id}` // versi baru: simpan PATH
-
-      const existingNew = localStorage.getItem(newKey)
-      if (!existingNew) {
-        const oldVal = localStorage.getItem(oldKey)
+      const newKey = `user_avatar_path_${user.id}`
+      if (!localStorage.getItem(newKey)) {
+        const oldVal = localStorage.getItem(`user_avatar_${user.id}`)
         if (oldVal) {
-          const extractedOld = extractObjectKeyFromMaybeUrl(oldVal, SUPABASE_BUCKET)
-          if (extractedOld) localStorage.setItem(newKey, extractedOld)
+          const extracted = extractObjectKeyFromMaybeUrl(oldVal, SUPABASE_BUCKET)
+          if (extracted) localStorage.setItem(newKey, extracted)
         }
       }
     }
   }, [profile, isAuthorized, user?.id])
 
-  // ✅ Buat signed URL avatar on-demand dari PATH
+
   useEffect(() => {
     if (!isAuthorized || activeSettingsMenu !== 'admin') return
     let cancelled = false
@@ -711,7 +697,7 @@ export default function APengaturan() {
     return () => { cancelled = true }
   }, [activeSettingsMenu, avatarPath, isAuthorized])
 
-  // ✅ Buat signed URL logo on-demand dari PATH (form.logo_url)
+
   useEffect(() => {
     if (!isAuthorized || activeSettingsMenu !== 'identity') return
     let cancelled = false
@@ -792,7 +778,6 @@ export default function APengaturan() {
         if (!isCancelled && data) {
           setSettingsId(data.id)
 
-          // ✅ Support data lama: kalau logo_url masih URL, extract jadi PATH
           const logoPath = extractObjectKeyFromMaybeUrl(data.logo_url || '', SUPABASE_BUCKET)
 
           setForm((prev) => ({
@@ -801,7 +786,7 @@ export default function APengaturan() {
             email: data.email || '',
             telepon: data.telepon || '',
             alamat: data.alamat || '',
-            logo_url: logoPath || '', // ✅ SIMPAN PATH di state (dan nanti DB)
+            logo_url: logoPath || '',
             visi: data.visi || '',
             misi: data.misi || '',
             link_instagram: data.link_instagram || '',
@@ -826,8 +811,6 @@ export default function APengaturan() {
       } finally {
         if (!isCancelled) {
           setLoading(false)
-          // Mark initial load complete after a short delay so auto-save
-          // does not fire from the form state change that loadSettings triggers.
           setTimeout(() => { initialLoadDoneRef.current = true }, 1000)
         }
       }
@@ -933,12 +916,7 @@ export default function APengaturan() {
           const row = payload.new
           if (!row) return
 
-          // Guard: skip form overwrite while user is still typing
-          // (auto-save timer is pending). This prevents a loop where
-          // realtime echo resets the form mid-edit.
           if (autoSaveTimerRef.current) return
-
-          // Guard: skip self-echo — the realtime event is from our own save
           const rowUpdatedAt = String(row.updated_at || '')
           if (lastSaveTimestampRef.current && rowUpdatedAt === lastSaveTimestampRef.current) return
 
@@ -1358,7 +1336,6 @@ export default function APengaturan() {
         return
       }
 
-      // ✅ logo_url adalah PATH, bukan URL
       const dataToSave = {
         nama_sekolah: sanitizeText(form.nama_sekolah),
         email: sanitizeText(form.email),
@@ -1378,7 +1355,6 @@ export default function APengaturan() {
         updated_at: new Date().toISOString()
       }
 
-      // Track our own save timestamp so the realtime handler can skip self-echo
       lastSaveTimestampRef.current = dataToSave.updated_at
 
       const { error } = await supabase
@@ -1404,7 +1380,7 @@ export default function APengaturan() {
     try {
       const compressedFile = await compressImage(selectedLogoFile, 300)
 
-      // (Opsional) hapus file lama, upsert sebenarnya sudah cukup
+
       await supabase.storage.from(SUPABASE_BUCKET).remove([TENANT_LOGO_FILE_PATH])
 
       const { error: uploadError } = await supabase.storage
@@ -1417,7 +1393,6 @@ export default function APengaturan() {
 
       if (uploadError) throw uploadError
 
-      // ✅ DB simpan PATH saja
       const newLogoPath = TENANT_LOGO_FILE_PATH
       setForm((prev) => ({ ...prev, logo_url: newLogoPath }))
 
@@ -1435,7 +1410,6 @@ export default function APengaturan() {
         queryClient.invalidateQueries({ queryKey: SETTINGS_QUERY_KEY })
       }
 
-      // ✅ refresh signed URL untuk preview
       const signed = await createSignedUrlSafe(SUPABASE_BUCKET, newLogoPath)
       setLogoSignedUrl(signed)
 
@@ -1455,7 +1429,6 @@ export default function APengaturan() {
     try {
       const compressedFile = await compressImage(file, 300)
 
-      // ✅ ObjectKey sulit ditebak (anti-guessing)
       const randomId = makeRandomId()
       const path = `profiles/${user.id}/${randomId}.jpg`
 
@@ -1465,7 +1438,6 @@ export default function APengaturan() {
 
       if (uploadError) throw uploadError
 
-      // ✅ DB simpan PATH saja, bukan signed URL
       setAvatarPath(path)
 
       let { error: updateError } = await supabase
@@ -1487,14 +1459,12 @@ export default function APengaturan() {
           .eq('id', user.id))
       }
 
-      // ✅ Simpan PATH ke localStorage (fallback)
       if (typeof window !== 'undefined') {
         localStorage.setItem(`user_avatar_path_${user.id}`, path)
       }
 
       if (updateError) throw updateError
 
-      // ✅ refresh signed URL untuk UI
       const signed = await createSignedUrlSafe(SUPABASE_BUCKET, path)
       setAvatarSignedUrl(signed)
       await refreshProfile?.()
@@ -1649,16 +1619,14 @@ export default function APengaturan() {
     }
   }
 
-  // ✅ Fallback PATH: localStorage -> profile -> state
   const localStorageAvatarPath =
     typeof window !== 'undefined' && user?.id
       ? localStorage.getItem(`user_avatar_path_${user.id}`) ||
-      extractObjectKeyFromMaybeUrl(localStorage.getItem(`user_avatar_${user.id}`) || '', SUPABASE_BUCKET) // support legacy
+        extractObjectKeyFromMaybeUrl(localStorage.getItem(`user_avatar_${user.id}`) || '', SUPABASE_BUCKET)
       : null
 
   const fallbackAvatarPath = avatarPath || localStorageAvatarPath || extractObjectKeyFromMaybeUrl(profile?.photo_url || '', SUPABASE_BUCKET) || ''
 
-  // kalau avatarSignedUrl belum kebentuk tapi path ada, coba generate sekali (tanpa bikin loop)
   useEffect(() => {
     if (!isAuthorized || activeSettingsMenu !== 'admin') return
     if (avatarSignedUrl) return
@@ -1878,30 +1846,31 @@ export default function APengaturan() {
         </div>
 
         {!isStandaloneSettingsMenu && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-          <div className="flex gap-2 overflow-x-auto pb-1">
+        <div className="rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+          <div className="flex gap-1.5 overflow-x-auto">
             {settingsVisibleMenuItems.map((item) => {
               const Icon = item.icon
               const isActive = activeSettingsMenu === item.id
-
               return (
                 <button
                   key={item.id}
                   type="button"
                   onClick={() => handleSettingsMenuChange(item.id)}
                   aria-pressed={isActive}
-                  className={`flex min-w-[190px] items-start gap-3 rounded-xl border px-4 py-3 text-left transition-all ${isActive
+                  className={`flex shrink-0 items-center gap-2.5 rounded-xl border px-4 py-2.5 text-left transition-all ${
+                    isActive
                       ? 'border-blue-200 bg-blue-50 text-blue-700 shadow-sm'
-                      : 'border-transparent bg-white text-slate-600 hover:border-slate-200 hover:bg-slate-50'
-                    }`}
+                      : 'border-transparent text-slate-600 hover:border-slate-200 hover:bg-slate-50'
+                  }`}
                 >
-                  <span className={`mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${isActive ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'
-                    }`}>
+                  <span className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors ${
+                    isActive ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'
+                  }`}>
                     <Icon className="h-4 w-4" />
                   </span>
                   <span className="min-w-0">
-                    <span className="block text-sm font-bold">{item.label}</span>
-                    <span className="mt-0.5 block text-xs leading-4 text-slate-500">{item.description}</span>
+                    <span className="block text-sm font-semibold">{item.label}</span>
+                    <span className="block text-[11px] leading-4 text-slate-500">{item.description}</span>
                   </span>
                 </button>
               )
@@ -1911,14 +1880,18 @@ export default function APengaturan() {
         )}
 
         {!isStandaloneSettingsMenu && (
-        <div className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
-          <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
-            <ActiveSettingsIcon className="h-5 w-5" />
+        <div className="flex items-center gap-3 rounded-2xl border border-slate-100 bg-gradient-to-r from-blue-50/60 to-white px-5 py-3 shadow-sm">
+          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm">
+            <ActiveSettingsIcon className="h-4 w-4" />
           </span>
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">Sub Menu Aktif</p>
-            <h2 className="mt-1 text-lg font-bold text-slate-900">{activeSettings.label}</h2>
-            <p className="mt-1 text-sm text-slate-500">{activeSettings.description}</p>
+          <div className="flex min-w-0 flex-1 items-center justify-between gap-4">
+            <div>
+              <h2 className="text-base font-bold text-slate-900">{activeSettings.label}</h2>
+              <p className="text-xs text-slate-500">{activeSettings.description}</p>
+            </div>
+            <span className="hidden rounded-full border border-blue-200 bg-white px-3 py-1 text-xs font-semibold text-blue-600 sm:inline-block">
+              Aktif
+            </span>
           </div>
         </div>
         )}
@@ -2215,7 +2188,6 @@ export default function APengaturan() {
           <div className={settingsContentClass}>
             {showSettingsMainColumn && (
             <div className={settingsMainColumnClass}>
-              {/* ====== Identitas Sekolah ====== */}
               {activeSettingsMenu === 'identity' && (
               <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
                 <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center space-x-2">
@@ -2302,9 +2274,8 @@ export default function APengaturan() {
                     </div>
                   </div>
 
-                  {/* ===== Media Sosial ===== */}
                   <div className="border-t pt-6">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center space-x-2">
+                    <h3 className="mb-4 flex items-center gap-2 text-base font-semibold text-gray-900">
                       <span>📱</span>
                       <span>Media Sosial Sekolah</span>
                     </h3>
@@ -2410,7 +2381,6 @@ export default function APengaturan() {
               </div>
               )}
 
-              {/* ====== Google Drive Sekolah ====== */}
               {activeSettingsMenu === 'drive' && (
               <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
                 <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -2821,10 +2791,8 @@ export default function APengaturan() {
             </div>
             )}
 
-            {/* ====== Sidebar ====== */}
             {showSettingsSidebarColumn && (
             <div className="space-y-6">
-              {/* Profil Admin */}
               {activeSettingsMenu === 'admin' && (
               <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
                 <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center space-x-2">
@@ -2941,40 +2909,55 @@ export default function APengaturan() {
               </div>
               )}
 
-              {/* Logo Sekolah */}
               {activeSettingsMenu === 'identity' && (
-              <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
-                <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center space-x-2">
-                  <span>🏫</span>
-                  <span>Logo Sekolah</span>
-                </h2>
+              <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-lg">
+                <div className="mb-4 flex items-center gap-2">
+                  <School className="h-5 w-5 text-blue-600" />
+                  <h2 className="text-base font-bold text-slate-900">Logo / Foto Sekolah</h2>
+                </div>
 
-                <div className="flex justify-center mb-4">
+                <div className="mb-4 overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
                   {logoSignedUrl ? (
-                    <div className="relative">
+                    <div className="relative aspect-video">
                       <img
                         src={logoSignedUrl}
                         alt="Logo Sekolah"
-                        className="w-24 h-24 object-cover bg-gray-50 rounded-full p-1.5 border border-gray-200 transition-all duration-200 hover:shadow-md"
+                        className="h-full w-full object-contain p-4 transition-all duration-200"
                       />
                       {uploadingLogo && (
-                        <div className="absolute inset-0 bg-black bg-opacity-50 rounded-full flex items-center justify-center">
-                          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white"></div>
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+                          <div className="h-8 w-8 animate-spin rounded-full border-2 border-white border-t-transparent" />
                         </div>
                       )}
                     </div>
                   ) : (
-                    <div className="w-24 h-24 flex items-center justify-center bg-gray-50 rounded-full border-2 border-dashed border-gray-300 text-gray-400 transition-all duration-200 hover:border-gray-400">
-                      <div className="text-center">
-                        <div className="text-lg">🏫</div>
-                        <div className="text-xs mt-1">Belum ada logo</div>
-                      </div>
+                    <div className="flex aspect-video flex-col items-center justify-center gap-2 text-slate-400">
+                      <School className="h-10 w-10 opacity-30" />
+                      <p className="text-xs font-medium">Belum ada logo</p>
                     </div>
                   )}
                 </div>
 
+                {selectedLogoFile && (
+                  <div className="mb-3 flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
+                    <span className="min-w-0 flex-1 truncate text-xs font-semibold text-blue-800">
+                      {selectedLogoFile.name}
+                    </span>
+                    <span className="shrink-0 text-[11px] text-blue-600">
+                      {(selectedLogoFile.size / 1024).toFixed(0)} KB
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedLogoFile(null)}
+                      className="shrink-0 text-lg leading-none text-blue-400 hover:text-blue-700"
+                    >
+                      x
+                    </button>
+                  </div>
+                )}
+
                 <FileDropzone
-                  label="Pilih file logo"
+                  label="Pilih atau seret gambar logo"
                   onFileSelected={setSelectedLogoFile}
                   accept={{ 'image/*': ['.png', '.jpg', '.jpeg'] }}
                   className="text-sm"
@@ -2983,25 +2966,20 @@ export default function APengaturan() {
                 <button
                   onClick={handleLogoUpload}
                   disabled={!selectedLogoFile || uploadingLogo}
-                  className="w-full mt-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white py-2 px-4 rounded-lg hover:from-blue-700 hover:to-blue-800 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm flex items-center justify-center space-x-2"
+                  className="mt-3 w-full rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {uploadingLogo ? (
-                    <>
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                      <span>Mengupload...</span>
-                    </>
-                  ) : (
-                    <>
-                      <span>📤</span>
-                      <span>Upload Logo</span>
-                    </>
-                  )}
+                    <span className="flex items-center justify-center gap-2">
+                      <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                      Mengupload...
+                    </span>
+                  ) : 'Upload Logo'}
                 </button>
-                <p className="text-xs text-gray-500 text-center mt-2">Gambar akan dikompresi maksimal 300KB</p>
+                <p className="mt-2 text-center text-[11px] text-slate-500">PNG / JPG dikompres maks 300 KB</p>
               </div>
               )}
 
-              {/* Preview Visi & Misi */}
+
               {activeSettingsMenu === 'identity' && (
               <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
                 <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center space-x-2">
@@ -3035,11 +3013,10 @@ export default function APengaturan() {
               </div>
               )}
 
-              {/* Save */}
               {activeSettingsMenu === 'identity' && (
               <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
                 <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4 transition-all duration-200">
-                  <p className="text-sm text-green-700 text-center">✅ Semua pengaturan tersimpan otomatis & bisa disinkron realtime</p>
+                  <p className="text-sm text-green-700 text-center">Semua pengaturan tersimpan otomatis &amp; bisa disinkron realtime</p>
                 </div>
 
                 <button
@@ -3064,7 +3041,6 @@ export default function APengaturan() {
               </div>
               )}
 
-              {/* ====== Pengaturan Registrasi ====== */}
               {activeSettingsMenu === 'registration' && (
               <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
                 <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center space-x-2">
