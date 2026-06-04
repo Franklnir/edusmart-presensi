@@ -43,6 +43,9 @@ services:
 
   backend:
     environment:
+      RFID_RATE_LIMIT_PER_MINUTE: ${RFID_RATE_LIMIT_PER_MINUTE:-3000}
+      RFID_DEVICE_EVENT_LOG_ENABLED: ${RFID_DEVICE_EVENT_LOG_ENABLED:-false}
+      RFID_MQTT_MODE_PUBLISH_AFTER_SCAN_THROTTLE_SECONDS: ${RFID_MQTT_MODE_PUBLISH_AFTER_SCAN_THROTTLE_SECONDS:-10}
       PHP_FPM_PM: dynamic
       PHP_FPM_PM_MAX_CHILDREN: ${PHP_FPM_PM_MAX_CHILDREN:-64}
       PHP_FPM_PM_START_SERVERS: ${PHP_FPM_PM_START_SERVERS:-12}
@@ -60,6 +63,14 @@ services:
     mem_limit: 3g
     cpus: "3.00"
     pids_limit: 1024
+
+  rfid_bridge:
+    environment:
+      RFID_DEVICE_EVENT_LOG_ENABLED: ${RFID_DEVICE_EVENT_LOG_ENABLED:-false}
+      RFID_MQTT_MODE_PUBLISH_AFTER_SCAN_THROTTLE_SECONDS: ${RFID_MQTT_MODE_PUBLISH_AFTER_SCAN_THROTTLE_SECONDS:-10}
+    mem_limit: 1g
+    cpus: "1.00"
+    pids_limit: 256
 
   scheduler:
     mem_limit: 512m

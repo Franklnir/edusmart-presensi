@@ -4,12 +4,17 @@ namespace App\Services\Rfid;
 
 use App\Services\WhatsApp\WhatsAppNotificationService;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 class RfidScanService
 {
+    private static array $tenantCache = [];
+
+    private static ?array $rfidSettingsSchema = null;
+
     public function __construct(
         private readonly WhatsAppNotificationService $whatsAppNotificationService
     ) {}
@@ -175,17 +180,15 @@ class RfidScanService
             ]);
         }
 
-        $settingsColumns = [
+        $settingsColumns = array_values(array_filter([
             'scan_manual_enabled',
             'manual_jam_masuk_mulai',
             'manual_jam_masuk_selesai',
             'manual_jam_pulang_mulai',
             'manual_jam_pulang_selesai',
             'rfid_mode',
-        ];
-        if (Schema::hasColumn('settings', 'scan_always_active')) {
-            $settingsColumns[] = 'scan_always_active';
-        }
+            $this->settingsHasColumn('scan_always_active') ? 'scan_always_active' : null,
+        ]));
 
         $settings = DB::table('settings')
             ->where('tenant_id', $tenant->id)
@@ -253,19 +256,22 @@ class RfidScanService
     private function ensureRfidAlwaysActive(string $tenantId): void
     {
         try {
-            if (
-                ! Schema::hasTable('absensi_rfid_settings') ||
-                ! Schema::hasColumn('absensi_rfid_settings', 'rfid_aktif')
-            ) {
+            $cacheKey = 'rfid:always-active:'.$tenantId;
+            if ($this->shouldUseRuntimeCache() && Cache::get($cacheKey) === true) {
                 return;
             }
 
-            $hasTenant = Schema::hasColumn('absensi_rfid_settings', 'tenant_id');
-            $hasId = Schema::hasColumn('absensi_rfid_settings', 'id');
-            $hasCreatedAt = Schema::hasColumn('absensi_rfid_settings', 'created_at');
-            $hasUpdatedAt = Schema::hasColumn('absensi_rfid_settings', 'updated_at');
-            $hasMulai = Schema::hasColumn('absensi_rfid_settings', 'rfid_mulai');
-            $hasSelesai = Schema::hasColumn('absensi_rfid_settings', 'rfid_selesai');
+            $schema = $this->rfidSettingsSchema();
+            if (! ($schema['has_table'] ?? false) || ! ($schema['rfid_aktif'] ?? false)) {
+                return;
+            }
+
+            $hasTenant = (bool) ($schema['tenant_id'] ?? false);
+            $hasId = (bool) ($schema['id'] ?? false);
+            $hasCreatedAt = (bool) ($schema['created_at'] ?? false);
+            $hasUpdatedAt = (bool) ($schema['updated_at'] ?? false);
+            $hasMulai = (bool) ($schema['rfid_mulai'] ?? false);
+            $hasSelesai = (bool) ($schema['rfid_selesai'] ?? false);
 
             $payload = ['rfid_aktif' => true];
             if ($hasMulai) {
@@ -289,8 +295,25 @@ class RfidScanService
                 $query->orderBy('id');
             }
 
-            $row = $query->first($hasId ? ['id'] : ['*']);
+            $select = array_values(array_filter([
+                $hasId ? 'id' : null,
+                'rfid_aktif',
+                $hasMulai ? 'rfid_mulai' : null,
+                $hasSelesai ? 'rfid_selesai' : null,
+            ]));
+
+            $row = $query->first(! empty($select) ? $select : ['*']);
             if ($row) {
+                $alreadyReady = (bool) ($row->rfid_aktif ?? false)
+                    && (! $hasMulai || ($row->rfid_mulai ?? null) === null)
+                    && (! $hasSelesai || ($row->rfid_selesai ?? null) === null);
+
+                if ($alreadyReady) {
+                    $this->putRuntimeCache($cacheKey, true, $this->performanceTtl('always_active_cache_ttl_seconds', 600));
+
+                    return;
+                }
+
                 $updateQuery = DB::table('absensi_rfid_settings');
                 if ($hasId) {
                     $updateQuery->where('id', $row->id);
@@ -299,6 +322,7 @@ class RfidScanService
                     $updateQuery->where('tenant_id', $tenantId);
                 }
                 $updateQuery->update($payload);
+                $this->putRuntimeCache($cacheKey, true, $this->performanceTtl('always_active_cache_ttl_seconds', 600));
 
                 return;
             }
@@ -314,6 +338,7 @@ class RfidScanService
             }
 
             DB::table('absensi_rfid_settings')->insert($payload);
+            $this->putRuntimeCache($cacheKey, true, $this->performanceTtl('always_active_cache_ttl_seconds', 600));
         } catch (\Throwable $e) {
             // RFID tetap diproses oleh fungsi utama; sinkronisasi flag lama bersifat best-effort.
         }
@@ -326,9 +351,73 @@ class RfidScanService
             return null;
         }
 
-        return DB::table('tenants')
-            ->whereRaw('lower(slug) = ?', [Str::lower($tenantSlug)])
-            ->first();
+        $normalized = Str::lower($tenantSlug);
+        if ($this->shouldUseRuntimeCache() && array_key_exists($normalized, self::$tenantCache)) {
+            return self::$tenantCache[$normalized];
+        }
+
+        $tenantQuery = fn () => DB::table('tenants')
+            ->whereRaw('lower(slug) = ?', [$normalized])
+            ->first(['id', 'slug', 'status']);
+
+        $tenant = $this->shouldUseRuntimeCache()
+            ? Cache::remember('rfid:tenant:'.$normalized, $this->performanceTtl('tenant_cache_ttl_seconds', 300), $tenantQuery)
+            : $tenantQuery();
+
+        self::$tenantCache[$normalized] = $tenant ?: null;
+
+        return self::$tenantCache[$normalized];
+    }
+
+    private function settingsHasColumn(string $column): bool
+    {
+        static $columns = null;
+
+        if ($columns === null) {
+            $columns = [];
+            foreach (['scan_always_active'] as $candidate) {
+                $columns[$candidate] = Schema::hasColumn('settings', $candidate);
+            }
+        }
+
+        return (bool) ($columns[$column] ?? false);
+    }
+
+    private function rfidSettingsSchema(): array
+    {
+        if (self::$rfidSettingsSchema !== null) {
+            return self::$rfidSettingsSchema;
+        }
+
+        $hasTable = Schema::hasTable('absensi_rfid_settings');
+        $columns = [
+            'has_table' => $hasTable,
+        ];
+
+        foreach (['id', 'tenant_id', 'rfid_aktif', 'rfid_mulai', 'rfid_selesai', 'created_at', 'updated_at'] as $column) {
+            $columns[$column] = $hasTable && Schema::hasColumn('absensi_rfid_settings', $column);
+        }
+
+        self::$rfidSettingsSchema = $columns;
+
+        return self::$rfidSettingsSchema;
+    }
+
+    private function performanceTtl(string $key, int $default): int
+    {
+        return max(1, (int) config('rfid.performance.'.$key, $default));
+    }
+
+    private function shouldUseRuntimeCache(): bool
+    {
+        return ! app()->runningUnitTests();
+    }
+
+    private function putRuntimeCache(string $key, mixed $value, int $ttl): void
+    {
+        if ($this->shouldUseRuntimeCache()) {
+            Cache::put($key, $value, $ttl);
+        }
     }
 
     private function normalizeCardUid(string $raw): string

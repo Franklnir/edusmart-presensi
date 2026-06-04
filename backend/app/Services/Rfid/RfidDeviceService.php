@@ -3,6 +3,7 @@
 namespace App\Services\Rfid;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -10,6 +11,8 @@ use Illuminate\Support\Str;
 
 class RfidDeviceService
 {
+    private static array $deviceContextCache = [];
+
     public function authenticateRequest(Request $request): array
     {
         $deviceId = $this->extractDeviceId($request);
@@ -26,7 +29,17 @@ class RfidDeviceService
             }
 
             $secretHash = trim((string) ($device->secret_hash ?? ''));
-            if ($secretHash === '' || ! Hash::check($providedSecret, $secretHash)) {
+            $authCacheKey = $this->deviceAuthCacheKey((string) $device->id, $secretHash, $providedSecret);
+            $secretValid = $authCacheKey !== null && $this->shouldUseRuntimeCache() && Cache::get($authCacheKey) === true;
+
+            if (! $secretValid && $secretHash !== '' && Hash::check($providedSecret, $secretHash)) {
+                $secretValid = true;
+                if ($authCacheKey !== null && $this->shouldUseRuntimeCache()) {
+                    Cache::put($authCacheKey, true, $this->performanceTtl('device_auth_cache_ttl_seconds', 300));
+                }
+            }
+
+            if (! $secretValid) {
                 return $this->authError(401, 'invalid_device_secret', 'Secret device RFID tidak valid');
             }
 
@@ -117,6 +130,7 @@ class RfidDeviceService
             'created_at' => now(),
             'updated_at' => now(),
         ]);
+        $this->forgetDeviceContext($deviceId);
 
         return [
             'success' => true,
@@ -136,9 +150,14 @@ class RfidDeviceService
             return null;
         }
 
-        return DB::table('rfid_devices as devices')
+        $normalized = Str::lower($deviceId);
+        if ($this->shouldUseRuntimeCache() && array_key_exists($normalized, self::$deviceContextCache)) {
+            return self::$deviceContextCache[$normalized];
+        }
+
+        $deviceQuery = fn () => DB::table('rfid_devices as devices')
             ->leftJoin('tenants as tenants', 'tenants.id', '=', 'devices.tenant_id')
-            ->whereRaw('lower(devices.device_id) = ?', [Str::lower($deviceId)])
+            ->whereRaw('lower(devices.device_id) = ?', [$normalized])
             ->first([
                 'devices.id',
                 'devices.tenant_id',
@@ -155,6 +174,14 @@ class RfidDeviceService
                 'tenants.slug as tenant_slug',
                 'tenants.status as tenant_status',
             ]);
+
+        $device = $this->shouldUseRuntimeCache()
+            ? Cache::remember('rfid:device-context:'.$normalized, $this->performanceTtl('device_cache_ttl_seconds', 60), $deviceQuery)
+            : $deviceQuery();
+
+        self::$deviceContextCache[$normalized] = $device ?: null;
+
+        return self::$deviceContextCache[$normalized];
     }
 
     public function resolveRegisteredTenantSlug(string $deviceId): string
@@ -231,6 +258,7 @@ class RfidDeviceService
                     : null,
                 'updated_at' => now(),
             ]);
+        $this->forgetDeviceContext((string) $device->device_id);
 
         return [
             'success' => true,
@@ -285,6 +313,7 @@ class RfidDeviceService
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);
+            $this->forgetDeviceContext($deviceId);
         } elseif ($plainSecret === null) {
             $plainSecret = Str::random(40);
             $metadata = $this->buildTemplateMetadata($metadata, $tenantSlug, $plainSecret);
@@ -299,6 +328,7 @@ class RfidDeviceService
                     'metadata' => json_encode($metadata, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
                     'updated_at' => now(),
                 ]);
+            $this->forgetDeviceContext($deviceId);
         } else {
             $metadata = $this->mergeMetadata($metadata, [
                 'template_transport' => 'mqtt',
@@ -314,6 +344,7 @@ class RfidDeviceService
                     'metadata' => json_encode($metadata, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
                     'updated_at' => now(),
                 ]);
+            $this->forgetDeviceContext($deviceId);
         }
 
         return [
@@ -328,6 +359,16 @@ class RfidDeviceService
 
     public function touchDeviceSeen(string $deviceId, string $transport, ?string $ipAddress = null, array $metadata = []): void
     {
+        $normalizedDeviceId = Str::lower(trim($deviceId));
+        if ($normalizedDeviceId === '') {
+            return;
+        }
+
+        $seenCacheKey = 'rfid:device-seen:'.$normalizedDeviceId.':'.Str::lower($this->normalizeTransport($transport));
+        if ($this->shouldUseRuntimeCache() && ! Cache::add($seenCacheKey, true, $this->performanceTtl('device_seen_throttle_seconds', 30))) {
+            return;
+        }
+
         $device = $this->findDeviceContext($deviceId);
         if (! $device) {
             return;
@@ -349,6 +390,39 @@ class RfidDeviceService
                     : null,
                 'updated_at' => now(),
             ]);
+
+        Cache::forget('rfid:device-context:'.$normalizedDeviceId);
+        unset(self::$deviceContextCache[$normalizedDeviceId]);
+    }
+
+    private function forgetDeviceContext(string $deviceId): void
+    {
+        $normalized = Str::lower(trim($deviceId));
+        if ($normalized === '') {
+            return;
+        }
+
+        Cache::forget('rfid:device-context:'.$normalized);
+        unset(self::$deviceContextCache[$normalized]);
+    }
+
+    private function deviceAuthCacheKey(string $deviceId, string $secretHash, string $providedSecret): ?string
+    {
+        if ($deviceId === '' || $secretHash === '' || $providedSecret === '') {
+            return null;
+        }
+
+        return 'rfid:device-auth:'.hash('sha256', $deviceId.'|'.$secretHash.'|'.$providedSecret);
+    }
+
+    private function performanceTtl(string $key, int $default): int
+    {
+        return max(1, (int) config('rfid.performance.'.$key, $default));
+    }
+
+    private function shouldUseRuntimeCache(): bool
+    {
+        return ! app()->runningUnitTests();
     }
 
     private function validateSharedKey(Request $request): array

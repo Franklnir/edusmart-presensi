@@ -4,6 +4,7 @@ namespace App\Services\Rfid;
 
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -28,8 +29,22 @@ class RfidIngressService
         $tenantId = $this->resolveTenantId($tenantSlug);
 
         if ($eventId !== '') {
+            $eventCacheKey = $this->eventCacheKey($tenantId, $deviceId, $eventId);
+            if ($eventCacheKey !== null && $this->shouldUseEventCache() && Cache::get($eventCacheKey) === true) {
+                return $this->duplicateEventResult((object) [
+                    'event_id' => $eventId,
+                    'device_id' => $deviceId,
+                    'response_code' => 200,
+                    'response_payload' => null,
+                ]);
+            }
+
             $existing = $this->findExistingEvent($tenantId, $deviceId, $eventId);
             if ($existing) {
+                if ($eventCacheKey !== null && $this->shouldUseEventCache()) {
+                    Cache::put($eventCacheKey, true, $this->eventCacheTtl());
+                }
+
                 return $this->duplicateEventResult($existing);
             }
         }
@@ -55,6 +70,13 @@ class RfidIngressService
         $result = $this->rfidScanService->processScanByTenantSlug($tenantSlug, $cardUid, $deviceId, $mode);
 
         $this->finishEventRecord($eventRowId, $result);
+
+        if ($eventId !== '' && (int) ($result['status'] ?? 500) < 500) {
+            $eventCacheKey = $this->eventCacheKey($tenantId, $deviceId, $eventId);
+            if ($eventCacheKey !== null && $this->shouldUseEventCache()) {
+                Cache::put($eventCacheKey, true, $this->eventCacheTtl());
+            }
+        }
 
         return $result;
     }
@@ -174,6 +196,10 @@ class RfidIngressService
         ?string $scannedAt,
         ?array $payload
     ): ?int {
+        if (! $this->shouldPersistDeviceEvents()) {
+            return null;
+        }
+
         try {
             return DB::table('rfid_device_events')->insertGetId([
                 'tenant_id' => $tenantId,
@@ -227,6 +253,10 @@ class RfidIngressService
 
     private function findExistingEvent(?string $tenantId, string $deviceId, string $eventId): ?object
     {
+        if (! $this->shouldPersistDeviceEvents()) {
+            return null;
+        }
+
         $query = DB::table('rfid_device_events')
             ->whereRaw('lower(device_id) = ?', [Str::lower($deviceId)])
             ->where('event_id', $eventId);
@@ -255,6 +285,35 @@ class RfidIngressService
         } catch (\Throwable $e) {
             return null;
         }
+    }
+
+    private function eventCacheKey(?string $tenantId, string $deviceId, string $eventId): ?string
+    {
+        $eventId = trim($eventId);
+        if ($eventId === '') {
+            return null;
+        }
+
+        return 'rfid:event:'.hash('sha256', implode('|', [
+            trim((string) ($tenantId ?? '')),
+            Str::lower(trim($deviceId)),
+            $eventId,
+        ]));
+    }
+
+    private function eventCacheTtl(): int
+    {
+        return max(60, (int) config('rfid.performance.device_event_cache_ttl_seconds', 3600));
+    }
+
+    private function shouldPersistDeviceEvents(): bool
+    {
+        return (bool) config('rfid.performance.device_event_log_enabled', true);
+    }
+
+    private function shouldUseEventCache(): bool
+    {
+        return ! app()->runningUnitTests();
     }
 
     private function duplicateEventResult(object $row): array

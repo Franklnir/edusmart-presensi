@@ -4,6 +4,17 @@ return [
     'shared_key' => env('RFID_SCAN_SHARED_KEY'),
     'allow_open_http' => filter_var(env('RFID_ALLOW_OPEN_HTTP', env('APP_ENV') !== 'production'), FILTER_VALIDATE_BOOL),
 
+    'performance' => [
+        'tenant_cache_ttl_seconds' => (int) env('RFID_TENANT_CACHE_TTL_SECONDS', 300),
+        'device_cache_ttl_seconds' => (int) env('RFID_DEVICE_CACHE_TTL_SECONDS', 60),
+        'device_auth_cache_ttl_seconds' => (int) env('RFID_DEVICE_AUTH_CACHE_TTL_SECONDS', 300),
+        'device_seen_throttle_seconds' => (int) env('RFID_DEVICE_SEEN_THROTTLE_SECONDS', 30),
+        'always_active_cache_ttl_seconds' => (int) env('RFID_ALWAYS_ACTIVE_CACHE_TTL_SECONDS', 600),
+        'mqtt_mode_publish_after_scan_throttle_seconds' => (int) env('RFID_MQTT_MODE_PUBLISH_AFTER_SCAN_THROTTLE_SECONDS', 5),
+        'device_event_log_enabled' => filter_var(env('RFID_DEVICE_EVENT_LOG_ENABLED', true), FILTER_VALIDATE_BOOL),
+        'device_event_cache_ttl_seconds' => (int) env('RFID_DEVICE_EVENT_CACHE_TTL_SECONDS', 3600),
+    ],
+
     'mqtt' => [
         'enabled' => filter_var(env('RFID_MQTT_BRIDGE_ENABLED', false), FILTER_VALIDATE_BOOL),
         'host' => env('RFID_MQTT_HOST', ''),

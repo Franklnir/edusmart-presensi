@@ -9,6 +9,8 @@ use PhpMqtt\Client\MqttClient;
 
 class MqttBridgeService
 {
+    private array $modePublishAfterScanAt = [];
+
     public function __construct(
         private readonly RfidScanService $rfidScanService,
         private readonly RfidIngressService $rfidIngressService,
@@ -317,15 +319,7 @@ class MqttBridgeService
             false
         );
 
-        $modeResult = $this->rfidScanService->modeByTenantSlug($tenantSlug);
-        if ((int) ($modeResult['status'] ?? 500) === 200 && is_array($modeResult['data'] ?? null)) {
-            $modeTopic = $this->renderTopicTemplate(
-                (string) ($cfg['mode_topic_template'] ?? 'edusmart/{tenant}/rfid/mode'),
-                $tenantSlug
-            );
-            $mode = (string) ($modeResult['data']['mode'] ?? 'auto');
-            $client->publish($modeTopic, $mode, $qos, true);
-        }
+        $this->publishTenantModeAfterScan($client, $cfg, $tenantSlug, $qos);
     }
 
     private function publishTenantModes(
@@ -337,19 +331,53 @@ class MqttBridgeService
     ): void {
         $tenants = $this->resolveModeTenants($forcedTenants);
         foreach ($tenants as $tenantSlug) {
-            $result = $this->rfidScanService->modeByTenantSlug($tenantSlug);
-            if ((int) ($result['status'] ?? 500) !== 200) {
-                continue;
-            }
+            $this->publishTenantMode($client, $cfg, $tenantSlug, $qos, $log);
+        }
+    }
 
-            $mode = (string) (($result['data']['mode'] ?? 'auto'));
-            $modeTopic = $this->renderTopicTemplate(
-                (string) ($cfg['mode_topic_template'] ?? 'edusmart/{tenant}/rfid/mode'),
-                $tenantSlug
-            );
-            $client->publish($modeTopic, $mode, $qos, true);
+    private function publishTenantModeAfterScan(MqttClient $client, array $cfg, string $tenantSlug, int $qos): void
+    {
+        $throttleSeconds = max(0, (int) config('rfid.performance.mqtt_mode_publish_after_scan_throttle_seconds', 5));
+        $cacheKey = $this->contextKey($cfg).'|mode-after-scan|'.$tenantSlug;
+        $now = microtime(true);
+
+        if (
+            $throttleSeconds > 0
+            && isset($this->modePublishAfterScanAt[$cacheKey])
+            && ($now - $this->modePublishAfterScanAt[$cacheKey]) < $throttleSeconds
+        ) {
+            return;
+        }
+
+        if ($this->publishTenantMode($client, $cfg, $tenantSlug, $qos)) {
+            $this->modePublishAfterScanAt[$cacheKey] = $now;
+        }
+    }
+
+    private function publishTenantMode(
+        MqttClient $client,
+        array $cfg,
+        string $tenantSlug,
+        int $qos,
+        ?callable $log = null
+    ): bool {
+        $result = $this->rfidScanService->modeByTenantSlug($tenantSlug);
+        if ((int) ($result['status'] ?? 500) !== 200 || ! is_array($result['data'] ?? null)) {
+            return false;
+        }
+
+        $mode = (string) (($result['data']['mode'] ?? 'auto'));
+        $modeTopic = $this->renderTopicTemplate(
+            (string) ($cfg['mode_topic_template'] ?? 'edusmart/{tenant}/rfid/mode'),
+            $tenantSlug
+        );
+        $client->publish($modeTopic, $mode, $qos, true);
+
+        if ($log !== null) {
             $log('debug', sprintf('Publish mode [%s] => %s', $tenantSlug, $mode));
         }
+
+        return true;
     }
 
     private function resolveModeTenants(array $forcedTenants): array

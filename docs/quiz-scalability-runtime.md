@@ -17,6 +17,17 @@ QUIZ_WORKER_HEARTBEAT_MAX_AGE_SECONDS=150
 
 QUIZ_MONITOR_WARNING_QUEUE_SIZE=100
 QUIZ_MONITOR_CRITICAL_QUEUE_SIZE=500
+
+# RFID high-volume scan tuning.
+RFID_RATE_LIMIT_PER_MINUTE=3000
+RFID_TENANT_CACHE_TTL_SECONDS=300
+RFID_DEVICE_CACHE_TTL_SECONDS=60
+RFID_DEVICE_AUTH_CACHE_TTL_SECONDS=300
+RFID_DEVICE_SEEN_THROTTLE_SECONDS=30
+RFID_ALWAYS_ACTIVE_CACHE_TTL_SECONDS=600
+RFID_MQTT_MODE_PUBLISH_AFTER_SCAN_THROTTLE_SECONDS=5
+RFID_DEVICE_EVENT_LOG_ENABLED=true
+RFID_DEVICE_EVENT_CACHE_TTL_SECONDS=3600
 ```
 
 Cache konten quiz selalu tenant-scoped dan otomatis dihapus saat quiz, soal, atau opsi diubah. Jika Redis bermasalah, aplikasi kembali membaca database.
@@ -69,6 +80,8 @@ docker compose --env-file .env.production \
 
 Override ini meningkatkan koneksi PostgreSQL, memory Redis, PHP-FPM children, dan jumlah worker scoring. Angka tersebut adalah titik awal, bukan jaminan kapasitas. Tetap ukur CPU, RAM, queue backlog, koneksi database, dan p95 response time.
 
+Profil kapasitas tinggi juga menaikkan default `RFID_RATE_LIMIT_PER_MINUTE` menjadi `3000`, memperbesar resource `rfid_bridge`, mengurangi publish mode berulang setelah scan, dan mematikan log detail `rfid_device_events` secara default lewat `RFID_DEVICE_EVENT_LOG_ENABLED=false`. Jika RFID masuk dari satu gateway/MQTT bridge, rate limit rendah atau write log event berlebihan bisa menjadi bottleneck walaupun Mosquitto ringan.
+
 ## Load Test Staging
 
 Gunakan staging dengan akun siswa khusus. Siapkan satu token berbeda untuk setiap siswa virtual agar pengujian benar-benar mewakili 100-500 siswa, bukan satu siswa yang mengirim request berulang. Skrip menolak domain `*.sismu.biz.id` kecuali override production diisi secara sadar.
@@ -112,3 +125,27 @@ Naikkan bertahap: `100`, `250`, `500`, `750`, lalu `1000`. Jangan melompat langs
 - antrean `quiz-scoring` kembali turun setelah gelombang submit.
 
 Jalankan k6 dari mesin terpisah yang cukup kuat agar generator beban tidak menjadi bottleneck. Untuk 1.000 VU, gunakan runner dengan resource memadai atau beberapa runner terdistribusi.
+
+## Load Test RFID
+
+RFID MQTT lebih ringan di sisi alat dan transport karena pesan masuk lewat broker, tetapi backend tetap menulis ke PostgreSQL melalui fungsi `absensi_rfid_auto`. Gunakan staging dan kartu siswa pengujian.
+
+Untuk simulasi jalur Mosquitto asli, jalankan `rfid_bridge` dengan profile RFID. Untuk simulasi HTTP fallback, gunakan skrip berikut:
+
+```bash
+k6 run \
+  -e BASE_URL=https://staging.example.test \
+  -e TENANT_SLUG=sman3bogor \
+  -e RFID_SHARED_KEY=secret-staging \
+  -e RFID_CARD_UIDS="$(paste -sd, kartu-rfid-staging.txt)" \
+  -e STUDENTS=100 \
+  scripts/load-tests/rfid-scan.k6.js
+```
+
+Naikkan bertahap: `100`, `250`, `500`, `750`, lalu `1000`. Target awal:
+
+- error rate di bawah 2%;
+- p95 RFID di bawah 1,2 detik;
+- tidak ada lonjakan failed query di log backend;
+- CPU PostgreSQL tidak mentok terus-menerus;
+- tidak ada rate-limit RFID saat mode high-capacity dipakai.
