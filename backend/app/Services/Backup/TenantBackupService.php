@@ -106,8 +106,7 @@ class TenantBackupService
         ?Carbon $startAt = null,
         string $runKind = 'initial_monthly_snapshot',
         ?Carbon $serverTime = null
-    ): array
-    {
+    ): array {
         $month = $this->findAcademicMonth($tenantId, $monthKey);
         if (! $month) {
             throw new \RuntimeException('Bulan backup tidak berada dalam periode aktif sekolah.');
@@ -158,8 +157,7 @@ class TenantBackupService
         string $userId = 'system',
         bool $force = false,
         ?Carbon $runAt = null
-    ): array
-    {
+    ): array {
         $month = $this->findAcademicMonth($tenantId, $monthKey);
         if (! $month) {
             throw new \RuntimeException('Bulan backup tidak berada dalam periode aktif sekolah.');
