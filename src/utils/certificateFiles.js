@@ -5,6 +5,19 @@ const CERT_BUCKET_CANDIDATES = Array.from(new Set([CERT_BUCKET, LEGACY_CERT_BUCK
 const SIGNED_EXPIRES = 60 * 60 * 24 * 7
 
 const isHttpUrl = (value) => typeof value === 'string' && /^https?:\/\//i.test(value)
+const isSameOriginUrl = (value = '') => {
+  if (typeof window === 'undefined') return false
+  try {
+    return new URL(String(value || ''), window.location.origin).origin === window.location.origin
+  } catch {
+    return false
+  }
+}
+const fetchCredentialsForUrl = (value = '') => {
+  const raw = String(value || '')
+  if (!isHttpUrl(raw)) return 'same-origin'
+  return isSameOriginUrl(raw) ? 'same-origin' : 'omit'
+}
 
 const normalizePath = (value) => String(value || '').replace(/\\/g, '/').replace(/^\/+/, '').trim()
 
@@ -13,7 +26,7 @@ const canAccessSignedUrl = async (signedUrl) => {
   try {
     const response = await fetch(signedUrl, {
       method: 'HEAD',
-      credentials: 'omit'
+      credentials: fetchCredentialsForUrl(signedUrl)
     })
     return response.ok
   } catch {
@@ -22,16 +35,17 @@ const canAccessSignedUrl = async (signedUrl) => {
 }
 
 export const resolveCertificateFileUrl = async (fileUrlOrPath) => {
-  const raw = normalizePath(fileUrlOrPath)
-  if (!raw) return ''
-  if (isHttpUrl(fileUrlOrPath)) return fileUrlOrPath
-
-  let fallbackSignedUrl = ''
+  const rawValue = String(fileUrlOrPath || '').trim()
+  const raw = normalizePath(rawValue)
+  if (!rawValue && !raw) return ''
+  if (isHttpUrl(rawValue) && !CERT_BUCKET_CANDIDATES.some((bucket) => extractObjectPath(bucket, rawValue))) {
+    return rawValue
+  }
 
   for (const bucket of CERT_BUCKET_CANDIDATES) {
     const objectPathCandidates = Array.from(new Set([
-      extractObjectPath(bucket, raw),
-      raw
+      extractObjectPath(bucket, rawValue || raw),
+      isHttpUrl(rawValue) ? '' : raw
     ].filter(Boolean)))
 
     for (const objectPath of objectPathCandidates) {
@@ -40,16 +54,14 @@ export const resolveCertificateFileUrl = async (fileUrlOrPath) => {
         .createSignedUrl(objectPath, SIGNED_EXPIRES)
 
       if (error || !data?.signedUrl) continue
-      if (!fallbackSignedUrl) fallbackSignedUrl = data.signedUrl
 
       // Signed URL bisa sukses walau file bucket salah; validasi akses agar bucket tepat.
-      // Fallback tetap dipakai jika semua HEAD gagal.
       // eslint-disable-next-line no-await-in-loop
       if (await canAccessSignedUrl(data.signedUrl)) return data.signedUrl
     }
   }
 
-  return fallbackSignedUrl
+  return ''
 }
 
 export const hydrateCertificateFileUrls = async (rows = []) => {
@@ -76,8 +88,9 @@ const sanitizeDownloadName = (value) =>
     .slice(0, 120)
 
 export const downloadCertificateFile = async (row) => {
-  const raw = normalizePath(row?.file_url || row?.file_url_resolved || '')
-  if (!raw) throw new Error('File sertifikat tidak ditemukan')
+  const rawValue = String(row?.file_url || row?.file_url_resolved || '').trim()
+  const raw = normalizePath(rawValue)
+  if (!rawValue && !raw) throw new Error('File sertifikat tidak ditemukan')
 
   const extension = String(raw.split('?')[0].split('.').pop() || 'pdf').toLowerCase()
   const baseName = sanitizeDownloadName([
@@ -90,8 +103,8 @@ export const downloadCertificateFile = async (row) => {
   let lastError = null
   for (const bucket of CERT_BUCKET_CANDIDATES) {
     const objectPathCandidates = Array.from(new Set([
-      extractObjectPath(bucket, raw),
-      raw
+      extractObjectPath(bucket, rawValue || raw),
+      isHttpUrl(rawValue) ? '' : raw
     ].filter(Boolean)))
 
     for (const objectPath of objectPathCandidates) {

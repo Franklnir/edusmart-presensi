@@ -381,12 +381,15 @@ const canvasToBlob = (canvas, type, quality) =>
   })
 
 const createSignedUrl = async (bucket, pathOrUrl) => {
-  if (!pathOrUrl) return ''
-  if (isHttpUrl(pathOrUrl)) return pathOrUrl
+  const rawValue = String(pathOrUrl || '').trim()
+  if (!rawValue) return ''
+
+  const extractedPath = extractObjectPath(bucket, rawValue)
+  if (isHttpUrl(rawValue) && !extractedPath) return rawValue
 
   const candidates = uniqueNonEmpty([
-    extractObjectPath(bucket, pathOrUrl),
-    pathOrUrl
+    extractedPath,
+    isHttpUrl(rawValue) ? '' : rawValue
   ])
 
   let lastError = null
@@ -408,7 +411,7 @@ const canAccessSignedUrl = async (signedUrl) => {
   try {
     const response = await fetch(signedUrl, {
       method: 'HEAD',
-      credentials: 'omit'
+      credentials: fetchCredentialsForUrl(signedUrl)
     })
     return response.ok
   } catch {
@@ -417,16 +420,17 @@ const canAccessSignedUrl = async (signedUrl) => {
 }
 
 const createSignedUrlWithFallbackBuckets = async (buckets, pathOrUrl) => {
-  if (!pathOrUrl) return ''
-  if (isHttpUrl(pathOrUrl)) return pathOrUrl
+  const rawValue = String(pathOrUrl || '').trim()
+  if (!rawValue) return ''
+  if (isHttpUrl(rawValue) && !buckets.some((bucket) => extractObjectPath(bucket, rawValue))) {
+    return rawValue
+  }
 
   let lastError = null
-  let fallbackSignedUrl = ''
   for (const bucket of buckets) {
     try {
-      const signed = await createSignedUrl(bucket, pathOrUrl)
+      const signed = await createSignedUrl(bucket, rawValue)
       if (!signed) continue
-      if (!fallbackSignedUrl) fallbackSignedUrl = signed
       // eslint-disable-next-line no-await-in-loop
       if (await canAccessSignedUrl(signed)) return signed
     } catch (error) {
@@ -434,7 +438,6 @@ const createSignedUrlWithFallbackBuckets = async (buckets, pathOrUrl) => {
     }
   }
 
-  if (fallbackSignedUrl) return fallbackSignedUrl
   if (lastError) throw lastError
   return ''
 }
