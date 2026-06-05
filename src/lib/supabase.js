@@ -2833,8 +2833,11 @@ const auth = {
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
-    async backupMonthlyStatus() {
-      const res = await apiFetch('/api/admin/backup/monthly-status', {
+    async backupMonthlyStatus(options = {}) {
+      const query = new URLSearchParams()
+      if (options?.refresh) query.set('refresh', '1')
+      const suffix = query.toString() ? `?${query.toString()}` : ''
+      const res = await apiFetch(`/api/admin/backup/monthly-status${suffix}`, {
         method: 'GET',
         cacheTtlMs: 10 * 1000,
         staleKey: 'admin.backup-monthly-status',
@@ -2857,6 +2860,14 @@ const auth = {
         body: payload,
         cacheTtlMs: 0,
         timeoutMs: 180000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async backupMonthlyJobStatus(jobId) {
+      const res = await apiFetch(`/api/admin/backup/google-drive/monthly/jobs/${encodeURIComponent(jobId)}`, {
+        method: 'GET',
+        cacheTtlMs: 0,
+        timeoutMs: 20000
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
@@ -3066,8 +3077,11 @@ const auth = {
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
-    async tenantBackupMonthlyStatus(id) {
-      const res = await apiFetch(`/api/super/tenants/${id}/backup/monthly-status`, {
+    async tenantBackupMonthlyStatus(id, options = {}) {
+      const query = new URLSearchParams()
+      if (options?.refresh) query.set('refresh', '1')
+      const suffix = query.toString() ? `?${query.toString()}` : ''
+      const res = await apiFetch(`/api/super/tenants/${id}/backup/monthly-status${suffix}`, {
         method: 'GET',
         cacheTtlMs: 10 * 1000,
         staleKey: `super.tenant-backup-monthly-status.${id}`,
@@ -3090,6 +3104,14 @@ const auth = {
         body: payload,
         cacheTtlMs: 0,
         timeoutMs: 180000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async tenantMonthlyBackupJobStatus(id, jobId) {
+      const res = await apiFetch(`/api/super/tenants/${id}/backup/google-drive/monthly/jobs/${encodeURIComponent(jobId)}`, {
+        method: 'GET',
+        cacheTtlMs: 0,
+        timeoutMs: 20000
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },

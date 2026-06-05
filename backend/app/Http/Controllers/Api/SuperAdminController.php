@@ -574,7 +574,10 @@ class SuperAdminController extends ApiController
         }
 
         return response()->json([
-            'data' => $this->tenantBackupService->monthlyStatus((string) $tenant->id),
+            'data' => $this->tenantBackupService->monthlyStatus(
+                (string) $tenant->id,
+                filter_var($request->query('refresh', false), FILTER_VALIDATE_BOOLEAN)
+            ),
         ]);
     }
 
@@ -655,12 +658,27 @@ class SuperAdminController extends ApiController
             return $this->deny('Bulan backup wajib dipilih.', 422);
         }
 
+        $force = filter_var($request->input('force', false), FILTER_VALIDATE_BOOLEAN);
+        $async = filter_var($request->input('async', true), FILTER_VALIDATE_BOOLEAN);
+
         try {
+            if ($async) {
+                $job = $this->tenantBackupService->queueMonthlyBackupToGoogleDrive(
+                    (string) $tenant->id,
+                    $monthKey,
+                    (string) ($request->user()?->id ?? ''),
+                    $force,
+                    false
+                );
+
+                return response()->json(['data' => $job], 202);
+            }
+
             $driveFile = $this->tenantBackupService->saveMonthlyBackupToGoogleDrive(
                 (string) $tenant->id,
                 $monthKey,
                 (string) ($request->user()?->id ?? ''),
-                filter_var($request->input('force', false), FILTER_VALIDATE_BOOLEAN)
+                $force
             );
         } catch (\Throwable $e) {
             return $this->deny('Gagal menyimpan backup bulanan tenant ke Google Drive: '.trim((string) $e->getMessage()), 422);
@@ -686,7 +704,7 @@ class SuperAdminController extends ApiController
             'data' => [
                 'month' => $monthKey,
                 'drive_file' => $driveFile,
-                'monthly_status' => $this->tenantBackupService->monthlyStatus((string) $tenant->id),
+                'monthly_status' => $this->tenantBackupService->monthlyStatus((string) $tenant->id, true),
             ],
         ]);
     }
@@ -702,7 +720,21 @@ class SuperAdminController extends ApiController
             return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
         }
 
+        $async = filter_var($request->input('async', true), FILTER_VALIDATE_BOOLEAN);
+
         try {
+            if ($async) {
+                $result = $this->tenantBackupService->queueMonthlyBackupToGoogleDrive(
+                    (string) $tenant->id,
+                    null,
+                    (string) ($request->user()?->id ?? ''),
+                    true,
+                    true
+                );
+
+                return response()->json(['data' => $result], 202);
+            }
+
             $result = $this->tenantBackupService->autoMonthlyBackupToGoogleDrive(
                 (string) $tenant->id,
                 (string) ($request->user()?->id ?? '')
@@ -727,6 +759,22 @@ class SuperAdminController extends ApiController
 
         return response()->json([
             'data' => $result,
+        ]);
+    }
+
+    public function tenantMonthlyBackupJobStatus(Request $request, string $id, string $jobId)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenant = $this->findTenantByIdOrSlug($id);
+        if (! $tenant) {
+            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+        }
+
+        return response()->json([
+            'data' => $this->tenantBackupService->monthlyBackupJobStatus((string) $tenant->id, $jobId),
         ]);
     }
 

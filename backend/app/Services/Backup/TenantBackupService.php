@@ -2,11 +2,13 @@
 
 namespace App\Services\Backup;
 
+use App\Jobs\TenantMonthlyGoogleDriveBackupJob;
 use App\Models\TenantGoogleDriveFile;
 use App\Services\GoogleDrive\GoogleDriveService;
 use App\Support\AcademicPeriod;
 use App\Traits\HasTenantBackupLogic;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -211,7 +213,7 @@ class TenantBackupService
 
     public function autoMonthlyBackupToGoogleDrive(string $tenantId, string $userId = 'system'): array
     {
-        $status = $this->monthlyStatus($tenantId);
+        $status = $this->monthlyStatus($tenantId, true);
         $now = now('Asia/Jakarta');
         $statusMonths = array_values((array) ($status['months'] ?? []));
         if (empty($statusMonths)) {
@@ -296,22 +298,145 @@ class TenantBackupService
         ];
     }
 
-    public function monthlyStatus(string $tenantId): array
+    public function queueMonthlyBackupToGoogleDrive(
+        string $tenantId,
+        ?string $monthKey,
+        string $userId = 'system',
+        bool $force = false,
+        bool $auto = false,
+        int $delaySeconds = 0
+    ): array {
+        $tenantId = trim($tenantId);
+        if ($tenantId === '') {
+            throw new \RuntimeException('Tenant tidak valid.');
+        }
+
+        $monthKey = $monthKey !== null ? trim($monthKey) : null;
+        if (! $auto && ($monthKey === null || $monthKey === '')) {
+            throw new \RuntimeException('Bulan backup wajib dipilih.');
+        }
+
+        $jobId = (string) Str::uuid();
+        $status = [
+            'job_id' => $jobId,
+            'tenant_id' => $tenantId,
+            'month' => $monthKey,
+            'type' => $auto ? 'auto_monthly' : 'monthly',
+            'status' => 'queued',
+            'progress' => 12,
+            'message' => $auto
+                ? 'Auto backup masuk antrean dan akan diproses di background.'
+                : 'Backup bulanan masuk antrean dan akan diproses di background.',
+            'queued_at' => now('Asia/Jakarta')->toIso8601String(),
+            'updated_at' => now('Asia/Jakarta')->toIso8601String(),
+        ];
+
+        $this->putMonthlyBackupJobStatus($tenantId, $jobId, $status);
+
+        $job = new TenantMonthlyGoogleDriveBackupJob(
+            $tenantId,
+            trim($userId) !== '' ? trim($userId) : 'system',
+            $monthKey,
+            $force,
+            $auto,
+            $jobId
+        );
+
+        if ($delaySeconds > 0) {
+            $job->delay(now()->addSeconds($delaySeconds));
+        }
+
+        dispatch($job);
+
+        return array_merge($status, [
+            'queued' => true,
+            'monthly_status' => $this->monthlyStatus($tenantId),
+        ]);
+    }
+
+    public function monthlyBackupJobStatus(string $tenantId, string $jobId): array
+    {
+        $tenantId = trim($tenantId);
+        $jobId = trim($jobId);
+        if ($tenantId === '' || $jobId === '') {
+            return [
+                'job_id' => $jobId,
+                'status' => 'missing',
+                'message' => 'Status job backup tidak ditemukan.',
+            ];
+        }
+
+        $status = Cache::get($this->monthlyBackupJobStatusKey($tenantId, $jobId));
+        if (! is_array($status)) {
+            return [
+                'job_id' => $jobId,
+                'tenant_id' => $tenantId,
+                'status' => 'missing',
+                'progress' => 0,
+                'message' => 'Status job backup tidak ditemukan atau sudah kedaluwarsa.',
+                'monthly_status' => $this->monthlyStatus($tenantId),
+            ];
+        }
+
+        if (! isset($status['monthly_status']) && in_array((string) ($status['status'] ?? ''), ['finished', 'failed'], true)) {
+            $status['monthly_status'] = $this->monthlyStatus($tenantId);
+        }
+
+        return $status;
+    }
+
+    public function putMonthlyBackupJobStatus(string $tenantId, string $jobId, array $patch): void
+    {
+        $tenantId = trim($tenantId);
+        $jobId = trim($jobId);
+        if ($tenantId === '' || $jobId === '') {
+            return;
+        }
+
+        $key = $this->monthlyBackupJobStatusKey($tenantId, $jobId);
+        $current = Cache::get($key);
+        if (! is_array($current)) {
+            $current = [
+                'job_id' => $jobId,
+                'tenant_id' => $tenantId,
+            ];
+        }
+
+        $next = array_merge($current, $patch, [
+            'job_id' => $jobId,
+            'tenant_id' => $tenantId,
+            'updated_at' => now('Asia/Jakarta')->toIso8601String(),
+        ]);
+
+        Cache::put($key, $next, now()->addHours((int) config('backup.job_status_ttl_hours', 24)));
+    }
+
+    public function monthlyStatus(string $tenantId, bool $refresh = false): array
     {
         $tenantId = trim($tenantId);
         $active = $this->tenantActiveAcademicPeriod($tenantId);
         $year = $this->activeAcademicYear($tenantId);
         $months = $this->academicYearMonths($year);
         $now = now('Asia/Jakarta');
+        $cacheKey = $this->monthlyStatusCacheKey($tenantId, $year);
+        if ($refresh) {
+            Cache::forget($cacheKey);
+        } else {
+            $cached = Cache::get($cacheKey);
+            if (is_array($cached)) {
+                return $cached;
+            }
+        }
 
         $items = [];
         foreach ($months as $month) {
             $window = $this->monthlyBackupWindow($tenantId, (string) $month['value'], $now);
             $record = $this->monthlyBackupRecord($tenantId, (string) $month['value']);
-            $latestDataAt = $this->latestTenantDataAt(
+            $latestDataAt = $this->latestTenantDataAtCached(
                 $tenantId,
                 $window['month_start'],
-                $window['effective_end_at']
+                $window['effective_end_at'],
+                $refresh
             );
             $lastBackupAt = $this->recordUploadedAt($record);
             $needsUpdate = $record && $latestDataAt && $lastBackupAt && $latestDataAt->greaterThan($lastBackupAt);
@@ -336,13 +461,14 @@ class TenantBackupService
 
         $backedUp = count(array_filter($items, static fn ($item) => (bool) ($item['is_backed_up'] ?? false)));
 
-        return [
+        $statusPayload = [
             'tenant' => $this->tenantSnapshot($tenantId),
             'schedule' => [
                 'enabled' => true,
                 'timezone' => 'Asia/Jakarta',
-                'runs_at' => '23:59',
-                'rule' => 'Akhir bulan pada periode aktif sekolah',
+                'runs_at' => (string) config('backup.monthly_auto_start_time', '23:15'),
+                'runs_at_label' => $this->monthlyAutoScheduleLabel(),
+                'rule' => 'Akhir bulan pada periode aktif sekolah. Tenant diproses bertahap agar server dan Google Drive tidak menumpuk.',
                 'mode' => 'full',
                 'destination' => 'Google Drive sekolah',
                 'server_time' => $now->toIso8601String(),
@@ -361,6 +487,22 @@ class TenantBackupService
             ],
             'months' => $items,
         ];
+
+        Cache::put(
+            $cacheKey,
+            $statusPayload,
+            now()->addSeconds((int) config('backup.monthly_status_cache_ttl_seconds', 60))
+        );
+
+        return $statusPayload;
+    }
+
+    private function monthlyAutoScheduleLabel(): string
+    {
+        $start = trim((string) config('backup.monthly_auto_start_time', '23:15')) ?: '23:15';
+        $spacing = (int) config('backup.monthly_auto_tenant_spacing_minutes', 4);
+
+        return $start.' WIB, bertahap tiap '.$spacing.' menit per sekolah';
     }
 
     public function tenantsEligibleForMonthlyBackup(): array
@@ -521,6 +663,51 @@ class TenantBackupService
         })
             ->latest('uploaded_at')
             ->first();
+    }
+
+    private function monthlyBackupJobStatusKey(string $tenantId, string $jobId): string
+    {
+        return 'tenant-backup-monthly-job:'.trim($tenantId).':'.trim($jobId);
+    }
+
+    private function monthlyStatusCacheKey(string $tenantId, string $academicYear): string
+    {
+        return 'tenant-backup-monthly-status:'.trim($tenantId).':'.trim($academicYear);
+    }
+
+    private function latestTenantDataAtCached(string $tenantId, Carbon $startAt, Carbon $endAt, bool $refresh = false): ?Carbon
+    {
+        $cacheKey = implode(':', [
+            'tenant-backup-latest-data',
+            trim($tenantId),
+            $startAt->format('YmdHis'),
+            $endAt->format('YmdHis'),
+        ]);
+
+        if ($refresh) {
+            Cache::forget($cacheKey);
+        }
+
+        $cached = Cache::get($cacheKey);
+        if (is_string($cached) && $cached !== '') {
+            try {
+                return Carbon::parse($cached, 'Asia/Jakarta');
+            } catch (\Throwable $e) {
+                Cache::forget($cacheKey);
+            }
+        }
+        if ($cached === false) {
+            return null;
+        }
+
+        $latest = $this->latestTenantDataAt($tenantId, $startAt, $endAt);
+        Cache::put(
+            $cacheKey,
+            $latest ? $latest->toIso8601String() : false,
+            now()->addSeconds((int) config('backup.monthly_status_cache_ttl_seconds', 60))
+        );
+
+        return $latest;
     }
 
     private function driveRecordPayload(TenantGoogleDriveFile $record): array

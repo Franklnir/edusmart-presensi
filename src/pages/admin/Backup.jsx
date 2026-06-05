@@ -588,16 +588,16 @@ export default function BackupAdmin() {
     setDriveSyncing(true)
     try {
       await loadDriveStatus({ refresh: true })
-      await loadMonthlyStatus({ silent: true })
+      await loadMonthlyStatus({ silent: true, refresh: true })
     } finally {
       setDriveSyncing(false)
     }
   }
 
-  const loadMonthlyStatus = async ({ silent = false } = {}) => {
+  const loadMonthlyStatus = async ({ silent = false, refresh = false } = {}) => {
     setMonthlyLoading(true)
     try {
-      const { data, error } = await supabase.admin.backupMonthlyStatus()
+      const { data, error } = await supabase.admin.backupMonthlyStatus({ refresh })
       if (error) throw error
       setMonthlyStatus(data || null)
       return data || null
@@ -607,6 +607,48 @@ export default function BackupAdmin() {
     } finally {
       setMonthlyLoading(false)
     }
+  }
+
+  const extractMonthlyDriveFile = (result) => {
+    if (!result) return null
+    if (result?.formats?.json) return result.formats.json
+    if (result?.drive_file) return result.drive_file
+    if (result?.drive_file_name || result?.drive_web_view_link) return result
+    if (Array.isArray(result?.months)) {
+      const changed = result.months.find((month) => month?.drive_file)
+      return changed?.drive_file || null
+    }
+    return null
+  }
+
+  const waitForMonthlyJob = async (jobId, { auto = false } = {}) => {
+    let lastStatus = null
+
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, attempt === 0 ? 900 : 2500))
+      const { data, error } = await supabase.admin.backupMonthlyJobStatus(jobId)
+      if (error) throw error
+
+      lastStatus = data || null
+      const numericProgress = Number(lastStatus?.progress)
+      const fallbackProgress = Math.min(95, 18 + attempt)
+      const percent = Number.isFinite(numericProgress) ? numericProgress : fallbackProgress
+      setMonthlyProgress({
+        label: lastStatus?.message || (auto ? 'Auto backup sedang berjalan...' : 'Backup bulanan sedang berjalan...'),
+        percent
+      })
+
+      if (lastStatus?.monthly_status) {
+        setMonthlyStatus(lastStatus.monthly_status)
+      }
+
+      if (lastStatus?.status === 'finished') return lastStatus
+      if (lastStatus?.status === 'failed' || lastStatus?.status === 'missing') {
+        throw new Error(lastStatus?.message || 'Backup bulanan gagal diproses')
+      }
+    }
+
+    return lastStatus || { status: 'running', message: 'Backup masih diproses di background.' }
   }
 
   const handleSaveToGoogleDrive = async () => {
@@ -629,7 +671,7 @@ export default function BackupAdmin() {
       if (error) throw error
       setLastDriveBackup(data?.drive_file || null)
       await loadDriveStatus({ refresh: true, silent: true })
-      await loadMonthlyStatus({ silent: true })
+      await loadMonthlyStatus({ silent: true, refresh: true })
       pushToast('success', 'Backup JSON berhasil disimpan ke Google Drive sekolah')
     } catch (err) {
       pushToast('error', err?.message || 'Gagal menyimpan backup ke Google Drive')
@@ -685,25 +727,35 @@ export default function BackupAdmin() {
   const handleSaveMonthlyBackup = async (monthKey, force = false) => {
     if (!monthKey || monthlySavingKey || monthlyAutoSaving || loading || downloading || driveSaving) return
     setMonthlySavingKey(monthKey)
-    setMonthlyProgress({ label: 'Menyiapkan backup bulanan...', percent: 8 })
-    const timer = window.setInterval(() => {
-      setMonthlyProgress((prev) => prev ? { ...prev, percent: Math.min(92, prev.percent + 7) } : prev)
-    }, 650)
+    setMonthlyProgress({ label: 'Memasukkan backup bulanan ke antrean...', percent: 8 })
     try {
-      const { data, error } = await supabase.admin.saveMonthlyBackupToGoogleDrive({ month: monthKey, force })
+      const { data, error } = await supabase.admin.saveMonthlyBackupToGoogleDrive({ month: monthKey, force, async: true })
       if (error) throw error
-      window.clearInterval(timer)
-      setMonthlyProgress({ label: 'Backup bulanan berhasil disimpan.', percent: 100 })
-      if (data?.monthly_status) {
-        setMonthlyStatus(data.monthly_status)
-      } else {
-        await loadMonthlyStatus({ silent: true })
+
+      if (data?.monthly_status) setMonthlyStatus(data.monthly_status)
+
+      let finalData = data
+      if (data?.queued && data?.job_id) {
+        setMonthlyProgress({ label: data?.job?.message || 'Backup bulanan sedang diproses di background...', percent: 15 })
+        pushToast('success', 'Backup bulanan masuk antrean. Status akan diperbarui otomatis.')
+        finalData = await waitForMonthlyJob(data.job_id)
+        if (finalData?.status !== 'finished') {
+          setMonthlyProgress({ label: finalData?.message || 'Backup masih diproses di background.', percent: 95 })
+          pushToast('warning', 'Backup masih diproses di background. Klik Refresh Jadwal untuk melihat status terbaru.')
+          return
+        }
       }
-      setLastDriveBackup(data?.drive_file || null)
+
+      setMonthlyProgress({ label: 'Backup bulanan berhasil disimpan.', percent: 100 })
+      if (finalData?.monthly_status) {
+        setMonthlyStatus(finalData.monthly_status)
+      } else {
+        await loadMonthlyStatus({ silent: true, refresh: true })
+      }
+      setLastDriveBackup(extractMonthlyDriveFile(finalData?.result || finalData))
       await loadDriveStatus({ refresh: true, silent: true })
       pushToast('success', 'Backup bulanan berhasil disimpan ke Google Drive')
     } catch (err) {
-      window.clearInterval(timer)
       pushToast('error', err?.message || 'Gagal menyimpan backup bulanan')
     } finally {
       setMonthlySavingKey('')
@@ -714,17 +766,28 @@ export default function BackupAdmin() {
   const handleAutoMonthlyBackup = async () => {
     if (monthlyAutoSaving || monthlySavingKey || loading || downloading || driveSaving) return
     setMonthlyAutoSaving(true)
-    setMonthlyProgress({ label: 'Auto backup berjalan dari awal periode sampai bulan ini...', percent: 5 })
-    const timer = window.setInterval(() => {
-      setMonthlyProgress((prev) => prev ? { ...prev, percent: Math.min(94, prev.percent + 4) } : prev)
-    }, 700)
+    setMonthlyProgress({ label: 'Memasukkan auto backup ke antrean...', percent: 5 })
     try {
-      const { data, error } = await supabase.admin.autoMonthlyBackupToGoogleDrive()
+      const { data, error } = await supabase.admin.autoMonthlyBackupToGoogleDrive({ async: true })
       if (error) throw error
-      window.clearInterval(timer)
-      setMonthlyProgress({ label: 'Auto backup selesai.', percent: 100 })
+
       if (data?.monthly_status) setMonthlyStatus(data.monthly_status)
-      const summary = data?.summary || {}
+
+      let finalData = data
+      if (data?.queued && data?.job_id) {
+        setMonthlyProgress({ label: data?.job?.message || 'Auto backup sedang diproses di background...', percent: 15 })
+        pushToast('success', 'Auto backup masuk antrean. Sistem akan backup data baru saja.')
+        finalData = await waitForMonthlyJob(data.job_id, { auto: true })
+        if (finalData?.status !== 'finished') {
+          setMonthlyProgress({ label: finalData?.message || 'Auto backup masih diproses di background.', percent: 95 })
+          pushToast('warning', 'Auto backup masih diproses di background. Klik Refresh Jadwal untuk melihat status terbaru.')
+          return
+        }
+      }
+
+      setMonthlyProgress({ label: 'Auto backup selesai.', percent: 100 })
+      if (finalData?.monthly_status) setMonthlyStatus(finalData.monthly_status)
+      const summary = finalData?.result?.summary || finalData?.summary || {}
       const changed = Number(summary.changed || 0)
       const failed = Number(summary.failed || 0)
       const serverTimeLabel = summary.server_time_label ? ` Diproses sampai ${summary.server_time_label}.` : ''
@@ -732,7 +795,6 @@ export default function BackupAdmin() {
       pushToast(failed > 0 ? 'warning' : 'success', message)
       await loadDriveStatus({ refresh: true, silent: true })
     } catch (err) {
-      window.clearInterval(timer)
       pushToast('error', err?.message || 'Gagal menjalankan auto backup')
     } finally {
       setMonthlyAutoSaving(false)
@@ -1104,7 +1166,7 @@ export default function BackupAdmin() {
                   <div className="flex flex-wrap items-center gap-2">
                     <h3 className="text-sm font-bold text-slate-900">Jadwal Backup Bulanan Google Drive</h3>
                     <span className="rounded-full border border-amber-200 bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-800">
-                      Otomatis 23.59 WIB
+                      {monthlyStatus?.schedule?.runs_at_label || 'Otomatis 23:15 WIB, bertahap'}
                     </span>
                   </div>
                   <p className="mt-1 text-xs leading-relaxed text-slate-600">
@@ -1125,7 +1187,7 @@ export default function BackupAdmin() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => loadMonthlyStatus()}
+                  onClick={() => loadMonthlyStatus({ refresh: true })}
                   disabled={monthlyLoading || monthlyAutoSaving}
                   className="inline-flex items-center justify-center gap-2 rounded-xl border border-amber-200 bg-white px-3 py-2 text-xs font-bold text-amber-800 shadow-sm hover:bg-amber-50 disabled:opacity-60"
                 >

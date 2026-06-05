@@ -216,6 +216,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'throttle:api'])->group(func
     Route::post('/backup/google-drive', [AdminBackupController::class, 'saveToGoogleDrive']);
     Route::post('/backup/google-drive/monthly', [AdminBackupController::class, 'saveMonthlyToGoogleDrive']);
     Route::post('/backup/google-drive/monthly/auto', [AdminBackupController::class, 'autoMonthlyToGoogleDrive']);
+    Route::get('/backup/google-drive/monthly/jobs/{jobId}', [AdminBackupController::class, 'monthlyJobStatus']);
     Route::post('/backup/restore', [AdminBackupController::class, 'restore']);
     Route::get('/approvals', [ApprovalController::class, 'index']);
     Route::post('/approvals/{id}/approve', [ApprovalController::class, 'approve']);
@@ -283,6 +284,7 @@ Route::middleware(['auth:sanctum', 'throttle:super', 'super.domain', 'super.admi
     Route::post('/super/tenants/{id}/backup/google-drive', [SuperAdminController::class, 'saveTenantBackupToGoogleDrive']);
     Route::post('/super/tenants/{id}/backup/google-drive/monthly', [SuperAdminController::class, 'saveTenantMonthlyBackupToGoogleDrive']);
     Route::post('/super/tenants/{id}/backup/google-drive/monthly/auto', [SuperAdminController::class, 'autoTenantMonthlyBackupToGoogleDrive']);
+    Route::get('/super/tenants/{id}/backup/google-drive/monthly/jobs/{jobId}', [SuperAdminController::class, 'tenantMonthlyBackupJobStatus']);
     Route::post('/super/tenants/{id}/restore', [SuperAdminController::class, 'restoreTenant']);
     Route::patch('/super/tenants/{id}/status', [SuperAdminController::class, 'updateTenantStatus']);
     Route::get('/super/whatsapp', [WhatsAppController::class, 'superOverview']);

@@ -684,6 +684,7 @@ const Tenants = () => {
   const [backupMonthlyLoading, setBackupMonthlyLoading] = useState(false)
   const [backupMonthlySavingKey, setBackupMonthlySavingKey] = useState('')
   const [backupMonthlyAutoSaving, setBackupMonthlyAutoSaving] = useState(false)
+  const [backupMonthlyProgress, setBackupMonthlyProgress] = useState(null)
   const [statusSaving, setStatusSaving] = useState(false)
   const [mqttForm, setMqttForm] = useState(RFID_MQTT_FORM_DEFAULTS)
   const [mqttSaving, setMqttSaving] = useState(false)
@@ -1270,13 +1271,13 @@ const Tenants = () => {
     }
   }
 
-  const loadTenantBackupMonthlyStatus = async ({ silent = false } = {}) => {
+  const loadTenantBackupMonthlyStatus = async ({ silent = false, refresh = false } = {}) => {
     const tenantId = tenantDetail?.tenant?.id || selectedTenantId
     if (!tenantId) return null
 
     setBackupMonthlyLoading(true)
     try {
-      const { data, error } = await supabase.super.tenantBackupMonthlyStatus(tenantId)
+      const { data, error } = await supabase.super.tenantBackupMonthlyStatus(tenantId, { refresh })
       if (error) throw error
       setBackupMonthlyStatus(data || null)
       return data || null
@@ -1286,6 +1287,34 @@ const Tenants = () => {
     } finally {
       setBackupMonthlyLoading(false)
     }
+  }
+
+  const waitForTenantMonthlyJob = async (tenantId, jobId, { auto = false } = {}) => {
+    let lastStatus = null
+
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, attempt === 0 ? 900 : 2500))
+      const { data, error } = await supabase.super.tenantMonthlyBackupJobStatus(tenantId, jobId)
+      if (error) throw error
+
+      lastStatus = data || null
+      const numericProgress = Number(lastStatus?.progress)
+      setBackupMonthlyProgress({
+        label: lastStatus?.message || (auto ? 'Auto backup tenant sedang berjalan...' : 'Backup bulanan tenant sedang berjalan...'),
+        percent: Number.isFinite(numericProgress) ? numericProgress : Math.min(95, 18 + attempt)
+      })
+
+      if (lastStatus?.monthly_status) {
+        setBackupMonthlyStatus(lastStatus.monthly_status)
+      }
+
+      if (lastStatus?.status === 'finished') return lastStatus
+      if (lastStatus?.status === 'failed' || lastStatus?.status === 'missing') {
+        throw new Error(lastStatus?.message || 'Backup bulanan tenant gagal diproses')
+      }
+    }
+
+    return lastStatus || { status: 'running', message: 'Backup masih diproses di background.' }
   }
 
   const handleSaveTenantBackupToDrive = async () => {
@@ -1303,7 +1332,7 @@ const Tenants = () => {
         months: selectedMonths
       })
       if (error) throw error
-      await loadTenantBackupMonthlyStatus({ silent: true })
+      await loadTenantBackupMonthlyStatus({ silent: true, refresh: true })
       const fileName = data?.drive_file?.drive_file_name || 'backup.json'
       pushToast('success', `Backup tenant tersimpan di Google Drive: ${fileName}`)
     } catch (err) {
@@ -1318,19 +1347,36 @@ const Tenants = () => {
     if (!tenantId || !monthKey || backupMonthlySavingKey || backupMonthlyAutoSaving || backupDriveSaving || backupLoading) return
 
     setBackupMonthlySavingKey(monthKey)
+    setBackupMonthlyProgress({ label: 'Memasukkan backup bulanan tenant ke antrean...', percent: 8 })
     try {
-      const { data, error } = await supabase.super.saveTenantMonthlyBackupToGoogleDrive(tenantId, { month: monthKey, force })
+      const { data, error } = await supabase.super.saveTenantMonthlyBackupToGoogleDrive(tenantId, { month: monthKey, force, async: true })
       if (error) throw error
-      if (data?.monthly_status) {
-        setBackupMonthlyStatus(data.monthly_status)
+
+      let finalData = data
+      if (data?.monthly_status) setBackupMonthlyStatus(data.monthly_status)
+      if (data?.queued && data?.job_id) {
+        setBackupMonthlyProgress({ label: data?.job?.message || 'Backup tenant sedang diproses...', percent: 15 })
+        pushToast('success', 'Backup bulanan tenant masuk antrean.')
+        finalData = await waitForTenantMonthlyJob(tenantId, data.job_id)
+        if (finalData?.status !== 'finished') {
+          setBackupMonthlyProgress({ label: finalData?.message || 'Backup tenant masih diproses di background.', percent: 95 })
+          pushToast('warning', 'Backup tenant masih diproses di background. Klik Refresh untuk melihat status terbaru.')
+          return
+        }
+      }
+
+      setBackupMonthlyProgress({ label: 'Backup bulanan tenant berhasil disimpan.', percent: 100 })
+      if (finalData?.monthly_status) {
+        setBackupMonthlyStatus(finalData.monthly_status)
       } else {
-        await loadTenantBackupMonthlyStatus({ silent: true })
+        await loadTenantBackupMonthlyStatus({ silent: true, refresh: true })
       }
       pushToast('success', 'Backup bulanan tenant berhasil disimpan ke Google Drive')
     } catch (err) {
       pushToast('error', err?.message || 'Gagal menyimpan backup bulanan tenant')
     } finally {
       setBackupMonthlySavingKey('')
+      window.setTimeout(() => setBackupMonthlyProgress(null), 900)
     }
   }
 
@@ -1339,17 +1385,34 @@ const Tenants = () => {
     if (!tenantId || backupMonthlyAutoSaving || backupMonthlySavingKey || backupDriveSaving || backupLoading) return
 
     setBackupMonthlyAutoSaving(true)
+    setBackupMonthlyProgress({ label: 'Memasukkan auto backup tenant ke antrean...', percent: 5 })
     try {
-      const { data, error } = await supabase.super.autoTenantMonthlyBackupToGoogleDrive(tenantId)
+      const { data, error } = await supabase.super.autoTenantMonthlyBackupToGoogleDrive(tenantId, { async: true })
       if (error) throw error
+
+      let finalData = data
       if (data?.monthly_status) setBackupMonthlyStatus(data.monthly_status)
-      const summary = data?.summary || {}
+      if (data?.queued && data?.job_id) {
+        setBackupMonthlyProgress({ label: data?.job?.message || 'Auto backup tenant sedang diproses...', percent: 15 })
+        pushToast('success', 'Auto backup tenant masuk antrean.')
+        finalData = await waitForTenantMonthlyJob(tenantId, data.job_id, { auto: true })
+        if (finalData?.status !== 'finished') {
+          setBackupMonthlyProgress({ label: finalData?.message || 'Auto backup tenant masih diproses di background.', percent: 95 })
+          pushToast('warning', 'Auto backup tenant masih diproses di background. Klik Refresh untuk melihat status terbaru.')
+          return
+        }
+      }
+
+      setBackupMonthlyProgress({ label: 'Auto backup tenant selesai.', percent: 100 })
+      if (finalData?.monthly_status) setBackupMonthlyStatus(finalData.monthly_status)
+      const summary = finalData?.result?.summary || finalData?.summary || {}
       const serverTimeLabel = summary.server_time_label ? ` Diproses sampai ${summary.server_time_label}.` : ''
       pushToast(Number(summary.failed || 0) > 0 ? 'warning' : 'success', `${summary.message || 'Auto backup tenant selesai'}${serverTimeLabel}`)
     } catch (err) {
       pushToast('error', err?.message || 'Gagal menjalankan auto backup tenant')
     } finally {
       setBackupMonthlyAutoSaving(false)
+      window.setTimeout(() => setBackupMonthlyProgress(null), 1100)
     }
   }
 
@@ -2446,7 +2509,7 @@ const Tenants = () => {
                             <div>
                               <p className="text-xs font-black uppercase tracking-wide text-amber-800">Backup Bulanan</p>
                               <p className="mt-0.5 text-[11px] leading-relaxed text-amber-800">
-                                Auto backup lengkap akhir bulan jam 23.59 WIB. Kuning berarti bulan itu sudah tersimpan.
+                                Auto backup lengkap akhir bulan {backupMonthlyStatus?.schedule?.runs_at_label || '23:15 WIB bertahap'}. Kuning berarti bulan itu sudah tersimpan.
                                 {backupMonthlyStatus?.schedule?.server_time_label ? ` Waktu server: ${backupMonthlyStatus.schedule.server_time_label}.` : ''}
                               </p>
                             </div>
@@ -2463,7 +2526,7 @@ const Tenants = () => {
                             </button>
                             <button
                               type="button"
-                              onClick={() => loadTenantBackupMonthlyStatus()}
+                              onClick={() => loadTenantBackupMonthlyStatus({ refresh: true })}
                               disabled={backupMonthlyLoading || backupMonthlyAutoSaving}
                               className="inline-flex h-8 items-center justify-center gap-1 rounded-lg bg-white px-2 text-[11px] font-bold text-amber-800 ring-1 ring-amber-200 disabled:opacity-60"
                             >
@@ -2472,6 +2535,20 @@ const Tenants = () => {
                             </button>
                           </div>
                         </div>
+                        {backupMonthlyProgress ? (
+                          <div className="mt-3 rounded-xl border border-blue-200 bg-white px-3 py-2">
+                            <div className="flex items-center justify-between gap-3 text-[11px] font-bold text-blue-900">
+                              <span>{backupMonthlyProgress.label}</span>
+                              <span>{Math.round(Number(backupMonthlyProgress.percent || 0))}%</span>
+                            </div>
+                            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-blue-100">
+                              <div
+                                className="h-full rounded-full bg-blue-600 transition-all duration-500"
+                                style={{ width: `${Math.max(0, Math.min(100, Number(backupMonthlyProgress.percent || 0)))}%` }}
+                              />
+                            </div>
+                          </div>
+                        ) : null}
                         <div className="mt-3 grid gap-2 sm:grid-cols-2">
                           {backupMonthlyMonths.length ? backupMonthlyMonths.map((month) => {
                             const backedUp = Boolean(month?.is_backed_up)

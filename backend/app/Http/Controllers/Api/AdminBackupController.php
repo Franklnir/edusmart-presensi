@@ -172,7 +172,10 @@ class AdminBackupController extends ApiController
         }
 
         return response()->json([
-            'data' => $this->tenantBackupService->monthlyStatus((string) $tenantId),
+            'data' => $this->tenantBackupService->monthlyStatus(
+                (string) $tenantId,
+                filter_var($request->query('refresh', false), FILTER_VALIDATE_BOOLEAN)
+            ),
         ]);
     }
 
@@ -192,12 +195,27 @@ class AdminBackupController extends ApiController
             return $this->deny('Bulan backup wajib dipilih.', 422);
         }
 
+        $force = filter_var($request->input('force', false), FILTER_VALIDATE_BOOLEAN);
+        $async = filter_var($request->input('async', true), FILTER_VALIDATE_BOOLEAN);
+
         try {
+            if ($async) {
+                $job = $this->tenantBackupService->queueMonthlyBackupToGoogleDrive(
+                    (string) $tenantId,
+                    $monthKey,
+                    (string) ($request->user()?->id ?? ''),
+                    $force,
+                    false
+                );
+
+                return response()->json(['data' => $job], 202);
+            }
+
             $driveFile = $this->tenantBackupService->saveMonthlyBackupToGoogleDrive(
                 (string) $tenantId,
                 $monthKey,
                 (string) ($request->user()?->id ?? ''),
-                filter_var($request->input('force', false), FILTER_VALIDATE_BOOLEAN)
+                $force
             );
         } catch (\Throwable $e) {
             return $this->deny('Gagal menyimpan backup bulanan ke Google Drive: '.trim((string) $e->getMessage()), 422);
@@ -223,7 +241,7 @@ class AdminBackupController extends ApiController
             'data' => [
                 'month' => $monthKey,
                 'drive_file' => $driveFile,
-                'monthly_status' => $this->tenantBackupService->monthlyStatus((string) $tenantId),
+                'monthly_status' => $this->tenantBackupService->monthlyStatus((string) $tenantId, true),
             ],
         ]);
     }
@@ -239,7 +257,21 @@ class AdminBackupController extends ApiController
             return $this->deny('Tenant tidak valid', 400);
         }
 
+        $async = filter_var($request->input('async', true), FILTER_VALIDATE_BOOLEAN);
+
         try {
+            if ($async) {
+                $result = $this->tenantBackupService->queueMonthlyBackupToGoogleDrive(
+                    (string) $tenantId,
+                    null,
+                    (string) ($request->user()?->id ?? ''),
+                    true,
+                    true
+                );
+
+                return response()->json(['data' => $result], 202);
+            }
+
             $result = $this->tenantBackupService->autoMonthlyBackupToGoogleDrive(
                 (string) $tenantId,
                 (string) ($request->user()?->id ?? '')
@@ -264,6 +296,22 @@ class AdminBackupController extends ApiController
 
         return response()->json([
             'data' => $result,
+        ]);
+    }
+
+    public function monthlyJobStatus(Request $request, string $jobId)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny('Akses ditolak. Hanya admin sekolah yang bisa melihat status backup.');
+        }
+
+        $tenantId = $this->resolveOwnedTenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        return response()->json([
+            'data' => $this->tenantBackupService->monthlyBackupJobStatus((string) $tenantId, $jobId),
         ]);
     }
 }
