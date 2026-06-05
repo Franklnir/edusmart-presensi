@@ -25,7 +25,7 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('backup:monthly-google-drive')
-        ->dailyAt((string) config('backup.monthly_auto_start_time', '23:15'))
+    ->dailyAt((string) config('backup.monthly_auto_start_time', '23:15'))
     ->timezone('Asia/Jakarta')
     ->when(fn () => now('Asia/Jakarta')->isSameDay(now('Asia/Jakarta')->copy()->endOfMonth()))
     ->withoutOverlapping(30)

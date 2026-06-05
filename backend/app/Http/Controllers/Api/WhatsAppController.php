@@ -273,7 +273,7 @@ class WhatsAppController extends ApiController
         ]);
 
         $tenant = DB::table('tenants')->where('id', $tenantId)->first();
-        if (!$tenant) {
+        if (! $tenant) {
             return $this->deny('Sekolah tidak ditemukan', 404);
         }
 
