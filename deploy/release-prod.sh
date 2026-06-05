@@ -574,7 +574,9 @@ if [[ "${#COMPOSE_FILES[@]}" -eq 0 ]]; then
     COMPOSE_FILES=("${SPLIT_PATHS_RESULT[@]}")
   else
     COMPOSE_FILES=("$COMPOSE_FILE")
-    if [[ -f "docker-compose.prod.4gb.yml" ]] || git cat-file -e "$TARGET_REF:docker-compose.prod.4gb.yml" 2>/dev/null; then
+    ENV_USE_4GB_PROFILE="${EDUSMART_USE_4GB_PROFILE:-$(read_env_var EDUSMART_USE_4GB_PROFILE "$ENV_FILE")}"
+    if [[ "$ENV_USE_4GB_PROFILE" =~ ^(1|true|TRUE|yes|YES|on|ON)$ ]] \
+      && { [[ -f "docker-compose.prod.4gb.yml" ]] || git cat-file -e "$TARGET_REF:docker-compose.prod.4gb.yml" 2>/dev/null; }; then
       COMPOSE_FILES+=("docker-compose.prod.4gb.yml")
     fi
   fi

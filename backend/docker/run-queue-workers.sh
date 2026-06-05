@@ -2,18 +2,18 @@
 
 set -eu
 
-default_processes="${QUEUE_WORKER_PROCESSES:-1}"
-quiz_processes="${QUIZ_SCORING_WORKER_PROCESSES:-0}"
+default_processes="${QUEUE_WORKER_PROCESSES:-2}"
+quiz_processes="${QUIZ_SCORING_WORKER_PROCESSES:-4}"
 quiz_queue="${QUIZ_SCORING_QUEUE:-quiz-scoring}"
 backup_queue="${BACKUP_QUEUE:-backup}"
 worker_timeout="${QUEUE_WORKER_TIMEOUT_SECONDS:-${BACKUP_JOB_TIMEOUT_SECONDS:-900}}"
 
 case "$default_processes" in
-  ''|*[!0-9]*) default_processes=1 ;;
+  ''|*[!0-9]*) default_processes=2 ;;
 esac
 
 case "$quiz_processes" in
-  ''|*[!0-9]*) quiz_processes=0 ;;
+  ''|*[!0-9]*) quiz_processes=4 ;;
 esac
 
 case "$worker_timeout" in
@@ -44,9 +44,9 @@ start_worker() {
 i=0
 while [ "$i" -lt "$default_processes" ]; do
   if [ "$quiz_processes" -gt 0 ]; then
-    start_worker "$backup_queue,default"
+    start_worker "default,$backup_queue"
   else
-    start_worker "$quiz_queue,$backup_queue,default"
+    start_worker "$quiz_queue,default,$backup_queue"
   fi
   i=$((i + 1))
 done
