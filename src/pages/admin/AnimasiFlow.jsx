@@ -271,9 +271,9 @@ function DotBackground() {
    ═══════════════════════════════════════════════ */
 function FlowCanvas({ theme = 'dark' }) {
   const [nodes, setNodes] = useState(() => FLOW_NODES.map((n) => ({ ...n })))
-  const [transform, setTransform] = useState({ x: 50, y: -100, scale: 0.45 })
+  const [transform, setTransform] = useState({ x: 60, y: 30, scale: 0.35 })
   const transformLayerRef = useRef(null)
-  const transformRef = useRef({ x: 50, y: -100, scale: 0.45 })
+  const transformRef = useRef({ x: 60, y: 30, scale: 0.35 })
   const canvasRef = useRef(null)
 
   /** Directly patch the DOM — no React re-render during pan/zoom */
@@ -378,10 +378,10 @@ function FlowCanvas({ theme = 'dark' }) {
   /* ── Controls ── */
   const zoomIn = () => { const t = { ...transformRef.current, scale: Math.min(2.5, transformRef.current.scale * 1.2) }; applyTransform(t); setTransform({ ...t }) }
   const zoomOut = () => { const t = { ...transformRef.current, scale: Math.max(0.3, transformRef.current.scale / 1.2) }; applyTransform(t); setTransform({ ...t }) }
-  const fitView = () => { const t = { x: 50, y: -100, scale: 0.45 }; applyTransform(t); setTransform({ ...t }) }
+  const fitView = () => { const t = { x: 60, y: 30, scale: 0.35 }; applyTransform(t); setTransform({ ...t }) }
   const resetNodes = () => {
     setNodes(FLOW_NODES.map((n) => ({ ...n })))
-    const t = { x: 50, y: -100, scale: 0.45 }
+    const t = { x: 60, y: 30, scale: 0.35 }
     applyTransform(t)
     setTransform({ ...t })
   }
@@ -529,7 +529,7 @@ export default function AnimasiFlow() {
     <PageGate superAdminChecked={superAdminChecked} isSuperAdmin={isSuperAdmin}>
       <div className="space-y-6 p-4 sm:p-6">
         {/* ── Header ── */}
-        <div className="page-title-card relative">
+        <div className="page-title-card relative z-[100] !overflow-visible">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
             <div className="flex items-center gap-4">
               <div className="grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 text-white shadow-lg">
