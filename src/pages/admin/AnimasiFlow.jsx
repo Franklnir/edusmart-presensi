@@ -271,9 +271,9 @@ function DotBackground() {
    ═══════════════════════════════════════════════ */
 function FlowCanvas({ theme = 'dark' }) {
   const [nodes, setNodes] = useState(() => FLOW_NODES.map((n) => ({ ...n })))
-  const [transform, setTransform] = useState({ x: 20, y: 20, scale: 0.55 })
+  const [transform, setTransform] = useState({ x: 50, y: -100, scale: 0.45 })
   const transformLayerRef = useRef(null)
-  const transformRef = useRef({ x: 20, y: 20, scale: 0.55 })
+  const transformRef = useRef({ x: 50, y: -100, scale: 0.45 })
   const canvasRef = useRef(null)
 
   /** Directly patch the DOM — no React re-render during pan/zoom */
@@ -378,10 +378,10 @@ function FlowCanvas({ theme = 'dark' }) {
   /* ── Controls ── */
   const zoomIn = () => { const t = { ...transformRef.current, scale: Math.min(2.5, transformRef.current.scale * 1.2) }; applyTransform(t); setTransform({ ...t }) }
   const zoomOut = () => { const t = { ...transformRef.current, scale: Math.max(0.3, transformRef.current.scale / 1.2) }; applyTransform(t); setTransform({ ...t }) }
-  const fitView = () => { const t = { x: 20, y: 20, scale: 0.55 }; applyTransform(t); setTransform({ ...t }) }
+  const fitView = () => { const t = { x: 50, y: -100, scale: 0.45 }; applyTransform(t); setTransform({ ...t }) }
   const resetNodes = () => {
     setNodes(FLOW_NODES.map((n) => ({ ...n })))
-    const t = { x: 20, y: 20, scale: 0.55 }
+    const t = { x: 50, y: -100, scale: 0.45 }
     applyTransform(t)
     setTransform({ ...t })
   }
@@ -529,9 +529,25 @@ export default function AnimasiFlow() {
     <PageGate superAdminChecked={superAdminChecked} isSuperAdmin={isSuperAdmin}>
       <div className="space-y-6 p-4 sm:p-6">
         {/* ── Header ── */}
-        <div className="page-title-card">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex items-center gap-3 ml-auto relative">
+        <div className="page-title-card relative">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
+            <div className="flex items-center gap-4">
+              <div className="grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 text-white shadow-lg">
+                <Workflow size={24} />
+              </div>
+              <div className="pr-[140px]">
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-violet-600">
+                  Monitoring
+                </p>
+                <h1 className="page-title-heading">Animasi Flow</h1>
+                <p className="page-title-description">
+                  Visualisasi alur proses EduSmart dengan animasi flowchart interaktif — powered by ArtisanFlow concept.
+                </p>
+              </div>
+            </div>
+            
+            {/* Theme Toggle Button - Absolute right */}
+            <div className="absolute top-6 right-6 z-[100]">
               <button
                 type="button"
                 onClick={() => setThemeOpen((o) => !o)}
@@ -543,7 +559,7 @@ export default function AnimasiFlow() {
                 <span className="ml-auto opacity-50">▾</span>
               </button>
               {themeOpen && (
-                <div className="absolute right-0 top-11 z-50 w-36 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+                <div className="absolute right-0 top-12 z-[100] w-36 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
                   {[
                     { value: 'dark', emoji: '🌙', label: 'Dark' },
                     { value: 'light', emoji: '☀️', label: 'Light' },
@@ -561,20 +577,6 @@ export default function AnimasiFlow() {
                   ))}
                 </div>
               )}
-            </div>
-            <div className="flex items-center gap-4">
-              <div className="grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 text-white shadow-lg">
-                <Workflow size={24} />
-              </div>
-              <div>
-                <p className="text-xs font-bold uppercase tracking-[0.18em] text-violet-600">
-                  Monitoring
-                </p>
-                <h1 className="page-title-heading">Animasi Flow</h1>
-                <p className="page-title-description">
-                  Visualisasi alur proses EduSmart dengan animasi flowchart interaktif — powered by ArtisanFlow concept.
-                </p>
-              </div>
             </div>
           </div>
         </div>
