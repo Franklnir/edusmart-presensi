@@ -23,64 +23,64 @@ function PageGate({ superAdminChecked, isSuperAdmin, children }) {
    ═══════════════════════════════════════════════ */
 const FLOW_NODES = [
   // ─── AUTH ─────────────────────────────────────────
-  { id: 'login',          x: 40,   y: 980,  label: '🔐 Autentikasi',    color: '#8b5cf6' },
-  { id: 'gateway',        x: 240,  y: 980,  label: '🚦 Role Gateway',   color: '#6366f1' },
-
-  // ─── SUPER ADMIN (Dipindah ke atas) ───────────────
-  { id: 'sa_dash',        x: 440,  y: 230, label: '🛡️ Dash Super',    color: '#ef4444' },
-  { id: 'sa_monitor',     x: 660,  y: 80,  label: '📈 Monitoring',    color: '#f87171' },
-  { id: 'sa_server',      x: 660,  y: 155, label: '🖥️ Monitor Server',color: '#ef4444' },
-  { id: 'sa_log',         x: 660,  y: 230, label: '📜 Monitor Log',   color: '#ef4444' },
-  { id: 'sa_animflow',    x: 660,  y: 305, label: '🎬 Animasi Flow',  color: '#dc2626' },
-  { id: 'sa_tenants',     x: 900,  y: 80,  label: '🏢 Kelola Tenant', color: '#f87171' },
-  { id: 'sa_admins',      x: 900,  y: 155, label: '🛡️ Super Admins',  color: '#ef4444' },
-  { id: 'sa_audit',       x: 900,  y: 230, label: '🔍 Audit Trail',   color: '#b91c1c' },
-  { id: 'sa_plugins',     x: 900,  y: 305, label: '🔌 Plugins',       color: '#b91c1c' },
-  { id: 'sa_wa_pusat',    x: 900,  y: 380, label: '💬 WA Pusat',      color: '#991b1b' },
-
-  // ─── SISWA ────────────────────────────────────────
-  { id: 'siswa_dash',     x: 440,  y: 615,  label: '👨‍🎓 Dash Siswa',   color: '#0ea5e9' },
-  { id: 'siswa_profil',   x: 660,  y: 495,  label: '👤 Profil Siswa',  color: '#38bdf8' },
-  { id: 'siswa_absensi',  x: 660,  y: 570,  label: '📋 Absensi',       color: '#0ea5e9' },
-  { id: 'siswa_quiz',     x: 660,  y: 645,  label: '🧠 Kerjakan Quiz', color: '#0ea5e9' },
-  { id: 'siswa_tugas',    x: 660,  y: 720,  label: '✏️ Kumpul Tugas',  color: '#0ea5e9' },
-  { id: 'siswa_eskul',    x: 660,  y: 795,  label: '🎨 Eskul (Soon)',  color: '#0284c7' },
+  { id: 'login',          x: 40,   y: 500,  label: '🔐 Autentikasi',    color: '#8b5cf6' },
+  { id: 'gateway',        x: 240,  y: 500,  label: '🚦 Role Gateway',   color: '#6366f1' },
 
   // ─── GURU ─────────────────────────────────────────
-  { id: 'guru_dash',      x: 440,  y: 1075, label: '👨‍🏫 Dash Guru',   color: '#10b981' },
-  { id: 'guru_profil',    x: 660,  y: 910,  label: '👤 Profil Guru',   color: '#34d399' },
-  { id: 'guru_jadwal',    x: 660,  y: 985,  label: '📅 Jadwal Ajar',   color: '#10b981' },
-  { id: 'guru_absen',     x: 660,  y: 1060, label: '✅ Cek Absensi',   color: '#10b981' },
-  { id: 'guru_quiz',      x: 660,  y: 1135, label: '📝 Buat Quiz',     color: '#10b981' },
-  { id: 'guru_tugas',     x: 660,  y: 1210, label: '📚 Buat Tugas',    color: '#10b981' },
-  { id: 'guru_laporan',   x: 660,  y: 1285, label: '📊 Laporan Nilai', color: '#059669' },
-  { id: 'guru_wali',      x: 900,  y: 910,  label: '🏠 Siswa Wali',    color: '#34d399' },
-  { id: 'guru_rapot',     x: 900,  y: 985,  label: '🎓 Rapot Siswa',   color: '#047857' },
+  { id: 'guru_dash',      x: 440,  y: 220,  label: '👨‍🏫 Dash Guru',   color: '#10b981' },
+  { id: 'guru_profil',    x: 680,  y: 20,   label: '👤 Profil Guru',   color: '#34d399' },
+  { id: 'guru_jadwal',    x: 680,  y: 100,  label: '📅 Jadwal Ajar',   color: '#10b981' },
+  { id: 'guru_absen',     x: 680,  y: 180,  label: '✅ Cek Absensi',   color: '#10b981' },
+  { id: 'guru_quiz',      x: 680,  y: 260,  label: '📝 Buat Quiz',     color: '#10b981' },
+  { id: 'guru_tugas',     x: 680,  y: 340,  label: '📚 Buat Tugas',    color: '#10b981' },
+  { id: 'guru_laporan',   x: 680,  y: 420,  label: '📊 Laporan Nilai', color: '#059669' },
+  { id: 'guru_wali',      x: 920,  y: 20,   label: '🏠 Siswa Wali',    color: '#34d399' },
+  { id: 'guru_rapot',     x: 920,  y: 100,  label: '🎓 Rapot Siswa',   color: '#047857' },
 
   // ─── ADMIN ────────────────────────────────────────
-  { id: 'admin_dash',     x: 440,  y: 1595, label: '💼 Dash Admin',    color: '#f59e0b' },
-  { id: 'admin_kelas',    x: 660,  y: 1405, label: '🏫 Kelola Kelas',  color: '#fbbf24' },
-  { id: 'admin_jadwal',   x: 660,  y: 1480, label: '📅 Jadwal Kelas',  color: '#fbbf24' },
-  { id: 'admin_struktur', x: 660,  y: 1555, label: '🏛️ Struktur Sek',  color: '#f59e0b' },
-  { id: 'admin_org',      x: 660,  y: 1630, label: '🏢 Organisasi',    color: '#f59e0b' },
-  { id: 'admin_guru',     x: 660,  y: 1705, label: '👨‍🏫 Kelola Guru', color: '#f59e0b' },
-  { id: 'admin_siswa',    x: 660,  y: 1780, label: '👥 Kelola Siswa',  color: '#fbbf24' },
-  { id: 'admin_scan',     x: 660,  y: 1855, label: '📱 Scan Absensi',  color: '#f59e0b' },
-  { id: 'admin_sertif',   x: 900,  y: 1405, label: '🏆 Sertifikat',    color: '#d97706' },
-  { id: 'admin_approval', x: 900,  y: 1480, label: '✅ Approval',      color: '#d97706' },
-  { id: 'admin_wa',       x: 900,  y: 1555, label: '💬 WhatsApp',      color: '#b45309' },
-  { id: 'admin_storage',  x: 900,  y: 1630, label: '💾 Storage',       color: '#b45309' },
-  { id: 'admin_backup',   x: 900,  y: 1705, label: '🔄 Backup',        color: '#b45309' },
-  { id: 'admin_set',      x: 900,  y: 1780, label: '⚙️ Pengaturan',    color: '#92400e' },
+  { id: 'admin_dash',     x: 440,  y: 820,  label: '💼 Dash Admin',    color: '#f59e0b' },
+  { id: 'admin_kelas',    x: 680,  y: 580,  label: '🏫 Kelola Kelas',  color: '#fbbf24' },
+  { id: 'admin_jadwal',   x: 680,  y: 660,  label: '📅 Jadwal Kelas',  color: '#fbbf24' },
+  { id: 'admin_struktur', x: 680,  y: 740,  label: '🏛️ Struktur Sek',  color: '#f59e0b' },
+  { id: 'admin_org',      x: 680,  y: 820,  label: '🏢 Organisasi',    color: '#f59e0b' },
+  { id: 'admin_guru',     x: 680,  y: 900,  label: '👨‍🏫 Kelola Guru', color: '#f59e0b' },
+  { id: 'admin_siswa',    x: 680,  y: 980,  label: '👥 Kelola Siswa',  color: '#fbbf24' },
+  { id: 'admin_scan',     x: 680,  y: 1060, label: '📱 Scan Absensi',  color: '#f59e0b' },
+  { id: 'admin_sertif',   x: 920,  y: 580,  label: '🏆 Sertifikat',    color: '#d97706' },
+  { id: 'admin_approval', x: 920,  y: 660,  label: '✅ Approval',      color: '#d97706' },
+  { id: 'admin_wa',       x: 920,  y: 740,  label: '💬 WhatsApp',      color: '#b45309' },
+  { id: 'admin_storage',  x: 920,  y: 820,  label: '💾 Storage',       color: '#b45309' },
+  { id: 'admin_backup',   x: 920,  y: 900,  label: '🔄 Backup',        color: '#b45309' },
+  { id: 'admin_set',      x: 920,  y: 980,  label: '⚙️ Pengaturan',    color: '#92400e' },
+
+  // ─── SISWA ────────────────────────────────────────
+  { id: 'siswa_dash',     x: 1000, y: 260,  label: '👨‍🎓 Dash Siswa',   color: '#0ea5e9' },
+  { id: 'siswa_profil',   x: 1240, y: 100,  label: '👤 Profil Siswa',  color: '#38bdf8' },
+  { id: 'siswa_absensi',  x: 1240, y: 180,  label: '📋 Absensi',       color: '#0ea5e9' },
+  { id: 'siswa_quiz',     x: 1240, y: 260,  label: '🧠 Kerjakan Quiz', color: '#0ea5e9' },
+  { id: 'siswa_tugas',    x: 1240, y: 340,  label: '✏️ Kumpul Tugas',  color: '#0ea5e9' },
+  { id: 'siswa_eskul',    x: 1240, y: 420,  label: '🎨 Eskul (Soon)',  color: '#0284c7' },
+
+  // ─── SUPER ADMIN ──────────────────────────────────
+  { id: 'sa_dash',        x: 1000, y: 500,  label: '🛡️ Dash Super',    color: '#ef4444' },
+  { id: 'sa_monitor',     x: 1240, y: 500,  label: '📈 Monitoring',    color: '#f87171' },
+  { id: 'sa_server',      x: 1240, y: 580,  label: '🖥️ Monitor Server',color: '#ef4444' },
+  { id: 'sa_log',         x: 1240, y: 660,  label: '📜 Monitor Log',   color: '#ef4444' },
+  { id: 'sa_animflow',    x: 1240, y: 740,  label: '🎬 Animasi Flow',  color: '#dc2626' },
+  { id: 'sa_tenants',     x: 1480, y: 420,  label: '🏢 Kelola Tenant', color: '#f87171' },
+  { id: 'sa_admins',      x: 1480, y: 500,  label: '🛡️ Super Admins',  color: '#ef4444' },
+  { id: 'sa_audit',       x: 1480, y: 580,  label: '🔍 Audit Trail',   color: '#b91c1c' },
+  { id: 'sa_plugins',     x: 1480, y: 660,  label: '🔌 Plugins',       color: '#b91c1c' },
+  { id: 'sa_wa_pusat',    x: 1480, y: 740,  label: '💬 WA Pusat',      color: '#991b1b' },
 
   // ─── INFRASTRUCTURE ───────────────────────────────
-  { id: 'db_main',        x: 1140, y: 1630, label: '🗄️ Database',      color: '#64748b' },
-  { id: 'storage_s3',     x: 1140, y: 1705, label: '☁️ S3 Storage',    color: '#64748b' },
-  { id: 'backup_db',      x: 1140, y: 1780, label: '🔄 Auto Backup',   color: '#475569' },
+  { id: 'db_main',        x: 1240, y: 820,  label: '🗄️ Database',      color: '#64748b' },
+  { id: 'storage_s3',     x: 1240, y: 900,  label: '☁️ S3 Storage',    color: '#64748b' },
+  { id: 'backup_db',      x: 1240, y: 980,  label: '🔄 Auto Backup',   color: '#475569' },
 
   // ─── OUTPUT ───────────────────────────────────────
-  { id: 'out_nilai',      x: 1140, y: 645,  label: '💯 Nilai Keluar',  color: '#ec4899' },
-  { id: 'out_lulus',      x: 1380, y: 1395, label: '🌟 Selesai',       color: '#22c55e' },
+  { id: 'out_nilai',      x: 1480, y: 300,  label: '💯 Nilai Keluar',  color: '#ec4899' },
+  { id: 'out_lulus',      x: 1480, y: 100,  label: '🌟 Selesai',       color: '#22c55e' },
 ]
 
 const FLOW_EDGES = [
@@ -271,9 +271,9 @@ function DotBackground() {
    ═══════════════════════════════════════════════ */
 function FlowCanvas({ theme = 'dark' }) {
   const [nodes, setNodes] = useState(() => FLOW_NODES.map((n) => ({ ...n })))
-  const [transform, setTransform] = useState({ x: 120, y: 50, scale: 0.28 })
+  const [transform, setTransform] = useState({ x: 140, y: 60, scale: 0.5 })
   const transformLayerRef = useRef(null)
-  const transformRef = useRef({ x: 120, y: 50, scale: 0.28 })
+  const transformRef = useRef({ x: 140, y: 60, scale: 0.5 })
   const canvasRef = useRef(null)
 
   /** Directly patch the DOM — no React re-render during pan/zoom */
@@ -378,10 +378,10 @@ function FlowCanvas({ theme = 'dark' }) {
   /* ── Controls ── */
   const zoomIn = () => { const t = { ...transformRef.current, scale: Math.min(2.5, transformRef.current.scale * 1.2) }; applyTransform(t); setTransform({ ...t }) }
   const zoomOut = () => { const t = { ...transformRef.current, scale: Math.max(0.3, transformRef.current.scale / 1.2) }; applyTransform(t); setTransform({ ...t }) }
-  const fitView = () => { const t = { x: 120, y: 50, scale: 0.28 }; applyTransform(t); setTransform({ ...t }) }
+  const fitView = () => { const t = { x: 140, y: 60, scale: 0.5 }; applyTransform(t); setTransform({ ...t }) }
   const resetNodes = () => {
     setNodes(FLOW_NODES.map((n) => ({ ...n })))
-    const t = { x: 120, y: 50, scale: 0.28 }
+    const t = { x: 140, y: 60, scale: 0.5 }
     applyTransform(t)
     setTransform({ ...t })
   }
