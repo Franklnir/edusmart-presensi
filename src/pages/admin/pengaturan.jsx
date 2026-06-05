@@ -74,9 +74,10 @@ const SETTINGS_SELECT_COLUMNS = [
   'periode_genap_selesai',
   'jadwal_periode_berlaku'
 ].join(',')
-const SETTINGS_QUERY_KEY = ['admin', 'settings', 'system']
+const SETTINGS_TENANT_CACHE_SCOPE = CURRENT_TENANT_SLUG || 'default'
+const SETTINGS_QUERY_KEY = ['admin', 'settings', 'system', SETTINGS_TENANT_CACHE_SCOPE]
 const SETTINGS_STALE_TIME = 5 * 60 * 1000
-const SETTINGS_SESSION_CACHE_KEY = 'edusmart_settings_cache:system'
+const SETTINGS_SESSION_CACHE_KEY = `edusmart_settings_cache:${SETTINGS_TENANT_CACHE_SCOPE}:system`
 const normalizeEskulLimit = (value) => Math.max(1, Math.min(99, Number.parseInt(value, 10) || 3))
 
 function getSettingsStorage() {
@@ -584,6 +585,8 @@ export default function APengaturan() {
   const autoSaveTimerRef = useRef(null)
   const initialLoadDoneRef = useRef(false)
   const lastSaveTimestampRef = useRef('')
+  const settingsDirtyRef = useRef(false)
+  const lastSettingsRowRef = useRef(null)
 
   const handlePasswordConfirm = async (password) => {
     setPasswordLoading(true)
@@ -728,6 +731,8 @@ export default function APengaturan() {
     const applySettingsRow = (data) => {
       if (!data) return
 
+      settingsDirtyRef.current = false
+      lastSettingsRowRef.current = data
       setSettingsId(data.id)
 
       const logoPath = extractObjectKeyFromMaybeUrl(data.logo_url || '', SUPABASE_BUCKET)
@@ -761,6 +766,7 @@ export default function APengaturan() {
     }
 
     async function loadSettings() {
+      initialLoadDoneRef.current = false
       const cachedSettings = queryClient.getQueryData(SETTINGS_QUERY_KEY) || readCachedSettingsRow()
       if (cachedSettings && !isCancelled) {
         queryClient.setQueryData(SETTINGS_QUERY_KEY, cachedSettings)
@@ -769,49 +775,18 @@ export default function APengaturan() {
 
       setLoading(!cachedSettings)
       try {
-        const data = await queryClient.fetchQuery({
-          queryKey: SETTINGS_QUERY_KEY,
-          queryFn: fetchSettingsRow,
-          staleTime: SETTINGS_STALE_TIME,
-        })
+        const data = await fetchSettingsRow()
+        if (data) queryClient.setQueryData(SETTINGS_QUERY_KEY, data)
 
         if (!isCancelled && data) {
-          setSettingsId(data.id)
-
-          const logoPath = extractObjectKeyFromMaybeUrl(data.logo_url || '', SUPABASE_BUCKET)
-
-          setForm((prev) => ({
-            ...prev,
-            nama_sekolah: data.nama_sekolah || '',
-            email: data.email || '',
-            telepon: data.telepon || '',
-            alamat: data.alamat || '',
-            logo_url: logoPath || '',
-            visi: data.visi || '',
-            misi: data.misi || '',
-            link_instagram: data.link_instagram || '',
-            link_facebook: data.link_facebook || '',
-            link_youtube: data.link_youtube || '',
-            link_tiktok: data.link_tiktok || '',
-            registrasi_siswa_aktif: data.registrasi_siswa_aktif ?? true,
-            registrasi_guru_aktif: data.registrasi_guru_aktif ?? false,
-            registrasi_admin_aktif: data.registrasi_admin_aktif ?? false,
-            max_ekskul_per_siswa: normalizeEskulLimit(data.max_ekskul_per_siswa)
-          }))
-          const nextPeriodForm = resolvePeriodForm(data)
-          setPeriodForm(nextPeriodForm)
-          setPersistedPeriodForm(nextPeriodForm)
-          setDrivePeriodFilter({
-            tahunAjaran: nextPeriodForm.tahunAjaran,
-            semester: ''
-          })
+          applySettingsRow(data)
         }
       } catch (err) {
         if (!isCancelled) pushToast('error', 'Gagal memuat pengaturan: ' + err.message)
       } finally {
         if (!isCancelled) {
           setLoading(false)
-          setTimeout(() => { initialLoadDoneRef.current = true }, 1000)
+          initialLoadDoneRef.current = true
         }
       }
     }
@@ -821,7 +796,7 @@ export default function APengaturan() {
     return () => {
       isCancelled = true
     }
-  }, [activeSettingsMenu, pushToast, isAuthorized])
+  }, [pushToast, isAuthorized])
 
   useEffect(() => {
     if (!isAuthorized || activeSettingsMenu !== 'drive') return
@@ -920,6 +895,8 @@ export default function APengaturan() {
           const rowUpdatedAt = String(row.updated_at || '')
           if (lastSaveTimestampRef.current && rowUpdatedAt === lastSaveTimestampRef.current) return
 
+          settingsDirtyRef.current = false
+          lastSettingsRowRef.current = row
           const logoPath = extractObjectKeyFromMaybeUrl(row.logo_url || '', SUPABASE_BUCKET)
 
           setForm((prev) => ({
@@ -958,6 +935,7 @@ export default function APengaturan() {
 
   function handleChange(e) {
     const { name, value } = e.target
+    settingsDirtyRef.current = true
     setForm((prev) => ({ ...prev, [name]: value }))
   }
 
@@ -1240,37 +1218,7 @@ export default function APengaturan() {
 
   useEffect(() => {
     if (!settingsId || !isAuthorized || !initialLoadDoneRef.current) return
-
-    const {
-      nama_sekolah,
-      email,
-      telepon,
-      alamat,
-      logo_url,
-      visi,
-      misi,
-      link_instagram,
-      link_facebook,
-      link_youtube,
-      link_tiktok,
-      max_ekskul_per_siswa
-    } = form
-
-    const hasContent =
-      nama_sekolah ||
-      email ||
-      telepon ||
-      alamat ||
-      logo_url ||
-      visi ||
-      misi ||
-      link_instagram ||
-      link_facebook ||
-      link_youtube ||
-      link_tiktok ||
-      max_ekskul_per_siswa
-
-    if (!hasContent) return
+    if (!settingsDirtyRef.current) return
 
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
 
@@ -1319,8 +1267,14 @@ export default function APengaturan() {
         .eq('id', settingsId)
 
       if (error) throw error
-      clearCachedSettingsRow()
-      queryClient.invalidateQueries({ queryKey: SETTINGS_QUERY_KEY })
+      const savedRow = {
+        ...(lastSettingsRowRef.current || queryClient.getQueryData(SETTINGS_QUERY_KEY) || {}),
+        ...updateData,
+        id: settingsId
+      }
+      lastSettingsRowRef.current = savedRow
+      writeCachedSettingsRow(savedRow)
+      queryClient.setQueryData(SETTINGS_QUERY_KEY, savedRow)
       pushToast('success', 'Pengaturan registrasi berhasil diperbarui.')
     } catch (err) {
       pushToast('error', 'Gagal menyimpan pengaturan: ' + err.message)
@@ -1363,8 +1317,15 @@ export default function APengaturan() {
         .eq('id', settingsId)
 
       if (error) throw error
-      clearCachedSettingsRow()
-      queryClient.invalidateQueries({ queryKey: SETTINGS_QUERY_KEY })
+      const savedRow = {
+        ...(lastSettingsRowRef.current || queryClient.getQueryData(SETTINGS_QUERY_KEY) || {}),
+        ...dataToSave,
+        id: settingsId
+      }
+      settingsDirtyRef.current = false
+      lastSettingsRowRef.current = savedRow
+      writeCachedSettingsRow(savedRow)
+      queryClient.setQueryData(SETTINGS_QUERY_KEY, savedRow)
       if (showToast) pushToast('success', 'Pengaturan berhasil disimpan.')
     } catch (err) {
       if (showToast) pushToast('error', 'Gagal menyimpan: ' + err.message)
@@ -1394,17 +1355,26 @@ export default function APengaturan() {
       setForm((prev) => ({ ...prev, logo_url: newLogoPath }))
 
       if (settingsId) {
+        const updatedAt = new Date().toISOString()
         const { error } = await supabase
           .from('settings')
           .update({
             logo_url: newLogoPath,
-            updated_at: new Date().toISOString()
+            updated_at: updatedAt
           })
           .eq('id', settingsId)
 
         if (error) throw error
-        clearCachedSettingsRow()
-        queryClient.invalidateQueries({ queryKey: SETTINGS_QUERY_KEY })
+        const savedRow = {
+          ...(lastSettingsRowRef.current || queryClient.getQueryData(SETTINGS_QUERY_KEY) || {}),
+          logo_url: newLogoPath,
+          updated_at: updatedAt,
+          id: settingsId
+        }
+        lastSaveTimestampRef.current = updatedAt
+        lastSettingsRowRef.current = savedRow
+        writeCachedSettingsRow(savedRow)
+        queryClient.setQueryData(SETTINGS_QUERY_KEY, savedRow)
       }
 
       const signed = await createSignedUrlSafe(SUPABASE_BUCKET, newLogoPath)
