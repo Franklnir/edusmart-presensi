@@ -103,7 +103,7 @@ class AuthController extends ApiController
     {
         try {
             $tenantId = $this->tenantId($request);
-            $cacheKey = 'bootstrap_settings:'.($tenantId ?: 'default');
+            $cacheKey = 'bootstrap_settings:' . ($tenantId ?: 'default');
 
             return Cache::remember($cacheKey, 300, function () use ($request, $tenantId) {
                 if (! Schema::hasTable('settings')) {
