@@ -290,6 +290,7 @@ Route::middleware(['auth:sanctum', 'throttle:super', 'super.domain', 'super.admi
     Route::post('/super/whatsapp/sync', [WhatsAppController::class, 'superSync']);
     Route::post('/super/whatsapp/logout', [WhatsAppController::class, 'superLogout']);
     Route::post('/super/whatsapp/test', [WhatsAppController::class, 'superSendTest']);
+    Route::patch('/super/whatsapp/tenants/{tenantId}/status', [WhatsAppController::class, 'superUpdateTenantSettings']);
     Route::post('/super/whatsapp/daily-alpha/run', [WhatsAppController::class, 'superRunDailyAlpha']);
     Route::post('/super/whatsapp/retry-failed', [WhatsAppController::class, 'superRetryFailed']);
     Route::post('/super/tenants/{tenantId}/admins/{userId}/reset-password', [SuperAdminController::class, 'resetTenantAdminPassword']);

@@ -3330,6 +3330,16 @@ const auth = {
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
+    async updateWhatsAppTenantStatus(payload = {}) {
+      const { tenant_id, is_enabled } = payload
+      const res = await apiFetch(`/api/super/whatsapp/tenants/${tenant_id}/status`, {
+        method: 'PATCH',
+        body: { is_enabled },
+        cacheTtlMs: 0,
+        timeoutMs: 30000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
     async sendWhatsAppTest(payload = {}) {
       const res = await apiFetch('/api/super/whatsapp/test', {
         method: 'POST',

@@ -262,6 +262,28 @@ class WhatsAppController extends ApiController
         }
     }
 
+    public function superUpdateTenantSettings(Request $request, $tenantId)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
+        }
+
+        $validated = $request->validate([
+            'is_enabled' => ['required', 'boolean'],
+        ]);
+
+        $tenant = DB::table('tenants')->where('id', $tenantId)->first();
+        if (!$tenant) {
+            return $this->deny('Sekolah tidak ditemukan', 404);
+        }
+
+        $settings = $this->whatsAppIntegrationService->saveNotificationSettings($tenantId, [
+            'is_enabled' => $validated['is_enabled'],
+        ]);
+
+        return $this->ok(['settings' => $settings]);
+    }
+
     public function superSendTest(Request $request)
     {
         if (! $this->isSuperAdmin($request)) {

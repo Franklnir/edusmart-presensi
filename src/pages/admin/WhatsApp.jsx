@@ -419,6 +419,49 @@ function SuperWhatsAppCenter() {
     pushToast('success', 'Pesan tes masuk ke antrean pengiriman')
   }
 
+  const handleToggleTenant = async (tenantId, currentEnabled) => {
+    const nextEnabled = !currentEnabled
+    setPayload((prev) => {
+      if (!prev.tenants) return prev
+      return {
+        ...prev,
+        tenants: prev.tenants.map(t => 
+          t.tenant_id === tenantId ? { ...t, is_enabled: nextEnabled, _toggling: true } : t
+        )
+      }
+    })
+
+    const { error } = await supabase.super.updateWhatsAppTenantStatus({
+      tenant_id: tenantId,
+      is_enabled: nextEnabled
+    })
+
+    if (error) {
+      pushToast('error', error.message || 'Gagal mengubah status WA sekolah')
+      setPayload((prev) => {
+        if (!prev.tenants) return prev
+        return {
+          ...prev,
+          tenants: prev.tenants.map(t => 
+            t.tenant_id === tenantId ? { ...t, is_enabled: currentEnabled, _toggling: false } : t
+          )
+        }
+      })
+      return
+    }
+
+    pushToast('success', nextEnabled ? 'Notifikasi sekolah diaktifkan' : 'Notifikasi sekolah dinonaktifkan')
+    setPayload((prev) => {
+      if (!prev.tenants) return prev
+      return {
+        ...prev,
+        tenants: prev.tenants.map(t => 
+          t.tenant_id === tenantId ? { ...t, _toggling: false } : t
+        )
+      }
+    })
+  }
+
   return (
     <div className="page-wrapper space-y-6">
       <section className="page-title-card flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -698,9 +741,31 @@ function SuperWhatsAppCenter() {
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="font-bold text-slate-900">{tenant.tenant_name || tenant.tenant_slug || 'Sekolah'}</div>
-                      <div className="text-xs text-slate-500">{tenant.tenant_slug || tenant.tenant_id}</div>
+                      <div className="flex items-center gap-2">
+                        <div className="text-xs text-slate-500">{tenant.tenant_slug || tenant.tenant_id}</div>
+                      </div>
                     </div>
-                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">{tenant.required || 0} siswa Alpha</span>
+                    <div className="flex items-center gap-3">
+                      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">{tenant.required || 0} siswa Alpha</span>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleTenant(tenant.tenant_id, tenant.is_enabled)}
+                        disabled={tenant._toggling}
+                        className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${tenant.is_enabled ? 'bg-emerald-500' : 'bg-slate-300'}`}
+                        aria-pressed={tenant.is_enabled}
+                        title={tenant.is_enabled ? "Nonaktifkan WhatsApp Sekolah" : "Aktifkan WhatsApp Sekolah"}
+                      >
+                        <span className="sr-only">Toggle status WhatsApp sekolah</span>
+                        <span
+                          aria-hidden="true"
+                          className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${tenant.is_enabled ? 'translate-x-5' : 'translate-x-0'}`}
+                        >
+                          {tenant._toggling && (
+                            <Loader2 className="absolute left-1/2 top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 animate-spin text-slate-400" />
+                          )}
+                        </span>
+                      </button>
+                    </div>
                   </div>
                   <div className="mt-3 grid grid-cols-2 gap-2 text-center text-xs font-bold sm:grid-cols-5">
                     <MiniPill label="Harus Kirim" value={tenant.required} tone="sky" />

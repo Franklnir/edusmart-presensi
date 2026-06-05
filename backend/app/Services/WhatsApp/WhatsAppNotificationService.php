@@ -253,6 +253,11 @@ class WhatsAppNotificationService
                 ->where('id', $tenantId)
                 ->first(['id', 'name', 'slug']);
 
+            $settings = DB::table('whatsapp_notification_settings')
+                ->where('tenant_id', $tenantId)
+                ->first(['is_enabled']);
+            $isEnabled = $settings ? (bool) $settings->is_enabled : false;
+
             $alphaRows = $this->dailyAlphaRows($tenantId, $targetDate);
             $alphaStudents = [];
             foreach ($alphaRows as $row) {
@@ -296,6 +301,7 @@ class WhatsAppNotificationService
                 'tenant_id' => $tenantId,
                 'tenant_name' => $tenant->name ?? null,
                 'tenant_slug' => $tenant->slug ?? null,
+                'is_enabled' => $isEnabled,
                 'required' => $required,
                 'pending' => max(0, $required - $sent - $queued - $failed - $skipped),
                 'sent' => $sent,
