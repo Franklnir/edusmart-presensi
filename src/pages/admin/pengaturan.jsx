@@ -1380,9 +1380,6 @@ export default function APengaturan() {
     try {
       const compressedFile = await compressImage(selectedLogoFile, 300)
 
-
-      await supabase.storage.from(SUPABASE_BUCKET).remove([TENANT_LOGO_FILE_PATH])
-
       const { error: uploadError } = await supabase.storage
         .from(SUPABASE_BUCKET)
         .upload(TENANT_LOGO_FILE_PATH, compressedFile, {

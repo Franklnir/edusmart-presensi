@@ -22,17 +22,28 @@ export const useNavbarSettings = (authSettings) => {
       if (authSettings?.id) {
         setSettings(authSettings || {})
         setSettingsId(authSettings.id)
-        setIsLoading(false)
-        return
       }
 
       try {
-        let { data, error } = await supabase
-          .from('settings')
-          .select('id,nama_sekolah,logo_url,logo_path,updated_at')
-          .order('id', { ascending: true })
-          .limit(1)
-          .single()
+        const columns = 'id,nama_sekolah,logo_url,logo_path,updated_at'
+        let data = null
+        let error = null
+
+        if (authSettings?.id) {
+          ; ({ data, error } = await supabase
+            .from('settings')
+            .select(columns)
+            .eq('id', authSettings.id)
+            .limit(1)
+            .single())
+        } else {
+          ; ({ data, error } = await supabase
+            .from('settings')
+            .select(columns)
+            .order('id', { ascending: true })
+            .limit(1)
+            .single())
+        }
 
         if (error && error.code === 'PGRST116') data = null
         else if (error) throw error

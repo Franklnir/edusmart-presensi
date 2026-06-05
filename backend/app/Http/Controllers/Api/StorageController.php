@@ -1689,9 +1689,10 @@ class StorageController extends ApiController
 
     private function shouldProxyObjectStorageRead(string $bucket): bool
     {
-        // Quiz media is small and rendered inside the app. Proxying it keeps the
-        // browser on the tenant origin, so missing S3 CORS cannot break images.
-        return $bucket === 'quiz-media';
+        // Small visual assets are rendered directly in the app. Proxying keeps
+        // the browser on the tenant origin, so missing/strict S3 CORS cannot
+        // break quiz images, school logos, or profile photos.
+        return in_array($bucket, ['quiz-media', 'profile-photos'], true);
     }
 
     private function objectStorageBrowserDirectEnabledForBucket(string $bucket): bool

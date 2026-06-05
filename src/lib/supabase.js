@@ -591,9 +591,14 @@ const waitForDirectUploadRetry = (delayMs, signal) => new Promise((resolve) => {
 const shouldUseServerRelayForSmallUpload = (bucket, file, options = {}) => {
   if (!DIRECT_UPLOAD_BUCKETS.has(bucket)) return false
   if (options?.fastLocal || options?.skipDirectUpload || options?.forceBrowserDirectUpload) return false
-  if (options?.preferServerRelayForSmallFiles !== true && options?.skipDrive !== true) return false
 
   const size = Number(file?.size || 0)
+  if (bucket === PROFILE_BUCKET) {
+    return size > 0 && size <= 2 * 1024 * 1024
+  }
+
+  if (options?.preferServerRelayForSmallFiles !== true && options?.skipDrive !== true) return false
+
   const threshold = Number.isFinite(DIRECT_UPLOAD_SMALL_FILE_RELAY_BYTES)
     ? Math.max(0, DIRECT_UPLOAD_SMALL_FILE_RELAY_BYTES)
     : 1024 * 1024
