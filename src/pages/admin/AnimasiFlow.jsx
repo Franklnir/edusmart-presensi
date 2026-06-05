@@ -271,9 +271,9 @@ function DotBackground() {
    ═══════════════════════════════════════════════ */
 function FlowCanvas({ theme = 'dark' }) {
   const [nodes, setNodes] = useState(() => FLOW_NODES.map((n) => ({ ...n })))
-  const [transform, setTransform] = useState({ x: 60, y: 30, scale: 0.35 })
+  const [transform, setTransform] = useState({ x: 120, y: 50, scale: 0.28 })
   const transformLayerRef = useRef(null)
-  const transformRef = useRef({ x: 60, y: 30, scale: 0.35 })
+  const transformRef = useRef({ x: 120, y: 50, scale: 0.28 })
   const canvasRef = useRef(null)
 
   /** Directly patch the DOM — no React re-render during pan/zoom */
@@ -378,10 +378,10 @@ function FlowCanvas({ theme = 'dark' }) {
   /* ── Controls ── */
   const zoomIn = () => { const t = { ...transformRef.current, scale: Math.min(2.5, transformRef.current.scale * 1.2) }; applyTransform(t); setTransform({ ...t }) }
   const zoomOut = () => { const t = { ...transformRef.current, scale: Math.max(0.3, transformRef.current.scale / 1.2) }; applyTransform(t); setTransform({ ...t }) }
-  const fitView = () => { const t = { x: 60, y: 30, scale: 0.35 }; applyTransform(t); setTransform({ ...t }) }
+  const fitView = () => { const t = { x: 120, y: 50, scale: 0.28 }; applyTransform(t); setTransform({ ...t }) }
   const resetNodes = () => {
     setNodes(FLOW_NODES.map((n) => ({ ...n })))
-    const t = { x: 60, y: 30, scale: 0.35 }
+    const t = { x: 120, y: 50, scale: 0.28 }
     applyTransform(t)
     setTransform({ ...t })
   }
