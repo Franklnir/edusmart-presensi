@@ -20,8 +20,8 @@ import {
 const normalizeEmail = (email) => email.trim().toLowerCase()
 let authInitPromise = null
 const SETTINGS_COLUMNS = 'id,nama_sekolah,logo_url,logo_path,admin_lock_enabled,updated_at'
-const AUTH_SESSION_RETRY_ATTEMPTS = 5
-const AUTH_SESSION_RETRY_DELAY_MS = 350
+const AUTH_SESSION_RETRY_ATTEMPTS = 3
+const AUTH_SESSION_RETRY_DELAY_MS = 500
 const GOOGLE_POPUP_SESSION_RETRY_ATTEMPTS = 24
 const GOOGLE_POPUP_SESSION_RETRY_DELAY_MS = 700
 const SESSION_NOT_READY_MESSAGE =
@@ -521,7 +521,6 @@ export const useAuthStore = create((set, get) => ({
 
     try {
       clearAuthSessionHint()
-      await supabase.auth.signOut()
 
       const normalizedEmail = normalizeEmail(email)
 
@@ -584,7 +583,7 @@ export const useAuthStore = create((set, get) => ({
         throw new Error(errorMessage)
       }
 
-      const settings = await get().loadSettings()
+      const settings = authData?.settings || await get().loadSettings()
 
       const accountSetupRequired = shouldForceAccountSetup(profile, user?.email)
 
@@ -620,7 +619,6 @@ export const useAuthStore = create((set, get) => ({
 
     try {
       clearAuthSessionHint()
-      await supabase.auth.signOut()
 
       const { data: authData, error: authError } = await supabase.auth.signInWithGoogleCode({
         code
@@ -662,7 +660,7 @@ export const useAuthStore = create((set, get) => ({
         throw new Error(errorMessage)
       }
 
-      const settings = await get().loadSettings()
+      const settings = authData?.settings || await get().loadSettings()
       const accountSetupRequired = shouldForceAccountSetup(profile, user?.email)
 
       setAuthSessionHint(true)
@@ -697,7 +695,6 @@ export const useAuthStore = create((set, get) => ({
 
     try {
       clearAuthSessionHint()
-      await supabase.auth.signOut()
 
       const { data: authData, error: authError } = await supabase.auth.signInWithGoogleCredential({
         credential
@@ -739,7 +736,7 @@ export const useAuthStore = create((set, get) => ({
         throw new Error(errorMessage)
       }
 
-      const settings = await get().loadSettings()
+      const settings = authData?.settings || await get().loadSettings()
       const accountSetupRequired = shouldForceAccountSetup(profile, user?.email)
 
       setAuthSessionHint(true)

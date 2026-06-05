@@ -102,29 +102,33 @@ class AuthController extends ApiController
     private function bootstrapSettings(Request $request): ?array
     {
         try {
-            if (! Schema::hasTable('settings')) {
-                return null;
-            }
-
-            $availableColumns = Schema::getColumnListing('settings');
-            $columns = array_values(array_filter(
-                self::BOOTSTRAP_SETTINGS_COLUMNS,
-                fn (string $column) => in_array($column, $availableColumns, true)
-            ));
-
-            if (empty($columns)) {
-                return null;
-            }
-
-            $query = DB::table('settings')->orderBy('id');
             $tenantId = $this->tenantId($request);
-            if ($tenantId && in_array('tenant_id', $availableColumns, true)) {
-                $query->where('tenant_id', $tenantId);
-            }
+            $cacheKey = 'bootstrap_settings:'.($tenantId ?: 'default');
 
-            $settings = $query->first($columns);
+            return Cache::remember($cacheKey, 300, function () use ($request, $tenantId) {
+                if (! Schema::hasTable('settings')) {
+                    return null;
+                }
 
-            return $settings ? (array) $settings : null;
+                $availableColumns = Schema::getColumnListing('settings');
+                $columns = array_values(array_filter(
+                    self::BOOTSTRAP_SETTINGS_COLUMNS,
+                    fn (string $column) => in_array($column, $availableColumns, true)
+                ));
+
+                if (empty($columns)) {
+                    return null;
+                }
+
+                $query = DB::table('settings')->orderBy('id');
+                if ($tenantId && in_array('tenant_id', $availableColumns, true)) {
+                    $query->where('tenant_id', $tenantId);
+                }
+
+                $settings = $query->first($columns);
+
+                return $settings ? (array) $settings : null;
+            });
         } catch (\Throwable $e) {
             return null;
         }
@@ -863,6 +867,7 @@ class AuthController extends ApiController
                 'user' => $user,
                 'profile' => $profile,
                 'is_super_admin' => $isSuperAdminIdentity,
+                'settings' => $this->bootstrapSettings($request),
             ],
         ]);
     }

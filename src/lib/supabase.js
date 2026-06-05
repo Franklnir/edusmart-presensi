@@ -2241,13 +2241,32 @@ const auth = {
     if (res.error) return { data: null, error: res.error }
 
     invalidateDbSelectCache()
+
+    const profile = res.raw?.data?.profile || null
+    const user = normalizeUser(res.raw?.data?.user, profile)
+    const settings = res.raw?.data?.settings || null
+    const hasSuperAdminFlag = Object.prototype.hasOwnProperty.call(res.raw?.data || {}, 'is_super_admin')
+    const isSuperAdmin = Boolean(res.raw?.data?.is_super_admin)
+
+    if (user && profile) {
+      return {
+        data: {
+          user,
+          profile,
+          settings,
+          isSuperAdmin,
+          superAdminChecked: hasSuperAdminFlag,
+          session: { user, profile, settings, isSuperAdmin, superAdminChecked: hasSuperAdminFlag }
+        },
+        error: null
+      }
+    }
+
     const ready = await this.waitForSessionReady()
     if (!ready.error && ready.data?.user && ready.data?.profile) {
       return { data: ready.data, error: null }
     }
 
-    const profile = res.raw?.data?.profile || null
-    const user = normalizeUser(res.raw?.data?.user, profile)
     return { data: { user, profile, session: user ? { user, profile } : null }, error: null }
   },
 
@@ -2292,17 +2311,37 @@ const auth = {
     if (res.error) return { data: null, error: res.error }
 
     invalidateDbSelectCache()
+
+    const profile = res.raw?.data?.profile || null
+    const user = normalizeUser(res.raw?.data?.user, profile)
+    const settings = res.raw?.data?.settings || null
+    const hasSuperAdminFlag = Object.prototype.hasOwnProperty.call(res.raw?.data || {}, 'is_super_admin')
+    const isSuperAdmin = Boolean(res.raw?.data?.is_super_admin)
+
+    if (user && profile) {
+      return {
+        data: {
+          user,
+          profile,
+          settings,
+          isSuperAdmin,
+          superAdminChecked: hasSuperAdminFlag,
+          session: { user, profile, settings, isSuperAdmin, superAdminChecked: hasSuperAdminFlag }
+        },
+        error: null
+      }
+    }
+
     const ready = await this.waitForSessionReady()
     if (!ready.error && ready.data?.user && ready.data?.profile) {
       return { data: ready.data, error: null }
     }
 
-    const user = normalizeUser(res.raw?.data?.user, res.raw?.data?.profile)
     return {
       data: {
         user,
-        profile: res.raw?.data?.profile || null,
-        session: user ? { user } : null
+        profile,
+        session: user ? { user, profile } : null
       },
       error: null
     }
@@ -2317,17 +2356,37 @@ const auth = {
     if (res.error) return { data: null, error: res.error }
 
     invalidateDbSelectCache()
+
+    const profile = res.raw?.data?.profile || null
+    const user = normalizeUser(res.raw?.data?.user, profile)
+    const settings = res.raw?.data?.settings || null
+    const hasSuperAdminFlag = Object.prototype.hasOwnProperty.call(res.raw?.data || {}, 'is_super_admin')
+    const isSuperAdmin = Boolean(res.raw?.data?.is_super_admin)
+
+    if (user && profile) {
+      return {
+        data: {
+          user,
+          profile,
+          settings,
+          isSuperAdmin,
+          superAdminChecked: hasSuperAdminFlag,
+          session: { user, profile, settings, isSuperAdmin, superAdminChecked: hasSuperAdminFlag }
+        },
+        error: null
+      }
+    }
+
     const ready = await this.waitForSessionReady()
     if (!ready.error && ready.data?.user && ready.data?.profile) {
       return { data: ready.data, error: null }
     }
 
-    const user = normalizeUser(res.raw?.data?.user, res.raw?.data?.profile)
     return {
       data: {
         user,
-        profile: res.raw?.data?.profile || null,
-        session: user ? { user } : null
+        profile,
+        session: user ? { user, profile } : null
       },
       error: null
     }
