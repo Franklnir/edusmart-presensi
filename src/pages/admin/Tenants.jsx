@@ -135,6 +135,23 @@ const MQTT_BROKER_PRESETS = [
       socketTimeout: '5',
       keepAlive: '20'
     }
+  },
+  {
+    key: 'mosquitto-plain',
+    label: 'Mosquitto (Non-TLS)',
+    helper: 'Open Source Mosquitto, port 1883 tanpa enkripsi',
+    values: {
+      port: '1883',
+      useTls: false,
+      tlsVerifyPeer: false,
+      tlsVerifyPeerName: false,
+      tlsAllowSelfSigned: false,
+      qos: '1',
+      clientIdPrefix: 'edusmart-rfid-bridge',
+      connectTimeout: '20',
+      socketTimeout: '5',
+      keepAlive: '20'
+    }
   }
 ]
 
