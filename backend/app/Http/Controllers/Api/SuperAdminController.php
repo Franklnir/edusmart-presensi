@@ -566,7 +566,7 @@ class SuperAdminController extends ApiController
         }
 
         $data = $validator->validated();
-        
+
         $result = $this->rfidDeviceService->registerDevice(
             (string) $tenant->slug,
             (string) $data['device_id'],
