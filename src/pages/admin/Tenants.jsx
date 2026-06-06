@@ -691,6 +691,10 @@ const Tenants = () => {
   const [mosquittoProvisioning, setMosquittoProvisioning] = useState(false)
   const [rfidDevices, setRfidDevices] = useState(null)
   const [rfidDevicesLoading, setRfidDevicesLoading] = useState(false)
+  const [showAddDeviceModal, setShowAddDeviceModal] = useState(false)
+  const [addDeviceSaving, setAddDeviceSaving] = useState(false)
+  const [addDeviceForm, setAddDeviceForm] = useState({ device_id: '', name: '' })
+  const [selectedDeviceDetail, setSelectedDeviceDetail] = useState(null)
   const [rfidWifiForm, setRfidWifiForm] = useState({
     ssid: '',
     password: ''
@@ -1650,11 +1654,37 @@ const Tenants = () => {
     } catch (err) {
       pushToast('error', err?.message || 'Gagal menetapkan admin utama tenant')
     } finally {
-      setPrimaryAdminSavingByUser((prev) => {
-        const next = { ...prev }
-        delete next[userId]
-        return next
       })
+    }
+  }
+
+  const handleAddDeviceSubmit = async (e) => {
+    e.preventDefault()
+    if (!selectedTenantId) return
+    if (!addDeviceForm.device_id.trim()) {
+      pushToast('error', 'Device ID wajib diisi')
+      return
+    }
+
+    setAddDeviceSaving(true)
+    try {
+      const payload = {
+        device_id: addDeviceForm.device_id.trim(),
+        name: addDeviceForm.name.trim() || undefined,
+        transport: 'mqtt'
+      }
+
+      const { error } = await supabase.super.storeTenantRfidDevice(selectedTenantId, payload)
+      if (error) throw error
+
+      pushToast('success', 'Alat RFID berhasil ditambahkan')
+      setShowAddDeviceModal(false)
+      setAddDeviceForm({ device_id: '', name: '' })
+      await loadRfidDevices(selectedTenantId)
+    } catch (err) {
+      pushToast('error', err?.message || 'Gagal menambahkan alat RFID')
+    } finally {
+      setAddDeviceSaving(false)
     }
   }
 
@@ -1684,20 +1714,27 @@ const Tenants = () => {
     ],
     [detailTenantSlug]
   )
-  const rfidArduinoCode = useMemo(
-    () => buildTenantRfidArduinoCode(detailRfidTemplate, rfidWifiForm),
-    [detailRfidTemplate, rfidWifiForm]
-  )
+  const deviceArduinoCode = useMemo(() => {
+    if (!detailRfidTemplate || !selectedDeviceDetail) return ''
+    // Inject device_id and device_name from selected device to the template
+    const specificTemplate = {
+      ...detailRfidTemplate,
+      device_id: selectedDeviceDetail.device_id,
+      device_name: selectedDeviceDetail.name || selectedDeviceDetail.device_id
+    }
+    return buildTenantRfidArduinoCode(specificTemplate, rfidWifiForm)
+  }, [detailRfidTemplate, selectedDeviceDetail, rfidWifiForm])
+
   const rfidWifiReady = rfidWifiForm.ssid.trim() !== '' && rfidWifiForm.password.trim() !== ''
 
   const handleCopyRfidArduinoCode = async () => {
-    if (!rfidArduinoCode) {
+    if (!deviceArduinoCode) {
       pushToast('error', 'Template Arduino RFID belum tersedia')
       return
     }
 
     try {
-      const copied = await copyText(rfidArduinoCode)
+      const copied = await copyText(deviceArduinoCode)
       if (!copied) throw new Error('Clipboard tidak tersedia')
       pushToast('success', 'Kode Arduino RFID siap flash berhasil dicopy')
     } catch (err) {
@@ -2756,14 +2793,26 @@ const Tenants = () => {
                           Monitoring perangkat RFID yang terdaftar untuk sekolah ini.
                         </p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => loadRfidDevices(selectedTenantId)}
-                        disabled={rfidDevicesLoading}
-                        className="text-xs px-3 py-1.5 rounded-full border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-                      >
-                        {rfidDevicesLoading ? 'Memuat...' : 'Refresh'}
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => loadRfidDevices(selectedTenantId)}
+                          disabled={rfidDevicesLoading}
+                          className="text-xs px-3 py-1.5 rounded-full border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                        >
+                          {rfidDevicesLoading ? 'Memuat...' : 'Refresh'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAddDeviceForm({ device_id: `edusmart-${Math.random().toString(36).substring(2, 8)}`, name: '' })
+                            setShowAddDeviceModal(true)
+                          }}
+                          className="text-xs px-3 py-1.5 rounded-full bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60"
+                        >
+                          + Tambah Alat
+                        </button>
+                      </div>
                     </div>
 
                     {(() => {
@@ -2803,6 +2852,7 @@ const Tenants = () => {
                               <th className="px-3 py-2.5 font-semibold">Koneksi</th>
                               <th className="px-3 py-2.5 font-semibold">Last Seen</th>
                               <th className="px-3 py-2.5 font-semibold">IP</th>
+                              <th className="px-3 py-2.5 font-semibold text-right">Aksi</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
@@ -2838,6 +2888,15 @@ const Tenants = () => {
                                   {device.last_seen_at ? formatDateTime(device.last_seen_at) : 'Belum pernah'}
                                 </td>
                                 <td className="px-3 py-2.5 font-mono text-slate-500">{device.last_ip || '-'}</td>
+                                <td className="px-3 py-2.5 text-right">
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedDeviceDetail(device)}
+                                    className="text-indigo-600 hover:text-indigo-700 font-semibold"
+                                  >
+                                    Detail
+                                  </button>
+                                </td>
                               </tr>
                             ))}
                           </tbody>
@@ -3154,175 +3213,7 @@ const Tenants = () => {
                 </div>
               </form>
 
-              <div className="rounded-2xl border border-slate-200 p-4 space-y-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h3 className="text-sm font-semibold text-slate-900">Template Arduino RFID</h3>
-                    <p className="text-xs text-slate-500 mt-1">
-                      Template ini otomatis diisi khusus untuk sekolah ini. Device cukup kirim scan lewat MQTT,
-                      lalu backend yang menentukan mode masuk/pulang, jadwal aktif, dan enroll UID.
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={handleCopyRfidSecret}
-                      disabled={!detailRfidTemplate?.available}
-                      className="text-xs px-3 py-1.5 rounded-full border border-amber-200 text-amber-700 hover:bg-amber-50 disabled:opacity-60"
-                    >
-                      Salin Secret
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleCopyRfidArduinoCode}
-                      disabled={!rfidArduinoCode}
-                      className="text-xs px-3 py-1.5 rounded-full bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60"
-                    >
-                      Salin Code Siap Flash
-                    </button>
-                  </div>
-                </div>
 
-                {!detailRfidTemplate?.available ? (
-                  <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                    {detailRfidTemplate?.message || 'Template RFID belum tersedia untuk tenant ini.'}
-                  </div>
-                ) : (
-                  <>
-                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                        <p className="text-xs text-slate-500">Tenant Slug</p>
-                        <p className="text-sm font-semibold text-slate-900 mt-1">
-                          {detailRfidTemplate.tenant_slug || '-'}
-                        </p>
-                      </div>
-                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                        <p className="text-xs text-slate-500">Device ID Default</p>
-                        <p className="text-sm font-semibold text-slate-900 mt-1 break-all">
-                          {detailRfidTemplate.device_id || '-'}
-                        </p>
-                      </div>
-                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                        <p className="text-xs text-slate-500">Firmware</p>
-                        <p className="text-sm font-semibold text-slate-900 mt-1 break-all">
-                          {detailRfidTemplate.firmware_version || '-'}
-                        </p>
-                      </div>
-                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                        <p className="text-xs text-slate-500">MQTT Host</p>
-                        <p className="text-sm font-semibold text-slate-900 mt-1 break-all">
-                          {detailRfidTemplate?.mqtt?.host || '-'}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div>
-                          <p className="text-xs font-semibold text-slate-700">WiFi Alat</p>
-                          <p className="text-xs text-slate-500 mt-1">Lokal di browser, tidak disimpan ke server.</p>
-                        </div>
-                        <span
-                          className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
-                            rfidWifiReady
-                              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                              : 'border-amber-200 bg-amber-50 text-amber-700'
-                          }`}
-                        >
-                          {rfidWifiReady ? 'WiFi terisi' : 'WiFi placeholder'}
-                        </span>
-                      </div>
-                      <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <label className="space-y-1">
-                          <span className="text-xs font-semibold text-slate-700">WiFi SSID</span>
-                          <input
-                            type="text"
-                            value={rfidWifiForm.ssid}
-                            onChange={handleRfidWifiField('ssid')}
-                            placeholder="Nama WiFi lokasi alat"
-                            className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                          />
-                        </label>
-                        <label className="space-y-1">
-                          <span className="text-xs font-semibold text-slate-700">Password WiFi</span>
-                          <PasswordInput
-                            value={rfidWifiForm.password}
-                            onChange={handleRfidWifiField('password')}
-                            placeholder="Password WiFi lokasi alat"
-                            className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                          />
-                        </label>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 xl:grid-cols-[0.95fr,1.35fr] gap-4">
-                      <div className="space-y-3">
-                        <div className="rounded-xl border border-slate-200 p-4">
-                          <p className="text-xs font-semibold text-slate-700">Topic MQTT</p>
-                          <div className="mt-3 space-y-2 text-xs">
-                            <div className="rounded-lg bg-slate-50 px-3 py-2">
-                              <div className="text-slate-500">Scan</div>
-                              <div className="font-semibold text-slate-900 break-all">
-                                {detailRfidTemplate?.topics?.scan || '-'}
-                              </div>
-                            </div>
-                            <div className="rounded-lg bg-slate-50 px-3 py-2">
-                              <div className="text-slate-500">Response</div>
-                              <div className="font-semibold text-slate-900 break-all">
-                                {detailRfidTemplate?.topics?.response || '-'}
-                              </div>
-                            </div>
-                            <div className="rounded-lg bg-slate-50 px-3 py-2">
-                              <div className="text-slate-500">Mode</div>
-                              <div className="font-semibold text-slate-900 break-all">
-                                {detailRfidTemplate?.topics?.mode || '-'}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3 space-y-2">
-                          <p className="text-xs font-semibold text-amber-800">Catatan penting</p>
-                          {detailRfidNotes.map((note) => (
-                            <p key={note} className="text-xs text-amber-700">
-                              - {note}
-                            </p>
-                          ))}
-                          <p className="text-xs text-amber-700">
-                            {rfidWifiReady
-                              ? 'WiFi sudah masuk ke kode Arduino yang akan disalin.'
-                              : 'Kolom WiFi kosong akan memakai placeholder di kode Arduino.'}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="rounded-xl border border-slate-200 overflow-hidden">
-                        <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-slate-200 bg-slate-50">
-                          <div>
-                            <p className="text-sm font-semibold text-slate-900">Code Arduino Siap Copy</p>
-                            <p className="text-xs text-slate-500 mt-0.5">
-                              {rfidWifiReady
-                                ? `Template sudah terisi untuk sekolah ${detailTenant?.name || '-'}.`
-                                : 'WiFi masih memakai placeholder.'}
-                            </p>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={handleCopyRfidArduinoCode}
-                            disabled={!rfidArduinoCode}
-                            className="shrink-0 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
-                          >
-                            Salin
-                          </button>
-                        </div>
-                        <pre className="max-h-[34rem] overflow-auto bg-slate-950 text-slate-100 text-[11px] leading-5 p-4 whitespace-pre">
-                          {rfidArduinoCode}
-                        </pre>
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
 
                 </>
               )}
@@ -3762,6 +3653,224 @@ const Tenants = () => {
         </section>
       )}
       </div>
+
+      {showAddDeviceModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={() => setShowAddDeviceModal(false)} />
+          <div className="relative w-full max-w-md rounded-2xl bg-white shadow-xl">
+            <div className="border-b border-slate-100 px-6 py-4">
+              <h3 className="text-lg font-bold text-slate-900">Tambah Alat RFID</h3>
+              <p className="mt-1 text-sm text-slate-500">Daftarkan alat baru untuk sekolah ini.</p>
+            </div>
+            <form onSubmit={handleAddDeviceSubmit} className="p-6">
+              <div className="space-y-4">
+                <label className="block space-y-1">
+                  <span className="text-sm font-semibold text-slate-700">Device ID</span>
+                  <input
+                    type="text"
+                    required
+                    value={addDeviceForm.device_id}
+                    onChange={(e) => setAddDeviceForm({ ...addDeviceForm, device_id: e.target.value })}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+                    placeholder="edusmart-xxxxx"
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-sm font-semibold text-slate-700">Nama Alat <span className="font-normal text-slate-400">(opsional)</span></span>
+                  <input
+                    type="text"
+                    value={addDeviceForm.name}
+                    onChange={(e) => setAddDeviceForm({ ...addDeviceForm, name: e.target.value })}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+                    placeholder="Misal: Gerbang Utama"
+                  />
+                </label>
+              </div>
+              <div className="mt-8 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowAddDeviceModal(false)}
+                  className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={addDeviceSaving}
+                  className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
+                >
+                  {addDeviceSaving ? 'Menyimpan...' : 'Tambah Alat'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {selectedDeviceDetail && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={() => setSelectedDeviceDetail(null)} />
+          <div className="relative w-full max-w-5xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white shadow-xl">
+            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white/80 px-6 py-4 backdrop-blur-md">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">Konfigurasi Perangkat</h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  {selectedDeviceDetail.name || selectedDeviceDetail.device_id}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedDeviceDetail(null)}
+                className="rounded-full p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            
+            <div className="p-6 space-y-6">
+              {!detailRfidTemplate?.available ? (
+                <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                  {detailRfidTemplate?.message || 'Template RFID belum tersedia untuk tenant ini.'}
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                      <p className="text-xs text-slate-500">Tenant Slug</p>
+                      <p className="text-sm font-semibold text-slate-900 mt-1">
+                        {detailRfidTemplate.tenant_slug || '-'}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                      <p className="text-xs text-slate-500">Device ID</p>
+                      <p className="text-sm font-semibold text-slate-900 mt-1 break-all">
+                        {selectedDeviceDetail.device_id || '-'}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                      <p className="text-xs text-slate-500">Firmware</p>
+                      <p className="text-sm font-semibold text-slate-900 mt-1 break-all">
+                        {detailRfidTemplate.firmware_version || '-'}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                      <p className="text-xs text-slate-500">MQTT Host</p>
+                      <p className="text-sm font-semibold text-slate-900 mt-1 break-all">
+                        {detailRfidTemplate?.mqtt?.host || '-'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="text-xs font-semibold text-slate-700">WiFi Alat</p>
+                        <p className="text-xs text-slate-500 mt-1">Lokal di browser, tidak disimpan ke server.</p>
+                      </div>
+                      <span
+                        className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
+                          rfidWifiReady
+                            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                            : 'border-amber-200 bg-amber-50 text-amber-700'
+                        }`}
+                      >
+                        {rfidWifiReady ? 'WiFi terisi' : 'WiFi placeholder'}
+                      </span>
+                    </div>
+                    <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <label className="space-y-1">
+                        <span className="text-xs font-semibold text-slate-700">WiFi SSID</span>
+                        <input
+                          type="text"
+                          value={rfidWifiForm.ssid}
+                          onChange={handleRfidWifiField('ssid')}
+                          placeholder="Nama WiFi lokasi alat"
+                          className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                      </label>
+                      <label className="space-y-1">
+                        <span className="text-xs font-semibold text-slate-700">Password WiFi</span>
+                        <PasswordInput
+                          value={rfidWifiForm.password}
+                          onChange={handleRfidWifiField('password')}
+                          placeholder="Password WiFi lokasi alat"
+                          className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 xl:grid-cols-[0.95fr,1.35fr] gap-4">
+                    <div className="space-y-3">
+                      <div className="rounded-xl border border-slate-200 p-4">
+                        <p className="text-xs font-semibold text-slate-700">Topic MQTT</p>
+                        <div className="mt-3 space-y-2 text-xs">
+                          <div className="rounded-lg bg-slate-50 px-3 py-2">
+                            <div className="text-slate-500">Scan</div>
+                            <div className="font-semibold text-slate-900 break-all">
+                              {detailRfidTemplate?.topics?.scan || '-'}
+                            </div>
+                          </div>
+                          <div className="rounded-lg bg-slate-50 px-3 py-2">
+                            <div className="text-slate-500">Response</div>
+                            <div className="font-semibold text-slate-900 break-all">
+                              {detailRfidTemplate?.topics?.response || '-'}
+                            </div>
+                          </div>
+                          <div className="rounded-lg bg-slate-50 px-3 py-2">
+                            <div className="text-slate-500">Mode</div>
+                            <div className="font-semibold text-slate-900 break-all">
+                              {detailRfidTemplate?.topics?.mode || '-'}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3 space-y-2">
+                        <p className="text-xs font-semibold text-amber-800">Catatan penting</p>
+                        {detailRfidNotes.map((note) => (
+                          <p key={note} className="text-xs text-amber-700">
+                            - {note}
+                          </p>
+                        ))}
+                        <p className="text-xs text-amber-700">
+                          {rfidWifiReady
+                            ? 'WiFi sudah masuk ke kode Arduino yang akan disalin.'
+                            : 'Kolom WiFi kosong akan memakai placeholder di kode Arduino.'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-200 overflow-hidden">
+                      <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-slate-200 bg-slate-50">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">Code Arduino Siap Copy</p>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            {rfidWifiReady
+                              ? `Template terisi khusus untuk alat ${selectedDeviceDetail.device_id}.`
+                              : 'WiFi masih memakai placeholder.'}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleCopyRfidArduinoCode}
+                          disabled={!deviceArduinoCode}
+                          className="shrink-0 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
+                        >
+                          Salin
+                        </button>
+                      </div>
+                      <pre className="max-h-[34rem] overflow-auto bg-slate-950 text-slate-100 text-[11px] leading-5 p-4 whitespace-pre">
+                        {deviceArduinoCode}
+                      </pre>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

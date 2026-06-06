@@ -544,6 +544,46 @@ class SuperAdminController extends ApiController
         ]);
     }
 
+    public function storeTenantRfidDevice(Request $request, string $tenantId)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenant = $this->findTenantByIdOrSlug($tenantId);
+        if (! $tenant) {
+            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'device_id' => ['required', 'string', 'max:191'],
+            'name' => ['nullable', 'string', 'max:191'],
+            'transport' => ['nullable', 'string', 'in:mqtt,http,hybrid'],
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['error' => $validator->errors()->first()], 422);
+        }
+
+        $data = $validator->validated();
+        
+        $result = $this->rfidDeviceService->registerDevice(
+            (string) $tenant->slug,
+            (string) $data['device_id'],
+            $data['name'] ?? null,
+            $data['transport'] ?? 'mqtt'
+        );
+
+        if (! ($result['success'] ?? false)) {
+            return response()->json(['error' => $result['message'] ?? 'Gagal mendaftarkan device'], 400);
+        }
+
+        return $this->ok([
+            'message' => 'Device berhasil didaftarkan',
+            'data' => $result,
+        ]);
+    }
+
     public function checkDomain(Request $request, string $domainId)
     {
         if (! $this->isSuperAdmin($request)) {
