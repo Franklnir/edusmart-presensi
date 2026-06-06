@@ -254,6 +254,18 @@ class MqttBridgeService
         int $qos,
         callable $log
     ): void {
+        $maxPayloadBytes = (int) config('rfid.mqtt.max_payload_bytes', 8192);
+        if ($maxPayloadBytes > 0 && strlen($message) > $maxPayloadBytes) {
+            $log('warning', sprintf(
+                'Payload scan MQTT ditolak karena terlalu besar pada topik %s (%d bytes, maks %d bytes).',
+                $topic,
+                strlen($message),
+                $maxPayloadBytes
+            ));
+
+            return;
+        }
+
         $payload = json_decode($message, true);
         if (! is_array($payload)) {
             $log('warning', sprintf('Payload scan invalid JSON pada topik %s', $topic));

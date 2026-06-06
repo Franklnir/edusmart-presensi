@@ -316,6 +316,26 @@ class TenantBackupService
             throw new \RuntimeException('Bulan backup wajib dipilih.');
         }
 
+        $activeKey = $this->monthlyBackupActiveJobKey($tenantId, $auto ? null : $monthKey, $auto);
+        $activeJobId = Cache::get($activeKey);
+        if (is_string($activeJobId) && trim($activeJobId) !== '') {
+            $activeStatus = $this->monthlyBackupJobStatus($tenantId, $activeJobId);
+            if (in_array((string) ($activeStatus['status'] ?? ''), ['queued', 'running', 'retrying'], true)) {
+                return array_merge($activeStatus, [
+                    'queued' => true,
+                    'already_queued' => true,
+                    'monthly_status' => $activeStatus['monthly_status'] ?? $this->monthlyStatus($tenantId),
+                    'message' => $activeStatus['message'] ?? (
+                        $auto
+                            ? 'Auto backup tenant ini masih berada di antrean.'
+                            : 'Backup bulan ini masih berada di antrean.'
+                    ),
+                ]);
+            }
+
+            Cache::forget($activeKey);
+        }
+
         $jobId = (string) Str::uuid();
         $status = [
             'job_id' => $jobId,
@@ -332,6 +352,15 @@ class TenantBackupService
         ];
 
         $this->putMonthlyBackupJobStatus($tenantId, $jobId, $status);
+        $lockMinutes = max(
+            (int) config('backup.monthly_active_job_lock_minutes', 45),
+            (int) ceil(max(0, $delaySeconds) / 60) + (int) config('backup.monthly_active_job_lock_minutes', 45)
+        );
+        Cache::put(
+            $activeKey,
+            $jobId,
+            now()->addMinutes($lockMinutes)
+        );
 
         $job = new TenantMonthlyGoogleDriveBackupJob(
             $tenantId,
@@ -352,6 +381,16 @@ class TenantBackupService
             'queued' => true,
             'monthly_status' => $this->monthlyStatus($tenantId),
         ]);
+    }
+
+    public function releaseMonthlyBackupActiveJob(string $tenantId, ?string $monthKey, bool $auto, string $jobId): void
+    {
+        $activeKey = $this->monthlyBackupActiveJobKey($tenantId, $auto ? null : $monthKey, $auto);
+        $activeJobId = Cache::get($activeKey);
+
+        if (is_string($activeJobId) && trim($activeJobId) === trim($jobId)) {
+            Cache::forget($activeKey);
+        }
     }
 
     public function monthlyBackupJobStatus(string $tenantId, string $jobId): array
@@ -668,6 +707,16 @@ class TenantBackupService
     private function monthlyBackupJobStatusKey(string $tenantId, string $jobId): string
     {
         return 'tenant-backup-monthly-job:'.trim($tenantId).':'.trim($jobId);
+    }
+
+    private function monthlyBackupActiveJobKey(string $tenantId, ?string $monthKey, bool $auto): string
+    {
+        return implode(':', [
+            'tenant-backup-monthly-active',
+            trim($tenantId),
+            $auto ? 'auto' : 'monthly',
+            $auto ? 'all' : trim((string) $monthKey),
+        ]);
     }
 
     private function monthlyStatusCacheKey(string $tenantId, string $academicYear): string

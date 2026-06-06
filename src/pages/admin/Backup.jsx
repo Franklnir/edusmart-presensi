@@ -737,7 +737,12 @@ export default function BackupAdmin() {
       let finalData = data
       if (data?.queued && data?.job_id) {
         setMonthlyProgress({ label: data?.job?.message || 'Backup bulanan sedang diproses di background...', percent: 15 })
-        pushToast('success', 'Backup bulanan masuk antrean. Status akan diperbarui otomatis.')
+        pushToast(
+          data?.already_queued ? 'warning' : 'success',
+          data?.already_queued
+            ? 'Backup bulan ini masih berjalan. Status akan dilanjutkan otomatis.'
+            : 'Backup bulanan masuk antrean. Status akan diperbarui otomatis.'
+        )
         finalData = await waitForMonthlyJob(data.job_id)
         if (finalData?.status !== 'finished') {
           setMonthlyProgress({ label: finalData?.message || 'Backup masih diproses di background.', percent: 95 })
@@ -776,7 +781,12 @@ export default function BackupAdmin() {
       let finalData = data
       if (data?.queued && data?.job_id) {
         setMonthlyProgress({ label: data?.job?.message || 'Auto backup sedang diproses di background...', percent: 15 })
-        pushToast('success', 'Auto backup masuk antrean. Sistem akan backup data baru saja.')
+        pushToast(
+          data?.already_queued ? 'warning' : 'success',
+          data?.already_queued
+            ? 'Auto backup tenant ini masih berjalan. Status akan dilanjutkan otomatis.'
+            : 'Auto backup masuk antrean. Sistem akan backup data baru saja.'
+        )
         finalData = await waitForMonthlyJob(data.job_id, { auto: true })
         if (finalData?.status !== 'finished') {
           setMonthlyProgress({ label: finalData?.message || 'Auto backup masih diproses di background.', percent: 95 })
@@ -1179,16 +1189,16 @@ export default function BackupAdmin() {
                 <button
                   type="button"
                   onClick={handleAutoMonthlyBackup}
-                  disabled={!driveReady || monthlyAutoSaving || monthlyLoading}
+                  disabled={!driveReady || monthlyAutoSaving || monthlySavingKey || monthlyLoading}
                   className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white shadow-sm hover:bg-blue-700 disabled:opacity-60"
                 >
                   <UploadCloud className={`h-4 w-4 ${monthlyAutoSaving ? 'animate-bounce' : ''}`} />
-                  {monthlyAutoSaving ? 'Auto Backup...' : 'Auto'}
+                  {monthlyAutoSaving ? 'Memproses Auto...' : 'Auto'}
                 </button>
                 <button
                   type="button"
                   onClick={() => loadMonthlyStatus({ refresh: true })}
-                  disabled={monthlyLoading || monthlyAutoSaving}
+                  disabled={monthlyLoading || monthlyAutoSaving || Boolean(monthlySavingKey)}
                   className="inline-flex items-center justify-center gap-2 rounded-xl border border-amber-200 bg-white px-3 py-2 text-xs font-bold text-amber-800 shadow-sm hover:bg-amber-50 disabled:opacity-60"
                 >
                   <RefreshCw className={`h-4 w-4 ${monthlyLoading ? 'animate-spin' : ''}`} />
@@ -1248,10 +1258,10 @@ export default function BackupAdmin() {
                       <button
                         type="button"
                         onClick={() => handleSaveMonthlyBackup(month.key, backedUp)}
-                        disabled={!driveReady || monthlySavingKey === month.key || monthlyAutoSaving}
+                        disabled={!driveReady || Boolean(monthlySavingKey) || monthlyAutoSaving}
                         className="mt-2 inline-flex h-8 w-full items-center justify-center rounded-lg bg-slate-900 px-2 text-[11px] font-bold text-white hover:bg-slate-800 disabled:opacity-50"
                       >
-                        {monthlySavingKey === month.key ? 'Menyimpan...' : (needsUpdate ? 'Backup data baru' : 'Backup bulan ini')}
+                        {monthlySavingKey === month.key ? 'Memproses...' : (needsUpdate ? 'Backup data baru' : 'Backup bulan ini')}
                       </button>
                     ) : (
                       <button

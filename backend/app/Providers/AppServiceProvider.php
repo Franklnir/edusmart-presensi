@@ -95,7 +95,7 @@ class AppServiceProvider extends ServiceProvider
                 ?: $request->input('device_id')
                 ?: $request->ip()
             )));
-            $perMinute = $clampInt('RFID_RATE_LIMIT_PER_MINUTE', 180, 30, 5000);
+            $perMinute = $clampInt('RFID_RATE_LIMIT_PER_MINUTE', 1200, 30, 5000);
 
             return Limit::perMinute($perMinute)->by('rfid|'.$tenant.'|'.$device.'|'.$request->ip());
         });

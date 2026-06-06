@@ -1394,7 +1394,12 @@ const Tenants = () => {
       if (data?.monthly_status) setBackupMonthlyStatus(data.monthly_status)
       if (data?.queued && data?.job_id) {
         setBackupMonthlyProgress({ label: data?.job?.message || 'Backup tenant sedang diproses...', percent: 15 })
-        pushToast('success', 'Backup bulanan tenant masuk antrean.')
+        pushToast(
+          data?.already_queued ? 'warning' : 'success',
+          data?.already_queued
+            ? 'Backup bulanan tenant ini masih berjalan. Status akan dilanjutkan otomatis.'
+            : 'Backup bulanan tenant masuk antrean.'
+        )
         finalData = await waitForTenantMonthlyJob(tenantId, data.job_id)
         if (finalData?.status !== 'finished') {
           setBackupMonthlyProgress({ label: finalData?.message || 'Backup tenant masih diproses di background.', percent: 95 })
@@ -1432,7 +1437,12 @@ const Tenants = () => {
       if (data?.monthly_status) setBackupMonthlyStatus(data.monthly_status)
       if (data?.queued && data?.job_id) {
         setBackupMonthlyProgress({ label: data?.job?.message || 'Auto backup tenant sedang diproses...', percent: 15 })
-        pushToast('success', 'Auto backup tenant masuk antrean.')
+        pushToast(
+          data?.already_queued ? 'warning' : 'success',
+          data?.already_queued
+            ? 'Auto backup tenant ini masih berjalan. Status akan dilanjutkan otomatis.'
+            : 'Auto backup tenant masuk antrean.'
+        )
         finalData = await waitForTenantMonthlyJob(tenantId, data.job_id, { auto: true })
         if (finalData?.status !== 'finished') {
           setBackupMonthlyProgress({ label: finalData?.message || 'Auto backup tenant masih diproses di background.', percent: 95 })
@@ -1671,6 +1681,10 @@ const Tenants = () => {
     } catch (err) {
       pushToast('error', err?.message || 'Gagal menetapkan admin utama tenant')
     } finally {
+      setPrimaryAdminSavingByUser((prev) => {
+        const next = { ...prev }
+        delete next[userId]
+        return next
       })
     }
   }
@@ -2589,16 +2603,16 @@ const Tenants = () => {
                             <button
                               type="button"
                               onClick={handleAutoTenantMonthlyBackup}
-                              disabled={backupMonthlyAutoSaving || backupMonthlyLoading}
+                              disabled={backupMonthlyAutoSaving || backupMonthlySavingKey || backupMonthlyLoading}
                               className="inline-flex h-8 items-center justify-center gap-1 rounded-lg bg-blue-600 px-2 text-[11px] font-bold text-white disabled:opacity-60"
                             >
                               <UploadCloud className={`h-3.5 w-3.5 ${backupMonthlyAutoSaving ? 'animate-bounce' : ''}`} />
-                              Auto
+                              {backupMonthlyAutoSaving ? 'Auto...' : 'Auto'}
                             </button>
                             <button
                               type="button"
                               onClick={() => loadTenantBackupMonthlyStatus({ refresh: true })}
-                              disabled={backupMonthlyLoading || backupMonthlyAutoSaving}
+                              disabled={backupMonthlyLoading || backupMonthlyAutoSaving || Boolean(backupMonthlySavingKey)}
                               className="inline-flex h-8 items-center justify-center gap-1 rounded-lg bg-white px-2 text-[11px] font-bold text-amber-800 ring-1 ring-amber-200 disabled:opacity-60"
                             >
                               <RefreshCw className={`h-3.5 w-3.5 ${backupMonthlyLoading ? 'animate-spin' : ''}`} />
@@ -2661,10 +2675,10 @@ const Tenants = () => {
                                     <button
                                       type="button"
                                       onClick={() => handleSaveTenantMonthlyBackup(month.key, backedUp)}
-                                      disabled={backupMonthlySavingKey === month.key || backupMonthlyAutoSaving}
+                                      disabled={Boolean(backupMonthlySavingKey) || backupMonthlyAutoSaving}
                                       className="shrink-0 rounded-lg bg-slate-900 px-2 py-1 text-[10px] font-black text-white disabled:opacity-60"
                                     >
-                                      {backupMonthlySavingKey === month.key ? '...' : (needsUpdate ? 'Update' : 'Backup')}
+                                      {backupMonthlySavingKey === month.key ? 'Proses' : (needsUpdate ? 'Update' : 'Backup')}
                                     </button>
                                   )}
                                 </div>

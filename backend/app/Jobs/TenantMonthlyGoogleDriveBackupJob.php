@@ -63,6 +63,7 @@ class TenantMonthlyGoogleDriveBackupJob implements ShouldQueue
                 'monthly_status' => $tenantBackupService->monthlyStatus($this->tenantId, true),
                 'finished_at' => now('Asia/Jakarta')->toIso8601String(),
             ]);
+            $tenantBackupService->releaseMonthlyBackupActiveJob($this->tenantId, $this->monthKey, $this->auto, $this->jobId);
         } catch (Throwable $e) {
             $message = trim((string) $e->getMessage()) ?: 'Backup gagal diproses.';
 
@@ -85,17 +86,20 @@ class TenantMonthlyGoogleDriveBackupJob implements ShouldQueue
                 'failed_at' => now('Asia/Jakarta')->toIso8601String(),
                 'monthly_status' => $tenantBackupService->monthlyStatus($this->tenantId, true),
             ]);
+            $tenantBackupService->releaseMonthlyBackupActiveJob($this->tenantId, $this->monthKey, $this->auto, $this->jobId);
         }
     }
 
     public function failed(Throwable $e): void
     {
-        app(TenantBackupService::class)->putMonthlyBackupJobStatus($this->tenantId, $this->jobId, [
+        $tenantBackupService = app(TenantBackupService::class);
+        $tenantBackupService->putMonthlyBackupJobStatus($this->tenantId, $this->jobId, [
             'status' => 'failed',
             'progress' => 100,
             'message' => trim((string) $e->getMessage()) ?: 'Backup gagal diproses.',
             'last_error' => trim((string) $e->getMessage()) ?: null,
             'failed_at' => now('Asia/Jakarta')->toIso8601String(),
         ]);
+        $tenantBackupService->releaseMonthlyBackupActiveJob($this->tenantId, $this->monthKey, $this->auto, $this->jobId);
     }
 }

@@ -80,9 +80,10 @@ class RfidController extends ApiController
             return $auth['response'];
         }
 
+        $maxEvents = max(10, min(1000, (int) config('rfid.performance.sync_batch_max_events', 500)));
         $validated = $request->validate([
             'device_id' => ['nullable', 'string', 'max:191'],
-            'events' => ['required', 'array', 'min:1', 'max:200'],
+            'events' => ['required', 'array', 'min:1', 'max:'.$maxEvents],
             'events.*.event_id' => ['nullable', 'string', 'max:191'],
             'events.*.scan_id' => ['nullable', 'string', 'max:191'],
             'events.*.device_id' => ['nullable', 'string', 'max:191'],

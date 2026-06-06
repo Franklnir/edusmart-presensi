@@ -13,6 +13,7 @@ return [
         'mqtt_mode_publish_after_scan_throttle_seconds' => (int) env('RFID_MQTT_MODE_PUBLISH_AFTER_SCAN_THROTTLE_SECONDS', 5),
         'device_event_log_enabled' => filter_var(env('RFID_DEVICE_EVENT_LOG_ENABLED', true), FILTER_VALIDATE_BOOL),
         'device_event_cache_ttl_seconds' => (int) env('RFID_DEVICE_EVENT_CACHE_TTL_SECONDS', 3600),
+        'sync_batch_max_events' => max(10, min(1000, (int) env('RFID_SYNC_BATCH_MAX_EVENTS', 500))),
     ],
 
     'mqtt' => [
@@ -29,6 +30,7 @@ return [
         'reconnect_delay_seconds' => (int) env('RFID_MQTT_RECONNECT_DELAY', 5),
         'mode_sync_interval_seconds' => (int) env('RFID_MQTT_MODE_SYNC_INTERVAL', 20),
         'config_reload_interval_seconds' => (int) env('RFID_MQTT_CONFIG_RELOAD_INTERVAL', 60),
+        'max_payload_bytes' => max(512, min(65536, (int) env('RFID_MQTT_MAX_PAYLOAD_BYTES', 8192))),
 
         'use_tls' => filter_var(env('RFID_MQTT_USE_TLS', true), FILTER_VALIDATE_BOOL),
         'tls_verify_peer' => filter_var(env('RFID_MQTT_TLS_VERIFY_PEER', true), FILTER_VALIDATE_BOOL),
