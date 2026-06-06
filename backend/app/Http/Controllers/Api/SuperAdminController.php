@@ -260,6 +260,7 @@ class SuperAdminController extends ApiController
                 'domains' => $domains,
                 'rfid_mqtt_config' => $this->tenantMqttConfigService->publicConfig($rfidMqttConfig),
                 'rfid_template' => $rfidTemplate,
+                'rfid_devices_summary' => $this->buildTenantRfidDevicesSummary((string) $tenant->id),
                 'password_security' => [
                     'can_view_existing_password' => false,
                     'note' => 'Password lama tidak bisa ditampilkan karena disimpan dalam hash.',
@@ -475,6 +476,71 @@ class SuperAdminController extends ApiController
                 'rfid_template' => $this->buildTenantRfidTemplate($tenant),
                 'mosquitto_sync' => $result['sync'] ?? null,
             ],
+        ]);
+    }
+
+    public function tenantRfidDevices(Request $request, string $tenantId)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenant = $this->findTenantByIdOrSlug($tenantId);
+        if (! $tenant) {
+            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+        }
+
+        $onlineThresholdMinutes = 5;
+        $onlineThreshold = now()->subMinutes($onlineThresholdMinutes);
+
+        $devices = DB::table('rfid_devices as d')
+            ->where('d.tenant_id', (string) $tenant->id)
+            ->orderBy('d.device_id')
+            ->get([
+                'd.id',
+                'd.device_id',
+                'd.name',
+                'd.status',
+                'd.transport',
+                'd.fallback_http_enabled',
+                'd.last_seen_at',
+                'd.last_transport',
+                'd.last_ip',
+                'd.created_at',
+            ])
+            ->map(function ($row) use ($onlineThreshold) {
+                $lastSeen = $row->last_seen_at ? Carbon::parse($row->last_seen_at) : null;
+                $isOnline = $lastSeen && $lastSeen->gte($onlineThreshold);
+
+                return [
+                    'id' => (string) $row->id,
+                    'device_id' => trim((string) ($row->device_id ?? '')),
+                    'name' => trim((string) ($row->name ?? '')) ?: null,
+                    'status' => strtolower(trim((string) ($row->status ?? 'active'))),
+                    'transport' => strtolower(trim((string) ($row->transport ?? 'mqtt'))),
+                    'fallback_http_enabled' => (bool) ($row->fallback_http_enabled ?? false),
+                    'last_seen_at' => $row->last_seen_at,
+                    'last_transport' => trim((string) ($row->last_transport ?? '')) ?: null,
+                    'last_ip' => trim((string) ($row->last_ip ?? '')) ?: null,
+                    'is_online' => $isOnline,
+                    'created_at' => $row->created_at,
+                ];
+            })
+            ->values();
+
+        $total = $devices->count();
+        $online = $devices->where('is_online', true)->count();
+        $offline = $total - $online;
+
+        return $this->ok([
+            'tenant_id' => (string) $tenant->id,
+            'tenant_slug' => (string) ($tenant->slug ?? ''),
+            'summary' => [
+                'total' => $total,
+                'online' => $online,
+                'offline' => $offline,
+            ],
+            'devices' => $devices->all(),
         ]);
     }
 
@@ -4732,6 +4798,33 @@ class SuperAdminController extends ApiController
                 'Backend tetap memutuskan absensi masuk/pulang, jadwal aktif, dan enroll UID.',
                 'Kalau tenant butuh alat kedua, duplikasi template lalu ubah DEVICE_ID dan daftarkan device baru agar tidak konflik.',
             ],
+        ];
+    }
+
+    private function buildTenantRfidDevicesSummary(string $tenantId): array
+    {
+        if ($tenantId === '' || ! $this->hasTable('rfid_devices')) {
+            return ['total' => 0, 'online' => 0, 'offline' => 0];
+        }
+
+        $onlineThreshold = now()->subMinutes(5);
+        $devices = DB::table('rfid_devices')
+            ->where('tenant_id', $tenantId)
+            ->get(['last_seen_at']);
+
+        $total = $devices->count();
+        $online = $devices->filter(function ($row) use ($onlineThreshold) {
+            if (! $row->last_seen_at) {
+                return false;
+            }
+
+            return Carbon::parse($row->last_seen_at)->gte($onlineThreshold);
+        })->count();
+
+        return [
+            'total' => $total,
+            'online' => $online,
+            'offline' => $total - $online,
         ];
     }
 

@@ -279,6 +279,7 @@ Route::middleware(['auth:sanctum', 'throttle:super', 'super.domain', 'super.admi
     Route::post('/super/tenants/{tenantId}/domains', [SuperAdminController::class, 'storeTenantDomain']);
     Route::patch('/super/tenants/{tenantId}/rfid-mqtt', [SuperAdminController::class, 'updateTenantRfidMqtt']);
     Route::post('/super/tenants/{tenantId}/rfid-mqtt/mosquitto', [SuperAdminController::class, 'provisionTenantRfidMosquitto']);
+    Route::get('/super/tenants/{tenantId}/rfid-devices', [SuperAdminController::class, 'tenantRfidDevices']);
     Route::get('/super/tenants/{id}/backup', [SuperAdminController::class, 'backupTenant']);
     Route::get('/super/tenants/{id}/backup/monthly-status', [SuperAdminController::class, 'backupTenantMonthlyStatus']);
     Route::post('/super/tenants/{id}/backup/google-drive', [SuperAdminController::class, 'saveTenantBackupToGoogleDrive']);

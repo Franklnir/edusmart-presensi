@@ -689,6 +689,8 @@ const Tenants = () => {
   const [mqttForm, setMqttForm] = useState(RFID_MQTT_FORM_DEFAULTS)
   const [mqttSaving, setMqttSaving] = useState(false)
   const [mosquittoProvisioning, setMosquittoProvisioning] = useState(false)
+  const [rfidDevices, setRfidDevices] = useState(null)
+  const [rfidDevicesLoading, setRfidDevicesLoading] = useState(false)
   const [rfidWifiForm, setRfidWifiForm] = useState({
     ssid: '',
     password: ''
@@ -977,6 +979,20 @@ const Tenants = () => {
     }
   }
 
+  const loadRfidDevices = async (tenantId) => {
+    if (!tenantId) return
+    setRfidDevicesLoading(true)
+    try {
+      const { data, error } = await supabase.super.tenantRfidDevices(tenantId)
+      if (error) throw error
+      setRfidDevices(data || null)
+    } catch (err) {
+      pushToast('error', err?.message || 'Gagal memuat daftar device RFID')
+    } finally {
+      setRfidDevicesLoading(false)
+    }
+  }
+
   const handleSelectTenant = async (tenantId) => {
     if (!tenantId) return
     setSelectedTenantId(tenantId)
@@ -986,6 +1002,7 @@ const Tenants = () => {
     resetTenantDomainForm()
     setMqttForm(RFID_MQTT_FORM_DEFAULTS)
     setRfidWifiForm({ ssid: '', password: '' })
+    setRfidDevices(null)
     setRestorePreview(null)
     setRestorePayload(null)
     setRestoreFileName('')
@@ -2730,6 +2747,119 @@ const Tenants = () => {
 
               {detailTab === 'devices' && (
                 <>
+                  {/* Daftar Alat RFID */}
+                  <div className="rounded-2xl border border-slate-200 p-4 space-y-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-semibold text-slate-900">Daftar Alat RFID</h3>
+                        <p className="text-xs text-slate-500 mt-1">
+                          Monitoring perangkat RFID yang terdaftar untuk sekolah ini.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => loadRfidDevices(selectedTenantId)}
+                        disabled={rfidDevicesLoading}
+                        className="text-xs px-3 py-1.5 rounded-full border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                      >
+                        {rfidDevicesLoading ? 'Memuat...' : 'Refresh'}
+                      </button>
+                    </div>
+
+                    {(() => {
+                      const summary = rfidDevices?.summary || tenantDetail?.rfid_devices_summary || { total: 0, online: 0, offline: 0 }
+                      return (
+                        <div className="grid grid-cols-3 gap-3">
+                          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-center">
+                            <p className="text-[11px] font-semibold uppercase text-slate-500">Total Alat</p>
+                            <p className="mt-1 text-xl font-bold text-slate-900">{summary.total}</p>
+                          </div>
+                          <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-center">
+                            <p className="text-[11px] font-semibold uppercase text-emerald-600">Online</p>
+                            <p className="mt-1 text-xl font-bold text-emerald-700">{summary.online}</p>
+                          </div>
+                          <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-center">
+                            <p className="text-[11px] font-semibold uppercase text-rose-600">Offline</p>
+                            <p className="mt-1 text-xl font-bold text-rose-700">{summary.offline}</p>
+                          </div>
+                        </div>
+                      )
+                    })()}
+
+                    {rfidDevicesLoading ? (
+                      <div className="flex items-center justify-center gap-2 py-6 text-sm text-slate-500">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Memuat daftar device...
+                      </div>
+                    ) : rfidDevices?.devices?.length ? (
+                      <div className="overflow-x-auto rounded-xl border border-slate-200">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="bg-slate-50 text-left text-[11px] uppercase text-slate-500">
+                              <th className="px-3 py-2.5 font-semibold">Device ID</th>
+                              <th className="px-3 py-2.5 font-semibold">Nama</th>
+                              <th className="px-3 py-2.5 font-semibold">Status</th>
+                              <th className="px-3 py-2.5 font-semibold">Transport</th>
+                              <th className="px-3 py-2.5 font-semibold">Koneksi</th>
+                              <th className="px-3 py-2.5 font-semibold">Last Seen</th>
+                              <th className="px-3 py-2.5 font-semibold">IP</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {rfidDevices.devices.map((device) => (
+                              <tr key={device.id} className="hover:bg-slate-50/50">
+                                <td className="px-3 py-2.5 font-mono font-semibold text-slate-900 whitespace-nowrap">
+                                  {device.device_id || '-'}
+                                </td>
+                                <td className="px-3 py-2.5 text-slate-700">{device.name || '-'}</td>
+                                <td className="px-3 py-2.5">
+                                  <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                                    device.status === 'active'
+                                      ? 'bg-emerald-100 text-emerald-700'
+                                      : 'bg-slate-100 text-slate-600'
+                                  }`}>
+                                    {device.status}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2.5 text-slate-600">{device.transport || '-'}</td>
+                                <td className="px-3 py-2.5">
+                                  <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                                    device.is_online
+                                      ? 'bg-emerald-100 text-emerald-700'
+                                      : 'bg-rose-100 text-rose-600'
+                                  }`}>
+                                    <span className={`h-1.5 w-1.5 rounded-full ${
+                                      device.is_online ? 'bg-emerald-500 animate-pulse' : 'bg-rose-400'
+                                    }`} />
+                                    {device.is_online ? 'Online' : 'Offline'}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap">
+                                  {device.last_seen_at ? formatDateTime(device.last_seen_at) : 'Belum pernah'}
+                                </td>
+                                <td className="px-3 py-2.5 font-mono text-slate-500">{device.last_ip || '-'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : rfidDevices ? (
+                      <div className="rounded-xl border border-dashed border-slate-300 px-4 py-6 text-center text-sm text-slate-500">
+                        Belum ada device RFID terdaftar untuk sekolah ini.
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-dashed border-slate-300 px-4 py-6 text-center text-sm text-slate-500">
+                        <button
+                          type="button"
+                          onClick={() => loadRfidDevices(selectedTenantId)}
+                          className="text-indigo-600 hover:text-indigo-700 font-semibold"
+                        >
+                          Klik untuk memuat daftar device
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
                   <form onSubmit={handleSaveRfidMqtt} className="rounded-2xl border border-slate-200 p-4 space-y-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
@@ -2818,14 +2948,32 @@ const Tenants = () => {
                   </label>
                   <label className="space-y-1">
                     <span className="text-xs font-semibold text-slate-700">Port</span>
-                    <input
-                      type="number"
-                      min="1"
-                      max="65535"
-                      value={mqttForm.port}
-                      onChange={handleMqttField('port')}
+                    <select
+                      value={['8883', '1883', '443'].includes(mqttForm.port) ? mqttForm.port : 'custom'}
+                      onChange={(e) => {
+                        const val = e.target.value
+                        if (val !== 'custom') {
+                          setMqttForm((prev) => ({ ...prev, port: val }))
+                        }
+                      }}
                       className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
+                    >
+                      <option value="8883">8883 (TLS default)</option>
+                      <option value="1883">1883 (non-TLS)</option>
+                      <option value="443">443 (WSS)</option>
+                      <option value="custom">Custom</option>
+                    </select>
+                    {!['8883', '1883', '443'].includes(mqttForm.port) && (
+                      <input
+                        type="number"
+                        min="1"
+                        max="65535"
+                        value={mqttForm.port}
+                        onChange={handleMqttField('port')}
+                        placeholder="Port custom"
+                        className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    )}
                   </label>
                   <label className="space-y-1">
                     <span className="text-xs font-semibold text-slate-700">Username</span>
@@ -2893,36 +3041,47 @@ const Tenants = () => {
                   </label>
                   <label className="space-y-1">
                     <span className="text-xs font-semibold text-slate-700">Connect Timeout</span>
-                    <input
-                      type="number"
-                      min="3"
-                      max="120"
+                    <select
                       value={mqttForm.connectTimeout}
                       onChange={handleMqttField('connectTimeout')}
                       className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
+                    >
+                      <option value="10">10 detik</option>
+                      <option value="15">15 detik</option>
+                      <option value="20">20 detik (default)</option>
+                      <option value="30">30 detik</option>
+                      <option value="60">60 detik</option>
+                      <option value="120">120 detik</option>
+                    </select>
                   </label>
                   <label className="space-y-1">
                     <span className="text-xs font-semibold text-slate-700">Socket Timeout</span>
-                    <input
-                      type="number"
-                      min="1"
-                      max="60"
+                    <select
                       value={mqttForm.socketTimeout}
                       onChange={handleMqttField('socketTimeout')}
                       className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
+                    >
+                      <option value="3">3 detik</option>
+                      <option value="5">5 detik (default)</option>
+                      <option value="10">10 detik</option>
+                      <option value="15">15 detik</option>
+                      <option value="30">30 detik</option>
+                    </select>
                   </label>
                   <label className="space-y-1">
                     <span className="text-xs font-semibold text-slate-700">Keep Alive</span>
-                    <input
-                      type="number"
-                      min="3"
-                      max="300"
+                    <select
                       value={mqttForm.keepAlive}
                       onChange={handleMqttField('keepAlive')}
                       className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
+                    >
+                      <option value="10">10 detik</option>
+                      <option value="15">15 detik</option>
+                      <option value="20">20 detik (default)</option>
+                      <option value="30">30 detik</option>
+                      <option value="60">60 detik</option>
+                      <option value="120">120 detik</option>
+                    </select>
                   </label>
                 </div>
 
