@@ -442,13 +442,22 @@ class AuthController extends ApiController
             $request->session()->regenerate();
         }
 
+        $profile = $this->profile($request);
+        if (! $this->isAllowedMobileProfile($profile)) {
+            $this->logoutWebSession($request);
+
+            return response()->json([
+                'error' => 'Aplikasi mobile hanya tersedia untuk guru dan siswa.',
+            ], 403);
+        }
+
         return response()->json([
-            'data' => [
+            'data' => array_merge([
                 'user' => $user->fresh(),
-                'profile' => $this->profile($request),
+                'profile' => $profile,
                 'settings' => $this->bootstrapSettings($request),
                 'is_super_admin' => $isSuperAdminIdentity,
-            ],
+            ], $this->mobileTokenPayload($user, $profile)),
         ]);
     }
 
@@ -862,13 +871,23 @@ class AuthController extends ApiController
             ]);
         }
 
+        $mobileAuth = $this->isMobileAuthRequest($request);
+        if ($mobileAuth && ! $this->isAllowedMobileProfile($profile)) {
+            $this->logoutWebSession($request);
+            $this->registerFailedLoginAttempt($throttleKey);
+
+            return response()->json([
+                'error' => 'Aplikasi mobile hanya tersedia untuk guru dan siswa. Admin tetap memakai website.',
+            ], 403);
+        }
+
         return response()->json([
-            'data' => [
+            'data' => array_merge([
                 'user' => $user,
                 'profile' => $profile,
                 'is_super_admin' => $isSuperAdminIdentity,
                 'settings' => $this->bootstrapSettings($request),
-            ],
+            ], $mobileAuth ? $this->mobileTokenPayload($user, $profile) : []),
         ]);
     }
 
@@ -922,6 +941,35 @@ class AuthController extends ApiController
         }
 
         return ['email' => $email, 'user_id' => (string) $profile->id];
+    }
+
+    private function isMobileAuthRequest(Request $request): bool
+    {
+        return $request->boolean('mobile')
+            || strtolower(trim((string) $request->header('X-Mobile-App', ''))) === 'edusmart-presensi';
+    }
+
+    private function isAllowedMobileProfile(?Profile $profile): bool
+    {
+        $role = strtolower(trim((string) ($profile?->role ?? '')));
+
+        return in_array($role, ['guru', 'siswa'], true)
+            && strtolower(trim((string) ($profile?->status ?? 'active'))) !== 'nonaktif';
+    }
+
+    private function mobileTokenPayload(User $user, ?Profile $profile): array
+    {
+        if (! $profile || ! method_exists($user, 'createToken')) {
+            return [];
+        }
+
+        $role = strtolower(trim((string) ($profile->role ?? 'user')));
+        $token = $user->createToken('mobile-'.$role.'-'.now()->format('YmdHis'), ['mobile', $role])->plainTextToken;
+
+        return [
+            'access_token' => $token,
+            'token_type' => 'Bearer',
+        ];
     }
 
     private function profileForTenantEmail(string $tenantId, string $email): ?Profile

@@ -203,30 +203,109 @@ class RfidDeviceService
             $query->whereRaw('lower(tenants.slug) = ?', [$tenantSlug]);
         }
 
-        return $query->get([
+        $rows = $query->get([
             'devices.id',
+            'devices.tenant_id',
             'devices.device_id',
             'devices.name',
             'devices.status',
             'devices.transport',
             'devices.fallback_http_enabled',
+            'devices.metadata',
             'devices.last_seen_at',
             'devices.last_transport',
             'devices.last_ip',
             'tenants.slug as tenant_slug',
-        ])->map(function ($row) {
+        ]);
+
+        $eventStats = $this->deviceEventStats(
+            $rows->map(fn ($row) => trim((string) ($row->device_id ?? '')))->filter()->values()->all(),
+            $tenantSlug
+        );
+        $onlineGraceSeconds = max(30, (int) config('rfid.performance.device_status_online_grace_seconds', 120));
+        $now = now();
+
+        return $rows->map(function ($row) use ($eventStats, $onlineGraceSeconds, $now) {
+            $metadata = $this->decodeMetadata($row->metadata ?? null);
+            $deviceId = trim((string) ($row->device_id ?? ''));
+            $stats = $eventStats[Str::lower($deviceId)] ?? [];
+            $lastSeenAt = $row->last_seen_at ? (string) $row->last_seen_at : null;
+            $isOnline = false;
+            if ($lastSeenAt) {
+                try {
+                    $isOnline = $now->diffInSeconds(\Illuminate\Support\Carbon::parse($lastSeenAt), true) <= $onlineGraceSeconds;
+                } catch (\Throwable $e) {
+                    $isOnline = false;
+                }
+            }
+
             return [
                 'tenant_slug' => $this->normalizeTenantSlug($row->tenant_slug ?? ''),
-                'device_id' => trim((string) ($row->device_id ?? '')),
+                'device_id' => $deviceId,
                 'name' => $this->nullableString($row->name ?? null),
                 'status' => Str::lower(trim((string) ($row->status ?? 'active'))),
+                'connection_status' => $isOnline ? 'online' : 'offline',
+                'is_online' => $isOnline,
                 'transport' => Str::lower(trim((string) ($row->transport ?? 'mqtt'))),
                 'fallback_http_enabled' => (bool) ($row->fallback_http_enabled ?? false),
-                'last_seen_at' => $row->last_seen_at ? (string) $row->last_seen_at : null,
+                'last_seen_at' => $lastSeenAt,
                 'last_transport' => $this->nullableString($row->last_transport ?? null),
                 'last_ip' => $this->nullableString($row->last_ip ?? null),
+                'last_scan_at' => $metadata['last_scan_at'] ?? ($stats['last_scan_at'] ?? null),
+                'last_error_at' => $stats['last_error_at'] ?? null,
+                'error_count' => (int) ($stats['error_count'] ?? 0),
+                'firmware_version' => $this->nullableString($metadata['firmware_version'] ?? $metadata['firmware'] ?? null),
+                'wifi_rssi' => $metadata['wifi_rssi'] ?? $metadata['rssi'] ?? null,
+                'free_heap' => $metadata['free_heap'] ?? $metadata['heap'] ?? null,
+                'metadata' => [
+                    'last_mqtt_topic' => $metadata['last_mqtt_topic'] ?? null,
+                    'battery' => $metadata['battery'] ?? null,
+                    'mac' => $metadata['mac'] ?? null,
+                ],
             ];
         })->values()->all();
+    }
+
+    private function deviceEventStats(array $deviceIds, string $tenantSlug = ''): array
+    {
+        $deviceIds = array_values(array_unique(array_filter(array_map(
+            fn ($value) => Str::lower(trim((string) $value)),
+            $deviceIds
+        ))));
+        if (empty($deviceIds)) {
+            return [];
+        }
+
+        try {
+            if (! \Illuminate\Support\Facades\Schema::hasTable('rfid_device_events')) {
+                return [];
+            }
+
+            $query = DB::table('rfid_device_events as events')
+                ->selectRaw('lower(events.device_id) as device_key')
+                ->selectRaw('max(events.created_at) as last_scan_at')
+                ->selectRaw("max(case when events.status = 'error' then events.updated_at else null end) as last_error_at")
+                ->selectRaw("sum(case when events.status = 'error' then 1 else 0 end) as error_count")
+                ->whereIn(DB::raw('lower(events.device_id)'), $deviceIds)
+                ->groupBy(DB::raw('lower(events.device_id)'));
+
+            if ($tenantSlug !== '') {
+                $query->leftJoin('tenants', 'tenants.id', '=', 'events.tenant_id')
+                    ->whereRaw('lower(tenants.slug) = ?', [$tenantSlug]);
+            }
+
+            return $query->get()
+                ->mapWithKeys(fn ($row) => [
+                    (string) $row->device_key => [
+                        'last_scan_at' => $row->last_scan_at ? (string) $row->last_scan_at : null,
+                        'last_error_at' => $row->last_error_at ? (string) $row->last_error_at : null,
+                        'error_count' => (int) ($row->error_count ?? 0),
+                    ],
+                ])
+                ->all();
+        } catch (\Throwable $e) {
+            return [];
+        }
     }
 
     public function rotateSecret(string $deviceId, ?string $plainSecret = null): array

@@ -47,7 +47,7 @@ class TenantBackupService
 
         $tenant = $this->tenantSnapshot($tenantId);
 
-        return [
+        $payload = [
             'tenant' => $tenant,
             'exported_at' => now()->toIso8601String(),
             'mode' => $mode,
@@ -78,6 +78,8 @@ class TenantBackupService
                 'role' => $role,
             ],
         ];
+
+        return $this->attachPayloadChecksum($payload);
     }
 
     public function savePayloadToGoogleDrive(string $tenantId, string $userId, array $payload, string $fileName = ''): array
@@ -150,7 +152,7 @@ class TenantBackupService
             'kind' => $runKind,
         ];
 
-        return $payload;
+        return $this->attachPayloadChecksum($payload);
     }
 
     public function saveMonthlyBackupToGoogleDrive(
@@ -207,6 +209,7 @@ class TenantBackupService
             'effective_end_at' => $window['effective_end_at']->toIso8601String(),
             'stores_json_and_excel' => true,
         ];
+        $payload = $this->attachPayloadChecksum($payload);
 
         return $this->savePayloadFormatsToGoogleDrive($tenantId, $userId, $payload, $fileName);
     }
@@ -318,6 +321,12 @@ class TenantBackupService
 
         $activeKey = $this->monthlyBackupActiveJobKey($tenantId, $auto ? null : $monthKey, $auto);
         $activeJobId = Cache::get($activeKey);
+        if ((! is_string($activeJobId) || trim($activeJobId) === '') && $this->tenantBackupJobsTableReady()) {
+            $activeJobId = $this->latestActiveMonthlyBackupJobId($tenantId, $auto ? null : $monthKey, $auto);
+            if (is_string($activeJobId) && trim($activeJobId) !== '') {
+                Cache::put($activeKey, $activeJobId, now()->addMinutes((int) config('backup.monthly_active_job_lock_minutes', 45)));
+            }
+        }
         if (is_string($activeJobId) && trim($activeJobId) !== '') {
             $activeStatus = $this->monthlyBackupJobStatus($tenantId, $activeJobId);
             if (in_array((string) ($activeStatus['status'] ?? ''), ['queued', 'running', 'retrying'], true)) {
@@ -407,17 +416,20 @@ class TenantBackupService
 
         $status = Cache::get($this->monthlyBackupJobStatusKey($tenantId, $jobId));
         if (! is_array($status)) {
-            return [
-                'job_id' => $jobId,
-                'tenant_id' => $tenantId,
-                'status' => 'missing',
-                'progress' => 0,
-                'message' => 'Status job backup tidak ditemukan atau sudah kedaluwarsa.',
-                'monthly_status' => $this->monthlyStatus($tenantId),
-            ];
+            $status = $this->readMonthlyBackupJobStatusFromDatabase($tenantId, $jobId);
+            if (! is_array($status)) {
+                return [
+                    'job_id' => $jobId,
+                    'tenant_id' => $tenantId,
+                    'status' => 'missing',
+                    'progress' => 0,
+                    'message' => 'Status job backup tidak ditemukan atau sudah kedaluwarsa.',
+                    'monthly_status' => $this->monthlyStatus($tenantId),
+                ];
+            }
         }
 
-        if (! isset($status['monthly_status']) && in_array((string) ($status['status'] ?? ''), ['finished', 'failed'], true)) {
+        if (! isset($status['monthly_status']) && in_array((string) ($status['status'] ?? ''), ['finished', 'failed', 'needs_attention'], true)) {
             $status['monthly_status'] = $this->monthlyStatus($tenantId);
         }
 
@@ -448,6 +460,39 @@ class TenantBackupService
         ]);
 
         Cache::put($key, $next, now()->addHours((int) config('backup.job_status_ttl_hours', 24)));
+        $this->persistMonthlyBackupJobStatus($tenantId, $jobId, $next);
+    }
+
+    public function monthlyCatchUpKeysForTenant(string $tenantId, ?Carbon $runAt = null): array
+    {
+        $tenantId = trim($tenantId);
+        if ($tenantId === '') {
+            return [];
+        }
+
+        $now = ($runAt ?: now('Asia/Jakarta'))->copy()->setTimezone('Asia/Jakarta');
+        $status = $this->monthlyStatus($tenantId, true);
+        $months = array_values((array) ($status['months'] ?? []));
+        $keys = [];
+
+        foreach ($months as $month) {
+            $monthKey = (string) ($month['key'] ?? '');
+            if ($monthKey === '' || ! (bool) ($month['can_backup'] ?? false)) {
+                continue;
+            }
+
+            try {
+                $monthEnd = Carbon::parse((string) ($month['end_date'] ?? ''), 'Asia/Jakarta')->endOfDay();
+            } catch (\Throwable $e) {
+                continue;
+            }
+
+            if ($monthEnd->lessThanOrEqualTo($now) || $monthEnd->isSameDay($now)) {
+                $keys[] = $monthKey;
+            }
+        }
+
+        return array_values(array_unique($keys));
     }
 
     public function monthlyStatus(string $tenantId, bool $refresh = false): array
@@ -507,7 +552,7 @@ class TenantBackupService
                 'timezone' => 'Asia/Jakarta',
                 'runs_at' => (string) config('backup.monthly_auto_start_time', '23:15'),
                 'runs_at_label' => $this->monthlyAutoScheduleLabel(),
-                'rule' => 'Akhir bulan pada periode aktif sekolah. Tenant diproses bertahap agar server dan Google Drive tidak menumpuk.',
+                'rule' => 'Scheduler berjalan harian, mengejar bulan yang sudah due/terlewat, dan tenant diproses bertahap agar server dan Google Drive tidak menumpuk.',
                 'mode' => 'full',
                 'destination' => 'Google Drive sekolah',
                 'server_time' => $now->toIso8601String(),
@@ -541,7 +586,36 @@ class TenantBackupService
         $start = trim((string) config('backup.monthly_auto_start_time', '23:15')) ?: '23:15';
         $spacing = (int) config('backup.monthly_auto_tenant_spacing_minutes', 4);
 
-        return $start.' WIB, bertahap tiap '.$spacing.' menit per sekolah';
+        return 'Setiap hari '.$start.' WIB, catch-up bulanan bertahap tiap '.$spacing.' menit per sekolah';
+    }
+
+    public function backupFailureStatus(string $message): string
+    {
+        return $this->isGoogleDriveAttentionError($message) ? 'needs_attention' : 'failed';
+    }
+
+    public function markGoogleDriveNeedsAttention(string $tenantId, string $message): void
+    {
+        $tenantId = trim($tenantId);
+        if ($tenantId === '' || ! $this->hasTable('tenant_google_drive_configs')) {
+            return;
+        }
+
+        try {
+            $updates = [
+                'status' => 'needs_attention',
+                'updated_at' => now(),
+            ];
+            if ($this->tableHasColumn('tenant_google_drive_configs', 'last_error')) {
+                $updates['last_error'] = Str::limit($message, 1000, '');
+            }
+
+            DB::table('tenant_google_drive_configs')
+                ->where('tenant_id', $tenantId)
+                ->update($updates);
+        } catch (\Throwable $e) {
+            // Status koneksi Drive bersifat observability; jangan gagalkan job.
+        }
     }
 
     public function tenantsEligibleForMonthlyBackup(): array
@@ -717,6 +791,210 @@ class TenantBackupService
             $auto ? 'auto' : 'monthly',
             $auto ? 'all' : trim((string) $monthKey),
         ]);
+    }
+
+    private function latestActiveMonthlyBackupJobId(string $tenantId, ?string $monthKey, bool $auto): ?string
+    {
+        if (! $this->tenantBackupJobsTableReady()) {
+            return null;
+        }
+
+        try {
+            $query = DB::table('tenant_backup_jobs')
+                ->where('tenant_id', $tenantId)
+                ->where('type', $auto ? 'auto_monthly' : 'monthly')
+                ->whereIn('status', ['queued', 'running', 'retrying'])
+                ->latest('updated_at');
+
+            if ($auto) {
+                $query->whereNull('month_key');
+            } else {
+                $query->where('month_key', $monthKey);
+            }
+
+            $jobId = $query->value('job_id');
+
+            return is_string($jobId) && trim($jobId) !== '' ? trim($jobId) : null;
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    private function readMonthlyBackupJobStatusFromDatabase(string $tenantId, string $jobId): ?array
+    {
+        if (! $this->tenantBackupJobsTableReady()) {
+            return null;
+        }
+
+        try {
+            $row = DB::table('tenant_backup_jobs')
+                ->where('tenant_id', $tenantId)
+                ->where('job_id', $jobId)
+                ->first();
+            if (! $row) {
+                return null;
+            }
+
+            $result = $this->decodeJson($row->result ?? null);
+            $metadata = $this->decodeJson($row->metadata ?? null);
+            $status = [
+                'job_id' => (string) $row->job_id,
+                'tenant_id' => (string) $row->tenant_id,
+                'month' => $row->month_key ? (string) $row->month_key : null,
+                'type' => (string) ($row->type ?? 'monthly'),
+                'status' => (string) ($row->status ?? 'missing'),
+                'progress' => (int) ($row->progress ?? 0),
+                'message' => $row->message ? (string) $row->message : null,
+                'last_error' => $row->last_error ? (string) $row->last_error : null,
+                'queued_at' => $row->queued_at ? Carbon::parse($row->queued_at)->toIso8601String() : null,
+                'started_at' => $row->started_at ? Carbon::parse($row->started_at)->toIso8601String() : null,
+                'finished_at' => $row->finished_at ? Carbon::parse($row->finished_at)->toIso8601String() : null,
+                'failed_at' => $row->failed_at ? Carbon::parse($row->failed_at)->toIso8601String() : null,
+                'updated_at' => $row->updated_at ? Carbon::parse($row->updated_at)->toIso8601String() : null,
+            ];
+
+            if ($result !== null) {
+                $status['result'] = $result;
+            }
+            if ($metadata !== null) {
+                $status = array_merge($status, $metadata);
+            }
+
+            return $status;
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    private function persistMonthlyBackupJobStatus(string $tenantId, string $jobId, array $status): void
+    {
+        if (! $this->tenantBackupJobsTableReady()) {
+            return;
+        }
+
+        try {
+            $now = now();
+            $row = DB::table('tenant_backup_jobs')->where('job_id', $jobId)->first(['id']);
+            $metadata = $status;
+            unset(
+                $metadata['job_id'],
+                $metadata['tenant_id'],
+                $metadata['month'],
+                $metadata['type'],
+                $metadata['status'],
+                $metadata['progress'],
+                $metadata['message'],
+                $metadata['last_error'],
+                $metadata['result'],
+                $metadata['monthly_status'],
+                $metadata['queued_at'],
+                $metadata['started_at'],
+                $metadata['finished_at'],
+                $metadata['failed_at'],
+                $metadata['updated_at']
+            );
+            $updates = [
+                'tenant_id' => $tenantId,
+                'job_id' => $jobId,
+                'type' => (string) ($status['type'] ?? 'monthly'),
+                'month_key' => isset($status['month']) && trim((string) $status['month']) !== '' ? trim((string) $status['month']) : null,
+                'status' => (string) ($status['status'] ?? 'queued'),
+                'progress' => max(0, min(100, (int) ($status['progress'] ?? 0))),
+                'message' => isset($status['message']) ? (string) $status['message'] : null,
+                'last_error' => isset($status['last_error']) ? (string) $status['last_error'] : null,
+                'result' => isset($status['result'])
+                    ? json_encode($status['result'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                    : null,
+                'metadata' => ! empty($metadata)
+                    ? json_encode($metadata, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                    : null,
+                'queued_at' => $this->nullableTimestamp($status['queued_at'] ?? null),
+                'started_at' => $this->nullableTimestamp($status['started_at'] ?? null),
+                'finished_at' => $this->nullableTimestamp($status['finished_at'] ?? null),
+                'failed_at' => $this->nullableTimestamp($status['failed_at'] ?? null),
+                'updated_at' => $now,
+            ];
+
+            if ($row) {
+                DB::table('tenant_backup_jobs')->where('job_id', $jobId)->update($updates);
+
+                return;
+            }
+
+            $updates['id'] = (string) Str::uuid();
+            $updates['created_at'] = $now;
+            DB::table('tenant_backup_jobs')->insert($updates);
+        } catch (\Throwable $e) {
+            // Durable status tidak boleh menggagalkan backup.
+        }
+    }
+
+    private function tenantBackupJobsTableReady(): bool
+    {
+        try {
+            return Schema::hasTable('tenant_backup_jobs');
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
+    private function nullableTimestamp(mixed $value): ?string
+    {
+        if ($value === null || trim((string) $value) === '') {
+            return null;
+        }
+
+        try {
+            return Carbon::parse((string) $value)->toDateTimeString();
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    private function decodeJson(mixed $value): ?array
+    {
+        if (is_array($value)) {
+            return $value;
+        }
+
+        if (! is_string($value) || trim($value) === '') {
+            return null;
+        }
+
+        $decoded = json_decode($value, true);
+
+        return is_array($decoded) ? $decoded : null;
+    }
+
+    private function isGoogleDriveAttentionError(string $message): bool
+    {
+        $message = Str::lower($message);
+
+        return Str::contains($message, [
+            'google',
+            'drive',
+            'oauth',
+            'token',
+            'refresh',
+            'unauthorized',
+            'forbidden',
+            'invalid_grant',
+            'disconnected',
+            'belum tersambung',
+        ]);
+    }
+
+    private function attachPayloadChecksum(array $payload): array
+    {
+        unset($payload['manifest']['checksum']);
+        $payload['manifest']['checksum'] = [
+            'algorithm' => 'sha256',
+            'scope' => 'payload_without_checksum',
+            'generated_at' => now('Asia/Jakarta')->toIso8601String(),
+            'value' => hash('sha256', json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: ''),
+        ];
+
+        return $payload;
     }
 
     private function monthlyStatusCacheKey(string $tenantId, string $academicYear): string

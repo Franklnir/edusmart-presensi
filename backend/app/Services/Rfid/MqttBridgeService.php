@@ -273,7 +273,8 @@ class MqttBridgeService
             return;
         }
 
-        $deviceId = trim((string) ($payload['device_id'] ?? ''));
+        $topicDeviceId = $this->extractDeviceIdFromTopic($cfg, $topic);
+        $deviceId = trim((string) ($payload['device_id'] ?? $topicDeviceId));
         $cardUid = trim((string) ($payload['card_uid'] ?? ''));
         $mode = trim((string) ($payload['mode'] ?? ''));
         $eventId = trim((string) ($payload['event_id'] ?? $payload['scan_id'] ?? ''));
@@ -287,9 +288,10 @@ class MqttBridgeService
         }
 
         if ($deviceId !== '') {
-            $this->rfidDeviceService->touchDeviceSeen($deviceId, 'mqtt', null, [
+            $this->rfidDeviceService->touchDeviceSeen($deviceId, 'mqtt', null, $this->deviceTelemetryFromPayload($payload, [
                 'last_mqtt_topic' => $topic,
-            ]);
+                'last_scan_at' => now('Asia/Jakarta')->toIso8601String(),
+            ]));
         }
 
         $result = $this->rfidIngressService->processScanByTenantSlug(
@@ -303,11 +305,12 @@ class MqttBridgeService
             payload: $payload,
         );
         $responseTopic = $this->renderTopicTemplate(
-            (string) ($cfg['response_topic_template'] ?? 'edusmart/{tenant}/rfid/response'),
-            $tenantSlug
+            (string) ($cfg['response_topic_template'] ?? 'edusmart/{tenant}/rfid/{device}/response'),
+            $tenantSlug,
+            $deviceId
         );
 
-        $responsePayload = $result['data'] ?? [];
+        $responsePayload = is_array($result['data'] ?? null) ? $result['data'] : [];
         if (! array_key_exists('event_id', $responsePayload) && $eventId !== '') {
             $responsePayload['event_id'] = $eventId;
         }
@@ -331,7 +334,7 @@ class MqttBridgeService
             false
         );
 
-        $this->publishTenantModeAfterScan($client, $cfg, $tenantSlug, $qos);
+        $this->publishTenantModeAfterScan($client, $cfg, $tenantSlug, $deviceId, $qos);
     }
 
     private function publishTenantModes(
@@ -347,10 +350,10 @@ class MqttBridgeService
         }
     }
 
-    private function publishTenantModeAfterScan(MqttClient $client, array $cfg, string $tenantSlug, int $qos): void
+    private function publishTenantModeAfterScan(MqttClient $client, array $cfg, string $tenantSlug, string $deviceId, int $qos): void
     {
         $throttleSeconds = max(0, (int) config('rfid.performance.mqtt_mode_publish_after_scan_throttle_seconds', 5));
-        $cacheKey = $this->contextKey($cfg).'|mode-after-scan|'.$tenantSlug;
+        $cacheKey = $this->contextKey($cfg).'|mode-after-scan|'.$tenantSlug.'|'.$deviceId;
         $now = microtime(true);
 
         if (
@@ -361,7 +364,7 @@ class MqttBridgeService
             return;
         }
 
-        if ($this->publishTenantMode($client, $cfg, $tenantSlug, $qos)) {
+        if ($this->publishTenantMode($client, $cfg, $tenantSlug, $qos, null, $deviceId)) {
             $this->modePublishAfterScanAt[$cacheKey] = $now;
         }
     }
@@ -371,7 +374,8 @@ class MqttBridgeService
         array $cfg,
         string $tenantSlug,
         int $qos,
-        ?callable $log = null
+        ?callable $log = null,
+        ?string $deviceId = null
     ): bool {
         $result = $this->rfidScanService->modeByTenantSlug($tenantSlug);
         if ((int) ($result['status'] ?? 500) !== 200 || ! is_array($result['data'] ?? null)) {
@@ -379,8 +383,34 @@ class MqttBridgeService
         }
 
         $mode = (string) (($result['data']['mode'] ?? 'auto'));
+        $template = (string) ($cfg['mode_topic_template'] ?? 'edusmart/{tenant}/rfid/{device}/mode');
+        if (str_contains($template, '{device}')) {
+            $devices = $deviceId !== null && trim($deviceId) !== ''
+                ? [['device_id' => trim($deviceId), 'status' => 'active']]
+                : $this->rfidDeviceService->listDevices($tenantSlug);
+
+            $published = false;
+            foreach ($devices as $device) {
+                $targetDeviceId = trim((string) ($device['device_id'] ?? ''));
+                $status = Str::lower(trim((string) ($device['status'] ?? 'active')));
+                if ($targetDeviceId === '' || in_array($status, ['blocked', 'inactive', 'disabled'], true)) {
+                    continue;
+                }
+
+                $modeTopic = $this->renderTopicTemplate($template, $tenantSlug, $targetDeviceId);
+                $client->publish($modeTopic, $mode, $qos, true);
+                $published = true;
+
+                if ($log !== null) {
+                    $log('debug', sprintf('Publish mode [%s/%s] => %s', $tenantSlug, $targetDeviceId, $mode));
+                }
+            }
+
+            return $published || $deviceId === null;
+        }
+
         $modeTopic = $this->renderTopicTemplate(
-            (string) ($cfg['mode_topic_template'] ?? 'edusmart/{tenant}/rfid/mode'),
+            $template,
             $tenantSlug
         );
         $client->publish($modeTopic, $mode, $qos, true);
@@ -475,12 +505,31 @@ class MqttBridgeService
 
         $regex = preg_quote($template, '#');
         $regex = str_replace('\{tenant\}', '([^/]+)', $regex);
+        $regex = str_replace('\{device\}', '[^/]+', $regex);
 
         if (! preg_match('#^'.$regex.'$#', $topic, $matches)) {
             return '';
         }
 
         return isset($matches[1]) ? Str::lower(trim((string) $matches[1])) : '';
+    }
+
+    private function extractDeviceIdFromTopic(array $cfg, string $topic): string
+    {
+        $template = trim((string) ($cfg['scan_topic_template'] ?? ''));
+        if ($template === '' || ! str_contains($template, '{device}')) {
+            return '';
+        }
+
+        $regex = preg_quote($template, '#');
+        $regex = str_replace('\{tenant\}', '[^/]+', $regex);
+        $regex = str_replace('\{device\}', '([^/]+)', $regex);
+
+        if (! preg_match('#^'.$regex.'$#', $topic, $matches)) {
+            return '';
+        }
+
+        return isset($matches[1]) ? trim((string) $matches[1]) : '';
     }
 
     private function scanTopicFilter(array $cfg): string
@@ -491,19 +540,47 @@ class MqttBridgeService
             return $tenantSlug ? $this->renderTopicTemplate($filter, $tenantSlug) : $filter;
         }
 
-        $template = trim((string) ($cfg['scan_topic_template'] ?? 'edusmart/{tenant}/rfid/scan'));
+        $template = trim((string) ($cfg['scan_topic_template'] ?? 'edusmart/{tenant}/rfid/{device}/scan'));
         if (str_contains($template, '{tenant}')) {
-            return $tenantSlug ? $this->renderTopicTemplate($template, $tenantSlug) : str_replace('{tenant}', '+', $template);
+            $topic = $tenantSlug ? $this->renderTopicTemplate($template, $tenantSlug, '+') : str_replace('{tenant}', '+', $template);
+
+            return str_replace('{device}', '+', $topic);
         }
 
-        return $template;
+        return str_replace('{device}', '+', $template);
     }
 
-    private function renderTopicTemplate(string $template, string $tenantSlug): string
+    private function renderTopicTemplate(string $template, string $tenantSlug, string $deviceId = ''): string
     {
-        $topic = str_replace('{tenant}', $tenantSlug, trim($template));
+        $topic = str_replace(
+            ['{tenant}', '{device}'],
+            [$tenantSlug, $deviceId !== '' ? $deviceId : 'RFID_DEVICE'],
+            trim($template)
+        );
 
         return $topic !== '' ? $topic : sprintf('edusmart/%s/rfid/response', $tenantSlug);
+    }
+
+    private function deviceTelemetryFromPayload(array $payload, array $defaults = []): array
+    {
+        $metadata = $defaults;
+        foreach ([
+            'firmware_version',
+            'firmware',
+            'wifi_rssi',
+            'rssi',
+            'free_heap',
+            'heap',
+            'battery',
+            'ip',
+            'mac',
+        ] as $key) {
+            if (array_key_exists($key, $payload) && $payload[$key] !== null && $payload[$key] !== '') {
+                $metadata[$key] = $payload[$key];
+            }
+        }
+
+        return $metadata;
     }
 
     private function deviceTenantMap(array $cfg): array

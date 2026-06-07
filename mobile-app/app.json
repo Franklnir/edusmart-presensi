@@ -1,0 +1,37 @@
+{
+  "expo": {
+    "name": "SISMU Mobile",
+    "slug": "sismu-mobile",
+    "scheme": "edusmart-presensi",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "bundleIdentifier": "id.sismu.mobile",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NFCReaderUsageDescription": "SISMU memakai NFC untuk membaca kartu siswa saat absensi.",
+        "NSCameraUsageDescription": "SISMU memakai kamera untuk scan QR siswa sebagai fallback absensi."
+      }
+    },
+    "android": {
+      "package": "id.sismu.mobile",
+      "permissions": ["android.permission.NFC", "android.permission.CAMERA"],
+      "adaptiveIcon": {
+        "backgroundColor": "#2563eb"
+      }
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "SISMU memakai kamera untuk scan QR siswa sebagai fallback absensi."
+        }
+      ]
+    ],
+    "extra": {
+      "defaultApiBaseUrl": "https://sismu.biz.id"
+    }
+  }
+}

@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\DbController;
 use App\Http\Controllers\Api\GoogleDriveController;
 use App\Http\Controllers\Api\InfrastructureController;
 use App\Http\Controllers\Api\JadwalController;
+use App\Http\Controllers\Api\MobileController;
 use App\Http\Controllers\Api\MobileDirectoryController;
 use App\Http\Controllers\Api\PresenceController;
 use App\Http\Controllers\Api\ProfileController;
@@ -47,6 +48,22 @@ Route::get('/mobile/schools', [MobileDirectoryController::class, 'schools'])
         ResolveTenant::class,
         EnsureTenantMatchesProfile::class,
     ]);
+
+Route::prefix('mobile')->middleware(['auth:sanctum', 'throttle:api'])->group(function () {
+    Route::get('/me', [MobileController::class, 'me']);
+    Route::get('/dashboard', [MobileController::class, 'dashboard']);
+    Route::get('/guru/dashboard', [MobileController::class, 'guruDashboard']);
+    Route::get('/guru/schedules/today', [MobileController::class, 'guruSchedulesToday']);
+    Route::get('/guru/classes', [MobileController::class, 'guruClasses']);
+    Route::get('/guru/classes/{id}', [MobileController::class, 'guruClass']);
+    Route::get('/guru/attendance/summary', [MobileController::class, 'guruAttendanceSummary']);
+    Route::get('/siswa/dashboard', [MobileController::class, 'siswaDashboard']);
+    Route::get('/siswa/attendance', [MobileController::class, 'siswaAttendance']);
+    Route::get('/siswa/schedules', [MobileController::class, 'siswaSchedules']);
+    Route::get('/siswa/tasks', [MobileController::class, 'siswaTasks']);
+    Route::get('/siswa/grades', [MobileController::class, 'siswaGrades']);
+    Route::get('/siswa/digital-card', [MobileController::class, 'siswaDigitalCard']);
+});
 
 Route::post('/auth/register', [AuthController::class, 'register'])
     ->middleware(['throttle:auth', 'auth.not_root_domain'])

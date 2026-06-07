@@ -12,8 +12,10 @@ return [
         'always_active_cache_ttl_seconds' => (int) env('RFID_ALWAYS_ACTIVE_CACHE_TTL_SECONDS', 600),
         'mqtt_mode_publish_after_scan_throttle_seconds' => (int) env('RFID_MQTT_MODE_PUBLISH_AFTER_SCAN_THROTTLE_SECONDS', 5),
         'device_event_log_enabled' => filter_var(env('RFID_DEVICE_EVENT_LOG_ENABLED', true), FILTER_VALIDATE_BOOL),
+        'require_idempotency_key' => filter_var(env('RFID_REQUIRE_IDEMPOTENCY_KEY', true), FILTER_VALIDATE_BOOL),
         'device_event_cache_ttl_seconds' => (int) env('RFID_DEVICE_EVENT_CACHE_TTL_SECONDS', 3600),
         'sync_batch_max_events' => max(10, min(1000, (int) env('RFID_SYNC_BATCH_MAX_EVENTS', 500))),
+        'device_status_online_grace_seconds' => max(30, (int) env('RFID_DEVICE_STATUS_ONLINE_GRACE_SECONDS', 120)),
     ],
 
     'mqtt' => [
@@ -37,10 +39,10 @@ return [
         'tls_verify_peer_name' => filter_var(env('RFID_MQTT_TLS_VERIFY_PEER_NAME', true), FILTER_VALIDATE_BOOL),
         'tls_allow_self_signed' => filter_var(env('RFID_MQTT_TLS_ALLOW_SELF_SIGNED', false), FILTER_VALIDATE_BOOL),
 
-        'scan_topic_template' => env('RFID_MQTT_SCAN_TOPIC_TEMPLATE', 'edusmart/{tenant}/rfid/scan'),
+        'scan_topic_template' => env('RFID_MQTT_SCAN_TOPIC_TEMPLATE', 'edusmart/{tenant}/rfid/{device}/scan'),
         'scan_topic_filter' => env('RFID_MQTT_SCAN_TOPIC_FILTER', ''),
-        'response_topic_template' => env('RFID_MQTT_RESPONSE_TOPIC_TEMPLATE', 'edusmart/{tenant}/rfid/response'),
-        'mode_topic_template' => env('RFID_MQTT_MODE_TOPIC_TEMPLATE', 'edusmart/{tenant}/rfid/mode'),
+        'response_topic_template' => env('RFID_MQTT_RESPONSE_TOPIC_TEMPLATE', 'edusmart/{tenant}/rfid/{device}/response'),
+        'mode_topic_template' => env('RFID_MQTT_MODE_TOPIC_TEMPLATE', 'edusmart/{tenant}/rfid/{device}/mode'),
 
         'default_tenant_slug' => env('RFID_MQTT_DEFAULT_TENANT_SLUG', ''),
         'device_tenant_map' => env('RFID_MQTT_DEVICE_TENANT_MAP', '{}'),

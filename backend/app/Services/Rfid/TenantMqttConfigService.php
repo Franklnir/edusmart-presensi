@@ -58,15 +58,15 @@ class TenantMqttConfigService
             ),
             'scan_topic_template' => $this->nonEmptyString(
                 $payload['scan_topic_template'] ?? null,
-                'edusmart/{tenant}/rfid/scan'
+                'edusmart/{tenant}/rfid/{device}/scan'
             ),
             'response_topic_template' => $this->nonEmptyString(
                 $payload['response_topic_template'] ?? null,
-                'edusmart/{tenant}/rfid/response'
+                'edusmart/{tenant}/rfid/{device}/response'
             ),
             'mode_topic_template' => $this->nonEmptyString(
                 $payload['mode_topic_template'] ?? null,
-                'edusmart/{tenant}/rfid/mode'
+                'edusmart/{tenant}/rfid/{device}/mode'
             ),
             'connect_timeout' => $this->clampInt($payload['connect_timeout'] ?? 20, 3, 120, 20),
             'socket_timeout' => $this->clampInt($payload['socket_timeout'] ?? 5, 1, 60, 5),
@@ -149,9 +149,9 @@ class TenantMqttConfigService
             'tls_allow_self_signed' => true,
             'qos' => 1,
             'client_id_prefix' => 'edusmart-rfid-bridge',
-            'scan_topic_template' => "{$topicPrefix}/{tenant}/rfid/scan",
-            'response_topic_template' => "{$topicPrefix}/{tenant}/rfid/response",
-            'mode_topic_template' => "{$topicPrefix}/{tenant}/rfid/mode",
+            'scan_topic_template' => "{$topicPrefix}/{tenant}/rfid/{device}/scan",
+            'response_topic_template' => "{$topicPrefix}/{tenant}/rfid/{device}/response",
+            'mode_topic_template' => "{$topicPrefix}/{tenant}/rfid/{device}/mode",
             'connect_timeout' => 20,
             'socket_timeout' => 5,
             'keep_alive' => 20,
@@ -371,9 +371,9 @@ class TenantMqttConfigService
             'tls_allow_self_signed' => (bool) ($row->tls_allow_self_signed ?? false),
             'qos' => (int) ($row->qos ?? 1),
             'client_id_prefix' => trim((string) ($row->client_id_prefix ?? 'edusmart-rfid-bridge')),
-            'scan_topic_template' => trim((string) ($row->scan_topic_template ?? 'edusmart/{tenant}/rfid/scan')),
-            'response_topic_template' => trim((string) ($row->response_topic_template ?? 'edusmart/{tenant}/rfid/response')),
-            'mode_topic_template' => trim((string) ($row->mode_topic_template ?? 'edusmart/{tenant}/rfid/mode')),
+            'scan_topic_template' => trim((string) ($row->scan_topic_template ?? 'edusmart/{tenant}/rfid/{device}/scan')),
+            'response_topic_template' => trim((string) ($row->response_topic_template ?? 'edusmart/{tenant}/rfid/{device}/response')),
+            'mode_topic_template' => trim((string) ($row->mode_topic_template ?? 'edusmart/{tenant}/rfid/{device}/mode')),
             'connect_timeout' => (int) ($row->connect_timeout ?? 20),
             'socket_timeout' => (int) ($row->socket_timeout ?? 5),
             'keep_alive' => (int) ($row->keep_alive ?? 20),
@@ -420,10 +420,10 @@ class TenantMqttConfigService
             'tls_allow_self_signed' => (bool) ($cfg['tls_allow_self_signed'] ?? false),
             'qos' => (int) ($cfg['qos'] ?? 1),
             'client_id_prefix' => trim((string) ($cfg['client_id_prefix'] ?? 'edusmart-rfid-bridge')),
-            'scan_topic_template' => trim((string) ($cfg['scan_topic_template'] ?? 'edusmart/{tenant}/rfid/scan')),
+            'scan_topic_template' => trim((string) ($cfg['scan_topic_template'] ?? 'edusmart/{tenant}/rfid/{device}/scan')),
             'scan_topic_filter' => trim((string) ($cfg['scan_topic_filter'] ?? '')),
-            'response_topic_template' => trim((string) ($cfg['response_topic_template'] ?? 'edusmart/{tenant}/rfid/response')),
-            'mode_topic_template' => trim((string) ($cfg['mode_topic_template'] ?? 'edusmart/{tenant}/rfid/mode')),
+            'response_topic_template' => trim((string) ($cfg['response_topic_template'] ?? 'edusmart/{tenant}/rfid/{device}/response')),
+            'mode_topic_template' => trim((string) ($cfg['mode_topic_template'] ?? 'edusmart/{tenant}/rfid/{device}/mode')),
             'connect_timeout' => (int) ($cfg['connect_timeout'] ?? 20),
             'socket_timeout' => (int) ($cfg['socket_timeout'] ?? 5),
             'keep_alive' => (int) ($cfg['keep_alive'] ?? 20),
@@ -454,7 +454,7 @@ class TenantMqttConfigService
             }
 
             if (str_contains($topic, '+') || str_contains($topic, '#')) {
-                throw new \RuntimeException('Template topik MQTT RFID tidak boleh berisi wildcard + atau #. Gunakan {tenant} untuk slug sekolah.');
+                throw new \RuntimeException('Template topik MQTT RFID tidak boleh berisi wildcard + atau #. Gunakan {tenant} dan {device} untuk scope topik.');
             }
         }
     }
@@ -472,7 +472,7 @@ class TenantMqttConfigService
         }
 
         $scanTopic = $this->renderTopicTemplate(
-            (string) ($data['scan_topic_template'] ?? 'edusmart/{tenant}/rfid/scan'),
+            (string) ($data['scan_topic_template'] ?? 'edusmart/{tenant}/rfid/{device}/scan'),
             $tenantSlug
         );
 
@@ -491,7 +491,7 @@ class TenantMqttConfigService
         foreach ($rows as $row) {
             $otherSlug = $this->normalizeTenantSlug((string) ($row->tenant_slug ?? ''));
             $otherTopic = $this->renderTopicTemplate(
-                (string) ($row->scan_topic_template ?? 'edusmart/{tenant}/rfid/scan'),
+                (string) ($row->scan_topic_template ?? 'edusmart/{tenant}/rfid/{device}/scan'),
                 $otherSlug
             );
 
@@ -508,9 +508,13 @@ class TenantMqttConfigService
         }
     }
 
-    private function renderTopicTemplate(string $template, string $tenantSlug): string
+    private function renderTopicTemplate(string $template, string $tenantSlug, string $deviceId = '+'): string
     {
-        $topic = str_replace('{tenant}', $tenantSlug, trim($template));
+        $topic = str_replace(
+            ['{tenant}', '{device}'],
+            [$tenantSlug, $deviceId !== '' ? $deviceId : '+'],
+            trim($template)
+        );
 
         return $topic !== '' ? $topic : sprintf('edusmart/%s/rfid/scan', $tenantSlug);
     }
@@ -605,15 +609,15 @@ class TenantMqttConfigService
             }
 
             $scanTopic = $this->renderTopicTemplate(
-                (string) ($config['scan_topic_template'] ?? 'edusmart/{tenant}/rfid/scan'),
+                (string) ($config['scan_topic_template'] ?? 'edusmart/{tenant}/rfid/{device}/scan'),
                 $tenantSlug
             );
             $responseTopic = $this->renderTopicTemplate(
-                (string) ($config['response_topic_template'] ?? 'edusmart/{tenant}/rfid/response'),
+                (string) ($config['response_topic_template'] ?? 'edusmart/{tenant}/rfid/{device}/response'),
                 $tenantSlug
             );
             $modeTopic = $this->renderTopicTemplate(
-                (string) ($config['mode_topic_template'] ?? 'edusmart/{tenant}/rfid/mode'),
+                (string) ($config['mode_topic_template'] ?? 'edusmart/{tenant}/rfid/{device}/mode'),
                 $tenantSlug
             );
 
@@ -634,15 +638,15 @@ class TenantMqttConfigService
             }
 
             $scanTopic = $this->renderTopicTemplate(
-                (string) ($config['scan_topic_template'] ?? 'edusmart/{tenant}/rfid/scan'),
+                (string) ($config['scan_topic_template'] ?? 'edusmart/{tenant}/rfid/{device}/scan'),
                 $tenantSlug
             );
             $responseTopic = $this->renderTopicTemplate(
-                (string) ($config['response_topic_template'] ?? 'edusmart/{tenant}/rfid/response'),
+                (string) ($config['response_topic_template'] ?? 'edusmart/{tenant}/rfid/{device}/response'),
                 $tenantSlug
             );
             $modeTopic = $this->renderTopicTemplate(
-                (string) ($config['mode_topic_template'] ?? 'edusmart/{tenant}/rfid/mode'),
+                (string) ($config['mode_topic_template'] ?? 'edusmart/{tenant}/rfid/{device}/mode'),
                 $tenantSlug
             );
 
@@ -727,8 +731,8 @@ class TenantMqttConfigService
 
     private function assertMosquittoAclTopic(string $topic): void
     {
-        if ($topic === '' || str_contains($topic, '+') || str_contains($topic, '#')) {
-            throw new \RuntimeException('Topik ACL Mosquitto harus konkret dan tidak boleh memakai wildcard.');
+        if ($topic === '' || str_contains($topic, '#')) {
+            throw new \RuntimeException('Topik ACL Mosquitto tidak boleh kosong dan tidak boleh memakai wildcard #.');
         }
     }
 

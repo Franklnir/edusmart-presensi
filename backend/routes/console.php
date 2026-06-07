@@ -27,9 +27,68 @@ Artisan::command('inspire', function () {
 Schedule::command('backup:monthly-google-drive')
     ->dailyAt((string) config('backup.monthly_auto_start_time', '23:15'))
     ->timezone('Asia/Jakarta')
-    ->when(fn () => now('Asia/Jakarta')->isSameDay(now('Asia/Jakarta')->copy()->endOfMonth()))
     ->withoutOverlapping(30)
     ->onOneServer();
+
+Artisan::command('backup:verify-monthly {--tenant=} {--month=}', function () {
+    /** @var \App\Services\Backup\TenantBackupService $service */
+    $service = app(\App\Services\Backup\TenantBackupService::class);
+    $tenantFilter = trim((string) ($this->option('tenant') ?: ''));
+    $monthFilter = trim((string) ($this->option('month') ?: ''));
+    $tenantIds = $tenantFilter !== ''
+        ? [$tenantFilter]
+        : $service->tenantsEligibleForMonthlyBackup();
+
+    if (empty($tenantIds)) {
+        $this->warn('Tidak ada tenant yang Google Drive-nya aktif.');
+
+        return 1;
+    }
+
+    $warning = 0;
+    foreach ($tenantIds as $tenantId) {
+        $resolvedTenantId = trim((string) $tenantId);
+        if ($tenantFilter !== '') {
+            $tenant = DB::table('tenants')
+                ->where('id', $tenantFilter)
+                ->orWhere('slug', $tenantFilter)
+                ->first(['id']);
+            $resolvedTenantId = (string) ($tenant->id ?? $tenantFilter);
+        }
+
+        $status = $service->monthlyStatus($resolvedTenantId, true);
+        $tenantName = (string) data_get($status, 'tenant.name', $resolvedTenantId);
+        $months = array_values((array) data_get($status, 'months', []));
+        if ($monthFilter !== '') {
+            $months = array_values(array_filter($months, fn ($month) => (string) ($month['key'] ?? '') === $monthFilter));
+        }
+
+        $this->line('Tenant: '.$tenantName);
+        foreach ($months as $month) {
+            $state = (string) ($month['status'] ?? 'unknown');
+            $label = (string) ($month['label'] ?? $month['key'] ?? '-');
+            $this->line(sprintf(
+                ' - %s: %s%s',
+                $label,
+                $state,
+                (bool) ($month['has_new_data'] ?? false) ? ' (ada data baru)' : ''
+            ));
+            if (in_array($state, ['pending', 'needs_update'], true)) {
+                $warning++;
+            }
+        }
+    }
+
+    if ($warning > 0) {
+        $this->warn("Ada {$warning} bulan yang belum aman / perlu update.");
+
+        return 1;
+    }
+
+    $this->info('Backup bulanan terverifikasi.');
+
+    return 0;
+})->purpose('Memverifikasi status backup bulanan Google Drive tenant.');
 
 Schedule::job(new QuizWorkerHeartbeatJob, (string) config('quiz.scoring_queue', 'quiz-scoring'))
     ->everyMinute()

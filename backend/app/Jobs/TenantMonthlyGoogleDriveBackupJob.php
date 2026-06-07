@@ -41,6 +41,7 @@ class TenantMonthlyGoogleDriveBackupJob implements ShouldQueue
             'message' => $this->auto
                 ? 'Auto backup sedang berjalan di background.'
                 : 'Backup bulanan sedang berjalan di background.',
+            'started_at' => now('Asia/Jakarta')->toIso8601String(),
         ]);
 
         try {
@@ -78,10 +79,17 @@ class TenantMonthlyGoogleDriveBackupJob implements ShouldQueue
                 throw $e;
             }
 
+            $status = $tenantBackupService->backupFailureStatus($message);
+            if ($status === 'needs_attention') {
+                $tenantBackupService->markGoogleDriveNeedsAttention($this->tenantId, $message);
+            }
+
             $tenantBackupService->putMonthlyBackupJobStatus($this->tenantId, $this->jobId, [
-                'status' => 'failed',
+                'status' => $status,
                 'progress' => 100,
-                'message' => $message,
+                'message' => $status === 'needs_attention'
+                    ? 'Google Drive perlu disambungkan ulang: '.$message
+                    : $message,
                 'last_error' => $message,
                 'failed_at' => now('Asia/Jakarta')->toIso8601String(),
                 'monthly_status' => $tenantBackupService->monthlyStatus($this->tenantId, true),
@@ -93,11 +101,18 @@ class TenantMonthlyGoogleDriveBackupJob implements ShouldQueue
     public function failed(Throwable $e): void
     {
         $tenantBackupService = app(TenantBackupService::class);
+        $message = trim((string) $e->getMessage()) ?: 'Backup gagal diproses.';
+        $status = $tenantBackupService->backupFailureStatus($message);
+        if ($status === 'needs_attention') {
+            $tenantBackupService->markGoogleDriveNeedsAttention($this->tenantId, $message);
+        }
         $tenantBackupService->putMonthlyBackupJobStatus($this->tenantId, $this->jobId, [
-            'status' => 'failed',
+            'status' => $status,
             'progress' => 100,
-            'message' => trim((string) $e->getMessage()) ?: 'Backup gagal diproses.',
-            'last_error' => trim((string) $e->getMessage()) ?: null,
+            'message' => $status === 'needs_attention'
+                ? 'Google Drive perlu disambungkan ulang: '.$message
+                : $message,
+            'last_error' => $message,
             'failed_at' => now('Asia/Jakarta')->toIso8601String(),
         ]);
         $tenantBackupService->releaseMonthlyBackupActiveJob($this->tenantId, $this->monthKey, $this->auto, $this->jobId);

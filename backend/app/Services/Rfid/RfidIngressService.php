@@ -25,8 +25,23 @@ class RfidIngressService
         ?array $payload = null
     ): array {
         $deviceId = $this->normalizeDeviceId($deviceId);
-        $eventId = trim((string) $eventId);
         $tenantId = $this->resolveTenantId($tenantSlug);
+        $rawScannedAt = $scannedAt ?? ($payload['scanned_at'] ?? $payload['timestamp'] ?? null);
+        $scannedAt = $this->normalizeTimestamp($rawScannedAt)
+            ?? now('Asia/Jakarta')->startOfMinute()->toDateTimeString();
+        $eventId = $this->normalizeEventId(
+            $eventId,
+            $tenantId,
+            $tenantSlug,
+            $deviceId,
+            $cardUid,
+            $mode,
+            $scannedAt
+        );
+        if (is_array($payload)) {
+            $payload['event_id'] = $payload['event_id'] ?? $eventId;
+            $payload['scanned_at'] = $payload['scanned_at'] ?? $scannedAt;
+        }
 
         if ($eventId !== '') {
             $eventCacheKey = $this->eventCacheKey($tenantId, $deviceId, $eventId);
@@ -68,6 +83,9 @@ class RfidIngressService
         }
 
         $result = $this->rfidScanService->processScanByTenantSlug($tenantSlug, $cardUid, $deviceId, $mode);
+        $result['data'] = is_array($result['data'] ?? null) ? $result['data'] : [];
+        $result['data']['event_id'] = $result['data']['event_id'] ?? $eventId;
+        $result['data']['device_id'] = $result['data']['device_id'] ?? $deviceId;
 
         $this->finishEventRecord($eventRowId, $result);
 
@@ -154,7 +172,7 @@ class RfidIngressService
 
             $items[] = [
                 'index' => $index,
-                'event_id' => $currentEventId !== '' ? $currentEventId : null,
+                'event_id' => $data['event_id'] ?? ($currentEventId !== '' ? $currentEventId : null),
                 'device_id' => $currentDeviceId,
                 'card_uid' => $data['card_uid'] ?? $currentCardUid,
                 'success' => (bool) ($data['success'] ?? false),
@@ -380,6 +398,36 @@ class RfidIngressService
         } catch (\Throwable $e) {
             return null;
         }
+    }
+
+    private function normalizeEventId(
+        mixed $eventId,
+        ?string $tenantId,
+        string $tenantSlug,
+        string $deviceId,
+        string $cardUid,
+        ?string $mode,
+        string $scannedAt
+    ): string {
+        $eventId = trim((string) $eventId);
+        if ($eventId !== '') {
+            return Str::limit($eventId, 190, '');
+        }
+
+        if (! (bool) config('rfid.performance.require_idempotency_key', true)) {
+            return '';
+        }
+
+        $fingerprint = implode('|', [
+            trim((string) ($tenantId ?? '')),
+            Str::lower(trim($tenantSlug)),
+            Str::lower(trim($deviceId)),
+            $this->normalizeCardUid($cardUid),
+            Str::lower(trim((string) $mode)),
+            trim($scannedAt),
+        ]);
+
+        return 'auto-'.hash('sha256', $fingerprint);
     }
 
     private function normalizeCardUid(string $cardUid): string

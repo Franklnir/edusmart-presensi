@@ -2,12 +2,10 @@
 
 namespace App\Console\Commands;
 
-use App\Jobs\TenantMonthlyGoogleDriveBackupJob;
 use App\Services\Backup\TenantBackupService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
 
 class MonthlyGoogleDriveBackupCommand extends Command
 {
@@ -16,13 +14,14 @@ class MonthlyGoogleDriveBackupCommand extends Command
         {--month= : Pakai bulan tertentu dalam format YYYY-MM}
         {--force : Buat ulang meskipun bulan tersebut sudah ada backup}
         {--sync : Jalankan langsung di proses command, bukan queue}
+        {--catch-up : Proses semua bulan periode aktif yang terlewat atau punya data baru}
         {--spacing-minutes= : Jeda antar tenant saat dispatch queue}';
 
     protected $description = 'Membuat backup database tenant lengkap ke Google Drive sekolah pada akhir bulan.';
 
     public function handle(TenantBackupService $tenantBackupService): int
     {
-        $monthKey = trim((string) ($this->option('month') ?: $tenantBackupService->currentMonthKey()));
+        $monthOption = trim((string) ($this->option('month') ?: ''));
         $tenantFilter = trim((string) ($this->option('tenant') ?: ''));
         $force = (bool) $this->option('force');
         $sync = (bool) $this->option('sync');
@@ -42,8 +41,9 @@ class MonthlyGoogleDriveBackupCommand extends Command
         $queued = 0;
         $skipped = 0;
         $failed = 0;
+        $dispatchIndex = 0;
 
-        foreach (array_values($tenantIds) as $index => $tenantId) {
+        foreach (array_values($tenantIds) as $tenantId) {
             $tenantId = $this->resolveTenantId((string) $tenantId);
             if ($tenantId === '') {
                 $failed++;
@@ -53,46 +53,51 @@ class MonthlyGoogleDriveBackupCommand extends Command
             }
 
             try {
-                if (! $sync) {
-                    $jobId = (string) Str::uuid();
-                    $delaySeconds = $index * $spacingMinutes * 60;
-                    $tenantBackupService->putMonthlyBackupJobStatus($tenantId, $jobId, [
-                        'status' => 'queued',
-                        'progress' => 12,
-                        'type' => 'monthly',
-                        'month' => $monthKey,
-                        'message' => 'Backup bulanan otomatis masuk antrean scheduler.',
-                        'queued_at' => now('Asia/Jakarta')->toIso8601String(),
-                        'scheduled_for' => now('Asia/Jakarta')->addSeconds($delaySeconds)->toIso8601String(),
-                    ]);
+                $monthKeys = $monthOption !== ''
+                    ? [$monthOption]
+                    : $tenantBackupService->monthlyCatchUpKeysForTenant($tenantId);
 
-                    $job = new TenantMonthlyGoogleDriveBackupJob(
-                        $tenantId,
-                        'system',
-                        $monthKey,
-                        $force,
-                        false,
-                        $jobId
-                    );
-                    if ($delaySeconds > 0) {
-                        $job->delay(now()->addSeconds($delaySeconds));
-                    }
-                    dispatch($job);
-
-                    $queued++;
-                    $this->info("QUEUE {$tenantId}: {$monthKey} delay={$delaySeconds}s job={$jobId}");
+                if (empty($monthKeys)) {
+                    $skipped++;
+                    $this->line("SKIP {$tenantId}: tidak ada bulan yang perlu backup.");
 
                     continue;
                 }
 
-                $file = $tenantBackupService->saveMonthlyBackupToGoogleDrive(
-                    $tenantId,
-                    $monthKey,
-                    'system',
-                    $force
-                );
-                $success++;
-                $this->info("OK {$tenantId}: ".($file['drive_file_name'] ?? 'backup.json'));
+                foreach ($monthKeys as $monthKey) {
+                    if (! $sync) {
+                        $delaySeconds = $dispatchIndex * $spacingMinutes * 60;
+                        $status = $tenantBackupService->queueMonthlyBackupToGoogleDrive(
+                            $tenantId,
+                            (string) $monthKey,
+                            'system',
+                            $force,
+                            false,
+                            $delaySeconds
+                        );
+                        $queued++;
+                        $dispatchIndex++;
+                        $this->info(sprintf(
+                            'QUEUE %s: %s delay=%ds job=%s%s',
+                            $tenantId,
+                            (string) $monthKey,
+                            $delaySeconds,
+                            (string) ($status['job_id'] ?? '-'),
+                            (bool) ($status['already_queued'] ?? false) ? ' already_queued' : ''
+                        ));
+
+                        continue;
+                    }
+
+                    $file = $tenantBackupService->saveMonthlyBackupToGoogleDrive(
+                        $tenantId,
+                        (string) $monthKey,
+                        'system',
+                        $force
+                    );
+                    $success++;
+                    $this->info("OK {$tenantId}: ".($file['drive_file_name'] ?? 'backup.json'));
+                }
             } catch (\Throwable $e) {
                 $message = trim((string) $e->getMessage());
                 if (str_contains(strtolower($message), 'sudah tersedia')) {
@@ -106,7 +111,7 @@ class MonthlyGoogleDriveBackupCommand extends Command
                 $this->error("FAIL {$tenantId}: {$message}");
                 Log::warning('Monthly Google Drive backup failed', [
                     'tenant_id' => $tenantId,
-                    'month' => $monthKey,
+                    'month' => $monthOption ?: 'catch-up',
                     'error' => $message,
                 ]);
             }

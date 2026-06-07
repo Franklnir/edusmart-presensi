@@ -263,6 +263,52 @@ class RfidApiTest extends TestCase
         $this->assertDatabaseCount('rfid_scans', 1);
     }
 
+    public function test_rfid_sync_generates_fallback_event_id_for_legacy_device_without_event_id(): void
+    {
+        config()->set('rfid.performance.require_idempotency_key', true);
+
+        $tenant = $this->createTenant('sma-bali');
+        $this->createRegisteredDevice($tenant->id, 'GERBANG_UTAMA', 'secret-device-1');
+
+        $response = $this->withHeaders([
+            'X-RFID-Device' => 'GERBANG_UTAMA',
+            'X-RFID-Secret' => 'secret-device-1',
+        ])->postJson('/api/rfid/sync', [
+            'events' => [
+                [
+                    'card_uid' => 'A1B2C3D4',
+                    'mode' => 'enroll',
+                ],
+                [
+                    'card_uid' => 'A1B2C3D4',
+                    'mode' => 'enroll',
+                ],
+            ],
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('summary.total', 2)
+            ->assertJsonPath('summary.processed', 1)
+            ->assertJsonPath('summary.duplicates', 1)
+            ->assertJsonPath('summary.failed', 0)
+            ->assertJsonPath('items.0.duplicate', false)
+            ->assertJsonPath('items.1.duplicate', true);
+
+        $firstEventId = (string) data_get($response->json(), 'items.0.event_id');
+        $secondEventId = (string) data_get($response->json(), 'items.1.event_id');
+
+        $this->assertStringStartsWith('auto-', $firstEventId);
+        $this->assertSame($firstEventId, $secondEventId);
+        $this->assertDatabaseHas('rfid_device_events', [
+            'tenant_id' => $tenant->id,
+            'device_id' => 'GERBANG_UTAMA',
+            'event_id' => $firstEventId,
+        ]);
+        $this->assertDatabaseCount('rfid_device_events', 1);
+        $this->assertDatabaseCount('rfid_scans', 1);
+    }
+
     public function test_rfid_sync_dedupes_events_inside_each_tenant_scope(): void
     {
         $tenantA = $this->createTenant('sma-bali');

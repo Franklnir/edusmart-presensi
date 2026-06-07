@@ -1,0 +1,60 @@
+name: Mobile Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - backup/vps-ready-20260430
+    paths:
+      - 'mobile-app/**'
+      - 'backend/app/Http/Controllers/Api/MobileController.php'
+      - 'backend/app/Http/Controllers/Api/AuthController.php'
+      - 'backend/routes/api.php'
+      - '.github/workflows/mobile-android.yml'
+
+jobs:
+  build-apk:
+    name: Build SISMU Mobile APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile-app
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: mobile-app/package-lock.json
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test -- --runInBand
+
+      - name: Prebuild Android native project
+        run: npm run prebuild:android
+
+      - name: Build release APK
+        run: cd android && ./gradlew assembleRelease --no-daemon
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sismu-mobile-apk
+          path: mobile-app/android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
