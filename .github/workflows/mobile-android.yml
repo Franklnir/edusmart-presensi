@@ -47,6 +47,8 @@ jobs:
         run: npm test -- --runInBand
 
       - name: Prebuild Android native project
+        env:
+          CI: true
         run: npm run prebuild:android
 
       - name: Build release APK

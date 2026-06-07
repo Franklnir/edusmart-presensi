@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Database\Migrations\Migration;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
@@ -20,7 +21,7 @@ return new class extends Migration
                 continue;
             }
 
-            \Illuminate\Support\Facades\DB::table('tenant_mqtt_configs')
+            DB::table('tenant_mqtt_configs')
                 ->where(function ($query) use ($column) {
                     $query->whereNull($column)
                         ->orWhere($column, '')
@@ -36,7 +37,7 @@ return new class extends Migration
                         ? substr($current, 0, -strlen("/rfid/{$suffix}"))."/rfid/{device}/{$suffix}"
                         : $current.'/{device}';
 
-                    \Illuminate\Support\Facades\DB::table('tenant_mqtt_configs')
+                    DB::table('tenant_mqtt_configs')
                         ->where('id', $row->id)
                         ->update([
                             $column => $next,
@@ -61,12 +62,12 @@ return new class extends Migration
                 continue;
             }
 
-            \Illuminate\Support\Facades\DB::table('tenant_mqtt_configs')
+            DB::table('tenant_mqtt_configs')
                 ->where($column, 'like', '%/{device}/'.$suffix)
                 ->get(['id', $column])
                 ->each(function ($row) use ($column, $suffix): void {
                     $next = str_replace('/{device}/'.$suffix, '/'.$suffix, (string) $row->{$column});
-                    \Illuminate\Support\Facades\DB::table('tenant_mqtt_configs')
+                    DB::table('tenant_mqtt_configs')
                         ->where('id', $row->id)
                         ->update([
                             $column => $next,

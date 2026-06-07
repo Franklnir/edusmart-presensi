@@ -592,6 +592,7 @@ class MobileController extends ApiController
     {
         try {
             $text = trim((string) $value);
+
             return $text !== '' ? Carbon::parse($text, 'Asia/Jakarta') : null;
         } catch (\Throwable $e) {
             return null;

@@ -3,6 +3,7 @@
 use App\Jobs\QuizWorkerHeartbeatJob;
 use App\Models\Profile;
 use App\Models\User;
+use App\Services\Backup\TenantBackupService;
 use App\Services\Quiz\QuizScoringService;
 use App\Services\Rfid\MqttBridgeService;
 use App\Services\Rfid\RfidDeviceService;
@@ -31,8 +32,8 @@ Schedule::command('backup:monthly-google-drive')
     ->onOneServer();
 
 Artisan::command('backup:verify-monthly {--tenant=} {--month=}', function () {
-    /** @var \App\Services\Backup\TenantBackupService $service */
-    $service = app(\App\Services\Backup\TenantBackupService::class);
+    /** @var TenantBackupService $service */
+    $service = app(TenantBackupService::class);
     $tenantFilter = trim((string) ($this->option('tenant') ?: ''));
     $monthFilter = trim((string) ($this->option('month') ?: ''));
     $tenantIds = $tenantFilter !== ''

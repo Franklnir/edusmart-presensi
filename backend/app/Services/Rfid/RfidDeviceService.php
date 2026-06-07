@@ -3,10 +3,12 @@
 namespace App\Services\Rfid;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 class RfidDeviceService
@@ -233,7 +235,7 @@ class RfidDeviceService
             $isOnline = false;
             if ($lastSeenAt) {
                 try {
-                    $isOnline = $now->diffInSeconds(\Illuminate\Support\Carbon::parse($lastSeenAt), true) <= $onlineGraceSeconds;
+                    $isOnline = $now->diffInSeconds(Carbon::parse($lastSeenAt), true) <= $onlineGraceSeconds;
                 } catch (\Throwable $e) {
                     $isOnline = false;
                 }
@@ -277,7 +279,7 @@ class RfidDeviceService
         }
 
         try {
-            if (! \Illuminate\Support\Facades\Schema::hasTable('rfid_device_events')) {
+            if (! Schema::hasTable('rfid_device_events')) {
                 return [];
             }
 

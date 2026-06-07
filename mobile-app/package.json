@@ -7,8 +7,8 @@
     "start": "expo start --dev-client",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "prebuild:android": "expo prebuild --platform android --non-interactive",
-    "build:android:release": "expo prebuild --platform android --non-interactive && cd android && ./gradlew assembleRelease --no-daemon",
+    "prebuild:android": "expo prebuild --platform android --clean",
+    "build:android:release": "CI=1 expo prebuild --platform android --clean && cd android && ./gradlew assembleRelease --no-daemon",
     "test": "jest",
     "typecheck": "tsc --noEmit"
   },
