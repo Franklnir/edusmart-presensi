@@ -428,7 +428,7 @@ class TenantDomainManagementTest extends TestCase
             ->assertJsonPath('data.rfid_template.mqtt.managed_by_platform', true)
             ->assertJsonPath('data.rfid_template.mqtt.host', 'mqtt.edusmart.test')
             ->assertJsonPath('data.rfid_template.mqtt.use_tls', true)
-            ->assertJsonPath('data.rfid_template.topics.scan', 'edusmart/bali/rfid/scan')
+            ->assertJsonPath('data.rfid_template.topics.scan', 'edusmart/bali/rfid/{device}/scan')
             ->assertJsonPath('data.mosquitto_sync.synced', true);
 
         $devicePassword = (string) data_get($response->json(), 'data.rfid_template.mqtt.password');
@@ -443,10 +443,10 @@ class TenantDomainManagementTest extends TestCase
         $this->assertStringContainsString('edusmart_bali_rfid:', $passwordContents);
         $this->assertStringNotContainsString($devicePassword, $passwordContents);
         $this->assertStringContainsString('user edusmart_bridge', $aclContents);
-        $this->assertStringContainsString('topic read edusmart/bali/rfid/scan', $aclContents);
+        $this->assertStringContainsString('topic read edusmart/bali/rfid/+/scan', $aclContents);
         $this->assertStringContainsString('user edusmart_bali_rfid', $aclContents);
-        $this->assertStringContainsString('topic write edusmart/bali/rfid/scan', $aclContents);
-        $this->assertStringContainsString('topic read edusmart/bali/rfid/response', $aclContents);
+        $this->assertStringContainsString('topic write edusmart/bali/rfid/+/scan', $aclContents);
+        $this->assertStringContainsString('topic read edusmart/bali/rfid/+/response', $aclContents);
     }
 
     public function test_managed_mosquitto_replaces_previous_custom_mqtt_credentials(): void
@@ -507,7 +507,7 @@ class TenantDomainManagementTest extends TestCase
             ->assertJsonPath('data.rfid_mqtt_config.username', 'edusmart_bali_rfid')
             ->assertJsonPath('data.rfid_template.available', true)
             ->assertJsonPath('data.rfid_template.mqtt.host', 'mqtt.edusmart.test')
-            ->assertJsonPath('data.rfid_template.topics.scan', 'edusmart/bali/rfid/scan');
+            ->assertJsonPath('data.rfid_template.topics.scan', 'edusmart/bali/rfid/{device}/scan');
 
         $this->assertNotSame(
             'old-cloud-secret',

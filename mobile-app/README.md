@@ -21,29 +21,69 @@ Stack yang dipakai:
 5. Guru memakai tab Beranda, Scan, Kelas, Aktivitas, Profil.
 6. Siswa memakai tab Beranda, Absensi, Tugas, Nilai, Profil.
 
-## Build Android APK di GitHub
+## Build Android APK di GitHub Actions
 
-Workflow `.github/workflows/mobile-android.yml` akan:
+Workflow `.github/workflows/mobile-android.yml` bernama `Mobile Android Build`.
+Workflow ini berjalan saat:
 
-1. Install dependency di `mobile-app`.
-2. Menjalankan Expo prebuild Android.
-3. Build APK release.
-4. Upload artifact `sismu-mobile-apk`.
+- ada push yang mengubah file di `mobile-app/**`;
+- workflow dijalankan manual dari tab GitHub Actions;
+- ada tag release seperti `v1.0.0` atau `mobile-1.0.0`.
 
-Artifact bisa diunduh dari halaman GitHub Actions setelah workflow sukses.
+Build Android selalu membuat APK debug untuk testing dan mengupload artifact:
+
+- `mobile-app-android-debug-apk`
+
+Jika semua GitHub Secrets signing Android tersedia, workflow juga membuat release build dan mengupload:
+
+- `mobile-app-android-release-apk`
+- `mobile-app-android-release-aab`
+
+Secrets Android release yang dipakai:
+
+- `ANDROID_KEYSTORE_BASE64`
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
+
+Jangan commit file keystore, `.jks`, `.p12`, `.mobileprovision`, `.env`, token, password, atau secret apapun ke repository.
+
+Cara download APK:
+
+1. Buka repository di GitHub.
+2. Masuk ke tab `Actions`.
+3. Pilih workflow `Mobile Android Build`.
+4. Buka run yang sukses.
+5. Di bagian `Artifacts`, download `mobile-app-android-debug-apk`.
+6. Jika signing release aktif, download juga `mobile-app-android-release-apk` atau `mobile-app-android-release-aab`.
+
+## Build iOS Opsional
+
+Workflow `.github/workflows/mobile-ios.yml` bernama `Mobile iOS Optional` hanya berjalan manual dari GitHub Actions. Workflow ini tidak menjadi syarat CI utama karena macOS runner lebih berat dan iOS membutuhkan Apple signing.
+
+Untuk membuat `.ipa`, siapkan Apple Developer certificate dan provisioning profile melalui GitHub Secrets:
+
+- `IOS_BUILD_CERTIFICATE_BASE64`
+- `IOS_P12_PASSWORD`
+- `IOS_BUILD_PROVISION_PROFILE_BASE64`
+- `IOS_KEYCHAIN_PASSWORD`
+
+Jika secrets iOS belum lengkap, workflow manual akan melewati build `.ipa` tanpa memblokir CI utama.
 
 ## Build Lokal
 
 ```bash
 cd mobile-app
-npm install
-npm run build:android:release
+npm ci
+npx expo prebuild --platform android --clean
+cd android
+./gradlew assembleDebug --no-daemon
 ```
 
 APK akan tersedia di:
 
 ```text
-mobile-app/android/app/build/outputs/apk/release/
+mobile-app/android/app/build/outputs/apk/debug/
 ```
 
 ## Catatan Production

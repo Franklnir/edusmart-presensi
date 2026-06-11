@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Models\Profile;
+use App\Services\Rfid\RfidIngressService;
 use App\Support\Tenancy\TenantDomainService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -13,7 +14,8 @@ use Illuminate\Support\Str;
 class MobileController extends ApiController
 {
     public function __construct(
-        private readonly TenantDomainService $tenantDomainService
+        private readonly TenantDomainService $tenantDomainService,
+        private readonly RfidIngressService $rfidIngressService
     ) {}
 
     public function me(Request $request)
@@ -188,6 +190,91 @@ class MobileController extends ApiController
             'date' => $today,
             'summary' => $this->attendanceCounts($context['tenant_id'], $today, $classes->all()),
         ]);
+    }
+
+    public function guruRfidScan(Request $request)
+    {
+        $context = $this->mobileContext($request, 'guru');
+        if ($context['response']) {
+            return $context['response'];
+        }
+
+        $validated = $request->validate([
+            'card_uid' => ['required', 'string', 'max:128'],
+            'device_id' => ['nullable', 'string', 'max:191'],
+            'event_id' => ['nullable', 'string', 'max:191'],
+            'mode' => ['nullable', 'string', 'max:32'],
+            'scanned_at' => ['nullable', 'date'],
+        ]);
+
+        $tenantSlug = $this->mobileTenantSlug($context, $request);
+        if ($tenantSlug === '') {
+            return $this->deny('Tenant sekolah tidak valid.', 400);
+        }
+
+        $deviceId = trim((string) ($validated['device_id'] ?? ''));
+        if ($deviceId === '') {
+            $deviceId = 'MOBILE_GURU_'.Str::slug((string) $context['profile']->id, '_');
+        }
+
+        $payload = array_merge($request->all(), [
+            'mobile' => true,
+            'teacher_id' => (string) $context['profile']->id,
+            'tenant_slug' => $tenantSlug,
+        ]);
+
+        $result = $this->rfidIngressService->processScanByTenantSlug(
+            tenantSlug: $tenantSlug,
+            cardUid: (string) $validated['card_uid'],
+            deviceId: $deviceId,
+            mode: (string) ($validated['mode'] ?? ''),
+            source: 'mobile-nfc',
+            eventId: (string) ($validated['event_id'] ?? ''),
+            scannedAt: (string) ($validated['scanned_at'] ?? ''),
+            payload: $payload,
+        );
+
+        return response()->json($result['data'] ?? [], (int) ($result['status'] ?? 500));
+    }
+
+    public function guruRfidSync(Request $request)
+    {
+        $context = $this->mobileContext($request, 'guru');
+        if ($context['response']) {
+            return $context['response'];
+        }
+
+        $maxEvents = max(10, min(1000, (int) config('rfid.performance.sync_batch_max_events', 500)));
+        $validated = $request->validate([
+            'device_id' => ['nullable', 'string', 'max:191'],
+            'events' => ['required', 'array', 'min:1', 'max:'.$maxEvents],
+            'events.*.event_id' => ['nullable', 'string', 'max:191'],
+            'events.*.scan_id' => ['nullable', 'string', 'max:191'],
+            'events.*.device_id' => ['nullable', 'string', 'max:191'],
+            'events.*.card_uid' => ['required', 'string', 'max:128'],
+            'events.*.mode' => ['nullable', 'string', 'max:32'],
+            'events.*.scanned_at' => ['nullable', 'date'],
+            'events.*.timestamp' => ['nullable', 'date'],
+        ]);
+
+        $tenantSlug = $this->mobileTenantSlug($context, $request);
+        if ($tenantSlug === '') {
+            return $this->deny('Tenant sekolah tidak valid.', 400);
+        }
+
+        $deviceId = trim((string) ($validated['device_id'] ?? ''));
+        if ($deviceId === '') {
+            $deviceId = 'MOBILE_GURU_'.Str::slug((string) $context['profile']->id, '_');
+        }
+
+        $result = $this->rfidIngressService->syncBatchByTenantSlug(
+            tenantSlug: $tenantSlug,
+            events: (array) $validated['events'],
+            deviceId: $deviceId,
+            source: 'mobile-nfc-sync',
+        );
+
+        return response()->json($result['data'] ?? [], (int) ($result['status'] ?? 500));
     }
 
     public function siswaDashboard(Request $request)
@@ -418,6 +505,27 @@ class MobileController extends ApiController
             'tenant' => $tenant,
             'role' => $role,
         ];
+    }
+
+    private function mobileTenantSlug(array $context, Request $request): string
+    {
+        $tenantSlug = strtolower(trim((string) ($context['tenant']->slug ?? '')));
+        if ($tenantSlug !== '') {
+            return $tenantSlug;
+        }
+
+        $tenantSlug = strtolower(trim((string) $request->header(config('tenancy.header', 'X-Tenant'), '')));
+        if ($tenantSlug !== '') {
+            return $tenantSlug;
+        }
+
+        if (! Schema::hasTable('tenants')) {
+            return '';
+        }
+
+        return strtolower(trim((string) DB::table('tenants')
+            ->where('id', (string) ($context['tenant_id'] ?? ''))
+            ->value('slug')));
     }
 
     private function teacherSchedulesForDate(string $tenantId, string $teacherId, Carbon $date)

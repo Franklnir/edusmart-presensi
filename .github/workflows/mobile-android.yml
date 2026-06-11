@@ -1,33 +1,40 @@
-name: Mobile Android APK
+name: Mobile Android Build
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - backup/vps-ready-20260430
+      - '**'
+    tags:
+      - 'v*'
+      - 'mobile-*'
     paths:
       - 'mobile-app/**'
-      - 'backend/app/Http/Controllers/Api/MobileController.php'
-      - 'backend/app/Http/Controllers/Api/AuthController.php'
-      - 'backend/routes/api.php'
-      - '.github/workflows/mobile-android.yml'
+
+permissions:
+  contents: read
 
 jobs:
-  build-apk:
-    name: Build SISMU Mobile APK
+  android:
+    name: Android APK/AAB
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: mobile-app
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '20.19.0'
           cache: npm
           cache-dependency-path: mobile-app/package-lock.json
 
@@ -35,10 +42,10 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: '17'
 
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ci
 
       - name: Typecheck
         run: npm run typecheck
@@ -49,14 +56,86 @@ jobs:
       - name: Prebuild Android native project
         env:
           CI: true
-        run: npm run prebuild:android
+        run: npx expo prebuild --platform android --clean
 
-      - name: Build release APK
-        run: cd android && ./gradlew assembleRelease --no-daemon
+      - name: Build debug APK
+        run: cd android && ./gradlew assembleDebug --no-daemon
 
-      - name: Upload APK artifact
+      - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: sismu-mobile-apk
+          name: mobile-app-android-debug-apk
+          path: mobile-app/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Configure Android release signing
+        if: >
+          env.ANDROID_KEYSTORE_BASE64 != '' &&
+          env.ANDROID_KEYSTORE_PASSWORD != '' &&
+          env.ANDROID_KEY_ALIAS != '' &&
+          env.ANDROID_KEY_PASSWORD != ''
+        run: |
+          set -euo pipefail
+          install -m 700 -d android/app/keystores
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/keystores/release.keystore
+          chmod 600 android/app/keystores/release.keystore
+
+          {
+            echo 'EDUSMART_RELEASE_STORE_FILE=keystores/release.keystore'
+            echo "EDUSMART_RELEASE_STORE_PASSWORD=${ANDROID_KEYSTORE_PASSWORD}"
+            echo "EDUSMART_RELEASE_KEY_ALIAS=${ANDROID_KEY_ALIAS}"
+            echo "EDUSMART_RELEASE_KEY_PASSWORD=${ANDROID_KEY_PASSWORD}"
+          } >> android/gradle.properties
+
+          cat >> android/app/build.gradle <<'GRADLE'
+
+          if (project.hasProperty("EDUSMART_RELEASE_STORE_FILE")) {
+              def edusmartReleaseSigning = android.signingConfigs.maybeCreate("edusmartRelease")
+              edusmartReleaseSigning.storeFile = file(project.property("EDUSMART_RELEASE_STORE_FILE"))
+              edusmartReleaseSigning.storePassword = project.property("EDUSMART_RELEASE_STORE_PASSWORD")
+              edusmartReleaseSigning.keyAlias = project.property("EDUSMART_RELEASE_KEY_ALIAS")
+              edusmartReleaseSigning.keyPassword = project.property("EDUSMART_RELEASE_KEY_PASSWORD")
+              android.buildTypes.release.signingConfig = edusmartReleaseSigning
+          }
+          GRADLE
+
+      - name: Build signed release APK and AAB
+        if: >
+          env.ANDROID_KEYSTORE_BASE64 != '' &&
+          env.ANDROID_KEYSTORE_PASSWORD != '' &&
+          env.ANDROID_KEY_ALIAS != '' &&
+          env.ANDROID_KEY_PASSWORD != ''
+        run: cd android && ./gradlew assembleRelease bundleRelease --no-daemon
+
+      - name: Upload release APK
+        if: >
+          env.ANDROID_KEYSTORE_BASE64 != '' &&
+          env.ANDROID_KEYSTORE_PASSWORD != '' &&
+          env.ANDROID_KEY_ALIAS != '' &&
+          env.ANDROID_KEY_PASSWORD != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-app-android-release-apk
           path: mobile-app/android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
+
+      - name: Upload release AAB
+        if: >
+          env.ANDROID_KEYSTORE_BASE64 != '' &&
+          env.ANDROID_KEYSTORE_PASSWORD != '' &&
+          env.ANDROID_KEY_ALIAS != '' &&
+          env.ANDROID_KEY_PASSWORD != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-app-android-release-aab
+          path: mobile-app/android/app/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
+
+      - name: Release signing skipped
+        if: >
+          env.ANDROID_KEYSTORE_BASE64 == '' ||
+          env.ANDROID_KEYSTORE_PASSWORD == '' ||
+          env.ANDROID_KEY_ALIAS == '' ||
+          env.ANDROID_KEY_PASSWORD == ''
+        run: |
+          echo 'Android release signing secrets are incomplete; debug APK artifact was still uploaded.'
