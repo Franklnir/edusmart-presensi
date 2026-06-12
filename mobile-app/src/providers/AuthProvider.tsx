@@ -1,8 +1,8 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import type { AuthSession, TenantContext } from '@/types/mobile';
 import { clearSession, loadSession, loadTenant, saveSession, saveTenant } from '@/storage/sessionStorage';
-import { setApiSession, setApiTenant } from '@/api/client';
-import { logoutMobile } from '@/api/mobileApi';
+import { isAuthApiError, setApiSession, setApiTenant } from '@/api/client';
+import { fetchMe, logoutMobile } from '@/api/mobileApi';
 
 type AuthContextValue = {
   booting: boolean;
@@ -22,13 +22,59 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let mounted = true;
-    Promise.all([loadSession(), loadTenant()]).then(([storedSession, storedTenant]) => {
+
+    async function boot() {
+      const [storedSession, storedTenant] = await Promise.all([loadSession(), loadTenant()]);
       if (!mounted) return;
-      setSessionState(storedSession);
-      setTenantState(storedSession?.tenant || storedTenant);
-      setApiSession(storedSession);
-      setApiTenant(storedSession?.tenant || storedTenant);
-    }).finally(() => mounted && setBooting(false));
+
+      if (storedSession) {
+        // Temporarily set session so API calls can authenticate
+        setApiSession(storedSession);
+        setApiTenant(storedSession.tenant);
+
+        try {
+          // Revalidate token with server
+          const serverData = await fetchMe();
+          const revalidatedSession: AuthSession = {
+            token: storedSession.token,
+            tenant: serverData.tenant ?? storedSession.tenant,
+            profile: serverData.profile ?? storedSession.profile,
+          };
+
+          if (!mounted) return;
+
+          // Save updated profile/tenant from server
+          await saveSession(revalidatedSession);
+          setSessionState(revalidatedSession);
+          setTenantState(revalidatedSession.tenant);
+          setApiSession(revalidatedSession);
+          setApiTenant(revalidatedSession.tenant);
+        } catch (err) {
+          if (!mounted) return;
+          const fallbackTenant = storedTenant ?? storedSession.tenant;
+          if (isAuthApiError(err)) {
+            await clearSession(true);
+            setSessionState(null);
+            setTenantState(fallbackTenant);
+            setApiSession(null);
+            setApiTenant(fallbackTenant);
+            return;
+          }
+
+          setSessionState(storedSession);
+          setTenantState(storedSession.tenant);
+          setApiSession(storedSession);
+          setApiTenant(storedSession.tenant);
+        }
+      } else {
+        setSessionState(null);
+        setTenantState(storedTenant);
+        setApiSession(null);
+        setApiTenant(storedTenant);
+      }
+    }
+
+    boot().finally(() => mounted && setBooting(false));
     return () => {
       mounted = false;
     };

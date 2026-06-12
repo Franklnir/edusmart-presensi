@@ -1,28 +1,48 @@
-import React from 'react';
-import { StyleSheet, View } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { Animated, StyleSheet, View } from 'react-native';
 import { AppText } from './AppText';
 
-export function EmptyState({ title, description }: { title: string; description?: string }) {
+export function EmptyState({ title, description, icon }: { title: string; description?: string; icon?: string }) {
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 500,
+      useNativeDriver: true,
+    }).start();
+  }, [fadeAnim]);
+
   return (
-    <View style={styles.root}>
-      <AppText variant="subtitle">{title}</AppText>
+    <Animated.View style={[styles.root, { opacity: fadeAnim }]}>
+      {icon ? <AppText style={styles.icon}>{icon}</AppText> : null}
+      <AppText variant="subtitle" style={styles.title}>{title}</AppText>
       {description ? <AppText style={styles.description}>{description}</AppText> : null}
-    </View>
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
   root: {
-    padding: 24,
+    padding: 32,
     alignItems: 'center',
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: '#e2e8f0',
     borderStyle: 'dashed',
     borderRadius: 20,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#f8fafc',
+  },
+  icon: {
+    fontSize: 36,
+    marginBottom: 8,
+  },
+  title: {
+    textAlign: 'center',
+    color: '#64748b',
   },
   description: {
     textAlign: 'center',
     marginTop: 4,
+    color: '#94a3b8',
   },
 });

@@ -1,45 +1,71 @@
 import React from 'react';
 import { StyleSheet, Text, TextProps } from 'react-native';
+import { useColors } from '@/providers/ThemeProvider';
 
 type Props = TextProps & {
-  variant?: 'title' | 'subtitle' | 'body' | 'caption' | 'label';
+  variant?: 'hero' | 'title' | 'subtitle' | 'body' | 'caption' | 'label';
   color?: string;
 };
 
 export function AppText({ variant = 'body', color, style, ...props }: Props) {
-  return <Text {...props} style={[styles.base, styles[variant], color ? { color } : null, style]} />;
+  const colors = useColors();
+  const variantColor = variant === 'body'
+    ? colors.textSecondary
+    : variant === 'caption'
+      ? colors.textMuted
+      : variant === 'label'
+        ? colors.primary
+        : colors.text;
+
+  return (
+    <Text
+      {...props}
+      style={[
+        styles.base,
+        styles[variant],
+        { color: variantColor },
+        color ? { color } : null,
+        style,
+      ]}
+    />
+  );
 }
 
 const styles = StyleSheet.create({
   base: {
-    color: '#0f172a',
+    fontFamily: 'System',
+  },
+  hero: {
+    fontSize: 34,
+    lineHeight: 40,
+    fontWeight: '900',
+    letterSpacing: -0.5,
   },
   title: {
-    fontSize: 28,
-    lineHeight: 34,
+    fontSize: 26,
+    lineHeight: 32,
     fontWeight: '800',
+    letterSpacing: -0.3,
   },
   subtitle: {
-    fontSize: 19,
-    lineHeight: 26,
+    fontSize: 17,
+    lineHeight: 24,
     fontWeight: '700',
   },
   body: {
     fontSize: 15,
     lineHeight: 22,
-    color: '#334155',
   },
   caption: {
     fontSize: 12,
     lineHeight: 18,
-    color: '#64748b',
+    fontWeight: '500',
   },
   label: {
-    fontSize: 12,
-    lineHeight: 16,
+    fontSize: 11,
+    lineHeight: 14,
     fontWeight: '800',
-    letterSpacing: 0.8,
-    color: '#4f46e5',
+    letterSpacing: 1.2,
     textTransform: 'uppercase',
   },
 });

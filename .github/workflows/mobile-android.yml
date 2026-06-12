@@ -58,6 +58,22 @@ jobs:
           CI: true
         run: npx expo prebuild --platform android --clean
 
+      - name: Set Android app version
+        run: |
+          set -euo pipefail
+          VERSION_NAME="$(node -p "require('./package.json').version")"
+          VERSION_CODE="${GITHUB_RUN_NUMBER}"
+          VERSION_NAME="$VERSION_NAME" VERSION_CODE="$VERSION_CODE" node <<'NODE'
+          const fs = require('fs');
+          const path = 'android/app/build.gradle';
+          let text = fs.readFileSync(path, 'utf8');
+          text = text.replace(/versionCode\s+\d+/g, `versionCode ${process.env.VERSION_CODE}`);
+          text = text.replace(/versionName\s+["'][^"']+["']/g, `versionName "${process.env.VERSION_NAME}"`);
+          fs.writeFileSync(path, text);
+          NODE
+          echo "MOBILE_VERSION_NAME=${VERSION_NAME}" >> "$GITHUB_ENV"
+          echo "MOBILE_VERSION_CODE=${VERSION_CODE}" >> "$GITHUB_ENV"
+
       - name: Bundle Android JS for standalone debug APK
         run: |
           set -euo pipefail
@@ -67,11 +83,19 @@ jobs:
       - name: Build standalone debug APK
         run: cd android && ./gradlew assembleDebug --no-daemon
 
+      - name: Prepare debug APK artifact
+        run: |
+          set -euo pipefail
+          mkdir -p build/artifacts/android/debug
+          APK_SOURCE="$(find android/app/build/outputs/apk/debug -name '*.apk' | head -n 1)"
+          test -n "$APK_SOURCE"
+          cp "$APK_SOURCE" "build/artifacts/android/debug/sismu-mobile-${MOBILE_VERSION_NAME}-build${MOBILE_VERSION_CODE}-debug.apk"
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: mobile-app-android-debug-apk
-          path: mobile-app/android/app/build/outputs/apk/debug/*.apk
+          path: mobile-app/build/artifacts/android/debug/*.apk
           if-no-files-found: error
 
       - name: Configure Android release signing
@@ -113,6 +137,22 @@ jobs:
           env.ANDROID_KEY_PASSWORD != ''
         run: cd android && ./gradlew assembleRelease bundleRelease --no-daemon
 
+      - name: Prepare release artifacts
+        if: >
+          env.ANDROID_KEYSTORE_BASE64 != '' &&
+          env.ANDROID_KEYSTORE_PASSWORD != '' &&
+          env.ANDROID_KEY_ALIAS != '' &&
+          env.ANDROID_KEY_PASSWORD != ''
+        run: |
+          set -euo pipefail
+          mkdir -p build/artifacts/android/release
+          APK_SOURCE="$(find android/app/build/outputs/apk/release -name '*.apk' | head -n 1)"
+          AAB_SOURCE="$(find android/app/build/outputs/bundle/release -name '*.aab' | head -n 1)"
+          test -n "$APK_SOURCE"
+          test -n "$AAB_SOURCE"
+          cp "$APK_SOURCE" "build/artifacts/android/release/sismu-mobile-${MOBILE_VERSION_NAME}-build${MOBILE_VERSION_CODE}-release.apk"
+          cp "$AAB_SOURCE" "build/artifacts/android/release/sismu-mobile-${MOBILE_VERSION_NAME}-build${MOBILE_VERSION_CODE}-release.aab"
+
       - name: Upload release APK
         if: >
           env.ANDROID_KEYSTORE_BASE64 != '' &&
@@ -122,7 +162,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: mobile-app-android-release-apk
-          path: mobile-app/android/app/build/outputs/apk/release/*.apk
+          path: mobile-app/build/artifacts/android/release/*.apk
           if-no-files-found: error
 
       - name: Upload release AAB
@@ -134,7 +174,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: mobile-app-android-release-aab
-          path: mobile-app/android/app/build/outputs/bundle/release/*.aab
+          path: mobile-app/build/artifacts/android/release/*.aab
           if-no-files-found: error
 
       - name: Release signing skipped

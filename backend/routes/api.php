@@ -59,6 +59,7 @@ Route::prefix('mobile')->middleware(['auth:sanctum', 'throttle:api'])->group(fun
     Route::get('/guru/attendance/summary', [MobileController::class, 'guruAttendanceSummary']);
     Route::post('/guru/rfid/scan', [MobileController::class, 'guruRfidScan']);
     Route::post('/guru/rfid/sync', [MobileController::class, 'guruRfidSync']);
+    Route::post('/guru/attendance/manual', [MobileController::class, 'guruManualAttendance']);
     Route::get('/siswa/dashboard', [MobileController::class, 'siswaDashboard']);
     Route::get('/siswa/attendance', [MobileController::class, 'siswaAttendance']);
     Route::get('/siswa/schedules', [MobileController::class, 'siswaSchedules']);

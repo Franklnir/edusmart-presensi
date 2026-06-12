@@ -5,7 +5,7 @@
     "scheme": "edusmart-presensi",
     "version": "0.1.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "assetBundlePatterns": [
       "**/*"
     ],
@@ -21,11 +21,28 @@
       "package": "id.sismu.mobile",
       "permissions": [
         "android.permission.NFC",
-        "android.permission.CAMERA"
+        "android.permission.CAMERA",
+        "android.permission.VIBRATE"
       ],
       "adaptiveIcon": {
-        "backgroundColor": "#2563eb"
-      }
+        "backgroundColor": "#4f46e5"
+      },
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "edusmart-presensi",
+              "host": "google-auth"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ]
     },
     "plugins": [
       [

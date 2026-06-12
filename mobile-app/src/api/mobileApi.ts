@@ -1,4 +1,21 @@
-import type { AuthSession, RfidScanEvent, TenantContext, UserProfile } from '@/types/mobile';
+import type {
+  AttendanceQrScanResult,
+  AttendanceQrSession,
+  AuthSession,
+  ManualAttendancePayload,
+  QuizAnswer,
+  QuizDetail,
+  QuizListItem,
+  QuizStartResult,
+  QuizSubmitResult,
+  RfidScanEvent,
+  ScheduleItem,
+  StudentListItem,
+  SubmitTaskPayload,
+  TaskItem,
+  TenantContext,
+  UserProfile,
+} from '@/types/mobile';
 import { apiRequest, setApiSession, setApiTenant } from './client';
 
 type LoginResponse = {
@@ -7,6 +24,8 @@ type LoginResponse = {
   profile: UserProfile;
   user: { id: string; email: string };
 };
+
+/* ── Auth ── */
 
 export async function searchSchools(search: string): Promise<TenantContext[]> {
   const qs = encodeURIComponent(search);
@@ -55,11 +74,15 @@ export function fetchMe(): Promise<{ profile: UserProfile; tenant: TenantContext
   return apiRequest('/api/mobile/me');
 }
 
+/* ── Dashboard ── */
+
 export function fetchDashboard(): Promise<Record<string, unknown>> {
   return apiRequest('/api/mobile/dashboard');
 }
 
-export function fetchGuruSchedulesToday(): Promise<Array<Record<string, unknown>>> {
+/* ── Guru: Schedules & Classes ── */
+
+export function fetchGuruSchedulesToday(): Promise<ScheduleItem[]> {
   return apiRequest('/api/mobile/guru/schedules/today');
 }
 
@@ -67,7 +90,7 @@ export function fetchGuruClasses(): Promise<Array<Record<string, unknown>>> {
   return apiRequest('/api/mobile/guru/classes');
 }
 
-export function fetchGuruClassDetail(classId: string): Promise<Record<string, unknown>> {
+export function fetchGuruClassDetail(classId: string): Promise<{ kelas_id: string; students: StudentListItem[] }> {
   return apiRequest(`/api/mobile/guru/classes/${encodeURIComponent(classId)}`);
 }
 
@@ -75,25 +98,7 @@ export function fetchGuruAttendanceSummary(): Promise<Record<string, unknown>> {
   return apiRequest('/api/mobile/guru/attendance/summary');
 }
 
-export function fetchSiswaAttendance(): Promise<Record<string, unknown>> {
-  return apiRequest('/api/mobile/siswa/attendance');
-}
-
-export function fetchSiswaSchedules(): Promise<Array<Record<string, unknown>>> {
-  return apiRequest('/api/mobile/siswa/schedules');
-}
-
-export function fetchSiswaTasks(): Promise<Array<Record<string, unknown>>> {
-  return apiRequest('/api/mobile/siswa/tasks');
-}
-
-export function fetchSiswaGrades(): Promise<Record<string, unknown>> {
-  return apiRequest('/api/mobile/siswa/grades');
-}
-
-export function fetchDigitalCard(): Promise<{ token: string; expires_at: string; student: Record<string, unknown> }> {
-  return apiRequest('/api/mobile/siswa/digital-card');
-}
+/* ── Guru: RFID / NFC scan ── */
 
 export function postRfidScan(event: RfidScanEvent): Promise<Record<string, unknown>> {
   return apiRequest('/api/mobile/guru/rfid/scan', {
@@ -106,5 +111,130 @@ export function syncRfidEvents(events: RfidScanEvent[]): Promise<Record<string, 
   return apiRequest('/api/mobile/guru/rfid/sync', {
     method: 'POST',
     body: JSON.stringify({ events }),
+  });
+}
+
+/* ── Guru: QR Absensi Kelas (Guru tampilkan QR → Siswa scan) ── */
+
+export function postAttendanceQrSession(jadwalId: string, kelasId: string): Promise<AttendanceQrSession> {
+  return apiRequest('/api/attendance-qr/session', {
+    method: 'POST',
+    body: JSON.stringify({ jadwal_id: jadwalId, kelas_id: kelasId }),
+  });
+}
+
+/* ── Guru: Manual Attendance ── */
+
+export function postManualAttendance(payload: ManualAttendancePayload): Promise<Record<string, unknown>> {
+  return apiRequest('/api/mobile/guru/attendance/manual', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+/* ── Siswa: Attendance ── */
+
+export function fetchSiswaAttendance(): Promise<Record<string, unknown>> {
+  return apiRequest('/api/mobile/siswa/attendance');
+}
+
+export function fetchSiswaSchedules(): Promise<ScheduleItem[]> {
+  return apiRequest('/api/mobile/siswa/schedules');
+}
+
+/* ── Siswa: QR Absensi (Siswa scan QR guru) ── */
+
+export function postAttendanceQrScan(token: string): Promise<AttendanceQrScanResult> {
+  return apiRequest('/api/attendance-qr/scan', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  });
+}
+
+/* ── Siswa: Tasks / Tugas ── */
+
+export function fetchSiswaTasks(): Promise<TaskItem[]> {
+  return apiRequest('/api/mobile/siswa/tasks');
+}
+
+export function submitTaskAnswer(payload: SubmitTaskPayload): Promise<Record<string, unknown>> {
+  return apiRequest('/api/tugas/jawaban/submit', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+/* ── Siswa: Grades ── */
+
+export function fetchSiswaGrades(): Promise<Record<string, unknown>> {
+  return apiRequest('/api/mobile/siswa/grades');
+}
+
+/* ── Siswa: Digital Card ── */
+
+export function fetchDigitalCard(): Promise<{ token: string; expires_at: string; student: Record<string, unknown> }> {
+  return apiRequest('/api/mobile/siswa/digital-card');
+}
+
+/* ── Siswa: Quiz ── */
+
+export function fetchQuizDashboard(kelas?: string): Promise<{ rows: QuizListItem[]; meta: Record<string, unknown> }> {
+  const params = kelas ? `?kelas=${encodeURIComponent(kelas)}` : '';
+  return apiRequest(`/api/quiz/dashboard${params}`);
+}
+
+export function fetchQuizDetail(quizId: string): Promise<QuizDetail> {
+  return apiRequest(`/api/quiz/${encodeURIComponent(quizId)}/detail`);
+}
+
+export function postQuizStart(quizId: string, accessCode?: string): Promise<QuizStartResult> {
+  return apiRequest('/api/quiz/start', {
+    method: 'POST',
+    body: JSON.stringify({ quiz_id: quizId, access_code: accessCode }),
+  });
+}
+
+export function postQuizAnswer(
+  quizId: string,
+  submissionId: string,
+  questionId: string,
+  optionId?: string | null,
+  essayAnswer?: string | null,
+): Promise<{ answer_id: string; submission_id: string; question_id: string; saved_at: string }> {
+  return apiRequest('/api/quiz/answer', {
+    method: 'POST',
+    body: JSON.stringify({
+      quiz_id: quizId,
+      submission_id: submissionId,
+      question_id: questionId,
+      option_id: optionId ?? undefined,
+      essay_answer: essayAnswer ?? undefined,
+    }),
+  });
+}
+
+export function postQuizAnswersBatch(
+  quizId: string,
+  submissionId: string,
+  answers: Array<{ question_id: string; option_id?: string | null; essay_answer?: string | null }>,
+): Promise<{ submission_id: string; answers: QuizAnswer[]; saved_count: number }> {
+  return apiRequest('/api/quiz/answers/batch', {
+    method: 'POST',
+    body: JSON.stringify({ quiz_id: quizId, submission_id: submissionId, answers }),
+  });
+}
+
+export function postQuizSubmit(
+  quizId: string,
+  submissionId: string,
+  answers?: Array<{ question_id: string; option_id?: string | null; essay_answer?: string | null }>,
+): Promise<QuizSubmitResult> {
+  return apiRequest('/api/quiz/submit', {
+    method: 'POST',
+    body: JSON.stringify({
+      quiz_id: quizId,
+      submission_id: submissionId,
+      answers: answers ?? [],
+    }),
   });
 }

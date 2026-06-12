@@ -18,8 +18,22 @@ Stack yang dipakai:
 2. App menyimpan tenant context.
 3. Login memakai endpoint auth Laravel yang sama dengan web, dengan flag `mobile=true`.
 4. Backend hanya memberi token untuk role `guru` dan `siswa`.
-5. Guru memakai tab Beranda, Scan, Kelas, Aktivitas, Profil.
-6. Siswa memakai tab Beranda, Absensi, Tugas, Nilai, Profil.
+5. Saat boot, session direvalidasi ke server via `GET /api/mobile/me`. Jika 401/403, clear session.
+6. Guru memakai tab Beranda, Scan, Kelas, Aktivitas, Profil.
+7. Siswa memakai tab Beranda, Absensi, Tugas, Quiz, Profil. (Nilai ringkas di Beranda)
+
+### Endpoint yang Dipakai Mobile
+
+Lihat [docs/mobile-integration.md](../docs/mobile-integration.md) untuk mapping lengkap endpoint mobile ↔ backend.
+
+Ringkasan fitur mobile:
+
+- **QR Absensi**: Guru tampilkan QR kelas (`/api/attendance-qr/session`), siswa scan (`/api/attendance-qr/scan`)
+- **NFC Guru**: Scan kartu siswa via `RfidIngressService` (`/api/mobile/guru/rfid/scan`)
+- **Manual Absensi**: Guru pilih siswa + status (`/api/mobile/guru/attendance/manual`)
+- **Tugas Siswa**: List + submit jawaban (`/api/tugas/jawaban/submit`)
+- **Quiz Siswa**: Start, answer, submit via endpoint `/api/quiz/*`
+- **Offline Sync**: NFC scan disimpan sementara, dikirim via `/api/mobile/guru/rfid/sync`
 
 ## Build Android APK di GitHub Actions
 
@@ -34,12 +48,21 @@ Build Android selalu membuat APK debug standalone untuk testing dan mengupload a
 
 - `mobile-app-android-debug-apk`
 
+Isi artifact diberi nama versi/build, contoh:
+
+- `sismu-mobile-0.1.0-build123-debug.apk`
+
 APK debug artifact sudah membawa `index.android.bundle`, jadi bisa dibuka langsung di HP tanpa menjalankan Metro atau `expo start`.
 
 Jika semua GitHub Secrets signing Android tersedia, workflow juga membuat release build dan mengupload:
 
 - `mobile-app-android-release-apk`
 - `mobile-app-android-release-aab`
+
+Isi artifact release juga diberi nama versi/build, contoh:
+
+- `sismu-mobile-0.1.0-build123-release.apk`
+- `sismu-mobile-0.1.0-build123-release.aab`
 
 Secrets Android release yang dipakai:
 

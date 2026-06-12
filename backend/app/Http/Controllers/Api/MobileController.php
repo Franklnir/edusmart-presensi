@@ -472,6 +472,140 @@ class MobileController extends ApiController
         ]);
     }
 
+    public function guruManualAttendance(Request $request)
+    {
+        $context = $this->mobileContext($request, 'guru');
+        if ($context['response']) {
+            return $context['response'];
+        }
+
+        $validated = $request->validate([
+            'jadwal_id' => ['required', 'string', 'max:191'],
+            'kelas_id' => ['required', 'string', 'max:191'],
+            'siswa_id' => ['required', 'string', 'max:191'],
+            'status' => ['required', 'string', 'in:Hadir,Izin,Sakit,Alpha'],
+        ]);
+
+        $tenantId = $context['tenant_id'];
+
+        // Verify guru teaches this class via jadwal
+        if (! Schema::hasTable('jadwal')) {
+            return $this->deny('Tabel jadwal tidak tersedia.', 500);
+        }
+
+        $jadwal = $this->tenantQuery('jadwal', $tenantId)
+            ->where('id', (string) $validated['jadwal_id'])
+            ->where('kelas_id', (string) $validated['kelas_id'])
+            ->where('guru_id', (string) $context['profile']->id)
+            ->first();
+
+        if (! $jadwal) {
+            return $this->deny('Jadwal tidak ditemukan atau bukan milik guru ini.', 403);
+        }
+
+        // Verify student exists in this class
+        if (! Schema::hasTable('profiles')) {
+            return $this->deny('Tabel profiles tidak tersedia.', 500);
+        }
+
+        $student = DB::table('profiles')
+            ->where('tenant_id', $tenantId)
+            ->where('id', (string) $validated['siswa_id'])
+            ->where('role', 'siswa')
+            ->where('kelas', (string) $validated['kelas_id'])
+            ->first(['id', 'nama', 'kelas']);
+
+        if (! $student) {
+            return $this->deny('Siswa tidak ditemukan di kelas ini.', 404);
+        }
+
+        if (! Schema::hasTable('absensi')) {
+            return $this->deny('Tabel absensi tidak tersedia.', 500);
+        }
+
+        $now = $this->today();
+        $today = $now->toDateString();
+
+        // Check for duplicate
+        $existing = $this->tenantQuery('absensi', $tenantId)
+            ->where('kelas', (string) $student->kelas)
+            ->where('tanggal', $today)
+            ->where('uid', (string) $student->id)
+            ->where('mapel', (string) ($jadwal->mapel ?? ''))
+            ->first();
+
+        if ($existing) {
+            return response()->json([
+                'success' => false,
+                'reason' => 'already_attended',
+                'error' => 'Siswa sudah tercatat absensi untuk mata pelajaran ini hari ini.',
+                'data' => [
+                    'absensi_id' => (int) $existing->id,
+                    'status' => (string) ($existing->status ?? ''),
+                ],
+            ], 409);
+        }
+
+        $insert = [
+            'tenant_id' => $tenantId,
+            'kelas' => (string) $student->kelas,
+            'tanggal' => $today,
+            'uid' => (string) $student->id,
+            'mapel' => (string) ($jadwal->mapel ?? ''),
+            'status' => (string) $validated['status'],
+            'nama' => (string) ($student->nama ?? ''),
+            'waktu' => $now,
+            'komentar' => 'Manual oleh guru via mobile',
+            'oleh' => 'manual:' . (string) $context['profile']->id,
+        ];
+
+        // Add academic period columns if available
+        if (Schema::hasColumn('absensi', 'tahun_ajaran') || Schema::hasColumn('absensi', 'semester')) {
+            $settings = $this->tenantSettings($tenantId);
+            if (Schema::hasColumn('absensi', 'tahun_ajaran')) {
+                $insert['tahun_ajaran'] = (string) ($settings->tahun_ajaran ?? '');
+            }
+            if (Schema::hasColumn('absensi', 'semester')) {
+                $insert['semester'] = (string) ($settings->semester_aktif ?? '');
+            }
+        }
+
+        try {
+            $id = DB::table('absensi')->insertGetId($insert);
+        } catch (\Illuminate\Database\QueryException $e) {
+            // Race condition: might be duplicate
+            $dup = $this->tenantQuery('absensi', $tenantId)
+                ->where('kelas', (string) $student->kelas)
+                ->where('tanggal', $today)
+                ->where('uid', (string) $student->id)
+                ->where('mapel', (string) ($jadwal->mapel ?? ''))
+                ->first();
+
+            if ($dup) {
+                return response()->json([
+                    'success' => false,
+                    'reason' => 'already_attended',
+                    'error' => 'Siswa sudah tercatat absensi (duplikat).',
+                ], 409);
+            }
+
+            report($e);
+
+            return $this->deny('Gagal menyimpan absensi manual.', 500);
+        }
+
+        return $this->ok([
+            'success' => true,
+            'message' => 'Absensi manual berhasil.',
+            'absensi_id' => $id,
+            'nama' => (string) ($student->nama ?? ''),
+            'kelas' => (string) ($student->kelas ?? ''),
+            'mapel' => (string) ($jadwal->mapel ?? ''),
+            'status' => (string) $validated['status'],
+            'tanggal' => $today,
+        ]);
+    }
+
     private function mobileContext(Request $request, ?string $requiredRole = null): array
     {
         $profile = $this->profile($request);
@@ -673,7 +807,12 @@ class MobileController extends ApiController
             $query->where('tenant_id', $tenantId);
         }
 
-        return $query->first($this->existingColumns('settings', ['nama_sekolah', 'logo_url']));
+        return $query->first($this->existingColumns('settings', [
+            'nama_sekolah',
+            'logo_url',
+            'tahun_ajaran',
+            'semester_aktif',
+        ]));
     }
 
     private function tenantQuery(string $table, string $tenantId)

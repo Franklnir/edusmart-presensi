@@ -23,6 +23,21 @@ type RequestOptions = RequestInit & {
   authenticated?: boolean;
 };
 
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly payload: unknown,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+export function isAuthApiError(error: unknown): boolean {
+  return error instanceof ApiError && (error.status === 401 || error.status === 403);
+}
+
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const headers = new Headers(options.headers || {});
   headers.set('Accept', 'application/json');
@@ -43,7 +58,11 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
 
   const payload = await response.json().catch(() => ({})) as ApiEnvelope<T>;
   if (!response.ok) {
-    throw new Error(payload.error || `Server Error ${response.status}`);
+    throw new ApiError(
+      payload.error || payload.message || `Server Error ${response.status}`,
+      response.status,
+      payload,
+    );
   }
 
   return (payload.data ?? payload) as T;
