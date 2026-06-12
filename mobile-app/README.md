@@ -30,9 +30,11 @@ Workflow ini berjalan saat:
 - workflow dijalankan manual dari tab GitHub Actions;
 - ada tag release seperti `v1.0.0` atau `mobile-1.0.0`.
 
-Build Android selalu membuat APK debug untuk testing dan mengupload artifact:
+Build Android selalu membuat APK debug standalone untuk testing dan mengupload artifact:
 
 - `mobile-app-android-debug-apk`
+
+APK debug artifact sudah membawa `index.android.bundle`, jadi bisa dibuka langsung di HP tanpa menjalankan Metro atau `expo start`.
 
 Jika semua GitHub Secrets signing Android tersedia, workflow juga membuat release build dan mengupload:
 
@@ -75,9 +77,7 @@ Jika secrets iOS belum lengkap, workflow manual akan melewati build `.ipa` tanpa
 ```bash
 cd mobile-app
 npm ci
-npx expo prebuild --platform android --clean
-cd android
-./gradlew assembleDebug --no-daemon
+npm run build:android:debug:standalone
 ```
 
 APK akan tersedia di:
@@ -91,5 +91,5 @@ mobile-app/android/app/build/outputs/apk/debug/
 - NFC Android paling fleksibel.
 - iOS harus memakai NDEF token, bukan UID mentah.
 - QR siswa harus signed/random token, bukan NIS/nama polos.
-- Scan offline disimpan sementara dan dikirim ke `/api/rfid/sync`.
+- Scan offline disimpan sementara dan dikirim ke `/api/mobile/guru/rfid/sync`.
 - Admin dan super admin tetap memakai website.

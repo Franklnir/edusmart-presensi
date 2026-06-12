@@ -96,14 +96,14 @@ export function fetchDigitalCard(): Promise<{ token: string; expires_at: string;
 }
 
 export function postRfidScan(event: RfidScanEvent): Promise<Record<string, unknown>> {
-  return apiRequest('/api/rfid/scan', {
+  return apiRequest('/api/mobile/guru/rfid/scan', {
     method: 'POST',
     body: JSON.stringify(event),
   });
 }
 
 export function syncRfidEvents(events: RfidScanEvent[]): Promise<Record<string, unknown>> {
-  return apiRequest('/api/rfid/sync', {
+  return apiRequest('/api/mobile/guru/rfid/sync', {
     method: 'POST',
     body: JSON.stringify({ events }),
   });

@@ -21,6 +21,10 @@ export function SchoolPickerScreen({ navigation }: Props) {
     queryFn: () => searchSchools(search),
     enabled: search.trim().length >= 2,
   });
+  const chooseSchool = async (item: Awaited<ReturnType<typeof searchSchools>>[number]) => {
+    await setTenant(item);
+    navigation.replace('Login');
+  };
 
   return (
     <Screen scroll={false}>
@@ -45,15 +49,12 @@ export function SchoolPickerScreen({ navigation }: Props) {
             : <EmptyState title="Tidak ada sekolah" description="Periksa kembali kata kunci." />}
         renderItem={({ item }) => (
           <Pressable
-            onPress={async () => {
-              await setTenant(item);
-              navigation.replace('Login');
-            }}
+            onPress={() => chooseSchool(item)}
           >
             <Card>
               <AppText variant="subtitle">{item.name}</AppText>
               <AppText>{item.slug} - {item.host || item.apiBaseUrl}</AppText>
-              <Button label="Gunakan sekolah ini" />
+              <Button label="Gunakan sekolah ini" onPress={() => chooseSchool(item)} />
             </Card>
           </Pressable>
         )}

@@ -34,9 +34,10 @@ export function RootNavigator() {
       : tenant
         ? 'Login'
         : 'SchoolPicker';
+  const navigatorKey = `${session?.profile.role || 'guest'}-${tenant?.id || 'no-tenant'}`;
 
   return (
-    <Stack.Navigator initialRouteName={initialRoute} screenOptions={{ headerShown: false }}>
+    <Stack.Navigator key={navigatorKey} initialRouteName={initialRoute} screenOptions={{ headerShown: false }}>
       <Stack.Screen name="SchoolPicker" component={SchoolPickerScreen} />
       <Stack.Screen name="Login" component={LoginScreen} />
       <Stack.Screen name="Guru" component={GuruTabs} />

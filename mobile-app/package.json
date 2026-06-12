@@ -8,6 +8,8 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "prebuild:android": "expo prebuild --platform android --clean",
+    "bundle:android:standalone": "node scripts/ensureExpoAsset.js && mkdir -p android/app/src/main/assets android/app/src/main/res && expo export:embed --platform android --dev false --entry-file index.js --bundle-output android/app/src/main/assets/index.android.bundle --assets-dest android/app/src/main/res --reset-cache",
+    "build:android:debug:standalone": "CI=1 expo prebuild --platform android --clean && npm run bundle:android:standalone && cd android && ./gradlew assembleDebug --no-daemon",
     "build:android:release": "CI=1 expo prebuild --platform android --clean && cd android && ./gradlew assembleRelease --no-daemon",
     "test": "jest",
     "typecheck": "tsc --noEmit"
