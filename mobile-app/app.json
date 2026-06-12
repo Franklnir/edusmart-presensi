@@ -6,7 +6,9 @@
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "bundleIdentifier": "id.sismu.mobile",
       "supportsTablet": true,
@@ -17,7 +19,10 @@
     },
     "android": {
       "package": "id.sismu.mobile",
-      "permissions": ["android.permission.NFC", "android.permission.CAMERA"],
+      "permissions": [
+        "android.permission.NFC",
+        "android.permission.CAMERA"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#2563eb"
       }
@@ -27,6 +32,12 @@
         "expo-camera",
         {
           "cameraPermission": "SISMU memakai kamera untuk scan QR siswa sebagai fallback absensi."
+        }
+      ],
+      [
+        "./plugins/withAndroidKotlinVersion",
+        {
+          "kotlinVersion": "1.9.25"
         }
       ]
     ],
