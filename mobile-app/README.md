@@ -80,6 +80,8 @@ npm ci
 npm run build:android:debug:standalone
 ```
 
+Script build lokal memakai `npm run bundle:android:standalone` sebelum Gradle agar bundle JS ikut masuk ke APK debug.
+
 APK akan tersedia di:
 
 ```text
