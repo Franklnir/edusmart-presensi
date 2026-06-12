@@ -804,7 +804,7 @@ services:
       - internal
 
   caddy:
-    image: caddy:2.10.2-alpine
+    image: ${EDUSMART_CADDY_IMAGE:?EDUSMART_CADDY_IMAGE is required. Build and push production Caddy WAF image in GitHub Actions, then deploy with --pull-images.}
     container_name: edusmart-caddy
     restart: unless-stopped
     depends_on:
@@ -814,6 +814,8 @@ services:
       CADDY_ACME_EMAIL: ${CADDY_ACME_EMAIL:-admin@example.com}
       CADDY_ASK_SECRET: ${CADDY_ASK_SECRET:-}
       CADDY_EVOLUTION_HOST: ${CADDY_EVOLUTION_HOST:-evolution.localhost.invalid}
+      CADDY_APP_HOSTS: ${CADDY_APP_HOSTS:-sismu.biz.id}
+      CADDY_ROOT_DOMAIN: ${CADDY_ROOT_DOMAIN:-sismu.biz.id}
       CADDY_HTTPS_PORT_SUFFIX: ${CADDY_HTTPS_PORT_SUFFIX:-}
     ports:
       - "${NGINX_HTTP_PORT:-80}:80"

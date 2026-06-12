@@ -82,6 +82,7 @@ jobs:
     outputs:
       backend_image: ${{ steps.images.outputs.backend_image }}
       nginx_image: ${{ steps.images.outputs.nginx_image }}
+      caddy_image: ${{ steps.images.outputs.caddy_image }}
 
     steps:
       - name: Checkout
@@ -107,19 +108,24 @@ jobs:
 
           backend_image="ghcr.io/${repo}/backend:${GITHUB_SHA}"
           nginx_image="ghcr.io/${repo}/nginx:${GITHUB_SHA}"
+          caddy_image="ghcr.io/${repo}/caddy:${GITHUB_SHA}"
           backend_branch_image="ghcr.io/${repo}/backend:${branch_tag}"
           nginx_branch_image="ghcr.io/${repo}/nginx:${branch_tag}"
+          caddy_branch_image="ghcr.io/${repo}/caddy:${branch_tag}"
 
           {
             echo "BACKEND_IMAGE=${backend_image}"
             echo "NGINX_IMAGE=${nginx_image}"
+            echo "CADDY_IMAGE=${caddy_image}"
             echo "BACKEND_BRANCH_IMAGE=${backend_branch_image}"
             echo "NGINX_BRANCH_IMAGE=${nginx_branch_image}"
+            echo "CADDY_BRANCH_IMAGE=${caddy_branch_image}"
           } >> "$GITHUB_ENV"
 
           {
             echo "backend_image=${backend_image}"
             echo "nginx_image=${nginx_image}"
+            echo "caddy_image=${caddy_image}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Build and push backend image
@@ -166,6 +172,33 @@ jobs:
             --cache-to type=gha,mode=max,scope=nginx-prod \
             --push \
             .
+
+      - name: Build and push Caddy WAF image
+        run: |
+          set -euo pipefail
+          docker buildx build \
+            --file deploy/caddy/Dockerfile \
+            --tag "$CADDY_IMAGE" \
+            --tag "$CADDY_BRANCH_IMAGE" \
+            --cache-from type=gha,scope=caddy-waf-prod \
+            --cache-to type=gha,mode=max,scope=caddy-waf-prod \
+            --push \
+            .
+
+      - name: Validate Caddy WAF config
+        run: |
+          set -euo pipefail
+          docker pull "$CADDY_IMAGE"
+          docker run --rm \
+            -e CADDY_ACME_EMAIL=ops@sismu.biz.id \
+            -e CADDY_ASK_SECRET=ci-validate-only \
+            -e CADDY_EVOLUTION_HOST=wa.sismu.biz.id \
+            -e CADDY_APP_HOSTS=sismu.biz.id \
+            -e CADDY_ROOT_DOMAIN=sismu.biz.id \
+            -e CADDY_HTTPS_PORT_SUFFIX= \
+            -v "$PWD/deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            "$CADDY_IMAGE" \
+            caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 
   deploy-production:
     name: Deploy To VPS
@@ -237,6 +270,7 @@ jobs:
           RELEASE_BRANCH: ${{ github.ref_name }}
           EDUSMART_BACKEND_IMAGE: ${{ needs.build-production-images.outputs.backend_image }}
           EDUSMART_NGINX_IMAGE: ${{ needs.build-production-images.outputs.nginx_image }}
+          EDUSMART_CADDY_IMAGE: ${{ needs.build-production-images.outputs.caddy_image }}
           GHCR_USERNAME: ${{ github.actor }}
           GHCR_TOKEN: ${{ github.token }}
           VPS_HOST: ${{ secrets.VPS_HOST }}
@@ -256,6 +290,7 @@ jobs:
             printf 'RELEASE_BRANCH=%q\n' "$RELEASE_BRANCH"
             printf 'BACKEND_IMAGE=%q\n' "$EDUSMART_BACKEND_IMAGE"
             printf 'NGINX_IMAGE=%q\n' "$EDUSMART_NGINX_IMAGE"
+            printf 'CADDY_IMAGE=%q\n' "$EDUSMART_CADDY_IMAGE"
             printf 'GHCR_USERNAME=%q\n' "${GHCR_USERNAME:-}"
             printf 'GHCR_TOKEN=%q\n' "${GHCR_TOKEN:-}"
             printf '%s\n' \
@@ -291,7 +326,7 @@ jobs:
               'trap '"'"'rm -f "$tmp_script"'"'"' EXIT' \
               'git show "$RELEASE_REF":deploy/release-prod.sh > "$tmp_script"' \
               'chmod +x "$tmp_script"' \
-              'EDUSMART_BACKEND_IMAGE="$BACKEND_IMAGE" EDUSMART_NGINX_IMAGE="$NGINX_IMAGE" EDUSMART_ROOT_DIR="$REMOTE_DIR" "$tmp_script" --ref "$RELEASE_REF" --pull-images'
+              'EDUSMART_BACKEND_IMAGE="$BACKEND_IMAGE" EDUSMART_NGINX_IMAGE="$NGINX_IMAGE" EDUSMART_CADDY_IMAGE="$CADDY_IMAGE" EDUSMART_ROOT_DIR="$REMOTE_DIR" "$tmp_script" --ref "$RELEASE_REF" --pull-images'
           } | ssh -i ~/.ssh/edusmart_deploy_key -p "$port" \
             -o BatchMode=yes \
             -o IdentitiesOnly=yes \

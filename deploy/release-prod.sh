@@ -21,6 +21,7 @@ PREV_FULL_REF=""
 PREV_REF=""
 PREV_BACKEND_IMAGE=""
 PREV_NGINX_IMAGE=""
+PREV_CADDY_IMAGE=""
 DEPLOY_PHASE="preflight"
 ROLLBACK_RUNNING="false"
 
@@ -42,8 +43,8 @@ Options:
   -h, --help              Tampilkan bantuan
 
 Contoh:
-  EDUSMART_BACKEND_IMAGE=ghcr.io/org/repo/backend:sha EDUSMART_NGINX_IMAGE=ghcr.io/org/repo/nginx:sha deploy/release-prod.sh --ref v1.5.0
-  EDUSMART_BACKEND_IMAGE=ghcr.io/org/repo/backend:sha EDUSMART_NGINX_IMAGE=ghcr.io/org/repo/nginx:sha deploy/release-prod.sh --ref main --pull-images
+  EDUSMART_BACKEND_IMAGE=ghcr.io/org/repo/backend:sha EDUSMART_NGINX_IMAGE=ghcr.io/org/repo/nginx:sha EDUSMART_CADDY_IMAGE=ghcr.io/org/repo/caddy:sha deploy/release-prod.sh --ref v1.5.0
+  EDUSMART_BACKEND_IMAGE=ghcr.io/org/repo/backend:sha EDUSMART_NGINX_IMAGE=ghcr.io/org/repo/nginx:sha EDUSMART_CADDY_IMAGE=ghcr.io/org/repo/caddy:sha deploy/release-prod.sh --ref main --pull-images
 USAGE
 }
 
@@ -468,6 +469,9 @@ rollback_application() {
   if [[ -n "$PREV_NGINX_IMAGE" ]]; then
     export EDUSMART_NGINX_IMAGE="$PREV_NGINX_IMAGE"
   fi
+  if [[ -n "$PREV_CADDY_IMAGE" ]]; then
+    export EDUSMART_CADDY_IMAGE="$PREV_CADDY_IMAGE"
+  fi
 
   compose up -d --no-build "${APP_SERVICES[@]}"
   local compose_status=$?
@@ -634,6 +638,11 @@ validate_compose_files_present
 
 PREV_BACKEND_IMAGE="$(compose_service_image backend)"
 PREV_NGINX_IMAGE="$(compose_service_image nginx)"
+PREV_CADDY_IMAGE="$(compose_service_image caddy)"
+
+if [[ -n "${EDUSMART_CADDY_IMAGE:-}" ]]; then
+  append_unique IMAGE_SERVICES caddy
+fi
 
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 BACKUP_DIR="backups"
@@ -708,4 +717,4 @@ echo "Release lama  : $PREV_REF"
 if [[ "$SKIP_BACKUP" != "true" ]]; then
   echo "Backup DB     : $RELEASE_BACKUP"
 fi
-echo "Rollback cepat: EDUSMART_BACKEND_IMAGE=${PREV_BACKEND_IMAGE:-<image-lama>} EDUSMART_NGINX_IMAGE=${PREV_NGINX_IMAGE:-<image-lama>} deploy/rollback-prod.sh --ref $PREV_REF"
+echo "Rollback cepat: EDUSMART_BACKEND_IMAGE=${PREV_BACKEND_IMAGE:-<image-lama>} EDUSMART_NGINX_IMAGE=${PREV_NGINX_IMAGE:-<image-lama>} EDUSMART_CADDY_IMAGE=${PREV_CADDY_IMAGE:-<image-lama>} deploy/rollback-prod.sh --ref $PREV_REF"

@@ -13,8 +13,28 @@ server karena bergantung pada IP admin, IP perangkat RFID, dan panel DNS.
 - Method API yang salah untuk route API dikembalikan sebagai `404 Not Found` generik.
 - `public/robots.txt` menolak crawler untuk `/api`, `/admin`, dan `/manager`.
 - Caddy edge proxy menambahkan HSTS untuk host HTTPS production.
+- Caddy production memakai custom image dengan Coraza WAF untuk memblokir probe
+  high-confidence: scanner user-agent, path sensitif, SQLi, XSS, dan path traversal.
+- `wa.sismu.biz.id` tidak lagi menampilkan root welcome/manager panel publik dari
+  Caddy; `/` dan `/manager*` dikembalikan sebagai `404`.
 - Build frontend dipisah per area role agar kode admin/guru/siswa tidak masuk satu chunk utama.
 - Referensi domain lama diganti ke `sismu.biz.id`.
+
+## Status VPS 12 Juni 2026
+
+- UFW sudah aktif dengan default deny incoming dan hanya port aplikasi yang terbuka.
+- Fail2Ban SSH sudah aktif.
+- Validasi build Caddy WAF lokal di VPS pernah dicoba di direktori sementara, tetapi
+  compile Coraza gagal karena disk root VPS hampir penuh. Cache build Docker dari
+  validasi tersebut sudah dibersihkan.
+- Sisa disk root setelah pembersihan sekitar 2.4 GB. Untuk produksi, tambah kapasitas
+  disk atau jadwalkan pembersihan image/log Docker agar deploy berikutnya tidak gagal
+  karena ruang habis.
+- SSH password/root login belum dimatikan langsung agar akses admin dan GitHub Actions
+  deploy tidak terkunci. Matikan password login hanya setelah key admin/deploy sudah
+  diverifikasi bisa login.
+- Port MQTT `8883` belum di-allowlist karena IP perangkat RFID belum dipastikan statis.
+  Jangan tutup port ini sebelum perangkat dipindahkan ke IP statis atau VPN.
 
 ## DNS Wajib
 
@@ -80,7 +100,8 @@ Wajib:
 
 - Gunakan `EVOLUTION_API_KEY` panjang dan acak.
 - Jangan simpan key di frontend, Git, atau artifact build.
-- Batasi akses manager/admin Evolution lewat firewall, reverse proxy allowlist, VPN, atau Basic Auth.
+- Manager publik sudah diblokir di Caddy (`/manager*` -> `404`).
+- Jika manager Evolution tetap diperlukan, akses lewat tunnel/VPN internal, bukan publik.
 - Alur normal EduSmart cukup memakai menu WhatsApp di aplikasi, bukan manager publik.
 
 Env production yang relevan:
@@ -126,6 +147,19 @@ sudo fail2ban-client status sshd
 ```
 
 Tambahkan jail Nginx/Caddy jika log VPS sudah stabil dan path log sudah jelas.
+
+## WAF / Reverse Proxy
+
+Production Caddy dibuild dari `deploy/caddy/Dockerfile` dengan plugin Coraza.
+Rule yang aktif sengaja high-confidence agar aman untuk produksi awal:
+
+- scanner user-agent umum (`sqlmap`, `nikto`, `nuclei`, dan sejenisnya);
+- akses file/path sensitif seperti `.env`, `.git`, `wp-admin`, `phpmyadmin`;
+- pola SQL injection, XSS, dan path traversal yang jelas;
+- upload tugas/storage dilewatkan dari WAF supaya request body besar tidak mengganggu workflow sekolah.
+
+Setelah traffic nyata stabil, CRS penuh bisa diuji dulu di staging/detect-only
+sebelum dinaikkan ke blocking mode.
 
 ## Setelah Deploy
 

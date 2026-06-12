@@ -27,8 +27,8 @@ Options:
   -h, --help              Tampilkan bantuan
 
 Contoh:
-  EDUSMART_BACKEND_IMAGE=ghcr.io/org/repo/backend:sha EDUSMART_NGINX_IMAGE=ghcr.io/org/repo/nginx:sha deploy/rollback-prod.sh --ref v1.4.2
-  EDUSMART_BACKEND_IMAGE=ghcr.io/org/repo/backend:sha EDUSMART_NGINX_IMAGE=ghcr.io/org/repo/nginx:sha deploy/rollback-prod.sh --ref 8d4a1f2 --restore-db backups/pre-release-2026-02-21.sql.gz
+  EDUSMART_BACKEND_IMAGE=ghcr.io/org/repo/backend:sha EDUSMART_NGINX_IMAGE=ghcr.io/org/repo/nginx:sha EDUSMART_CADDY_IMAGE=ghcr.io/org/repo/caddy:sha deploy/rollback-prod.sh --ref v1.4.2
+  EDUSMART_BACKEND_IMAGE=ghcr.io/org/repo/backend:sha EDUSMART_NGINX_IMAGE=ghcr.io/org/repo/nginx:sha EDUSMART_CADDY_IMAGE=ghcr.io/org/repo/caddy:sha deploy/rollback-prod.sh --ref 8d4a1f2 --restore-db backups/pre-release-2026-02-21.sql.gz
 USAGE
 }
 
@@ -231,6 +231,10 @@ fi
 echo "[3/7] Checkout target ref: $TARGET_REF"
 git checkout "$TARGET_REF"
 prune_missing_compose_files
+
+if [[ -n "${EDUSMART_CADDY_IMAGE:-}" ]]; then
+  IMAGE_SERVICES+=(caddy)
+fi
 
 echo "[4/7] Pull image registry & restart service produksi tanpa build lokal..."
 compose pull \

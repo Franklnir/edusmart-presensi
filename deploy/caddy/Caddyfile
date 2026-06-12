@@ -1,10 +1,31 @@
 {
 	email {$CADDY_ACME_EMAIL}
+	order coraza_waf first
 	admin off
 	storage file_system /data/caddy
 
 	on_demand_tls {
 		ask http://nginx/api/internal/tls/authorize?secret={$CADDY_ASK_SECRET}
+	}
+}
+
+(waf_high_confidence) {
+	coraza_waf {
+		directives `
+			SecRuleEngine On
+			SecRequestBodyAccess On
+			SecRequestBodyLimit 1048576
+			SecRequestBodyNoFilesLimit 131072
+			SecRequestBodyLimitAction ProcessPartial
+			SecResponseBodyAccess Off
+			SecDefaultAction "phase:1,log,pass"
+			SecDefaultAction "phase:2,log,pass"
+			SecRule REQUEST_HEADERS:User-Agent "(?i)(sqlmap|nikto|acunetix|nessus|nuclei|zgrab|masscan|dirbuster|gobuster|ffuf|wpscan)" "id:100001,phase:1,deny,status:403,log,msg:'scanner user agent'"
+			SecRule REQUEST_URI "(?i)(?:/\\.env|/\\.git|/wp-admin|/wp-login\\.php|/phpmyadmin|/server-status|/cgi-bin/)" "id:100002,phase:1,deny,status:403,log,msg:'sensitive path probe'"
+			SecRule ARGS|ARGS_NAMES|REQUEST_HEADERS|REQUEST_COOKIES|REQUEST_URI "(?i)(?:union\\s+select|information_schema|sleep\\s*\\(|benchmark\\s*\\(|load_file\\s*\\(|into\\s+outfile|@@version)" "id:100003,phase:2,deny,status:403,t:none,t:urlDecodeUni,log,msg:'sql injection probe'"
+			SecRule ARGS|ARGS_NAMES|REQUEST_HEADERS|REQUEST_COOKIES|REQUEST_URI "(?i)(?:<script|javascript:|onerror\\s*=|onload\\s*=|document\\.cookie)" "id:100004,phase:2,deny,status:403,t:none,t:urlDecodeUni,log,msg:'xss probe'"
+			SecRule ARGS|ARGS_NAMES|REQUEST_URI "(?:\\.\\./|\\.\\.\\\\|%2e%2e%2f|%252e%252e%252f)" "id:100005,phase:2,deny,status:403,t:none,t:urlDecodeUni,log,msg:'path traversal probe'"
+		`
 	}
 }
 
@@ -17,20 +38,50 @@
 	}
 }
 
+(edusmart_proxy) {
+	@skip_waf_uploads {
+		path /api/storage/upload* /api/tugas/jawaban/submit* /api/admin/storage-manager/*
+	}
+
+	handle @skip_waf_uploads {
+		reverse_proxy nginx:80
+	}
+
+	handle {
+		import waf_high_confidence
+		reverse_proxy nginx:80
+	}
+}
+
+(evolution_proxy) {
+	handle /manager* {
+		respond "Not Found" 404
+	}
+
+	handle / {
+		respond "Not Found" 404
+	}
+
+	handle {
+		import waf_high_confidence
+		reverse_proxy evolution_api:8080 {
+			header_up Origin "https://{host}"
+		}
+	}
+}
+
 localhost, admin.localhost, admin26.localhost, demo.localhost, bali.localhost {
 	tls internal
 
 	encode zstd gzip
-	reverse_proxy nginx:80
+	import edusmart_proxy
 }
 
 wa.localhost {
 	tls internal
 
 	encode zstd gzip
-	reverse_proxy evolution_api:8080 {
-		header_up Origin "https://{host}"
-	}
+	import evolution_proxy
 }
 
 {$CADDY_EVOLUTION_HOST} {
@@ -40,21 +91,34 @@ wa.localhost {
 
 	import security_headers
 	encode zstd gzip
-	reverse_proxy evolution_api:8080 {
-		header_up Origin "https://{host}"
-	}
+	import evolution_proxy
 }
 
 :80 {
 	redir https://{host}{$CADDY_HTTPS_PORT_SUFFIX}{uri} 308
 }
 
-:443 {
+{$CADDY_APP_HOSTS} {
 	tls {
 		on_demand
 	}
 
 	import security_headers
 	encode zstd gzip
-	reverse_proxy nginx:80
+	import edusmart_proxy
+}
+
+*.{$CADDY_ROOT_DOMAIN} {
+	tls {
+		on_demand
+	}
+
+	import security_headers
+	encode zstd gzip
+	import edusmart_proxy
+}
+
+:443 {
+	tls internal
+	respond "Forbidden" 403
 }
