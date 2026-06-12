@@ -61,14 +61,7 @@ jobs:
       - name: Bundle Android JS for standalone debug APK
         run: |
           set -euo pipefail
-          mkdir -p android/app/src/main/assets android/app/src/main/res
-          npx expo export:embed \
-            --platform android \
-            --dev false \
-            --entry-file index.js \
-            --bundle-output android/app/src/main/assets/index.android.bundle \
-            --assets-dest android/app/src/main/res \
-            --reset-cache
+          npm run bundle:android:standalone
           test -s android/app/src/main/assets/index.android.bundle
 
       - name: Build standalone debug APK
