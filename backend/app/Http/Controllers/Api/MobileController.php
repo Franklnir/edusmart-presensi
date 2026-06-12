@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Models\Profile;
 use App\Services\Rfid\RfidIngressService;
 use App\Support\Tenancy\TenantDomainService;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -556,7 +557,7 @@ class MobileController extends ApiController
             'nama' => (string) ($student->nama ?? ''),
             'waktu' => $now,
             'komentar' => 'Manual oleh guru via mobile',
-            'oleh' => 'manual:' . (string) $context['profile']->id,
+            'oleh' => 'manual:'.(string) $context['profile']->id,
         ];
 
         // Add academic period columns if available
@@ -572,7 +573,7 @@ class MobileController extends ApiController
 
         try {
             $id = DB::table('absensi')->insertGetId($insert);
-        } catch (\Illuminate\Database\QueryException $e) {
+        } catch (QueryException $e) {
             // Race condition: might be duplicate
             $dup = $this->tenantQuery('absensi', $tenantId)
                 ->where('kelas', (string) $student->kelas)
