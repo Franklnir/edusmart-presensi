@@ -292,20 +292,20 @@ domain utama            -> IP_VPS_BARU
 admin subdomain         -> IP_VPS_BARU
 wa subdomain            -> IP_VPS_BARU
 mqtt subdomain          -> IP_VPS_BARU
-wildcard tenant jika ada -> IP_VPS_BARU
+tenant subdomain aktif  -> IP_VPS_BARU
 ```
 
 Contoh:
 
 ```text
-xiaozhiscig.biz.id        A IP_VPS_BARU
-admin26.xiaozhiscig.biz.id A IP_VPS_BARU
-wa.xiaozhiscig.biz.id     A IP_VPS_BARU
-mqtt.xiaozhiscig.biz.id   A IP_VPS_BARU
-*.xiaozhiscig.biz.id      A IP_VPS_BARU
+sismu.biz.id        A IP_VPS_BARU
+admin26.sismu.biz.id A IP_VPS_BARU
+wa.sismu.biz.id     A IP_VPS_BARU
+mqtt.sismu.biz.id   A IP_VPS_BARU
+sman3bogor.sismu.biz.id A IP_VPS_BARU
 ```
 
-Sesuaikan dengan domain production di `.env.production`.
+Sesuaikan dengan domain production di `.env.production`. Jangan buat record wildcard `*.sismu.biz.id` untuk produksi normal; buat record eksplisit per host yang benar-benar dipakai.
 
 ## Alur Update Harian
 

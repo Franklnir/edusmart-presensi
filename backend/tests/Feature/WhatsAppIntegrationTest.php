@@ -776,7 +776,7 @@ class WhatsAppIntegrationTest extends TestCase
     {
         config()->set('app.url', 'https://sismu.biz.id');
         config()->set('tenancy.public_scheme', 'https');
-        config()->set('services.evolution_api.public_url', 'https://wa.xiaozhiscig.biz.id');
+        config()->set('services.evolution_api.public_url', 'https://wa.sismu.biz.id');
 
         $tenantId = $this->defaultTenantId();
         $service = app(WhatsAppIntegrationService::class);

@@ -36,7 +36,7 @@ class GooglePopupLoginTest extends TestCase
         ]);
 
         $response = $this
-            ->withServerVariables(['HTTP_HOST' => 'xiaozhiscig.biz.id'])
+            ->withServerVariables(['HTTP_HOST' => 'sismu.biz.id'])
             ->withHeader('X-Tenant', 'default')
             ->postJson('/api/auth/google/credential-login', [
                 'credential' => 'google-id-token',
@@ -80,7 +80,7 @@ class GooglePopupLoginTest extends TestCase
         ]);
 
         $response = $this
-            ->withServerVariables(['HTTP_HOST' => 'xiaozhiscig.biz.id'])
+            ->withServerVariables(['HTTP_HOST' => 'sismu.biz.id'])
             ->withHeader('X-Tenant', 'default')
             ->postJson('/api/auth/google/credential-login', [
                 'credential' => 'google-id-token',
@@ -116,7 +116,7 @@ class GooglePopupLoginTest extends TestCase
 
         $response = $this
             ->actingAs($user)
-            ->withServerVariables(['HTTP_HOST' => 'xiaozhiscig.biz.id'])
+            ->withServerVariables(['HTTP_HOST' => 'sismu.biz.id'])
             ->withHeader('X-Tenant', 'default')
             ->postJson('/api/auth/google/credential-link', [
                 'credential' => 'google-id-token',
@@ -138,21 +138,21 @@ class GooglePopupLoginTest extends TestCase
         config()->set('services.google.enabled', true);
         config()->set('services.google.client_id', 'google-client-id');
         config()->set('services.google.client_secret', 'google-client-secret');
-        config()->set('services.google.redirect_uri', 'https://xiaozhiscig.biz.id/api/auth/google/callback');
+        config()->set('services.google.redirect_uri', 'https://sismu.biz.id/api/auth/google/callback');
         config()->set('tenancy.allow_header_override', true);
-        config()->set('tenancy.root_domain', 'xiaozhiscig.biz.id');
+        config()->set('tenancy.root_domain', 'sismu.biz.id');
 
         $tenantId = $this->defaultTenantId();
         $user = $this->createUserWithProfile($tenantId, 'siswa', 'siswa-oauth@example.com');
 
         $redirect = $this
-            ->withServerVariables(['HTTP_HOST' => 'xiaozhiscig.biz.id'])
+            ->withServerVariables(['HTTP_HOST' => 'sismu.biz.id'])
             ->withHeader('X-Tenant', 'default')
             ->get('/api/auth/google/redirect?'.http_build_query([
                 'popup' => '1',
-                'origin' => 'https://xiaozhiscig.biz.id',
+                'origin' => 'https://sismu.biz.id',
                 'popup_state' => 'popup-state-123',
-                'redirect' => 'https://xiaozhiscig.biz.id/login',
+                'redirect' => 'https://sismu.biz.id/login',
             ]));
 
         $redirect->assertRedirect();
@@ -161,7 +161,7 @@ class GooglePopupLoginTest extends TestCase
 
         parse_str((string) parse_url((string) $location, PHP_URL_QUERY), $query);
         $this->assertSame('google-client-id', $query['client_id'] ?? null);
-        $this->assertSame('https://xiaozhiscig.biz.id/api/auth/google/callback', $query['redirect_uri'] ?? null);
+        $this->assertSame('https://sismu.biz.id/api/auth/google/callback', $query['redirect_uri'] ?? null);
         $this->assertNotEmpty($query['state'] ?? '');
 
         Http::fake([
@@ -179,7 +179,7 @@ class GooglePopupLoginTest extends TestCase
         ]);
 
         $callback = $this
-            ->withServerVariables(['HTTP_HOST' => 'xiaozhiscig.biz.id'])
+            ->withServerVariables(['HTTP_HOST' => 'sismu.biz.id'])
             ->get('/api/auth/google/callback?'.http_build_query([
                 'state' => $query['state'],
                 'code' => 'google-auth-code',
@@ -191,7 +191,7 @@ class GooglePopupLoginTest extends TestCase
 
             $handoffParts = parse_url($handoffLocation);
             $callback = $this
-                ->withServerVariables(['HTTP_HOST' => $handoffParts['host'] ?? 'xiaozhiscig.biz.id'])
+                ->withServerVariables(['HTTP_HOST' => $handoffParts['host'] ?? 'sismu.biz.id'])
                 ->get(($handoffParts['path'] ?? '/api/auth/google/finalize-login')
                     .(isset($handoffParts['query']) ? '?'.$handoffParts['query'] : ''));
         }
@@ -211,14 +211,14 @@ class GooglePopupLoginTest extends TestCase
     {
         config()->set('services.google.enabled', true);
         config()->set('services.google.client_id', 'google-client-id');
-        config()->set('tenancy.root_domain', 'xiaozhiscig.biz.id');
+        config()->set('tenancy.root_domain', 'sismu.biz.id');
 
         $response = $this
-            ->withServerVariables(['HTTP_HOST' => 'xiaozhiscig.biz.id'])
-            ->getJson('/api/auth/google/popup-context?origin=https%3A%2F%2Fsmabali.xiaozhiscig.biz.id&mode=login');
+            ->withServerVariables(['HTTP_HOST' => 'sismu.biz.id'])
+            ->getJson('/api/auth/google/popup-context?origin=https%3A%2F%2Fsmabali.sismu.biz.id&mode=login');
 
         $response->assertOk();
-        $response->assertJsonPath('data.origin', 'https://smabali.xiaozhiscig.biz.id');
+        $response->assertJsonPath('data.origin', 'https://smabali.sismu.biz.id');
         $response->assertJsonPath('data.mode', 'login');
     }
 
@@ -226,10 +226,10 @@ class GooglePopupLoginTest extends TestCase
     {
         config()->set('services.google.enabled', true);
         config()->set('services.google.client_id', 'google-client-id');
-        config()->set('tenancy.root_domain', 'xiaozhiscig.biz.id');
+        config()->set('tenancy.root_domain', 'sismu.biz.id');
 
         $response = $this
-            ->withServerVariables(['HTTP_HOST' => 'xiaozhiscig.biz.id'])
+            ->withServerVariables(['HTTP_HOST' => 'sismu.biz.id'])
             ->getJson('/api/auth/google/popup-context?origin=https%3A%2F%2Fevil.example.com&mode=login');
 
         $response->assertStatus(422);

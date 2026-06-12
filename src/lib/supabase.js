@@ -4129,6 +4129,17 @@ export const supabase = {
   from: (table) => new QueryBuilder(table),
   batch: dbBatch,
   invalidateCache: invalidateDbSelectCache,
+  public: {
+    async settings() {
+      const res = await apiFetch('/api/public/settings', {
+        method: 'GET',
+        cache: true,
+        cacheTtlMs: DEFAULT_DB_SELECT_CACHE_TTL_MS
+      })
+
+      return { data: res.raw?.data ?? null, error: res.error }
+    }
+  },
   auth,
   admin: auth.admin,
   super: auth.super,

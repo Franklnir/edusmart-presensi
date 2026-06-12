@@ -2,21 +2,21 @@
 
 server {
     listen 80;
-    server_name edusmart.example.com *.edusmart.example.com;
+    server_name sismu.biz.id admin26.sismu.biz.id sman3bogor.sismu.biz.id;
     return 301 https://$host$request_uri;
 }
 
 server {
     listen 443 ssl http2;
-    server_name edusmart.example.com *.edusmart.example.com;
+    server_name sismu.biz.id admin26.sismu.biz.id sman3bogor.sismu.biz.id;
 
     # Frontend React hasil build (npm run build)
     root /var/www/edusmart/dist;
     index index.html;
 
     # SSL Let's Encrypt
-    ssl_certificate /etc/letsencrypt/live/edusmart.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/edusmart.example.com/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/sismu.biz.id/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/sismu.biz.id/privkey.pem;
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
@@ -25,6 +25,7 @@ server {
     add_header X-Content-Type-Options nosniff always;
     add_header X-Frame-Options SAMEORIGIN always;
     add_header Referrer-Policy strict-origin-when-cross-origin always;
+    add_header Strict-Transport-Security "max-age=31536000" always;
 
     # Backend Laravel dari supervisor (php artisan serve --host=127.0.0.1 --port=8000)
     location /api/ {

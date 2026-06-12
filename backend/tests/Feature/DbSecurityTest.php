@@ -14,7 +14,27 @@ class DbSecurityTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_public_settings_select_is_sanitized(): void
+    public function test_database_gateway_requires_authentication(): void
+    {
+        $this->postJson('/api/db', [
+            'table' => 'settings',
+            'action' => 'select',
+            'columns' => '*',
+        ])->assertUnauthorized();
+
+        $this->postJson('/api/db/batch', [
+            'requests' => [
+                [
+                    'key' => 'settings',
+                    'table' => 'settings',
+                    'action' => 'select',
+                    'columns' => '*',
+                ],
+            ],
+        ])->assertUnauthorized();
+    }
+
+    public function test_public_settings_endpoint_is_sanitized(): void
     {
         $tenantId = $this->defaultTenantId();
 
@@ -30,14 +50,10 @@ class DbSecurityTest extends TestCase
             'updated_at' => now(),
         ]);
 
-        $response = $this->postJson('/api/db', [
-            'table' => 'settings',
-            'action' => 'select',
-            'columns' => '*',
-        ]);
+        $response = $this->getJson('/api/public/settings');
 
         $response->assertOk();
-        $row = $response->json('data.0');
+        $row = $response->json('data');
 
         $this->assertIsArray($row);
         $this->assertSame('Sekolah Aman', $row['nama_sekolah'] ?? null);

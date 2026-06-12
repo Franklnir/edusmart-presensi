@@ -99,12 +99,7 @@ const Login = () => {
 
     const loadSettings = async () => {
       try {
-        let { data, error } = await supabase
-          .from('settings')
-          .select('id,nama_sekolah,alamat,telepon,email,logo_url,logo_path,link_facebook,link_tiktok,link_instagram,link_youtube')
-          .order('id', { ascending: true })
-          .limit(1)
-          .single();
+        let { data, error } = await supabase.public.settings();
 
         if (error && error.code === 'PGRST116') {
           // Tidak ada data settings, gunakan default

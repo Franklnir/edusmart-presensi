@@ -66,12 +66,7 @@ export default function Register() {
     async function loadSettings() {
       setLoadingSettings(true)
       try {
-        let { data, error } = await supabase
-          .from('settings')
-          .select('id,nama_sekolah,logo_url,logo_path,alamat,telepon,email,link_facebook,link_tiktok,link_instagram,link_youtube,registrasi_siswa_aktif,registrasi_guru_aktif')
-          .order('id', { ascending: true })
-          .limit(1)
-          .single()
+        let { data, error } = await supabase.public.settings()
 
         if (error && error.code === 'PGRST116') data = null
         else if (error) throw error

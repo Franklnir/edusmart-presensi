@@ -30,7 +30,7 @@
     "react-barcode": "^1.6.1",
     "react-dom": "^18.3.1",
     "react-dropzone": "^14.3.8",
-    "react-router-dom": "^6.30.3",
+    "react-router-dom": "^6.30.4",
     "react-to-print": "^3.2.0",
     "swiper": "^12.1.2",
     "zustand": "^4.5.7"

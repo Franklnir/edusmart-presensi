@@ -104,7 +104,7 @@ APP_OBJECT_STORAGE_BUCKET_CERTIFICATE_TEMPLATES=certificate-templates
 APP_OBJECT_STORAGE_BUCKET_SERTIFIKAT_TEMPLATES=sertifikat-templates
 ```
 
-Env lama `ASSIGNMENT_DIRECT_UPLOAD_*` masih didukung untuk deploy existing, tetapi konfigurasi baru sebaiknya memakai `APP_DIRECT_UPLOAD_*`. Bucket CORS minimal perlu mengizinkan origin domain sekolah untuk method `PUT`, `GET`, dan `HEAD`, header `Content-Type` atau `*`, expose header `ETag` dan `Content-Length`, serta origin root/admin/tenant seperti `https://sismu.biz.id`, `https://admin26.sismu.biz.id`, dan `https://*.sismu.biz.id`. Simpan object tetap private; aplikasi hanya memberi signed URL sementara setelah permission pengguna dicek.
+Env lama `ASSIGNMENT_DIRECT_UPLOAD_*` masih didukung untuk deploy existing, tetapi konfigurasi baru sebaiknya memakai `APP_DIRECT_UPLOAD_*`. Bucket CORS minimal perlu mengizinkan origin domain sekolah untuk method `PUT`, `GET`, dan `HEAD`, header `Content-Type` atau `*`, expose header `ETag` dan `Content-Length`, serta origin root/admin/tenant eksplisit seperti `https://sismu.biz.id`, `https://admin26.sismu.biz.id`, dan `https://sman3bogor.sismu.biz.id`. Simpan object tetap private; aplikasi hanya memberi signed URL sementara setelah permission pengguna dicek.
 
 Jika CORS bucket belum benar, browser akan menolak upload langsung sebelum file terkirim. Frontend sekarang menahan percobaan direct upload sementara setelah error CORS/network, dan backend dapat meneruskan file ke object storage sebagai fallback aman. Ini menjaga fitur tetap jalan, tetapi signed direct upload dengan CORS yang benar tetap jalur paling cepat untuk upload massal.
 

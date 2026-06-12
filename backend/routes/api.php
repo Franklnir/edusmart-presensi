@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\MobileController;
 use App\Http\Controllers\Api\MobileDirectoryController;
 use App\Http\Controllers\Api\PresenceController;
 use App\Http\Controllers\Api\ProfileController;
+use App\Http\Controllers\Api\PublicSettingsController;
 use App\Http\Controllers\Api\QuizController;
 use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\RfidController;
@@ -48,6 +49,10 @@ Route::get('/mobile/schools', [MobileDirectoryController::class, 'schools'])
         ResolveTenant::class,
         EnsureTenantMatchesProfile::class,
     ]);
+
+Route::get('/public/settings', [PublicSettingsController::class, 'show'])
+    ->middleware('throttle:api')
+    ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
 
 Route::prefix('mobile')->middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::get('/me', [MobileController::class, 'me']);
@@ -114,7 +119,7 @@ Route::get('/auth/verify-email/{id}/{hash}', [AuthController::class, 'verifyEmai
     ->name('verification.verify')
     ->middleware('throttle:6,1');
 Route::get('/auth/me', [AuthController::class, 'me'])
-    ->middleware('throttle:api')
+    ->middleware(['auth:sanctum', 'throttle:api'])
     ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
 Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout']);
@@ -185,8 +190,10 @@ Route::prefix('quiz')->middleware(['auth:sanctum', 'throttle:api'])->group(funct
     Route::post('/complete-essay-review', [QuizController::class, 'completeEssayReview']);
 });
 
-Route::post('/db', [DbController::class, 'handle'])->middleware('throttle:db');
-Route::post('/db/batch', [DbController::class, 'batch'])->middleware('throttle:db');
+Route::middleware(['auth:sanctum', 'throttle:db'])->group(function () {
+    Route::post('/db', [DbController::class, 'handle']);
+    Route::post('/db/batch', [DbController::class, 'batch']);
+});
 
 Route::prefix('storage')->middleware(['auth:sanctum', 'throttle:storage'])->group(function () {
     Route::post('/upload', [StorageController::class, 'upload']);

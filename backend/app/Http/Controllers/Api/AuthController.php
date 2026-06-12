@@ -64,7 +64,7 @@ class AuthController extends ApiController
     {
         $user = $request->user('sanctum') ?: $this->user($request);
         if (! $user) {
-            return response()->json(['data' => null]);
+            return response()->json(['message' => 'Unauthenticated.'], 401);
         }
 
         $request->setUserResolver(fn () => $user);

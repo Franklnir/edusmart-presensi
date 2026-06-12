@@ -196,13 +196,13 @@ Untuk install fresh tanpa restore database, isi `SUPER_ADMIN_EMAILS` dan `SUPER_
 
 Di panel DNS domain:
 
-- Root/app: `A xiaozhiscig.biz.id -> IP_VPS_BARU`
-- Admin: `A admin26.xiaozhiscig.biz.id -> IP_VPS_BARU`
-- WhatsApp: `A wa.xiaozhiscig.biz.id -> IP_VPS_BARU`
-- MQTT: `A mqtt.xiaozhiscig.biz.id -> IP_VPS_BARU`
-- Tenant wildcard jika dipakai: `A *.xiaozhiscig.biz.id -> IP_VPS_BARU`
+- Root/app: `A sismu.biz.id -> IP_VPS_BARU`
+- Admin: `A admin26.sismu.biz.id -> IP_VPS_BARU`
+- WhatsApp: `A wa.sismu.biz.id -> IP_VPS_BARU`
+- MQTT: `A mqtt.sismu.biz.id -> IP_VPS_BARU`
+- Tenant aktif: `A namasekolah.sismu.biz.id -> IP_VPS_BARU`
 
-Sesuaikan nama host dengan domain production yang dipakai di `.env.production`.
+Sesuaikan nama host dengan domain production yang dipakai di `.env.production`. Untuk produksi `sismu.biz.id`, hindari wildcard DNS dan buat record eksplisit per host yang benar-benar dipakai.
 
 ## 8. Deploy Stack Production
 

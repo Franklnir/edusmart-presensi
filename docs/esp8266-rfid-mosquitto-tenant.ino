@@ -38,7 +38,7 @@ const char* DEVICE_ID = "gerbang-utara-01";
 const char* FIRMWARE_VERSION = "2.0.0-mqtt-only";
 
 /* ================== KONFIGURASI MOSQUITTO MQTT ================== */
-const char* MQTT_HOST = "mqtt.edusmart.example.com";
+const char* MQTT_HOST = "mqtt.sismu.biz.id";
 const uint16_t MQTT_PORT = 8883;
 const char* MQTT_USER = "edusmart_sman1jombang_rfid";
 const char* MQTT_PASS = "YOUR_MOSQUITTO_PASSWORD";

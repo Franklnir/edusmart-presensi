@@ -13,6 +13,22 @@ class AuthSuperAdminHardeningTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_auth_me_requires_authentication(): void
+    {
+        $response = $this->getJson('/api/auth/me');
+
+        $response->assertUnauthorized();
+        $response->assertJsonPath('message', 'Unauthenticated.');
+    }
+
+    public function test_api_method_not_allowed_is_rendered_as_generic_not_found(): void
+    {
+        $response = $this->getJson('/api/db');
+
+        $response->assertNotFound();
+        $response->assertJsonPath('message', 'Not Found');
+    }
+
     public function test_register_rejects_reserved_super_admin_email(): void
     {
         config()->set('superadmin.emails', ['root@example.com']);

@@ -18,7 +18,7 @@ Isi di `.env.production`:
 
 ```env
 RFID_MOSQUITTO_ENABLED=true
-RFID_MOSQUITTO_PUBLIC_HOST=mqtt.edusmart.example.com
+RFID_MOSQUITTO_PUBLIC_HOST=mqtt.sismu.biz.id
 RFID_MOSQUITTO_PUBLIC_PORT=8883
 RFID_MOSQUITTO_PUBLIC_USE_TLS=true
 RFID_MOSQUITTO_INTERNAL_HOST=mosquitto
@@ -29,7 +29,7 @@ RFID_MOSQUITTO_BRIDGE_PASSWORD=GANTI_PASSWORD_PANJANG_RANDOM
 RFID_MOSQUITTO_TOPIC_PREFIX=edusmart
 ```
 
-Untuk DNS, arahkan `mqtt.edusmart.example.com` ke server yang menjalankan
+Untuk DNS, arahkan `mqtt.sismu.biz.id` ke server yang menjalankan
 `docker-compose.prod.yml`. Port public default adalah `8883`.
 
 ## Deploy

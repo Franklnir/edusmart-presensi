@@ -36,7 +36,7 @@ Catatan local:
 
 ## 1. Prasyarat
 
-- Domain aktif (contoh: `edusmart.example.com`)
+- Domain aktif (contoh: `sismu.biz.id`)
 - VPS Ubuntu 22.04+
 - Docker + Docker Compose plugin terpasang
 - Port `80` dan `443` dibuka
@@ -188,7 +188,7 @@ Agar tombol Google di halaman login bisa dipakai langsung:
 
 1. Buat OAuth Client di Google Cloud Console (type: `Web application`).
 2. Isi **Authorized redirect URIs**:
-   - `https://edusmart.example.com/api/auth/google/callback`
+   - `https://sismu.biz.id/api/auth/google/callback`
    - jika pakai host callback lain, samakan dengan `GOOGLE_REDIRECT_URI`.
 3. Bagian **Authorized JavaScript origins** tidak wajib untuk flow login aktif sekarang, karena popup memakai OAuth redirect backend. Jika masih melihat `Error 400: origin_mismatch`, deploy frontend terbaru dan pastikan tombol Google tidak lagi memuat Google Identity Services.
 4. Set env di `.env.production`:
@@ -198,7 +198,7 @@ Agar tombol Google di halaman login bisa dipakai langsung:
    - `GOOGLE_AUTH_ENABLED=true`
    - `GOOGLE_CLIENT_ID=<client-id-google>`
    - `GOOGLE_CLIENT_SECRET=<client-secret-google>`
-   - `GOOGLE_REDIRECT_URI=https://edusmart.example.com/api/auth/google/callback`
+   - `GOOGLE_REDIRECT_URI=https://sismu.biz.id/api/auth/google/callback`
 5. Reload config + restart service:
 
 ```bash
@@ -208,7 +208,7 @@ deploy/release-prod.sh --ref <commit-or-tag> --pull-images
 
 Catatan multi-tenant:
 - Gunakan URL Google frontend yang relatif (`/api/auth/google/...`) agar otomatis mengikuti host tenant aktif.
-- Pastikan `GOOGLE_REDIRECT_URI` memakai root domain publik yang sama dengan `VITE_ROOT_DOMAIN`, misalnya `https://edusmart.example.com/api/auth/google/callback`.
+- Pastikan `GOOGLE_REDIRECT_URI` memakai root domain publik yang sama dengan `VITE_ROOT_DOMAIN`, misalnya `https://sismu.biz.id/api/auth/google/callback`.
 
 ## 3.2.1 Object Storage untuk Upload File
 
@@ -265,7 +265,7 @@ Bucket harus private dan CORS bucket perlu mengizinkan domain sekolah:
 
 - Method: `PUT`, `GET`, `HEAD`
 - Header: `Content-Type` atau `*`
-- Origin: root domain dan subdomain tenant yang dipakai, misalnya `https://sismu.biz.id`, `https://admin26.sismu.biz.id`, dan `https://*.sismu.biz.id`
+- Origin: root domain dan subdomain tenant yang dipakai, misalnya `https://sismu.biz.id`, `https://admin26.sismu.biz.id`, dan `https://sman3bogor.sismu.biz.id`. Untuk produksi, pakai origin eksplisit dan hindari wildcard.
 - Expose header: `ETag`, `Content-Length`
 
 Jika bucket CORS belum siap, browser akan menolak preflight `OPTIONS` ke Nevaobjects. Aplikasi tetap menyediakan fallback aman lewat backend: file dikirim ke API terlebih dahulu, lalu backend meneruskan ke object storage jika konfigurasi S3 aktif. Jalur tercepat tetap signed direct upload, jadi CORS bucket tetap perlu dibereskan untuk performa terbaik saat banyak siswa upload bersamaan.
@@ -278,7 +278,7 @@ Broker default sekarang memakai Mosquitto open source yang dideploy sebagai serv
 Pastikan env ini terisi:
 
 - `RFID_MQTT_BRIDGE_ENABLED=true`
-- `RFID_MOSQUITTO_PUBLIC_HOST=mqtt.edusmart.example.com`
+- `RFID_MOSQUITTO_PUBLIC_HOST=mqtt.sismu.biz.id`
 - `RFID_MOSQUITTO_BRIDGE_PASSWORD=<password-panjang-random>`
 - `RFID_MQTT_HOST=` dikosongkan agar global fallback tidak dipakai lintas sekolah.
 - `RFID_MQTT_SCAN_TOPIC_TEMPLATE=edusmart/{tenant}/rfid/scan`
@@ -307,12 +307,12 @@ Stack production ini mendukung pola `1 VPS, banyak container`, jadi EduSmart tet
 
 Isi env minimal:
 
-- `EVOLUTION_PUBLIC_URL=https://wa.edusmart.example.com`
-- `CADDY_EVOLUTION_HOST=wa.edusmart.example.com`
+- `EVOLUTION_PUBLIC_URL=https://wa.sismu.biz.id`
+- `CADDY_EVOLUTION_HOST=wa.sismu.biz.id`
 - `EVOLUTION_API_KEY=<apikey server Evolution>`
 - `EVOLUTION_DB_PASSWORD=<password postgres khusus Evolution>`
 - `EVOLUTION_REDIS_PASSWORD=<password redis khusus Evolution>`
-- `EVOLUTION_API_WEBHOOK_BASE_URL=https://edusmart.example.com`
+- `EVOLUTION_API_WEBHOOK_BASE_URL=https://sismu.biz.id`
 
 Catatan operasional:
 
@@ -354,13 +354,13 @@ Catatan:
 
 ## 4.1 Domain Policy (Rekomendasi Profesional)
 
-- Root domain tenant: `edusmart.myid`
-- Tenant sekolah: `bali.edusmart.myid`, `jakarta.edusmart.myid`, dst
-- Panel super admin: `admin26.edusmart.myid`
+- Root domain tenant: `sismu.biz.id`
+- Tenant sekolah: `bali.sismu.biz.id`, `jakarta.sismu.biz.id`, dst
+- Panel super admin: `admin26.sismu.biz.id`
 
 Set env:
 
-- `TENANT_ROOT_DOMAIN=edusmart.myid`
+- `TENANT_ROOT_DOMAIN=sismu.biz.id`
 - `TENANT_ADMIN_SUBDOMAIN=admin26`
 - `TENANT_RESERVED=www,app,api,admin,admin26`
 - `TENANT_ALLOW_ROOT_FOR_SUPER_ADMIN=false`
@@ -370,9 +370,9 @@ Catatan:
 - Endpoint `api/super/*` hanya bisa diakses dari domain admin.
 - Login akun super admin hanya di domain admin.
 - Login user sekolah (admin/guru/siswa tenant) ditolak jika mencoba login dari domain admin.
-- Wildcard DNS `*.edusmart.myid` tetap sangat disarankan untuk host tenant bawaan.
+- Buat DNS eksplisit per host tenant aktif, misalnya `bali.sismu.biz.id`, dan hindari wildcard DNS production.
 - Untuk skala kecil sampai menengah, `caddy` on-demand TLS sudah cukup nyaman.
-- Jika nanti tenant bawaan bertambah sangat cepat dalam domain yang sama, pertimbangkan wildcard SSL via DNS challenge agar tidak mendekati rate limit penerbit sertifikat publik.
+- Jika nanti tenant bawaan bertambah sangat cepat, gunakan otomasi DNS eksplisit atau custom domain onboarding, bukan membuka wildcard publik tanpa kontrol.
 
 ## 4.2 Domain Onboarding dari Super Admin
 
@@ -392,28 +392,29 @@ Alur yang direkomendasikan:
 
 Catatan penting:
 
-- Subdomain tenant bawaan seperti `bali.edusmart.myid` tetap otomatis aktif dari slug tenant dan tidak perlu didaftarkan ulang.
+- Subdomain tenant bawaan seperti `bali.sismu.biz.id` tetap otomatis aktif dari slug tenant setelah DNS host itu diarahkan ke VPS.
 - Custom domain di aplikasi ini dibuat provider-agnostic, jadi tetap bisa dipakai walau registrar/domain provider kamu berbeda-beda.
 - Setelah DNS diarahkan dan host sudah terdaftar di panel, sertifikat HTTPS akan diterbitkan otomatis oleh `caddy` saat domain pertama kali diakses.
 - Jika nanti kamu pindah ke provider DNS yang punya API publik, otomasi create/update DNS bisa ditambahkan tanpa mengubah alur tenant di panel.
 
 ### Contoh domain tenant
 
-- Tenant bawaan cepat: `smabali.edusmart.myid`
+- Tenant bawaan cepat: `smabali.sismu.biz.id`
 - Domain sekolah sendiri: `portal.smabali.sch.id`
-- Panel super admin: `admin26.edusmart.myid`
-- Host WhatsApp/Evolution: `wa.edusmart.myid`
+- Panel super admin: `admin26.sismu.biz.id`
+- Host WhatsApp/Evolution: `wa.sismu.biz.id`
 
 ## 4.3 Alur Saat Sekolah Baru Berlangganan
 
 Cara paling aman dan cepat saat ada sekolah baru masuk:
 
 1. Buat tenant baru dari panel super admin dengan `nama sekolah`, `slug`, `admin sekolah`, dan `email admin`.
-2. Tenant langsung aktif di subdomain bawaan, misalnya `smabali.edusmart.myid`.
-3. Kirim URL bawaan itu ke sekolah agar mereka bisa mulai onboarding tanpa menunggu domain mereka sendiri selesai.
-4. Jika sekolah ingin domain khusus, tambahkan dari detail tenant di kartu `Domain & DNS Tenant`.
-5. Minta pihak sekolah mengarahkan DNS domain mereka ke target yang tampil di kartu `Target DNS Default`.
-6. Klik `Cek DNS` sampai status `ready`.
+2. Buat DNS eksplisit untuk subdomain bawaan, misalnya `smabali.sismu.biz.id`, ke IP VPS.
+3. Tenant aktif di subdomain bawaan itu setelah DNS mengarah dan sertifikat HTTPS terbit.
+4. Kirim URL bawaan itu ke sekolah agar mereka bisa mulai onboarding tanpa menunggu domain mereka sendiri selesai.
+5. Jika sekolah ingin domain khusus, tambahkan dari detail tenant di kartu `Domain & DNS Tenant`.
+6. Minta pihak sekolah mengarahkan DNS domain mereka ke target yang tampil di kartu `Target DNS Default`.
+7. Klik `Cek DNS` sampai status `ready`.
 
 Rekomendasi praktis:
 

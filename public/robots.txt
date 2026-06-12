@@ -1,0 +1,6 @@
+User-agent: *
+Disallow: /admin/
+Disallow: /api/
+Disallow: /manager/
+
+Sitemap: https://sismu.biz.id/sitemap.xml

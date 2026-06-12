@@ -8,6 +8,15 @@
 	}
 }
 
+(security_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Frame-Options "SAMEORIGIN"
+	}
+}
+
 localhost, admin.localhost, admin26.localhost, demo.localhost, bali.localhost {
 	tls internal
 
@@ -29,6 +38,7 @@ wa.localhost {
 		on_demand
 	}
 
+	import security_headers
 	encode zstd gzip
 	reverse_proxy evolution_api:8080 {
 		header_up Origin "https://{host}"
@@ -44,6 +54,7 @@ wa.localhost {
 		on_demand
 	}
 
+	import security_headers
 	encode zstd gzip
 	reverse_proxy nginx:80
 }
