@@ -121,14 +121,23 @@ export default function LaporanRekap() {
   const { pushToast, setLoading } = useUIStore()
   const [searchParams] = useSearchParams()
 
+  // -- Persist filter state in localStorage --
+  const FILTER_STORAGE_KEY = 'edusmart.guru.laporan.filters'
+  const savedFilters = useMemo(() => {
+    try {
+      const raw = window.localStorage.getItem(FILTER_STORAGE_KEY)
+      return raw ? JSON.parse(raw) : {}
+    } catch { return {} }
+  }, [])
+
   // -- UI State --
   const [activeTab, setActiveTab] = useState(() => {
     const tab = new URLSearchParams(
       typeof window !== 'undefined' ? window.location.search : ''
     ).get('tab')
-    return ['absensi', 'tugas', 'quiz', 'mapel', 'rekap', 'rekap_eskul'].includes(tab)
-      ? tab
-      : 'absensi'
+    if (['absensi', 'tugas', 'quiz', 'mapel', 'rekap', 'rekap_eskul'].includes(tab)) return tab
+    if (savedFilters.activeTab && ['absensi', 'tugas', 'quiz', 'mapel', 'rekap', 'rekap_eskul'].includes(savedFilters.activeTab)) return savedFilters.activeTab
+    return 'absensi'
   })
   const isRekapTab = activeTab === 'rekap' || activeTab === 'rekap_eskul'
   const [showBulanDropdown, setShowBulanDropdown] = useState(false)
@@ -137,7 +146,7 @@ export default function LaporanRekap() {
   // -- Data Filter State --
   const [kelasList, setKelasList] = useState([])
   const [waliKelasList, setWaliKelasList] = useState([])
-  const [selectedWaliKelas, setSelectedWaliKelas] = useState('')
+  const [selectedWaliKelas, setSelectedWaliKelas] = useState(savedFilters.selectedWaliKelas || '')
   const [jadwalGuru, setJadwalGuru] = useState([])
   const [mapelList, setMapelList] = useState([])
   const [mapelComponentWeightRows, setMapelComponentWeightRows] = useState([])
@@ -145,12 +154,13 @@ export default function LaporanRekap() {
   const [mapelWeightForm, setMapelWeightForm] = useState({ ...DEFAULT_MAPEL_COMPONENT_WEIGHTS })
   const [savingMapelWeight, setSavingMapelWeight] = useState(false)
 
-  // -- Selection State (Default Kosong) --
-  const [selectedKelas, setSelectedKelas] = useState('')
-  const [selectedMapel, setSelectedMapel] = useState('')
-  const [selectedBulan, setSelectedBulan] = useState(() => [
-    getCurrentMonthValue()
-  ]) // Default: bulan berjalan
+  // -- Selection State (Restore from saved or default) --
+  const [selectedKelas, setSelectedKelas] = useState(savedFilters.selectedKelas || '')
+  const [selectedMapel, setSelectedMapel] = useState(savedFilters.selectedMapel || '')
+  const [selectedBulan, setSelectedBulan] = useState(() => {
+    if (Array.isArray(savedFilters.selectedBulan) && savedFilters.selectedBulan.length) return savedFilters.selectedBulan
+    return [getCurrentMonthValue()]
+  }) // Default: bulan berjalan atau saved
   const [tahun, setTahun] = useState(new Date().getFullYear())
   const {
     activeAcademicPeriod,
@@ -347,6 +357,19 @@ export default function LaporanRekap() {
       return { ...prev, siswa: normalizedRank }
     })
   }, [rekapWaliData?.siswa, rekapWaliData?.policy, rankingPolicy])
+
+  // -- Persist filters to localStorage on change --
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify({
+        activeTab,
+        selectedKelas,
+        selectedMapel,
+        selectedBulan,
+        selectedWaliKelas
+      }))
+    } catch { /* quota exceeded or private mode */ }
+  }, [activeTab, selectedKelas, selectedMapel, selectedBulan, selectedWaliKelas])
 
   // 1. Initial Load (Lib & Click Outside)
   useEffect(() => {
