@@ -206,6 +206,8 @@ function StorageManager() {
   const [cleanupLoading, setCleanupLoading] = useState(false)
   const [syncingObjectStorage, setSyncingObjectStorage] = useState(false)
   const [restoringTrashId, setRestoringTrashId] = useState('')
+  const [deletingTrashId, setDeletingTrashId] = useState('')
+  const [purgingAllTrash, setPurgingAllTrash] = useState(false)
   const [purgingTrash, setPurgingTrash] = useState(false)
 
   const activeSummary = tenantDetail || summary || {}
@@ -642,6 +644,45 @@ function StorageManager() {
       pushToast('error', error?.message || 'Gagal purge Trash kedaluwarsa')
     } finally {
       setPurgingTrash(false)
+    }
+  }
+
+  const handleDeleteTrashFile = async (fileId, fileName) => {
+    if (!isSuperAdmin || !fileId) return
+    const confirmed = window.confirm(`Hapus permanen file "${fileName || 'file ini'}" dari Trash? File akan dihapus dari Neva S3 dan tidak bisa dipulihkan.`)
+    if (!confirmed) return
+
+    setDeletingTrashId(fileId)
+    try {
+      const { data, error } = await supabase.super.deleteStorageTrash(selectedTenantId, fileId)
+      if (error) throw error
+      pushToast('success', data?.message || 'File berhasil dihapus permanen dari Trash')
+      await reloadActiveStorage()
+    } catch (error) {
+      pushToast('error', error?.message || 'Gagal menghapus file dari Trash')
+    } finally {
+      setDeletingTrashId('')
+    }
+  }
+
+  const handlePurgeAllTrash = async () => {
+    if (!isSuperAdmin || !selectedTenantId) return
+    const trashCount = activeSummary?.trash?.files || 0
+    const confirmed = window.confirm(
+      `Hapus permanen SEMUA ${trashCount} file di Trash sekolah ini? Semua file akan dihapus dari Neva S3 dan tidak bisa dipulihkan.`
+    )
+    if (!confirmed) return
+
+    setPurgingAllTrash(true)
+    try {
+      const { data, error } = await supabase.super.purgeAllTenantTrash(selectedTenantId)
+      if (error) throw error
+      pushToast('success', data?.message || `${data?.files || 0} file Trash dihapus permanen`)
+      await reloadActiveStorage()
+    } catch (error) {
+      pushToast('error', error?.message || 'Gagal menghapus semua file Trash')
+    } finally {
+      setPurgingAllTrash(false)
     }
   }
 
@@ -1141,7 +1182,19 @@ function StorageManager() {
                 </section>
 
                 <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                  <h2 className="text-sm font-bold text-slate-900">Trash Terbaru</h2>
+                  <div className="flex items-center justify-between gap-3">
+                    <h2 className="text-sm font-bold text-slate-900">Trash Terbaru</h2>
+                    {trashFiles.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={handlePurgeAllTrash}
+                        disabled={purgingAllTrash || deletingTrashId !== '' || restoringTrashId !== ''}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 disabled:opacity-60"
+                      >
+                        {purgingAllTrash ? 'Menghapus...' : 'Hapus Semua Trash'}
+                      </button>
+                    )}
+                  </div>
                   <div className="mt-3 space-y-2">
                     {trashFiles.slice(0, 8).map((file) => (
                       <div key={file.id} className="flex items-start justify-between gap-3 rounded-lg border border-slate-100 px-3 py-2">
@@ -1149,14 +1202,24 @@ function StorageManager() {
                           <p className="truncate text-sm font-semibold text-slate-900">{file.file_name}</p>
                           <p className="text-xs text-slate-500">{file.category_label} · {file.size_label}</p>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => handleRestoreTrashFile(file.id)}
-                          disabled={restoringTrashId === file.id}
-                          className="shrink-0 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-                        >
-                          {restoringTrashId === file.id ? '...' : 'Restore'}
-                        </button>
+                        <div className="flex shrink-0 gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleRestoreTrashFile(file.id)}
+                            disabled={restoringTrashId === file.id || deletingTrashId === file.id}
+                            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                          >
+                            {restoringTrashId === file.id ? '...' : 'Restore'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteTrashFile(file.id, file.file_name)}
+                            disabled={deletingTrashId === file.id || restoringTrashId === file.id}
+                            className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-60"
+                          >
+                            {deletingTrashId === file.id ? '...' : 'Hapus'}
+                          </button>
+                        </div>
                       </div>
                     ))}
                     {trashFiles.length === 0 && <p className="text-sm text-slate-500">Trash masih kosong.</p>}

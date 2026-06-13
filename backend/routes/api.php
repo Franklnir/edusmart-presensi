@@ -300,6 +300,8 @@ Route::middleware(['auth:sanctum', 'throttle:super', 'super.domain', 'super.admi
     Route::post('/super/tenants/{tenantId}/storage/cleanup/preview', [StorageManagementController::class, 'superCleanupPreview']);
     Route::post('/super/tenants/{tenantId}/storage/cleanup/execute', [StorageManagementController::class, 'superCleanupExecute']);
     Route::post('/super/tenants/{tenantId}/storage/trash/{fileId}/restore', [StorageManagementController::class, 'superRestoreTrashFile']);
+    Route::delete('/super/tenants/{tenantId}/storage/trash/{fileId}', [StorageManagementController::class, 'superDeleteTrashFile']);
+    Route::post('/super/tenants/{tenantId}/storage/trash/purge-all', [StorageManagementController::class, 'superPurgeAllTenantTrash']);
     Route::get('/super/tenants/{tenantId}/google-drive', [StorageManagementController::class, 'superTenantDriveSummary']);
     Route::get('/super/tenants/{tenantId}/google-drive/files', [StorageManagementController::class, 'superTenantDriveFiles']);
     Route::post('/super/tenants/{tenantId}/google-drive/sync', [StorageManagementController::class, 'superTenantDriveSync']);

@@ -3328,6 +3328,23 @@ const auth = {
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
+    async deleteStorageTrash(id, fileId) {
+      const res = await apiFetch(`/api/super/tenants/${id}/storage/trash/${fileId}`, {
+        method: 'DELETE',
+        cacheTtlMs: 0,
+        timeoutMs: 20000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async purgeAllTenantTrash(id) {
+      const res = await apiFetch(`/api/super/tenants/${id}/storage/trash/purge-all`, {
+        method: 'POST',
+        body: {},
+        cacheTtlMs: 0,
+        timeoutMs: 120000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
     async purgeExpiredStorageTrash() {
       const res = await apiFetch('/api/super/storage/trash/purge-expired', {
         method: 'POST',

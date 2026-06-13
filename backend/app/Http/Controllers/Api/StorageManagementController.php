@@ -274,6 +274,44 @@ class StorageManagementController extends ApiController
         ));
     }
 
+    public function superDeleteTrashFile(Request $request, string $tenantId, string $fileId)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenant = $this->tenantByIdOrSlug($tenantId);
+        if (! $tenant) {
+            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+        }
+
+        $result = $this->storageManagementService->deleteTrashFile((string) $tenant->id, $fileId);
+        if (! ($result['ok'] ?? false)) {
+            return response()->json(['error' => $result['message'] ?? 'Gagal menghapus file trash'], 422);
+        }
+
+        return $this->ok($result);
+    }
+
+    public function superPurgeAllTenantTrash(Request $request, string $tenantId)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenant = $this->tenantByIdOrSlug($tenantId);
+        if (! $tenant) {
+            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+        }
+
+        $result = $this->storageManagementService->purgeAllTenantTrash((string) $tenant->id);
+        if (! ($result['ok'] ?? false)) {
+            return response()->json(['error' => $result['message'] ?? 'Gagal menghapus semua trash'], 422);
+        }
+
+        return $this->ok($result);
+    }
+
     public function superPurgeExpiredTrash(Request $request)
     {
         if (! $this->isSuperAdmin($request)) {

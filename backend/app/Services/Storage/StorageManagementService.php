@@ -86,7 +86,11 @@ class StorageManagementService
     {
         $capacityBytes = $this->configuredObjectStorageCapacityBytes();
         $snapshotTotals = $this->latestProviderSnapshotTotals(self::PROVIDER_NEVA_S3);
-        $usedBytes = $snapshotTotals['total_bytes'] ?? $this->providerUsedBytes(self::PROVIDER_NEVA_S3);
+        $snapshotBytes = (int) ($snapshotTotals['total_bytes'] ?? 0);
+        $dbUsedBytes = $this->providerUsedBytes(self::PROVIDER_NEVA_S3);
+        // Use the larger of snapshot vs database to avoid under-estimating actual S3 usage.
+        // Snapshot captures untracked files; database captures trash files not yet deleted from S3.
+        $usedBytes = ! empty($snapshotTotals) ? max($snapshotBytes, $dbUsedBytes) : $dbUsedBytes;
         $allocatedBytes = $this->allocatedQuotaBytes(self::PROVIDER_NEVA_S3);
         $remainingBytes = $capacityBytes !== null ? max(0, $capacityBytes - $usedBytes) : null;
         $remainingAfterAllocatedBytes = $capacityBytes !== null ? max(0, $capacityBytes - $allocatedBytes) : null;
@@ -97,6 +101,10 @@ class StorageManagementService
             'capacity_label' => $capacityBytes !== null ? $this->formatBytes($capacityBytes) : 'Belum diset',
             'used_bytes' => $usedBytes,
             'used_label' => $this->formatBytes($usedBytes),
+            'db_used_bytes' => $dbUsedBytes,
+            'db_used_label' => $this->formatBytes($dbUsedBytes),
+            'snapshot_used_bytes' => $snapshotBytes,
+            'snapshot_used_label' => $this->formatBytes($snapshotBytes),
             'allocated_quota_bytes' => $allocatedBytes,
             'allocated_quota_label' => $this->formatBytes($allocatedBytes),
             'remaining_bytes' => $remainingBytes,
@@ -884,6 +892,116 @@ class StorageManagementService
             'files' => $files,
             'bytes' => $bytes,
             'bytes_label' => $this->formatBytes($bytes),
+        ];
+    }
+
+    public function deleteTrashFile(string $tenantId, string $fileId): array
+    {
+        if (! $this->storageFilesReady()) {
+            return ['ok' => false, 'message' => 'Metadata storage belum siap.'];
+        }
+
+        $file = DB::table('storage_files')
+            ->where('tenant_id', $tenantId)
+            ->where('id', $fileId)
+            ->where('status', 'trash')
+            ->first();
+        if (! $file) {
+            return ['ok' => false, 'message' => 'File trash tidak ditemukan atau sudah dihapus.'];
+        }
+
+        $provider = (string) ($file->provider ?? self::PROVIDER_VPS);
+        if ($provider === self::PROVIDER_NEVA_S3) {
+            $deleted = $this->objectStorageSigner->deleteObject(
+                $this->objectKeyForFile($file),
+                (string) ($file->bucket ?? '')
+            );
+            if (! $deleted) {
+                return ['ok' => false, 'message' => 'Gagal menghapus file dari Neva S3. Coba lagi nanti.'];
+            }
+        }
+
+        $updates = ['status' => 'deleted'];
+        if ($this->tableHasColumn('storage_files', 'deleted_at')) {
+            $updates['deleted_at'] = now();
+        }
+        if ($this->tableHasColumn('storage_files', 'updated_at')) {
+            $updates['updated_at'] = now();
+        }
+        DB::table('storage_files')->where('id', $fileId)->update($updates);
+
+        return [
+            'ok' => true,
+            'message' => 'File berhasil dihapus permanen dari Trash.',
+            'file_id' => $fileId,
+            'file_name' => $file->file_name ?? '',
+            'size_bytes' => (int) ($file->size_bytes ?? 0),
+            'size_label' => $this->formatBytes((int) ($file->size_bytes ?? 0)),
+        ];
+    }
+
+    public function purgeAllTenantTrash(string $tenantId): array
+    {
+        if (! $this->storageFilesReady() || ! $this->tableHasColumn('storage_files', 'provider')) {
+            return ['ok' => false, 'files' => 0, 'bytes' => 0, 'bytes_label' => '0 B', 'message' => 'Metadata storage belum siap.'];
+        }
+
+        $totalFiles = 0;
+        $totalBytes = 0;
+        $failedFiles = 0;
+        $maxIterations = 20; // safety limit: 20 batches × 500 = 10,000 files max
+
+        for ($iteration = 0; $iteration < $maxIterations; $iteration++) {
+            $rows = DB::table('storage_files')
+                ->where('tenant_id', $tenantId)
+                ->where('status', 'trash')
+                ->limit(500)
+                ->get();
+
+            if ($rows->isEmpty()) {
+                break;
+            }
+
+            foreach ($rows as $row) {
+                $provider = (string) ($row->provider ?? self::PROVIDER_VPS);
+                $deletedFromStorage = true;
+
+                if ($provider === self::PROVIDER_NEVA_S3) {
+                    $deletedFromStorage = $this->objectStorageSigner->deleteObject(
+                        $this->objectKeyForFile($row),
+                        (string) ($row->bucket ?? '')
+                    );
+                }
+
+                if (! $deletedFromStorage) {
+                    $failedFiles++;
+
+                    continue;
+                }
+
+                $totalBytes += (int) ($row->size_bytes ?? 0);
+                $totalFiles++;
+
+                $updates = ['status' => 'deleted'];
+                if ($this->tableHasColumn('storage_files', 'deleted_at')) {
+                    $updates['deleted_at'] = now();
+                }
+                if ($this->tableHasColumn('storage_files', 'updated_at')) {
+                    $updates['updated_at'] = now();
+                }
+                DB::table('storage_files')->where('id', $row->id)->update($updates);
+            }
+        }
+
+        return [
+            'ok' => true,
+            'files' => $totalFiles,
+            'bytes' => $totalBytes,
+            'bytes_label' => $this->formatBytes($totalBytes),
+            'failed_files' => $failedFiles,
+            'message' => $totalFiles > 0
+                ? "Berhasil menghapus {$totalFiles} file (".($this->formatBytes($totalBytes)).') dari Trash secara permanen.'
+                : 'Tidak ada file Trash yang bisa dihapus.',
         ];
     }
 

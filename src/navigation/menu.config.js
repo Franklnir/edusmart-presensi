@@ -99,22 +99,23 @@ export const legacyWaliKelasItem = {
   icon: 'users',
 }
 
+export const superAdminMonitoringGroup = {
+  id: 'super-monitoring-group',
+  group: 'Monitoring',
+  icon: 'monitor',
+  items: [
+    { id: 'super-monitoring', to: '/admin/monitoring', label: 'Monitoring', icon: 'signal' },
+    { id: 'super-monitoring-server', to: '/admin/monitoring-server', label: 'Monitoring Server', icon: 'monitor' },
+    { id: 'super-monitoring-log', to: '/admin/monitoring-log', label: 'Monitor Log', icon: 'terminal' },
+    { id: 'super-animasi-flow', to: '/admin/animasi-flow', label: 'Animasi Flow', icon: 'workflow' },
+  ],
+}
+
 export const superAdminGroup = {
   id: 'super-admin',
   group: 'Super Admin',
   icon: 'shield',
   items: [
-    {
-      id: 'super-monitoring-group',
-      group: 'Monitoring',
-      icon: 'monitor',
-      items: [
-        { id: 'super-monitoring', to: '/admin/monitoring', label: 'Monitoring', icon: 'signal' },
-        { id: 'super-monitoring-server', to: '/admin/monitoring-server', label: 'Monitoring Server', icon: 'monitor' },
-        { id: 'super-monitoring-log', to: '/admin/monitoring-log', label: 'Monitor Log', icon: 'terminal' },
-        { id: 'super-animasi-flow', to: '/admin/animasi-flow', label: 'Animasi Flow', icon: 'workflow' },
-      ],
-    },
     { id: 'super-tenants', to: '/admin/tenants', label: 'Sekolah', icon: 'school' },
     { id: 'super-storage', to: '/admin/storage', label: 'Storage VPS & S3', icon: 'storage' },
     { id: 'super-whatsapp', to: '/admin/whatsapp', label: 'WA Pusat', icon: 'chat' },

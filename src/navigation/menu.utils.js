@@ -1,4 +1,4 @@
-import { menuConfig, superAdminGroup, waliKelasItem } from './menu.config'
+import { menuConfig, superAdminMonitoringGroup, superAdminGroup, waliKelasItem } from './menu.config'
 import { ADMIN_FEATURE_BY_KEY } from '../constants/adminFeaturePermissions'
 
 export const hasMenuChildren = (item) => Array.isArray(item?.items) && item.items.length > 0
@@ -111,7 +111,7 @@ function addItemToGroup(items, groupId, itemToAdd) {
 
 export function buildNavigationMenu({ effectiveRole, isSuperAdmin, isWaliKelas, role, delegatedAdminFeatures = [] }) {
   if (isSuperAdmin) {
-    return cloneMenuItems([superAdminGroup])
+    return cloneMenuItems([superAdminMonitoringGroup, superAdminGroup])
   }
 
   let items = cloneMenuItems(menuConfig[effectiveRole] || [])
