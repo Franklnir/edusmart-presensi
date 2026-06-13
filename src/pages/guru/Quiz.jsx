@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { QUIZ_MEDIA_BUCKET, supabase } from '../../lib/supabase'
 import { startTransition } from 'react'
 import { useAuthStore } from '../../store/useAuthStore'
@@ -770,7 +770,8 @@ export default function GuruQuiz() {
   }, [applyPeriodFilters, periodFilter.semester, user?.id, pushToast])
 
   useEffect(() => {
-    const timer = setInterval(() => setNowTick(new Date()), 1000)
+    // Guru doesn't need per-second countdown — 15s is enough for status badges
+    const timer = setInterval(() => setNowTick(new Date()), 15_000)
     return () => clearInterval(timer)
   }, [])
 
@@ -863,10 +864,38 @@ export default function GuruQuiz() {
     }
 
     try {
-      const { data: detailData, error: detailError } = await supabase.quiz.detail(selectedQuizId, {
+      // --- Phase 1: Fetch quiz detail + side data in PARALLEL ---
+      const quizIsActive = selectedQuiz && (toBoolean(selectedQuiz.is_active) || toBoolean(selectedQuiz.is_live))
+      const detailPromise = supabase.quiz.detail(selectedQuizId, {
         tahun_ajaran: period.tahunAjaran,
         semester: period.semester
       })
+      const sidePromise = Promise.all([
+        supabase.batch([
+          {
+            key: 'siswa',
+            query: supabase
+              .from('profiles')
+              .select('id, nama, nis, photo_path, photo_url')
+              .eq('kelas', selectedKelas)
+              .eq('role', 'siswa')
+              .order('nama')
+          },
+          {
+            key: 'warnings',
+            query: supabase
+              .from('quiz_violation_logs')
+              .select('id, quiz_id, submission_id, siswa_id, event_type, event_message, event_meta, created_at')
+              .eq('quiz_id', selectedQuizId)
+              .order('created_at', { ascending: false })
+              .limit(300)
+          }
+        ]),
+        supabase.quiz.retakeHistory(selectedQuizId)
+      ])
+
+      const [detailResult, [{ data: detailBatch }, retakeResult]] = await Promise.all([detailPromise, sidePromise])
+      const { data: detailData, error: detailError } = detailResult
       if (detailError?.code === 'REQUEST_ABORTED') return
       if (detailError) throw detailError
 
@@ -875,35 +904,11 @@ export default function GuruQuiz() {
       const submissionRows = detailData?.submissions || []
       const answersBySubmission = detailData?.answers_by_submission || {}
 
+      // --- Phase 1 results already awaited above ---
       let siswaRows = []
       let historyRows = []
       let warningRows = []
-      const detailBatchRequests = [
-        {
-          key: 'siswa',
-          query: supabase
-            .from('profiles')
-            .select('id, nama, nis, photo_path, photo_url')
-            .eq('kelas', selectedKelas)
-            .eq('role', 'siswa')
-            .order('nama')
-        },
-        {
-          key: 'warnings',
-          query: supabase
-            .from('quiz_violation_logs')
-            .select('id, quiz_id, submission_id, siswa_id, event_type, event_message, event_meta, created_at')
-            .eq('quiz_id', selectedQuizId)
-            .order('created_at', { ascending: false })
-            .limit(300)
-        }
-      ]
       try {
-        const [{ data: detailBatch }, retakeResult] = await Promise.all([
-          supabase.batch(detailBatchRequests),
-          supabase.quiz.retakeHistory(selectedQuizId)
-        ])
-
         const siswaRes = detailBatch?.siswa || {}
         const warningsRes = detailBatch?.warnings || {}
         if (siswaRes.error) throw siswaRes.error
@@ -913,17 +918,13 @@ export default function GuruQuiz() {
       } catch (err) {
         // Fallback untuk skema lama yang belum punya kolom photo_path.
         if (/photo_path/i.test(String(err?.message || ''))) {
-          const [{ data }, retakeResult] = await Promise.all([
-            supabase
-              .from('profiles')
-              .select('id, nama, nis, photo_url')
-              .eq('kelas', selectedKelas)
-              .eq('role', 'siswa')
-              .order('nama'),
-            supabase.quiz.retakeHistory(selectedQuizId)
-          ])
+          const { data } = await supabase
+            .from('profiles')
+            .select('id, nama, nis, photo_url')
+            .eq('kelas', selectedKelas)
+            .eq('role', 'siswa')
+            .order('nama')
           siswaRows = data || []
-          if (!retakeResult?.error) historyRows = retakeResult.data || []
         } else {
           throw err
         }
@@ -965,15 +966,16 @@ export default function GuruQuiz() {
         })
       }
 
+      // --- Presence: only fetch when quiz is active/live (skip for archived quizzes) ---
       let presenceMap = {}
       try {
-        if (siswaIds.length) {
+        if (quizIsActive && siswaIds.length) {
           const { data: presenceRows, error: presenceError } = await supabase
             .from('user_presence')
             .select('user_id, device_id, last_seen_at, activity_count')
             .in('user_id', siswaIds)
             .order('last_seen_at', { ascending: false })
-            .limit(2000)
+            .limit(500)
           if (!presenceError) {
             const cutoffMs = Date.now() - ONLINE_ACTIVE_SECONDS * 1000
             ;(presenceRows || []).forEach((row) => {
