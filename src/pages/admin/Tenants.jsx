@@ -2867,7 +2867,7 @@ const Tenants = () => {
                         <div>
                           <p className="text-xs font-semibold text-slate-700">Topic RFID per Alat</p>
                           <p className="mt-1 text-xs text-slate-500">
-                            `{device}` diganti otomatis dengan Device ID yang dipilih saat kode Arduino dibuat.
+                            <code className="rounded bg-white px-1 font-mono text-[11px] text-slate-700">{'{device}'}</code> diganti otomatis dengan Device ID yang dipilih saat kode Arduino dibuat.
                           </p>
                         </div>
                         <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600">
