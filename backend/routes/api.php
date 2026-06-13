@@ -221,6 +221,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'throttle:api'])->group(func
     Route::get('/students/{id}', [AdminController::class, 'studentDetail']);
     Route::get('/academic-summary', [AdminController::class, 'academicSummary']);
     Route::post('/academic-period/apply', [AdminController::class, 'applyAcademicPeriod']);
+    Route::post('/academic-period/restore-roster', [AdminController::class, 'restoreAcademicPeriodRoster']);
     Route::get('/student-options', [AdminController::class, 'studentOptions']);
     Route::get('/teachers', [AdminController::class, 'teachers']);
     Route::get('/certificates', [AdminController::class, 'certificates']);

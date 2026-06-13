@@ -147,6 +147,168 @@ class AcademicPeriodProfileRestoreTest extends TestCase
         ]);
     }
 
+    public function test_auto_rollover_promotes_smp_and_sma_students_without_reassigning_homeroom_teacher(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-06-13 09:00:00', 'Asia/Jakarta'));
+
+        $tenantId = $this->defaultTenantId();
+        $admin = $this->createUserWithProfile($tenantId, 'admin', 'admin-rollover-period@example.com', 'admin');
+        $teacher = $this->createUserWithProfile($tenantId, 'guru', 'teacher-rollover-period@example.com', 'guru');
+
+        $this->insertClass($tenantId, 'vii-a', 'VII A', 'VII', 'A', '2025', '2025/2026', 'Genap');
+        $this->insertClass($tenantId, 'viii-a', 'VIII A', 'VIII', 'A', '2024', '2025/2026', 'Genap');
+        $this->insertClass($tenantId, 'ix-a', 'IX A', 'IX', 'A', '2023', '2025/2026', 'Genap');
+        $this->insertClass($tenantId, 'x-a', 'X A', 'X', 'A', '2025', '2025/2026', 'Genap');
+        $this->insertClass($tenantId, 'xi-a', 'XI A', 'XI', 'A', '2024', '2025/2026', 'Genap');
+        $this->insertClass($tenantId, 'xii-a', 'XII A', 'XII', 'A', '2023', '2025/2026', 'Genap');
+        $this->insertClassStructure($tenantId, 'xi-a', $teacher->id, 'Pak Wali Tetap', 'old-ketua', 'Ketua Lama');
+        $this->insertSettingsPeriod($tenantId, '2025/2026', 'Genap');
+
+        $students = [
+            'vii' => $this->createUserWithProfile($tenantId, 'siswa', 'student-vii-rollover@example.com', 'vii-a', ['angkatan' => '2025']),
+            'viii' => $this->createUserWithProfile($tenantId, 'siswa', 'student-viii-rollover@example.com', 'viii-a', ['angkatan' => '2024']),
+            'ix' => $this->createUserWithProfile($tenantId, 'siswa', 'student-ix-rollover@example.com', 'ix-a', ['angkatan' => '2023']),
+            'x' => $this->createUserWithProfile($tenantId, 'siswa', 'student-x-rollover@example.com', 'x-a', ['angkatan' => '2025']),
+            'xi' => $this->createUserWithProfile($tenantId, 'siswa', 'student-xi-rollover@example.com', 'xi-a', ['angkatan' => '2024']),
+            'xii' => $this->createUserWithProfile($tenantId, 'siswa', 'student-xii-rollover@example.com', 'xii-a', ['angkatan' => '2023']),
+        ];
+
+        Sanctum::actingAs($admin);
+        $response = $this->postJson('/api/admin/academic-period/apply', $this->periodPayload('2026/2027', 'Ganjil', [
+            'auto_rollover' => true,
+            'calendar_confirmed' => true,
+        ]));
+
+        $response->assertOk()
+            ->assertJsonPath('data.rollover.promoted_students', 4)
+            ->assertJsonPath('data.rollover.alumni_students', 2)
+            ->assertJsonPath('data.rollover.skipped_students', 0);
+
+        $this->assertDatabaseHas('profiles', ['id' => $students['vii']->id, 'kelas' => 'viii-a', 'status' => 'active', 'angkatan' => '2025']);
+        $this->assertDatabaseHas('profiles', ['id' => $students['viii']->id, 'kelas' => 'ix-a', 'status' => 'active', 'angkatan' => '2024']);
+        $this->assertDatabaseHas('profiles', ['id' => $students['x']->id, 'kelas' => 'xi-a', 'status' => 'active', 'angkatan' => '2025']);
+        $this->assertDatabaseHas('profiles', ['id' => $students['xi']->id, 'kelas' => 'xii-a', 'status' => 'active', 'angkatan' => '2024']);
+        $this->assertDatabaseHas('profiles', ['id' => $students['ix']->id, 'kelas' => '', 'status' => 'alumni', 'tahun_lulus' => 2026]);
+        $this->assertDatabaseHas('profiles', ['id' => $students['xii']->id, 'kelas' => '', 'status' => 'alumni', 'tahun_lulus' => 2026]);
+        $this->assertNotNull(DB::table('profiles')->where('id', $students['ix']->id)->value('disabled_at'));
+        $this->assertNotNull(DB::table('profiles')->where('id', $students['xii']->id)->value('disabled_at'));
+
+        $this->assertDatabaseHas('kelas_struktur', [
+            'tenant_id' => $tenantId,
+            'kelas_id' => 'xi-a',
+            'wali_guru_id' => $teacher->id,
+            'wali_guru_nama' => 'Pak Wali Tetap',
+            'ketua_siswa_id' => null,
+            'ketua_siswa_nama' => null,
+        ]);
+        $this->assertDatabaseHas('student_class_histories', [
+            'tenant_id' => $tenantId,
+            'student_id' => $students['x']->id,
+            'tahun_ajaran' => '2026/2027',
+            'semester' => 'Ganjil',
+            'class_id' => 'xi-a',
+            'status' => 'active',
+            'source' => 'auto_rollover',
+        ]);
+    }
+
+    public function test_active_period_roster_repair_previews_and_restores_profiles(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-06-13 09:00:00', 'Asia/Jakarta'));
+
+        $tenantId = $this->defaultTenantId();
+        $admin = $this->createUserWithProfile($tenantId, 'admin', 'admin-roster-repair@example.com', 'admin');
+        $student = $this->createUserWithProfile($tenantId, 'siswa', 'student-roster-repair@example.com', 'xi-a', [
+            'angkatan' => '2024',
+        ]);
+        $outsidePeriodStudent = $this->createUserWithProfile($tenantId, 'siswa', 'student-outside-roster-repair@example.com', 'xi-a', [
+            'angkatan' => '2024',
+        ]);
+
+        $this->insertClass($tenantId, 'x-a', 'X A', 'X', 'A', '2025', '2025/2026', 'Genap');
+        $this->insertClass($tenantId, 'xi-a', 'XI A', 'XI', 'A', '2024', '2025/2026', 'Genap');
+        $this->insertSettingsPeriod($tenantId, '2025/2026', 'Genap');
+        $this->insertClassSnapshot($tenantId, $student->id, 'x-a', 'X A', 'X', 'A', '2025', '2025/2026', 'Genap', 'active');
+
+        Sanctum::actingAs($admin);
+        $preview = $this->postJson('/api/admin/academic-period/restore-roster', ['apply' => false]);
+
+        $preview->assertOk()
+            ->assertJsonPath('data.dry_run', true)
+            ->assertJsonPath('data.preview.snapshot_students', 1)
+            ->assertJsonPath('data.preview.would_restore', 1)
+            ->assertJsonPath('data.preview.would_mark_outside_period', 1);
+
+        $apply = $this->postJson('/api/admin/academic-period/restore-roster', ['apply' => true]);
+
+        $apply->assertOk()
+            ->assertJsonPath('data.period_snapshot_restored', true)
+            ->assertJsonPath('data.student_profile_restores', 1)
+            ->assertJsonPath('data.student_profiles_outside_period', 1);
+
+        $this->assertDatabaseHas('profiles', [
+            'id' => $student->id,
+            'tenant_id' => $tenantId,
+            'kelas' => 'x-a',
+            'status' => 'active',
+            'angkatan' => '2025',
+        ]);
+        $this->assertDatabaseHas('profiles', [
+            'id' => $outsidePeriodStudent->id,
+            'tenant_id' => $tenantId,
+            'kelas' => '',
+            'status' => 'nonaktif',
+        ]);
+        $this->assertDatabaseHas('student_class_histories', [
+            'tenant_id' => $tenantId,
+            'student_id' => $student->id,
+            'tahun_ajaran' => '2025/2026',
+            'semester' => 'Genap',
+            'class_id' => 'x-a',
+            'source' => 'period_snapshot_restore',
+        ]);
+    }
+
+    public function test_roster_repair_keeps_students_created_inside_period_after_base_snapshot(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-06-13 09:00:00', 'Asia/Jakarta'));
+
+        $tenantId = $this->defaultTenantId();
+        $admin = $this->createUserWithProfile($tenantId, 'admin', 'admin-roster-new-student@example.com', 'admin');
+        $originalStudent = $this->createUserWithProfile($tenantId, 'siswa', 'student-original-snapshot@example.com', 'x-a', [
+            'angkatan' => '2025',
+        ]);
+        $newStudent = $this->createUserWithProfile($tenantId, 'siswa', 'student-created-inside-period@example.com', 'x-b', [
+            'angkatan' => '2025',
+        ]);
+
+        $this->insertClass($tenantId, 'x-a', 'X A', 'X', 'A', '2025', '2025/2026', 'Genap');
+        $this->insertClass($tenantId, 'x-b', 'X B', 'X', 'B', '2025', '2025/2026', 'Genap');
+        $this->insertSettingsPeriod($tenantId, '2025/2026', 'Genap');
+        $this->insertClassSnapshot($tenantId, $originalStudent->id, 'x-a', 'X A', 'X', 'A', '2025', '2025/2026', 'Genap', 'active', 'before_period_change');
+        $this->insertClassSnapshot($tenantId, $newStudent->id, 'x-b', 'X B', 'X', 'B', '2025', '2025/2026', 'Genap', 'active', 'profile_create');
+
+        Sanctum::actingAs($admin);
+        $preview = $this->postJson('/api/admin/academic-period/restore-roster', ['apply' => false]);
+
+        $preview->assertOk()
+            ->assertJsonPath('data.preview.snapshot_students', 2)
+            ->assertJsonPath('data.preview.would_mark_outside_period', 0);
+
+        $apply = $this->postJson('/api/admin/academic-period/restore-roster', ['apply' => true]);
+
+        $apply->assertOk()
+            ->assertJsonPath('data.student_profiles_outside_period', 0);
+
+        $this->assertDatabaseHas('profiles', [
+            'id' => $newStudent->id,
+            'tenant_id' => $tenantId,
+            'kelas' => 'x-b',
+            'status' => 'active',
+            'angkatan' => '2025',
+        ]);
+    }
+
     private function defaultTenantId(): string
     {
         $tenantId = (string) DB::table('tenants')
@@ -202,6 +364,26 @@ class AcademicPeriodProfileRestoreTest extends TestCase
             'tahun_ajaran' => $year,
             'semester' => $semester,
             'is_active' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
+
+    private function insertClassStructure(
+        string $tenantId,
+        string $classId,
+        string $teacherId,
+        string $teacherName,
+        ?string $leaderId = null,
+        ?string $leaderName = null
+    ): void {
+        DB::table('kelas_struktur')->insert([
+            'kelas_id' => $classId,
+            'tenant_id' => $tenantId,
+            'wali_guru_id' => $teacherId,
+            'wali_guru_nama' => $teacherName,
+            'ketua_siswa_id' => $leaderId,
+            'ketua_siswa_nama' => $leaderName,
             'created_at' => now(),
             'updated_at' => now(),
         ]);

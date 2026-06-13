@@ -581,6 +581,7 @@ export default function APengaturan() {
   const [periodForm, setPeriodForm] = useState(() => resolvePeriodForm())
   const [persistedPeriodForm, setPersistedPeriodForm] = useState(() => resolvePeriodForm())
   const [savingPeriod, setSavingPeriod] = useState(false)
+  const [restoringRoster, setRestoringRoster] = useState(false)
   const [carryEskulMembers, setCarryEskulMembers] = useState(false)
 
   const autoSaveTimerRef = useRef(null)
@@ -1199,6 +1200,7 @@ export default function APengaturan() {
       queryClient.invalidateQueries({ queryKey: SETTINGS_QUERY_KEY })
       queryClient.invalidateQueries({ queryKey: ['admin', 'academic-summary'] })
       queryClient.invalidateQueries({ queryKey: ['admin', 'student-options'] })
+      queryClient.invalidateQueries({ queryKey: ['admin', 'students'] })
       const rollover = data?.rollover
       const rolloverText = rollover
         ? ` Siswa naik: ${rollover.promoted_students || 0}, tidak naik: ${rollover.retained_students || 0}, alumni: ${rollover.alumni_students || 0}.`
@@ -1217,6 +1219,50 @@ export default function APengaturan() {
       pushToast('error', error?.message || 'Gagal menyimpan kalender akademik')
     } finally {
       setSavingPeriod(false)
+    }
+  }
+
+  async function restoreActivePeriodRoster() {
+    if (!isAuthorized || restoringRoster) return
+
+    setRestoringRoster(true)
+    try {
+      const previewResult = await supabase.admin.restoreAcademicPeriodRoster({ apply: false })
+      if (previewResult.error) throw previewResult.error
+
+      const preview = previewResult.data?.preview || {}
+      const period = previewResult.data?.period || {}
+      const confirmed = await requestConfirmation({
+        title: 'Pulihkan roster siswa periode aktif?',
+        message: `Roster siswa akan disamakan dengan snapshot ${period.tahun_ajaran || activeAcademicPeriod.tahunAjaran} ${period.semester || activeAcademicPeriod.semester || ''}.`,
+        confirmText: 'Ya, pulihkan roster',
+        cancelText: 'Batal',
+        tone: 'warning',
+        details: [
+          `Siswa dari snapshot: ${preview.snapshot_students || 0}.`,
+          `Profil yang akan diselaraskan: ${preview.would_restore || 0}.`,
+          `Siswa aktif di luar snapshot yang akan dinonaktifkan: ${preview.would_mark_outside_period || 0}.`,
+          'Jadwal, guru pengampu, wali kelas, tugas, quiz, absensi, dan nilai lama tidak ditimpa.'
+        ]
+      })
+      if (!confirmed) return
+
+      const applyResult = await supabase.admin.restoreAcademicPeriodRoster({ apply: true })
+      if (applyResult.error) throw applyResult.error
+
+      const data = applyResult.data || {}
+      queryClient.invalidateQueries({ queryKey: ['admin', 'academic-summary'] })
+      queryClient.invalidateQueries({ queryKey: ['admin', 'student-options'] })
+      queryClient.invalidateQueries({ queryKey: ['admin', 'students'] })
+      pushToast(
+        'success',
+        `Roster periode aktif dipulihkan. Siswa diselaraskan: ${data.student_profile_restores || 0}, di luar periode: ${data.student_profiles_outside_period || 0}.`,
+        { title: 'Roster siswa sinkron' }
+      )
+    } catch (error) {
+      pushToast('error', error?.message || 'Gagal memulihkan roster siswa periode aktif')
+    } finally {
+      setRestoringRoster(false)
     }
   }
 
@@ -2150,6 +2196,14 @@ export default function APengaturan() {
                     className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {savingPeriod ? 'Menyimpan...' : 'Simpan Periode'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={restoreActivePeriodRoster}
+                    disabled={savingPeriod || restoringRoster}
+                    className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-bold text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {restoringRoster ? 'Memulihkan...' : 'Pulihkan Roster Siswa'}
                   </button>
                 </div>
               </div>

@@ -1019,6 +1019,90 @@ class AdminController extends ApiController
         return response()->json(['data' => $result]);
     }
 
+    public function restoreAcademicPeriodRoster(Request $request)
+    {
+        if ($this->isAdmin($request) === false) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->tenantId($request);
+        if ($tenantId === null || $tenantId === '') {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        $settings = $this->firstTenantRow('settings', $tenantId);
+        if (! $settings) {
+            return $this->deny('Pengaturan akademik belum tersedia.', 422);
+        }
+
+        $period = AcademicPeriod::fromSettings($settings);
+        if (! $this->hasStudentClassSnapshotsForPeriod($tenantId, $period)) {
+            return $this->deny(
+                'Snapshot roster siswa untuk periode '.$period['tahun_ajaran'].' belum tersedia. Tidak ada data aman untuk dipulihkan.',
+                422
+            );
+        }
+
+        $apply = filter_var($request->input('apply', false), FILTER_VALIDATE_BOOLEAN);
+        $preview = $this->previewStudentProfilesFromPeriodSnapshot($tenantId, $period);
+
+        if ($apply === false) {
+            return response()->json([
+                'data' => [
+                    'dry_run' => true,
+                    'period' => [
+                        'tahun_ajaran' => $period['tahun_ajaran'],
+                        'semester' => $period['semester'],
+                    ],
+                    'preview' => $preview,
+                ],
+            ]);
+        }
+
+        $result = DB::transaction(function () use ($request, $tenantId, $period, $preview) {
+            $beforeSnapshots = $this->snapshotStudentClassHistoriesForPeriod(
+                $tenantId,
+                $period,
+                'before_roster_repair'
+            );
+            $classesSynced = $this->syncClassPeriodMetadata($tenantId, $period);
+            $restoreResult = $this->restoreStudentProfilesFromPeriodSnapshot($tenantId, $period);
+            $afterSnapshots = $this->snapshotStudentClassHistoriesForPeriod(
+                $tenantId,
+                $period,
+                'period_snapshot_restore'
+            );
+
+            $payload = [
+                'period' => [
+                    'tahun_ajaran' => $period['tahun_ajaran'],
+                    'semester' => $period['semester'],
+                ],
+                'preview' => $preview,
+                'period_snapshot_restored' => true,
+                'student_profile_restores' => (int) ($restoreResult['restored'] ?? 0),
+                'student_profiles_outside_period' => (int) ($restoreResult['outside_period'] ?? 0),
+                'before_class_history_snapshots' => $beforeSnapshots,
+                'class_history_snapshots' => $afterSnapshots,
+                'classes_synced' => $classesSynced,
+            ];
+
+            $this->logAudit(
+                $request,
+                'student_class_histories',
+                (string) ($period['tahun_ajaran'] ?? 'active-period'),
+                'UPDATE',
+                ['preview' => $preview],
+                $payload,
+                $tenantId
+            );
+
+            return $payload;
+        });
+
+        return response()->json(['data' => $result]);
+    }
+
     private function academicPeriodConfirmationRequired(
         string $message,
         array $serverPeriod,
@@ -3000,10 +3084,87 @@ class AdminController extends ApiController
             ->whereNotNull('student_id');
 
         if (Schema::hasColumn('student_class_histories', 'source')) {
-            $query->whereIn('source', $this->restorableClassSnapshotSources());
+            $query->whereIn('source', $this->authoritativeClassSnapshotSources());
         }
 
         return $query->exists();
+    }
+
+    private function previewStudentProfilesFromPeriodSnapshot(string $tenantId, array $period): array
+    {
+        $year = AcademicPeriod::normalizeAcademicYear($period['tahun_ajaran'] ?? null);
+        if (! $year || ! Schema::hasTable('profiles')) {
+            return [
+                'snapshot_students' => 0,
+                'active_profile_students' => 0,
+                'would_restore' => 0,
+                'would_mark_outside_period' => 0,
+                'missing_profiles' => 0,
+                'active_snapshots' => 0,
+                'alumni_snapshots' => 0,
+                'nonactive_snapshots' => 0,
+            ];
+        }
+
+        $snapshots = $this->latestStudentSnapshotRowsForPeriod($tenantId, $period, true);
+        $snapshotStudentIds = array_keys($snapshots);
+        $profiles = [];
+        foreach (array_chunk($snapshotStudentIds, 500) as $chunk) {
+            foreach (DB::table('profiles')
+                ->where('tenant_id', $tenantId)
+                ->where('role', 'siswa')
+                ->whereIn('id', $chunk)
+                ->select($this->existingColumns('profiles', [
+                    'id', 'kelas', 'status', 'angkatan', 'disabled_at', 'alasan_nonaktif', 'tahun_lulus',
+                ]))
+                ->get() as $profile) {
+                $profiles[(string) ($profile->id ?? '')] = $profile;
+            }
+        }
+
+        $wouldRestore = 0;
+        $missingProfiles = 0;
+        $statusCounts = [
+            'active_snapshots' => 0,
+            'alumni_snapshots' => 0,
+            'nonactive_snapshots' => 0,
+        ];
+
+        foreach ($snapshots as $studentId => $snapshot) {
+            $status = $this->statusFromStudentClassSnapshot($snapshot);
+            if ($status === 'active') {
+                $statusCounts['active_snapshots'] += 1;
+            } elseif ($status === 'alumni') {
+                $statusCounts['alumni_snapshots'] += 1;
+            } else {
+                $statusCounts['nonactive_snapshots'] += 1;
+            }
+
+            $profile = $profiles[$studentId] ?? null;
+            if (! $profile) {
+                $missingProfiles += 1;
+
+                continue;
+            }
+
+            if ($this->studentProfileNeedsSnapshotRestore($profile, $snapshot, $year)) {
+                $wouldRestore += 1;
+            }
+        }
+
+        $activeProfileStudents = (int) DB::table('profiles')
+            ->where('tenant_id', $tenantId)
+            ->where('role', 'siswa')
+            ->whereRaw('lower(coalesce(status, \'active\')) = ?', ['active'])
+            ->count();
+
+        return array_merge([
+            'snapshot_students' => count($snapshots),
+            'active_profile_students' => $activeProfileStudents,
+            'would_restore' => $wouldRestore,
+            'would_mark_outside_period' => $this->countStudentsMissingFromPeriodSnapshot($tenantId, $snapshotStudentIds),
+            'missing_profiles' => $missingProfiles,
+        ], $statusCounts);
     }
 
     private function restoreStudentProfilesFromPeriodSnapshot(string $tenantId, array $period): array
@@ -3022,25 +3183,70 @@ class AdminController extends ApiController
             return ['restored' => 0, 'outside_period' => 0];
         }
 
+        $snapshots = $this->latestStudentSnapshotRowsForPeriod($tenantId, $period, true);
+
+        if ($snapshots === []) {
+            return ['restored' => 0, 'outside_period' => 0];
+        }
+
+        $now = now();
+        $restored = 0;
+        foreach (array_chunk($snapshots, 300, true) as $chunk) {
+            foreach ($chunk as $studentId => $snapshot) {
+                $payload = $this->studentProfilePayloadFromSnapshot($snapshot, $year, $now);
+                if ($payload === []) {
+                    continue;
+                }
+
+                $affected = DB::table('profiles')
+                    ->where('tenant_id', $tenantId)
+                    ->where('role', 'siswa')
+                    ->where('id', $studentId)
+                    ->update($payload);
+                $restored += (int) $affected;
+            }
+        }
+
+        $outsidePeriod = $this->markStudentsMissingFromPeriodSnapshot($tenantId, $year, array_keys($snapshots), $now);
+
+        return ['restored' => $restored, 'outside_period' => $outsidePeriod];
+    }
+
+    private function latestStudentSnapshotRowsForPeriod(string $tenantId, array $period, bool $includeProfileEvents): array
+    {
+        if (
+            ! Schema::hasTable('student_class_histories')
+            || ! Schema::hasColumn('student_class_histories', 'student_id')
+            || ! Schema::hasColumn('student_class_histories', 'tahun_ajaran')
+        ) {
+            return [];
+        }
+
+        $year = AcademicPeriod::normalizeAcademicYear($period['tahun_ajaran'] ?? null);
+        if (! $year) {
+            return [];
+        }
+
         $semester = AcademicPeriod::normalizeSemester($period['semester'] ?? null);
         $columns = $this->existingColumns('student_class_histories', [
             'student_id', 'class_id', 'class_name', 'grade', 'suffix', 'angkatan',
-            'tahun_ajaran', 'semester', 'status', 'valid_from', 'created_at',
+            'tahun_ajaran', 'semester', 'status', 'source', 'valid_from', 'created_at',
         ]);
         $query = $this->tenantQuery('student_class_histories', $tenantId)
             ->where('tahun_ajaran', $year);
         if (Schema::hasColumn('student_class_histories', 'source')) {
-            $query->whereIn('source', $this->restorableClassSnapshotSources());
+            $query->whereIn(
+                'source',
+                $includeProfileEvents
+                    ? $this->studentRosterSnapshotSources()
+                    : $this->authoritativeClassSnapshotSources()
+            );
         }
 
         $rows = $query->select($columns)
             ->orderBy('student_id')
             ->orderByDesc(Schema::hasColumn('student_class_histories', 'valid_from') ? 'valid_from' : 'created_at')
             ->get();
-
-        if ($rows->isEmpty()) {
-            return ['restored' => 0, 'outside_period' => 0];
-        }
 
         $snapshots = [];
         foreach ($rows as $row) {
@@ -3066,60 +3272,70 @@ class AdminController extends ApiController
             }
         }
 
-        if ($snapshots === []) {
-            return ['restored' => 0, 'outside_period' => 0];
+        return array_map(fn ($snapshot) => $snapshot['row'], $snapshots);
+    }
+
+    private function studentProfilePayloadFromSnapshot(object $row, string $year, $timestamp): array
+    {
+        $classId = trim((string) ($row->class_id ?? ''));
+        $status = $this->statusFromStudentClassSnapshot($row);
+        $payload = [
+            'kelas' => $classId,
+            'status' => $status,
+            'updated_at' => $timestamp,
+        ];
+
+        $angkatan = trim((string) ($row->angkatan ?? ''));
+        if ($angkatan !== '') {
+            $payload['angkatan'] = $angkatan;
         }
 
-        $now = now();
-        $restored = 0;
-        $graduationYear = (int) substr($year, 0, 4);
-        foreach (array_chunk($snapshots, 300, true) as $chunk) {
-            foreach ($chunk as $studentId => $snapshot) {
-                $row = $snapshot['row'];
-                $classId = trim((string) ($row->class_id ?? ''));
-                $status = strtolower(trim((string) ($row->status ?? '')));
-                if (! in_array($status, ['active', 'nonaktif', 'mutasi', 'alumni'], true)) {
-                    $status = $classId !== '' ? 'active' : 'alumni';
-                }
+        if ($status === 'active') {
+            $payload['disabled_at'] = null;
+            $payload['alasan_nonaktif'] = null;
+            $payload['tahun_lulus'] = null;
+        } elseif ($status === 'alumni') {
+            $payload['kelas'] = '';
+            $payload['disabled_at'] = $timestamp;
+            $payload['tahun_lulus'] = (int) substr($year, 0, 4);
+            $payload['alasan_nonaktif'] = 'Status alumni mengikuti snapshot periode '.$year.'.';
+        }
 
-                $payload = [
-                    'kelas' => $classId,
-                    'status' => $status,
-                    'updated_at' => $now,
-                ];
-                $angkatan = trim((string) ($row->angkatan ?? ''));
-                if ($angkatan !== '') {
-                    $payload['angkatan'] = $angkatan;
-                }
+        return $this->filterExistingPayload('profiles', $payload);
+    }
 
-                if ($status === 'active') {
-                    $payload['disabled_at'] = null;
-                    $payload['alasan_nonaktif'] = null;
-                    $payload['tahun_lulus'] = null;
-                } elseif ($status === 'alumni') {
-                    $payload['kelas'] = '';
-                    $payload['disabled_at'] = $now;
-                    $payload['tahun_lulus'] = $graduationYear;
-                    $payload['alasan_nonaktif'] = 'Status alumni mengikuti snapshot periode '.$year.'.';
-                }
+    private function statusFromStudentClassSnapshot(object $row): string
+    {
+        $classId = trim((string) ($row->class_id ?? ''));
+        $status = strtolower(trim((string) ($row->status ?? '')));
+        if (! in_array($status, ['active', 'nonaktif', 'mutasi', 'alumni'], true)) {
+            $status = $classId !== '' ? 'active' : 'alumni';
+        }
 
-                $payload = $this->filterExistingPayload('profiles', $payload);
-                if ($payload === []) {
-                    continue;
-                }
+        return $status;
+    }
 
-                $affected = DB::table('profiles')
-                    ->where('tenant_id', $tenantId)
-                    ->where('role', 'siswa')
-                    ->where('id', $studentId)
-                    ->update($payload);
-                $restored += (int) $affected;
+    private function studentProfileNeedsSnapshotRestore(object $profile, object $snapshot, string $year): bool
+    {
+        $expected = $this->studentProfilePayloadFromSnapshot($snapshot, $year, now());
+        foreach (['kelas', 'status', 'angkatan', 'tahun_lulus'] as $column) {
+            if (! array_key_exists($column, $expected)) {
+                continue;
+            }
+            if ((string) ($profile->{$column} ?? '') !== (string) ($expected[$column] ?? '')) {
+                return true;
             }
         }
 
-        $outsidePeriod = $this->markStudentsMissingFromPeriodSnapshot($tenantId, $year, array_keys($snapshots), $now);
+        $status = (string) ($expected['status'] ?? '');
+        if ($status === 'active' && ($profile->disabled_at ?? null) !== null) {
+            return true;
+        }
+        if ($status === 'alumni' && ($profile->disabled_at ?? null) === null) {
+            return true;
+        }
 
-        return ['restored' => $restored, 'outside_period' => $outsidePeriod];
+        return false;
     }
 
     private function markStudentsMissingFromPeriodSnapshot(string $tenantId, string $year, array $snapshotStudentIds, $timestamp): int
@@ -3148,7 +3364,31 @@ class AdminController extends ApiController
             return 0;
         }
 
-        $query = DB::table('profiles')
+        $query = $this->studentsMissingFromPeriodSnapshotQuery($tenantId, $snapshotStudentIds);
+
+        return (int) $query->update($payload);
+    }
+
+    private function countStudentsMissingFromPeriodSnapshot(string $tenantId, array $snapshotStudentIds): int
+    {
+        if (! Schema::hasTable('profiles')) {
+            return 0;
+        }
+
+        $snapshotStudentIds = array_values(array_unique(array_filter(
+            array_map(fn ($id) => trim((string) $id), $snapshotStudentIds),
+            fn ($id) => $id !== ''
+        )));
+        if ($snapshotStudentIds === []) {
+            return 0;
+        }
+
+        return (int) $this->studentsMissingFromPeriodSnapshotQuery($tenantId, $snapshotStudentIds)->count();
+    }
+
+    private function studentsMissingFromPeriodSnapshotQuery(string $tenantId, array $snapshotStudentIds)
+    {
+        return DB::table('profiles')
             ->where('tenant_id', $tenantId)
             ->where('role', 'siswa')
             ->whereNotIn('id', $snapshotStudentIds)
@@ -3158,11 +3398,9 @@ class AdminController extends ApiController
                         $classQuery->whereNotNull('kelas')->where('kelas', '!=', '');
                     });
             });
-
-        return (int) $query->update($payload);
     }
 
-    private function restorableClassSnapshotSources(): array
+    private function authoritativeClassSnapshotSources(): array
     {
         return [
             'backfill',
@@ -3172,6 +3410,14 @@ class AdminController extends ApiController
             'manual_rollover_completed',
             'period_snapshot_restore',
         ];
+    }
+
+    private function studentRosterSnapshotSources(): array
+    {
+        return array_values(array_unique(array_merge(
+            $this->authoritativeClassSnapshotSources(),
+            ['profile_create', 'profile_update']
+        )));
     }
 
     private function snapshotStudentClassHistoriesForPeriod(string $tenantId, array $period, string $source): int

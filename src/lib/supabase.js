@@ -2690,6 +2690,15 @@ const auth = {
       if (!res.error) invalidateDbSelectCache()
       return { data: res.raw?.data ?? res.data, error: res.error, raw: res.raw }
     },
+    async restoreAcademicPeriodRoster(payload = {}) {
+      const res = await apiFetch('/api/admin/academic-period/restore-roster', {
+        method: 'POST',
+        body: payload,
+        timeoutMs: 45000
+      })
+      if (!res.error && payload?.apply) invalidateDbSelectCache()
+      return { data: res.raw?.data ?? res.data, error: res.error, raw: res.raw }
+    },
     async studentOptions(params = {}) {
       const res = await apiFetch(`/api/admin/student-options${buildQueryString(params)}`, {
         method: 'GET',
