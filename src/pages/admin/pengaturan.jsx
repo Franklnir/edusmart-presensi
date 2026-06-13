@@ -33,6 +33,7 @@ import { completeGoogleLinkOAuthFlow } from '../../utils/googleLinking'
 import {
   getCurrentAcademicPeriod,
   generateAcademicYearOptions,
+  MONTH_NAMES_ID,
   normalizeAcademicYear,
   normalizeSemester,
   resolveAcademicPeriod,
@@ -2046,6 +2047,25 @@ export default function APengaturan() {
 
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   {semesterPeriodCards.map((item) => {
+                    const monthSelectOptions = (() => {
+                      const minParts = (item.min || '').split('-')
+                      const maxParts = (item.max || '').split('-')
+                      const minYear = Number(minParts[0]) || 2025
+                      const minMonth = Number(minParts[1]) || 1
+                      const maxYear = Number(maxParts[0]) || minYear
+                      const maxMonth = Number(maxParts[1]) || 12
+                      const options = []
+                      let year = minYear
+                      let month = minMonth
+                      while (year < maxYear || (year === maxYear && month <= maxMonth)) {
+                        const value = `${year}-${String(month).padStart(2, '0')}`
+                        const label = `${MONTH_NAMES_ID[month]} ${year}`
+                        options.push({ value, label })
+                        month++
+                        if (month > 12) { month = 1; year++ }
+                      }
+                      return options
+                    })()
                     return (
                       <div key={item.key} className="rounded-xl border border-slate-200 bg-white p-3 text-slate-700">
                         <div className="mb-3 flex items-center justify-between gap-2">
@@ -2054,27 +2074,37 @@ export default function APengaturan() {
                         <div className="grid grid-cols-2 gap-2">
                           <div>
                             <label className="block text-[11px] font-semibold text-slate-500 mb-1">Mulai</label>
-                            <input
-                              type="month"
-                              name={item.startName}
-                              value={toMonthInputValue(periodForm[item.startName])}
-                              min={item.min}
-                              max={item.max}
-                              onChange={handlePeriodChange}
-                              className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm font-semibold text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
-                            />
+                            <div className="relative">
+                              <select
+                                name={item.startName}
+                                value={toMonthInputValue(periodForm[item.startName])}
+                                onChange={handlePeriodChange}
+                                className="w-full appearance-none rounded-lg border border-slate-300 bg-white pl-9 pr-3 py-2 text-sm font-semibold text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200 cursor-pointer"
+                              >
+                                <option value="">— Pilih bulan —</option>
+                                {monthSelectOptions.map((opt) => (
+                                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                ))}
+                              </select>
+                              <CalendarDays className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                            </div>
                           </div>
                           <div>
                             <label className="block text-[11px] font-semibold text-slate-500 mb-1">Selesai</label>
-                            <input
-                              type="month"
-                              name={item.endName}
-                              value={toMonthInputValue(periodForm[item.endName])}
-                              min={item.min}
-                              max={item.max}
-                              onChange={handlePeriodChange}
-                              className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm font-semibold text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
-                            />
+                            <div className="relative">
+                              <select
+                                name={item.endName}
+                                value={toMonthInputValue(periodForm[item.endName])}
+                                onChange={handlePeriodChange}
+                                className="w-full appearance-none rounded-lg border border-slate-300 bg-white pl-9 pr-3 py-2 text-sm font-semibold text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200 cursor-pointer"
+                              >
+                                <option value="">— Pilih bulan —</option>
+                                {monthSelectOptions.map((opt) => (
+                                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                ))}
+                              </select>
+                              <CalendarDays className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                            </div>
                           </div>
                         </div>
                       </div>
