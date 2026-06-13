@@ -78,7 +78,8 @@ class RfidDeviceService
         string $deviceId,
         ?string $name = null,
         ?string $transport = 'mqtt',
-        ?string $plainSecret = null
+        ?string $plainSecret = null,
+        array $metadata = []
     ): array {
         $tenant = $this->resolveTenantBySlug($tenantSlug);
         if (! $tenant) {
@@ -117,6 +118,10 @@ class RfidDeviceService
 
         $transport = $this->normalizeTransport($transport);
 
+        $deviceMetadata = $this->mergeMetadata([
+            'created_via' => 'super_admin',
+        ], $metadata);
+
         DB::table('rfid_devices')->insert([
             'id' => (string) Str::uuid(),
             'tenant_id' => (string) $tenant->id,
@@ -126,9 +131,7 @@ class RfidDeviceService
             'status' => 'active',
             'transport' => $transport,
             'fallback_http_enabled' => $transport !== 'mqtt',
-            'metadata' => json_encode([
-                'created_via' => 'artisan',
-            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            'metadata' => json_encode($deviceMetadata, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             'created_at' => now(),
             'updated_at' => now(),
         ]);
@@ -217,6 +220,7 @@ class RfidDeviceService
             'devices.last_seen_at',
             'devices.last_transport',
             'devices.last_ip',
+            'devices.created_at',
             'tenants.slug as tenant_slug',
         ]);
 
@@ -242,6 +246,8 @@ class RfidDeviceService
             }
 
             return [
+                'id' => (string) $row->id,
+                'tenant_id' => (string) ($row->tenant_id ?? ''),
                 'tenant_slug' => $this->normalizeTenantSlug($row->tenant_slug ?? ''),
                 'device_id' => $deviceId,
                 'name' => $this->nullableString($row->name ?? null),
@@ -256,9 +262,15 @@ class RfidDeviceService
                 'last_scan_at' => $metadata['last_scan_at'] ?? ($stats['last_scan_at'] ?? null),
                 'last_error_at' => $stats['last_error_at'] ?? null,
                 'error_count' => (int) ($stats['error_count'] ?? 0),
+                'template_managed' => (bool) ($metadata['template_managed'] ?? false),
+                'template_scope' => $this->nullableString($metadata['template_scope'] ?? null),
+                'board_type' => $this->nullableString($metadata['board_type'] ?? null),
+                'location' => $this->nullableString($metadata['location'] ?? null),
+                'reader_model' => $this->nullableString($metadata['reader_model'] ?? null),
                 'firmware_version' => $this->nullableString($metadata['firmware_version'] ?? $metadata['firmware'] ?? null),
                 'wifi_rssi' => $metadata['wifi_rssi'] ?? $metadata['rssi'] ?? null,
                 'free_heap' => $metadata['free_heap'] ?? $metadata['heap'] ?? null,
+                'created_at' => $row->created_at ? (string) $row->created_at : null,
                 'metadata' => [
                     'last_mqtt_topic' => $metadata['last_mqtt_topic'] ?? null,
                     'battery' => $metadata['battery'] ?? null,
@@ -266,6 +278,51 @@ class RfidDeviceService
                 ],
             ];
         })->values()->all();
+    }
+
+    public function deleteTenantDevice(string $tenantId, string $deviceIdOrUuid): array
+    {
+        $tenantId = trim($tenantId);
+        $deviceKey = trim($deviceIdOrUuid);
+
+        if ($tenantId === '' || $deviceKey === '') {
+            return [
+                'success' => false,
+                'message' => 'Tenant atau device RFID tidak valid',
+            ];
+        }
+
+        $device = DB::table('rfid_devices')
+            ->where('tenant_id', $tenantId)
+            ->where(function ($query) use ($deviceKey) {
+                $query->where('id', $deviceKey)
+                    ->orWhereRaw('lower(device_id) = ?', [Str::lower($deviceKey)]);
+            })
+            ->first(['id', 'device_id', 'metadata']);
+
+        if (! $device) {
+            return [
+                'success' => false,
+                'message' => 'Device RFID tidak ditemukan pada tenant ini',
+            ];
+        }
+
+        $metadata = $this->decodeMetadata($device->metadata ?? null);
+        if ((bool) ($metadata['template_managed'] ?? false)) {
+            return [
+                'success' => false,
+                'message' => 'Alat template utama dikelola otomatis. Tambahkan alat operasional baru, lalu hapus alat operasional dari daftar.',
+            ];
+        }
+
+        DB::table('rfid_devices')->where('id', $device->id)->delete();
+        $this->forgetDeviceContext((string) $device->device_id);
+
+        return [
+            'success' => true,
+            'message' => 'Device RFID berhasil dihapus',
+            'device_id' => (string) $device->device_id,
+        ];
     }
 
     private function deviceEventStats(array $deviceIds, string $tenantSlug = ''): array
@@ -601,6 +658,8 @@ class RfidDeviceService
             'template_device_id' => $this->templateDeviceId($tenantSlug),
             'template_transport' => 'mqtt',
             'template_http_fallback' => false,
+            'board_type' => $existing['board_type'] ?? 'esp8266',
+            'reader_model' => $existing['reader_model'] ?? 'pn532-spi',
             'template_generated_at' => now()->toIso8601String(),
             'template_secret_ciphertext' => $ciphertext,
         ]);

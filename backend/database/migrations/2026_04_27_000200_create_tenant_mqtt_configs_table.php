@@ -27,9 +27,9 @@ return new class extends Migration
             $table->boolean('tls_allow_self_signed')->default(false);
             $table->unsignedTinyInteger('qos')->default(1);
             $table->string('client_id_prefix', 120)->default('edusmart-rfid-bridge');
-            $table->string('scan_topic_template', 191)->default('edusmart/{tenant}/rfid/scan');
-            $table->string('response_topic_template', 191)->default('edusmart/{tenant}/rfid/response');
-            $table->string('mode_topic_template', 191)->default('edusmart/{tenant}/rfid/mode');
+            $table->string('scan_topic_template', 191)->default('edusmart/{tenant}/rfid/{device}/scan');
+            $table->string('response_topic_template', 191)->default('edusmart/{tenant}/rfid/{device}/response');
+            $table->string('mode_topic_template', 191)->default('edusmart/{tenant}/rfid/{device}/mode');
             $table->unsignedInteger('connect_timeout')->default(20);
             $table->unsignedInteger('socket_timeout')->default(5);
             $table->unsignedInteger('keep_alive')->default(20);

@@ -277,9 +277,9 @@ class TenantDomainManagementTest extends TestCase
         config()->set('rfid.mqtt.port', 8883);
         config()->set('rfid.mqtt.username', 'mqtt-user');
         config()->set('rfid.mqtt.password', 'mqtt-pass');
-        config()->set('rfid.mqtt.scan_topic_template', 'edusmart/{tenant}/rfid/scan');
-        config()->set('rfid.mqtt.response_topic_template', 'edusmart/{tenant}/rfid/response');
-        config()->set('rfid.mqtt.mode_topic_template', 'edusmart/{tenant}/rfid/mode');
+        config()->set('rfid.mqtt.scan_topic_template', 'edusmart/{tenant}/rfid/{device}/scan');
+        config()->set('rfid.mqtt.response_topic_template', 'edusmart/{tenant}/rfid/{device}/response');
+        config()->set('rfid.mqtt.mode_topic_template', 'edusmart/{tenant}/rfid/{device}/mode');
 
         $superAdmin = $this->createSuperAdmin();
         $tenantId = $this->createTenant('SMA Bali', 'bali');
@@ -296,7 +296,7 @@ class TenantDomainManagementTest extends TestCase
             ->assertJsonPath('data.rfid_template.device_id', 'rfid-template-bali-01')
             ->assertJsonPath('data.rfid_template.api_base_url', 'https://edusmart.test')
             ->assertJsonPath('data.rfid_template.mqtt.host', 'mqtt.edusmart.test')
-            ->assertJsonPath('data.rfid_template.topics.scan', 'edusmart/bali/rfid/scan');
+            ->assertJsonPath('data.rfid_template.topics.scan', 'edusmart/bali/rfid/rfid-template-bali-01/scan');
 
         $secret = data_get($response->json(), 'data.rfid_template.device_secret');
         $this->assertNotEmpty($secret);
@@ -428,7 +428,8 @@ class TenantDomainManagementTest extends TestCase
             ->assertJsonPath('data.rfid_template.mqtt.managed_by_platform', true)
             ->assertJsonPath('data.rfid_template.mqtt.host', 'mqtt.edusmart.test')
             ->assertJsonPath('data.rfid_template.mqtt.use_tls', true)
-            ->assertJsonPath('data.rfid_template.topics.scan', 'edusmart/bali/rfid/{device}/scan')
+            ->assertJsonPath('data.rfid_template.topic_templates.scan', 'edusmart/{tenant}/rfid/{device}/scan')
+            ->assertJsonPath('data.rfid_template.topics.scan', 'edusmart/bali/rfid/rfid-template-bali-01/scan')
             ->assertJsonPath('data.mosquitto_sync.synced', true);
 
         $devicePassword = (string) data_get($response->json(), 'data.rfid_template.mqtt.password');
@@ -507,7 +508,8 @@ class TenantDomainManagementTest extends TestCase
             ->assertJsonPath('data.rfid_mqtt_config.username', 'edusmart_bali_rfid')
             ->assertJsonPath('data.rfid_template.available', true)
             ->assertJsonPath('data.rfid_template.mqtt.host', 'mqtt.edusmart.test')
-            ->assertJsonPath('data.rfid_template.topics.scan', 'edusmart/bali/rfid/{device}/scan');
+            ->assertJsonPath('data.rfid_template.topic_templates.scan', 'edusmart/{tenant}/rfid/{device}/scan')
+            ->assertJsonPath('data.rfid_template.topics.scan', 'edusmart/bali/rfid/rfid-template-bali-01/scan');
 
         $this->assertNotSame(
             'old-cloud-secret',
@@ -521,6 +523,51 @@ class TenantDomainManagementTest extends TestCase
             'host' => 'mqtt.edusmart.test',
             'runtime_host' => 'mosquitto',
             'username' => 'edusmart_bali_rfid',
+        ]);
+    }
+
+    public function test_super_admin_can_manage_tenant_rfid_devices(): void
+    {
+        config()->set('tenancy.root_domain', 'edusmart.test');
+        config()->set('tenancy.admin_subdomain', 'admin');
+        config()->set('tenancy.admin_hosts', []);
+        config()->set('tenancy.allow_root_for_super_admin', false);
+
+        $superAdmin = $this->createSuperAdmin();
+        $tenantId = $this->createTenant('SMA Bali', 'bali');
+
+        $this
+            ->actingAs($superAdmin)
+            ->postJson("http://admin.edusmart.test/api/super/tenants/{$tenantId}/rfid-devices", [
+                'device_id' => 'esp32-gerbang-utara',
+                'name' => 'Gerbang Utara',
+                'transport' => 'mqtt',
+                'board_type' => 'esp32',
+                'location' => 'Gerbang utara',
+                'reader_model' => 'pn532-spi',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.data.device_id', 'esp32-gerbang-utara');
+
+        $this
+            ->actingAs($superAdmin)
+            ->getJson("http://admin.edusmart.test/api/super/tenants/{$tenantId}/rfid-devices")
+            ->assertOk()
+            ->assertJsonPath('data.summary.total', 1)
+            ->assertJsonPath('data.devices.0.device_id', 'esp32-gerbang-utara')
+            ->assertJsonPath('data.devices.0.board_type', 'esp32')
+            ->assertJsonPath('data.devices.0.location', 'Gerbang utara')
+            ->assertJsonPath('data.devices.0.reader_model', 'pn532-spi');
+
+        $this
+            ->actingAs($superAdmin)
+            ->deleteJson("http://admin.edusmart.test/api/super/tenants/{$tenantId}/rfid-devices/esp32-gerbang-utara")
+            ->assertOk()
+            ->assertJsonPath('data.data.device_id', 'esp32-gerbang-utara');
+
+        $this->assertDatabaseMissing('rfid_devices', [
+            'tenant_id' => $tenantId,
+            'device_id' => 'esp32-gerbang-utara',
         ]);
     }
 

@@ -3157,6 +3157,13 @@ const auth = {
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
+    async deleteTenantRfidDevice(id, deviceId) {
+      const encodedDeviceId = encodeURIComponent(String(deviceId || ''))
+      const res = await apiFetch(`/api/super/tenants/${id}/rfid-devices/${encodedDeviceId}`, {
+        method: 'DELETE'
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
     async createTenant(payload) {
       const res = await apiFetch('/api/super/tenants', { method: 'POST', body: payload })
       return { data: res.raw?.data ?? res.data, error: res.error }

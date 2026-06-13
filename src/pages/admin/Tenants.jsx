@@ -3,18 +3,23 @@ import {
   Building2,
   CalendarClock,
   CheckCircle2,
+  Copy,
   Database,
   Filter,
   Globe2,
   HardDrive,
   Loader2,
   PlusCircle,
+  Radio,
   RefreshCw,
+  Router,
   School,
   Search,
   ShieldCheck,
+  Trash2,
   UploadCloud,
   UserCog,
+  X,
   XCircle
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
@@ -96,96 +101,20 @@ const TENANT_DETAIL_TABS = [
 ]
 
 const STANDARD_RFID_MQTT_TOPICS = {
-  scan: 'edusmart/{tenant}/rfid/scan',
-  response: 'edusmart/{tenant}/rfid/response',
-  mode: 'edusmart/{tenant}/rfid/mode'
+  scan: 'edusmart/{tenant}/rfid/{device}/scan',
+  response: 'edusmart/{tenant}/rfid/{device}/response',
+  mode: 'edusmart/{tenant}/rfid/{device}/mode'
 }
 
-const MQTT_BROKER_PRESETS = [
-  {
-    key: 'hivemq',
-    label: 'HiveMQ Cloud',
-    helper: 'TLS verified, port 8883',
-    values: {
-      port: '8883',
-      useTls: true,
-      tlsVerifyPeer: true,
-      tlsVerifyPeerName: true,
-      tlsAllowSelfSigned: false,
-      qos: '1',
-      clientIdPrefix: 'edusmart-rfid-bridge',
-      connectTimeout: '20',
-      socketTimeout: '5',
-      keepAlive: '20'
-    }
-  },
-  {
-    key: 'self-signed',
-    label: 'Self-signed TLS',
-    helper: 'TLS aktif, verifikasi sertifikat nonaktif',
-    values: {
-      port: '8883',
-      useTls: true,
-      tlsVerifyPeer: false,
-      tlsVerifyPeerName: false,
-      tlsAllowSelfSigned: true,
-      qos: '1',
-      clientIdPrefix: 'edusmart-rfid-bridge',
-      connectTimeout: '20',
-      socketTimeout: '5',
-      keepAlive: '20'
-    }
-  },
-  {
-    key: 'mosquitto-plain',
-    label: 'Mosquitto (Non-TLS)',
-    helper: 'Open Source Mosquitto, port 1883 tanpa enkripsi',
-    values: {
-      port: '1883',
-      useTls: false,
-      tlsVerifyPeer: false,
-      tlsVerifyPeerName: false,
-      tlsAllowSelfSigned: false,
-      qos: '1',
-      clientIdPrefix: 'edusmart-rfid-bridge',
-      connectTimeout: '20',
-      socketTimeout: '5',
-      keepAlive: '20'
-    }
-  }
+const RFID_BOARD_OPTIONS = [
+  { value: 'esp8266', label: 'ESP8266' },
+  { value: 'esp32', label: 'ESP32' }
 ]
 
-const RFID_MQTT_FORM_DEFAULTS = {
-  enabled: true,
-  host: '',
-  port: '8883',
-  username: '',
-  password: '',
-  clearPassword: false,
-  useTls: true,
-  tlsVerifyPeer: true,
-  tlsVerifyPeerName: true,
-  tlsAllowSelfSigned: false,
-  qos: '1',
-  clientIdPrefix: 'edusmart-rfid-bridge',
-  scanTopicTemplate: STANDARD_RFID_MQTT_TOPICS.scan,
-  responseTopicTemplate: STANDARD_RFID_MQTT_TOPICS.response,
-  modeTopicTemplate: STANDARD_RFID_MQTT_TOPICS.mode,
-  connectTimeout: '20',
-  socketTimeout: '5',
-  keepAlive: '20'
-}
-
-const withStandardMqttTopics = (form = {}) => ({
-  ...form,
-  scanTopicTemplate: STANDARD_RFID_MQTT_TOPICS.scan,
-  responseTopicTemplate: STANDARD_RFID_MQTT_TOPICS.response,
-  modeTopicTemplate: STANDARD_RFID_MQTT_TOPICS.mode
-})
-
-const renderMqttTopicTemplate = (template, tenantSlug = '') => {
+const renderMqttTopicTemplate = (template, tenantSlug = '', deviceId = '{device}') => {
   const slug = String(tenantSlug || '').trim() || '{tenant}'
-  return String(template || '').replace('{tenant}', slug)
+  const device = String(deviceId || '').trim() || '{device}'
+  return String(template || '').replaceAll('{tenant}', slug).replaceAll('{device}', device)
 }
 
 const TENANT_STATUS_OPTIONS = [
@@ -253,11 +182,30 @@ const replaceBoolConst = (source, name, value) =>
     `const bool ${name} = ${value ? 'true' : 'false'};`
   )
 
+const buildRfidArduinoTemplateSource = (boardType = 'esp8266') => {
+  if (String(boardType || '').toLowerCase() !== 'esp32') {
+    return rfidArduinoTemplateSource
+  }
+
+  return rfidArduinoTemplateSource
+    .replace('ESP8266 + PN532 + Mosquitto MQTT-only RFID', 'ESP32 + PN532 + Mosquitto MQTT-only RFID')
+    .replace('ESP8266 hanya membaca kartu dan publish event scan ke MQTT.', 'ESP32 hanya membaca kartu dan publish event scan ke MQTT.')
+    .replace('- ESP8266 Board Package', '- ESP32 Board Package')
+    .replace('#include <ESP8266WiFi.h>\n#include <WiFiClientSecureBearSSL.h>', '#include <WiFi.h>\n#include <WiFiClientSecure.h>')
+    .replace('#define PN532_SCK   D5', '#define PN532_SCK   18')
+    .replace('#define PN532_MISO  D6', '#define PN532_MISO  19')
+    .replace('#define PN532_MOSI  D7', '#define PN532_MOSI  23')
+    .replace('#define PN532_SS    D0', '#define PN532_SS    5')
+    .replace('#define LED_PIN      LED_BUILTIN', '#define LED_PIN      2')
+    .replace('#define BUZZER_PIN   D2', '#define BUZZER_PIN   4')
+    .replace('BearSSL::WiFiClientSecure mqttSecureClient;', 'WiFiClientSecure mqttSecureClient;')
+}
+
 const buildTenantRfidArduinoCode = (template, wifi = {}) => {
   if (!template?.available) return ''
   if (!template?.mqtt?.host || !template?.mqtt?.username || !template?.mqtt?.password) return ''
 
-  let source = rfidArduinoTemplateSource
+  let source = buildRfidArduinoTemplateSource(template?.board_type || 'esp8266')
   source = replaceCStringConst(source, 'WIFI_SSID', wifi?.ssid || 'YOUR_WIFI_SSID')
   source = replaceCStringConst(source, 'WIFI_PASS', wifi?.password || 'YOUR_WIFI_PASSWORD')
   source = replaceCStringConst(source, 'TENANT_SLUG', template?.tenant_slug || '')
@@ -275,26 +223,6 @@ const buildTenantRfidArduinoCode = (template, wifi = {}) => {
 
   return source
 }
-
-const mqttFormFromConfig = (config = {}) =>
-  withStandardMqttTopics({
-    ...RFID_MQTT_FORM_DEFAULTS,
-    enabled: config?.enabled !== false,
-    host: String(config?.host || ''),
-    port: String(config?.port || RFID_MQTT_FORM_DEFAULTS.port),
-    username: String(config?.username || ''),
-    password: '',
-    clearPassword: false,
-    useTls: config?.use_tls !== false,
-    tlsVerifyPeer: config?.tls_verify_peer !== false,
-    tlsVerifyPeerName: config?.tls_verify_peer_name !== false,
-    tlsAllowSelfSigned: Boolean(config?.tls_allow_self_signed),
-    qos: String(Number.isFinite(Number(config?.qos)) ? Number(config.qos) : RFID_MQTT_FORM_DEFAULTS.qos),
-    clientIdPrefix: String(config?.client_id_prefix || RFID_MQTT_FORM_DEFAULTS.clientIdPrefix),
-    connectTimeout: String(config?.connect_timeout || RFID_MQTT_FORM_DEFAULTS.connectTimeout),
-    socketTimeout: String(config?.socket_timeout || RFID_MQTT_FORM_DEFAULTS.socketTimeout),
-    keepAlive: String(config?.keep_alive || RFID_MQTT_FORM_DEFAULTS.keepAlive)
-  })
 
 const copyText = async (text) => {
   const value = String(text || '')
@@ -703,14 +631,19 @@ const Tenants = () => {
   const [backupMonthlyAutoSaving, setBackupMonthlyAutoSaving] = useState(false)
   const [backupMonthlyProgress, setBackupMonthlyProgress] = useState(null)
   const [statusSaving, setStatusSaving] = useState(false)
-  const [mqttForm, setMqttForm] = useState(RFID_MQTT_FORM_DEFAULTS)
-  const [mqttSaving, setMqttSaving] = useState(false)
   const [mosquittoProvisioning, setMosquittoProvisioning] = useState(false)
   const [rfidDevices, setRfidDevices] = useState(null)
   const [rfidDevicesLoading, setRfidDevicesLoading] = useState(false)
   const [showAddDeviceModal, setShowAddDeviceModal] = useState(false)
   const [addDeviceSaving, setAddDeviceSaving] = useState(false)
-  const [addDeviceForm, setAddDeviceForm] = useState({ device_id: '', name: '' })
+  const [deviceDeletingById, setDeviceDeletingById] = useState({})
+  const [addDeviceForm, setAddDeviceForm] = useState({
+    device_id: '',
+    name: '',
+    board_type: 'esp8266',
+    location: '',
+    reader_model: 'pn532-spi'
+  })
   const [selectedDeviceDetail, setSelectedDeviceDetail] = useState(null)
   const [rfidWifiForm, setRfidWifiForm] = useState({
     ssid: '',
@@ -804,9 +737,6 @@ const Tenants = () => {
       const { data, error } = await supabase.super.tenantDetail(tenantId)
       if (error) throw error
       setTenantDetail(data || null)
-      if (!silent || options?.syncMqttForm) {
-        setMqttForm(mqttFormFromConfig(data?.rfid_mqtt_config))
-      }
     } catch (err) {
       const message = err?.message || 'Gagal memuat detail sekolah'
       setDetailError(message)
@@ -845,6 +775,12 @@ const Tenants = () => {
   useEffect(() => {
     if (detailTab !== 'backup' || !selectedTenantId) return
     loadTenantBackupMonthlyStatus({ silent: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detailTab, selectedTenantId])
+
+  useEffect(() => {
+    if (detailTab !== 'devices' || !selectedTenantId) return
+    loadRfidDevices(selectedTenantId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detailTab, selectedTenantId])
 
@@ -898,31 +834,6 @@ const Tenants = () => {
   const handleTenantDomainField = (field) => (event) => {
     const value = field === 'isPrimary' ? event.target.checked : event.target.value
     setTenantDomainForm((prev) => ({ ...prev, [field]: value }))
-  }
-
-  const handleMqttField = (field) => (event) => {
-    const checkboxFields = [
-      'enabled',
-      'clearPassword',
-      'useTls',
-      'tlsVerifyPeer',
-      'tlsVerifyPeerName',
-      'tlsAllowSelfSigned'
-    ]
-    const value = checkboxFields.includes(field) ? event.target.checked : event.target.value
-    setMqttForm((prev) => ({ ...prev, [field]: value }))
-  }
-
-  const handleMqttPreset = (preset) => {
-    if (!preset?.values) return
-    setMqttForm((prev) =>
-      withStandardMqttTopics({
-        ...prev,
-        ...preset.values,
-        clearPassword: false
-      })
-    )
-    pushToast('success', `Preset ${preset.label} diterapkan`)
   }
 
   const handleRfidWifiField = (field) => (event) => {
@@ -1021,7 +932,6 @@ const Tenants = () => {
     setTemporaryPasswords({})
     setPrimaryAdminSavingByUser({})
     resetTenantDomainForm()
-    setMqttForm(RFID_MQTT_FORM_DEFAULTS)
     setRfidWifiForm({ ssid: '', password: '' })
     setRfidDevices(null)
     setRestorePreview(null)
@@ -1033,7 +943,7 @@ const Tenants = () => {
 
   const handleRefreshDetail = async () => {
     if (!selectedTenantId) return
-    await loadTenantDetail(selectedTenantId, { silent: true, syncMqttForm: true })
+    await loadTenantDetail(selectedTenantId, { silent: true })
   }
 
   const handleCreateAdminDomain = async (event) => {
@@ -1102,69 +1012,6 @@ const Tenants = () => {
     }
   }
 
-  const handleSaveRfidMqtt = async (event) => {
-    event.preventDefault()
-    if (mqttSaving) return
-
-    const tenantId = tenantDetail?.tenant?.id || selectedTenantId
-    const host = mqttForm.host.trim()
-    if (!tenantId) {
-      pushToast('error', 'Pilih tenant terlebih dahulu')
-      return
-    }
-    if (!host) {
-      pushToast('error', 'Host MQTT wajib diisi')
-      return
-    }
-
-    const password = mqttForm.password.trim()
-    const payload = {
-      enabled: Boolean(mqttForm.enabled),
-      host,
-      port: Number(mqttForm.port || 8883),
-      username: mqttForm.username.trim() || undefined,
-      use_tls: Boolean(mqttForm.useTls),
-      tls_verify_peer: Boolean(mqttForm.tlsVerifyPeer),
-      tls_verify_peer_name: Boolean(mqttForm.tlsVerifyPeerName),
-      tls_allow_self_signed: Boolean(mqttForm.tlsAllowSelfSigned),
-      qos: Number(mqttForm.qos || 1),
-      client_id_prefix: mqttForm.clientIdPrefix.trim() || RFID_MQTT_FORM_DEFAULTS.clientIdPrefix,
-      scan_topic_template: STANDARD_RFID_MQTT_TOPICS.scan,
-      response_topic_template: STANDARD_RFID_MQTT_TOPICS.response,
-      mode_topic_template: STANDARD_RFID_MQTT_TOPICS.mode,
-      connect_timeout: Number(mqttForm.connectTimeout || 20),
-      socket_timeout: Number(mqttForm.socketTimeout || 5),
-      keep_alive: Number(mqttForm.keepAlive || 20)
-    }
-
-    if (password) {
-      payload.password = password
-    } else if (mqttForm.clearPassword) {
-      payload.clear_password = true
-    }
-
-    setMqttSaving(true)
-    try {
-      const { data, error } = await supabase.super.updateTenantRfidMqtt(tenantId, payload)
-      if (error) throw error
-
-      setTenantDetail((prev) => {
-        if (!prev) return prev
-        return {
-          ...prev,
-          rfid_mqtt_config: data?.rfid_mqtt_config || prev.rfid_mqtt_config,
-          rfid_template: data?.rfid_template || prev.rfid_template
-        }
-      })
-      setMqttForm(mqttFormFromConfig(data?.rfid_mqtt_config))
-      pushToast('success', 'Konfigurasi MQTT RFID sekolah berhasil disimpan')
-    } catch (err) {
-      pushToast('error', err?.message || 'Gagal menyimpan konfigurasi MQTT RFID')
-    } finally {
-      setMqttSaving(false)
-    }
-  }
-
   const handleProvisionMosquitto = async (rotatePassword = false) => {
     const tenantId = tenantDetail?.tenant?.id || selectedTenantId
     if (!tenantId || mosquittoProvisioning) return
@@ -1191,7 +1038,6 @@ const Tenants = () => {
           rfid_template: data?.rfid_template || prev.rfid_template
         }
       })
-      setMqttForm(mqttFormFromConfig(data?.rfid_mqtt_config))
       pushToast(
         'success',
         rotatePassword
@@ -1702,7 +1548,10 @@ const Tenants = () => {
       const payload = {
         device_id: addDeviceForm.device_id.trim(),
         name: addDeviceForm.name.trim() || undefined,
-        transport: 'mqtt'
+        transport: 'mqtt',
+        board_type: addDeviceForm.board_type || 'esp8266',
+        location: addDeviceForm.location.trim() || undefined,
+        reader_model: addDeviceForm.reader_model.trim() || 'pn532-spi'
       }
 
       const { error } = await supabase.super.storeTenantRfidDevice(selectedTenantId, payload)
@@ -1710,7 +1559,13 @@ const Tenants = () => {
 
       pushToast('success', 'Alat RFID berhasil ditambahkan')
       setShowAddDeviceModal(false)
-      setAddDeviceForm({ device_id: '', name: '' })
+      setAddDeviceForm({
+        device_id: '',
+        name: '',
+        board_type: 'esp8266',
+        location: '',
+        reader_model: 'pn532-spi'
+      })
       await loadRfidDevices(selectedTenantId)
     } catch (err) {
       pushToast('error', err?.message || 'Gagal menambahkan alat RFID')
@@ -1719,42 +1574,107 @@ const Tenants = () => {
     }
   }
 
+  const setDeviceDeleting = (deviceKey, value) => {
+    setDeviceDeletingById((prev) => {
+      const next = { ...prev }
+      if (value) {
+        next[deviceKey] = true
+      } else {
+        delete next[deviceKey]
+      }
+      return next
+    })
+  }
+
+  const handleDeleteRfidDevice = async (device) => {
+    const tenantId = tenantDetail?.tenant?.id || selectedTenantId
+    const deviceKey = String(device?.id || device?.device_id || '')
+    const deviceLabel = String(device?.name || device?.device_id || 'alat RFID')
+    if (!tenantId || !deviceKey || deviceDeletingById[deviceKey]) return
+
+    if (device?.template_managed) {
+      pushToast('error', 'Alat template utama dikelola otomatis. Hapus alat operasional tambahan dari daftar.')
+      return
+    }
+
+    const confirmed = window.confirm(
+      `Hapus ${deviceLabel}? Riwayat scan lama tetap tersimpan, tetapi device ini tidak bisa dipakai lagi sampai didaftarkan ulang.`
+    )
+    if (!confirmed) return
+
+    setDeviceDeleting(deviceKey, true)
+    try {
+      const { error } = await supabase.super.deleteTenantRfidDevice(tenantId, deviceKey)
+      if (error) throw error
+
+      pushToast('success', `${deviceLabel} berhasil dihapus`)
+      if (selectedDeviceDetail && String(selectedDeviceDetail.id || selectedDeviceDetail.device_id) === deviceKey) {
+        setSelectedDeviceDetail(null)
+      }
+      await loadRfidDevices(tenantId)
+      await loadTenantDetail(tenantId, { silent: true, suppressToast: true })
+    } catch (err) {
+      pushToast('error', err?.message || 'Gagal menghapus alat RFID')
+    } finally {
+      setDeviceDeleting(deviceKey, false)
+    }
+  }
+
   const detailRfidTemplate = tenantDetail?.rfid_template || null
   const detailRfidMqttConfig = tenantDetail?.rfid_mqtt_config || {}
+  const detailRfidMosquittoActive = Boolean(
+    detailRfidMqttConfig?.available && detailRfidMqttConfig?.managed_by_platform
+  )
   const detailTenantSlug = tenantDetail?.tenant?.slug || detailRfidTemplate?.tenant_slug || ''
   const mqttTopicPreview = useMemo(
-    () => [
-      {
-        key: 'scan',
-        label: 'Scan',
-        template: STANDARD_RFID_MQTT_TOPICS.scan,
-        preview: renderMqttTopicTemplate(STANDARD_RFID_MQTT_TOPICS.scan, detailTenantSlug)
-      },
-      {
-        key: 'response',
-        label: 'Response',
-        template: STANDARD_RFID_MQTT_TOPICS.response,
-        preview: renderMqttTopicTemplate(STANDARD_RFID_MQTT_TOPICS.response, detailTenantSlug)
-      },
-      {
-        key: 'mode',
-        label: 'Mode',
-        template: STANDARD_RFID_MQTT_TOPICS.mode,
-        preview: renderMqttTopicTemplate(STANDARD_RFID_MQTT_TOPICS.mode, detailTenantSlug)
-      }
-    ],
-    [detailTenantSlug]
+    () => {
+      const templates = detailRfidTemplate?.topic_templates || STANDARD_RFID_MQTT_TOPICS
+
+      return [
+        {
+          key: 'scan',
+          label: 'Scan',
+          template: templates.scan || STANDARD_RFID_MQTT_TOPICS.scan,
+          preview: renderMqttTopicTemplate(templates.scan || STANDARD_RFID_MQTT_TOPICS.scan, detailTenantSlug)
+        },
+        {
+          key: 'response',
+          label: 'Response',
+          template: templates.response || STANDARD_RFID_MQTT_TOPICS.response,
+          preview: renderMqttTopicTemplate(templates.response || STANDARD_RFID_MQTT_TOPICS.response, detailTenantSlug)
+        },
+        {
+          key: 'mode',
+          label: 'Mode',
+          template: templates.mode || STANDARD_RFID_MQTT_TOPICS.mode,
+          preview: renderMqttTopicTemplate(templates.mode || STANDARD_RFID_MQTT_TOPICS.mode, detailTenantSlug)
+        }
+      ]
+    },
+    [detailRfidTemplate, detailTenantSlug]
   )
-  const deviceArduinoCode = useMemo(() => {
+  const selectedDeviceRfidTemplate = useMemo(() => {
     if (!detailRfidTemplate || !selectedDeviceDetail) return ''
-    // Inject device_id and device_name from selected device to the template
+    const templates = detailRfidTemplate.topic_templates || STANDARD_RFID_MQTT_TOPICS
+    const deviceId = String(selectedDeviceDetail.device_id || '').trim()
     const specificTemplate = {
       ...detailRfidTemplate,
-      device_id: selectedDeviceDetail.device_id,
-      device_name: selectedDeviceDetail.name || selectedDeviceDetail.device_id
+      device_id: deviceId,
+      device_name: selectedDeviceDetail.name || deviceId,
+      board_type: selectedDeviceDetail.board_type || 'esp8266',
+      topics: {
+        scan: renderMqttTopicTemplate(templates.scan || STANDARD_RFID_MQTT_TOPICS.scan, detailTenantSlug, deviceId),
+        response: renderMqttTopicTemplate(templates.response || STANDARD_RFID_MQTT_TOPICS.response, detailTenantSlug, deviceId),
+        mode: renderMqttTopicTemplate(templates.mode || STANDARD_RFID_MQTT_TOPICS.mode, detailTenantSlug, deviceId)
+      }
     }
-    return buildTenantRfidArduinoCode(specificTemplate, rfidWifiForm)
-  }, [detailRfidTemplate, selectedDeviceDetail, rfidWifiForm])
+
+    return specificTemplate
+  }, [detailRfidTemplate, detailTenantSlug, selectedDeviceDetail])
+  const deviceArduinoCode = useMemo(() => {
+    if (!selectedDeviceRfidTemplate) return ''
+    return buildTenantRfidArduinoCode(selectedDeviceRfidTemplate, rfidWifiForm)
+  }, [selectedDeviceRfidTemplate, rfidWifiForm])
 
   const rfidWifiReady = rfidWifiForm.ssid.trim() !== '' && rfidWifiForm.password.trim() !== ''
 
@@ -1770,22 +1690,6 @@ const Tenants = () => {
       pushToast('success', 'Kode Arduino RFID siap flash berhasil dicopy')
     } catch (err) {
       pushToast('error', err?.message || 'Gagal menyalin kode Arduino RFID')
-    }
-  }
-
-  const handleCopyRfidSecret = async () => {
-    const secret = detailRfidTemplate?.device_secret || ''
-    if (!secret) {
-      pushToast('error', 'Secret RFID belum tersedia')
-      return
-    }
-
-    try {
-      const copied = await copyText(secret)
-      if (!copied) throw new Error('Clipboard tidak tersedia')
-      pushToast('success', 'Secret RFID berhasil dicopy')
-    } catch (err) {
-      pushToast('error', err?.message || 'Gagal menyalin secret RFID')
     }
   }
 
@@ -1822,38 +1726,7 @@ const Tenants = () => {
     (admin) => String(admin?.user_id || '') === primaryAdminUserId
   )
   const platformOverview = platformDomains?.platform || {}
-  const platformDnsRecords = Array.isArray(platformOverview?.dns_records)
-    ? platformOverview.dns_records
-    : []
-  const platformNotes = Array.isArray(platformOverview?.notes) ? platformOverview.notes : []
   const adminDomains = Array.isArray(platformDomains?.admin_domains) ? platformDomains.admin_domains : []
-  const isLocalRootDomain = ['localhost', '127.0.0.1'].includes(String(rootDomain || '').trim().toLowerCase())
-  const sampleTenantSlug = 'smabali'
-  const builtinTenantExample = rootDomain ? `${sampleTenantSlug}.${rootDomain}` : `${sampleTenantSlug}.example.com`
-  const customTenantExample = isLocalRootDomain ? 'smabali.localhost' : 'portal.smabali.sch.id'
-  const adminHostExample =
-    platformOverview.default_admin_host ||
-    (rootDomain ? `${ADMIN_SUBDOMAIN}.${rootDomain}` : `${ADMIN_SUBDOMAIN}.example.com`)
-  const onboardingSteps = [
-    'Saat sekolah baru berlangganan, buat tenant dulu dengan nama sekolah, slug unik, dan akun admin sekolah.',
-    `Tenant langsung aktif di subdomain bawaan seperti ${builtinTenantExample}. Ini paling cepat untuk go-live.`,
-    'Kalau sekolah ingin domain sendiri, buka detail tenant lalu tambahkan custom domain tenant di panel yang sama.',
-    'Arahkan DNS domain sekolah ke target default platform, tunggu propagasi, lalu klik Cek DNS sampai status ready.'
-  ]
-  const onboardingModes = [
-    {
-      title: 'Mode Cepat',
-      description: `Pakai subdomain bawaan seperti ${builtinTenantExample}. Cocok untuk onboarding cepat tanpa menunggu setting registrar.`
-    },
-    {
-      title: 'Mode Branding',
-      description: `Pakai domain sekolah sendiri seperti ${customTenantExample}. Dipakai setelah DNS sekolah diarahkan ke platform.`
-    },
-    {
-      title: 'Panel Super Admin',
-      description: `Host admin dipisah di ${adminHostExample} supaya akses tenant dan super admin tidak tercampur.`
-    }
-  ]
   const tenantSummary = tenants.reduce(
     (summary, tenant) => {
       const status = String(tenant?.status || '').toLowerCase()
@@ -1883,7 +1756,8 @@ const Tenants = () => {
   const formSlug = slugify(form.slug)
   const formSlugReserved = formSlug ? isReservedTenantSlug(formSlug) : false
   const formSlugValid = formSlug ? isValidTenantSlug(formSlug) && !formSlugReserved : false
-  const tenantPreviewHost = formSlug && platformRootDomain ? `${formSlug}.${platformRootDomain}` : builtinTenantExample
+  const tenantPreviewFallback = platformRootDomain ? `smabali.${platformRootDomain}` : 'smabali.sismu.biz.id'
+  const tenantPreviewHost = formSlug && platformRootDomain ? `${formSlug}.${platformRootDomain}` : tenantPreviewFallback
   const selectedTenantHost = selectedTenantRow?.slug
     ? `${selectedTenantRow.slug}.${platformRootDomain || rootDomain || 'domain'}`
     : ''
@@ -1903,7 +1777,7 @@ const Tenants = () => {
     admins: detailAdmins.length ? numberFormatter.format(detailAdmins.length) : '',
     domains: detailDomains.length ? numberFormatter.format(detailDomains.length) : '',
     backup: restoreFileName ? 'file siap' : '',
-    devices: detailRfidMqttConfig?.available ? 'aktif' : ''
+    devices: detailRfidMosquittoActive ? 'aktif' : ''
   }
 
   return (
@@ -2150,37 +2024,6 @@ const Tenants = () => {
             </form>
           </section>
 
-          <section className="rounded-2xl border border-slate-200 bg-slate-900 p-5 text-white shadow-sm">
-            <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white/10 text-white">
-                <UserCog className="h-5 w-5" />
-              </div>
-              <div>
-                <h2 className="text-base font-semibold">Panduan Onboarding</h2>
-                <p className="mt-1 text-xs leading-5 text-slate-300">
-                  Alur operasional saat sekolah baru mulai memakai platform.
-                </p>
-              </div>
-            </div>
-            <div className="mt-4 space-y-3">
-              {onboardingSteps.map((step, index) => (
-                <div key={step} className="flex gap-3 rounded-xl border border-white/10 bg-white/5 p-3">
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white text-xs font-bold text-slate-900">
-                    {index + 1}
-                  </span>
-                  <p className="text-sm leading-6 text-slate-100">{step}</p>
-                </div>
-              ))}
-            </div>
-            <div className="mt-4 grid gap-2">
-              {onboardingModes.map((item) => (
-                <div key={item.title} className="rounded-xl bg-white/5 px-3 py-2">
-                  <p className="text-sm font-semibold text-white">{item.title}</p>
-                  <p className="mt-1 text-xs leading-5 text-slate-300">{item.description}</p>
-                </div>
-              ))}
-            </div>
-          </section>
         </aside>
       </div>
 
@@ -2189,7 +2032,7 @@ const Tenants = () => {
           <div>
             <h2 className="text-lg font-semibold text-slate-900">Konfigurasi Platform & DNS</h2>
             <p className="mt-1 text-sm text-slate-600">
-              Pantau host admin, target DNS, dan domain platform dari satu area operasional.
+              Pantau host admin dan domain platform dari satu area operasional.
             </p>
           </div>
           <button
@@ -2231,44 +2074,7 @@ const Tenants = () => {
               </div>
             </div>
 
-            <div className="grid gap-4 lg:grid-cols-[0.95fr,1.05fr]">
-              <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h3 className="text-sm font-semibold text-slate-900">Target DNS Default</h3>
-                  <span className="rounded-full border border-indigo-200 bg-indigo-100 px-2 py-1 text-[11px] text-indigo-700">
-                    {platformOverview.manual_dns_mode ? 'Verifikasi manual' : 'Otomatis'}
-                  </span>
-                </div>
-                <div className="mt-3 space-y-2">
-                  {platformDnsRecords.length === 0 ? (
-                    <p className="text-sm text-slate-500">
-                      Target DNS belum tersedia. Isi `TENANT_DNS_A_RECORD` atau `TENANT_DNS_CNAME_TARGET` di env production.
-                    </p>
-                  ) : (
-                    platformDnsRecords.map((record, index) => (
-                      <div
-                        key={`${record.host}-${record.type}-${index}`}
-                        className="rounded-xl border border-slate-200 bg-white px-3 py-2"
-                      >
-                        <p className="text-xs text-slate-500">{record.label || 'Record'}</p>
-                        <p className="mt-0.5 text-sm font-semibold text-slate-900">
-                          {record.host} {record.type} {record.value}
-                        </p>
-                      </div>
-                    ))
-                  )}
-                </div>
-                {platformNotes.length > 0 && (
-                  <div className="mt-3 grid gap-2 text-xs text-slate-500">
-                    {platformNotes.map((note) => (
-                      <div key={note} className="rounded-xl border border-slate-200 bg-white px-3 py-2">
-                        {note}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
+            <div className="grid gap-4">
               <div className="rounded-2xl border border-slate-200 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h3 className="text-sm font-semibold text-slate-900">Custom Host Super Admin</h3>
@@ -2345,24 +2151,6 @@ const Tenants = () => {
           </div>
 
           <aside className="space-y-4">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-              <h3 className="text-sm font-semibold text-slate-900">Referensi Cepat</h3>
-              <div className="mt-3 space-y-2 text-sm">
-                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
-                  <p className="text-xs font-semibold text-emerald-700">Tenant cepat</p>
-                  <p className="mt-1 text-slate-700">{builtinTenantExample}</p>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
-                  <p className="text-xs font-semibold text-blue-700">Domain sekolah</p>
-                  <p className="mt-1 text-slate-700">{customTenantExample}</p>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
-                  <p className="text-xs font-semibold text-amber-700">Panel admin</p>
-                  <p className="mt-1 text-slate-700">{adminHostExample}</p>
-                </div>
-              </div>
-            </div>
-
             <div className="rounded-2xl border border-slate-200 p-4">
               <h3 className="text-sm font-semibold text-slate-900">Tambah Host Admin</h3>
               <p className="mt-1 text-xs text-slate-500">
@@ -2472,7 +2260,6 @@ const Tenants = () => {
                     setTemporaryPasswords({})
                     setPrimaryAdminSavingByUser({})
                     resetTenantDomainForm()
-                    setMqttForm(RFID_MQTT_FORM_DEFAULTS)
                     setRfidWifiForm({ ssid: '', password: '' })
                     setRestorePayload(null)
                     setRestoreFileName('')
@@ -2836,7 +2623,13 @@ const Tenants = () => {
                         <button
                           type="button"
                           onClick={() => {
-                            setAddDeviceForm({ device_id: `edusmart-${Math.random().toString(36).substring(2, 8)}`, name: '' })
+                            setAddDeviceForm({
+                              device_id: `edusmart-${Math.random().toString(36).substring(2, 8)}`,
+                              name: '',
+                              board_type: 'esp8266',
+                              location: '',
+                              reader_model: 'pn532-spi'
+                            })
                             setShowAddDeviceModal(true)
                           }}
                           className="text-xs px-3 py-1.5 rounded-full bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60"
@@ -2878,6 +2671,7 @@ const Tenants = () => {
                             <tr className="bg-slate-50 text-left text-[11px] uppercase text-slate-500">
                               <th className="px-3 py-2.5 font-semibold">Device ID</th>
                               <th className="px-3 py-2.5 font-semibold">Nama</th>
+                              <th className="px-3 py-2.5 font-semibold">Board</th>
                               <th className="px-3 py-2.5 font-semibold">Status</th>
                               <th className="px-3 py-2.5 font-semibold">Transport</th>
                               <th className="px-3 py-2.5 font-semibold">Koneksi</th>
@@ -2892,7 +2686,24 @@ const Tenants = () => {
                                 <td className="px-3 py-2.5 font-mono font-semibold text-slate-900 whitespace-nowrap">
                                   {device.device_id || '-'}
                                 </td>
-                                <td className="px-3 py-2.5 text-slate-700">{device.name || '-'}</td>
+                                <td className="px-3 py-2.5 text-slate-700">
+                                  <div>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span>{device.name || '-'}</span>
+                                      {device.template_managed && (
+                                        <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">
+                                          Default
+                                        </span>
+                                      )}
+                                    </div>
+                                    {device.location && (
+                                      <p className="mt-1 text-[11px] text-slate-500">{device.location}</p>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="px-3 py-2.5 text-slate-600 whitespace-nowrap">
+                                  {(device.board_type || 'esp8266').toUpperCase()}
+                                </td>
                                 <td className="px-3 py-2.5">
                                   <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${
                                     device.status === 'active'
@@ -2919,14 +2730,29 @@ const Tenants = () => {
                                   {device.last_seen_at ? formatDateTime(device.last_seen_at) : 'Belum pernah'}
                                 </td>
                                 <td className="px-3 py-2.5 font-mono text-slate-500">{device.last_ip || '-'}</td>
-                                <td className="px-3 py-2.5 text-right">
-                                  <button
-                                    type="button"
-                                    onClick={() => setSelectedDeviceDetail(device)}
-                                    className="text-indigo-600 hover:text-indigo-700 font-semibold"
-                                  >
-                                    Detail
-                                  </button>
+                                <td className="px-3 py-2.5">
+                                  <div className="flex items-center justify-end gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => setSelectedDeviceDetail(device)}
+                                      className="rounded-lg border border-indigo-200 px-2.5 py-1 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-50"
+                                    >
+                                      Detail
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteRfidDevice(device)}
+                                      disabled={Boolean(deviceDeletingById[device.id || device.device_id]) || device.template_managed}
+                                      title={device.template_managed ? 'Alat default dikelola otomatis' : 'Hapus alat'}
+                                      className="inline-flex items-center justify-center rounded-lg border border-rose-200 px-2 py-1 text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                      {deviceDeletingById[device.id || device.device_id] ? (
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                      ) : (
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      )}
+                                    </button>
+                                  </div>
                                 </td>
                               </tr>
                             ))}
@@ -2950,299 +2776,115 @@ const Tenants = () => {
                     )}
                   </div>
 
-                  <form onSubmit={handleSaveRfidMqtt} className="rounded-2xl border border-slate-200 p-4 space-y-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h3 className="text-sm font-semibold text-slate-900">Konfigurasi MQTT RFID Sekolah</h3>
-                    <p className="text-xs text-slate-500 mt-1">
-                      Setting ini dipakai bridge backend dan otomatis masuk ke template ESP sekolah ini.
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[11px] px-2 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
-                      {detailRfidMqttConfig?.managed_by_platform
-                        ? 'Mosquitto platform'
-                        : detailRfidMqttConfig?.source === 'tenant'
-                          ? 'Config tenant'
-                          : 'Fallback global'}
-                    </span>
-                    <span
-                      className={`text-[11px] px-2 py-1 rounded-full border ${
-                        detailRfidMqttConfig?.available
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                          : 'bg-rose-50 text-rose-700 border-rose-200'
-                      }`}
-                    >
-                      {detailRfidMqttConfig?.available ? 'Aktif' : 'Belum aktif'}
-                    </span>
-                    {detailRfidMqttConfig?.password_set && (
-                      <span className="text-[11px] px-2 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
-                        Password tersimpan
-                      </span>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => handleProvisionMosquitto(false)}
-                      disabled={mosquittoProvisioning}
-                      className="text-xs px-3 py-1.5 rounded-full border border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
-                    >
-                      {mosquittoProvisioning ? 'Menyiapkan...' : 'Pakai Mosquitto'}
-                    </button>
-                    {detailRfidMqttConfig?.managed_by_platform && (
-                      <button
-                        type="button"
-                        onClick={() => handleProvisionMosquitto(true)}
-                        disabled={mosquittoProvisioning}
-                        className="text-xs px-3 py-1.5 rounded-full border border-amber-200 text-amber-700 hover:bg-amber-50 disabled:opacity-60"
-                      >
-                        Rotasi Password
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                    <div>
-                      <p className="text-xs font-semibold text-slate-700">Preset Broker</p>
-                      <p className="text-xs text-slate-500 mt-1">
-                        Pilih preset, lalu isi host, username, dan password broker.
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {MQTT_BROKER_PRESETS.map((preset) => (
-                        <button
-                          key={preset.key}
-                          type="button"
-                          onClick={() => handleMqttPreset(preset)}
-                          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-xs hover:border-indigo-200 hover:bg-indigo-50"
-                        >
-                          <span className="block font-semibold text-slate-900">{preset.label}</span>
-                          <span className="block text-slate-500 mt-0.5">{preset.helper}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-                  <label className="space-y-1">
-                    <span className="text-xs font-semibold text-slate-700">Host MQTT</span>
-                    <input
-                      type="text"
-                      value={mqttForm.host}
-                      onChange={handleMqttField('host')}
-                      placeholder="mqtt.sekolah.sch.id"
-                      className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                  </label>
-                  <label className="space-y-1">
-                    <span className="text-xs font-semibold text-slate-700">Port</span>
-                    <select
-                      value={['8883', '1883', '443'].includes(mqttForm.port) ? mqttForm.port : 'custom'}
-                      onChange={(e) => {
-                        const val = e.target.value
-                        if (val !== 'custom') {
-                          setMqttForm((prev) => ({ ...prev, port: val }))
-                        }
-                      }}
-                      className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    >
-                      <option value="8883">8883 (TLS default)</option>
-                      <option value="1883">1883 (non-TLS)</option>
-                      <option value="443">443 (WSS)</option>
-                      <option value="custom">Custom</option>
-                    </select>
-                    {!['8883', '1883', '443'].includes(mqttForm.port) && (
-                      <input
-                        type="number"
-                        min="1"
-                        max="65535"
-                        value={mqttForm.port}
-                        onChange={handleMqttField('port')}
-                        placeholder="Port custom"
-                        className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      />
-                    )}
-                  </label>
-                  <label className="space-y-1">
-                    <span className="text-xs font-semibold text-slate-700">Username</span>
-                    <input
-                      type="text"
-                      value={mqttForm.username}
-                      onChange={handleMqttField('username')}
-                      placeholder="username MQTT"
-                      className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                  </label>
-                  <label className="space-y-1">
-                    <span className="text-xs font-semibold text-slate-700">Password MQTT</span>
-                    <PasswordInput
-                      value={mqttForm.password}
-                      onChange={handleMqttField('password')}
-                      placeholder={detailRfidMqttConfig?.password_set ? 'Kosongkan bila tetap' : 'Password MQTT'}
-                      className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                  </label>
-                </div>
-
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <p className="text-xs font-semibold text-slate-700">Topic RFID Standar</p>
-                      <p className="text-xs text-slate-500 mt-1">Dipakai otomatis oleh backend dan kode Arduino.</p>
-                    </div>
-                    <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600">
-                      Template terkunci
-                    </span>
-                  </div>
-                  <div className="mt-3 grid grid-cols-1 lg:grid-cols-3 gap-3">
-                    {mqttTopicPreview.map((topic) => (
-                      <div key={topic.key} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-                        <div className="text-[11px] font-semibold uppercase text-slate-500">{topic.label}</div>
-                        <div className="mt-1 break-all text-sm font-semibold text-slate-900">{topic.preview}</div>
-                        <div className="mt-1 break-all text-[11px] text-slate-500">{topic.template}</div>
+                  <section className="rounded-2xl border border-slate-200 p-4 space-y-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="flex items-start gap-3">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700">
+                          <Router className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <h3 className="text-sm font-semibold text-slate-900">Mosquitto RFID Sekolah</h3>
+                          <p className="mt-1 text-xs leading-5 text-slate-500">
+                            Semua alat RFID tenant ini memakai credential Mosquitto platform dan topic per-device.
+                          </p>
+                        </div>
                       </div>
-                    ))}
-                  </div>
-                </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[11px] px-2 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                          {detailRfidMqttConfig?.managed_by_platform ? 'Mosquitto platform' : 'Belum diprovision'}
+                        </span>
+                        <span
+                          className={`text-[11px] px-2 py-1 rounded-full border ${
+                            detailRfidMosquittoActive
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : 'bg-rose-50 text-rose-700 border-rose-200'
+                          }`}
+                        >
+                          {detailRfidMosquittoActive ? 'Aktif' : 'Belum aktif'}
+                        </span>
+                        {detailRfidMqttConfig?.password_set && (
+                          <span className="text-[11px] px-2 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                            Password tersimpan
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleProvisionMosquitto(false)}
+                          disabled={mosquittoProvisioning}
+                          className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
+                        >
+                          {mosquittoProvisioning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Radio className="h-3.5 w-3.5" />}
+                          {mosquittoProvisioning ? 'Menyiapkan...' : 'Pakai Mosquitto'}
+                        </button>
+                        {detailRfidMqttConfig?.managed_by_platform && (
+                          <button
+                            type="button"
+                            onClick={() => handleProvisionMosquitto(true)}
+                            disabled={mosquittoProvisioning}
+                            className="rounded-full border border-amber-200 px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-60"
+                          >
+                            Rotasi Password
+                          </button>
+                        )}
+                      </div>
+                    </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
-                  <label className="space-y-1">
-                    <span className="text-xs font-semibold text-slate-700">QoS</span>
-                    <select
-                      value={mqttForm.qos}
-                      onChange={handleMqttField('qos')}
-                      className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    >
-                      <option value="0">0</option>
-                      <option value="1">1</option>
-                      <option value="2">2</option>
-                    </select>
-                  </label>
-                  <label className="space-y-1">
-                    <span className="text-xs font-semibold text-slate-700">Client Prefix</span>
-                    <input
-                      type="text"
-                      value={mqttForm.clientIdPrefix}
-                      onChange={handleMqttField('clientIdPrefix')}
-                      className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                  </label>
-                  <label className="space-y-1">
-                    <span className="text-xs font-semibold text-slate-700">Connect Timeout</span>
-                    <select
-                      value={mqttForm.connectTimeout}
-                      onChange={handleMqttField('connectTimeout')}
-                      className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    >
-                      <option value="10">10 detik</option>
-                      <option value="15">15 detik</option>
-                      <option value="20">20 detik (default)</option>
-                      <option value="30">30 detik</option>
-                      <option value="60">60 detik</option>
-                      <option value="120">120 detik</option>
-                    </select>
-                  </label>
-                  <label className="space-y-1">
-                    <span className="text-xs font-semibold text-slate-700">Socket Timeout</span>
-                    <select
-                      value={mqttForm.socketTimeout}
-                      onChange={handleMqttField('socketTimeout')}
-                      className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    >
-                      <option value="3">3 detik</option>
-                      <option value="5">5 detik (default)</option>
-                      <option value="10">10 detik</option>
-                      <option value="15">15 detik</option>
-                      <option value="30">30 detik</option>
-                    </select>
-                  </label>
-                  <label className="space-y-1">
-                    <span className="text-xs font-semibold text-slate-700">Keep Alive</span>
-                    <select
-                      value={mqttForm.keepAlive}
-                      onChange={handleMqttField('keepAlive')}
-                      className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    >
-                      <option value="10">10 detik</option>
-                      <option value="15">15 detik</option>
-                      <option value="20">20 detik (default)</option>
-                      <option value="30">30 detik</option>
-                      <option value="60">60 detik</option>
-                      <option value="120">120 detik</option>
-                    </select>
-                  </label>
-                </div>
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                        <p className="text-[11px] font-semibold uppercase text-slate-500">Host</p>
+                        <p className="mt-1 break-all text-sm font-semibold text-slate-900">
+                          {detailRfidMosquittoActive ? detailRfidMqttConfig?.host || '-' : '-'}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                        <p className="text-[11px] font-semibold uppercase text-slate-500">Port</p>
+                        <p className="mt-1 text-sm font-semibold text-slate-900">
+                          {detailRfidMosquittoActive ? detailRfidMqttConfig?.port || '-' : '-'}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                        <p className="text-[11px] font-semibold uppercase text-slate-500">Username</p>
+                        <p className="mt-1 break-all text-sm font-semibold text-slate-900">
+                          {detailRfidMosquittoActive ? detailRfidMqttConfig?.username || '-' : '-'}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                        <p className="text-[11px] font-semibold uppercase text-slate-500">TLS</p>
+                        <p className="mt-1 text-sm font-semibold text-slate-900">
+                          {detailRfidMosquittoActive && detailRfidMqttConfig?.use_tls ? 'Aktif' : '-'}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                        <p className="text-[11px] font-semibold uppercase text-slate-500">Provider</p>
+                        <p className="mt-1 text-sm font-semibold text-slate-900">
+                          {detailRfidMosquittoActive ? 'mosquitto' : '-'}
+                        </p>
+                      </div>
+                    </div>
 
-                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3">
-                  <div className="flex flex-wrap items-center gap-4 text-xs text-slate-600">
-                    <label className="inline-flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={mqttForm.enabled}
-                        onChange={handleMqttField('enabled')}
-                        className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                      />
-                      Aktif
-                    </label>
-                    <label className="inline-flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={mqttForm.useTls}
-                        onChange={handleMqttField('useTls')}
-                        className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                      />
-                      TLS
-                    </label>
-                    <label className="inline-flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={mqttForm.tlsVerifyPeer}
-                        onChange={handleMqttField('tlsVerifyPeer')}
-                        className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                      />
-                      Verify peer
-                    </label>
-                    <label className="inline-flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={mqttForm.tlsVerifyPeerName}
-                        onChange={handleMqttField('tlsVerifyPeerName')}
-                        className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                      />
-                      Verify name
-                    </label>
-                    <label className="inline-flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={mqttForm.tlsAllowSelfSigned}
-                        onChange={handleMqttField('tlsAllowSelfSigned')}
-                        className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                      />
-                      Self-signed
-                    </label>
-                    {detailRfidMqttConfig?.password_set && (
-                      <label className="inline-flex items-center gap-2 text-rose-600">
-                        <input
-                          type="checkbox"
-                          checked={mqttForm.clearPassword}
-                          onChange={handleMqttField('clearPassword')}
-                          className="rounded border-rose-300 text-rose-600 focus:ring-rose-500"
-                        />
-                        Hapus password tersimpan
-                      </label>
-                    )}
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={mqttSaving}
-                    className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-60"
-                  >
-                    {mqttSaving ? 'Menyimpan...' : 'Simpan MQTT RFID'}
-                  </button>
-                </div>
-              </form>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <p className="text-xs font-semibold text-slate-700">Topic RFID per Alat</p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            `{device}` diganti otomatis dengan Device ID yang dipilih saat kode Arduino dibuat.
+                          </p>
+                        </div>
+                        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600">
+                          Mosquitto only
+                        </span>
+                      </div>
+                      <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-3">
+                        {mqttTopicPreview.map((topic) => (
+                          <div key={topic.key} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                            <div className="text-[11px] font-semibold uppercase text-slate-500">{topic.label}</div>
+                            <div className="mt-1 break-all text-sm font-semibold text-slate-900">{topic.preview}</div>
+                            <div className="mt-1 break-all text-[11px] text-slate-500">{topic.template}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </section>
 
 
 
@@ -3688,7 +3330,7 @@ const Tenants = () => {
       {showAddDeviceModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={() => setShowAddDeviceModal(false)} />
-          <div className="relative w-full max-w-md rounded-2xl bg-white shadow-xl">
+          <div className="relative w-full max-w-lg rounded-2xl bg-white shadow-xl">
             <div className="border-b border-slate-100 px-6 py-4">
               <h3 className="text-lg font-bold text-slate-900">Tambah Alat RFID</h3>
               <p className="mt-1 text-sm text-slate-500">Daftarkan alat baru untuk sekolah ini.</p>
@@ -3714,6 +3356,40 @@ const Tenants = () => {
                     onChange={(e) => setAddDeviceForm({ ...addDeviceForm, name: e.target.value })}
                     className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
                     placeholder="Misal: Gerbang Utama"
+                  />
+                </label>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="block space-y-1">
+                    <span className="text-sm font-semibold text-slate-700">Board</span>
+                    <select
+                      value={addDeviceForm.board_type}
+                      onChange={(e) => setAddDeviceForm({ ...addDeviceForm, board_type: e.target.value })}
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+                    >
+                      {RFID_BOARD_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block space-y-1">
+                    <span className="text-sm font-semibold text-slate-700">Reader</span>
+                    <input
+                      type="text"
+                      value={addDeviceForm.reader_model}
+                      onChange={(e) => setAddDeviceForm({ ...addDeviceForm, reader_model: e.target.value })}
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+                      placeholder="pn532-spi"
+                    />
+                  </label>
+                </div>
+                <label className="block space-y-1">
+                  <span className="text-sm font-semibold text-slate-700">Lokasi <span className="font-normal text-slate-400">(opsional)</span></span>
+                  <input
+                    type="text"
+                    value={addDeviceForm.location}
+                    onChange={(e) => setAddDeviceForm({ ...addDeviceForm, location: e.target.value })}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+                    placeholder="Misal: Gerbang utara, ruang guru, lab komputer"
                   />
                 </label>
               </div>
@@ -3765,7 +3441,7 @@ const Tenants = () => {
                 </div>
               ) : (
                 <>
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
                     <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                       <p className="text-xs text-slate-500">Tenant Slug</p>
                       <p className="text-sm font-semibold text-slate-900 mt-1">
@@ -3776,6 +3452,12 @@ const Tenants = () => {
                       <p className="text-xs text-slate-500">Device ID</p>
                       <p className="text-sm font-semibold text-slate-900 mt-1 break-all">
                         {selectedDeviceDetail.device_id || '-'}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                      <p className="text-xs text-slate-500">Board</p>
+                      <p className="text-sm font-semibold text-slate-900 mt-1 break-all">
+                        {(selectedDeviceDetail.board_type || 'esp8266').toUpperCase()}
                       </p>
                     </div>
                     <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
@@ -3839,19 +3521,19 @@ const Tenants = () => {
                           <div className="rounded-lg bg-slate-50 px-3 py-2">
                             <div className="text-slate-500">Scan</div>
                             <div className="font-semibold text-slate-900 break-all">
-                              {detailRfidTemplate?.topics?.scan || '-'}
+                              {selectedDeviceRfidTemplate?.topics?.scan || '-'}
                             </div>
                           </div>
                           <div className="rounded-lg bg-slate-50 px-3 py-2">
                             <div className="text-slate-500">Response</div>
                             <div className="font-semibold text-slate-900 break-all">
-                              {detailRfidTemplate?.topics?.response || '-'}
+                              {selectedDeviceRfidTemplate?.topics?.response || '-'}
                             </div>
                           </div>
                           <div className="rounded-lg bg-slate-50 px-3 py-2">
                             <div className="text-slate-500">Mode</div>
                             <div className="font-semibold text-slate-900 break-all">
-                              {detailRfidTemplate?.topics?.mode || '-'}
+                              {selectedDeviceRfidTemplate?.topics?.mode || '-'}
                             </div>
                           </div>
                         </div>
@@ -3886,8 +3568,9 @@ const Tenants = () => {
                           type="button"
                           onClick={handleCopyRfidArduinoCode}
                           disabled={!deviceArduinoCode}
-                          className="shrink-0 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
+                          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
                         >
+                          <Copy className="h-3.5 w-3.5" />
                           Salin
                         </button>
                       </div>

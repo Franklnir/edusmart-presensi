@@ -281,9 +281,9 @@ Pastikan env ini terisi:
 - `RFID_MOSQUITTO_PUBLIC_HOST=mqtt.sismu.biz.id`
 - `RFID_MOSQUITTO_BRIDGE_PASSWORD=<password-panjang-random>`
 - `RFID_MQTT_HOST=` dikosongkan agar global fallback tidak dipakai lintas sekolah.
-- `RFID_MQTT_SCAN_TOPIC_TEMPLATE=edusmart/{tenant}/rfid/scan`
-- `RFID_MQTT_RESPONSE_TOPIC_TEMPLATE=edusmart/{tenant}/rfid/response`
-- `RFID_MQTT_MODE_TOPIC_TEMPLATE=edusmart/{tenant}/rfid/mode`
+- `RFID_MQTT_SCAN_TOPIC_TEMPLATE=edusmart/{tenant}/rfid/{device}/scan`
+- `RFID_MQTT_RESPONSE_TOPIC_TEMPLATE=edusmart/{tenant}/rfid/{device}/response`
+- `RFID_MQTT_MODE_TOPIC_TEMPLATE=edusmart/{tenant}/rfid/{device}/mode`
 
 Setelah service aktif, buka Super Admin > Detail Sekolah > `Pakai Mosquitto`
 untuk membuat username/password dan ACL topic khusus sekolah tersebut.

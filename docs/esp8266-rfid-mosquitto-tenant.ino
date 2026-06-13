@@ -48,9 +48,9 @@ const bool MQTT_USE_TLS = true;
 // ubah nilai ini ke false lewat generator agar ESP8266 memverifikasi TLS.
 const bool MQTT_TLS_INSECURE = true;
 
-const char* MQTT_TOPIC_SCAN = "edusmart/sman1jombang/rfid/scan";
-const char* MQTT_TOPIC_RESPONSE = "edusmart/sman1jombang/rfid/response";
-const char* MQTT_TOPIC_MODE = "edusmart/sman1jombang/rfid/mode";
+const char* MQTT_TOPIC_SCAN = "edusmart/sman1jombang/rfid/gerbang-utara-01/scan";
+const char* MQTT_TOPIC_RESPONSE = "edusmart/sman1jombang/rfid/gerbang-utara-01/response";
+const char* MQTT_TOPIC_MODE = "edusmart/sman1jombang/rfid/gerbang-utara-01/mode";
 
 /* ================== KONFIGURASI HARDWARE ================== */
 #define PN532_SCK   D5

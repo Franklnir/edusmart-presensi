@@ -15,9 +15,9 @@ Kontrak utama untuk device MQTT:
 Endpoint HTTP lama (`/api/rfid/scan`, `/api/rfid/sync`, `/api/rfid/heartbeat`, `/api/rfid/mode`) masih ada untuk kompatibilitas dan operasional, tetapi template Arduino baru tidak memakainya.
 
 Topik MQTT default:
-- `edusmart/{tenant}/rfid/scan`
-- `edusmart/{tenant}/rfid/response`
-- `edusmart/{tenant}/rfid/mode`
+- `edusmart/{tenant}/rfid/{device}/scan`
+- `edusmart/{tenant}/rfid/{device}/response`
+- `edusmart/{tenant}/rfid/{device}/mode`
 
 ## Arsitektur Final
 Alur ideal yang direkomendasikan:
@@ -62,9 +62,9 @@ RFID_MQTT_USE_TLS=true
 RFID_MQTT_TLS_VERIFY_PEER=true
 RFID_MQTT_TLS_VERIFY_PEER_NAME=true
 RFID_MQTT_TLS_ALLOW_SELF_SIGNED=false
-RFID_MQTT_SCAN_TOPIC_TEMPLATE=edusmart/{tenant}/rfid/scan
-RFID_MQTT_RESPONSE_TOPIC_TEMPLATE=edusmart/{tenant}/rfid/response
-RFID_MQTT_MODE_TOPIC_TEMPLATE=edusmart/{tenant}/rfid/mode
+RFID_MQTT_SCAN_TOPIC_TEMPLATE=edusmart/{tenant}/rfid/{device}/scan
+RFID_MQTT_RESPONSE_TOPIC_TEMPLATE=edusmart/{tenant}/rfid/{device}/response
+RFID_MQTT_MODE_TOPIC_TEMPLATE=edusmart/{tenant}/rfid/{device}/mode
 RFID_MQTT_DEFAULT_TENANT_SLUG=
 RFID_MQTT_DEVICE_TENANT_MAP={}
 RFID_MQTT_MODE_SYNC_INTERVAL=20
@@ -147,27 +147,27 @@ php artisan rfid:device-rotate-secret gerbang-utara-01
 Topic publish scan:
 
 ```txt
-edusmart/{tenant}/rfid/scan
+edusmart/{tenant}/rfid/{device}/scan
 ```
 
 Topic ACK/response:
 
 ```txt
-edusmart/{tenant}/rfid/response
+edusmart/{tenant}/rfid/{device}/response
 ```
 
 Topic mode:
 
 ```txt
-edusmart/{tenant}/rfid/mode
+edusmart/{tenant}/rfid/{device}/mode
 ```
 
 Contoh nyata:
 
 ```txt
-edusmart/sman1jombang/rfid/scan
-edusmart/sman1jombang/rfid/response
-edusmart/sman1jombang/rfid/mode
+edusmart/sman1jombang/rfid/gerbang-utara-01/scan
+edusmart/sman1jombang/rfid/gerbang-utara-01/response
+edusmart/sman1jombang/rfid/gerbang-utara-01/mode
 ```
 
 ## 5) Payload MQTT Scan
@@ -208,7 +208,7 @@ Contoh sukses:
   "kelas": "X A MIPA",
   "tenant_slug": "sman1jombang",
   "source": "rfid-mqtt-bridge",
-  "received_topic": "edusmart/sman1jombang/rfid/scan",
+  "received_topic": "edusmart/sman1jombang/rfid/gerbang-utara-01/scan",
   "http_status": 200
 }
 ```
@@ -287,7 +287,7 @@ Rekomendasi di device:
 - saat reconnect, tunggu retained message mode dari backend
 
 Catatan ACK:
-- karena topic response bersifat level tenant, firmware sebaiknya memfilter response berdasarkan `device_id` dan `event_id`
+- karena topic response sudah per-device, firmware cukup memfilter ACK berdasarkan `event_id`
 - backend mengembalikan `device_id`, `event_id`, dan `card_uid` pada response MQTT agar device tahu scan mana yang sudah selesai
 
 ## 8) Endpoint HTTP Legacy
@@ -310,7 +310,7 @@ Supaya firmware tetap ringan:
 
 Aturan aman:
 - jangan generate `event_id` baru saat retry
-- filter response berdasarkan `device_id` dan `event_id`
+- filter response berdasarkan `event_id`
 - satu event tertunda di RAM sudah cukup untuk reader gerbang/kelas yang ringan
 
 ## 10) Enroll vs Absensi Normal
@@ -360,10 +360,10 @@ Sebelum integrasi device dimulai, pastikan:
 - secret device tetap bisa dirotasi untuk kebutuhan operasional/legacy HTTP
 - jangan pakai satu username/password broker untuk semua tenant tanpa ACL topic
 
-## 14) Catatan Arduino/ESP8266
+## 14) Catatan Arduino/ESP8266/ESP32
 Project backend ini sudah siap untuk dipasangkan ke sketch device.
 
-Sketch ESP8266/Arduino yang siap dipakai sebagai baseline sudah disediakan. Yang perlu kamu sesuaikan tinggal:
+Sketch ESP8266/Arduino yang siap dipakai sebagai baseline sudah disediakan. Panel super admin bisa menghasilkan versi ESP8266 atau ESP32 berdasarkan `board_type` alat yang tersimpan. Yang perlu kamu sesuaikan tinggal:
 - koneksi TLS ke broker
 - topik publish dan subscribe
 - format payload di atas

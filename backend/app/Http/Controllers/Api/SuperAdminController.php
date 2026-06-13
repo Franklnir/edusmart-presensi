@@ -490,44 +490,7 @@ class SuperAdminController extends ApiController
             return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
         }
 
-        $onlineThresholdMinutes = 5;
-        $onlineThreshold = now()->subMinutes($onlineThresholdMinutes);
-
-        $devices = DB::table('rfid_devices as d')
-            ->where('d.tenant_id', (string) $tenant->id)
-            ->orderBy('d.device_id')
-            ->get([
-                'd.id',
-                'd.device_id',
-                'd.name',
-                'd.status',
-                'd.transport',
-                'd.fallback_http_enabled',
-                'd.last_seen_at',
-                'd.last_transport',
-                'd.last_ip',
-                'd.created_at',
-            ])
-            ->map(function ($row) use ($onlineThreshold) {
-                $lastSeen = $row->last_seen_at ? Carbon::parse($row->last_seen_at) : null;
-                $isOnline = $lastSeen && $lastSeen->gte($onlineThreshold);
-
-                return [
-                    'id' => (string) $row->id,
-                    'device_id' => trim((string) ($row->device_id ?? '')),
-                    'name' => trim((string) ($row->name ?? '')) ?: null,
-                    'status' => strtolower(trim((string) ($row->status ?? 'active'))),
-                    'transport' => strtolower(trim((string) ($row->transport ?? 'mqtt'))),
-                    'fallback_http_enabled' => (bool) ($row->fallback_http_enabled ?? false),
-                    'last_seen_at' => $row->last_seen_at,
-                    'last_transport' => trim((string) ($row->last_transport ?? '')) ?: null,
-                    'last_ip' => trim((string) ($row->last_ip ?? '')) ?: null,
-                    'is_online' => $isOnline,
-                    'created_at' => $row->created_at,
-                ];
-            })
-            ->values();
-
+        $devices = collect($this->rfidDeviceService->listDevices((string) $tenant->slug));
         $total = $devices->count();
         $online = $devices->where('is_online', true)->count();
         $offline = $total - $online;
@@ -559,6 +522,9 @@ class SuperAdminController extends ApiController
             'device_id' => ['required', 'string', 'max:191'],
             'name' => ['nullable', 'string', 'max:191'],
             'transport' => ['nullable', 'string', 'in:mqtt,http,hybrid'],
+            'board_type' => ['nullable', 'string', 'in:esp8266,esp32'],
+            'location' => ['nullable', 'string', 'max:191'],
+            'reader_model' => ['nullable', 'string', 'max:80'],
         ]);
 
         if ($validator->fails()) {
@@ -571,7 +537,13 @@ class SuperAdminController extends ApiController
             (string) $tenant->slug,
             (string) $data['device_id'],
             $data['name'] ?? null,
-            $data['transport'] ?? 'mqtt'
+            $data['transport'] ?? 'mqtt',
+            null,
+            [
+                'board_type' => $data['board_type'] ?? 'esp8266',
+                'location' => $data['location'] ?? null,
+                'reader_model' => $data['reader_model'] ?? 'pn532-spi',
+            ]
         );
 
         if (! ($result['success'] ?? false)) {
@@ -580,6 +552,46 @@ class SuperAdminController extends ApiController
 
         return $this->ok([
             'message' => 'Device berhasil didaftarkan',
+            'data' => $result,
+        ]);
+    }
+
+    public function deleteTenantRfidDevice(Request $request, string $tenantId, string $deviceId)
+    {
+        if (! $this->isSuperAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenant = $this->findTenantByIdOrSlug($tenantId);
+        if (! $tenant) {
+            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+        }
+
+        $before = DB::table('rfid_devices')
+            ->where('tenant_id', (string) $tenant->id)
+            ->where(function ($query) use ($deviceId) {
+                $query->where('id', $deviceId)
+                    ->orWhereRaw('lower(device_id) = ?', [Str::lower($deviceId)]);
+            })
+            ->first();
+
+        $result = $this->rfidDeviceService->deleteTenantDevice((string) $tenant->id, $deviceId);
+        if (! ($result['success'] ?? false)) {
+            return response()->json(['error' => $result['message'] ?? 'Gagal menghapus device RFID'], 422);
+        }
+
+        $this->logAudit(
+            $request,
+            'rfid_devices',
+            (string) ($before->id ?? $result['device_id'] ?? $deviceId),
+            'DELETE',
+            $before ? (array) $before : null,
+            $result,
+            (string) $tenant->id
+        );
+
+        return $this->ok([
+            'message' => $result['message'] ?? 'Device RFID berhasil dihapus',
             'data' => $result,
         ]);
     }
@@ -4783,9 +4795,10 @@ class SuperAdminController extends ApiController
         }
 
         $mqttConfig = $this->tenantMqttConfigService->tenantConfig($tenantId, $tenantSlug, true);
-        $scanTopicTemplate = trim((string) ($mqttConfig['scan_topic_template'] ?? 'edusmart/{tenant}/rfid/scan'));
-        $responseTopicTemplate = trim((string) ($mqttConfig['response_topic_template'] ?? 'edusmart/{tenant}/rfid/response'));
-        $modeTopicTemplate = trim((string) ($mqttConfig['mode_topic_template'] ?? 'edusmart/{tenant}/rfid/mode'));
+        $scanTopicTemplate = trim((string) ($mqttConfig['scan_topic_template'] ?? 'edusmart/{tenant}/rfid/{device}/scan'));
+        $responseTopicTemplate = trim((string) ($mqttConfig['response_topic_template'] ?? 'edusmart/{tenant}/rfid/{device}/response'));
+        $modeTopicTemplate = trim((string) ($mqttConfig['mode_topic_template'] ?? 'edusmart/{tenant}/rfid/{device}/mode'));
+        $deviceId = trim((string) ($template['device_id'] ?? ''));
         $mqttHost = trim((string) ($mqttConfig['host'] ?? ''));
         $mqttUsername = trim((string) ($mqttConfig['username'] ?? ''));
         $mqttPassword = trim((string) ($mqttConfig['password'] ?? ''));
@@ -4810,7 +4823,7 @@ class SuperAdminController extends ApiController
                 : $unavailableMessage,
             'tenant_id' => $tenantId,
             'tenant_slug' => $tenantSlug,
-            'device_id' => (string) ($template['device_id'] ?? ''),
+            'device_id' => $deviceId,
             'device_name' => (string) ($template['device_name'] ?? ''),
             'device_secret' => (string) ($template['secret'] ?? ''),
             'firmware_version' => '2.0.0-mqtt-only',
@@ -4828,17 +4841,31 @@ class SuperAdminController extends ApiController
                 'provider' => (string) ($mqttConfig['provider'] ?? 'custom'),
                 'managed_by_platform' => (bool) ($mqttConfig['managed_by_platform'] ?? false),
             ],
+            'topic_templates' => [
+                'scan' => $scanTopicTemplate,
+                'response' => $responseTopicTemplate,
+                'mode' => $modeTopicTemplate,
+            ],
             'topics' => [
-                'scan' => str_replace('{tenant}', $tenantSlug, $scanTopicTemplate),
-                'response' => str_replace('{tenant}', $tenantSlug, $responseTopicTemplate),
-                'mode' => str_replace('{tenant}', $tenantSlug, $modeTopicTemplate),
+                'scan' => $this->renderTenantRfidTopic($scanTopicTemplate, $tenantSlug, $deviceId),
+                'response' => $this->renderTenantRfidTopic($responseTopicTemplate, $tenantSlug, $deviceId),
+                'mode' => $this->renderTenantRfidTopic($modeTopicTemplate, $tenantSlug, $deviceId),
             ],
             'notes' => [
-                'Template MQTT-only: alat hanya publish scan dan menerima response/mode lewat MQTT.',
-                'Backend tetap memutuskan absensi masuk/pulang, jadwal aktif, dan enroll UID.',
-                'Kalau tenant butuh alat kedua, duplikasi template lalu ubah DEVICE_ID dan daftarkan device baru agar tidak konflik.',
+                'Template MQTT-only: setiap alat publish scan dan menerima response/mode lewat topic miliknya sendiri.',
+                'Backend tetap memutuskan absensi masuk/pulang, jadwal aktif, dan enroll UID per tenant.',
+                'Tambahkan satu device_id untuk setiap ESP32/ESP8266 agar topic dan riwayat alat tidak saling konflik.',
             ],
         ];
+    }
+
+    private function renderTenantRfidTopic(string $template, string $tenantSlug, string $deviceId): string
+    {
+        return str_replace(
+            ['{tenant}', '{device}'],
+            [$tenantSlug, $deviceId !== '' ? $deviceId : 'RFID_DEVICE_ID'],
+            trim($template)
+        );
     }
 
     private function buildTenantRfidDevicesSummary(string $tenantId): array
