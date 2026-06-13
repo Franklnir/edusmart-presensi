@@ -735,6 +735,66 @@ class DbController extends ApiController
             return true;
         }
 
+        // ACADEMIC ROLLOVER EXCEPTIONS
+        if ($table === 'academic_rollover_exceptions') {
+            if (! $this->isAdmin($request)) {
+                return $this->deny();
+            }
+
+            if ($action === 'select' || $action === 'delete') {
+                return true;
+            }
+
+            if (in_array($action, ['insert', 'upsert'], true)) {
+                $this->mapPayload($payload, function ($row) use ($userId) {
+                    $row = $this->filterPayload($row, [
+                        'id',
+                        'student_id',
+                        'source_tahun_ajaran',
+                        'target_tahun_ajaran',
+                        'reason',
+                        'created_at',
+                        'updated_at',
+                    ]);
+
+                    $row['created_by'] = $userId;
+                    if (! isset($row['created_at'])) {
+                        $row['created_at'] = now();
+                    }
+                    $row['updated_at'] = now();
+
+                    return $row;
+                });
+
+                $validationError = $this->validateAcademicRolloverExceptionRows(
+                    $this->normalizeRows($payload),
+                    $this->currentTenantId
+                );
+                if ($validationError !== null) {
+                    return $this->deny($validationError['message'], $validationError['status']);
+                }
+
+                return true;
+            }
+
+            if ($action === 'update') {
+                $this->mapPayload($payload, function ($row) {
+                    $row = $this->filterPayload($row, [
+                        'reason',
+                        'resolved_at',
+                        'updated_at',
+                    ]);
+                    $row['updated_at'] = now();
+
+                    return $row;
+                });
+
+                return true;
+            }
+
+            return $this->deny();
+        }
+
         // GURU_MAPEL_BOBOT
         if ($table === 'guru_mapel_bobot') {
             if ($action === 'select') {
@@ -3278,6 +3338,90 @@ class DbController extends ApiController
 
             $normalized['id'] = $this->resolveKelasInsertId($normalized['id'], $normalized['nama'], $tenantId);
             $rows[$index] = array_merge($row, $normalized);
+        }
+
+        return null;
+    }
+
+    private function validateAcademicRolloverExceptionRows(array $rows, ?string $tenantId): ?array
+    {
+        if ($tenantId === null || trim($tenantId) === '') {
+            return [
+                'message' => 'Tenant tidak valid',
+                'status' => 400,
+            ];
+        }
+
+        if (empty($rows)) {
+            return [
+                'message' => 'Daftar pengecualian kenaikan kelas kosong',
+                'status' => 422,
+            ];
+        }
+
+        $studentIds = [];
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+
+            $studentId = trim((string) ($row['student_id'] ?? ''));
+            $sourceYear = trim((string) ($row['source_tahun_ajaran'] ?? ''));
+            $targetYear = trim((string) ($row['target_tahun_ajaran'] ?? ''));
+
+            if ($studentId === '' || $sourceYear === '' || $targetYear === '') {
+                return [
+                    'message' => 'Siswa, periode sumber, dan periode target wajib diisi',
+                    'status' => 422,
+                ];
+            }
+
+            if ($sourceYear === $targetYear) {
+                return [
+                    'message' => 'Periode target rollover harus berbeda dari periode sumber',
+                    'status' => 422,
+                ];
+            }
+
+            $studentIds[] = $studentId;
+        }
+
+        $studentIds = array_values(array_unique($studentIds));
+        if (empty($studentIds)) {
+            return [
+                'message' => 'Daftar siswa pengecualian tidak valid',
+                'status' => 422,
+            ];
+        }
+
+        if (! Schema::hasTable('profiles') || ! $this->isSelectableColumn('profiles', 'id')) {
+            return [
+                'message' => 'Data siswa belum siap',
+                'status' => 422,
+            ];
+        }
+
+        $query = DB::table('profiles')->whereIn('id', $studentIds);
+        if ($this->isSelectableColumn('profiles', 'tenant_id')) {
+            $query->where('tenant_id', $tenantId);
+        }
+        if ($this->isSelectableColumn('profiles', 'role')) {
+            $query->whereIn('role', ['siswa', 'student']);
+        }
+        if ($this->isSelectableColumn('profiles', 'status')) {
+            $query->where('status', 'active');
+        }
+
+        $validStudentIds = $query
+            ->pluck('id')
+            ->map(fn ($id) => (string) $id)
+            ->all();
+
+        if (count($validStudentIds) !== count($studentIds)) {
+            return [
+                'message' => 'Siswa pengecualian harus siswa aktif di sekolah ini',
+                'status' => 422,
+            ];
         }
 
         return null;
