@@ -276,6 +276,28 @@ const buildScheduleDetailKey = (classId = '', period = {}) => (
   `${classId}|${period.tahunAjaran || ''}|${period.semester || ''}`
 )
 
+const classLookupKeys = (value = '') => {
+  const raw = String(value || '').trim()
+  if (!raw) return []
+
+  return Array.from(new Set([
+    raw,
+    raw.toLowerCase(),
+    raw.toUpperCase(),
+    raw.replace(/\s+/g, ' '),
+    classSlug(raw)
+  ].filter(Boolean).map((item) => String(item).trim().toLowerCase())))
+}
+
+const findClassByLookup = (lookup, value) => {
+  for (const key of classLookupKeys(value)) {
+    const match = lookup.get(key)
+    if (match) return match
+  }
+
+  return null
+}
+
 /* ===== Component Utama: AKelas (Terkunci Password) ===== */
 export default function AKelas({ initialTab = 'kelas' }) {
   const { pushToast, requestConfirmation } = useUIStore()
@@ -843,6 +865,20 @@ export default function AKelas({ initialTab = 'kelas' }) {
     [jadwal, exportDays]
   )
 
+  const kelasByAlias = React.useMemo(() => {
+    const lookup = new Map()
+    kelas.forEach((item) => {
+      const values = [item.nama, item.id]
+      values.forEach((value) => {
+        classLookupKeys(value).forEach((key) => {
+          if (!lookup.has(key)) lookup.set(key, item)
+        })
+      })
+    })
+
+    return lookup
+  }, [kelas])
+
   const kelasOptions = React.useMemo(() => (
     kelas.map((item) => ({
       value: item.id,
@@ -870,10 +906,25 @@ export default function AKelas({ initialTab = 'kelas' }) {
   const promotionCandidateSiswa = React.useMemo(() => {
     let rows = activeSiswaList
     if (promotionFilterGrade) {
-      rows = rows.filter((siswa) => parseGrade(siswa.kelas || '') === promotionFilterGrade)
+      rows = rows.filter((siswa) => {
+        const classRow = findClassByLookup(kelasByAlias, siswa.kelas)
+        const grade = classRow?.grade || parseGrade(classRow?.nama || siswa.kelas || '')
+        return grade === promotionFilterGrade
+      })
     }
     if (promotionFilterKelas) {
-      rows = rows.filter((siswa) => siswa.kelas === promotionFilterKelas)
+      const selectedClass = findClassByLookup(kelasByAlias, promotionFilterKelas)
+      const selectedAliases = new Set([
+        ...classLookupKeys(promotionFilterKelas),
+        ...classLookupKeys(selectedClass?.nama || '')
+      ])
+
+      rows = rows.filter((siswa) => {
+        const classRow = findClassByLookup(kelasByAlias, siswa.kelas)
+        if (classRow) return classRow.id === promotionFilterKelas
+
+        return classLookupKeys(siswa.kelas).some((key) => selectedAliases.has(key))
+      })
     }
 
     return [...rows].sort((a, b) => {
@@ -881,7 +932,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
       if (classCompare !== 0) return classCompare
       return (a.nama || '').localeCompare(b.nama || '', 'id')
     })
-  }, [activeSiswaList, promotionFilterGrade, promotionFilterKelas, kelas])
+  }, [activeSiswaList, promotionFilterGrade, promotionFilterKelas, kelasByAlias])
 
   const selectedDeletedHistory = React.useMemo(() => {
     return deletedClassHistories.find((item) => String(item.id) === String(selectedHistoryId)) || deletedClassHistories[0] || null
@@ -904,7 +955,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
   }
 
   function getKelasName(kelasId) {
-    return kelas.find((item) => item.id === kelasId)?.nama || kelasId || '-'
+    return findClassByLookup(kelasByAlias, kelasId)?.nama || kelasId || '-'
   }
 
   function formatHistoryDate(value) {
