@@ -190,7 +190,7 @@ class ClassHistoryController extends ApiController
             // Generate a unique ID by appending _restored_N suffix
             $suffix = 1;
             do {
-                $candidateId = $originalClassId . '_restored_' . $suffix;
+                $candidateId = $originalClassId.'_restored_'.$suffix;
                 $checkQuery = DB::table('kelas')->where('id', $candidateId);
                 $this->whereTenant($checkQuery, 'kelas', $tenantId);
                 if (! $checkQuery->exists()) {
@@ -204,7 +204,7 @@ class ClassHistoryController extends ApiController
             }
 
             $resolvedClassId = $candidateId;
-            $resolvedClassName = $resolvedClassName . ' (Pulihan)';
+            $resolvedClassName = $resolvedClassName.' (Pulihan)';
         }
 
         $restored = DB::transaction(function () use ($history, $snapshot, $classRow, $tenantId, $request, $originalClassId, $resolvedClassId, $resolvedClassName, $conflictExists) {
@@ -361,6 +361,7 @@ class ClassHistoryController extends ApiController
             if (isset($row['id'])) {
                 $row['id'] = (string) Str::uuid();
             }
+
             return $row;
         }, $rows);
     }
