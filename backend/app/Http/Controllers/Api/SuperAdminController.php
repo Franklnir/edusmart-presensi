@@ -4493,6 +4493,15 @@ class SuperAdminController extends ApiController
             'quiz_submissions',
             'quiz_answers',
         ];
+        $securitySensitiveTables = [
+            'settings',
+            'users',
+            'profiles',
+            'tenants',
+            'tenant_domains',
+            'super_admins',
+            'approval_requests',
+        ];
 
         if ($this->hasTable('audit_log')) {
             $deleteQuery = DB::table('audit_log')
@@ -4504,11 +4513,14 @@ class SuperAdminController extends ApiController
             }
             $criticalDeleteCount = (int) $deleteQuery->count();
             if ($criticalDeleteCount >= 3) {
-                $anomalies[] = [
-                    'severity' => 'high',
-                    'code' => 'CRITICAL_DELETE_SPIKE',
-                    'message' => "Terdeteksi {$criticalDeleteCount} aksi DELETE pada tabel kritikal dalam 24 jam terakhir.",
-                ];
+                $this->appendAuditAnomaly(
+                    $anomalies,
+                    'high',
+                    'CRITICAL_DELETE_SPIKE',
+                    "Terdeteksi {$criticalDeleteCount} aksi DELETE pada tabel kritikal dalam 24 jam terakhir.",
+                    'Segera review actor dan record yang dihapus. Pulihkan dari backup hanya setelah perubahan dipastikan tidak sah.',
+                    ['count' => $criticalDeleteCount, 'window' => '24h', 'source' => 'audit_log']
+                );
             }
 
             $settingsChangeQuery = DB::table('audit_log')
@@ -4520,11 +4532,14 @@ class SuperAdminController extends ApiController
             }
             $settingsChangeCount = (int) $settingsChangeQuery->count();
             if ($settingsChangeCount >= 8) {
-                $anomalies[] = [
-                    'severity' => 'medium',
-                    'code' => 'SETTINGS_CHANGE_BURST',
-                    'message' => "Perubahan settings tinggi ({$settingsChangeCount} update/jam).",
-                ];
+                $this->appendAuditAnomaly(
+                    $anomalies,
+                    'medium',
+                    'SETTINGS_CHANGE_BURST',
+                    "Perubahan settings tinggi ({$settingsChangeCount} update/jam).",
+                    'Bandingkan perubahan settings dengan approval/aktivitas admin. Kunci akun admin terkait bila perubahan tidak dikenali.',
+                    ['count' => $settingsChangeCount, 'window' => '1h', 'source' => 'audit_log']
+                );
             }
 
             $scannerQuery = DB::table('audit_log')
@@ -4541,11 +4556,75 @@ class SuperAdminController extends ApiController
             }
             $scannerCount = (int) $scannerQuery->count();
             if ($scannerCount >= 1) {
-                $anomalies[] = [
-                    'severity' => 'high',
-                    'code' => 'SCANNER_TRAFFIC_DETECTED',
-                    'message' => "Terdeteksi {$scannerCount} request dari scanner otomatis dalam 24 jam terakhir. Cek login_success dan perubahan tabel sensitif.",
-                ];
+                $this->appendAuditAnomaly(
+                    $anomalies,
+                    'high',
+                    'SCANNER_TRAFFIC_DETECTED',
+                    "Terdeteksi {$scannerCount} request dari scanner otomatis dalam 24 jam terakhir. Cek login_success dan perubahan tabel sensitif.",
+                    'Pastikan WAF/Caddy memblokir request tersebut. Jika IP berulang, tambahkan ke SECURITY_BLOCKED_IPS atau UFW setelah memastikan bukan scanner internal.',
+                    ['count' => $scannerCount, 'window' => '24h', 'source' => 'audit_log']
+                );
+            }
+
+            $sensitivePathProbeCount = $this->auditTextPatternCount(
+                $now->copy()->subDay(),
+                [
+                    '%.env%',
+                    '%.git%',
+                    '%wp-admin%',
+                    '%phpmyadmin%',
+                    '%/manager%',
+                    '%\\/manager%',
+                    '%/vendor/phpunit%',
+                    '%\\/vendor\\/phpunit%',
+                    '%/storage/%',
+                    '%\\/storage\\/%',
+                    '%/backup%',
+                    '%\\/backup%',
+                ],
+                $tenantId
+            );
+            if ($sensitivePathProbeCount >= 1) {
+                $this->appendAuditAnomaly(
+                    $anomalies,
+                    'high',
+                    'SENSITIVE_PATH_PROBE_DETECTED',
+                    "Terdeteksi {$sensitivePathProbeCount} probe path sensitif dalam 24 jam terakhir.",
+                    'Cek apakah request diblokir WAF/404. Jika ada response sukses pada path sensitif, rollback konfigurasi proxy dan audit file yang terekspos.',
+                    ['count' => $sensitivePathProbeCount, 'window' => '24h', 'source' => 'audit_log']
+                );
+            }
+
+            $waManagerProbeCount = $this->auditTextPatternCount(
+                $now->copy()->subDay(),
+                ['%wa.%/manager%', '%wa.%\\/manager%', '%"host":"wa.%', '%/manager%', '%\\/manager%'],
+                $tenantId
+            );
+            if ($waManagerProbeCount >= 1) {
+                $this->appendAuditAnomaly(
+                    $anomalies,
+                    'high',
+                    'WA_MANAGER_PROBE_DETECTED',
+                    "Terdeteksi {$waManagerProbeCount} indikasi akses/probe manager WhatsApp dalam 24 jam.",
+                    'Pastikan wa.sismu.biz.id tidak membuka manager publik. Normalnya /manager* harus 404 atau hanya lewat VPN/tunnel internal.',
+                    ['count' => $waManagerProbeCount, 'window' => '24h', 'source' => 'audit_log']
+                );
+            }
+
+            $dbProbeCount = $this->auditTextPatternCount(
+                $now->copy()->subDay(),
+                ['%/api/db%', '%\\/api\\/db%', '%api/db/batch%', '%api\\/db\\/batch%', '%"table":"users"%', '%"table":"settings"%'],
+                $tenantId
+            );
+            if ($dbProbeCount >= 1) {
+                $this->appendAuditAnomaly(
+                    $anomalies,
+                    'high',
+                    'API_DB_PROBE_DETECTED',
+                    "Terdeteksi {$dbProbeCount} indikasi probe endpoint database atau tabel sensitif.",
+                    'Pastikan /api/db dan /api/db/batch tetap auth:sanctum dan review token/user yang melakukan request. Cabut token jika tidak sah.',
+                    ['count' => $dbProbeCount, 'window' => '24h', 'source' => 'audit_log']
+                );
             }
 
             $adminHostDeniedQuery = DB::table('audit_log')
@@ -4557,11 +4636,14 @@ class SuperAdminController extends ApiController
             }
             $adminHostDeniedCount = (int) $adminHostDeniedQuery->count();
             if ($adminHostDeniedCount >= 3) {
-                $anomalies[] = [
-                    'severity' => 'medium',
-                    'code' => 'ADMIN_HOST_DENIED_BURST',
-                    'message' => "Ada {$adminHostDeniedCount} percobaan login non-super-admin di host admin dalam 1 jam.",
-                ];
+                $this->appendAuditAnomaly(
+                    $anomalies,
+                    'medium',
+                    'ADMIN_HOST_DENIED_BURST',
+                    "Ada {$adminHostDeniedCount} percobaan login non-super-admin di host admin dalam 1 jam.",
+                    'Cek IP dan user-agent. Edukasi user jika salah URL; blokir IP jika pola otomatis/berulang.',
+                    ['count' => $adminHostDeniedCount, 'window' => '1h', 'source' => 'audit_log']
+                );
             }
 
             $anonymousSecurityQuery = DB::table('audit_log')
@@ -4573,11 +4655,122 @@ class SuperAdminController extends ApiController
             }
             $anonymousSecurityCount = (int) $anonymousSecurityQuery->count();
             if ($anonymousSecurityCount >= 20) {
-                $anomalies[] = [
-                    'severity' => 'medium',
-                    'code' => 'ANONYMOUS_SECURITY_EVENT_BURST',
-                    'message' => "Terdeteksi {$anonymousSecurityCount} event login/keamanan anonim dalam 1 jam.",
-                ];
+                $this->appendAuditAnomaly(
+                    $anomalies,
+                    'medium',
+                    'ANONYMOUS_SECURITY_EVENT_BURST',
+                    "Terdeteksi {$anonymousSecurityCount} event login/keamanan anonim dalam 1 jam.",
+                    'Review event anonim, cari IP dominan, lalu blokir di WAF/UFW jika bukan traffic sah.',
+                    ['count' => $anonymousSecurityCount, 'window' => '1h', 'source' => 'audit_log']
+                );
+            }
+
+            $loginFailureQuery = DB::table('audit_log')
+                ->where('table_name', 'auth_events')
+                ->where('timestamp', '>=', $now->copy()->subMinutes(15))
+                ->where(function ($query) {
+                    $query
+                        ->whereRaw('LOWER(CAST(new_data AS TEXT)) LIKE ?', ['%login_failed%'])
+                        ->orWhereRaw('LOWER(CAST(new_data AS TEXT)) LIKE ?', ['%login_locked%']);
+                });
+            if ($tenantId && $this->tableHasColumn('audit_log', 'tenant_id')) {
+                $loginFailureQuery->where('tenant_id', $tenantId);
+            }
+            $loginFailureCount = (int) $loginFailureQuery->count();
+            if ($loginFailureCount >= 10) {
+                $this->appendAuditAnomaly(
+                    $anomalies,
+                    'high',
+                    'LOGIN_FAILURE_BURST',
+                    "Terdeteksi {$loginFailureCount} kegagalan/lock login dalam 15 menit.",
+                    'Cek apakah ada login_success dari IP/email yang sama setelah burst. Reset password dan cabut session/token bila ada indikasi kompromi.',
+                    ['count' => $loginFailureCount, 'window' => '15m', 'source' => 'audit_log']
+                );
+            }
+
+            $lockoutQuery = DB::table('audit_log')
+                ->where('table_name', 'auth_events')
+                ->where('timestamp', '>=', $now->copy()->subHour())
+                ->whereRaw('LOWER(CAST(new_data AS TEXT)) LIKE ?', ['%login_locked%']);
+            if ($tenantId && $this->tableHasColumn('audit_log', 'tenant_id')) {
+                $lockoutQuery->where('tenant_id', $tenantId);
+            }
+            $lockoutCount = (int) $lockoutQuery->count();
+            if ($lockoutCount >= 5) {
+                $this->appendAuditAnomaly(
+                    $anomalies,
+                    'high',
+                    'LOGIN_LOCKOUT_BURST',
+                    "Terdeteksi {$lockoutCount} login terkunci dalam 1 jam.",
+                    'Naikkan proteksi untuk IP sumber dan cek apakah tenant sedang diserang brute-force.',
+                    ['count' => $lockoutCount, 'window' => '1h', 'source' => 'audit_log']
+                );
+            }
+
+            $superAdminChangeQuery = DB::table('audit_log')
+                ->where('table_name', 'super_admins')
+                ->whereIn('action', ['INSERT', 'DELETE'])
+                ->where('timestamp', '>=', $now->copy()->subDay());
+            if ($tenantId && $this->tableHasColumn('audit_log', 'tenant_id')) {
+                $superAdminChangeQuery->where('tenant_id', $tenantId);
+            }
+            $superAdminChangeCount = (int) $superAdminChangeQuery->count();
+            if ($superAdminChangeCount >= 1) {
+                $this->appendAuditAnomaly(
+                    $anomalies,
+                    'high',
+                    'SUPER_ADMIN_MEMBERSHIP_CHANGED',
+                    "Ada {$superAdminChangeCount} perubahan membership super admin dalam 24 jam.",
+                    'Validasi perubahan dengan pemilik sistem. Jika tidak sah, cabut super admin baru, reset password akun terkait, dan review audit setelah perubahan.',
+                    ['count' => $superAdminChangeCount, 'window' => '24h', 'source' => 'audit_log']
+                );
+            }
+
+            $securityConfigChangeQuery = DB::table('audit_log')
+                ->whereIn('table_name', ['tenants', 'tenant_domains', 'settings'])
+                ->whereIn('action', ['INSERT', 'UPDATE', 'DELETE'])
+                ->where('timestamp', '>=', $now->copy()->subDay())
+                ->where(function ($query) {
+                    $query
+                        ->whereRaw('LOWER(CAST(new_data AS TEXT)) LIKE ?', ['%domain%'])
+                        ->orWhereRaw('LOWER(CAST(old_data AS TEXT)) LIKE ?', ['%domain%'])
+                        ->orWhereRaw('LOWER(CAST(new_data AS TEXT)) LIKE ?', ['%approval_%'])
+                        ->orWhereRaw('LOWER(CAST(old_data AS TEXT)) LIKE ?', ['%approval_%'])
+                        ->orWhereRaw('LOWER(CAST(new_data AS TEXT)) LIKE ?', ['%admin_lock%'])
+                        ->orWhereRaw('LOWER(CAST(old_data AS TEXT)) LIKE ?', ['%admin_lock%']);
+                });
+            if ($tenantId && $this->tableHasColumn('audit_log', 'tenant_id')) {
+                $securityConfigChangeQuery->where('tenant_id', $tenantId);
+            }
+            $securityConfigChangeCount = (int) $securityConfigChangeQuery->count();
+            if ($securityConfigChangeCount >= 1) {
+                $this->appendAuditAnomaly(
+                    $anomalies,
+                    'medium',
+                    'SECURITY_CONFIG_CHANGED',
+                    "Ada {$securityConfigChangeCount} perubahan konfigurasi domain/approval/admin lock dalam 24 jam.",
+                    'Cocokkan perubahan dengan tiket/approval. Jalankan smoke test domain dan pastikan tidak ada wildcard/host tidak dikenal yang aktif.',
+                    ['count' => $securityConfigChangeCount, 'window' => '24h', 'source' => 'audit_log']
+                );
+            }
+
+            $directSensitiveChangeQuery = DB::table('audit_log')
+                ->whereIn('table_name', $securitySensitiveTables)
+                ->whereIn('action', ['INSERT', 'UPDATE', 'DELETE'])
+                ->where('timestamp', '>=', $now->copy()->subHour());
+            if ($tenantId && $this->tableHasColumn('audit_log', 'tenant_id')) {
+                $directSensitiveChangeQuery->where('tenant_id', $tenantId);
+            }
+            $directSensitiveChangeCount = (int) $directSensitiveChangeQuery->count();
+            if ($directSensitiveChangeCount >= 20) {
+                $this->appendAuditAnomaly(
+                    $anomalies,
+                    'high',
+                    'SENSITIVE_TABLE_CHANGE_BURST',
+                    "Terdeteksi {$directSensitiveChangeCount} perubahan tabel sensitif dalam 1 jam.",
+                    'Pause perubahan operasional, review actor paling aktif, lalu rollback hanya perubahan yang terbukti tidak sah.',
+                    ['count' => $directSensitiveChangeCount, 'window' => '1h', 'source' => 'audit_log']
+                );
             }
 
             $actorBurstQuery = DB::table('audit_log')
@@ -4592,11 +4785,14 @@ class SuperAdminController extends ApiController
             }
             $burstActors = $actorBurstQuery->get();
             foreach ($burstActors as $actor) {
-                $anomalies[] = [
-                    'severity' => 'medium',
-                    'code' => 'ACTIVITY_BURST',
-                    'message' => 'Akun '.((string) $actor->user_id)." membuat {$actor->total} perubahan data dalam 1 jam.",
-                ];
+                $this->appendAuditAnomaly(
+                    $anomalies,
+                    'medium',
+                    'ACTIVITY_BURST',
+                    'Akun '.((string) $actor->user_id)." membuat {$actor->total} perubahan data dalam 1 jam.",
+                    'Pastikan ini aktivitas import/batch yang sah. Jika bukan, nonaktifkan akun sementara dan review perubahan terakhirnya.',
+                    ['user_id' => (string) $actor->user_id, 'count' => (int) $actor->total, 'window' => '1h', 'source' => 'audit_log']
+                );
             }
         }
 
@@ -4607,15 +4803,145 @@ class SuperAdminController extends ApiController
             }
             $pendingCount = (int) $pendingQuery->count();
             if ($pendingCount >= 15) {
-                $anomalies[] = [
-                    'severity' => 'medium',
-                    'code' => 'APPROVAL_QUEUE_BACKLOG',
-                    'message' => "Antrian approval menumpuk ({$pendingCount} request pending).",
-                ];
+                $this->appendAuditAnomaly(
+                    $anomalies,
+                    'medium',
+                    'APPROVAL_QUEUE_BACKLOG',
+                    "Antrian approval menumpuk ({$pendingCount} request pending).",
+                    'Minta admin utama menyelesaikan approval agar perubahan kritikal tidak menggantung dan tidak diulang manual.',
+                    ['count' => $pendingCount, 'source' => 'approval_requests']
+                );
+            }
+        }
+
+        if ($this->hasTable('rfid_device_events')) {
+            $rfidErrorQuery = DB::table('rfid_device_events')
+                ->where('created_at', '>=', $now->copy()->subMinutes(15))
+                ->where(function ($query) {
+                    $query
+                        ->where('status', 'error')
+                        ->orWhere('response_code', '>=', 400);
+                });
+            if ($tenantId && $this->tableHasColumn('rfid_device_events', 'tenant_id')) {
+                $rfidErrorQuery->where('tenant_id', $tenantId);
+            }
+            $rfidErrorCount = (int) $rfidErrorQuery->count();
+            if ($rfidErrorCount >= 20) {
+                $this->appendAuditAnomaly(
+                    $anomalies,
+                    'medium',
+                    'RFID_ERROR_BURST',
+                    "Terdeteksi {$rfidErrorCount} error scan RFID dalam 15 menit.",
+                    'Cek device_id, credential Mosquitto, UID kartu belum terdaftar, dan jam absensi. Jangan hapus event sebelum penyebabnya jelas.',
+                    ['count' => $rfidErrorCount, 'window' => '15m', 'source' => 'rfid_device_events']
+                );
+            }
+        }
+
+        if ($this->hasTable('rfid_scans')) {
+            $rfidScanErrorQuery = DB::table('rfid_scans')
+                ->where('status', 'error')
+                ->where('created_at', '>=', $now->copy()->subMinutes(15));
+            if ($tenantId && $this->tableHasColumn('rfid_scans', 'tenant_id')) {
+                $rfidScanErrorQuery->where('tenant_id', $tenantId);
+            }
+            $rfidScanErrorCount = (int) $rfidScanErrorQuery->count();
+            if ($rfidScanErrorCount >= 20) {
+                $this->appendAuditAnomaly(
+                    $anomalies,
+                    'medium',
+                    'RFID_SCAN_ERROR_BURST',
+                    "Terdeteksi {$rfidScanErrorCount} hasil scan RFID error dalam 15 menit.",
+                    'Periksa apakah ada kartu tidak terdaftar massal, salah mode enroll/absensi, atau perangkat memakai tenant/device yang keliru.',
+                    ['count' => $rfidScanErrorCount, 'window' => '15m', 'source' => 'rfid_scans']
+                );
+            }
+        }
+
+        if ($this->hasTable('whatsapp_message_logs')) {
+            $waFailedQuery = DB::table('whatsapp_message_logs')
+                ->whereIn('status', ['failed', 'skipped'])
+                ->where('created_at', '>=', $now->copy()->subHour());
+            if ($tenantId && $this->tableHasColumn('whatsapp_message_logs', 'tenant_id')) {
+                $waFailedQuery->where('tenant_id', $tenantId);
+            }
+            $waFailedCount = (int) $waFailedQuery->count();
+            if ($waFailedCount >= 25) {
+                $this->appendAuditAnomaly(
+                    $anomalies,
+                    'medium',
+                    'WHATSAPP_DELIVERY_FAILURE_BURST',
+                    "Terdeteksi {$waFailedCount} pesan WhatsApp gagal/dilewati dalam 1 jam.",
+                    'Cek status integrasi WhatsApp, API key provider, nomor tujuan, dan jangan retry massal sebelum penyebab utama jelas.',
+                    ['count' => $waFailedCount, 'window' => '1h', 'source' => 'whatsapp_message_logs']
+                );
+            }
+        }
+
+        if ($this->hasTable('failed_jobs')) {
+            $failedJobQuery = DB::table('failed_jobs');
+            if ($this->tableHasColumn('failed_jobs', 'failed_at')) {
+                $failedJobQuery->where('failed_at', '>=', $now->copy()->subHour());
+            }
+            $failedJobCount = (int) $failedJobQuery->count();
+            if ($failedJobCount >= 5) {
+                $this->appendAuditAnomaly(
+                    $anomalies,
+                    'medium',
+                    'BACKGROUND_JOB_FAILURE_BURST',
+                    "Terdeteksi {$failedJobCount} failed job dalam 1 jam terakhir.",
+                    'Cek queue worker, Redis, backup Google Drive, quiz scoring, dan WhatsApp job. Retry hanya job yang aman setelah akar masalah diperbaiki.',
+                    ['count' => $failedJobCount, 'window' => $this->tableHasColumn('failed_jobs', 'failed_at') ? '1h' : 'all', 'source' => 'failed_jobs']
+                );
             }
         }
 
         return $anomalies;
+    }
+
+    private function appendAuditAnomaly(
+        array &$anomalies,
+        string $severity,
+        string $code,
+        string $message,
+        string $recommendedAction,
+        array $context = []
+    ): void {
+        $anomalies[] = [
+            'severity' => $severity,
+            'code' => $code,
+            'message' => $message,
+            'recommended_action' => $recommendedAction,
+            'safe_response' => 'manual_review_required',
+            'auto_remediation' => false,
+            'context' => $context,
+        ];
+    }
+
+    private function auditTextPatternCount(Carbon $since, array $patterns, ?string $tenantId = null): int
+    {
+        if (! $this->hasTable('audit_log') || empty($patterns)) {
+            return 0;
+        }
+
+        $query = DB::table('audit_log')
+            ->where('timestamp', '>=', $since)
+            ->where(function ($builder) use ($patterns) {
+                foreach ($patterns as $pattern) {
+                    $normalized = strtolower((string) $pattern);
+                    $builder
+                        ->orWhereRaw('LOWER(CAST(new_data AS TEXT)) LIKE ?', [$normalized])
+                        ->orWhereRaw('LOWER(CAST(old_data AS TEXT)) LIKE ?', [$normalized])
+                        ->orWhereRaw('LOWER(COALESCE(table_name, \'\')) LIKE ?', [$normalized])
+                        ->orWhereRaw('LOWER(COALESCE(record_id, \'\')) LIKE ?', [$normalized]);
+                }
+            });
+
+        if ($tenantId && $this->tableHasColumn('audit_log', 'tenant_id')) {
+            $query->where('tenant_id', $tenantId);
+        }
+
+        return (int) $query->count();
     }
 
     private function domainRules(): array

@@ -161,6 +161,40 @@ Rule yang aktif sengaja high-confidence agar aman untuk produksi awal:
 Setelah traffic nyata stabil, CRS penuh bisa diuji dulu di staging/detect-only
 sebelum dinaikkan ke blocking mode.
 
+## Audit Trail & Deteksi Anomali
+
+Menu super admin `/admin/audit-trail` sekarang menampilkan anomali berbasis
+`audit_log` dan tabel observability pendukung. Deteksi ini bersifat rule-based,
+aman untuk produksi awal, dan tidak melakukan auto-remediation destruktif.
+
+Yang dideteksi:
+
+- scanner/probe otomatis (`sqlmap`, `nikto`, `nuclei`, dan request security block);
+- probe path sensitif seperti `.env`, `.git`, `phpmyadmin`, dan `/manager`;
+- indikasi probe `/api/db` atau tabel sensitif;
+- burst gagal login, lockout login, dan login non-super-admin di host admin;
+- perubahan membership super admin;
+- perubahan konfigurasi domain, approval, dan admin lock;
+- burst perubahan tabel sensitif;
+- antrian approval menumpuk;
+- error RFID massal dari `rfid_device_events`/`rfid_scans`;
+- kegagalan pengiriman WhatsApp massal;
+- failed background jobs.
+
+Setiap anomali membawa `recommended_action`, `context`, dan
+`auto_remediation=false`. Tindakan seperti blokir IP, suspend akun, rollback data,
+atau retry job massal harus tetap dikonfirmasi admin karena bisa berdampak ke
+operasional sekolah.
+
+Catatan batasan:
+
+- Request yang diblokir sepenuhnya di Caddy/WAF sebelum masuk Laravel belum
+  otomatis masuk `audit_log`, kecuali log edge diimpor atau dikirim ke aplikasi.
+- DNS wildcard, DNSSEC, port publik, dan SSH hardening tetap perlu dicek dari
+  VPS/DNS panel karena bukan event aplikasi.
+- Untuk alert real-time, integrasikan anomali ini ke notifikasi WA/email setelah
+  threshold produksi stabil.
+
 ## Setelah Deploy
 
 Jalankan smoke check:

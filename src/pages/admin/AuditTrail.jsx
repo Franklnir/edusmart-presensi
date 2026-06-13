@@ -217,8 +217,30 @@ const AuditTrail = () => {
               key={`${item.code}-${idx}`}
               className={`rounded-xl border p-3 text-sm ${severityClass[item.severity] || severityClass.low}`}
             >
-              <p className="font-semibold">{item.code || 'ANOMALY'}</p>
-              <p>{item.message}</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="font-semibold">{item.code || 'ANOMALY'}</p>
+                <span className="rounded-full bg-white/70 px-2 py-0.5 text-[11px] font-semibold uppercase">
+                  {item.severity || 'low'}
+                </span>
+                {item.auto_remediation === false && (
+                  <span className="rounded-full bg-white/70 px-2 py-0.5 text-[11px] font-semibold">
+                    Review manual
+                  </span>
+                )}
+              </div>
+              <p className="mt-1">{item.message}</p>
+              {item.recommended_action && (
+                <p className="mt-2 rounded-lg bg-white/70 px-3 py-2 text-xs leading-relaxed">
+                  <span className="font-semibold">Tindakan aman: </span>
+                  {item.recommended_action}
+                </p>
+              )}
+              {item.context && Object.keys(item.context).length > 0 && (
+                <details className="mt-2 text-xs">
+                  <summary className="cursor-pointer font-semibold">Konteks</summary>
+                  <pre className="mt-2 max-h-36 overflow-auto rounded-lg bg-white/70 p-2">{safeJson(item.context)}</pre>
+                </details>
+              )}
             </div>
           ))
         )}
