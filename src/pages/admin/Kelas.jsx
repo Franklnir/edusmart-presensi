@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { startTransition } from 'react'
 import { supabase, apiFetch } from '../../lib/supabase'
@@ -977,8 +977,20 @@ export default function AKelas({ initialTab = 'kelas' }) {
       })
       if (res.error) throw res.error
 
-      pushToast('success', `Kelas ${className} berhasil dipulihkan`)
-      setKelasSelected(history.class_id)
+      const restoredData = res.raw?.data || res.data || {}
+      const restoredClassId = restoredData.restored_class_id || history.class_id
+      const conflictResolved = Boolean(restoredData.conflict_resolved)
+
+      if (conflictResolved) {
+        pushToast('success', `Kelas ${className} dipulihkan sebagai "${restoredClassId}" karena kelas asli sudah ada.`, {
+          title: 'Dipulihkan dengan nama baru',
+          duration: 7000
+        })
+      } else {
+        pushToast('success', `Kelas ${className} berhasil dipulihkan`)
+      }
+
+      setKelasSelected(restoredClassId)
       setJadwal([])
       setJadwalLoadedKey('')
       await Promise.all([loadKelas(), loadDeletedClassHistory()])

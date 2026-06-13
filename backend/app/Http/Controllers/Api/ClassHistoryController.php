@@ -173,37 +173,81 @@ class ClassHistoryController extends ApiController
 
         $snapshot = $this->decodeJson($history->snapshot);
         $classRow = $snapshot['kelas'] ?? null;
-        $classId = trim((string) ($classRow['id'] ?? $history->class_id ?? ''));
-        if ($classId === '') {
+        $originalClassId = trim((string) ($classRow['id'] ?? $history->class_id ?? ''));
+        if ($originalClassId === '') {
             return $this->deny('Snapshot kelas tidak valid', 422);
         }
 
-        $existsQuery = DB::table('kelas')->where('id', $classId);
+        // Check if the class ID already exists — if so, generate a unique ID
+        $existsQuery = DB::table('kelas')->where('id', $originalClassId);
         $this->whereTenant($existsQuery, 'kelas', $tenantId);
-        if ($existsQuery->exists()) {
-            return $this->deny('Kelas aktif dengan ID ini sudah ada. Pulihkan dibatalkan agar tidak menimpa data aktif.', 409);
+        $conflictExists = $existsQuery->exists();
+
+        $resolvedClassId = $originalClassId;
+        $resolvedClassName = (string) ($classRow['nama'] ?? $history->class_name ?? $originalClassId);
+
+        if ($conflictExists) {
+            // Generate a unique ID by appending _restored_N suffix
+            $suffix = 1;
+            do {
+                $candidateId = $originalClassId . '_restored_' . $suffix;
+                $checkQuery = DB::table('kelas')->where('id', $candidateId);
+                $this->whereTenant($checkQuery, 'kelas', $tenantId);
+                if (! $checkQuery->exists()) {
+                    break;
+                }
+                $suffix++;
+            } while ($suffix <= 20);
+
+            if ($suffix > 20) {
+                return $this->deny('Tidak dapat menemukan ID unik untuk kelas yang dipulihkan. Hapus kelas duplikat terlebih dahulu.', 409);
+            }
+
+            $resolvedClassId = $candidateId;
+            $resolvedClassName = $resolvedClassName . ' (Pulihan)';
         }
 
-        $restored = DB::transaction(function () use ($history, $snapshot, $classRow, $tenantId, $request) {
+        $restored = DB::transaction(function () use ($history, $snapshot, $classRow, $tenantId, $request, $originalClassId, $resolvedClassId, $resolvedClassName, $conflictExists) {
+            // Remap class row to the resolved ID
+            $classRow['id'] = $resolvedClassId;
+            $classRow['nama'] = $resolvedClassName;
+
             $this->insertSnapshotRows('kelas', [$classRow], $tenantId);
-            $this->insertSnapshotRows('kelas_struktur', $snapshot['kelas_struktur'] ?? [], $tenantId);
-            $this->insertSnapshotRows('jadwal', $snapshot['jadwal'] ?? [], $tenantId);
-            $this->insertSnapshotRows('jam_kosong', $snapshot['jam_kosong'] ?? [], $tenantId);
-            $this->insertSnapshotRows('absensi_settings', $snapshot['absensi_settings'] ?? [], $tenantId);
+
+            // Remap related snapshot rows to use the new class ID
+            $strukturRows = $this->remapClassId($snapshot['kelas_struktur'] ?? [], 'kelas_id', $originalClassId, $resolvedClassId);
+            $jadwalRows = $this->remapClassId($snapshot['jadwal'] ?? [], 'kelas_id', $originalClassId, $resolvedClassId);
+            $jamKosongRows = $this->remapClassId($snapshot['jam_kosong'] ?? [], 'kelas', $originalClassId, $resolvedClassId);
+            $absensiSettingsRows = $this->remapClassId($snapshot['absensi_settings'] ?? [], 'kelas', $originalClassId, $resolvedClassId);
+
+            $this->insertSnapshotRows('kelas_struktur', $strukturRows, $tenantId);
+            $this->insertSnapshotRows('jadwal', $jadwalRows, $tenantId);
+            $this->insertSnapshotRows('jam_kosong', $jamKosongRows, $tenantId);
+            $this->insertSnapshotRows('absensi_settings', $absensiSettingsRows, $tenantId);
+
+            $updatePayload = [
+                'restored_by' => $request->user()?->id,
+                'restored_at' => now(),
+                'updated_at' => now(),
+            ];
+
+            if ($conflictExists) {
+                $updatePayload['restore_note'] = "Kelas dipulihkan dengan ID baru: {$resolvedClassId} (ID asli {$originalClassId} sudah terpakai)";
+            }
 
             DB::table('kelas_deleted_histories')
                 ->where('id', $history->id)
                 ->where('tenant_id', $tenantId)
-                ->update([
-                    'restored_by' => $request->user()?->id,
-                    'restored_at' => now(),
-                    'updated_at' => now(),
-                ]);
+                ->update($updatePayload);
 
             return DB::table('kelas_deleted_histories')->where('id', $history->id)->first();
         });
 
-        return $this->ok($this->normalizeHistoryRow($restored));
+        $result = $this->normalizeHistoryRow($restored);
+        $result['restored_class_id'] = $resolvedClassId;
+        $result['conflict_resolved'] = $conflictExists;
+
+        return $this->ok($result);
     }
 
     private function fetchRows(string $table, string $column, string $value, string $tenantId): array
@@ -269,6 +313,24 @@ class ClassHistoryController extends ApiController
         if (! empty($filtered)) {
             DB::table($table)->insert($filtered);
         }
+    }
+
+    private function remapClassId(array $rows, string $column, string $oldId, string $newId): array
+    {
+        if ($oldId === $newId || empty($rows)) {
+            return $rows;
+        }
+
+        return array_map(function (array $row) use ($column, $oldId, $newId) {
+            if (isset($row[$column]) && trim((string) $row[$column]) === $oldId) {
+                $row[$column] = $newId;
+            }
+            // Generate a new unique ID for each related row to avoid PK conflicts
+            if (isset($row['id'])) {
+                $row['id'] = (string) Str::uuid();
+            }
+            return $row;
+        }, $rows);
     }
 
     private function whereTenant($query, string $table, string $tenantId): void

@@ -52,6 +52,8 @@ class DbTableRegistry
         'import_siswa_history_items',
         'import_guru_histories',
         'import_guru_history_items',
+        'academic_rollover_exceptions',
+        'kelas_deleted_histories',
     ];
 
     private const TENANT_SCOPED_TABLES = [
@@ -102,6 +104,8 @@ class DbTableRegistry
         'import_siswa_history_items',
         'import_guru_histories',
         'import_guru_history_items',
+        'academic_rollover_exceptions',
+        'kelas_deleted_histories',
     ];
 
     public function isAllowed(string $table): bool
