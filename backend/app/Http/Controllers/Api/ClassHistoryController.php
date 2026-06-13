@@ -250,6 +250,38 @@ class ClassHistoryController extends ApiController
         return $this->ok($result);
     }
 
+    public function destroyHistory(Request $request, string $historyId)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        $history = DB::table('kelas_deleted_histories')
+            ->where('id', $historyId)
+            ->where('tenant_id', $tenantId)
+            ->first();
+
+        if (! $history) {
+            return $this->deny('Riwayat kelas tidak ditemukan', 404);
+        }
+
+        if ($history->restored_at) {
+            return $this->deny('Riwayat yang sudah dipulihkan tidak bisa dihapus.', 409);
+        }
+
+        DB::table('kelas_deleted_histories')
+            ->where('id', $historyId)
+            ->where('tenant_id', $tenantId)
+            ->delete();
+
+        return $this->ok(['deleted' => true, 'id' => $historyId]);
+    }
+
     private function fetchRows(string $table, string $column, string $value, string $tenantId): array
     {
         if (! Schema::hasTable($table) || ! Schema::hasColumn($table, $column)) {

@@ -232,6 +232,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'throttle:api'])->group(func
     Route::get('/classes/deleted-history', [ClassHistoryController::class, 'index']);
     Route::delete('/classes/{id}', [ClassHistoryController::class, 'destroyClass']);
     Route::post('/classes/deleted-history/{id}/restore', [ClassHistoryController::class, 'restore']);
+    Route::delete('/classes/deleted-history/{id}', [ClassHistoryController::class, 'destroyHistory']);
     Route::post('/users/provision', [AdminController::class, 'provisionUser']);
     Route::patch('/teachers/{id}/name', [AdminController::class, 'updateTeacherName']);
     Route::patch('/teachers/{id}/profile', [AdminController::class, 'updateTeacherProfile']);

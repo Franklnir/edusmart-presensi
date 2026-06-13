@@ -1002,6 +1002,40 @@ export default function AKelas({ initialTab = 'kelas' }) {
     }
   }
 
+  async function deleteClassHistory(history) {
+    if (!history?.id || history.restored_at) return
+    const className = history.class_name || history.class_id
+
+    const confirmed = await requestConfirmation({
+      title: 'Hapus riwayat permanen?',
+      message: `Riwayat kelas "${className}" akan dihapus permanen dari daftar. Tindakan ini tidak bisa dikembalikan.`,
+      confirmText: 'Hapus Permanen',
+      cancelText: 'Batal',
+      tone: 'danger',
+      details: [
+        'Snapshot kelas (jadwal, struktur, dll) yang tersimpan akan hilang.',
+        'Data historis seperti absensi, tugas, quiz tidak terpengaruh.'
+      ]
+    })
+    if (!confirmed) return
+
+    try {
+      setRestoringHistoryId(String(history.id))
+      const res = await apiFetch(`/api/admin/classes/deleted-history/${encodeURIComponent(history.id)}`, {
+        method: 'DELETE'
+      })
+      if (res.error) throw res.error
+
+      pushToast('success', `Riwayat kelas ${className} berhasil dihapus permanen`)
+      await loadDeletedClassHistory()
+    } catch (error) {
+      console.error('Error deleting class history:', error)
+      pushToast('error', error?.message || 'Gagal menghapus riwayat kelas')
+    } finally {
+      setRestoringHistoryId('')
+    }
+  }
+
   function buildJadwalKey({ hari, mapel, jamMulai, jamSelesai, periodeBerlaku = SCHEDULE_SCOPE_YEAR }) {
     const cleanMapel = normalizeMapelName(mapel).replace(/\s+/g, '_').replace(/[^\w-]/g, '')
     const cleanHari = (hari || '').replace(/\s+/g, '_')
@@ -3349,18 +3383,31 @@ export default function AKelas({ initialTab = 'kelas' }) {
                                 ID kelas: {selectedDeletedHistory.class_id || '-'} • Grade {selectedDeletedHistory.grade || '-'} • Angkatan {selectedDeletedHistory.angkatan || '-'}
                               </p>
                             </div>
-                            <button
-                              type="button"
-                              className="px-4 py-2.5 rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
-                              onClick={() => restoreDeletedClass(selectedDeletedHistory)}
-                              disabled={Boolean(selectedDeletedHistory.restored_at) || String(restoringHistoryId) === String(selectedDeletedHistory.id)}
-                            >
-                              {selectedDeletedHistory.restored_at
-                                ? 'Sudah Dipulihkan'
-                                : String(restoringHistoryId) === String(selectedDeletedHistory.id)
-                                  ? 'Memulihkan...'
-                                  : 'Pulihkan Kelas'}
-                            </button>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <button
+                                type="button"
+                                className="px-4 py-2.5 rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm"
+                                onClick={() => restoreDeletedClass(selectedDeletedHistory)}
+                                disabled={Boolean(selectedDeletedHistory.restored_at) || String(restoringHistoryId) === String(selectedDeletedHistory.id)}
+                              >
+                                {selectedDeletedHistory.restored_at
+                                  ? 'Sudah Dipulihkan'
+                                  : String(restoringHistoryId) === String(selectedDeletedHistory.id)
+                                    ? 'Memulihkan...'
+                                    : 'Pulihkan Kelas'}
+                              </button>
+                              {!selectedDeletedHistory.restored_at && (
+                                <button
+                                  type="button"
+                                  className="px-4 py-2.5 rounded-lg border border-rose-300 text-rose-600 hover:bg-rose-50 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm flex items-center gap-1.5"
+                                  onClick={() => deleteClassHistory(selectedDeletedHistory)}
+                                  disabled={String(restoringHistoryId) === String(selectedDeletedHistory.id)}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                  <span>Hapus Permanen</span>
+                                </button>
+                              )}
+                            </div>
                           </div>
 
                           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
