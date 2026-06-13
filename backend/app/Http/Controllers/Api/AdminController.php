@@ -851,25 +851,39 @@ class AdminController extends ApiController
         $isCalendarCorrection = $yearChanged
             && $previousStartYear > $calendarStartYear
             && $targetStartYear === $calendarStartYear;
-        $requiresRollover = $yearChanged && $isCalendarCorrection === false && $manualRolloverCompleted === false;
+        $targetHasClassSnapshot = $yearChanged && $this->hasStudentClassSnapshotsForPeriod($tenantId, $activePeriod);
+        $restoreFromClassSnapshot = $yearChanged && $targetHasClassSnapshot && $manualRolloverCompleted === false;
+        $movingBackward = $yearChanged && $targetStartYear < $previousStartYear;
+        $movingForwardOneYear = $yearChanged && $targetStartYear === $previousStartYear + 1;
+        $requiresRollover = $yearChanged
+            && $restoreFromClassSnapshot === false
+            && $isCalendarCorrection === false
+            && $manualRolloverCompleted === false;
         $targetMatchesServerCalendar = $tahunAjaran === $calendarPeriod['tahun_ajaran']
             && $semester === $calendarPeriod['semester'];
 
-        if ($targetStartYear < $calendarStartYear) {
+        if ($movingBackward && $restoreFromClassSnapshot === false && $manualRolloverCompleted === false) {
             return $this->deny(
-                'Periode lama tidak boleh dijadikan periode aktif. Gunakan filter Mode Arsip untuk melihat data '.$tahunAjaran.'.',
+                'Snapshot kelas siswa untuk periode '.$tahunAjaran.' belum tersedia. Periode tidak diturunkan agar data siswa tidak rusak.',
                 422
             );
         }
 
-        if ($targetStartYear > $calendarStartYear + 1) {
+        if ($isCalendarCorrection && $restoreFromClassSnapshot === false && $manualRolloverCompleted === false) {
+            return $this->deny(
+                'Snapshot kelas siswa untuk periode kalender server belum tersedia. Pulihkan dari backup/snapshot sebelum koreksi periode.',
+                422
+            );
+        }
+
+        if ($targetStartYear > $calendarStartYear + 1 && $restoreFromClassSnapshot === false) {
             return $this->deny('Periode aktif tidak boleh melompat lebih dari satu tahun ajaran dari kalender server.', 422);
         }
 
         if (($isCalendarCorrection || $targetMatchesServerCalendar === false) && $calendarConfirmed === false) {
             return $this->academicPeriodConfirmationRequired(
                 $isCalendarCorrection
-                    ? 'Periode aktif tersimpan berada di masa depan. Konfirmasi untuk mengoreksi kalender aktif tanpa membalik otomatis riwayat siswa.'
+                    ? 'Periode aktif tersimpan berada di masa depan. Konfirmasi untuk mengoreksi kalender aktif; data siswa akan dipulihkan dari snapshot periode jika tersedia.'
                     : 'Periode yang dipilih tidak sama dengan kalender server saat ini. Konfirmasi ulang sebelum dipakai sebagai periode operasional.',
                 $calendarPeriod,
                 $serverNow,
@@ -884,7 +898,12 @@ class AdminController extends ApiController
             );
         }
 
-        if ($yearChanged && $isCalendarCorrection === false && $targetStartYear !== $previousStartYear + 1) {
+        if (
+            $yearChanged
+            && $restoreFromClassSnapshot === false
+            && $manualRolloverCompleted === false
+            && $movingForwardOneYear === false
+        ) {
             return $this->deny('Rollover akademik hanya bisa maju tepat satu tahun ajaran.', 422);
         }
 
@@ -892,7 +911,7 @@ class AdminController extends ApiController
             return $this->deny('Perubahan tahun ajaran harus dijalankan melalui rollover akademik atau Kenaikan Kelas manual.', 409);
         }
 
-        if ($requiresRollover && $targetStartYear !== $previousStartYear + 1) {
+        if ($requiresRollover && $movingForwardOneYear === false) {
             return $this->deny('Rollover otomatis hanya bisa maju tepat satu tahun ajaran.', 422);
         }
 
@@ -908,6 +927,7 @@ class AdminController extends ApiController
                 $yearChanged,
                 $semesterOnlyChange,
                 $requiresRollover,
+                $restoreFromClassSnapshot,
                 $isCalendarCorrection,
                 $manualRolloverCompleted,
                 $calendarPeriod,
@@ -917,8 +937,29 @@ class AdminController extends ApiController
                 $rollover = null;
                 $classesSynced = 0;
                 $classHistorySnapshots = 0;
+                $previousClassHistorySnapshots = 0;
+                $studentProfileRestores = 0;
+                $studentProfilesOutsidePeriod = 0;
 
-                if ($requiresRollover) {
+                if ($yearChanged || $manualRolloverCompleted) {
+                    $previousClassHistorySnapshots = $this->snapshotStudentClassHistoriesForPeriod(
+                        $tenantId,
+                        [
+                            'tahun_ajaran' => $previousYear,
+                            'semester' => $previousSemester,
+                        ],
+                        'before_period_change'
+                    );
+                }
+
+                $settings = $this->saveAcademicPeriodSettings($tenantId, $existing, $settingsPayload);
+
+                if ($restoreFromClassSnapshot) {
+                    $classesSynced = $this->syncClassPeriodMetadata($tenantId, $activePeriod);
+                    $restoreResult = $this->restoreStudentProfilesFromPeriodSnapshot($tenantId, $activePeriod);
+                    $studentProfileRestores = (int) ($restoreResult['restored'] ?? 0);
+                    $studentProfilesOutsidePeriod = (int) ($restoreResult['outside_period'] ?? 0);
+                } elseif ($requiresRollover) {
                     $rollover = $this->rolloverAcademicYearData(
                         $tenantId,
                         $activePeriod,
@@ -931,14 +972,15 @@ class AdminController extends ApiController
                     $classesSynced = $this->syncClassPeriodMetadata($tenantId, $activePeriod);
                 }
 
-                $settings = $this->saveAcademicPeriodSettings($tenantId, $existing, $settingsPayload);
-                if ($classesSynced > 0 || $requiresRollover || $yearChanged || $manualRolloverCompleted) {
+                if ($classesSynced > 0 || $requiresRollover || $restoreFromClassSnapshot || $yearChanged || $manualRolloverCompleted) {
                     $classHistorySnapshots = $this->snapshotStudentClassHistoriesForPeriod(
                         $tenantId,
                         $activePeriod,
-                        $requiresRollover
-                            ? 'auto_rollover'
-                            : ($manualRolloverCompleted ? 'manual_rollover_completed' : 'period_sync')
+                        $restoreFromClassSnapshot
+                            ? 'period_snapshot_restore'
+                            : ($requiresRollover
+                                ? 'auto_rollover'
+                                : ($manualRolloverCompleted ? 'manual_rollover_completed' : 'period_sync'))
                     );
                 }
 
@@ -955,6 +997,10 @@ class AdminController extends ApiController
                     'semester_only_change' => $semesterOnlyChange,
                     'calendar_correction' => $isCalendarCorrection,
                     'manual_rollover_completed' => $manualRolloverCompleted,
+                    'period_snapshot_restored' => $restoreFromClassSnapshot,
+                    'student_profile_restores' => $studentProfileRestores,
+                    'student_profiles_outside_period' => $studentProfilesOutsidePeriod,
+                    'previous_class_history_snapshots' => $previousClassHistorySnapshots,
                     'class_history_snapshots' => $classHistorySnapshots,
                     'server_calendar' => [
                         'today' => $serverNow->toDateString(),
@@ -2550,7 +2596,6 @@ class AdminController extends ApiController
                 'tahun_lulus' => $targetStartYear,
                 'disabled_at' => $now,
                 'alasan_nonaktif' => 'Lulus otomatis saat rollover dari '.$previousYear.' ke '.$period['tahun_ajaran'].'.',
-                'rfid_uid' => null,
                 'updated_at' => $now,
             ];
             $alumniPayload = $this->filterExistingPayload('profiles', $alumniPayload);
@@ -2936,6 +2981,199 @@ class AdminController extends ApiController
         return $histories;
     }
 
+    private function hasStudentClassSnapshotsForPeriod(string $tenantId, array $period): bool
+    {
+        if (
+            ! Schema::hasTable('student_class_histories')
+            || ! Schema::hasColumn('student_class_histories', 'tahun_ajaran')
+        ) {
+            return false;
+        }
+
+        $year = AcademicPeriod::normalizeAcademicYear($period['tahun_ajaran'] ?? null);
+        if (! $year) {
+            return false;
+        }
+
+        $query = $this->tenantQuery('student_class_histories', $tenantId)
+            ->where('tahun_ajaran', $year)
+            ->whereNotNull('student_id');
+
+        if (Schema::hasColumn('student_class_histories', 'source')) {
+            $query->whereIn('source', $this->restorableClassSnapshotSources());
+        }
+
+        return $query->exists();
+    }
+
+    private function restoreStudentProfilesFromPeriodSnapshot(string $tenantId, array $period): array
+    {
+        if (
+            ! Schema::hasTable('student_class_histories')
+            || ! Schema::hasTable('profiles')
+            || ! Schema::hasColumn('student_class_histories', 'student_id')
+            || ! Schema::hasColumn('student_class_histories', 'tahun_ajaran')
+        ) {
+            return ['restored' => 0, 'outside_period' => 0];
+        }
+
+        $year = AcademicPeriod::normalizeAcademicYear($period['tahun_ajaran'] ?? null);
+        if (! $year) {
+            return ['restored' => 0, 'outside_period' => 0];
+        }
+
+        $semester = AcademicPeriod::normalizeSemester($period['semester'] ?? null);
+        $columns = $this->existingColumns('student_class_histories', [
+            'student_id', 'class_id', 'class_name', 'grade', 'suffix', 'angkatan',
+            'tahun_ajaran', 'semester', 'status', 'valid_from', 'created_at',
+        ]);
+        $query = $this->tenantQuery('student_class_histories', $tenantId)
+            ->where('tahun_ajaran', $year);
+        if (Schema::hasColumn('student_class_histories', 'source')) {
+            $query->whereIn('source', $this->restorableClassSnapshotSources());
+        }
+
+        $rows = $query->select($columns)
+            ->orderBy('student_id')
+            ->orderByDesc(Schema::hasColumn('student_class_histories', 'valid_from') ? 'valid_from' : 'created_at')
+            ->get();
+
+        if ($rows->isEmpty()) {
+            return ['restored' => 0, 'outside_period' => 0];
+        }
+
+        $snapshots = [];
+        foreach ($rows as $row) {
+            $studentId = trim((string) ($row->student_id ?? ''));
+            if ($studentId === '') {
+                continue;
+            }
+
+            $rowSemester = AcademicPeriod::normalizeSemester($row->semester ?? null);
+            $score = $semester && $rowSemester === $semester ? 2 : ($rowSemester ? 1 : 0);
+            $timestamp = (string) ($row->valid_from ?? $row->created_at ?? '');
+            $previous = $snapshots[$studentId] ?? null;
+            if (
+                $previous === null
+                || $score > $previous['score']
+                || ($score === $previous['score'] && strcmp($timestamp, $previous['timestamp']) > 0)
+            ) {
+                $snapshots[$studentId] = [
+                    'row' => $row,
+                    'score' => $score,
+                    'timestamp' => $timestamp,
+                ];
+            }
+        }
+
+        if ($snapshots === []) {
+            return ['restored' => 0, 'outside_period' => 0];
+        }
+
+        $now = now();
+        $restored = 0;
+        $graduationYear = (int) substr($year, 0, 4);
+        foreach (array_chunk($snapshots, 300, true) as $chunk) {
+            foreach ($chunk as $studentId => $snapshot) {
+                $row = $snapshot['row'];
+                $classId = trim((string) ($row->class_id ?? ''));
+                $status = strtolower(trim((string) ($row->status ?? '')));
+                if (! in_array($status, ['active', 'nonaktif', 'mutasi', 'alumni'], true)) {
+                    $status = $classId !== '' ? 'active' : 'alumni';
+                }
+
+                $payload = [
+                    'kelas' => $classId,
+                    'status' => $status,
+                    'updated_at' => $now,
+                ];
+                $angkatan = trim((string) ($row->angkatan ?? ''));
+                if ($angkatan !== '') {
+                    $payload['angkatan'] = $angkatan;
+                }
+
+                if ($status === 'active') {
+                    $payload['disabled_at'] = null;
+                    $payload['alasan_nonaktif'] = null;
+                    $payload['tahun_lulus'] = null;
+                } elseif ($status === 'alumni') {
+                    $payload['kelas'] = '';
+                    $payload['disabled_at'] = $now;
+                    $payload['tahun_lulus'] = $graduationYear;
+                    $payload['alasan_nonaktif'] = 'Status alumni mengikuti snapshot periode '.$year.'.';
+                }
+
+                $payload = $this->filterExistingPayload('profiles', $payload);
+                if ($payload === []) {
+                    continue;
+                }
+
+                $affected = DB::table('profiles')
+                    ->where('tenant_id', $tenantId)
+                    ->where('role', 'siswa')
+                    ->where('id', $studentId)
+                    ->update($payload);
+                $restored += (int) $affected;
+            }
+        }
+
+        $outsidePeriod = $this->markStudentsMissingFromPeriodSnapshot($tenantId, $year, array_keys($snapshots), $now);
+
+        return ['restored' => $restored, 'outside_period' => $outsidePeriod];
+    }
+
+    private function markStudentsMissingFromPeriodSnapshot(string $tenantId, string $year, array $snapshotStudentIds, $timestamp): int
+    {
+        if (! Schema::hasTable('profiles')) {
+            return 0;
+        }
+
+        $snapshotStudentIds = array_values(array_unique(array_filter(
+            array_map(fn ($id) => trim((string) $id), $snapshotStudentIds),
+            fn ($id) => $id !== ''
+        )));
+        if ($snapshotStudentIds === []) {
+            return 0;
+        }
+
+        $payload = $this->filterExistingPayload('profiles', [
+            'kelas' => '',
+            'status' => 'nonaktif',
+            'disabled_at' => $timestamp,
+            'alasan_nonaktif' => 'Tidak tercatat pada snapshot periode '.$year.'.',
+            'tahun_lulus' => null,
+            'updated_at' => $timestamp,
+        ]);
+        if ($payload === []) {
+            return 0;
+        }
+
+        $query = DB::table('profiles')
+            ->where('tenant_id', $tenantId)
+            ->where('role', 'siswa')
+            ->whereNotIn('id', $snapshotStudentIds)
+            ->where(function ($inner) {
+                $inner->whereRaw('lower(coalesce(status, \'active\')) = ?', ['active'])
+                    ->orWhere(function ($classQuery) {
+                        $classQuery->whereNotNull('kelas')->where('kelas', '!=', '');
+                    });
+            });
+
+        return (int) $query->update($payload);
+    }
+
+    private function restorableClassSnapshotSources(): array
+    {
+        return [
+            'backfill',
+            'before_period_change',
+            'period_sync',
+            'auto_rollover',
+            'manual_rollover_completed',
+            'period_snapshot_restore',
+        ];
+    }
+
     private function snapshotStudentClassHistoriesForPeriod(string $tenantId, array $period, string $source): int
     {
         if (
@@ -2954,9 +3192,6 @@ class AdminController extends ApiController
         $studentRows = DB::table('profiles')
             ->where('tenant_id', $tenantId)
             ->where('role', 'siswa')
-            ->whereNotNull('kelas')
-            ->where('kelas', '!=', '')
-            ->whereRaw('lower(coalesce(status, \'active\')) = ?', ['active'])
             ->select($this->existingColumns('profiles', ['id', 'kelas', 'angkatan', 'status']))
             ->orderBy('kelas')
             ->orderBy('id')
@@ -2975,20 +3210,26 @@ class AdminController extends ApiController
                 ->where('tahun_ajaran', $period['tahun_ajaran'])
                 ->where('semester', $period['semester'])
                 ->whereNull('valid_until')
-                ->select($this->existingColumns('student_class_histories', ['student_id', 'class_id']))
+                ->select($this->existingColumns('student_class_histories', ['student_id', 'class_id', 'status', 'source']))
                 ->get()
-                ->mapWithKeys(fn ($row) => [(string) ($row->student_id ?? '').'|'.(string) ($row->class_id ?? '') => true]);
+                ->mapWithKeys(fn ($row) => [
+                    (string) ($row->student_id ?? '').'|'.
+                    (string) ($row->class_id ?? '').'|'.
+                    strtolower(trim((string) ($row->status ?? 'active'))).'|'.
+                    strtolower(trim((string) ($row->source ?? 'system'))) => true,
+                ]);
 
             $rowsToInsert = [];
             $studentsToClose = [];
             foreach ($chunk as $student) {
                 $studentId = (string) ($student->id ?? '');
                 $classId = (string) ($student->kelas ?? '');
-                if ($studentId === '' || $classId === '') {
+                $studentStatus = strtolower(trim((string) ($student->status ?? 'active'))) ?: 'active';
+                if ($studentId === '') {
                     continue;
                 }
 
-                if ($existingKeys->has($studentId.'|'.$classId)) {
+                if ($existingKeys->has($studentId.'|'.$classId.'|'.$studentStatus.'|'.strtolower($source))) {
                     continue;
                 }
 

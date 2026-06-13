@@ -1097,9 +1097,9 @@ export default function APengaturan() {
             cancelText: 'Batal',
             tone: 'warning',
             details: [
-              'Koreksi kalender aktif tidak membalik otomatis riwayat kelas siswa.',
-              'Backend tetap mengecek kalender server Asia/Jakarta sebelum perubahan disimpan.',
-              'Data periode lama sebaiknya dibuka lewat Mode Arsip, bukan dengan menurunkan periode aktif.'
+              'Jika snapshot periode target tersedia, kelas/status siswa akan dipulihkan mengikuti periode itu.',
+              'Jika snapshot belum tersedia, backend akan menolak agar roster siswa tidak rusak.',
+              'Tugas, quiz, absensi, rapot, jadwal, dan storage mengikuti periode aktif atau filter periode masing-masing.'
             ]
           })
       if (!confirmedYear) return
@@ -1203,11 +1203,14 @@ export default function APengaturan() {
       const rolloverText = rollover
         ? ` Siswa naik: ${rollover.promoted_students || 0}, tidak naik: ${rollover.retained_students || 0}, alumni: ${rollover.alumni_students || 0}.`
         : ''
+      const restoredText = data?.period_snapshot_restored
+        ? ` Siswa diselaraskan: ${data.student_profile_restores || 0}, di luar periode: ${data.student_profiles_outside_period || 0}.`
+        : ''
       const eskulText = rollover && payload.carry_eskul_members
         ? ` Eskul disalin: ${rollover.eskul_members_copied || 0}.`
         : ''
       setCarryEskulMembers(false)
-      pushToast('success', `Tahun ajaran ${tahunAjaran} aktif penuh.${rolloverText}${eskulText}`, {
+      pushToast('success', `Tahun ajaran ${tahunAjaran} aktif penuh.${rolloverText}${restoredText}${eskulText}`, {
         title: 'Kalender akademik diperbarui'
       })
     } catch (error) {

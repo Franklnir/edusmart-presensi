@@ -1143,7 +1143,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
       updated_at: new Date().toISOString()
     }
 
-    let { error, raw } = await supabase.admin.applyAcademicPeriod(payload)
+    let { data, error, raw } = await supabase.admin.applyAcademicPeriod(payload)
     if (error?.code === 'academic_period_calendar_confirmation_required') {
       const serverCalendar = raw?.data?.server_calendar || {}
       const confirmedCalendar = await requestConfirmation({
@@ -1166,6 +1166,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
         ...payload,
         calendar_confirmed: true
       })
+      data = retry.data
       error = retry.error
     }
 
@@ -1173,7 +1174,12 @@ export default function AKelas({ initialTab = 'kelas' }) {
 
     const resolved = resolveAcademicPeriod(payload)
     setAcademicPeriod(resolved)
-    if (!silent) pushToast('success', `Periode aktif disimpan: ${resolved.tahunAjaran} - ${resolved.semester}`)
+    if (!silent) {
+      const restoredText = data?.period_snapshot_restored
+        ? ` Siswa diselaraskan: ${data.student_profile_restores || 0}, di luar periode: ${data.student_profiles_outside_period || 0}.`
+        : ''
+      pushToast('success', `Periode aktif disimpan: ${resolved.tahunAjaran} - ${resolved.semester}.${restoredText}`)
+    }
 
     return resolved
   }
