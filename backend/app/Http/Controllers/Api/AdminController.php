@@ -3023,7 +3023,7 @@ class AdminController extends ApiController
             }
 
             // Generate a new UUID-style id for the row
-            $newRow['id'] = (string) \Illuminate\Support\Str::uuid();
+            $newRow['id'] = (string) Str::uuid();
 
             $newRow = $this->filterExistingPayload('jadwal', $newRow);
             if (empty($newRow)) {

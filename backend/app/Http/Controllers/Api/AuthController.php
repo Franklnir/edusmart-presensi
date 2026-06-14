@@ -977,9 +977,9 @@ class AuthController extends ApiController
         $status = strtolower(trim((string) ($profile->status ?? '')));
 
         $base = match ($status) {
-            'alumni'  => 'Akun ini tercatat sebagai alumni dan tidak dapat lagi mengakses sistem.',
-            'mutasi'  => 'Akun ini tercatat sebagai siswa mutasi dan tidak dapat lagi mengakses sistem.',
-            default   => 'Akun ini dinonaktifkan. Hubungi administrator.',
+            'alumni' => 'Akun ini tercatat sebagai alumni dan tidak dapat lagi mengakses sistem.',
+            'mutasi' => 'Akun ini tercatat sebagai siswa mutasi dan tidak dapat lagi mengakses sistem.',
+            default => 'Akun ini dinonaktifkan. Hubungi administrator.',
         };
 
         if ($profile->alasan_nonaktif) {
