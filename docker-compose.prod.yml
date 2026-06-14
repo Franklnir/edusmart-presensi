@@ -42,27 +42,6 @@ services:
     networks:
       - internal
 
-  pgbouncer:
-    image: edoburu/pgbouncer:v1.23.1-p3
-    container_name: edusmart-pgbouncer
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      DATABASE_URL: "postgres://${DB_USERNAME}:${DB_PASSWORD}@postgres:5432/${DB_DATABASE}?sslmode=disable"
-    volumes:
-      - ./deploy/pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
-    expose:
-      - "6432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 6432 -U ${DB_USERNAME} -d ${DB_DATABASE}"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-    networks:
-      - internal
-
   mosquitto_init:
     image: alpine:3.20
     container_name: edusmart-mosquitto-init
@@ -239,8 +218,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      pgbouncer:
-        condition: service_healthy
       redis:
         condition: service_healthy
     environment:
@@ -261,8 +238,8 @@ services:
       PHP_FPM_PM_MAX_REQUESTS: ${PHP_FPM_PM_MAX_REQUESTS:-500}
 
       DB_CONNECTION: pgsql
-      DB_HOST: pgbouncer
-      DB_PORT: 6432
+      DB_HOST: postgres
+      DB_PORT: 5432
       DB_DATABASE: ${DB_DATABASE:?DB_DATABASE is required}
       DB_USERNAME: ${DB_USERNAME:?DB_USERNAME is required}
       DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
@@ -467,8 +444,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      pgbouncer:
-        condition: service_healthy
       redis:
         condition: service_healthy
     environment:
@@ -479,8 +454,8 @@ services:
       APP_URL: ${APP_URL:?APP_URL is required}
 
       DB_CONNECTION: pgsql
-      DB_HOST: pgbouncer
-      DB_PORT: 6432
+      DB_HOST: postgres
+      DB_PORT: 5432
       DB_DATABASE: ${DB_DATABASE:?DB_DATABASE is required}
       DB_USERNAME: ${DB_USERNAME:?DB_USERNAME is required}
       DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
@@ -582,8 +557,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      pgbouncer:
-        condition: service_healthy
       redis:
         condition: service_healthy
     environment:
@@ -594,8 +567,8 @@ services:
       APP_URL: ${APP_URL:?APP_URL is required}
 
       DB_CONNECTION: pgsql
-      DB_HOST: pgbouncer
-      DB_PORT: 6432
+      DB_HOST: postgres
+      DB_PORT: 5432
       DB_DATABASE: ${DB_DATABASE:?DB_DATABASE is required}
       DB_USERNAME: ${DB_USERNAME:?DB_USERNAME is required}
       DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
@@ -694,8 +667,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      pgbouncer:
-        condition: service_healthy
       redis:
         condition: service_healthy
       mosquitto:
@@ -712,8 +683,8 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
 
       DB_CONNECTION: pgsql
-      DB_HOST: pgbouncer
-      DB_PORT: 6432
+      DB_HOST: postgres
+      DB_PORT: 5432
       DB_DATABASE: ${DB_DATABASE:?DB_DATABASE is required}
       DB_USERNAME: ${DB_USERNAME:?DB_USERNAME is required}
       DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
