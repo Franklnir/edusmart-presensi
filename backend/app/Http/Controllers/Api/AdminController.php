@@ -933,7 +933,9 @@ class AdminController extends ApiController
                 $manualRolloverCompleted,
                 $calendarPeriod,
                 $serverNow,
-                $carryEskulMembers
+                $carryEskulMembers,
+                $carryJadwal,
+                $tahunAjaran
             ) {
                 $rollover = null;
                 $classesSynced = 0;
