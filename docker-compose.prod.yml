@@ -42,39 +42,17 @@ services:
     networks:
       - internal
 
-  pgbouncer_init:
-    image: alpine:3.20
-    container_name: edusmart-pgbouncer-init
-    restart: "no"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      DB_USERNAME: ${DB_USERNAME:?DB_USERNAME is required}
-      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
-      EVOLUTION_DB_USER: ${EVOLUTION_DB_USER:-}
-      EVOLUTION_DB_PASSWORD: ${EVOLUTION_DB_PASSWORD:-}
-    volumes:
-      - ./deploy/pgbouncer/generate-userlist.sh:/generate-userlist.sh:ro
-      - pgbouncer_config:/etc/pgbouncer
-    command: ["sh", "/generate-userlist.sh"]
-    networks:
-      - internal
-
   pgbouncer:
     image: edoburu/pgbouncer:v1.23.1-p3
     container_name: edusmart-pgbouncer
     restart: unless-stopped
     depends_on:
-      pgbouncer_init:
-        condition: service_completed_successfully
       postgres:
         condition: service_healthy
     environment:
       DATABASE_URL: "postgres://${DB_USERNAME}:${DB_PASSWORD}@postgres:5432/${DB_DATABASE}?sslmode=disable"
     volumes:
       - ./deploy/pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
-      - pgbouncer_config:/etc/pgbouncer
     expose:
       - "6432"
     healthcheck:
@@ -886,7 +864,6 @@ services:
 volumes:
   postgres_data:
   redis_data:
-  pgbouncer_config:
   mosquitto_data:
   mosquitto_log:
   evolution_postgres_data:
