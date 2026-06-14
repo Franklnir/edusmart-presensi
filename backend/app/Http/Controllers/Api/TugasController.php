@@ -46,6 +46,16 @@ class TugasController extends ApiController
         if ($gteCreated = $request->query('created_gte')) {
             $query->where('created_at', '>=', $gteCreated);
         }
+        if ($tahunAjaran = $request->query('tahun_ajaran')) {
+            if (Schema::hasColumn('tugas', 'tahun_ajaran')) {
+                $query->where('tahun_ajaran', $tahunAjaran);
+            }
+        }
+        if ($semester = $request->query('semester')) {
+            if (Schema::hasColumn('tugas', 'semester')) {
+                $query->where('semester', $semester);
+            }
+        }
 
         $query->orderBy($request->query('order_by', 'created_at'), $request->query('order', 'desc'));
 

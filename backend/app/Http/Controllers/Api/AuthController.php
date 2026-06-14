@@ -425,13 +425,8 @@ class AuthController extends ApiController
             if (! $profile) {
                 return response()->json(['error' => 'Akun tidak memiliki akses tenant ini.'], 403);
             }
-            if ($profile->status === 'nonaktif') {
-                $message = 'Akun ini dinonaktifkan. Hubungi administrator.';
-                if ($profile->alasan_nonaktif) {
-                    $message .= ' Alasan: '.$profile->alasan_nonaktif;
-                }
-
-                return response()->json(['error' => $message], 403);
+            if ($this->isProfileLoginBlocked($profile)) {
+                return response()->json(['error' => $this->blockedLoginMessage($profile)], 403);
             }
         }
 
@@ -443,6 +438,7 @@ class AuthController extends ApiController
         }
 
         $profile = $this->profile($request);
+
         if (! $this->isAllowedMobileProfile($profile)) {
             $this->logoutWebSession($request);
 
@@ -833,20 +829,17 @@ class AuthController extends ApiController
             return response()->json(['error' => 'Akun tidak terdaftar di sekolah ini'], 403);
         }
 
-        if ($profile && $profile->status === 'nonaktif') {
+        if ($profile && $this->isProfileLoginBlocked($profile)) {
             $this->logoutWebSession($request);
             $this->registerFailedLoginAttempt($throttleKey);
             $this->logAuthEvent($request, 'login_failed_profile_inactive', [
                 'email' => $email,
                 'tenant_id' => $tenantId,
                 'host' => $host,
+                'status' => $profile->status,
             ]);
-            $message = 'Akun ini dinonaktifkan. Hubungi administrator.';
-            if ($profile->alasan_nonaktif) {
-                $message .= ' Alasan: '.$profile->alasan_nonaktif;
-            }
 
-            return response()->json(['error' => $message], 403);
+            return response()->json(['error' => $this->blockedLoginMessage($profile)], 403);
         }
 
         RateLimiter::clear($throttleKey);
@@ -954,7 +947,46 @@ class AuthController extends ApiController
         $role = strtolower(trim((string) ($profile?->role ?? '')));
 
         return in_array($role, ['guru', 'siswa'], true)
-            && strtolower(trim((string) ($profile?->status ?? 'active'))) !== 'nonaktif';
+            && ! $this->isProfileLoginBlocked($profile);
+    }
+
+    /**
+     * Returns true when the profile's status should prevent login.
+     *
+     * Blocked statuses: nonaktif, alumni, mutasi.
+     * Alumni and mutasi students have left the school and should not be able
+     * to access the system anymore.  If a school wants to re-activate an
+     * account they can set status back to 'active' via the admin panel.
+     */
+    private function isProfileLoginBlocked(?Profile $profile): bool
+    {
+        $blocked = ['nonaktif', 'alumni', 'mutasi'];
+
+        return in_array(
+            strtolower(trim((string) ($profile?->status ?? 'active'))),
+            $blocked,
+            true
+        );
+    }
+
+    /**
+     * Build a human-readable blocked-login message for the given profile.
+     */
+    private function blockedLoginMessage(Profile $profile): string
+    {
+        $status = strtolower(trim((string) ($profile->status ?? '')));
+
+        $base = match ($status) {
+            'alumni'  => 'Akun ini tercatat sebagai alumni dan tidak dapat lagi mengakses sistem.',
+            'mutasi'  => 'Akun ini tercatat sebagai siswa mutasi dan tidak dapat lagi mengakses sistem.',
+            default   => 'Akun ini dinonaktifkan. Hubungi administrator.',
+        };
+
+        if ($profile->alasan_nonaktif) {
+            $base .= ' Alasan: '.$profile->alasan_nonaktif;
+        }
+
+        return $base;
     }
 
     private function mobileTokenPayload(User $user, ?Profile $profile): array
@@ -1765,12 +1797,8 @@ class AuthController extends ApiController
         if (! $profile && ! $isSuperAdminIdentity) {
             throw new \RuntimeException('Akun Google tidak terdaftar di tenant ini.');
         }
-        if ($profile && $profile->status === 'nonaktif') {
-            $message = 'Akun ini dinonaktifkan. Hubungi administrator.';
-            if ($profile->alasan_nonaktif) {
-                $message .= ' Alasan: '.$profile->alasan_nonaktif;
-            }
-            throw new \RuntimeException($message);
+        if ($profile && $this->isProfileLoginBlocked($profile)) {
+            throw new \RuntimeException($this->blockedLoginMessage($profile));
         }
 
         DB::transaction(function () use ($user, $profile, $googleUser, $currentEmail) {

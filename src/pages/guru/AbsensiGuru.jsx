@@ -1605,21 +1605,70 @@ function AbsensiGuru() {
         { key: 'settings', query: settingsQuery },
         {
           key: 'students',
-          query: supabase
-            .from('profiles')
-            .select(STUDENT_COLUMNS)
-            .eq('role', 'siswa')
-            .eq('kelas', kelas)
-            .order('nama')
+          query: (() => {
+            // For live/current-period attendance we always use profiles.kelas
+            // so teachers see the real class list right now.  We only switch
+            // to student_class_histories when the teacher is *viewing* a past
+            // period (archive mode) — in that case profiles.kelas already
+            // reflects the new class after promotion, so it would show the
+            // wrong roster.
+            const isArchivePeriod =
+              periodFilter.tahunAjaran &&
+              periodFilter.tahunAjaran !== activeAcademicPeriod.tahunAjaran
+            if (isArchivePeriod) {
+              // Return a minimal query; we'll resolve via history after the batch.
+              return supabase.from('profiles').select(STUDENT_COLUMNS).eq('role', 'siswa').eq('kelas', '__history_lookup__').limit(0)
+            }
+            return supabase
+              .from('profiles')
+              .select(STUDENT_COLUMNS)
+              .eq('role', 'siswa')
+              .eq('kelas', kelas)
+              .order('nama')
+          })()
         },
         { key: 'absen', query: absenQuery },
         { key: 'reqs', query: reqsQuery }
       ])
 
+      // For archive periods resolve the student list from class history
+      const isArchivePeriod =
+        periodFilter.tahunAjaran &&
+        periodFilter.tahunAjaran !== activeAcademicPeriod.tahunAjaran
+      let resolvedStudentsRes = absensiBatch?.students || { data: [], error: null }
+      if (isArchivePeriod && periodFilter.tahunAjaran) {
+        const { data: histRows } = await supabase
+          .from('student_class_histories')
+          .select('student_id')
+          .eq('class_id', kelas)
+          .eq('tahun_ajaran', periodFilter.tahunAjaran)
+          .in('status', ['active', 'nonaktif', 'mutasi'])
+        const histIds = (histRows || [])
+          .map((r) => String(r.student_id || '').trim())
+          .filter(Boolean)
+        if (histIds.length) {
+          const { data: histProfiles, error: histErr } = await supabase
+            .from('profiles')
+            .select(STUDENT_COLUMNS)
+            .eq('role', 'siswa')
+            .in('id', histIds)
+            .order('nama')
+          resolvedStudentsRes = { data: histProfiles, error: histErr }
+        } else {
+          // History not available — fall back to current class members
+          const { data: currentProfiles, error: currentErr } = await supabase
+            .from('profiles')
+            .select(STUDENT_COLUMNS)
+            .eq('role', 'siswa')
+            .eq('kelas', kelas)
+            .order('nama')
+          resolvedStudentsRes = { data: currentProfiles, error: currentErr }
+        }
+      }
+
       if (!isLatestRequest()) return
 
       const settingsRes = absensiBatch?.settings || { data: null, error: null }
-      const studentsRes = absensiBatch?.students || { data: [], error: null }
       const absenRes = absensiBatch?.absen || { data: [], error: null }
       const reqsRes = absensiBatch?.reqs || { data: [], error: null }
 
@@ -1634,7 +1683,9 @@ function AbsensiGuru() {
         setAllowSelfAbsen(false)
       }
 
-      const { data: students, error: studentsError } = studentsRes
+      // Use resolvedStudentsRes — for archive periods this comes from
+      // student_class_histories, for live periods from profiles.kelas.
+      const { data: students, error: studentsError } = resolvedStudentsRes
       if (studentsError) {
         console.error('Error loading students:', studentsError)
         pushToast('error', 'Gagal memuat data siswa')

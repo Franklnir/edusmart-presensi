@@ -36,6 +36,16 @@ class JadwalController extends ApiController
         if ($hari = $request->query('hari')) {
             $query->where('hari', $hari);
         }
+        if ($tahunAjaran = $request->query('tahun_ajaran')) {
+            if (Schema::hasColumn('jadwal', 'tahun_ajaran')) {
+                $query->where('tahun_ajaran', $tahunAjaran);
+            }
+        }
+        if ($semester = $request->query('semester')) {
+            if (Schema::hasColumn('jadwal', 'semester')) {
+                $query->where('semester', $semester);
+            }
+        }
 
         $query->orderBy('hari')->orderBy('jam_mulai');
 

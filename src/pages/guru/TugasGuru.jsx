@@ -1088,6 +1088,41 @@ export default function TugasGuru() {
         }
 
         const siswaPromise = (async () => {
+          // For archive periods, use student_class_histories to get the exact
+          // roster for the year the tugas was created in.  This prevents
+          // promoted students from showing up (or disappearing) in the
+          // grading panel when the teacher views a historical assignment.
+          const tugasYear = (tugas.tahun_ajaran || period.tahunAjaran || '').trim()
+          if (isViewingArchivePeriod && tugasYear && tugas.kelas) {
+            const { data: histRows } = await supabase
+              .from('student_class_histories')
+              .select('student_id')
+              .eq('class_id', tugas.kelas)
+              .eq('tahun_ajaran', tugasYear)
+              .in('status', ['active', 'nonaktif', 'mutasi'])
+            const histIds = (histRows || [])
+              .map((r) => String(r.student_id || '').trim())
+              .filter(Boolean)
+            if (histIds.length) {
+              let { data, error } = await supabase
+                .from('profiles')
+                .select('id, nama, photo_url, photo_path, kelas, role')
+                .eq('role', 'siswa')
+                .in('id', histIds)
+                .order('nama')
+              if (error && /photo_path/i.test(error.message || '')) {
+                ;({ data, error } = await supabase
+                  .from('profiles')
+                  .select('id, nama, photo_url, kelas, role')
+                  .eq('role', 'siswa')
+                  .in('id', histIds)
+                  .order('nama'))
+              }
+              return { data, error }
+            }
+          }
+
+          // Current period (or no history data): fall back to profiles.kelas
           const kelasVariants = buildKelasVariants(tugas.kelas)
           const baseQuery = supabase
             .from('profiles')

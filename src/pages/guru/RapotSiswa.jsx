@@ -335,10 +335,29 @@ export default function RapotSiswa() {
             ? []
             : toArray(siswaResult?.data ?? siswaResult).filter((row) => aliasSet.has(normalizeKelasKey(row.kelas)))
           if ((selectedHistory?.status === 'riwayat' || !nextStudents.length) && rapotStudentIds.length) {
+            // For archived periods (riwayat), prefer student_class_histories so
+            // we get the exact roster that was enrolled in this class during that
+            // academic year, rather than whoever happens to have a rapot row.
+            let historyStudentIds = rapotStudentIds
+            const historyYear = (tahunPelajaran || '').trim()
+            if (historyYear) {
+              const { data: classHistoryRows } = await supabase
+                .from('student_class_histories')
+                .select('student_id')
+                .eq('class_id', selectedKelas)
+                .eq('tahun_ajaran', historyYear)
+                .in('status', ['active', 'nonaktif', 'mutasi'])
+              const historyFromClass = (classHistoryRows || [])
+                .map((row) => row.student_id)
+                .filter(Boolean)
+              if (historyFromClass.length) {
+                historyStudentIds = historyFromClass
+              }
+            }
             const { data: historyStudents, error: historyStudentsError } = await supabase
               .from('profiles')
               .select('id, nama, nis, nisn, kelas')
-              .in('id', rapotStudentIds)
+              .in('id', historyStudentIds)
               .order('nama')
             if (historyStudentsError) throw historyStudentsError
             nextStudents = toArray(historyStudents)

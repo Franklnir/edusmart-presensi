@@ -325,24 +325,48 @@ export default function LaporanRekap() {
   const loadSiswaForReport = useCallback(
     async (kelasId, recordUserIds = []) => {
       const ids = Array.from(new Set((recordUserIds || []).map((id) => String(id || '').trim()).filter(Boolean)))
-      let query = supabase
+
+      if (!isActiveReportPeriod) {
+        // For archived periods, use student_class_histories for the accurate
+        // per-class per-year roster. Fall back to submission IDs if unavailable.
+        const historicalYear = (reportPeriod.tahunAjaran || '').trim()
+        let historicalIds = []
+
+        if (historicalYear && kelasId) {
+          const { data: histRows } = await supabase
+            .from('student_class_histories')
+            .select('student_id')
+            .eq('class_id', kelasId)
+            .eq('tahun_ajaran', historicalYear)
+            .in('status', ['active', 'nonaktif', 'mutasi'])
+          historicalIds = (histRows || [])
+            .map((row) => String(row.student_id || '').trim())
+            .filter(Boolean)
+        }
+
+        const targetIds = historicalIds.length ? historicalIds : ids
+        if (!targetIds.length) return []
+
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('id, nama, nis, kelas, angkatan')
+          .eq('role', 'siswa')
+          .in('id', targetIds)
+          .order('nama')
+        if (error) throw error
+        return data || []
+      }
+
+      const { data, error } = await supabase
         .from('profiles')
         .select('id, nama, nis, kelas, angkatan')
         .eq('role', 'siswa')
+        .eq('kelas', kelasId)
         .order('nama')
-
-      if (!isActiveReportPeriod) {
-        if (!ids.length) return []
-        query = query.in('id', ids)
-      } else {
-        query = query.eq('kelas', kelasId)
-      }
-
-      const { data, error } = await query
       if (error) throw error
       return data || []
     },
-    [isActiveReportPeriod]
+    [isActiveReportPeriod, reportPeriod.tahunAjaran]
   )
 
   useEffect(() => {
@@ -1554,26 +1578,46 @@ export default function LaporanRekap() {
       const { data: absensiList } = await absensiQuery
 
       if (!isActiveReportPeriod) {
-        const historicalStudentIds = Array.from(
-          new Set(
-            [
-              ...(jawabanList || []).map((row) => row.user_id),
-              ...(submissionList || []).map((row) => row.siswa_id),
-              ...(absensiList || []).map((row) => row.uid)
-            ]
-              .map((id) => String(id || '').trim())
-              .filter(Boolean)
+        // For archived periods, prefer student_class_histories to get the
+        // exact class roster for that academic year.  Fall back to the
+        // union of submission user IDs only when history data is not available.
+        const historicalYear = (reportPeriod.tahunAjaran || '').trim()
+        let historicalStudentIds = []
+
+        if (historicalYear) {
+          const { data: classHistoryRows } = await supabase
+            .from('student_class_histories')
+            .select('student_id')
+            .eq('class_id', selectedWaliKelas)
+            .eq('tahun_ajaran', historicalYear)
+            .in('status', ['active', 'nonaktif', 'mutasi'])
+          historicalStudentIds = (classHistoryRows || [])
+            .map((row) => String(row.student_id || '').trim())
+            .filter(Boolean)
+        }
+
+        if (!historicalStudentIds.length) {
+          // Fallback: union of all submission/attendance user IDs for this period
+          historicalStudentIds = Array.from(
+            new Set(
+              [
+                ...(jawabanList || []).map((row) => row.user_id),
+                ...(submissionList || []).map((row) => row.siswa_id),
+                ...(absensiList || []).map((row) => row.uid)
+              ]
+                .map((id) => String(id || '').trim())
+                .filter(Boolean)
+            )
           )
-        )
+        }
 
         if (historicalStudentIds.length) {
-          let historicalSiswaQuery = supabase
+          const { data: historicalSiswaRaw, error: historicalSiswaErr } = await supabase
             .from('profiles')
             .select('id, nama, nis, kelas, angkatan')
             .eq('role', 'siswa')
             .in('id', historicalStudentIds)
             .order('nama')
-          const { data: historicalSiswaRaw, error: historicalSiswaErr } = await historicalSiswaQuery
           if (historicalSiswaErr) throw historicalSiswaErr
           siswaData = historicalSiswaRaw || []
         } else {

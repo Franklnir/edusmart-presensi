@@ -42,6 +42,49 @@ services:
     networks:
       - internal
 
+  pgbouncer_init:
+    image: alpine:3.20
+    container_name: edusmart-pgbouncer-init
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_USERNAME: ${DB_USERNAME:?DB_USERNAME is required}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      EVOLUTION_DB_USER: ${EVOLUTION_DB_USER:-}
+      EVOLUTION_DB_PASSWORD: ${EVOLUTION_DB_PASSWORD:-}
+    volumes:
+      - ./deploy/pgbouncer/generate-userlist.sh:/generate-userlist.sh:ro
+      - pgbouncer_config:/etc/pgbouncer
+    command: ["sh", "/generate-userlist.sh"]
+    networks:
+      - internal
+
+  pgbouncer:
+    image: edoburu/pgbouncer:1.23.1
+    container_name: edusmart-pgbouncer
+    restart: unless-stopped
+    depends_on:
+      pgbouncer_init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgres://${DB_USERNAME}:${DB_PASSWORD}@postgres:5432/${DB_DATABASE}?sslmode=disable"
+    volumes:
+      - ./deploy/pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - pgbouncer_config:/etc/pgbouncer
+    expose:
+      - "6432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 6432 -U ${DB_USERNAME} -d ${DB_DATABASE}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - internal
+
   mosquitto_init:
     image: alpine:3.20
     container_name: edusmart-mosquitto-init
@@ -218,6 +261,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      pgbouncer:
+        condition: service_healthy
       redis:
         condition: service_healthy
     environment:
@@ -231,15 +276,15 @@ services:
       LOG_STACK: single
       LOG_LEVEL: ${LOG_LEVEL:-info}
       PHP_FPM_PM: ${PHP_FPM_PM:-dynamic}
-      PHP_FPM_PM_MAX_CHILDREN: ${PHP_FPM_PM_MAX_CHILDREN:-12}
-      PHP_FPM_PM_START_SERVERS: ${PHP_FPM_PM_START_SERVERS:-3}
-      PHP_FPM_PM_MIN_SPARE_SERVERS: ${PHP_FPM_PM_MIN_SPARE_SERVERS:-2}
-      PHP_FPM_PM_MAX_SPARE_SERVERS: ${PHP_FPM_PM_MAX_SPARE_SERVERS:-5}
+      PHP_FPM_PM_MAX_CHILDREN: ${PHP_FPM_PM_MAX_CHILDREN:-50}
+      PHP_FPM_PM_START_SERVERS: ${PHP_FPM_PM_START_SERVERS:-10}
+      PHP_FPM_PM_MIN_SPARE_SERVERS: ${PHP_FPM_PM_MIN_SPARE_SERVERS:-5}
+      PHP_FPM_PM_MAX_SPARE_SERVERS: ${PHP_FPM_PM_MAX_SPARE_SERVERS:-20}
       PHP_FPM_PM_MAX_REQUESTS: ${PHP_FPM_PM_MAX_REQUESTS:-500}
 
       DB_CONNECTION: pgsql
-      DB_HOST: postgres
-      DB_PORT: 5432
+      DB_HOST: pgbouncer
+      DB_PORT: 6432
       DB_DATABASE: ${DB_DATABASE:?DB_DATABASE is required}
       DB_USERNAME: ${DB_USERNAME:?DB_USERNAME is required}
       DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
@@ -321,8 +366,8 @@ services:
       FILESYSTEM_DISK: local
       RUN_MIGRATIONS: ${RUN_MIGRATIONS:-true}
       WAIT_FOR_DB: "true"
-      AUTH_RATE_LIMIT_PER_MINUTE: ${AUTH_RATE_LIMIT_PER_MINUTE:-12}
-      AUTH_IP_RATE_LIMIT_PER_MINUTE: ${AUTH_IP_RATE_LIMIT_PER_MINUTE:-180}
+      AUTH_RATE_LIMIT_PER_MINUTE: ${AUTH_RATE_LIMIT_PER_MINUTE:-20}
+      AUTH_IP_RATE_LIMIT_PER_MINUTE: ${AUTH_IP_RATE_LIMIT_PER_MINUTE:-600}
       AUTH_LOGIN_MAX_ATTEMPTS: ${AUTH_LOGIN_MAX_ATTEMPTS:-5}
       SECURITY_SCANNER_BLOCK_ENABLED: ${SECURITY_SCANNER_BLOCK_ENABLED:-true}
       SECURITY_SCANNER_BLOCK_AUDIT: ${SECURITY_SCANNER_BLOCK_AUDIT:-true}
@@ -346,7 +391,7 @@ services:
       GOOGLE_DRIVE_CLIENT_SECRET: ${GOOGLE_DRIVE_CLIENT_SECRET:-}
       GOOGLE_DRIVE_REDIRECT_URI: ${GOOGLE_DRIVE_REDIRECT_URI:-}
       APP_OBJECT_STORAGE_ENABLED: ${APP_OBJECT_STORAGE_ENABLED:-}
-      APP_DIRECT_UPLOAD_ENABLED: ${APP_DIRECT_UPLOAD_ENABLED:-false}
+      APP_DIRECT_UPLOAD_ENABLED: ${APP_DIRECT_UPLOAD_ENABLED:-true}
       APP_DIRECT_UPLOAD_BROWSER_ENABLED: ${APP_DIRECT_UPLOAD_BROWSER_ENABLED:-}
       APP_DIRECT_UPLOAD_BUCKETS: ${APP_DIRECT_UPLOAD_BUCKETS:-profile-photos,assignments,quiz-media,certificates,sertifikat-files,certificate-templates,sertifikat-templates}
       APP_OBJECT_STORAGE_LABEL: ${APP_OBJECT_STORAGE_LABEL:-}
@@ -444,6 +489,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      pgbouncer:
+        condition: service_healthy
       redis:
         condition: service_healthy
     environment:
@@ -454,8 +501,8 @@ services:
       APP_URL: ${APP_URL:?APP_URL is required}
 
       DB_CONNECTION: pgsql
-      DB_HOST: postgres
-      DB_PORT: 5432
+      DB_HOST: pgbouncer
+      DB_PORT: 6432
       DB_DATABASE: ${DB_DATABASE:?DB_DATABASE is required}
       DB_USERNAME: ${DB_USERNAME:?DB_USERNAME is required}
       DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
@@ -513,7 +560,7 @@ services:
       MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS:-no-reply@example.com}
       MAIL_FROM_NAME: ${MAIL_FROM_NAME:-EduSmart}
       APP_OBJECT_STORAGE_ENABLED: ${APP_OBJECT_STORAGE_ENABLED:-}
-      APP_DIRECT_UPLOAD_ENABLED: ${APP_DIRECT_UPLOAD_ENABLED:-false}
+      APP_DIRECT_UPLOAD_ENABLED: ${APP_DIRECT_UPLOAD_ENABLED:-true}
       APP_DIRECT_UPLOAD_BROWSER_ENABLED: ${APP_DIRECT_UPLOAD_BROWSER_ENABLED:-}
       APP_DIRECT_UPLOAD_BUCKETS: ${APP_DIRECT_UPLOAD_BUCKETS:-profile-photos,assignments,quiz-media,certificates,sertifikat-files,certificate-templates,sertifikat-templates}
       APP_OBJECT_STORAGE_LABEL: ${APP_OBJECT_STORAGE_LABEL:-}
@@ -557,6 +604,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      pgbouncer:
+        condition: service_healthy
       redis:
         condition: service_healthy
     environment:
@@ -567,8 +616,8 @@ services:
       APP_URL: ${APP_URL:?APP_URL is required}
 
       DB_CONNECTION: pgsql
-      DB_HOST: postgres
-      DB_PORT: 5432
+      DB_HOST: pgbouncer
+      DB_PORT: 6432
       DB_DATABASE: ${DB_DATABASE:?DB_DATABASE is required}
       DB_USERNAME: ${DB_USERNAME:?DB_USERNAME is required}
       DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
@@ -623,7 +672,7 @@ services:
       MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS:-no-reply@example.com}
       MAIL_FROM_NAME: ${MAIL_FROM_NAME:-EduSmart}
       APP_OBJECT_STORAGE_ENABLED: ${APP_OBJECT_STORAGE_ENABLED:-}
-      APP_DIRECT_UPLOAD_ENABLED: ${APP_DIRECT_UPLOAD_ENABLED:-false}
+      APP_DIRECT_UPLOAD_ENABLED: ${APP_DIRECT_UPLOAD_ENABLED:-true}
       APP_DIRECT_UPLOAD_BROWSER_ENABLED: ${APP_DIRECT_UPLOAD_BROWSER_ENABLED:-}
       APP_DIRECT_UPLOAD_BUCKETS: ${APP_DIRECT_UPLOAD_BUCKETS:-profile-photos,assignments,quiz-media,certificates,sertifikat-files,certificate-templates,sertifikat-templates}
       APP_OBJECT_STORAGE_LABEL: ${APP_OBJECT_STORAGE_LABEL:-}
@@ -667,6 +716,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      pgbouncer:
+        condition: service_healthy
       redis:
         condition: service_healthy
       mosquitto:
@@ -683,8 +734,8 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
 
       DB_CONNECTION: pgsql
-      DB_HOST: postgres
-      DB_PORT: 5432
+      DB_HOST: pgbouncer
+      DB_PORT: 6432
       DB_DATABASE: ${DB_DATABASE:?DB_DATABASE is required}
       DB_USERNAME: ${DB_USERNAME:?DB_USERNAME is required}
       DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
@@ -835,6 +886,7 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  pgbouncer_config:
   mosquitto_data:
   mosquitto_log:
   evolution_postgres_data:

@@ -106,13 +106,36 @@ class QuizController extends ApiController
         $classIds = $rows->pluck('kelas_id')->filter()->unique()->values()->all();
         $studentCountsByClass = collect();
         if (! $isStudentDashboard && ! empty($classIds)) {
-            $studentCountsByClass = DB::table('profiles')
-                ->select('kelas', DB::raw('count(*) as aggregate'))
-                ->where('tenant_id', $tenantId)
-                ->where('role', 'siswa')
-                ->whereIn('kelas', $classIds)
-                ->groupBy('kelas')
-                ->pluck('aggregate', 'kelas');
+            $requestedYear = AcademicPeriod::normalizeAcademicYear($request->query('tahun_ajaran'));
+
+            // When a specific academic year is requested, count students from
+            // student_class_histories so the "not started" stat reflects the
+            // roster that was actually in each class that year — not today's.
+            if (
+                $requestedYear
+                && Schema::hasTable('student_class_histories')
+                && Schema::hasColumn('student_class_histories', 'tahun_ajaran')
+                && Schema::hasColumn('student_class_histories', 'class_id')
+            ) {
+                $studentCountsByClass = DB::table('student_class_histories')
+                    ->select('class_id', DB::raw('count(distinct student_id) as aggregate'))
+                    ->where('tenant_id', $tenantId)
+                    ->whereIn('class_id', $classIds)
+                    ->where('tahun_ajaran', $requestedYear)
+                    ->whereIn('status', ['active', 'nonaktif', 'mutasi'])
+                    ->groupBy('class_id')
+                    ->pluck('aggregate', 'class_id');
+            } else {
+                // Current period: count from live profiles.kelas
+                $studentCountsByClass = DB::table('profiles')
+                    ->select('kelas', DB::raw('count(*) as aggregate'))
+                    ->where('tenant_id', $tenantId)
+                    ->where('role', 'siswa')
+                    ->whereIn('kelas', $classIds)
+                    ->where('status', 'active')
+                    ->groupBy('kelas')
+                    ->pluck('aggregate', 'kelas');
+            }
         }
 
         $essayAnswerStatsByQuiz = [];

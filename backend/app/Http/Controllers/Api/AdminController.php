@@ -840,6 +840,7 @@ class AdminController extends ApiController
         $autoRollover = filter_var($payload['auto_rollover'] ?? false, FILTER_VALIDATE_BOOLEAN);
         $manualRolloverCompleted = filter_var($payload['manual_rollover_completed'] ?? false, FILTER_VALIDATE_BOOLEAN);
         $carryEskulMembers = filter_var($payload['carry_eskul_members'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        $carryJadwal = filter_var($payload['carry_jadwal'] ?? false, FILTER_VALIDATE_BOOLEAN);
 
         $previousStartYear = (int) substr($previousYear, 0, 4);
         $targetStartYear = (int) substr($tahunAjaran, 0, 4);
@@ -968,6 +969,10 @@ class AdminController extends ApiController
                         $carryEskulMembers
                     );
                     $classesSynced = (int) ($rollover['classes_synced'] ?? 0);
+
+                    if ($carryJadwal) {
+                        $this->copyJadwalToNewPeriod($tenantId, $previousYear, $tahunAjaran);
+                    }
                 } elseif ($yearChanged || $isCalendarCorrection || $manualRolloverCompleted) {
                     $classesSynced = $this->syncClassPeriodMetadata($tenantId, $activePeriod);
                 }
@@ -2920,6 +2925,115 @@ class AdminController extends ApiController
         foreach (array_chunk($insertRows, 500) as $chunk) {
             if ($chunk !== []) {
                 DB::table('ekskul_anggota')->insert($chunk);
+            }
+        }
+
+        return count($insertRows);
+    }
+
+    /**
+     * Salin semua jadwal dari tahun ajaran sebelumnya ke tahun ajaran baru.
+     *
+     * Guru dan mata pelajaran tetap sama — hanya tahun_ajaran yang diganti.
+     * Siswa tidak perlu disalin karena daftar siswa per kelas sudah diupdate
+     * oleh rolloverAcademicYearData() melalui profiles.kelas.
+     *
+     * Baris yang sudah ada di tahun tujuan tidak akan diduplikasi (skip).
+     * Ini memastikan aman dijalankan berkali-kali (idempotent).
+     */
+    private function copyJadwalToNewPeriod(
+        string $tenantId,
+        string $sourceYear,
+        string $targetYear
+    ): int {
+        if (! Schema::hasTable('jadwal')) {
+            return 0;
+        }
+
+        $sourceYear = AcademicPeriod::normalizeAcademicYear($sourceYear);
+        $targetYear = AcademicPeriod::normalizeAcademicYear($targetYear);
+
+        if (! $sourceYear || ! $targetYear || $sourceYear === $targetYear) {
+            return 0;
+        }
+
+        if (! Schema::hasColumn('jadwal', 'tahun_ajaran')) {
+            return 0;
+        }
+
+        // Columns to carry over (excluding id — we generate a new one)
+        $copyColumns = $this->existingColumns('jadwal', [
+            'tenant_id', 'kelas_id', 'hari', 'mapel',
+            'guru_id', 'guru_nama',
+            'jam_mulai', 'jam_selesai',
+            'semester', 'periode_berlaku', 'angkatan',
+        ]);
+
+        // Load source rows
+        $sourceQuery = DB::table('jadwal')->where('tahun_ajaran', $sourceYear);
+        if (Schema::hasColumn('jadwal', 'tenant_id')) {
+            $sourceQuery->where('tenant_id', $tenantId);
+        }
+        $sourceRows = $sourceQuery->get(array_merge($copyColumns, ['kelas_id', 'mapel', 'hari', 'jam_mulai']));
+
+        if ($sourceRows->isEmpty()) {
+            return 0;
+        }
+
+        // Build a set of existing rows in the target year to avoid duplicates.
+        // Key: kelas_id|hari|mapel|jam_mulai
+        $existingQuery = DB::table('jadwal')->where('tahun_ajaran', $targetYear);
+        if (Schema::hasColumn('jadwal', 'tenant_id')) {
+            $existingQuery->where('tenant_id', $tenantId);
+        }
+        $existingKeys = [];
+        foreach ($existingQuery->get(['kelas_id', 'hari', 'mapel', 'jam_mulai']) as $row) {
+            $key = implode('|', [
+                trim((string) ($row->kelas_id ?? '')),
+                trim((string) ($row->hari ?? '')),
+                trim((string) ($row->mapel ?? '')),
+                trim((string) ($row->jam_mulai ?? '')),
+            ]);
+            $existingKeys[$key] = true;
+        }
+
+        $now = now();
+        $insertRows = [];
+
+        foreach ($sourceRows as $row) {
+            $key = implode('|', [
+                trim((string) ($row->kelas_id ?? '')),
+                trim((string) ($row->hari ?? '')),
+                trim((string) ($row->mapel ?? '')),
+                trim((string) ($row->jam_mulai ?? '')),
+            ]);
+
+            // Skip if already exists in target year
+            if (isset($existingKeys[$key])) {
+                continue;
+            }
+
+            $existingKeys[$key] = true; // prevent duplicate inserts within this batch
+
+            $newRow = ['tahun_ajaran' => $targetYear, 'created_at' => $now, 'updated_at' => $now];
+            foreach ($copyColumns as $col) {
+                $newRow[$col] = $row->{$col} ?? null;
+            }
+
+            // Generate a new UUID-style id for the row
+            $newRow['id'] = (string) \Illuminate\Support\Str::uuid();
+
+            $newRow = $this->filterExistingPayload('jadwal', $newRow);
+            if (empty($newRow)) {
+                continue;
+            }
+
+            $insertRows[] = $newRow;
+        }
+
+        foreach (array_chunk($insertRows, 300) as $chunk) {
+            if ($chunk !== []) {
+                DB::table('jadwal')->insert($chunk);
             }
         }
 

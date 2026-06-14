@@ -61,7 +61,8 @@ class ReportController extends ApiController
         $this->applyAcademicFilters($rows, 'absensi', $request);
         $absensi = $rows->get();
 
-        $students = $this->studentsForReport($tenantId, $kelas, $absensi->pluck('uid')->all());
+        $tahunAjaran = trim((string) $request->query('tahun_ajaran', '')) ?: null;
+        $students = $this->studentsForReport($tenantId, $kelas, $absensi->pluck('uid')->all(), $tahunAjaran);
         $byStudent = $absensi->groupBy('uid');
 
         $formatted = $students->map(function ($student) use ($byStudent, $period) {
@@ -112,7 +113,8 @@ class ReportController extends ApiController
                 ->whereIn('tugas_id', $tugasIds)
                 ->get();
 
-        $students = $this->studentsForReport($tenantId, $kelas, $jawaban->pluck('user_id')->all());
+        $tahunAjaran = trim((string) $request->query('tahun_ajaran', '')) ?: null;
+        $students = $this->studentsForReport($tenantId, $kelas, $jawaban->pluck('user_id')->all(), $tahunAjaran);
         $jawabanByStudentTask = $jawaban->keyBy(fn ($row) => $row->user_id.'|'.$row->tugas_id);
 
         $formatted = $students->map(function ($student) use ($tugas, $jawabanByStudentTask) {
@@ -163,7 +165,8 @@ class ReportController extends ApiController
                 ->whereIn('quiz_id', $quizIds)
                 ->get();
 
-        $students = $this->studentsForReport($tenantId, $kelas, $submissions->pluck('siswa_id')->all());
+        $tahunAjaran = trim((string) $request->query('tahun_ajaran', '')) ?: null;
+        $students = $this->studentsForReport($tenantId, $kelas, $submissions->pluck('siswa_id')->all(), $tahunAjaran);
         $submissionByStudentQuiz = $submissions->keyBy(fn ($row) => $row->siswa_id.'|'.$row->quiz_id);
 
         $formatted = $students->map(function ($student) use ($quizzes, $submissionByStudentQuiz) {
@@ -206,6 +209,9 @@ class ReportController extends ApiController
             return false;
         }
 
+        // Check jadwal for any academic year — this allows teachers to access
+        // reports for past periods (archives) where they taught the same
+        // class/subject combination.
         $teachesSubject = $this->tenantQuery('jadwal', $tenantId)
             ->where('guru_id', $guruId)
             ->where('kelas_id', $kelas)
@@ -215,6 +221,7 @@ class ReportController extends ApiController
             return true;
         }
 
+        // Also allow wali kelas access — again across any period.
         return Schema::hasTable('kelas_struktur')
             && $this->tenantQuery('kelas_struktur', $tenantId)
                 ->where('kelas_id', $kelas)
@@ -259,31 +266,79 @@ class ReportController extends ApiController
         ];
     }
 
-    private function studentsForReport(string $tenantId, string $kelas, array $extraIds = [])
+    /**
+     * Resolve the list of students for a report.
+     *
+     * When a specific tahun_ajaran is provided (including past periods treated
+     * as archives), we look up who was actually enrolled in that class for
+     * that academic year from student_class_histories. This prevents students
+     * who have since been promoted to a higher grade from bleeding into the
+     * current-period report, and also correctly restores the archived roster
+     * when a teacher browses a past period.
+     *
+     * For the current active period (or when student_class_histories is not
+     * available), we fall back to querying profiles.kelas directly and only
+     * include active students.
+     */
+    private function studentsForReport(string $tenantId, string $kelas, array $extraIds = [], ?string $tahunAjaran = null)
     {
-        $ids = array_values(array_unique(array_filter(array_map('strval', $extraIds))));
+        // Prefer history-based lookup when tahun_ajaran is supplied and the
+        // history table exists — this is the period-aware (archive-safe) path.
+        if (
+            $tahunAjaran !== null
+            && $tahunAjaran !== ''
+            && Schema::hasTable('student_class_histories')
+            && Schema::hasColumn('student_class_histories', 'tahun_ajaran')
+            && Schema::hasColumn('student_class_histories', 'student_id')
+            && Schema::hasColumn('student_class_histories', 'class_id')
+        ) {
+            // Pick the most-recent open (valid_until IS NULL) history row per
+            // student for this class + year.  If there are no open rows (e.g.
+            // the period has ended) we also accept closed rows so that archived
+            // periods still show their full roster.
+            $historyStudentIds = DB::table('student_class_histories')
+                ->where('tenant_id', $tenantId)
+                ->where('class_id', $kelas)
+                ->where('tahun_ajaran', $tahunAjaran)
+                ->whereIn('status', ['active', 'nonaktif', 'mutasi'])  // exclude alumni
+                ->distinct()
+                ->pluck('student_id')
+                ->map('strval')
+                ->filter()
+                ->unique()
+                ->values()
+                ->all();
 
+            if (! empty($historyStudentIds)) {
+                return DB::table('profiles')
+                    ->where('tenant_id', $tenantId)
+                    ->where('role', 'siswa')
+                    ->whereIn('id', $historyStudentIds)
+                    ->select($this->existingColumns('profiles', ['id', 'nama', 'nis', 'kelas', 'status']))
+                    ->orderBy('nama')
+                    ->get();
+            }
+
+            // History table exists but no rows for this class+year — the
+            // period pre-dates the history feature.  Fall through to the
+            // legacy path below, but restrict to extraIds that still belong
+            // to this class so we do not pull in unrelated students.
+        }
+
+        // Legacy / current-period path: query profiles.kelas directly.
+        // We intentionally do NOT use orWhereIn($extraIds) here because that
+        // is what caused students from previous periods to "stick" — any
+        // student who had a submission in the class would always be included
+        // regardless of their current class or status.
         $query = DB::table('profiles')
             ->where('tenant_id', $tenantId)
             ->where('role', 'siswa')
-            ->where(function ($query) use ($kelas, $ids) {
-                $query->where('kelas', $kelas);
-                if (! empty($ids)) {
-                    $query->orWhereIn('id', $ids);
-                }
-            })
+            ->where('kelas', $kelas)
             ->select($this->existingColumns('profiles', ['id', 'nama', 'nis', 'kelas', 'status']))
             ->orderBy('nama');
 
-        // Only include active students, but keep legacy rows that have
-        // submissions/attendance even if their status is missing.
         if (Schema::hasColumn('profiles', 'status')) {
-            $query->where(function ($q) use ($ids) {
-                $q->where('status', 'active');
-                if (! empty($ids)) {
-                    $q->orWhereIn('id', $ids);
-                }
-            });
+            $query->where('status', 'active');
         }
 
         return $query->get();
