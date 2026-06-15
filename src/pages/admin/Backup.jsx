@@ -1912,9 +1912,8 @@ export default function BackupAdmin() {
                     </div>
                   </div>
                 )}
-              </div>
-                </section>
-              )}
+               </div>
+               )}
             </section>
           </>
         )}
