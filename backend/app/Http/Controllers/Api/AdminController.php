@@ -863,16 +863,9 @@ class AdminController extends ApiController
         $targetMatchesServerCalendar = $tahunAjaran === $calendarPeriod['tahun_ajaran']
             && $semester === $calendarPeriod['semester'];
 
-        if ($movingBackward && $restoreFromClassSnapshot === false && $manualRolloverCompleted === false) {
+        if ($movingBackward && $restoreFromClassSnapshot === false && $manualRolloverCompleted === false && $isCalendarCorrection === false) {
             return $this->deny(
                 'Snapshot kelas siswa untuk periode '.$tahunAjaran.' belum tersedia. Periode tidak diturunkan agar data siswa tidak rusak.',
-                422
-            );
-        }
-
-        if ($isCalendarCorrection && $restoreFromClassSnapshot === false && $manualRolloverCompleted === false) {
-            return $this->deny(
-                'Snapshot kelas siswa untuk periode kalender server belum tersedia. Pulihkan dari backup/snapshot sebelum koreksi periode.',
                 422
             );
         }
@@ -904,6 +897,7 @@ class AdminController extends ApiController
             && $restoreFromClassSnapshot === false
             && $manualRolloverCompleted === false
             && $movingForwardOneYear === false
+            && $isCalendarCorrection === false
         ) {
             return $this->deny('Rollover akademik hanya bisa maju tepat satu tahun ajaran.', 422);
         }

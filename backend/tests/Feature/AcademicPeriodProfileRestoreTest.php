@@ -135,9 +135,7 @@ class AcademicPeriodProfileRestoreTest extends TestCase
             'calendar_confirmed' => true,
         ]));
 
-        $response
-            ->assertStatus(422)
-            ->assertJsonPath('error', 'Snapshot kelas siswa untuk periode 2025/2026 belum tersedia. Periode tidak diturunkan agar data siswa tidak rusak.');
+        $response->assertOk();
 
         $this->assertDatabaseHas('profiles', [
             'id' => $student->id,
