@@ -526,7 +526,7 @@ class TenantBackupService
             $needsUpdate = $record && $latestDataAt && $lastBackupAt && $latestDataAt->greaterThan($lastBackupAt);
             $isFuture = $window['is_future'] ?? false;
             $status = $isFuture ? 'future' : ($record ? ($needsUpdate ? 'needs_update' : 'backed_up') : 'pending');
-            
+
             // Smart Algorithm: Generate days array based on timestamps
             $daysInMonth = $window['month_start']->daysInMonth;
             $daysArray = [];
@@ -544,8 +544,8 @@ class TenantBackupService
                         $dayStatus = 'backed_up';
                     }
                 } elseif ($needsUpdate && $latestDataAt && ($currentDay->isSameDay($latestDataAt) || $currentDay->lessThanOrEqualTo($latestDataAt))) {
-                    // This day is past the backup, and we have new data. We color the days leading up to latestDataAt as new_data or empty. 
-                    // Let's color the exact latestDataAt day as new_data, and others as empty, or all as new_data? 
+                    // This day is past the backup, and we have new data. We color the days leading up to latestDataAt as new_data or empty.
+                    // Let's color the exact latestDataAt day as new_data, and others as empty, or all as new_data?
                     // Better to color the exact latestDataAt as new_data to show where the trigger is.
                     $dayStatus = $currentDay->isSameDay($latestDataAt) ? 'new_data' : 'empty';
                 } else {
@@ -555,7 +555,7 @@ class TenantBackupService
                 $daysArray[] = [
                     'date' => $currentDay->format('Y-m-d'),
                     'day' => $d,
-                    'status' => $dayStatus
+                    'status' => $dayStatus,
                 ];
             }
 
