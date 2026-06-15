@@ -526,6 +526,39 @@ class TenantBackupService
             $needsUpdate = $record && $latestDataAt && $lastBackupAt && $latestDataAt->greaterThan($lastBackupAt);
             $isFuture = $window['is_future'] ?? false;
             $status = $isFuture ? 'future' : ($record ? ($needsUpdate ? 'needs_update' : 'backed_up') : 'pending');
+            
+            // Smart Algorithm: Generate days array based on timestamps
+            $daysInMonth = $window['month_start']->daysInMonth;
+            $daysArray = [];
+            for ($d = 1; $d <= $daysInMonth; $d++) {
+                $currentDay = $window['month_start']->copy()->addDays($d - 1);
+                if ($currentDay->greaterThan($now->copy()->endOfDay())) {
+                    // Future day relative to internet time
+                    $dayStatus = 'future';
+                } elseif ($lastBackupAt && $currentDay->startOfDay()->lessThanOrEqualTo($lastBackupAt)) {
+                    // Day was already backed up
+                    // But if this exact day is where the new data is, mark it new_data
+                    if ($needsUpdate && $latestDataAt && $currentDay->isSameDay($latestDataAt)) {
+                        $dayStatus = 'new_data';
+                    } else {
+                        $dayStatus = 'backed_up';
+                    }
+                } elseif ($needsUpdate && $latestDataAt && ($currentDay->isSameDay($latestDataAt) || $currentDay->lessThanOrEqualTo($latestDataAt))) {
+                    // This day is past the backup, and we have new data. We color the days leading up to latestDataAt as new_data or empty. 
+                    // Let's color the exact latestDataAt day as new_data, and others as empty, or all as new_data? 
+                    // Better to color the exact latestDataAt as new_data to show where the trigger is.
+                    $dayStatus = $currentDay->isSameDay($latestDataAt) ? 'new_data' : 'empty';
+                } else {
+                    $dayStatus = 'empty'; // Passed day, but no backup and no new data recorded specifically for this day
+                }
+
+                $daysArray[] = [
+                    'date' => $currentDay->format('Y-m-d'),
+                    'day' => $d,
+                    'status' => $dayStatus
+                ];
+            }
+
             $items[] = [
                 'key' => (string) $month['value'],
                 'label' => (string) $month['label'],
@@ -540,6 +573,7 @@ class TenantBackupService
                 'last_data_at' => optional($latestDataAt)->toIso8601String(),
                 'last_backup_at' => optional($lastBackupAt)->toIso8601String(),
                 'drive_file' => $record ? $this->driveRecordPayload($record) : null,
+                'days' => $daysArray,
             ];
         }
 

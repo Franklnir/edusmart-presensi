@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, CalendarClock, Cloud, Database, ExternalLink, RefreshCw, ShieldCheck, UploadCloud } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import { loadExcelJsBrowser } from '../../utils/excelBrowser'
 import { buildRestoreStatusToast } from '../../utils/restoreStatus'
@@ -457,9 +458,14 @@ const createHtmlContent = (payload) => {
 }
 
 export default function BackupAdmin() {
+  const { isSuperAdmin, superAdminChecked } = useAuthStore()
   const { pushToast } = useUIStore()
   const activePeriod = useMemo(() => resolveAcademicPeriod(), [])
   const academicYearOptions = useMemo(() => generateAcademicYearOptions({ back: 6, forward: 2 }), [])
+
+  const [superTenants, setSuperTenants] = useState([])
+  const [selectedTenantId, setSelectedTenantId] = useState('')
+  const [superLoading, setSuperLoading] = useState(false)
 
   const [mode, setMode] = useState('full')
   const [periodType, setPeriodType] = useState('all')
@@ -520,7 +526,7 @@ export default function BackupAdmin() {
         throw new Error('Isi tanggal mulai dan tanggal selesai untuk backup rentang tanggal')
       }
 
-      const { data, error } = await supabase.admin.backup({
+      const apiPayload = {
         mode,
         periodType,
         months: periodType === 'last_months' ? resolvedMonths || undefined : undefined,
@@ -528,7 +534,11 @@ export default function BackupAdmin() {
         semester: periodType === 'semester' ? semester : undefined,
         startDate: periodType === 'date_range' ? startDate : undefined,
         endDate: periodType === 'date_range' ? endDate : undefined
-      })
+      }
+      
+      const { data, error } = isSuperAdmin
+        ? await supabase.super.tenantBackup(selectedTenantId, apiPayload)
+        : await supabase.admin.backup(apiPayload)
 
       if (error) throw error
       if (!data || !Array.isArray(data.tables)) {
@@ -553,8 +563,8 @@ export default function BackupAdmin() {
     setDriveLoading(true)
     try {
       const { data, error } = refresh
-        ? await supabase.admin.syncGoogleDrive()
-        : await supabase.admin.googleDrive()
+        ? (isSuperAdmin ? await supabase.super.syncTenantGoogleDrive(selectedTenantId) : await supabase.admin.syncGoogleDrive())
+        : (isSuperAdmin ? await supabase.super.tenantGoogleDrive(selectedTenantId) : await supabase.admin.googleDrive())
       if (error) throw error
       setDriveStatus(data || DRIVE_STATUS_DEFAULT)
       if (refresh && !silent) {
@@ -573,6 +583,7 @@ export default function BackupAdmin() {
   const handleConnectGoogleDrive = async () => {
     setDriveConnecting(true)
     try {
+      if (isSuperAdmin) throw new Error('Fitur sambung Google Drive hanya tersedia untuk Admin Sekolah.')
       const returnUrl = `${window.location.origin}/admin/backup?drive=connected`
       const { data, error } = await supabase.admin.googleDriveConnectUrl({ return_url: returnUrl })
       if (error) throw error
@@ -597,7 +608,9 @@ export default function BackupAdmin() {
   const loadMonthlyStatus = async ({ silent = false, refresh = false } = {}) => {
     setMonthlyLoading(true)
     try {
-      const { data, error } = await supabase.admin.backupMonthlyStatus({ refresh })
+      const { data, error } = isSuperAdmin
+        ? await supabase.super.tenantBackupMonthlyStatus(selectedTenantId, { refresh })
+        : await supabase.admin.backupMonthlyStatus({ refresh })
       if (error) throw error
       setMonthlyStatus(data || null)
       return data || null
@@ -626,7 +639,9 @@ export default function BackupAdmin() {
 
     for (let attempt = 0; attempt < 120; attempt += 1) {
       await new Promise((resolve) => window.setTimeout(resolve, attempt === 0 ? 900 : 2500))
-      const { data, error } = await supabase.admin.backupMonthlyJobStatus(jobId)
+      const { data, error } = isSuperAdmin
+        ? await supabase.super.tenantMonthlyBackupJobStatus(selectedTenantId, jobId)
+        : await supabase.admin.backupMonthlyJobStatus(jobId)
       if (error) throw error
 
       lastStatus = data || null
@@ -729,7 +744,9 @@ export default function BackupAdmin() {
     setMonthlySavingKey(monthKey)
     setMonthlyProgress({ label: 'Memasukkan backup bulanan ke antrean...', percent: 8 })
     try {
-      const { data, error } = await supabase.admin.saveMonthlyBackupToGoogleDrive({ month: monthKey, force, async: true })
+      const { data, error } = isSuperAdmin
+        ? await supabase.super.saveTenantMonthlyBackupToGoogleDrive(selectedTenantId, { month: monthKey, force, async: true })
+        : await supabase.admin.saveMonthlyBackupToGoogleDrive({ month: monthKey, force, async: true })
       if (error) throw error
 
       if (data?.monthly_status) setMonthlyStatus(data.monthly_status)
@@ -773,7 +790,9 @@ export default function BackupAdmin() {
     setMonthlyAutoSaving(true)
     setMonthlyProgress({ label: 'Memasukkan auto backup ke antrean...', percent: 5 })
     try {
-      const { data, error } = await supabase.admin.autoMonthlyBackupToGoogleDrive({ async: true })
+      const { data, error } = isSuperAdmin
+        ? await supabase.super.autoTenantMonthlyBackupToGoogleDrive(selectedTenantId, { async: true })
+        : await supabase.admin.autoMonthlyBackupToGoogleDrive({ async: true })
       if (error) throw error
 
       if (data?.monthly_status) setMonthlyStatus(data.monthly_status)
@@ -812,11 +831,39 @@ export default function BackupAdmin() {
     }
   }
 
+  const loadSuperTenants = async () => {
+    setSuperLoading(true)
+    try {
+      const { data } = await supabase.super.tenants()
+      if (Array.isArray(data)) setSuperTenants(data)
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setSuperLoading(false)
+    }
+  }
+
   useEffect(() => {
-    loadDriveStatus({ silent: true })
-    loadMonthlyStatus({ silent: true })
+    if (superAdminChecked) {
+      if (isSuperAdmin) {
+        loadSuperTenants()
+      } else {
+        loadDriveStatus({ silent: true })
+        loadMonthlyStatus({ silent: true })
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [superAdminChecked, isSuperAdmin])
+
+  useEffect(() => {
+    if (isSuperAdmin && selectedTenantId) {
+      loadDriveStatus({ silent: true })
+      loadMonthlyStatus({ silent: true })
+      setPayload(null)
+      setRestoreResult(null)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTenantId, isSuperAdmin])
 
   const parseRestoreIncludeTables = () =>
     restoreIncludeTables
@@ -853,11 +900,14 @@ export default function BackupAdmin() {
     setRestorePreviewLoading(true)
     try {
       const includeTables = parseRestoreIncludeTables()
-      const { data, error } = await supabase.admin.restoreBackup({
+      const payload = {
         backup: restorePayload,
         dry_run: true,
         include_tables: includeTables.length ? includeTables : undefined
-      })
+      }
+      const { data, error } = isSuperAdmin
+        ? await supabase.super.restoreTenant(selectedTenantId, payload)
+        : await supabase.admin.restoreBackup(payload)
       if (error) throw error
       const result = data?.result || null
       setRestoreResult(result)
@@ -880,12 +930,15 @@ export default function BackupAdmin() {
     setRestoreApplyLoading(true)
     try {
       const includeTables = parseRestoreIncludeTables()
-      const { data, error } = await supabase.admin.restoreBackup({
+      const payload = {
         backup: restorePayload,
         dry_run: false,
         confirm: true,
         include_tables: includeTables.length ? includeTables : undefined
-      })
+      }
+      const { data, error } = isSuperAdmin
+        ? await supabase.super.restoreTenant(selectedTenantId, payload)
+        : await supabase.admin.restoreBackup(payload)
       if (error) throw error
       const result = data?.result || null
       setRestoreResult(result)
@@ -995,7 +1048,45 @@ export default function BackupAdmin() {
         </div>
       ) : null}
       <div className="w-full space-y-8 px-4 sm:px-6 lg:px-8">
-        <section className="page-title-card">
+        {isSuperAdmin ? (
+          <section className="rounded-2xl border border-indigo-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Pilih Tenant (Mode Super Admin)</h3>
+                <p className="text-xs text-slate-500">
+                  Anda sedang dalam mode Super Admin. Pilih tenant sekolah untuk mengelola backup mereka.
+                </p>
+              </div>
+              <div className="w-full sm:w-64">
+                <select
+                  value={selectedTenantId}
+                  onChange={(e) => setSelectedTenantId(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
+                  disabled={superLoading}
+                >
+                  <option value="" disabled>-- Pilih Sekolah --</option>
+                  {superTenants.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name || t.id}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        {isSuperAdmin && !selectedTenantId ? (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-center shadow-sm">
+            <AlertTriangle className="mx-auto h-12 w-12 text-amber-500 mb-3" />
+            <h3 className="text-lg font-bold text-amber-900">Pilih Sekolah</h3>
+            <p className="text-sm text-amber-700 mt-1">
+              Silakan pilih sekolah dari menu dropdown di atas untuk mengelola data backup.
+            </p>
+          </div>
+        ) : (
+          <>
+            <section className="page-title-card">
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
             <div className="flex items-center gap-4">
               <div className="p-3 bg-blue-100 rounded-lg">
@@ -1228,33 +1319,62 @@ export default function BackupAdmin() {
                 return (
                   <div
                     key={month.key}
-                    className={`rounded-xl border p-3 ${cardClass}`}
+                    className={`rounded-xl border p-3 flex flex-col justify-between ${cardClass}`}
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <p className="text-sm font-black">{month.short_label || month.label}</p>
-                        <p className="mt-0.5 text-[11px] font-semibold opacity-70">{month.start_date} - {month.end_date}</p>
+                    <div>
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-black">{month.short_label || month.label}</p>
+                          <p className="mt-0.5 text-[11px] font-semibold opacity-70">{month.start_date} - {month.end_date}</p>
+                        </div>
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${badgeClass}`}>
+                          {badgeText}
+                        </span>
                       </div>
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${badgeClass}`}>
-                        {badgeText}
-                      </span>
+                      
+                      {Array.isArray(month.days) && month.days.length > 0 ? (
+                        <div className="mt-3">
+                          <div className="mb-1 text-[9px] font-bold uppercase tracking-wider opacity-60">Status Harian</div>
+                          <div className="grid grid-cols-7 gap-1">
+                            {month.days.map((day) => {
+                              const dayColor = day.status === 'backed_up' 
+                                ? 'bg-emerald-500 shadow-sm' 
+                                : day.status === 'new_data' 
+                                  ? 'bg-blue-500 shadow-sm' 
+                                  : day.status === 'empty' 
+                                    ? 'bg-slate-200' 
+                                    : 'border border-dashed border-slate-300 bg-slate-50'
+                              return (
+                                <div
+                                  key={day.date}
+                                  className={`aspect-square rounded-[3px] ${dayColor}`}
+                                  title={`${day.date}: ${day.status}`}
+                                />
+                              )
+                            })}
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {month.last_backup_at ? (
+                        <p className="mt-3 text-[10px] font-semibold opacity-70">
+                          Backup: {new Date(month.last_backup_at).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}
+                        </p>
+                      ) : null}
+                      {file?.drive_web_view_link ? (
+                        <a
+                          href={file.drive_web_view_link}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mt-1 block truncate text-[11px] font-bold underline"
+                        >
+                          {file.drive_file_name || 'Buka backup'}
+                        </a>
+                      ) : null}
                     </div>
-                    {month.last_backup_at ? (
-                      <p className="mt-2 text-[10px] font-semibold opacity-70">
-                        Backup: {new Date(month.last_backup_at).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}
-                      </p>
-                    ) : null}
-                    {file?.drive_web_view_link ? (
-                      <a
-                        href={file.drive_web_view_link}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="mt-2 block truncate text-[11px] font-bold underline"
-                      >
-                        {file.drive_file_name || 'Buka backup'}
-                      </a>
-                    ) : null}
-                    {canBackup ? (
+
+                    <div className="mt-3 pt-3 border-t border-black/5">
+                      {canBackup ? (
                       <button
                         type="button"
                         onClick={() => handleSaveMonthlyBackup(month.key, backedUp)}
@@ -1275,14 +1395,14 @@ export default function BackupAdmin() {
                   </div>
                 )
               }) : (
-                <div className="col-span-full rounded-xl border border-dashed border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-500">
-                  {monthlyLoading ? 'Memuat jadwal backup bulanan...' : 'Jadwal backup bulanan belum tersedia.'}
-                </div>
-              )}
-            </div>
-          </div>
+        <div className="col-span-full rounded-xl border border-dashed border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-500">
+          {monthlyLoading ? 'Memuat jadwal backup bulanan...' : 'Jadwal backup bulanan belum tersedia.'}
+        </div>
+      )}
+    </div>
+  </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-1">Periode Backup</label>
               <select
@@ -1792,9 +1912,11 @@ export default function BackupAdmin() {
                   </div>
                 )}
               </div>
-            </div>
-          )}
-        </section>
+                </section>
+              )}
+            </section>
+          </>
+        )}
       </div>
     </div>
   )

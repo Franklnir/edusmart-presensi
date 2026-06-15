@@ -583,6 +583,7 @@ export default function APengaturan() {
   const [savingPeriod, setSavingPeriod] = useState(false)
   const [restoringRoster, setRestoringRoster] = useState(false)
   const [carryEskulMembers, setCarryEskulMembers] = useState(false)
+  const [carryJadwal, setCarryJadwal] = useState(false)
 
   const autoSaveTimerRef = useRef(null)
   const initialLoadDoneRef = useRef(false)
@@ -948,6 +949,7 @@ export default function APengaturan() {
       const nextYear = normalizeAcademicYear(value) || value
       if (nextYear === persistedPeriodForm.tahunAjaran) {
         setCarryEskulMembers(false)
+        setCarryJadwal(false)
       }
     }
 
@@ -1014,6 +1016,7 @@ export default function APengaturan() {
   function handleUseCurrentPeriod() {
     const current = getCurrentAcademicPeriod()
     setCarryEskulMembers(false)
+    setCarryJadwal(false)
     setPeriodForm(resolvePeriodForm({
       tahun_ajaran: current.tahunAjaran,
       semester_aktif: current.semester
@@ -1084,6 +1087,9 @@ export default function APengaturan() {
             details: [
               'Sistem akan menaikkan siswa aktif satu tingkat: X ke XI, XI ke XII, dan XII menjadi alumni.',
               'Metadata kelas aktif, filter tugas, absensi, jadwal, laporan, rekap, dan storage akan mengikuti periode baru.',
+              carryJadwal
+                ? 'Jadwal dan guru pengampu dari periode aktif saat ini akan disalin ke periode baru.'
+                : 'Jadwal periode baru akan dimulai dari kosong (tidak disalin).',
               carryEskulMembers
                 ? 'Anggota eskul aktif akan disalin sebagai keanggotaan baru pada periode target.'
                 : 'Anggota eskul tidak disalin otomatis; keanggotaan periode baru bisa diatur manual.'
@@ -1160,7 +1166,8 @@ export default function APengaturan() {
         periode_genap_selesai: genapPreview.endsAt,
         jadwal_periode_berlaku: nextPayload.jadwal_periode_berlaku,
         auto_rollover: yearMovesForwardOneStep,
-        carry_eskul_members: yearMovesForwardOneStep && carryEskulMembers
+        carry_eskul_members: yearMovesForwardOneStep && carryEskulMembers,
+        carry_jadwal: yearMovesForwardOneStep && carryJadwal
       }
 
       let { data, error, raw } = await supabase.admin.applyAcademicPeriod(payload)
@@ -1211,10 +1218,15 @@ export default function APengaturan() {
       const eskulText = rollover && payload.carry_eskul_members
         ? ` Eskul disalin: ${rollover.eskul_members_copied || 0}.`
         : ''
-      setCarryEskulMembers(false)
-      pushToast('success', `Tahun ajaran ${tahunAjaran} aktif penuh.${rolloverText}${restoredText}${eskulText}`, {
+      const jadwalText = rollover && payload.carry_jadwal
+        ? ' Jadwal berhasil disalin.'
+        : ''
+
+      pushToast('success', `Tahun ajaran ${tahunAjaran} aktif penuh.${rolloverText}${restoredText}${eskulText}${jadwalText}`, {
         title: 'Kalender akademik diperbarui'
       })
+      setCarryEskulMembers(false)
+      setCarryJadwal(false)
     } catch (error) {
       pushToast('error', error?.message || 'Gagal menyimpan kalender akademik')
     } finally {
@@ -2163,22 +2175,41 @@ export default function APengaturan() {
               </div>
 
               {periodYearWillChange && (
-                <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-                  <input
-                    type="checkbox"
-                    checked={carryEskulMembers}
-                    onChange={(event) => setCarryEskulMembers(event.target.checked)}
-                    className="mt-1 h-4 w-4 rounded border-amber-300 text-emerald-600 focus:ring-emerald-500"
-                  />
-                  <span className="min-w-0">
-                    <span className="block text-sm font-bold text-amber-900">
-                      Salin anggota eskul aktif ke periode baru
+                <div className="mt-4 flex flex-col gap-3">
+                  <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={carryJadwal}
+                      onChange={(event) => setCarryJadwal(event.target.checked)}
+                      className="mt-1 h-4 w-4 rounded border-blue-300 text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span className="min-w-0">
+                      <span className="block text-sm font-bold text-blue-900">
+                        Salin jadwal pelajaran ke periode baru
+                      </span>
+                      <span className="mt-1 block text-xs leading-5 text-blue-800">
+                        Jadwal dan guru pengampu yang aktif saat ini akan langsung disalin ke periode baru secara otomatis.
+                      </span>
                     </span>
-                    <span className="mt-1 block text-xs leading-5 text-amber-800">
-                      Membuat keanggotaan baru untuk siswa yang naik kelas; riwayat periode lama tetap utuh.
+                  </label>
+
+                  <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={carryEskulMembers}
+                      onChange={(event) => setCarryEskulMembers(event.target.checked)}
+                      className="mt-1 h-4 w-4 rounded border-amber-300 text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span className="min-w-0">
+                      <span className="block text-sm font-bold text-amber-900">
+                        Salin anggota eskul aktif ke periode baru
+                      </span>
+                      <span className="mt-1 block text-xs leading-5 text-amber-800">
+                        Membuat keanggotaan baru untuk siswa yang naik kelas; riwayat periode lama tetap utuh.
+                      </span>
                     </span>
-                  </span>
-                </label>
+                  </label>
+                </div>
               )}
 
               <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

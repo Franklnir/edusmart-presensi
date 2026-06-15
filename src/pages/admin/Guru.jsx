@@ -2328,20 +2328,15 @@ export default function AGuru() {
                 <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-800">
                   <p className="font-semibold mb-1">Catatan penting</p>
                   <ul className="list-disc list-inside space-y-1">
-                    <li>Kolom wajib: <b>Nama</b>, <b>NIP/NUPTK</b>, dan <b>Email</b>.</li>
-                    <li>Kolom <b>JK</b> bisa diisi <b>L</b>/<b>P</b>, <b>Laki-laki</b>, <b>Laki laki</b>, <b>Perempuan</b>, atau <b>Perumpuan</b>.</li>
-                    <li>Password awal sistem akan diamankan otomatis oleh server.</li>
-                    <li>Untuk <b>login pertama</b>, guru cukup pakai <b>tanggal lahir polos</b> (contoh 05/08/2010 → <b>05082010</b>).</li>
-                    <li>Kalau <b>tanggal lahir</b> kosong, login pertama memakai <b>NIP/NUPTK</b> sebagai password sementara.</li>
-                    <li>Login awal guru: pakai <b>Email</b> dan password sementara di atas.</li>
-                    <li>NIP/NUPTK dipakai sebagai nomor induk guru, bukan username login awal di sistem ini.</li>
-                    <li>NIP/NUPTK otomatis dirapikan menjadi huruf besar, jadi <b>gp001</b> dan <b>GP001</b> dianggap data yang sama.</li>
-                    <li>Kolom <b>Kelas</b>, <b>Mata Pelajaran</b>, atau <b>Mapel</b> di file akan diabaikan agar penugasan guru tetap konsisten.</li>
-                    <li>Atur mata pelajaran dari menu <b>Jadwal Mengajar</b>, dan atur wali kelas dari menu <b>Struktur Kelas</b> setelah akun guru dibuat.</li>
-                    <li>Kolom <b>Status</b> opsional. Kosong berarti akun baru dibuat aktif dan akun lama tidak diubah statusnya.</li>
-                    <li>Huruf besar dan kecil pada header kolom serta email tidak berpengaruh.</li>
-                    <li>Format upload yang didukung: <b>{SPREADSHEET_IMPORT_FORMAT_LABEL}</b>.</li>
-                    <li>Setelah login, guru wajib mengganti password.</li>
+                    <li>Wajib diisi: <b>Nama</b>, <b>NIP/NUPTK</b>, <b>Email</b>.</li>
+                    <li><b>JK</b>: <b>L</b>/<b>P</b>, <b>Laki-laki</b>, atau <b>Perempuan</b> (typo otomatis dikoreksi).</li>
+                    <li>Password awal = <b>tanggal lahir polos</b> (05/08/2010 → <b>05082010</b>). Jika kosong, pakai <b>NIP/NUPTK</b>.</li>
+                    <li>Login awal: <b>Email</b> + password sementara di atas. Setelah login, <b>wajib ganti password</b>.</li>
+                    <li>NIP/NUPTK = nomor induk, bukan username. Otomatis jadi huruf besar (<b>gp001</b> = <b>GP001</b>).</li>
+                    <li>Kolom <b>Kelas</b>/<b>Mapel</b> di file diabaikan — atur lewat menu <b>Jadwal Mengajar</b> dan <b>Struktur Kelas</b>.</li>
+                    <li><b>Status</b> opsional. Kosong = akun baru aktif, akun lama tidak berubah.</li>
+                    <li>Header kolom dan email <b>tidak case-sensitive</b>.</li>
+                    <li>Format didukung: <b>{SPREADSHEET_IMPORT_FORMAT_LABEL}</b>.</li>
                   </ul>
                 </div>
 

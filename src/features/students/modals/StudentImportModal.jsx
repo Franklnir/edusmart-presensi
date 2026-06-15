@@ -431,19 +431,13 @@ function StudentImportModal({
               <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-800">
                 <p className="font-semibold mb-1">Catatan penting</p>
                 <ul className="list-disc list-inside space-y-1">
-                  <li>Kolom wajib: <b>Nama</b>, <b>NIS</b>, dan <b>Kelas</b>.</li>
-                  <li>Kolom <b>Email</b> opsional, jadi boleh dikosongkan dulu.</li>
-                  <li>Kolom <b>JK</b> bisa diisi <b>L</b>/<b>P</b>, <b>Laki-laki</b>, <b>Laki laki</b>, <b>Perempuan</b>, atau <b>Perumpuan</b>.</li>
-                  <li>Password awal sistem akan diamankan otomatis oleh server.</li>
-                  <li>Untuk <b>login pertama</b>, siswa cukup pakai <b>tanggal lahir polos</b> (contoh 05/08/2010 → <b>05082010</b>).</li>
-                  <li>Kalau <b>tanggal lahir</b> kosong, login pertama memakai <b>NIS</b> sebagai password sementara.</li>
-                  <li>Usia akan dihitung otomatis dari tanggal lahir yang valid.</li>
-                  <li>Login awal siswa: pakai <b>NIS</b> dan password sementara di atas.</li>
-                  <li>Nama kelas harus mengarah ke kelas yang sudah dibuat di website ini.</li>
-                  <li>NIS otomatis dirapikan menjadi huruf besar, jadi <b>s001</b> dan <b>S001</b> dianggap siswa yang sama.</li>
-                  <li>Huruf besar dan kecil pada nama kelas tidak ngaruh, jadi <b>x ipa 1</b> dan <b>X IPA 1</b> akan dianggap sama.</li>
-                  <li>Format upload yang didukung: <b>{SPREADSHEET_IMPORT_FORMAT_LABEL}</b>.</li>
-                  <li>Setelah login, siswa wajib ganti password. Email bisa dilengkapi nanti kalau memang belum ada.</li>
+                  <li>Wajib diisi: <b>Nama</b>, <b>NIS</b>, <b>Kelas</b>. <b>Email</b> opsional.</li>
+                  <li><b>JK</b>: <b>L</b>/<b>P</b>, <b>Laki-laki</b>, atau <b>Perempuan</b> (typo otomatis dikoreksi).</li>
+                  <li>Password awal = <b>tanggal lahir polos</b> (05/08/2010 → <b>05082010</b>). Jika kosong, pakai <b>NIS</b>.</li>
+                  <li>Login awal: <b>NIS</b> + password sementara di atas. Setelah login, <b>wajib ganti password</b>.</li>
+                  <li>NIS otomatis huruf besar (<b>s001</b> = <b>S001</b>). Usia dihitung otomatis dari tanggal lahir.</li>
+                  <li>Nama kelas harus sesuai kelas yang sudah dibuat. <b>Tidak case-sensitive</b> (<b>x ipa 1</b> = <b>X IPA 1</b>).</li>
+                  <li>Format didukung: <b>{SPREADSHEET_IMPORT_FORMAT_LABEL}</b>.</li>
                 </ul>
               </div>
 
