@@ -279,7 +279,6 @@ export default function VerificationCodeModal({
           {phase === 'input' && (
             <div className="evmPhaseContent">
               <div className="evmSentBanner">
-                <span>✅</span>
                 <span>Kode verifikasi telah dikirim ke email Anda</span>
               </div>
               <p className="evmDesc">{inputDescription}</p>
@@ -289,7 +288,6 @@ export default function VerificationCodeModal({
                 onClick={handleVerifyCode}
                 disabled={codeDigits.join('').length < CODE_LENGTH}
               >
-                <span>✅</span>
                 <span>{confirmLabel}</span>
               </button>
               <div className="evmResendRow">
