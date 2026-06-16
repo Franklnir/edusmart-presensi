@@ -493,7 +493,7 @@ class QuizAutomationTest extends TestCase
             'payload' => ['nama' => 'Nama berubah'],
         ]);
         $quizUpdate->assertStatus(422);
-        $quizUpdate->assertJsonPath('error', 'Quiz sedang dikerjakan siswa. Hanya deadline atau durasi yang boleh diubah.');
+        $quizUpdate->assertJsonPath('error', 'Quiz sedang dikerjakan siswa. Hanya deadline yang boleh diubah.');
 
         $securityUpdate = $this->actingAs($guru)->postJson('/api/quiz/publish', [
             'quiz_id' => $quizId,
