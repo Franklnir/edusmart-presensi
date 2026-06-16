@@ -989,10 +989,19 @@ class QuizController extends ApiController
 
         $existingStart = $this->parseQuizDate($quiz->starts_at ?? null, $quizForDates);
         $hasStartChanged = ! $existingStart || $existingStart->getTimestamp() !== $startsAt->getTimestamp();
-        if ($this->quizHasOngoingSubmissions($tenantId, $quizId) && $hasStartChanged) {
-            return response()->json([
-                'error' => 'Saat ada siswa mengerjakan, tanggal mulai tidak boleh diubah. Ubah tanggal selesai saja.',
-            ], 409);
+        if ($this->quizHasOngoingSubmissions($tenantId, $quizId)) {
+            if ($hasStartChanged) {
+                return response()->json([
+                    'error' => 'Tidak boleh mengubah jadwal saat ada siswa sedang mengerjakan quiz. Tunggu hingga semua selesai.',
+                ], 409);
+            }
+            $existingDeadline = $this->parseQuizDate($quiz->deadline_at ?? null, $quizForDates);
+            $hasDeadlineChanged = ! $existingDeadline || $existingDeadline->getTimestamp() !== $deadlineAt->getTimestamp();
+            if ($hasDeadlineChanged) {
+                return response()->json([
+                    'error' => 'Tidak boleh mengubah jadwal saat ada siswa sedang mengerjakan quiz. Tunggu hingga semua selesai.',
+                ], 409);
+            }
         }
         if ((! $this->boolValue($quiz->is_active ?? false) || $hasStartChanged) && $startsAt->lt($nowMinute)) {
             return response()->json(['error' => 'Tanggal mulai quiz tidak boleh di masa lalu'], 422);

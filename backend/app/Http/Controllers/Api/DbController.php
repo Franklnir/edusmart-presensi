@@ -6231,7 +6231,17 @@ class DbController extends ApiController
         $target = $targets->first();
         $hasOngoingSubmission = $this->quizIdsHaveOngoingSubmissions([(string) $target->id]);
         if ($hasOngoingSubmission && $hasNonTimeMutation) {
-            return 'Quiz sedang dikerjakan siswa. Hanya deadline atau durasi yang boleh diubah.';
+            return 'Quiz sedang dikerjakan siswa. Hanya deadline yang boleh diubah.';
+        }
+        if ($hasOngoingSubmission && array_key_exists('duration_minutes', $payload)) {
+            return 'Durasi quiz tidak boleh diubah saat ada siswa sedang mengerjakan. Tunggu hingga semua selesai.';
+        }
+        if ($hasOngoingSubmission && array_key_exists('starts_at', $payload)) {
+            $targetStartsAt = $this->parseQuizDateTime($target->starts_at ?? null);
+            $startsAt = $this->parseQuizDateTime($payload['starts_at'] ?? null);
+            if ($targetStartsAt && $startsAt && ! $targetStartsAt->equalTo($startsAt)) {
+                return 'Tanggal mulai tidak boleh diubah saat ada siswa sedang mengerjakan quiz.';
+            }
         }
         if (
             $hasOngoingSubmission
