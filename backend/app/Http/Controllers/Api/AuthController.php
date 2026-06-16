@@ -2500,15 +2500,17 @@ class AuthController extends ApiController
 
         $email = strtolower(trim($payload['email']));
         $eligibility = $this->passwordResetEligibility($email, $this->tenantId($request));
-        if ($eligibility['allowed']) {
-            try {
-                Password::sendResetLink(['email' => $email]);
-            } catch (\Throwable $e) {
-                report($e);
-            }
+        if (! $eligibility['allowed']) {
+            return response()->json(['error' => $eligibility['message']], 400);
         }
 
-        return response()->json(['data' => $this->passwordResetRequestAcceptedMessage()]);
+        try {
+            Password::sendResetLink(['email' => $email]);
+        } catch (\Throwable $e) {
+            report($e);
+        }
+
+        return response()->json(['data' => 'Link reset password telah dikirim ke email Anda.']);
     }
 
     public function resetPassword(Request $request)
@@ -3346,10 +3348,13 @@ class AuthController extends ApiController
         $users = User::query()
             ->whereRaw('lower(email) = ?', [$normalizedEmail])
             ->limit(2)
-            ->get(['id', 'email']);
+            ->get(['id', 'email', 'email_verified_at']);
 
         if ($users->isEmpty()) {
-            return ['allowed' => true];
+            return [
+                'allowed' => false,
+                'message' => 'Email tidak terdaftar. Pastikan email yang Anda masukkan sudah terdaftar.',
+            ];
         }
 
         if ($users->count() > 1) {
@@ -3360,6 +3365,12 @@ class AuthController extends ApiController
         }
 
         $user = $users->first();
+        if ($user->email_verified_at === null) {
+            return [
+                'allowed' => false,
+                'message' => 'Email tidak terdaftar. Pastikan email yang Anda masukkan sudah terdaftar.',
+            ];
+        }
         $userId = (string) ($user->id ?? '');
         $profileQuery = Profile::query()->where('id', $userId);
         $normalizedTenantId = trim((string) ($tenantId ?? ''));
@@ -3387,11 +3398,6 @@ class AuthController extends ApiController
         }
 
         return ['allowed' => true];
-    }
-
-    private function passwordResetRequestAcceptedMessage(): string
-    {
-        return 'Jika email terdaftar dan memenuhi syarat, link reset password akan dikirim.';
     }
 
     private function passwordResetFailureMessage(): string

@@ -120,4 +120,11 @@ return [
         'name' => env('MAIL_FROM_NAME', 'Example'),
     ],
 
+    'markdown' => [
+        'paths' => [
+            resource_path('views/mail'),
+        ],
+        'theme' => 'default',
+    ],
+
 ];
