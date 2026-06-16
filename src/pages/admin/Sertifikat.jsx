@@ -2064,25 +2064,6 @@ const TemplateManagerSection = ({ onTemplateChanged }) => {
                       Hapus
                     </button>
                   </div>
-
-                <div className="p-3">
-                  <div className="font-bold text-sm text-gray-800 truncate mb-1">{t.nama}</div>
-                  {t.deskripsi && <p className="text-[11px] text-gray-500 mb-2 line-clamp-2">{t.deskripsi}</p>}
-
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => handleEdit(t)}
-                      className="flex-1 bg-yellow-50 text-yellow-700 text-xs py-1.5 rounded border border-yellow-200 hover:bg-yellow-100"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => handleDelete(t.id)}
-                      className="flex-1 bg-red-50 text-red-700 text-xs py-1.5 rounded border border-red-200 hover:bg-red-100"
-                    >
-                      Hapus
-                    </button>
-                  </div>
                 </div>
               </div>
             ))}
