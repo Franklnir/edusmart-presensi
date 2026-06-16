@@ -67,20 +67,20 @@ function StudentDetailModal({
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
-        <div className="px-6 py-4 border-b bg-gray-50 flex items-start justify-between">
-          <div className="flex items-center space-x-4">
-            <div className="flex-shrink-0 h-12 w-12">
+        <div className="px-6 py-5 border-b border-gray-100 bg-white flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-5">
+            <div className="flex-shrink-0 h-16 w-16">
               <ProfileAvatar
                 src={detailUser?.photo_path || detailUser?.photo_url}
                 name={detailUser?.nama}
-                size={48}
-                className="border-gray-200"
-                fallbackClassName="rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center text-base font-semibold text-blue-600"
+                size={64}
+                className="border border-slate-200 shadow-sm"
+                fallbackClassName="rounded-full bg-blue-50 border border-blue-100 flex items-center justify-center text-xl font-bold text-blue-600 shadow-sm"
               />
             </div>
             <div className="flex-1">
-              <div className="flex items-center gap-3 flex-wrap">
-                <h3 className="text-lg font-semibold text-gray-900">
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <h3 className="text-xl font-bold text-slate-900">
                   {detailUser?.nama || detailUser?.email}
                 </h3>
                 {!canManage && (
@@ -94,21 +94,23 @@ function StudentDetailModal({
                   </Badge>
                 )}
                 {detailUser?.status && detailUser.status !== 'active' && (
-                  <Badge variant={STATUS_META(detailUser.status).variant} className="text-xs">
-                    {STATUS_META(detailUser.status).icon} {STATUS_META(detailUser.status).label}
-                  </Badge>
+                  <span className={`${STATUS_META(detailUser.status).className} text-xs`}>
+                    {STATUS_META(detailUser.status).label}
+                  </span>
                 )}
                 <Badge variant={sourceMeta.variant} className="text-xs">
                   {sourceMeta.label}
                 </Badge>
               </div>
-              <p className="text-gray-600 text-sm mt-1">
-                {detailUser?.email || '-'} - NIS: {detailUser?.nis || '-'}
-              </p>
+              <div className="text-slate-500 text-sm mt-1 flex items-center gap-2">
+                <span>{detailUser?.email || 'Tidak ada email'}</span>
+                <span className="text-slate-300">•</span>
+                <span>NIS: <span className="font-medium text-slate-700">{detailUser?.nis || '-'}</span></span>
+              </div>
             </div>
           </div>
 
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center gap-2">
             {canManage && (
               <>
                 {detailUser?.status === 'active' ? (
@@ -128,7 +130,7 @@ function StudentDetailModal({
               </>
             )}
             <button
-              className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"
+              className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors ml-2"
               onClick={onClose}
               type="button"
             >

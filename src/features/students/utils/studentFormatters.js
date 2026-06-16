@@ -10,12 +10,12 @@ export const JK_LABEL = (jk) => {
 
 export const STATUS_META = (status) => {
   const st = String(status || '').toLowerCase()
-  if (st === 'active') return { key: 'active', label: 'Aktif', icon: '✅', variant: 'success' }
-  if (st === 'nonaktif' || st === 'inactive') return { key: 'nonaktif', label: 'Nonaktif', icon: '⏸️', variant: 'danger' }
-  if (st === 'mutasi') return { key: 'mutasi', label: 'Mutasi', icon: '📤', variant: 'info' }
-  if (st === 'alumni') return { key: 'alumni', label: 'Alumni', icon: '🎓', variant: 'primary' }
-  if (!st) return { key: '', label: '—', icon: '', variant: 'default' }
-  return { key: st, label: status, icon: '•', variant: 'default' }
+  if (st === 'active') return { key: 'active', label: 'Aktif', icon: '', variant: 'success', className: 'text-green-600 font-semibold' }
+  if (st === 'nonaktif' || st === 'inactive') return { key: 'nonaktif', label: 'Nonaktif', icon: '', variant: 'danger', className: 'text-red-600 font-semibold' }
+  if (st === 'mutasi') return { key: 'mutasi', label: 'Mutasi', icon: '', variant: 'info', className: 'text-indigo-600 font-semibold' }
+  if (st === 'alumni') return { key: 'alumni', label: 'Alumni', icon: '', variant: 'primary', className: 'text-blue-600 font-semibold' }
+  if (!st) return { key: '', label: '—', icon: '', variant: 'default', className: 'text-gray-600 font-semibold' }
+  return { key: st, label: status, icon: '', variant: 'default', className: 'text-gray-600 font-semibold' }
 }
 
 const GRADE_REGEX = /^\s*(XII|XI|X|IX|VIII|VII|VI|V|IV|III|II|I|\d+)/i

@@ -229,11 +229,11 @@ const normalizeStatusValue = (value) => {
 
 const getGuruStatusMeta = (value) => {
   const status = normalizeStatusValue(value) || String(value || 'active').toLowerCase() || 'active'
-  if (status === 'active') return { label: 'Aktif', icon: '✅', className: 'bg-green-100 text-green-700 border border-green-200' }
-  if (status === 'nonaktif') return { label: 'Nonaktif', icon: '⏸️', className: 'bg-red-100 text-red-700 border border-red-200' }
-  if (status === 'mutasi') return { label: 'Mutasi', icon: '📤', className: 'bg-indigo-100 text-indigo-700 border border-indigo-200' }
-  if (status === 'alumni') return { label: 'Alumni', icon: '🎓', className: 'bg-blue-100 text-blue-700 border border-blue-200' }
-  return { label: status || '—', icon: '•', className: 'bg-slate-100 text-slate-700 border border-slate-200' }
+  if (status === 'active') return { label: 'Aktif', icon: '', className: 'text-green-600 font-semibold' }
+  if (status === 'nonaktif') return { label: 'Nonaktif', icon: '', className: 'text-red-600 font-semibold' }
+  if (status === 'mutasi') return { label: 'Mutasi', icon: '', className: 'text-indigo-600 font-semibold' }
+  if (status === 'alumni') return { label: 'Alumni', icon: '', className: 'text-blue-600 font-semibold' }
+  return { label: status || '—', icon: '', className: 'text-slate-600 font-semibold' }
 }
 
 const isGuruExitStatus = (status) => ['mutasi', 'alumni'].includes(normalizeStatusValue(status) || String(status || '').toLowerCase())
@@ -2667,8 +2667,8 @@ export default function AGuru() {
                           <JabatanBadge jabatanList={g.jabatanList} />
                         </td>
                         <td className="px-4 py-4 whitespace-nowrap">
-                          <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold ${statusMeta.className}`}>
-                            {statusMeta.icon} {statusMeta.label}
+                          <span className={`text-xs ${statusMeta.className}`}>
+                            {statusMeta.label}
                           </span>
                         </td>
                         <td className="px-4 py-4 whitespace-nowrap text-right">
@@ -2995,8 +2995,8 @@ export default function AGuru() {
                     <p className="text-slate-500 text-sm">{selectedGuru.email}</p>
                     {selectedGuru.telp && <p className="text-slate-400 text-xs flex items-center gap-1 mt-0.5"><span>📞</span><span>{selectedGuru.telp}</span></p>}
                     <div className="mt-2">
-                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${selectedGuruStatusMeta.className}`}>
-                        {selectedGuruStatusMeta.icon} {selectedGuruStatusMeta.label}
+                      <span className={`text-xs ${selectedGuruStatusMeta.className}`}>
+                        {selectedGuruStatusMeta.label}
                       </span>
                       <span className={`ml-2 inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${selectedGuruSourceMeta.className}`}>
                         {selectedGuruSourceMeta.label}

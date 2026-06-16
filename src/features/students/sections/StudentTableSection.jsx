@@ -45,11 +45,10 @@ const StudentMobileCard = ({
               <div className="truncate text-sm font-semibold text-gray-900">
                 {rowNumber}. {student.nama || '-'}
               </div>
-              <div className="truncate text-xs text-gray-500">{student.email || '-'}</div>
             </div>
-            <Badge variant={statusMeta.variant} className="shrink-0 text-[11px]">
+            <span className={`shrink-0 text-[11px] ${statusMeta.className}`}>
               {statusMeta.label}
-            </Badge>
+            </span>
           </div>
 
           <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-600">

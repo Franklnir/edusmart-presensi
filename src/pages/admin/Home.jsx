@@ -223,9 +223,6 @@ export default function AHome() {
     return period
   }, [])
 
-  /* --- Monitoring Admin --- */
-  const [adminList, setAdminList] = useState([])
-
   // Gunakan useCallback untuk fungsi yang dipanggil di useEffect
   const loadAllData = useCallback(async () => {
     setIsLoading(true)
@@ -292,14 +289,7 @@ export default function AHome() {
           name: `${guru.nama || 'Tanpa Nama'}${guru.email ? ` (${guru.email})` : ''}`
         }))
       )
-      setAdminList(
-        adminRows.map((admin) => ({
-          id: admin.id,
-          nama: admin.nama || admin.email || 'Tanpa Nama',
-          email: admin.email || '-',
-          status: admin.status || 'active'
-        }))
-      )
+
       setPengumumanList(data?.pengumuman?.data || [])
 
     } catch (error) {
@@ -346,28 +336,6 @@ export default function AHome() {
     }
   }, [loadCurrentAcademicPeriod, loadStatistics])
 
-  const loadAdminList = useCallback(async () => {
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('id, nama, email, status')
-        .eq('role', 'admin')
-        .order('nama')
-
-      if (error) throw error
-
-      setAdminList(
-        (data || []).map((a) => ({
-          id: a.id,
-          nama: a.nama || a.email || 'Tanpa Nama',
-          email: a.email || '-',
-          status: a.status || 'active'
-        }))
-      )
-    } catch (error) {
-      pushToast('error', 'Gagal memuat data admin')
-    }
-  }, [pushToast])
 
   /* --- Data Umum (Guru & Siswa) --- */
   const [guruList, setGuruList] = useState([])
@@ -1887,89 +1855,6 @@ export default function AHome() {
             )}
           </div>
         </div>
-
-        {/* --- MONITORING ADMIN (DI BAWAH SEMUA) --- */}
-        {adminList.length > 0 && (
-          <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-gray-900 flex items-center gap-3">
-                <span className="p-2 bg-indigo-100 text-indigo-600 rounded-lg">
-                  🛡️
-                </span>
-                Monitoring Admin
-              </h2>
-              <span className="px-4 py-1 text-xs font-semibold rounded-full bg-indigo-50 text-indigo-700">
-                {adminList.length} admin terdaftar
-              </span>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead>
-                  <tr className="border-b bg-gray-50">
-                    <th className="text-left py-3 px-3 font-semibold text-gray-700">
-                      Nama
-                    </th>
-                    <th className="text-left py-3 px-3 font-semibold text-gray-700">
-                      Email
-                    </th>
-                    <th className="text-left py-3 px-3 font-semibold text-gray-700">
-                      Status Login
-                    </th>
-                    <th className="text-left py-3 px-3 font-semibold text-gray-700">
-                      Status Akun
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {adminList.map((a) => {
-                    const isCurrentAdmin =
-                      (profile && a.id === profile.id) || (user && a.id === user.id)
-                    const isActiveAccount = (a.status || 'active') === 'active'
-
-                    return (
-                      <tr
-                        key={a.id}
-                        className="border-b last:border-0 hover:bg-indigo-50/40 transition-colors"
-                      >
-                        <td className="py-3 px-3 text-gray-900 font-medium">
-                          {a.nama}
-                          {isCurrentAdmin && (
-                            <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-semibold">
-                              Anda
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-3 px-3 text-gray-600">{a.email}</td>
-                        <td className="py-3 px-3">
-                          <span
-                            className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${isCurrentAdmin
-                              ? 'bg-emerald-100 text-emerald-700'
-                              : 'bg-gray-100 text-gray-600'
-                              }`}
-                          >
-                            <span className="w-2 h-2 rounded-full mr-2 bg-current" />
-                            {isCurrentAdmin ? 'Online sekarang' : 'Offline'}
-                          </span>
-                        </td>
-                        <td className="py-3 px-3">
-                          <span
-                            className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${isActiveAccount
-                              ? 'bg-blue-100 text-blue-700'
-                              : 'bg-red-100 text-red-700'
-                              }`}
-                          >
-                            {isActiveAccount ? 'Akun aktif' : 'Akun nonaktif'}
-                          </span>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   )

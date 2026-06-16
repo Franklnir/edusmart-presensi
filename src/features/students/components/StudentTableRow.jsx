@@ -44,15 +44,13 @@ function StudentTableRow({
             />
           </div>
           <div className="ml-3">
-            <div className="text-sm font-medium text-gray-900">
-              {student.nama || '-'}
+            <div className="text-sm font-medium text-gray-900 flex items-center flex-wrap gap-2">
+              <span>{student.nama || '-'}</span>
               {isKetua && (
-                <Badge variant="warning" className="ml-2 text-xs">Ketua</Badge>
+                <Badge variant="warning" className="text-xs">Ketua</Badge>
               )}
             </div>
-            <div className="text-sm text-gray-500">{student.email || '-'}</div>
-            <div className="mt-1 flex flex-wrap items-center gap-1.5">
-              <Badge variant={sourceMeta.variant} className="text-[11px]">{sourceMeta.label}</Badge>
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
               <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${presenceBadgeClassName(student)}`}>
                 <span className={`h-1.5 w-1.5 rounded-full ${online ? 'bg-emerald-500' : 'bg-slate-300'}`} />
                 {formatPresenceText(student)}
@@ -75,9 +73,9 @@ function StudentTableRow({
       </td>
 
       <td className="px-4 py-3 whitespace-nowrap">
-        <Badge variant={statusMeta.variant} className="text-xs">
-          {statusMeta.icon} {statusMeta.label}
-        </Badge>
+        <span className={`${statusMeta.className} text-xs`}>
+          {statusMeta.label}
+        </span>
       </td>
 
       <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-medium space-x-1">

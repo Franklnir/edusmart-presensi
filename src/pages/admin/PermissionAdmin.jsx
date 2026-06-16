@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useUIStore } from '../../store/useUIStore'
+import { useAuthStore } from '../../store/useAuthStore'
 import { ADMIN_FEATURES } from '../../constants/adminFeaturePermissions'
 
 const TARGET_TYPE_LABELS = {
@@ -51,6 +52,8 @@ const PermissionAdmin = () => {
   const [data, setData] = useState({ rows: [], groups: [], options: {}, features: ADMIN_FEATURES })
   const [showCreate, setShowCreate] = useState(false)
   const [form, setForm] = useState(initialForm)
+  const { user, profile } = useAuthStore()
+  const [adminList, setAdminList] = useState([])
 
   const groups = Array.isArray(data?.groups) ? data.groups : []
   const options = data?.options || {}
@@ -86,8 +89,32 @@ const PermissionAdmin = () => {
     }
   }
 
+  const loadAdminList = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, nama, email, status')
+        .eq('role', 'admin')
+        .order('nama')
+
+      if (error) throw error
+
+      setAdminList(
+        (data || []).map((a) => ({
+          id: a.id,
+          nama: a.nama || a.email || 'Tanpa Nama',
+          email: a.email || '-',
+          status: a.status || 'active'
+        }))
+      )
+    } catch (error) {
+      pushToast('error', 'Gagal memuat data admin')
+    }
+  }
+
   useEffect(() => {
     loadPermissions()
+    loadAdminList()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -483,6 +510,88 @@ const PermissionAdmin = () => {
             </div>
           </form>
         </div>
+      )}
+
+      {adminList.length > 0 && (
+        <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-bold text-gray-900 flex items-center gap-3">
+              <span className="p-2 bg-indigo-100 text-indigo-600 rounded-lg">
+                🛡️
+              </span>
+              Monitoring Admin
+            </h2>
+            <span className="px-4 py-1 text-xs font-semibold rounded-full bg-indigo-50 text-indigo-700">
+              {adminList.length} admin terdaftar
+            </span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="border-b bg-gray-50">
+                  <th className="text-left py-3 px-3 font-semibold text-gray-700">
+                    Nama
+                  </th>
+                  <th className="text-left py-3 px-3 font-semibold text-gray-700">
+                    Email
+                  </th>
+                  <th className="text-left py-3 px-3 font-semibold text-gray-700">
+                    Status Login
+                  </th>
+                  <th className="text-left py-3 px-3 font-semibold text-gray-700">
+                    Status Akun
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {adminList.map((a) => {
+                  const isCurrentAdmin =
+                    (profile && a.id === profile.id) || (user && a.id === user.id)
+                  const isActiveAccount = (a.status || 'active') === 'active'
+
+                  return (
+                    <tr
+                      key={a.id}
+                      className="border-b last:border-0 hover:bg-indigo-50/40 transition-colors"
+                    >
+                      <td className="py-3 px-3 text-gray-900 font-medium">
+                        {a.nama}
+                        {isCurrentAdmin && (
+                          <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-semibold">
+                            Anda
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-3 px-3 text-gray-600">{a.email}</td>
+                      <td className="py-3 px-3">
+                        <span
+                          className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${isCurrentAdmin
+                            ? 'bg-emerald-100 text-emerald-700'
+                            : 'bg-gray-100 text-gray-600'
+                            }`}
+                        >
+                          <span className="w-2 h-2 rounded-full mr-2 bg-current" />
+                          {isCurrentAdmin ? 'Online sekarang' : 'Offline'}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3">
+                        <span
+                          className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${isActiveAccount
+                            ? 'bg-blue-100 text-blue-700'
+                            : 'bg-red-100 text-red-700'
+                            }`}
+                        >
+                          {isActiveAccount ? 'Akun aktif' : 'Akun nonaktif'}
+                        </span>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
       )}
       </div>
     </div>

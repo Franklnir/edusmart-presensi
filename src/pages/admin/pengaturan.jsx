@@ -2072,20 +2072,7 @@ export default function APengaturan() {
                 </div>
               </div>
 
-              <div className="grid w-full gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:w-auto">
-                <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3">
-                  <p className="text-xs font-semibold text-emerald-700">Tahun Ajaran</p>
-                  <p className="mt-1 text-sm font-bold text-slate-900">{activeAcademicPeriod.tahunAjaran}</p>
-                </div>
-                <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3">
-                  <p className="text-xs font-semibold text-emerald-700">Rentang Periode</p>
-                  <p className="mt-1 text-sm font-bold text-slate-900">{activeAcademicPeriod.academicYearRangeLabel || '-'}</p>
-                </div>
-                <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3">
-                  <p className="text-xs font-semibold text-emerald-700">Jadwal</p>
-                  <p className="mt-1 text-sm font-bold text-slate-900">1 Tahun Ajaran</p>
-                </div>
-              </div>
+
             </div>
 
             <form onSubmit={(event) => { event.preventDefault(); saveAcademicPeriod() }} className="mt-6 rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
