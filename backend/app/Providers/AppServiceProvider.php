@@ -10,6 +10,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\URL;
+use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password as PasswordRule;
 
@@ -59,6 +60,8 @@ class AppServiceProvider extends ServiceProvider
                 ]
             );
         });
+
+        View::prependNamespace('mail', resource_path('views/mail'));
 
         RateLimiter::for('auth', function (Request $request) use ($clampInt) {
             $tenantId = (string) ($request->attributes->get('tenant_id') ?? 'global');
