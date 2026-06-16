@@ -2,15 +2,24 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Mail\SertifikatMail;
 use App\Models\Profile;
 use App\Models\User;
 use App\Support\AcademicPeriod;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password as PasswordRule;
@@ -4104,5 +4113,74 @@ class AdminController extends ApiController
             6 => 'Sabtu',
             default => 'Minggu',
         };
+    }
+
+    public function sendCertificateEmail(Request $request, string $id)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+
+        $certificate = DB::table('certificates')->where('id', $id)->first();
+        if (! $certificate) {
+            return response()->json(['success' => false, 'message' => 'Sertifikat tidak ditemukan.'], 404);
+        }
+
+        if (! $certificate->user_id) {
+            DB::table('certificates')->where('id', $id)->update([
+                'email_sent' => false,
+                'email_error' => 'Data profil (user_id) tidak valid.',
+            ]);
+
+            return response()->json(['success' => false, 'message' => 'Sertifikat tidak terkait dengan profil valid.'], 400);
+        }
+
+        $user = User::find($certificate->user_id);
+        if (! $user) {
+            DB::table('certificates')->where('id', $id)->update([
+                'email_sent' => false,
+                'email_error' => 'Data akun tidak ditemukan.',
+            ]);
+
+            return response()->json(['success' => false, 'message' => 'Data akun (user) tidak ditemukan.'], 400);
+        }
+
+        if (! $user->email_verified_at) {
+            DB::table('certificates')->where('id', $id)->update([
+                'email_sent' => false,
+                'email_error' => 'Email belum terverifikasi.',
+            ]);
+
+            return response()->json(['success' => false, 'message' => 'Email pengguna belum terverifikasi.'], 400);
+        }
+
+        try {
+            // Kita harus dapatkan URL download. Misal pakai temporaryUrl dari disk S3 (Supabase)
+            // Atau public url jika bucket public.
+            // Dari frontend menggunakan createSignedUrl dengan expiresIn 31536000
+            $downloadUrl = Storage::disk('s3')->temporaryUrl(
+                $certificate->file_url,
+                now()->addDays(7) // berlaku 7 hari
+            );
+
+            $schoolName = DB::table('settings')->value('nama_sekolah') ?: config('app.name');
+
+            Mail::to($user->email)->send(new SertifikatMail($certificate, $user->name ?: $certificate->nama_penerima, $downloadUrl, $schoolName));
+
+            DB::table('certificates')->where('id', $id)->update([
+                'email_sent' => true,
+                'email_error' => null,
+            ]);
+
+            return response()->json(['success' => true, 'message' => 'Email sertifikat berhasil dikirim!']);
+
+        } catch (\Exception $e) {
+            DB::table('certificates')->where('id', $id)->update([
+                'email_sent' => false,
+                'email_error' => 'Gagal mengirim email: '.$e->getMessage(),
+            ]);
+
+            return response()->json(['success' => false, 'message' => 'Terjadi kesalahan sistem saat mengirim email: '.$e->getMessage()], 500);
+        }
     }
 }

@@ -2,6 +2,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   supabase,
+  apiFetch,
   CERT_BUCKET as APP_CERT_BUCKET,
   CERT_TEMPLATE_BUCKET as APP_CERT_TEMPLATE_BUCKET,
   extractObjectPath
@@ -1159,12 +1160,20 @@ const GeneratorSection = ({ templateVersion }) => {
           sent: true,
           sent_at: new Date().toISOString()
         }
-        let { error: insErr } = await supabase.from('certificates').insert(insertPayload)
+        let { data: insData, error: insErr } = await supabase.from('certificates').insert(insertPayload).select('id')
         if (insErr && /certificate_number/i.test(insErr.message || '')) {
           const { certificate_number, ...legacyPayload } = insertPayload
-          ; ({ error: insErr } = await supabase.from('certificates').insert(legacyPayload))
+          ; ({ data: insData, error: insErr } = await supabase.from('certificates').insert(legacyPayload).select('id'))
         }
         if (insErr) throw insErr
+
+        if (insData && insData[0]?.id) {
+          const certId = insData[0].id
+          apiFetch(`/api/admin/certificates/${certId}/send-email`, { method: 'POST' })
+            .catch((err) => {
+              console.error(`Gagal mengirim email untuk sertifikat ID ${certId}:`, err)
+            })
+        }
 
         success++
       }
@@ -2055,6 +2064,25 @@ const TemplateManagerSection = ({ onTemplateChanged }) => {
                       Hapus
                     </button>
                   </div>
+
+                <div className="p-3">
+                  <div className="font-bold text-sm text-gray-800 truncate mb-1">{t.nama}</div>
+                  {t.deskripsi && <p className="text-[11px] text-gray-500 mb-2 line-clamp-2">{t.deskripsi}</p>}
+
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleEdit(t)}
+                      className="flex-1 bg-yellow-50 text-yellow-700 text-xs py-1.5 rounded border border-yellow-200 hover:bg-yellow-100"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => handleDelete(t.id)}
+                      className="flex-1 bg-red-50 text-red-700 text-xs py-1.5 rounded border border-red-200 hover:bg-red-100"
+                    >
+                      Hapus
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
@@ -2071,6 +2099,7 @@ const HistorySection = () => {
   const [meta, setMeta] = useState({ page: 1, per_page: 50, total: 0, page_count: 1, from: 0, to: 0 })
   const [downloadingId, setDownloadingId] = useState(null)
   const [deletingId, setDeletingId] = useState(null)
+  const [sendingEmailId, setSendingEmailId] = useState(null)
   const { pushToast } = useUIStore()
   const toast = (type, message) => pushToast?.(type, message)
 
@@ -2109,6 +2138,22 @@ const HistorySection = () => {
       toast('error', err.message || 'Gagal download')
     } finally {
       setDownloadingId(null)
+    }
+  }
+
+  const handleSendEmail = async (row) => {
+    setSendingEmailId(row.id)
+    try {
+      const res = await apiFetch(`/api/admin/certificates/${row.id}/send-email`, {
+        method: 'POST'
+      })
+      if (res.error) throw res.error
+      toast('success', 'Email sertifikat berhasil dikirim!')
+      await load()
+    } catch (err) {
+      toast('error', err.message || 'Gagal mengirim email')
+    } finally {
+      setSendingEmailId(null)
     }
   }
 
@@ -2159,6 +2204,7 @@ const HistorySection = () => {
               <th className="p-4 font-medium">Nomor</th>
               <th className="p-4 font-medium">Nama Penerima</th>
               <th className="p-4 font-medium">Event</th>
+              <th className="p-4 font-medium text-center">Status Email</th>
               <th className="p-4 font-medium text-center">File</th>
               <th className="p-4 font-medium text-center">Aksi</th>
             </tr>
@@ -2179,6 +2225,25 @@ const HistorySection = () => {
                 <td className="p-4 text-gray-600">{d.event}</td>
 
                 <td className="p-4 text-center">
+                  {d.email_sent ? (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-green-50 text-green-700 border border-green-200">
+                      ✅ Terkirim
+                    </span>
+                  ) : d.email_error ? (
+                    <span
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-red-50 text-red-700 border border-red-200 cursor-help"
+                      title={d.email_error}
+                    >
+                      ❌ Gagal: {d.email_error}
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-50 text-gray-500 border border-gray-200">
+                      ⏳ Belum Dikirim
+                    </span>
+                  )}
+                </td>
+
+                <td className="p-4 text-center">
                   <button
                     onClick={() => handleDownload(d)}
                     disabled={downloadingId === d.id}
@@ -2189,28 +2254,47 @@ const HistorySection = () => {
                 </td>
 
                 <td className="p-4 text-center">
-                  <button
-                    onClick={() => handleDelete(d)}
-                    disabled={deletingId === d.id}
-                    className="text-gray-400 hover:text-red-600 transition-colors disabled:opacity-60"
-                    title="Hapus"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                      />
-                    </svg>
-                  </button>
+                  <div className="flex items-center justify-center gap-3">
+                    <button
+                      onClick={() => handleSendEmail(d)}
+                      disabled={sendingEmailId === d.id || deletingId === d.id || downloadingId === d.id}
+                      className="text-gray-400 hover:text-blue-600 transition-colors disabled:opacity-60"
+                      title="Kirim Ulang Email"
+                    >
+                      {sendingEmailId === d.id ? (
+                        <svg className="animate-spin h-5 w-5 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                      ) : (
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                        </svg>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => handleDelete(d)}
+                      disabled={deletingId === d.id || sendingEmailId === d.id}
+                      className="text-gray-400 hover:text-red-600 transition-colors disabled:opacity-60"
+                      title="Hapus"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                        />
+                      </svg>
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
 
             {data.length === 0 && (
               <tr>
-                <td colSpan={5} className="p-6 text-center text-gray-400 text-sm">
+                <td colSpan={7} className="p-6 text-center text-gray-400 text-sm">
                   Belum ada sertifikat yang dibuat.
                 </td>
               </tr>
