@@ -2,9 +2,9 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Mail\VerificationCodeMail;
 use App\Models\Profile;
 use App\Models\User;
-use App\Mail\VerificationCodeMail;
 use App\Support\Tenancy\TenantDomainService;
 use Illuminate\Contracts\Auth\StatefulGuard;
 use Illuminate\Http\Client\Response;
