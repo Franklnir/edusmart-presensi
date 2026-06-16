@@ -87,7 +87,7 @@ class AuthSuperAdminHardeningTest extends TestCase
         $response->assertJsonPath('error', 'Akses tenant ditolak');
     }
 
-    public function test_forgot_password_returns_generic_response_for_super_admin_email(): void
+    public function test_forgot_password_rejects_super_admin_email(): void
     {
         config()->set('superadmin.emails', ['root@example.com']);
 
@@ -97,14 +97,15 @@ class AuthSuperAdminHardeningTest extends TestCase
                 'email' => 'root@example.com',
             ]);
 
-        $response->assertOk();
-        $response->assertJsonPath('data', 'Jika email terdaftar dan memenuhi syarat, link reset password akan dikirim.');
+        $response->assertStatus(400);
+        $response->assertJsonPath('error', 'Reset password untuk akun super admin dinonaktifkan');
     }
 
-    public function test_forgot_password_returns_generic_response_for_admin_role(): void
+    public function test_forgot_password_rejects_admin_role(): void
     {
         $tenantId = $this->defaultTenantId();
         [$adminUser] = $this->createUserWithProfile($tenantId, 'admin', 'x-a', 'admin@example.com');
+        $adminUser->forceFill(['email_verified_at' => now()])->save();
 
         $response = $this
             ->withServerVariables(['REMOTE_ADDR' => '10.10.10.2'])
@@ -112,25 +113,42 @@ class AuthSuperAdminHardeningTest extends TestCase
                 'email' => $adminUser->email,
             ]);
 
-        $response->assertOk();
-        $response->assertJsonPath('data', 'Jika email terdaftar dan memenuhi syarat, link reset password akan dikirim.');
+        $response->assertStatus(400);
+        $response->assertJsonPath('error', 'Reset password untuk akun admin dinonaktifkan. Hubungi super admin.');
     }
 
-    public function test_forgot_password_allows_guru_and_siswa_roles(): void
+    public function test_forgot_password_rejects_unverified_email(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        [$guruUser] = $this->createUserWithProfile($tenantId, 'guru', 'x-a', 'guru@example.com');
+
+        $response = $this
+            ->withServerVariables(['REMOTE_ADDR' => '10.10.10.3'])
+            ->postJson('/api/auth/forgot-password', [
+                'email' => $guruUser->email,
+            ]);
+
+        $response->assertStatus(400);
+        $response->assertJsonPath('error', 'Email tidak terdaftar. Pastikan email yang Anda masukkan sudah terdaftar.');
+    }
+
+    public function test_forgot_password_allows_guru_and_siswa_with_verified_email(): void
     {
         $tenantId = $this->defaultTenantId();
         [$guruUser] = $this->createUserWithProfile($tenantId, 'guru', 'x-a', 'guru@example.com');
         [$siswaUser] = $this->createUserWithProfile($tenantId, 'siswa', 'x-a', 'siswa@example.com');
+        $guruUser->forceFill(['email_verified_at' => now()])->save();
+        $siswaUser->forceFill(['email_verified_at' => now()])->save();
 
         $guruResponse = $this
-            ->withServerVariables(['REMOTE_ADDR' => '10.10.10.3'])
+            ->withServerVariables(['REMOTE_ADDR' => '10.10.10.4'])
             ->postJson('/api/auth/forgot-password', [
                 'email' => $guruUser->email,
             ]);
         $guruResponse->assertStatus(200);
 
         $siswaResponse = $this
-            ->withServerVariables(['REMOTE_ADDR' => '10.10.10.4'])
+            ->withServerVariables(['REMOTE_ADDR' => '10.10.10.5'])
             ->postJson('/api/auth/forgot-password', [
                 'email' => $siswaUser->email,
             ]);
