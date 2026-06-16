@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Models\Profile;
 use App\Models\User;
+use App\Mail\VerificationCodeMail;
 use App\Support\Tenancy\TenantDomainService;
 use Illuminate\Contracts\Auth\StatefulGuard;
 use Illuminate\Http\Client\Response;
@@ -2661,20 +2662,8 @@ class AuthController extends ApiController
             }
         }
 
-        $mailBody = implode("\n", [
-            "Kode verifikasi perubahan akun Anda: {$code}",
-            '',
-            'Kode berlaku selama 10 menit dan hanya bisa digunakan 1 kali untuk perubahan email atau password.',
-            "Sekolah: {$schoolName}",
-            '',
-            'Jika Anda tidak meminta perubahan akun ini, abaikan email ini.',
-        ]);
-
         try {
-            Mail::raw($mailBody, function ($message) use ($targetEmail) {
-                $message->to($targetEmail)
-                    ->subject('Kode Verifikasi Perubahan Akun');
-            });
+            Mail::to($targetEmail)->send(new VerificationCodeMail($code, $schoolName));
         } catch (\Throwable $e) {
             report($e);
 
