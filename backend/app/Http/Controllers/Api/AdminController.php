@@ -2883,8 +2883,7 @@ class AdminController extends ApiController
         bool $ignoreActive = false,
         ?string $gradeOverride = null,
         ?string $suffixOverride = null
-    ): ?array
-    {
+    ): ?array {
         if ($ignoreActive === false && $this->isActiveClassRow($row) === false) {
             return null;
         }
