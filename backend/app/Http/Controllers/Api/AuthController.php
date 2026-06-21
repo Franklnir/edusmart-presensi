@@ -6,6 +6,7 @@ use App\Mail\VerificationCodeMail;
 use App\Models\Profile;
 use App\Models\User;
 use App\Support\Tenancy\TenantDomainService;
+use Carbon\Carbon;
 use Illuminate\Contracts\Auth\StatefulGuard;
 use Illuminate\Http\Client\Response;
 use Illuminate\Http\RedirectResponse;
@@ -3358,7 +3359,7 @@ class AuthController extends ApiController
         }
 
         try {
-            return \Carbon\Carbon::createFromTimestamp($value)->toIso8601String();
+            return Carbon::createFromTimestamp($value)->toIso8601String();
         } catch (\Throwable $e) {
             return null;
         }
@@ -3371,7 +3372,7 @@ class AuthController extends ApiController
         }
 
         try {
-            return \Carbon\Carbon::parse($value)->toIso8601String();
+            return Carbon::parse($value)->toIso8601String();
         } catch (\Throwable $e) {
             return null;
         }

@@ -2886,6 +2886,7 @@ export default function APengaturan() {
             {showSettingsSidebarColumn && (
             <div className="space-y-6">
               {activeSettingsMenu === 'admin' && (
+              <>
               <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
                 <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center space-x-2">
                   <span>👨‍💼</span>
@@ -2999,7 +3000,8 @@ export default function APengaturan() {
                   </button>
                 </div>
               </div>
-              <AccountSecurityPanel tone="blue" />
+                <AccountSecurityPanel tone="blue" />
+              </>
               )}
 
               {activeSettingsMenu === 'identity' && (
