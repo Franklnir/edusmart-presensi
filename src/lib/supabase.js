@@ -659,10 +659,11 @@ const ensureCsrf = async (force = false) => {
   }
 }
 
-const makeError = (message, status, code) => ({
+const makeError = (message, status, code, extra = {}) => ({
   message: message || 'Terjadi kesalahan',
   status,
-  code
+  code,
+  ...extra
 })
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -966,7 +967,9 @@ const runApiFetch = async (path, options = {}) => {
 
     return {
       data: null,
-      error: makeError(json?.error || json?.message || res.statusText, res.status, json?.code || json?.reason),
+      error: makeError(json?.error || json?.message || res.statusText, res.status, json?.code || json?.reason, {
+        retryAfter: json?.retry_after ?? json?.retry_after_seconds ?? null
+      }),
       raw: json
     }
   }
@@ -2477,6 +2480,26 @@ const auth = {
     const res = await apiFetch('/api/auth/logout', { method: 'POST' })
     invalidateDbSelectCache()
     return { error: res.error }
+  },
+
+  async getSecurityOverview() {
+    const res = await apiFetch('/api/auth/security', {
+      method: 'GET',
+      cacheTtlMs: 0,
+      persistCache: false
+    })
+    if (res.error) return { data: null, error: res.error }
+    return { data: res.data || null, error: null }
+  },
+
+  async logoutOtherDevices({ password } = {}) {
+    const res = await apiFetch('/api/auth/logout-other-devices', {
+      method: 'POST',
+      body: { password }
+    })
+    invalidateDbSelectCache()
+    if (res.error) return { data: null, error: res.error }
+    return { data: res.data || null, error: null }
   },
 
   async getSession() {

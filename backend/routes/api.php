@@ -123,6 +123,8 @@ Route::get('/auth/me', [AuthController::class, 'me'])
     ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
 Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout']);
+    Route::get('/auth/security', [AuthController::class, 'securityOverview']);
+    Route::post('/auth/logout-other-devices', [AuthController::class, 'logoutOtherDevices']);
     Route::post('/auth/update-password', [AuthController::class, 'updatePassword']);
     Route::post('/auth/update-account', [AuthController::class, 'updateAccount']);
     Route::get('/profile/me', [ProfileController::class, 'me']);

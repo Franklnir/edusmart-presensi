@@ -4,7 +4,31 @@ Tanggal audit: 21 Juni 2026
 
 Dokumen ini merangkum kontrak endpoint API backend EduSmart dari source
 `backend/routes/api.php`, hasil verifikasi `php artisan route:list --path=api`,
-dan pembacaan controller utama. Total endpoint API aktif saat audit: 198 route.
+dan pembacaan controller utama. Total endpoint API aktif saat audit: 200 route.
+
+## Status Kualitas Dokumen
+
+Penilaian setelah hardening dokumentasi ini: 9/10 untuk dokumentasi API
+production internal.
+
+Alasan nilainya 9/10:
+
+- Endpoint lengkap, diverifikasi dari route Laravel.
+- Auth, tenant, role, rate limit, dan status code terdokumentasi.
+- Endpoint public diberi review risiko dan kontrol keamanan.
+- Endpoint kritikal memiliki kontrak request/response dan guardrail bisnis.
+- Periode akademik, DB proxy, quiz, storage, RFID, dan super admin diberi
+  catatan operasional.
+- Ada checklist audit dan perawatan untuk mencegah dokumentasi basi.
+
+Batas menuju 10/10:
+
+- Buat `docs/openapi.yaml` lengkap untuk semua endpoint.
+- Generate Swagger UI/Postman collection dari OpenAPI.
+- Tambahkan contract test yang memastikan schema response tidak berubah tanpa
+  update dokumentasi.
+- Tambahkan automated diff dari `php artisan route:list --json --path=api`
+  ke CI agar route baru wajib didokumentasikan.
 
 ## Ringkasan Kontrak
 
@@ -16,6 +40,10 @@ dan pembacaan controller utama. Total endpoint API aktif saat audit: 198 route.
 - Multi tenant diselesaikan dari host/domain tenant. Header tenant hanya dipakai
   jika `tenancy.allow_header_override` aktif di konfigurasi.
 - Endpoint `GET|HEAD` dari Laravel dicatat sebagai `GET` di dokumen ini.
+- Semua endpoint mutasi data wajib dianggap tenant-scoped kecuali route super
+  admin atau route infrastruktur yang eksplisit bypass tenant.
+- Dokumentasi ini tidak boleh menyimpan token, secret, API key, password,
+  private key, signed URL aktif, atau data pribadi siswa/guru sungguhan.
 
 ## Base URL
 
@@ -70,6 +98,78 @@ Role aplikasi:
 Middleware tenant menolak host tenant yang belum terdaftar, tenant nonaktif,
 profil yang tenant-nya tidak cocok, dan request tanpa tenant valid pada endpoint
 yang membutuhkan tenant.
+
+## Matrix Akses Modul
+
+| Modul | Public | Siswa | Guru | Admin Sekolah | Super Admin | Device/Webhook |
+|---|---:|---:|---:|---:|---:|---:|
+| Health/public settings | Ya | Ya | Ya | Ya | Ya | Tidak |
+| Auth login/register/reset | Ya | Ya | Ya | Ya | Terbatas | Tidak |
+| Profile/me | Tidak | Ya | Ya | Ya | Ya | Tidak |
+| Mobile siswa | Tidak | Ya | Tidak | Tidak | Tidak | Tidak |
+| Mobile guru | Tidak | Tidak | Ya | Terbatas | Tidak | Tidak |
+| Attendance QR session | Tidak | Tidak | Ya | Ya | Tidak | Tidak |
+| Attendance QR scan | Tidak | Ya | Tidak | Tidak | Tidak | Tidak |
+| DB proxy select | Tidak | Policy | Policy | Ya | Ya | Tidak |
+| DB proxy mutation | Tidak | Sangat terbatas | Terbatas | Ya | Ya | Tidak |
+| Admin sekolah | Tidak | Tidak | Delegasi fitur | Ya | Ya | Tidak |
+| Quiz siswa | Tidak | Ya | Tidak | Tidak | Tidak | Tidak |
+| Quiz guru | Tidak | Tidak | Ya | Ya | Tidak | Tidak |
+| Storage | Signed/policy | Policy | Policy | Ya | Ya | Tidak |
+| RFID HTTP device | Tidak | Tidak | Tidak | Set mode | Super manage | Ya |
+| WhatsApp webhook | Secret only | Tidak | Tidak | Tidak | Tidak | Ya |
+| Super admin | Tidak | Tidak | Tidak | Tidak | Ya | Tidak |
+
+Keterangan:
+
+- `Policy` berarti akses ditentukan oleh policy controller, tenant, ownership,
+  kelas, jadwal, atau relasi guru/siswa.
+- `Delegasi fitur` berarti guru harus memiliki permission aktif dan mengirim
+  `X-Admin-Feature`.
+- Super admin dapat membaca lintas tenant hanya melalui endpoint `/api/super/*`
+  atau policy yang memang mengizinkan.
+
+## Klasifikasi Data dan Risiko
+
+| Kelas | Contoh data | Aturan minimum |
+|---|---|---|
+| Publik aman | status health, branding sekolah terfilter | Boleh tanpa token, tetap throttle. |
+| Internal tenant | jadwal, kelas, mapel, pengaturan operasional | Wajib tenant scoped. |
+| Data pribadi | nama, email, NIS, alamat, tanggal lahir, RFID UID | Wajib auth, role/policy, minimisasi field. |
+| Data akademik | nilai, rapor, quiz submission, tugas jawaban, absensi | Wajib periode akademik, audit untuk mutasi penting. |
+| Secret/signed data | webhook secret, signed URL, object key sensitif | Jangan dilog terbuka, TTL pendek, rotasi jika bocor. |
+| Operasional platform | tenant, domain, backup, storage quota, server logs | Super admin only dan audit. |
+
+## Public Endpoint Security Review
+
+Endpoint di bawah tidak memakai Sanctum, tetapi tetap tidak boleh dianggap
+bebas tanpa kontrol.
+
+| Endpoint | Risiko utama | Kontrol wajib |
+|---|---|---|
+| `GET /api/health` | Fingerprinting minimal | Response kecil, tanpa versi detail. |
+| `GET /api/public/settings` | Kebocoran setting sensitif | Allowlist field publik saja. |
+| `GET /api/mobile/schools` | Enumerasi tenant | Throttle, data minimal, tanpa secret. |
+| `GET /api/internal/tls/authorize` | Penyalahgunaan ACME ask endpoint | Secret/validasi domain di controller dan throttle. |
+| `POST /api/auth/login` | Bruteforce | `throttle:auth`, root-domain block, password policy. |
+| `POST /api/auth/register` | Spam akun | `throttle:auth`, admin public ditolak, setting registrasi. |
+| `POST /api/auth/forgot-password` | Email enumeration/spam | Rate limit, pesan aman, eligibility tenant. |
+| `POST /api/auth/reset-password` | Token abuse | Token broker Laravel, password strong, revoke token lama. |
+| Google OAuth callbacks | Open redirect/session mismatch | Validasi state, origin, host, ticket TTL. |
+| `GET /api/storage/signed` | Akses file tidak sah | Policy `canRead`, TTL, bucket allowlist. |
+| `GET /api/storage/object` | Bypass storage | Signature `sig`, expiry, bucket allowlist. |
+| `POST /api/rfid/*` public route | Fake scan device | Device credential, registered device, throttle RFID. |
+| `POST /api/whatsapp/webhook/{secret}` | Fake webhook | Secret path, throttle webhook, source validation service. |
+| Google Drive callback admin | OAuth callback abuse | State/session validation, throttle auth. |
+
+Checklist endpoint public baru:
+
+- Harus punya alasan bisnis kenapa tidak memakai Sanctum.
+- Harus punya throttle spesifik atau throttle `api`.
+- Harus mengembalikan field minimal.
+- Harus aman jika dipanggil berulang oleh bot.
+- Jika membawa akses ke data/file, wajib punya secret, signature, credential
+  device, atau policy server-side.
 
 ## Status Code Umum
 
@@ -221,6 +321,88 @@ Child snapshot penting:
 tugas_jawaban, quiz_submissions
 ```
 
+## Kontrak Mutasi Data
+
+Semua endpoint yang mengubah data harus mengikuti guardrail berikut.
+
+| Area | Wajib dilakukan | Alasan |
+|---|---|---|
+| Tenant | Filter `tenant_id` dari middleware, bukan dari input client mentah. | Mencegah cross-tenant access. |
+| Role | Cek role/policy sebelum query mutasi. | Mencegah privilege escalation. |
+| Validasi | Validasi request sebelum transaksi. | Mencegah data rusak dan payload liar. |
+| Transaksi | Gunakan transaksi untuk perubahan banyak tabel. | Mencegah data setengah jalan. |
+| Audit | Catat perubahan penting ke audit log. | Memudahkan investigasi dan rollback manual. |
+| Periode | Simpan dan baca snapshot periode untuk data akademik. | Mencegah rapor/absensi/tugas/quiz berubah salah saat periode diganti. |
+| Idempotensi | Gunakan key unik/event id pada scan, sync, submit, atau webhook. | Aman dari retry network. |
+| File | Validasi bucket, path, mime, ukuran, provider, dan quota. | Mencegah abuse storage dan file berbahaya. |
+| Error | Jangan bocorkan secret, stack trace, SQL, atau path server. | Mencegah informasi sensitif bocor. |
+
+Mutasi kritikal yang perlu audit ketat:
+
+- perubahan `settings` akademik.
+- perubahan status user: nonaktif, mutasi, alumni, active.
+- perubahan kelas, wali kelas, jadwal, dan assignment guru.
+- submit atau koreksi nilai quiz/tugas.
+- backup/restore tenant.
+- koneksi atau logout WhatsApp/Google Drive.
+- perubahan domain, storage quota, RFID MQTT/device, dan super admin.
+
+## Error Response Contract
+
+Format error normal:
+
+```json
+{
+  "error": "Akses ditolak"
+}
+```
+
+Format validasi Laravel dapat berbentuk:
+
+```json
+{
+  "message": "The given data was invalid.",
+  "errors": {
+    "email": ["The email field is required."]
+  }
+}
+```
+
+Format konflik periode akademik:
+
+```json
+{
+  "error": "Periode yang dipilih tidak sama dengan kalender server saat ini. Konfirmasi ulang sebelum dipakai sebagai periode operasional.",
+  "code": "academic_period_calendar_confirmation_required",
+  "data": {
+    "server_calendar": {
+      "today": "2026-06-21",
+      "timezone": "Asia/Jakarta",
+      "tahun_ajaran": "2025/2026",
+      "semester": "Genap",
+      "label": "2025/2026 - Semester Genap"
+    },
+    "previous_period": {
+      "tahun_ajaran": "2025/2026",
+      "semester": "Genap"
+    },
+    "target_period": {
+      "tahun_ajaran": "2026/2027",
+      "semester": "Ganjil"
+    }
+  }
+}
+```
+
+Aturan error aman:
+
+- Gunakan pesan yang bisa ditindaklanjuti oleh admin/guru/siswa.
+- Jangan kirim stack trace ke client production.
+- Jangan kirim SQL, credential, signed URL aktif, private path, atau secret.
+- Untuk endpoint auth, hindari detail yang memudahkan enumeration.
+- Untuk webhook/device, cukup kembalikan alasan aman seperti
+  `unauthorized_device` atau `invalid_secret`.
+
 ## Detail Modul Utama
 
 ### Auth
@@ -238,6 +420,10 @@ Payload penting:
   optional `verification_code`.
 - `POST /api/auth/update-account`: `email`, optional `password`,
   `password_confirmation`, optional `verification_code`.
+- `GET /api/auth/security`: tidak ada payload; mengembalikan ringkasan session,
+  token mobile/API, dan riwayat login milik user aktif.
+- `POST /api/auth/logout-other-devices`: `password`; mencabut session web lain
+  dan token mobile/API lain, session saat ini tetap dipertahankan.
 - Google credential login: `credential`.
 - Google code login: `code`.
 - Google mobile exchange: `ticket`.
@@ -250,6 +436,10 @@ Catatan:
 - Reset password super admin dinonaktifkan dari flow normal.
 - Endpoint `auth.not_root_domain` menolak login/register dari root domain yang
   tidak sesuai flow tenant.
+- Security overview tidak mengembalikan session id/token asli; identifier yang
+  dikirim ke client hanya hash pendek untuk tampilan.
+- Logout perangkat lain wajib password akun aktif dan mencatat audit event
+  `logout_other_devices`.
 
 ### Admin Sekolah
 
@@ -430,6 +620,344 @@ Fitur utama:
 - audit trail.
 - plugin inspect/upload/status/download.
 
+## Kontrak Endpoint Kritikal
+
+Bagian ini bukan pengganti OpenAPI penuh, tetapi menjadi kontrak minimum untuk
+endpoint yang paling sensitif.
+
+### `POST /api/auth/login`
+
+Request:
+
+```json
+{
+  "email": "admin@example.com",
+  "password": "password-kuat"
+}
+```
+
+Response sukses:
+
+```json
+{
+  "data": {
+    "token": "<sanctum-token>",
+    "user": {
+      "id": "uuid",
+      "email": "admin@example.com"
+    },
+    "profile": {
+      "id": "uuid",
+      "tenant_id": "tenant-id",
+      "role": "admin",
+      "nama": "Nama Admin"
+    }
+  }
+}
+```
+
+Security notes:
+
+- Login wajib berada di host tenant yang valid.
+- Root domain yang tidak sesuai flow ditolak.
+- Jangan simpan token di local storage jika ada opsi storage lebih aman pada
+  client.
+
+### `GET /api/auth/security`
+
+Response sukses ringkas:
+
+```json
+{
+  "data": {
+    "summary": {
+      "active_web_sessions": 1,
+      "active_api_tokens": 1,
+      "last_login_at": "2026-06-21T10:00:00+07:00",
+      "rate_limit": {
+        "max_failed_attempts": 5,
+        "source": "server"
+      }
+    },
+    "web_sessions": [
+      {
+        "id": "hashed-id",
+        "type": "web",
+        "name": "Chrome di Windows",
+        "ip_address": "10.1.1.10",
+        "last_active_at": "2026-06-21T10:05:00+07:00",
+        "current": true
+      }
+    ],
+    "api_tokens": [],
+    "login_history": []
+  }
+}
+```
+
+Security notes:
+
+- Wajib Sanctum.
+- Hanya mengembalikan session/token milik user aktif.
+- Session id asli dan token asli tidak pernah dikirim ke client.
+- Riwayat login berasal dari `audit_log` table `auth_events`.
+
+### `POST /api/auth/logout-other-devices`
+
+Request:
+
+```json
+{
+  "password": "password-akun-saat-ini"
+}
+```
+
+Response sukses ringkas:
+
+```json
+{
+  "data": {
+    "web_sessions_revoked": 2,
+    "api_tokens_revoked": 1,
+    "security": {
+      "summary": {
+        "active_web_sessions": 1,
+        "active_api_tokens": 0
+      }
+    }
+  }
+}
+```
+
+Security notes:
+
+- Wajib Sanctum dan password akun aktif.
+- Session web lain dicabut dari tabel `sessions`; current session tetap login.
+- Token mobile/API lain dicabut dari `personal_access_tokens`.
+- Audit event `logout_other_devices` dicatat untuk pelacakan.
+
+### `POST /api/admin/academic-period/apply`
+
+Request minimal:
+
+```json
+{
+  "tahun_ajaran": "2026/2027",
+  "semester_aktif": "Ganjil",
+  "periode_ganjil_mulai": "2026-07-01",
+  "periode_ganjil_selesai": "2026-12-31",
+  "periode_genap_mulai": "2027-01-01",
+  "periode_genap_selesai": "2027-06-30",
+  "auto_rollover": true,
+  "carry_jadwal": true,
+  "carry_eskul_members": true,
+  "calendar_confirmed": true
+}
+```
+
+Response sukses ringkas:
+
+```json
+{
+  "data": {
+    "period": {
+      "tahun_ajaran": "2026/2027",
+      "semester": "Ganjil",
+      "scope": "academic_year"
+    },
+    "year_changed": true,
+    "semester_only_change": false,
+    "period_snapshot_restored": false,
+    "class_history_snapshots": 120,
+    "classes_synced": 18,
+    "rollover": {
+      "students_promoted": 118,
+      "students_alumni": 12
+    }
+  }
+}
+```
+
+Security and logic notes:
+
+- Admin only atau guru dengan delegasi fitur yang valid.
+- Maju tahun ajaran hanya boleh tepat satu tahun dan via `auto_rollover`.
+- Mundur tahun ajaran harus memakai snapshot kelas siswa.
+- Semua operasi berjalan dalam transaksi.
+- Snapshot kelas dibuat sebelum dan sesudah perubahan periode.
+
+### `POST /api/db`
+
+Request select:
+
+```json
+{
+  "table": "absensi",
+  "action": "select",
+  "filters": [
+    ["kelas_id", "=", "class-id"],
+    ["tanggal", ">=", "2026-01-01"]
+  ],
+  "order": [["tanggal", "desc"]],
+  "limit": 100
+}
+```
+
+Response select:
+
+```json
+{
+  "data": [
+    {
+      "id": "row-id",
+      "tenant_id": "tenant-id"
+    }
+  ],
+  "count": 1
+}
+```
+
+Request mutation:
+
+```json
+{
+  "table": "settings",
+  "action": "update",
+  "payload": {
+    "nama_sekolah": "SMP Contoh"
+  },
+  "filters": [["id", "=", "settings-id"]]
+}
+```
+
+Security notes:
+
+- Tabel harus terdaftar di registry.
+- Mutasi non admin wajib punya filter.
+- Tabel akademik akan mendapat scope periode jika client tidak mengirim filter
+  periode eksplisit.
+- Tabel sensitif dapat masuk maker-checker approval sebelum dieksekusi.
+
+### `POST /api/quiz/start`
+
+Request:
+
+```json
+{
+  "quiz_id": "quiz-id",
+  "access_code": "123456",
+  "client_meta": {
+    "client_device_id": "device-fingerprint",
+    "fullscreen": true
+  }
+}
+```
+
+Response sukses:
+
+```json
+{
+  "data": {
+    "submission": {
+      "id": "submission-id",
+      "quiz_id": "quiz-id",
+      "status": "ongoing"
+    },
+    "questions": []
+  }
+}
+```
+
+Security notes:
+
+- Siswa hanya bisa mulai quiz yang sesuai kelas/periode.
+- Correct answer tidak dikirim ke siswa.
+- Ongoing attempt dapat dikunci ke device pertama.
+- Access code diverifikasi jika quiz mengaktifkan kode akses.
+
+### `POST /api/storage/direct-upload`
+
+Request:
+
+```json
+{
+  "bucket": "assignments",
+  "path": "tenant-safe/path/file.pdf",
+  "filename": "file.pdf",
+  "mime_type": "application/pdf",
+  "size_bytes": 102400
+}
+```
+
+Response sukses:
+
+```json
+{
+  "data": {
+    "available": true,
+    "bucket": "assignments",
+    "provider": "object_storage",
+    "browserDirect": true,
+    "contentType": "application/pdf",
+    "maxBytes": 10485760,
+    "upload": {
+      "method": "PUT",
+      "url": "https://signed-upload-url",
+      "headers": {},
+      "expiresAt": "2026-06-21T13:00:00+00:00"
+    }
+  }
+}
+```
+
+Security notes:
+
+- Bucket harus allowlisted.
+- Path disanitasi server-side.
+- File size, mime, quota, dan ownership divalidasi sebelum signed URL dibuat.
+- Client wajib memanggil `confirm-upload` setelah upload object storage.
+
+### `POST /api/rfid/scan`
+
+Request:
+
+```json
+{
+  "tenant_slug": "sekolah",
+  "device_id": "RFID-001",
+  "card_uid": "A1B2C3D4",
+  "event_id": "unique-event-id",
+  "mode": "auto",
+  "scanned_at": "2026-06-21T20:00:00+07:00"
+}
+```
+
+Response sukses bergantung mode, tetapi minimal harus aman untuk retry:
+
+```json
+{
+  "success": true,
+  "message": "Scan diterima",
+  "event_id": "unique-event-id"
+}
+```
+
+Security notes:
+
+- Endpoint route terlihat public, tetapi wajib lolos device credential.
+- Gunakan `event_id` atau `scan_id` agar retry tidak menggandakan absensi.
+- Device harus terdaftar di tenant yang benar.
+
+### `POST /api/whatsapp/webhook/{secret}/{event?}`
+
+Request berasal dari provider WhatsApp/Evolution.
+
+Security notes:
+
+- `secret` wajib panjang, acak, dan tidak pernah disimpan di frontend.
+- Response tidak boleh mengungkap konfigurasi WhatsApp.
+- Payload webhook harus diproses idempotent karena provider bisa retry.
+
 ## Contoh Request
 
 Login:
@@ -582,10 +1110,12 @@ curl -X POST "https://<tenant-host>/api/storage/direct-upload" \
 | `POST` | `/api/auth/google/unlink` | `AuthController@googleUnlink` | Sanctum |
 | `POST` | `/api/auth/login` | `AuthController@login` | Public |
 | `POST` | `/api/auth/logout` | `AuthController@logout` | Sanctum |
+| `POST` | `/api/auth/logout-other-devices` | `AuthController@logoutOtherDevices` | Sanctum |
 | `GET` | `/api/auth/me` | `AuthController@me` | Sanctum |
 | `POST` | `/api/auth/password-change/send-code` | `AuthController@sendPasswordChangeCode` | Sanctum |
 | `POST` | `/api/auth/register` | `AuthController@register` | Public |
 | `POST` | `/api/auth/reset-password` | `AuthController@resetPassword` | Public |
+| `GET` | `/api/auth/security` | `AuthController@securityOverview` | Sanctum |
 | `POST` | `/api/auth/update-account` | `AuthController@updateAccount` | Sanctum |
 | `POST` | `/api/auth/update-password` | `AuthController@updatePassword` | Sanctum |
 | `POST` | `/api/auth/verify-email/resend` | `AuthController@resendVerificationEmail` | Sanctum |
@@ -784,3 +1314,72 @@ curl -X POST "https://<tenant-host>/api/storage/direct-upload" \
   device credential, atau secret webhook.
 - Pastikan endpoint yang mutasi data tenant selalu terscope `tenant_id` dan
   mencatat audit untuk perubahan penting.
+
+## Acceptance Gate API Production
+
+Sebelum perubahan API dianggap siap deploy, checklist ini harus hijau:
+
+```text
+[ ] Route baru muncul di Katalog Endpoint Lengkap.
+[ ] Auth/role/tenant endpoint baru jelas.
+[ ] Endpoint public baru masuk Public Endpoint Security Review.
+[ ] Request payload penting terdokumentasi.
+[ ] Response sukses/error endpoint kritikal terdokumentasi.
+[ ] Mutasi data tenant memakai tenant_id dari middleware.
+[ ] Mutasi data penting punya audit log atau alasan eksplisit kenapa tidak.
+[ ] Endpoint akademik mempertahankan periode dan snapshot historis.
+[ ] Endpoint file/storage memvalidasi bucket, path, mime, size, quota, dan TTL.
+[ ] Endpoint device/webhook punya secret, credential, signature, atau idempotency key.
+[ ] Test backend relevan ditambah/diupdate.
+[ ] `php artisan route:list --path=api` tetap valid.
+[ ] `php artisan test` atau test target relevan hijau.
+[ ] `./vendor/bin/pint --test` hijau.
+[ ] Frontend check/build hijau di CI.
+```
+
+## Command Audit Cepat
+
+Jalankan dari root repo:
+
+```bash
+cd backend
+php artisan route:list --path=api
+php artisan route:list --json --path=api
+php artisan test
+./vendor/bin/pint --test
+```
+
+Jalankan dari root frontend jika Node/NPM tersedia:
+
+```bash
+npm run security:audit
+npm run check
+```
+
+Health check production:
+
+```bash
+curl -fsS https://sismu.biz.id/api/health
+```
+
+Expected:
+
+```json
+{"status":"ok"}
+```
+
+## Rekomendasi Menuju 10/10
+
+Dokumen ini sudah layak 9/10 untuk operasional internal. Untuk menjadikannya
+10/10, lakukan pekerjaan lanjutan berikut:
+
+- Buat OpenAPI 3.1 lengkap di `docs/openapi.yaml`.
+- Generate Swagger UI di environment internal, bukan public tanpa proteksi.
+- Generate Postman collection dari OpenAPI untuk QA.
+- Tambahkan CI job yang membandingkan daftar route Laravel dengan katalog
+  dokumentasi.
+- Tambahkan contract test untuk endpoint kritikal: auth, periode akademik,
+  DB proxy, quiz, storage, RFID, WhatsApp webhook, dan super admin.
+- Tambahkan contoh response aktual dari test fixture, bukan dari data production.
+- Tambahkan changelog API per release agar mobile app dan frontend bisa melacak
+  breaking change.

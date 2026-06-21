@@ -41,6 +41,19 @@ const sanitizeNextPath = (value) => {
   }
 };
 
+const resolveRetryAfterSeconds = (result, fallbackMessage = '') => {
+  const direct = Number(result?.retryAfter ?? result?.retry_after ?? result?.retry_after_seconds)
+  if (Number.isFinite(direct) && direct > 0) return Math.ceil(direct)
+
+  const match = String(result?.error || fallbackMessage || '').match(/(?:dalam|tunggu)\s+(\d+)\s+detik/i)
+  if (match) {
+    const parsed = Number(match[1])
+    if (Number.isFinite(parsed) && parsed > 0) return Math.ceil(parsed)
+  }
+
+  return 0
+}
+
 const Login = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -78,12 +91,17 @@ const Login = () => {
     return () => clearInterval(cooldownTimerRef.current);
   }, [cooldownEnd]);
 
+  const startCooldownSeconds = useCallback((seconds) => {
+    const safeSeconds = Math.min(900, Math.max(1, Math.ceil(Number(seconds) || 0)))
+    setCooldownEnd(Date.now() + safeSeconds * 1000)
+    setCooldownLeft(safeSeconds)
+  }, [])
+
   const startCooldown = useCallback((fails) => {
     // Exponential backoff: 2s, 4s, 8s, 16s, 30s max
     const seconds = Math.min(30, Math.pow(2, fails));
-    setCooldownEnd(Date.now() + seconds * 1000);
-    setCooldownLeft(seconds);
-  }, []);
+    startCooldownSeconds(seconds);
+  }, [startCooldownSeconds]);
 
   const [settings, setSettings] = useState(null);
   const [settingsId, setSettingsId] = useState(null);
@@ -298,6 +316,7 @@ const Login = () => {
 
       if (result?.error) {
         const errorMsg = result.error.toLowerCase();
+        const serverRetryAfter = resolveRetryAfterSeconds(result, errorMsg)
         const isSessionPreparing =
           errorMsg.includes('sesi login belum siap') ||
           errorMsg.includes('login belum selesai diproses')
@@ -314,17 +333,26 @@ const Login = () => {
         if (newFails >= 2) {
           startCooldown(newFails - 1);
         }
+        if (serverRetryAfter > 0) {
+          startCooldownSeconds(serverRetryAfter)
+        }
 
         if (
           errorMsg.includes('invalid login credentials') ||
           errorMsg.includes('invalid email or password')
         ) {
-          setError(`Email/NIS atau password salah${newFails >= 2 ? `. Tunggu ${Math.min(30, Math.pow(2, newFails - 1))} detik sebelum coba lagi` : ''}`);
+          const waitSeconds = serverRetryAfter || (newFails >= 2 ? Math.min(30, Math.pow(2, newFails - 1)) : 0)
+          setError(`Email/NIS atau password salah${waitSeconds ? `. Tunggu ${waitSeconds} detik sebelum coba lagi` : ''}`);
         } else if (errorMsg.includes('email not confirmed')) {
           setError('Email belum dikonfirmasi. Silakan cek email Anda');
         } else if (errorMsg.includes('too many requests')) {
-          setError('Terlalu banyak percobaan login. Silakan coba lagi nanti');
-          startCooldown(5); // Force 30s cooldown
+          const waitSeconds = serverRetryAfter || 30
+          setError(`Terlalu banyak percobaan login. Silakan coba lagi dalam ${waitSeconds} detik`);
+          startCooldownSeconds(waitSeconds);
+        } else if (result.status === 429) {
+          const waitSeconds = serverRetryAfter || 30
+          setError(`Terlalu banyak percobaan login. Silakan coba lagi dalam ${waitSeconds} detik`)
+          startCooldownSeconds(waitSeconds)
         } else {
           setError(result.error);
         }
@@ -639,7 +667,7 @@ const Login = () => {
               <div className="login__action-row">
                 <button
                   type="submit"
-                  disabled={isSubmitting || !form.email || !form.password}
+                  disabled={isSubmitting || isOnCooldown || !form.email || !form.password}
                   className="login__submit-btn"
                   aria-label="Masuk"
                 >
@@ -647,6 +675,11 @@ const Login = () => {
                     <>
                       <div className="login__spinner-btn"></div>
                       <span>Memproses...</span>
+                    </>
+                  ) : isOnCooldown ? (
+                    <>
+                      <AuthIcon className="ri-time-line" />
+                      <span>Tunggu {cooldownLeft} detik</span>
                     </>
                   ) : (
                     <>

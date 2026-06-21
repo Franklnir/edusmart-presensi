@@ -7,6 +7,7 @@ import GoogleCredentialButton from '../../components/GoogleCredentialButton'
 import PasswordInput from '../../components/PasswordInput'
 import VerificationCodeModal from '../../components/VerificationCodeModal'
 import UserThemeSettings from '../../components/UserThemeSettings'
+import AccountSecurityPanel from '../../components/AccountSecurityPanel'
 import {
   hasRealLoginEmail,
   isEmailFormat,
@@ -1123,6 +1124,7 @@ export default function ProfileGuru() {
         </div>
         </div>
         {securityAccountCard}
+        <AccountSecurityPanel tone="blue" />
         <VerificationCodeModal
           isOpen={accountVerifyOpen}
           onClose={() => {

@@ -142,6 +142,7 @@ export default function LaporanRekap() {
   const isRekapTab = activeTab === 'rekap' || activeTab === 'rekap_eskul'
   const [showBulanDropdown, setShowBulanDropdown] = useState(false)
   const dropdownRef = useRef(null)
+  const reportRequestSeqRef = useRef(0)
 
   // -- Data Filter State --
   const [kelasList, setKelasList] = useState([])
@@ -188,6 +189,7 @@ export default function LaporanRekap() {
   const [mapelRapotTargetType, setMapelRapotTargetType] = useState('uts')
   const [sendingMapelToWali, setSendingMapelToWali] = useState(false)
   const [rekapWaliData, setRekapWaliData] = useState(null)
+  const [reportLoadingKey, setReportLoadingKey] = useState('')
   const [rankingPolicy, setRankingPolicy] = useState(DEFAULT_RANKING_POLICY)
   const [editingNilai, setEditingNilai] = useState(null)
   const [editingQuizNilai, setEditingQuizNilai] = useState(null)
@@ -258,17 +260,39 @@ export default function LaporanRekap() {
 
   const reportPeriodLabel = `${reportPeriod.tahunAjaran} - Tahun Ajaran`
   const isActiveReportPeriod = !isViewingArchivePeriod
+  const reportLoadingLabel = useMemo(() => {
+    if (reportLoadingKey === 'absensi') return 'Memuat rekap absensi...'
+    if (reportLoadingKey === 'tugas') return 'Memuat rekap tugas...'
+    if (reportLoadingKey === 'quiz') return 'Memuat rekap quiz...'
+    if (reportLoadingKey === 'mapel') return 'Memuat laporan mapel...'
+    if (reportLoadingKey === 'rekap') return 'Memuat rekap wali kelas...'
+    return ''
+  }, [reportLoadingKey])
   const selectedTahunAjaran = selectedAcademicPeriodPayload.tahun_ajaran
   const selectedSemester = selectedAcademicPeriodPayload.semester
-	  const reportMonthOptions = useMemo(
-	    () => ((dateFilterPeriod.months?.length ? dateFilterPeriod.months : reportPeriod.months) || []).map((month) => ({
-	      value: month.value,
-	      label: month.label,
-	      month: String(month.month).padStart(2, '0'),
-	      year: month.year
-	    })),
-	    [dateFilterPeriod.months, reportPeriod.months]
-	  )
+  const startReportLoad = useCallback((loadingKey = '') => {
+    const requestId = reportRequestSeqRef.current + 1
+    reportRequestSeqRef.current = requestId
+    setReportLoadingKey(loadingKey)
+    return requestId
+  }, [])
+  const isCurrentReportLoad = useCallback(
+    (requestId) => reportRequestSeqRef.current === requestId,
+    []
+  )
+  const finishReportLoad = useCallback((requestId, loadingKey) => {
+    if (reportRequestSeqRef.current !== requestId) return
+    setReportLoadingKey((current) => current === loadingKey ? '' : current)
+  }, [])
+  const reportMonthOptions = useMemo(
+    () => ((dateFilterPeriod.months?.length ? dateFilterPeriod.months : reportPeriod.months) || []).map((month) => ({
+      value: month.value,
+      label: month.label,
+      month: String(month.month).padStart(2, '0'),
+      year: month.year
+    })),
+    [dateFilterPeriod.months, reportPeriod.months]
+  )
   const reportMonthOptionValues = useMemo(
     () => reportMonthOptions.map((month) => month.value),
     [reportMonthOptions]
@@ -785,12 +809,13 @@ export default function LaporanRekap() {
   const loadRekapAbsensi = useCallback(async () => {
     // Syarat: Kelas, Mapel, dan MINIMAL 1 Bulan dipilih
     if (!selectedKelas || !selectedMapel || selectedBulan.length === 0) {
+      startReportLoad()
       setAbsensiData(null)
       return
     }
 
+    const requestId = startReportLoad('absensi')
     try {
-      setLoading(true)
       const params = buildTeacherSummaryParams('absensi')
       const data = await queryClient.fetchQuery({
         queryKey: queryKeys.reports.teacherSummary(params),
@@ -806,32 +831,39 @@ export default function LaporanRekap() {
         },
         staleTime: 60 * 1000,
       })
-      startTransition(() => setAbsensiData(normalizeTeacherSummaryData(data)))
+      if (!isCurrentReportLoad(requestId)) return
+      const normalizedData = normalizeTeacherSummaryData(data)
+      startTransition(() => {
+        if (isCurrentReportLoad(requestId)) setAbsensiData(normalizedData)
+      })
     } catch (e) {
-      if (e?.code === 'REQUEST_ABORTED') return
+      if (e?.code === 'REQUEST_ABORTED' || !isCurrentReportLoad(requestId)) return
       console.error(e)
       pushToast('error', 'Gagal memuat absensi')
     } finally {
-      setLoading(false)
+      finishReportLoad(requestId, 'absensi')
     }
   }, [
     buildTeacherSummaryParams,
+    finishReportLoad,
+    isCurrentReportLoad,
     pushToast,
     selectedBulan,
     selectedKelas,
     selectedMapel,
-    setLoading,
+    startReportLoad,
   ])
 
   const loadRekapTugas = useCallback(async () => {
     // Syarat: Kelas, Mapel, dan MINIMAL 1 Bulan dipilih
     if (!selectedKelas || !selectedMapel || selectedBulan.length === 0) {
+      startReportLoad()
       setTugasData(null)
       return
     }
 
+    const requestId = startReportLoad('tugas')
     try {
-      setLoading(true)
       const params = buildTeacherSummaryParams('tugas')
       const data = await queryClient.fetchQuery({
         queryKey: queryKeys.reports.teacherSummary(params),
@@ -847,31 +879,38 @@ export default function LaporanRekap() {
         },
         staleTime: 60 * 1000,
       })
-      startTransition(() => setTugasData(normalizeTeacherSummaryData(data)))
+      if (!isCurrentReportLoad(requestId)) return
+      const normalizedData = normalizeTeacherSummaryData(data)
+      startTransition(() => {
+        if (isCurrentReportLoad(requestId)) setTugasData(normalizedData)
+      })
     } catch (e) {
-      if (e?.code === 'REQUEST_ABORTED') return
+      if (e?.code === 'REQUEST_ABORTED' || !isCurrentReportLoad(requestId)) return
       console.error(e)
       pushToast('error', 'Gagal memuat tugas')
     } finally {
-      setLoading(false)
+      finishReportLoad(requestId, 'tugas')
     }
   }, [
     buildTeacherSummaryParams,
+    finishReportLoad,
+    isCurrentReportLoad,
     pushToast,
     selectedBulan,
     selectedKelas,
     selectedMapel,
-    setLoading,
+    startReportLoad,
   ])
 
   const loadRekapQuiz = useCallback(async () => {
     if (!selectedKelas || !selectedMapel || selectedBulan.length === 0) {
+      startReportLoad()
       setQuizData(null)
       return
     }
 
+    const requestId = startReportLoad('quiz')
     try {
-      setLoading(true)
       const params = buildTeacherSummaryParams('quiz')
       const data = await queryClient.fetchQuery({
         queryKey: queryKeys.reports.teacherSummary(params),
@@ -887,32 +926,39 @@ export default function LaporanRekap() {
         },
         staleTime: 60 * 1000,
       })
-      startTransition(() => setQuizData(normalizeTeacherSummaryData(data)))
+      if (!isCurrentReportLoad(requestId)) return
+      const normalizedData = normalizeTeacherSummaryData(data)
+      startTransition(() => {
+        if (isCurrentReportLoad(requestId)) setQuizData(normalizedData)
+      })
     } catch (e) {
-      if (e?.code === 'REQUEST_ABORTED') return
+      if (e?.code === 'REQUEST_ABORTED' || !isCurrentReportLoad(requestId)) return
       console.error(e)
       pushToast('error', 'Gagal memuat nilai quiz')
     } finally {
-      setLoading(false)
+      finishReportLoad(requestId, 'quiz')
     }
   }, [
     buildTeacherSummaryParams,
+    finishReportLoad,
+    isCurrentReportLoad,
     pushToast,
     selectedBulan,
     selectedKelas,
     selectedMapel,
-    setLoading,
+    startReportLoad,
   ])
 
   const loadLaporanMapel = useCallback(async () => {
     if (!user?.id || !selectedKelas || !selectedMapel || selectedBulan.length === 0) {
+      startReportLoad()
       setMapelReportData(null)
       setMapelManualDrafts({})
       return
     }
 
+    const requestId = startReportLoad('mapel')
     try {
-      setLoading(true)
       const dateStrings = getDatesInPeriod(tahun, selectedBulan)
       if (!dateStrings.length) {
         setMapelReportData(null)
@@ -1126,34 +1172,40 @@ export default function LaporanRekap() {
         }
       })
 
-      setMapelManualDrafts(nextDrafts)
-      setMapelReportData({
-        rows,
-        mapel: selectedMapel,
-        kelas: kelasNama || selectedKelas,
-        guru: user?.nama || user?.email || '-',
-        periode: `${selectedBulan.map((bulan) => monthLabelByValue(bulan)).join(', ')} - ${reportPeriodLabel}`,
-        tahunAjaran,
-        bobot: bobotMapel,
-        sisaBobot,
-        targetType: mapelRapotTargetType,
-        totals: {
-          siswa: students.length,
-          tugas: tugasRows?.length || 0,
-          quizReguler: (quizRows || []).filter((quiz) => normalizeQuizMode(quiz) === 'regular').length,
-          quizUts: (quizRows || []).filter((quiz) => normalizeQuizMode(quiz) === 'uts').length,
-          quizUas: (quizRows || []).filter((quiz) => normalizeQuizMode(quiz) === 'uas').length
-        }
+      startTransition(() => {
+        if (!isCurrentReportLoad(requestId)) return
+        setMapelManualDrafts(nextDrafts)
+        setMapelReportData({
+          rows,
+          mapel: selectedMapel,
+          kelas: kelasNama || selectedKelas,
+          guru: user?.nama || user?.email || '-',
+          periode: `${selectedBulan.map((bulan) => monthLabelByValue(bulan)).join(', ')} - ${reportPeriodLabel}`,
+          tahunAjaran,
+          bobot: bobotMapel,
+          sisaBobot,
+          targetType: mapelRapotTargetType,
+          totals: {
+            siswa: students.length,
+            tugas: tugasRows?.length || 0,
+            quizReguler: (quizRows || []).filter((quiz) => normalizeQuizMode(quiz) === 'regular').length,
+            quizUts: (quizRows || []).filter((quiz) => normalizeQuizMode(quiz) === 'uts').length,
+            quizUas: (quizRows || []).filter((quiz) => normalizeQuizMode(quiz) === 'uas').length
+          }
+        })
       })
     } catch (error) {
+      if (!isCurrentReportLoad(requestId)) return
       console.error(error)
       pushToast('error', error?.message || 'Gagal memuat laporan mapel')
       setMapelReportData(null)
     } finally {
-      setLoading(false)
+      finishReportLoad(requestId, 'mapel')
     }
   }, [
     applyReportAcademicFilters,
+    finishReportLoad,
+    isCurrentReportLoad,
     kelasList,
     mapelWeightByMapelKey,
     mapelRapotTargetType,
@@ -1167,7 +1219,7 @@ export default function LaporanRekap() {
     selectedKelas,
     selectedMapel,
     selectedTahunAjaran,
-    setLoading,
+    startReportLoad,
     tahun,
     user?.email,
     user?.id,
@@ -1452,13 +1504,13 @@ export default function LaporanRekap() {
 
   const loadRekapWali = useCallback(async () => {
     if (!selectedWaliKelas || selectedBulan.length === 0) {
+      startReportLoad()
       setRekapWaliData(null)
       return
     }
 
+    const requestId = startReportLoad('rekap')
     try {
-      setLoading(true)
-
       // Hard guard: hanya kelas yang memang diwali guru ini
       if (
         Array.isArray(waliKelasList) &&
@@ -1506,22 +1558,14 @@ export default function LaporanRekap() {
       } else {
         siswaQuery = siswaQuery.in('kelas', kelasAliasesRaw)
       }
-      const { data: siswaRaw, error: siswaErr } = await siswaQuery
-      if (siswaErr) throw siswaErr
-      let siswaData = (siswaRaw || []).filter((s) =>
-        kelasAliasNormSet.has(normalizeKelasKey(s.kelas))
-      )
-
       const startDate = `${dateStrings[0]}T00:00:00`
       const endDate = `${dateStrings[dateStrings.length - 1]}T23:59:59`
 
-	      let jadwalKelasQuery = supabase
-	        .from('jadwal')
-	        .select('mapel, guru_id, periode_berlaku')
-	        .eq('kelas_id', selectedWaliKelas)
-	      jadwalKelasQuery = applyReportAcademicFilters(jadwalKelasQuery)
-	      const { data: jadwalKelasRaw } = await jadwalKelasQuery
-	      const jadwalKelasList = filterSchedulesForSemester(jadwalKelasRaw || [], selectedSemester)
+      let jadwalKelasQuery = supabase
+        .from('jadwal')
+        .select('mapel, guru_id, periode_berlaku')
+        .eq('kelas_id', selectedWaliKelas)
+      jadwalKelasQuery = applyReportAcademicFilters(jadwalKelasQuery)
 
       let tugasQuery = supabase
         .from('tugas')
@@ -1530,15 +1574,6 @@ export default function LaporanRekap() {
         .gte('created_at', startDate)
         .lte('created_at', endDate)
       tugasQuery = applyReportAcademicFilters(tugasQuery)
-      const { data: tugasList } = await tugasQuery
-
-      const tugasIds = (tugasList || []).map((t) => t.id)
-      let jawabanQuery = supabase
-        .from('tugas_jawaban')
-        .select('*')
-        .in('tugas_id', tugasIds.length ? tugasIds : [-1])
-      jawabanQuery = applyReportAcademicFilters(jawabanQuery, 'tugas_jawaban')
-      const { data: jawabanList } = await jawabanQuery
 
       let quizQuery = supabase
         .from('quizzes')
@@ -1547,32 +1582,6 @@ export default function LaporanRekap() {
         .gte('created_at', startDate)
         .lte('created_at', endDate)
       quizQuery = applyReportAcademicFilters(quizQuery)
-      const { data: quizList } = await quizQuery
-
-      const guruIdsPengampu = Array.from(
-        new Set((jadwalKelasList || []).map((item) => String(item?.guru_id || '').trim()).filter(Boolean))
-      )
-      let guruMapelWeightRows = []
-      if (guruIdsPengampu.length) {
-        const { data, error } = await supabase
-          .from('guru_mapel_bobot')
-          .select('*')
-          .in('guru_id', guruIdsPengampu)
-        if (error) {
-          console.warn('Bobot mapel belum tersedia, memakai default:', error)
-          guruMapelWeightRows = []
-        } else {
-          guruMapelWeightRows = data || []
-        }
-      }
-
-      const quizIds = (quizList || []).map((q) => q.id)
-      let submissionQuery = supabase
-        .from('quiz_submissions')
-        .select('*')
-        .in('quiz_id', quizIds.length ? quizIds : [-1])
-      submissionQuery = applyReportAcademicFilters(submissionQuery, 'quiz_submissions')
-      const { data: submissionList } = await submissionQuery
 
       let absensiQuery = supabase
         .from('absensi')
@@ -1581,7 +1590,78 @@ export default function LaporanRekap() {
         .gte('tanggal', dateStrings[0])
         .lte('tanggal', dateStrings[dateStrings.length - 1])
       absensiQuery = applyReportAcademicFilters(absensiQuery)
-      const { data: absensiList } = await absensiQuery
+
+      const [
+        siswaResult,
+        jadwalResult,
+        tugasResult,
+        quizResult,
+        absensiResult
+      ] = await Promise.all([
+        siswaQuery,
+        jadwalKelasQuery,
+        tugasQuery,
+        quizQuery,
+        absensiQuery
+      ])
+
+      if (siswaResult.error) throw siswaResult.error
+      if (jadwalResult.error) throw jadwalResult.error
+      if (tugasResult.error) throw tugasResult.error
+      if (quizResult.error) throw quizResult.error
+      if (absensiResult.error) throw absensiResult.error
+
+      let siswaData = (siswaResult.data || []).filter((s) =>
+        kelasAliasNormSet.has(normalizeKelasKey(s.kelas))
+      )
+      const jadwalKelasList = filterSchedulesForSemester(jadwalResult.data || [], selectedSemester)
+      const tugasList = tugasResult.data || []
+      const quizList = quizResult.data || []
+      const absensiList = absensiResult.data || []
+
+      const tugasIds = (tugasList || []).map((t) => t.id)
+      let jawabanQuery = supabase
+        .from('tugas_jawaban')
+        .select('*')
+        .in('tugas_id', tugasIds.length ? tugasIds : [-1])
+      jawabanQuery = applyReportAcademicFilters(jawabanQuery, 'tugas_jawaban')
+
+      const guruIdsPengampu = Array.from(
+        new Set((jadwalKelasList || []).map((item) => String(item?.guru_id || '').trim()).filter(Boolean))
+      )
+      const guruMapelWeightQuery = guruIdsPengampu.length
+        ? supabase
+          .from('guru_mapel_bobot')
+          .select('*')
+          .in('guru_id', guruIdsPengampu)
+        : null
+
+      const quizIds = (quizList || []).map((q) => q.id)
+      let submissionQuery = supabase
+        .from('quiz_submissions')
+        .select('*')
+        .in('quiz_id', quizIds.length ? quizIds : [-1])
+      submissionQuery = applyReportAcademicFilters(submissionQuery, 'quiz_submissions')
+
+      const [
+        jawabanResult,
+        submissionResult,
+        guruMapelWeightResult
+      ] = await Promise.all([
+        jawabanQuery,
+        submissionQuery,
+        guruMapelWeightQuery || Promise.resolve({ data: [], error: null })
+      ])
+
+      if (jawabanResult.error) throw jawabanResult.error
+      if (submissionResult.error) throw submissionResult.error
+      if (guruMapelWeightResult.error) {
+        console.warn('Bobot mapel belum tersedia, memakai default:', guruMapelWeightResult.error)
+      }
+
+      const jawabanList = jawabanResult.data || []
+      const submissionList = submissionResult.data || []
+      const guruMapelWeightRows = guruMapelWeightResult.error ? [] : (guruMapelWeightResult.data || [])
 
       if (!isActiveReportPeriod) {
         // For archived periods, prefer student_class_histories to get the
@@ -2089,61 +2169,70 @@ export default function LaporanRekap() {
         .map((b) => monthLabelByValue(b))
         .join(', ')
 
-      setRekapWaliData({
-        siswa: ranked,
-        periode: `${namaBulanTerpilih} - ${reportPeriodLabel}`,
-        totalTugas: tugasList?.length || 0,
-        totalQuiz: quizList?.length || 0,
-        totalMapel: mapelUrutan.length,
-        totalPertemuanKelas,
-        policy: policySummary,
-        eskul: {
-          summary: {
-            totalEkskul: ekskulIds.length,
-            totalKeanggotaanEskul,
-            siswaIkutEskul,
-            siswaTanpaEskul,
-            totalAbsensi: totalAbsensiEskul
+      startTransition(() => {
+        if (!isCurrentReportLoad(requestId)) return
+        setRekapWaliData({
+          siswa: ranked,
+          periode: `${namaBulanTerpilih} - ${reportPeriodLabel}`,
+          totalTugas: tugasList?.length || 0,
+          totalQuiz: quizList?.length || 0,
+          totalMapel: mapelUrutan.length,
+          totalPertemuanKelas,
+          policy: policySummary,
+          eskul: {
+            summary: {
+              totalEkskul: ekskulIds.length,
+              totalKeanggotaanEskul,
+              siswaIkutEskul,
+              siswaTanpaEskul,
+              totalAbsensi: totalAbsensiEskul
+            },
+            siswa: rekapEskulSiswa
           },
-          siswa: rekapEskulSiswa
-        },
-        ringkasanAkademik: {
-          rataNilaiAkhir: statistikNilaiAkhir.mean ?? '-',
-          medianNilaiAkhir: statistikNilaiAkhir.median ?? '-',
-          nilaiTertinggi: statistikNilaiAkhir.max ?? '-',
-          nilaiTerendah: statistikNilaiAkhir.min ?? '-',
-          jumlahTuntas,
-          jumlahRemedial,
-          jumlahBelumData,
-          persenKetuntasanKelas,
-          jumlahPerluPendampingan,
-          jumlahIntervensiIntensif
-        },
-        audit: {
-          totalSiswa,
-          siswaDenganNilaiAkademik,
-          siswaTanpaNilaiAkademik,
-          siswaTanpaCatatanAbsensi,
-          totalSesiTargetSiswa,
-          totalSesiTercatatSiswa,
-          totalSesiTanpaCatatan,
-          cakupanAbsensiPersen
-        }
+          ringkasanAkademik: {
+            rataNilaiAkhir: statistikNilaiAkhir.mean ?? '-',
+            medianNilaiAkhir: statistikNilaiAkhir.median ?? '-',
+            nilaiTertinggi: statistikNilaiAkhir.max ?? '-',
+            nilaiTerendah: statistikNilaiAkhir.min ?? '-',
+            jumlahTuntas,
+            jumlahRemedial,
+            jumlahBelumData,
+            persenKetuntasanKelas,
+            jumlahPerluPendampingan,
+            jumlahIntervensiIntensif
+          },
+          audit: {
+            totalSiswa,
+            siswaDenganNilaiAkademik,
+            siswaTanpaNilaiAkademik,
+            siswaTanpaCatatanAbsensi,
+            totalSesiTargetSiswa,
+            totalSesiTercatatSiswa,
+            totalSesiTanpaCatatan,
+            cakupanAbsensiPersen
+          }
+        })
       })
     } catch (e) {
+      if (!isCurrentReportLoad(requestId)) return
       console.error(e)
       pushToast('error', 'Gagal memuat rekap wali kelas')
     } finally {
-      setLoading(false)
+      finishReportLoad(requestId, 'rekap')
     }
   }, [
     applyReportAcademicFilters,
+    finishReportLoad,
     isActiveReportPeriod,
+    isCurrentReportLoad,
+    monthLabelByValue,
     pushToast,
+    reportPeriod.tahunAjaran,
     reportPeriodLabel,
     selectedBulan,
+    selectedSemester,
     selectedWaliKelas,
-    setLoading,
+    startReportLoad,
     tahun,
     waliKelasList
   ])
@@ -4017,7 +4106,8 @@ export default function LaporanRekap() {
               Aksi
             </label>
             <button
-              className="sismu-filter-action bg-blue-600 text-white hover:bg-blue-700 transition flex items-center justify-center gap-2 shadow-sm"
+              className="sismu-filter-action bg-blue-600 text-white hover:bg-blue-700 transition flex items-center justify-center gap-2 shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
+              disabled={Boolean(reportLoadingKey)}
               onClick={() => {
                 if (activeTab === 'absensi') loadRekapAbsensi()
                 else if (activeTab === 'tugas') loadRekapTugas()
@@ -4026,8 +4116,13 @@ export default function LaporanRekap() {
                 else if (isRekapTab) loadRekapWali()
               }}
             >
-              <span>🔄</span> Muat Ulang
+              <span>🔄</span> {reportLoadingKey ? 'Memuat...' : 'Muat Ulang'}
             </button>
+            {reportLoadingLabel && (
+              <div className="mt-2 text-xs font-medium text-blue-700">
+                {reportLoadingLabel}
+              </div>
+            )}
           </div>
         </div>
 

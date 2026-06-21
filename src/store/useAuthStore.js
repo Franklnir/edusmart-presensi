@@ -534,13 +534,23 @@ export const useAuthStore = create((set, get) => ({
         logError('Login auth error:', authError)
 
         if (authError.message.includes('Invalid login credentials')) {
-          throw new Error('Email/NIS atau password salah')
+          const error = new Error('Email/NIS atau password salah')
+          error.status = authError.status
+          error.retryAfter = authError.retryAfter
+          throw error
         }
         if (authError.message.includes('Email not confirmed')) {
-          throw new Error('Email belum diverifikasi. Silakan cek email Anda.')
+          const error = new Error('Email belum diverifikasi. Silakan cek email Anda.')
+          error.status = authError.status
+          error.retryAfter = authError.retryAfter
+          throw error
         }
 
-        throw new Error(authError.message || 'Login gagal')
+        const error = new Error(authError.message || 'Login gagal')
+        error.status = authError.status
+        error.code = authError.code
+        error.retryAfter = authError.retryAfter
+        throw error
       }
 
       const user = authData?.user
@@ -607,7 +617,7 @@ export const useAuthStore = create((set, get) => ({
       const errorMessage = err?.message || 'Terjadi kesalahan saat login'
       set({ error: errorMessage })
       pushToast('error', errorMessage)
-      return { error: errorMessage }
+      return { error: errorMessage, status: err?.status, code: err?.code, retryAfter: err?.retryAfter }
     } finally {
       set({ isLoading: false })
     }

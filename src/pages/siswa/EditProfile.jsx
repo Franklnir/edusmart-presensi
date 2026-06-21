@@ -7,6 +7,7 @@ import GoogleCredentialButton from '../../components/GoogleCredentialButton'
 import PasswordInput from '../../components/PasswordInput'
 import VerificationCodeModal from '../../components/VerificationCodeModal'
 import UserThemeSettings from '../../components/UserThemeSettings'
+import AccountSecurityPanel from '../../components/AccountSecurityPanel'
 import {
   hasRealLoginEmail,
   isEmailFormat,
@@ -1470,6 +1471,7 @@ export default function EditProfile() {
           </div>
         </div>
         {securityAccountCard}
+        <AccountSecurityPanel tone="purple" />
         <VerificationCodeModal
           isOpen={accountVerifyOpen}
           onClose={() => {

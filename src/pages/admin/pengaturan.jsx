@@ -26,6 +26,7 @@ import { CURRENT_TENANT_SLUG, supabase, PROFILE_BUCKET, getSignedUrlForValue } f
 import { queryClient } from '../../lib/queryClient'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
+import AccountSecurityPanel from '../../components/AccountSecurityPanel'
 import FileDropzone from '../../components/FileDropzone'
 import GoogleCredentialButton from '../../components/GoogleCredentialButton'
 import { sanitizeText, sanitizeUrl } from '../../utils/sanitize'
@@ -2998,6 +2999,7 @@ export default function APengaturan() {
                   </button>
                 </div>
               </div>
+              <AccountSecurityPanel tone="blue" />
               )}
 
               {activeSettingsMenu === 'identity' && (

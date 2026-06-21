@@ -719,6 +719,7 @@ class AuthController extends ApiController
 
             return response()->json([
                 'error' => "Terlalu banyak percobaan login. Coba lagi dalam {$seconds} detik.",
+                'retry_after' => $seconds,
             ], 429);
         }
 
@@ -2927,6 +2928,83 @@ class AuthController extends ApiController
         return response()->json(['data' => 'Logout berhasil']);
     }
 
+    public function securityOverview(Request $request)
+    {
+        $user = $request->user('sanctum') ?: $this->user($request);
+        if (! $user) {
+            return response()->json(['message' => 'Unauthenticated.'], 401);
+        }
+
+        $request->setUserResolver(fn () => $user);
+        $profile = $this->profile($request);
+
+        return response()->json([
+            'data' => $this->securityOverviewPayload($request, $user, $profile),
+        ]);
+    }
+
+    public function logoutOtherDevices(Request $request)
+    {
+        $user = $request->user('sanctum') ?: $this->user($request);
+        if (! $user) {
+            return response()->json(['message' => 'Unauthenticated.'], 401);
+        }
+
+        $validated = $request->validate([
+            'password' => ['required', 'string', 'max:255'],
+        ]);
+
+        $password = (string) ($validated['password'] ?? '');
+        if (! Hash::check($password, (string) ($user->password ?? ''))) {
+            $this->logAuthEvent($request, 'logout_other_devices_failed_password', [
+                'user_id' => (string) $user->id,
+            ], (string) $user->id, null);
+
+            return response()->json(['error' => 'Password akun tidak sesuai.'], 422);
+        }
+
+        $request->setUserResolver(fn () => $user);
+        $profile = $this->profile($request);
+        $currentSessionId = $request->hasSession() ? (string) $request->session()->getId() : '';
+        $currentToken = method_exists($user, 'currentAccessToken') ? $user->currentAccessToken() : null;
+        $currentTokenId = $currentToken && isset($currentToken->id) ? (string) $currentToken->id : '';
+
+        $revokedWebSessions = 0;
+        if (Schema::hasTable('sessions')) {
+            $sessionQuery = DB::table('sessions')->where('user_id', (string) $user->id);
+            if ($currentSessionId !== '') {
+                $sessionQuery->where('id', '!=', $currentSessionId);
+            }
+            $revokedWebSessions = (int) $sessionQuery->delete();
+        }
+
+        $revokedApiTokens = 0;
+        if (Schema::hasTable('personal_access_tokens')) {
+            $tokenQuery = DB::table('personal_access_tokens')
+                ->where('tokenable_type', User::class)
+                ->where('tokenable_id', (string) $user->id);
+            if ($currentTokenId !== '') {
+                $tokenQuery->where('id', '!=', $currentTokenId);
+            }
+            $revokedApiTokens = (int) $tokenQuery->delete();
+        }
+
+        $this->logAuthEvent($request, 'logout_other_devices', [
+            'web_sessions_revoked' => $revokedWebSessions,
+            'api_tokens_revoked' => $revokedApiTokens,
+            'current_session_kept' => $currentSessionId !== '',
+            'current_token_kept' => $currentTokenId !== '',
+        ], (string) $user->id, $profile->role ?? null);
+
+        return response()->json([
+            'data' => [
+                'web_sessions_revoked' => $revokedWebSessions,
+                'api_tokens_revoked' => $revokedApiTokens,
+                'security' => $this->securityOverviewPayload($request, $user, $profile),
+            ],
+        ]);
+    }
+
     private function requiresPasswordChangeVerification(Request $request): bool
     {
         $profile = $this->profile($request);
@@ -3129,6 +3207,239 @@ class AuthController extends ApiController
     {
         return Schema::hasTable('password_change_verifications')
             && Schema::hasColumn('password_change_verifications', 'target_email');
+    }
+
+    private function securityOverviewPayload(Request $request, User $user, ?Profile $profile = null): array
+    {
+        $webSessions = $this->webSessionDevices($request, $user);
+        $apiTokens = $this->apiTokenDevices($request, $user);
+        $history = $this->userAuthHistory($request, $user);
+        $lastLogin = collect($history)
+            ->first(fn (array $item) => ($item['event'] ?? '') === 'login_success');
+
+        return [
+            'summary' => [
+                'active_web_sessions' => count($webSessions),
+                'active_api_tokens' => count($apiTokens),
+                'last_login_at' => $lastLogin['occurred_at'] ?? null,
+                'rate_limit' => [
+                    'max_failed_attempts' => $this->maxLoginAttempts(),
+                    'per_identifier_per_minute' => max(6, min(120, (int) env('AUTH_RATE_LIMIT_PER_MINUTE', 12))),
+                    'per_ip_per_minute' => max(30, min(600, (int) env('AUTH_IP_RATE_LIMIT_PER_MINUTE', 90))),
+                    'source' => 'server',
+                ],
+                'profile_role' => $profile->role ?? null,
+            ],
+            'web_sessions' => $webSessions,
+            'api_tokens' => $apiTokens,
+            'login_history' => $history,
+        ];
+    }
+
+    private function webSessionDevices(Request $request, User $user): array
+    {
+        if (! Schema::hasTable('sessions')) {
+            return [];
+        }
+
+        $currentSessionId = $request->hasSession() ? (string) $request->session()->getId() : '';
+        $sessionLifetimeSeconds = max(1, (int) config('session.lifetime', 120)) * 60;
+        $activeSince = now()->subSeconds($sessionLifetimeSeconds)->timestamp;
+
+        return DB::table('sessions')
+            ->where('user_id', (string) $user->id)
+            ->where('last_activity', '>=', $activeSince)
+            ->orderByDesc('last_activity')
+            ->limit(20)
+            ->get(['id', 'ip_address', 'user_agent', 'last_activity'])
+            ->map(fn ($row) => [
+                'id' => substr(sha1((string) $row->id), 0, 16),
+                'type' => 'web',
+                'name' => $this->describeUserAgent((string) ($row->user_agent ?? '')),
+                'ip_address' => (string) ($row->ip_address ?: '-'),
+                'user_agent' => Str::limit((string) ($row->user_agent ?? ''), 180),
+                'last_active_at' => $this->timestampToIso($row->last_activity ?? null),
+                'current' => $currentSessionId !== '' && hash_equals($currentSessionId, (string) $row->id),
+            ])
+            ->values()
+            ->all();
+    }
+
+    private function apiTokenDevices(Request $request, User $user): array
+    {
+        if (! Schema::hasTable('personal_access_tokens')) {
+            return [];
+        }
+
+        $currentToken = method_exists($user, 'currentAccessToken') ? $user->currentAccessToken() : null;
+        $currentTokenId = $currentToken && isset($currentToken->id) ? (string) $currentToken->id : '';
+
+        return DB::table('personal_access_tokens')
+            ->where('tokenable_type', User::class)
+            ->where('tokenable_id', (string) $user->id)
+            ->where(function ($query) {
+                $query->whereNull('expires_at')->orWhere('expires_at', '>', now());
+            })
+            ->orderByDesc('last_used_at')
+            ->orderByDesc('created_at')
+            ->limit(20)
+            ->get(['id', 'name', 'abilities', 'last_used_at', 'expires_at', 'created_at'])
+            ->map(fn ($row) => [
+                'id' => substr(sha1('token:'.(string) $row->id), 0, 16),
+                'type' => 'api_token',
+                'name' => (string) ($row->name ?: 'Token API'),
+                'abilities' => $this->decodeTokenAbilities($row->abilities ?? null),
+                'last_active_at' => $this->dateToIso($row->last_used_at ?? null),
+                'created_at' => $this->dateToIso($row->created_at ?? null),
+                'expires_at' => $this->dateToIso($row->expires_at ?? null),
+                'current' => $currentTokenId !== '' && hash_equals($currentTokenId, (string) $row->id),
+            ])
+            ->values()
+            ->all();
+    }
+
+    private function userAuthHistory(Request $request, User $user): array
+    {
+        if (! Schema::hasTable('audit_log')) {
+            return [];
+        }
+
+        $query = DB::table('audit_log')
+            ->where('table_name', 'auth_events')
+            ->where('user_id', (string) $user->id);
+
+        $tenantId = $this->tenantId($request);
+        if ($tenantId && Schema::hasColumn('audit_log', 'tenant_id')) {
+            $query->where('tenant_id', $tenantId);
+        }
+
+        return $query
+            ->orderByDesc('timestamp')
+            ->limit(12)
+            ->get(['id', 'new_data', 'timestamp'])
+            ->map(function ($row) {
+                $context = json_decode((string) ($row->new_data ?? '{}'), true);
+                if (! is_array($context)) {
+                    $context = [];
+                }
+                $event = (string) ($context['event'] ?? 'auth_event');
+
+                return [
+                    'id' => substr(sha1('auth:'.(string) $row->id), 0, 16),
+                    'event' => $event,
+                    'label' => $this->authEventLabel($event),
+                    'severity' => $this->authEventSeverity($event),
+                    'ip_address' => (string) ($context['ip'] ?? $context['ip_address'] ?? '-'),
+                    'host' => (string) ($context['host'] ?? '-'),
+                    'device' => $this->describeUserAgent((string) ($context['user_agent'] ?? '')),
+                    'occurred_at' => $this->dateToIso($row->timestamp ?? null),
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    private function decodeTokenAbilities(mixed $value): array
+    {
+        if (is_array($value)) {
+            return array_values(array_filter($value));
+        }
+
+        $decoded = json_decode((string) $value, true);
+
+        return is_array($decoded) ? array_values(array_filter($decoded)) : [];
+    }
+
+    private function timestampToIso(mixed $timestamp): ?string
+    {
+        $value = (int) ($timestamp ?? 0);
+        if ($value <= 0) {
+            return null;
+        }
+
+        try {
+            return \Carbon\Carbon::createFromTimestamp($value)->toIso8601String();
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    private function dateToIso(mixed $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        try {
+            return \Carbon\Carbon::parse($value)->toIso8601String();
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    private function describeUserAgent(string $userAgent): string
+    {
+        $ua = strtolower($userAgent);
+        if ($ua === '') {
+            return 'Perangkat tidak dikenal';
+        }
+
+        $browser = 'Browser';
+        if (str_contains($ua, 'edg/')) {
+            $browser = 'Microsoft Edge';
+        } elseif (str_contains($ua, 'chrome/') || str_contains($ua, 'crios/')) {
+            $browser = 'Chrome';
+        } elseif (str_contains($ua, 'firefox/') || str_contains($ua, 'fxios/')) {
+            $browser = 'Firefox';
+        } elseif (str_contains($ua, 'safari/')) {
+            $browser = 'Safari';
+        }
+
+        $platform = 'Desktop';
+        if (str_contains($ua, 'android')) {
+            $platform = 'Android';
+        } elseif (str_contains($ua, 'iphone') || str_contains($ua, 'ipad')) {
+            $platform = 'iOS';
+        } elseif (str_contains($ua, 'windows')) {
+            $platform = 'Windows';
+        } elseif (str_contains($ua, 'mac os')) {
+            $platform = 'macOS';
+        } elseif (str_contains($ua, 'linux')) {
+            $platform = 'Linux';
+        }
+
+        return "{$browser} di {$platform}";
+    }
+
+    private function authEventLabel(string $event): string
+    {
+        return match ($event) {
+            'login_success' => 'Login berhasil',
+            'login_locked' => 'Login dikunci sementara',
+            'login_failed_invalid_credentials' => 'Login gagal: password salah',
+            'login_failed_resolution' => 'Login gagal: akun tidak ditemukan',
+            'login_failed_account_not_registered' => 'Login gagal: akun belum terdaftar',
+            'login_failed_profile_inactive' => 'Login ditolak: akun nonaktif',
+            'login_failed_tenant_mismatch' => 'Login ditolak: tenant tidak cocok',
+            'login_denied_super_admin_wrong_host' => 'Login super admin ditolak dari host ini',
+            'login_denied_non_super_admin_on_admin_host' => 'Login ditolak dari host admin pusat',
+            'logout_other_devices' => 'Perangkat lain dikeluarkan',
+            'logout_other_devices_failed_password' => 'Gagal keluarkan perangkat lain',
+            default => Str::of($event)->replace('_', ' ')->title()->toString(),
+        };
+    }
+
+    private function authEventSeverity(string $event): string
+    {
+        if ($event === 'login_success' || $event === 'logout_other_devices') {
+            return 'success';
+        }
+
+        if (str_contains($event, 'failed') || str_contains($event, 'denied') || str_contains($event, 'locked')) {
+            return 'warning';
+        }
+
+        return 'info';
     }
 
     private function maskEmail(string $email): string
