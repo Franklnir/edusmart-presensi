@@ -21,7 +21,6 @@ import { useStudentDetailActions } from '../../features/students/hooks/useStuden
 import { useStudentRfidActions } from '../../features/students/hooks/useStudentRfidActions'
 import { useStudentClassActions } from '../../features/students/hooks/useStudentClassActions'
 import { useStudentAccountActions } from '../../features/students/hooks/useStudentAccountActions'
-import { useStudentPromotionActions } from '../../features/students/hooks/useStudentPromotionActions'
 import StudentPageHeader from '../../features/students/sections/StudentPageHeader'
 import StudentStatsGrid from '../../features/students/sections/StudentStatsGrid'
 import StudentCreateForm from '../../features/students/sections/StudentCreateForm'
@@ -33,7 +32,6 @@ import {
   DeactivateStudentModal,
   MutateStudentModal,
 } from '../../features/students/modals/StudentActionModals'
-import StudentPromotionModal from '../../features/students/modals/StudentPromotionModal'
 import StudentDetailModal from '../../features/students/modals/StudentDetailModal'
 
 const SISWA_LIST_COLUMNS = [
@@ -627,41 +625,6 @@ export default function ASiswa() {
     strukturKelas,
   })
 
-  const {
-    closePromotionModal,
-    handlePromotion,
-    handlePromotionAlumniYearChange,
-    handlePromotionExitReasonChange,
-    handlePromotionFilterGradeChange,
-    handlePromotionFilterKelasChange,
-    handlePromotionFromKelasChange,
-    handlePromotionModeChange,
-    handlePromotionToKelasChange,
-    openPromotionModal,
-    promoAlumni,
-    promoMutasi,
-    promotionAlumniYear,
-    promotionCandidateSiswa,
-    promotionExitReason,
-    promotionFilterGrade,
-    promotionFilterKelas,
-    promotionFromKelas,
-    promotionLoading,
-    promotionModalOpen,
-    promotionMode,
-    promotionSelectedIds,
-    promotionToKelas,
-    togglePromotionSelect,
-    togglePromotionSelectAllVisible,
-  } = useStudentPromotionActions({
-    getGradeLabel,
-    getNamaKelas,
-    openPasswordModal,
-    pushToast,
-    reloadAllData: loadAllData,
-    siswaRaw,
-  })
-
   /* ===== Detail modal ===== */
   const openDetail = useCallback((student) => {
     openStudentDetail(student, {
@@ -885,38 +848,6 @@ export default function ASiswa() {
               onConfirm={aktifkanSiswa}
             />
           </>
-        )}
-
-        {canManage && (
-          <StudentPromotionModal
-            isOpen={promotionModalOpen}
-            mode={promotionMode}
-            fromKelas={promotionFromKelas}
-            toKelas={promotionToKelas}
-            loading={promotionLoading}
-            filterGrade={promotionFilterGrade}
-            filterKelas={promotionFilterKelas}
-            selectedIds={promotionSelectedIds}
-            alumniYear={promotionAlumniYear}
-            exitReason={promotionExitReason}
-            candidateSiswa={promotionCandidateSiswa}
-            kelasOptions={kelasOptions}
-            gradeLabels={gradeLabels}
-            promoAlumni={promoAlumni}
-            promoMutasi={promoMutasi}
-            getNamaKelas={getNamaKelas}
-            onModeChange={handlePromotionModeChange}
-            onFromKelasChange={handlePromotionFromKelasChange}
-            onToKelasChange={handlePromotionToKelasChange}
-            onFilterGradeChange={handlePromotionFilterGradeChange}
-            onFilterKelasChange={handlePromotionFilterKelasChange}
-            onToggleSelect={togglePromotionSelect}
-            onToggleSelectAllVisible={togglePromotionSelectAllVisible}
-            onAlumniYearChange={handlePromotionAlumniYearChange}
-            onExitReasonChange={handlePromotionExitReasonChange}
-            onClose={closePromotionModal}
-            onConfirm={handlePromotion}
-          />
         )}
 
         <StudentDetailModal

@@ -175,10 +175,10 @@ Route::post('/rfid/set-mode', [RfidController::class, 'setMode'])
 Route::prefix('quiz')->middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::get('/dashboard', [QuizController::class, 'dashboard']);
     Route::get('/{quizId}/detail', [QuizController::class, 'detail']);
-    Route::post('/submit', [QuizController::class, 'submit']);
+    Route::post('/submit', [QuizController::class, 'submit'])->middleware('throttle:quiz-submit');
     Route::post('/start', [QuizController::class, 'startAttempt']);
-    Route::post('/answer', [QuizController::class, 'saveAnswer']);
-    Route::post('/answers/batch', [QuizController::class, 'saveAnswersBatch']);
+    Route::post('/answer', [QuizController::class, 'saveAnswer'])->middleware('throttle:quiz-answers');
+    Route::post('/answers/batch', [QuizController::class, 'saveAnswersBatch'])->middleware('throttle:quiz-answers');
     Route::post('/violation', [QuizController::class, 'logViolation']);
     Route::post('/schedule', [QuizController::class, 'schedule']);
     Route::post('/publish', [QuizController::class, 'publish']);

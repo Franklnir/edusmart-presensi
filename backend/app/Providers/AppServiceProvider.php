@@ -150,6 +150,18 @@ class AppServiceProvider extends ServiceProvider
 
             return Limit::perMinute(30)->by('super|'.$key);
         });
+
+        RateLimiter::for('quiz-submit', function (Request $request) {
+            $key = $request->user()?->id ?: $request->ip();
+
+            return Limit::perMinute(20)->by('quiz-submit|'.$key);
+        });
+
+        RateLimiter::for('quiz-answers', function (Request $request) {
+            $key = $request->user()?->id ?: $request->ip();
+
+            return Limit::perMinute(120)->by('quiz-answers|'.$key);
+        });
     }
 
     private function safeFrontendBaseUrl(): string

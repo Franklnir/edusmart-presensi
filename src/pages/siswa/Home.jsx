@@ -4,6 +4,7 @@ import { useAuthStore } from '../../store/useAuthStore'
 import { supabase } from '../../lib/supabase'
 
 import { useUIStore } from '../../store/useUIStore'
+import { fetchStudentPeriodClass } from '../../hooks/useStudentPeriodClass'
 import {
   downloadCertificateFile,
   getCertificateDisplayUrl,
@@ -554,12 +555,14 @@ export default function SHome() {
   const { pushToast } = useUIStore()
   const navigate = useNavigate()
   const userId = profile?.id || user?.id
+  const profileClass = profile?.kelas || profile?.kelas_id || ''
 
   /* ============================
    *          STATE
    * ============================ */
   const [ringkas, setRingkas] = useState({ H: 0, I: 0, A: 0 })
   const [statusUser, setStatusUser] = useState('-')
+  const [dashboardClass, setDashboardClass] = useState(profileClass)
   const [tugas, setTugas] = useState([])
   const [tugasMeta, setTugasMeta] = useState({ pending: 0, overdue: 0 })
   const [isTugasLoading, setIsTugasLoading] = useState(false)
@@ -653,7 +656,7 @@ export default function SHome() {
         setIsLoading(false)
 
         void Promise.allSettled([
-          ...(profile?.kelas ? [loadAbsensi(), loadTugas()] : []),
+          ...(userId ? [loadAbsensi(), loadTugas()] : []),
           loadEskul(),
           loadOrganisasi(),
           loadSertifikat(),
@@ -668,14 +671,13 @@ export default function SHome() {
 
     loadAllData()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, profile?.kelas])
+  }, [userId, profileClass])
 
   useEffect(() => {
     if (!userId) return
 
     const refreshAcademicScopedData = () => {
       activeAcademicPeriodRef.current = null
-      if (!profile?.kelas) return
       void loadAbsensi()
       void loadTugas()
     }
@@ -689,7 +691,7 @@ export default function SHome() {
       supabase.removeChannel(channel)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, profile?.kelas])
+  }, [userId, profileClass])
 
   // Load Data Sertifikat
   const loadSertifikat = async () => {
@@ -774,15 +776,18 @@ export default function SHome() {
   }
 
   const loadAbsensi = async () => {
-    if (!profile?.kelas || !userId) return
+    if (!userId) return
     const today = getToday()
 
     try {
       const period = await loadActiveAcademicPeriod()
+      const kelas = await fetchStudentPeriodClass({ userId, profile, tahunAjaran: period.tahunAjaran })
+      if (!kelas) return
+      setDashboardClass(kelas)
       const { data, error } = await supabase
         .from('absensi')
         .select('uid, status')
-        .eq('kelas', profile.kelas)
+        .eq('kelas', kelas)
         .eq('tanggal', today)
         .eq('tahun_ajaran', period.tahunAjaran)
         .eq('semester', period.semester)
@@ -811,13 +816,20 @@ export default function SHome() {
   }
 
   const loadTugas = async () => {
-    if (!profile?.kelas || !userId) return
+    if (!userId) return
     const nowIso = new Date().toISOString()
     const requestId = ++tugasLoadSeqRef.current
 
     try {
       setIsTugasLoading(true)
       const period = await loadActiveAcademicPeriod()
+      const kelas = await fetchStudentPeriodClass({ userId, profile, tahunAjaran: period.tahunAjaran })
+      if (!kelas) {
+        setTugas([])
+        setTugasMeta({ pending: 0, overdue: 0 })
+        return
+      }
+      setDashboardClass(kelas)
       const [
         { data: overdueData, error: overdueError },
         { data: upcomingData, error: upcomingError },
@@ -825,7 +837,7 @@ export default function SHome() {
         supabase
           .from('tugas')
           .select(DASHBOARD_TASK_COLUMNS)
-          .eq('kelas', profile.kelas)
+          .eq('kelas', kelas)
           .eq('tahun_ajaran', period.tahunAjaran)
           .lt('deadline', nowIso)
           .order('deadline', { ascending: false })
@@ -833,7 +845,7 @@ export default function SHome() {
         supabase
           .from('tugas')
           .select(DASHBOARD_TASK_COLUMNS)
-          .eq('kelas', profile.kelas)
+          .eq('kelas', kelas)
           .eq('tahun_ajaran', period.tahunAjaran)
           .gte('deadline', nowIso)
           .order('deadline', { ascending: true })
@@ -896,7 +908,7 @@ export default function SHome() {
   }
 
   useEffect(() => {
-    if (!profile?.kelas || !userId) return
+    if (!userId) return
 
     const refreshTugas = () => {
       if (document.visibilityState === 'hidden') return
@@ -905,9 +917,7 @@ export default function SHome() {
 
     const channel = supabase
       .channel(`siswa_home_tugas_${userId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tugas' }, (payload) => {
-        const row = payload.new || payload.old
-        if (row?.kelas && row.kelas !== profile.kelas) return
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tugas' }, () => {
         refreshTugas()
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tugas_jawaban' }, (payload) => {
@@ -926,7 +936,7 @@ export default function SHome() {
       document.removeEventListener('visibilitychange', refreshTugas)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile?.kelas, userId])
+  }, [userId])
 
   const loadEskul = async () => {
     if (!userId) return
@@ -1159,7 +1169,7 @@ export default function SHome() {
             <p className="text-sm font-semibold text-brand-200 mb-0.5">{greeting} 👋</p>
             <h1 className="text-2xl font-extrabold">{profile?.nama || 'Siswa'}</h1>
             <p className="text-sm text-brand-200 mt-1">
-              Kelas <span className="font-bold text-white">{profile?.kelas || '—'}</span>
+              Kelas <span className="font-bold text-white">{dashboardClass || profileClass || '—'}</span>
             </p>
           </div>
           <div className="absolute -right-8 -top-8 w-40 h-40 rounded-full bg-white/5" />
@@ -1409,7 +1419,7 @@ export default function SHome() {
               <div className="mb-4 p-3.5 rounded-xl border-2 border-brand-100 bg-gradient-to-br from-brand-50 to-indigo-50">
                 <p className="text-xs font-semibold text-slate-600 mb-1">Status Anda Hari Ini</p>
                 <p className={`text-2xl font-extrabold ${statusUser === 'Hadir' ? 'text-emerald-600' : statusUser === 'Izin' || statusUser === 'Sakit' ? 'text-amber-600' : statusUser === 'Alpha' ? 'text-rose-600' : 'text-brand-600'}`}>{statusUser}</p>
-                <p className="text-xs text-slate-500 mt-0.5">Kelas {profile?.kelas || '—'}</p>
+                <p className="text-xs text-slate-500 mt-0.5">Kelas {dashboardClass || profileClass || '—'}</p>
               </div>
               {/* Ringkasan Kelas */}
               <p className="text-xs font-semibold text-slate-500 mb-2.5 uppercase tracking-wider">Ringkasan Kelas</p>

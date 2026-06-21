@@ -98,7 +98,8 @@ export default function GuruQuiz() {
     setSemester,
     resetToActivePeriod,
     applyPeriodFilters,
-    activeAcademicPeriodPayload
+    activeAcademicPeriodPayload,
+    isViewingArchivePeriod
   } = useActiveAcademicPeriod({
     storageKey: 'edusmart.guru.quiz.periodFilter'
   })
@@ -866,6 +867,20 @@ export default function GuruQuiz() {
     try {
       // --- Phase 1: Fetch quiz detail + side data in PARALLEL ---
       const quizIsActive = selectedQuiz && (toBoolean(selectedQuiz.is_active) || toBoolean(selectedQuiz.is_live))
+      const shouldUseHistoryRoster = Boolean(isViewingArchivePeriod && period.tahunAjaran && selectedKelas)
+      const siswaQuery = shouldUseHistoryRoster
+        ? supabase
+          .from('profiles')
+          .select('id, nama, nis, photo_path, photo_url')
+          .eq('role', 'siswa')
+          .eq('id', '__history_lookup__')
+          .limit(0)
+        : supabase
+          .from('profiles')
+          .select('id, nama, nis, photo_path, photo_url')
+          .eq('kelas', selectedKelas)
+          .eq('role', 'siswa')
+          .order('nama')
       const detailPromise = supabase.quiz.detail(selectedQuizId, {
         tahun_ajaran: period.tahunAjaran,
         semester: period.semester
@@ -874,12 +889,7 @@ export default function GuruQuiz() {
         supabase.batch([
           {
             key: 'siswa',
-            query: supabase
-              .from('profiles')
-              .select('id, nama, nis, photo_path, photo_url')
-              .eq('kelas', selectedKelas)
-              .eq('role', 'siswa')
-              .order('nama')
+            query: siswaQuery
           },
           {
             key: 'warnings',
@@ -927,6 +937,50 @@ export default function GuruQuiz() {
           siswaRows = data || []
         } else {
           throw err
+        }
+      }
+
+      if (shouldUseHistoryRoster) {
+        let historyStudentIds = []
+        const { data: histRows, error: histError } = await supabase
+          .from('student_class_histories')
+          .select('student_id')
+          .eq('class_id', selectedKelas)
+          .eq('tahun_ajaran', period.tahunAjaran)
+          .in('status', ['active', 'nonaktif', 'mutasi'])
+
+        if (histError) {
+          console.warn('Gagal memuat roster historis quiz:', histError)
+        } else {
+          historyStudentIds = (histRows || [])
+            .map((row) => String(row.student_id || '').trim())
+            .filter(Boolean)
+        }
+
+        const submissionStudentIds = (submissionRows || [])
+          .map((row) => String(row.siswa_id || '').trim())
+          .filter(Boolean)
+        const targetStudentIds = Array.from(new Set(historyStudentIds.length ? historyStudentIds : submissionStudentIds))
+
+        if (targetStudentIds.length) {
+          let { data, error } = await supabase
+            .from('profiles')
+            .select('id, nama, nis, photo_path, photo_url')
+            .eq('role', 'siswa')
+            .in('id', targetStudentIds)
+            .order('nama')
+          if (error && /photo_path/i.test(error.message || '')) {
+            ;({ data, error } = await supabase
+              .from('profiles')
+              .select('id, nama, nis, photo_url')
+              .eq('role', 'siswa')
+              .in('id', targetStudentIds)
+              .order('nama'))
+          }
+          if (error) throw error
+          siswaRows = data || []
+        } else {
+          siswaRows = []
         }
       }
 

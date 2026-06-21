@@ -1,4 +1,4 @@
-import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
   AlertTriangle,
@@ -21,7 +21,24 @@ import { formatDateTime, parseDateTime } from '../../lib/time'
 import FilePreviewModal from '../../components/FilePreviewModal'
 import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveFilter'
 import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
+import useStudentPeriodClass from '../../hooks/useStudentPeriodClass'
 import { filterSchedulesForSemester } from '../../utils/schedulePeriodScope'
+
+const QuizEssayTextarea = memo(function QuizEssayTextarea({ value, onChange, onBlur, disabled, placeholder, className }) {
+  return (
+    <textarea
+      name="quiz_essay_answer"
+      aria-label="Jawaban esai"
+      rows="10"
+      value={value}
+      onChange={onChange}
+      onBlur={onBlur}
+      disabled={disabled}
+      placeholder={placeholder}
+      className={className}
+    />
+  )
+})
 
 const safeDate = (value) => {
   return parseDateTime(value)
@@ -591,7 +608,11 @@ export default function SiswaQuiz() {
   const quizReloadTimerRef = useRef(null)
   const quizDetailReloadTimerRef = useRef(null)
 
-  const kelasId = profile?.kelas || profile?.kelas_id || ''
+  const kelasId = useStudentPeriodClass({
+    userId: profile?.id || user?.id,
+    profile,
+    tahunAjaran: period.tahunAjaran
+  })
   const buildQuizClientMeta = useCallback((extra = {}) => ({
     client: 'web',
     device: 'web',
@@ -882,7 +903,7 @@ export default function SiswaQuiz() {
 
   const watermarkText = useMemo(() => {
     const actor = profile?.nama || user?.email || 'Siswa'
-    const kelas = profile?.kelas || profile?.kelas_id || '-'
+    const kelas = kelasId || '-'
     const stamp = nowTick.toLocaleString('id-ID', {
       day: '2-digit',
       month: '2-digit',
@@ -891,7 +912,7 @@ export default function SiswaQuiz() {
       minute: '2-digit'
     })
     return `${actor} • ${kelas} • ${stamp}`
-  }, [profile?.nama, profile?.kelas, profile?.kelas_id, user?.email, nowTick])
+  }, [kelasId, profile?.nama, user?.email, nowTick])
 
   const answeredCount = useMemo(() => (
     (questions || []).reduce((sum, question) => {
@@ -1015,7 +1036,7 @@ export default function SiswaQuiz() {
     violationLogRef.current = { key: dedupeKey, at: nowMs }
 
     try {
-      await supabase.quiz.logViolation({
+      const { data: logResult } = await supabase.quiz.logViolation({
         quiz_id: quizId,
         submission_id: submissionId,
         event_type: normalizedType,
@@ -1023,10 +1044,43 @@ export default function SiswaQuiz() {
         event_meta: meta && typeof meta === 'object' ? meta : null,
         client_meta: buildQuizClientMeta()
       })
+
+      const autoSubmitted = logResult?.auto_submitted
+      if (autoSubmitted && !autoSubmitLockRef.current) {
+        autoSubmitLockRef.current = true
+        const sub = submission?.quiz_id === selectedQuiz?.id ? submission : activeSubmission
+        const updated = {
+          ...(sub || {}),
+          status: 'finished',
+          score: logResult.result?.score ?? null,
+          scoring_pending: logResult.result?.scoring_pending ?? true,
+          finished_at: new Date().toISOString()
+        }
+        pendingAnswersRef.current = {}
+        writePendingAnswersToStorage(user?.id, quizId, submissionId, {})
+        clearEssayDraftsFromStorage(user?.id, quizId, submissionId)
+        essayDraftMetaRef.current = {}
+        setSubmission(updated)
+        setQuizList((prev) => prev.map((q) => (
+          q.id === selectedQuiz?.id ? { ...q, submission: updated } : q
+        )))
+        setIsTaking(false)
+        setViolationMessage('')
+        setViolationPrompt({ open: false, message: '', stage: 1 })
+        setPrivacyShield({ open: false, message: '', reason: '' })
+        setCelebration({
+          open: true,
+          score: null,
+          title: 'Quiz Ditutup',
+          message: 'Anda telah melanggar batas percobaan keamanan quiz. Quiz otomatis ditutup.'
+        })
+        pushToast('error', 'Batas percobaan keamanan terlampaui. Quiz ditutup otomatis.')
+        autoSubmitLockRef.current = false
+      }
     } catch {
       // no-op: logging tidak boleh mengganggu quiz
     }
-  }, [selectedQuiz?.id, activeSubmissionId, user?.id, buildQuizClientMeta])
+  }, [selectedQuiz?.id, activeSubmissionId, submission?.quiz_id, submission?.id, activeSubmission?.quiz_id, activeSubmission?.id, user?.id, buildQuizClientMeta])
 
   const triggerViolationPrompt = (message, eventType = 'warning', meta = {}) => {
     if (autoSubmitLockRef.current || violationTriggeredRef.current || !isTaking) return
@@ -1086,6 +1140,7 @@ export default function SiswaQuiz() {
       message,
       reason: normalizedType
     })
+    void flushPendingAnswers({ silent: true })
     void logViolationEvent(normalizedType, message, {
       warning_count: nextCount,
       incident_id: incidentId,
@@ -1093,7 +1148,7 @@ export default function SiswaQuiz() {
       shield: true,
       ...(meta && typeof meta === 'object' ? meta : {})
     })
-  }, [isTaking, isStrictSecurity, selectedQuiz?.id, activeSubmissionId, logViolationEvent])
+  }, [isTaking, isStrictSecurity, selectedQuiz?.id, activeSubmissionId, logViolationEvent, flushPendingAnswers])
 
   const markSessionStarted = (bootKey) => {
     sessionInitRef.current = bootKey
@@ -1718,6 +1773,16 @@ export default function SiswaQuiz() {
       })
       if (error) throw error
 
+      const serverDeadline = data?.deadline_at
+      if (serverDeadline && typeof serverDeadline === 'string' && serverDeadline.trim()) {
+        setQuizList((prev) => prev.map((q) => {
+          if (q.id === quizId && q.deadline_at !== serverDeadline) {
+            return { ...q, deadline_at: serverDeadline }
+          }
+          return q
+        }))
+      }
+
       const answerIdByQuestion = Object.fromEntries(
         (data?.answers || []).map((row) => [String(row?.question_id || ''), row?.answer_id || ''])
       )
@@ -1815,7 +1880,8 @@ export default function SiswaQuiz() {
     }
   }
 
-  const handleEssayChange = (questionId, value) => {
+  const handleEssayChangeRef = useRef(null)
+  handleEssayChangeRef.current = (questionId, value) => {
     const revision = rememberEssayDraft(questionId, value)
     setAnswers((prev) => ({ ...prev, [questionId]: value }))
     if (selectedQuiz?.id && activeSubmissionId) {
@@ -1842,7 +1908,8 @@ export default function SiswaQuiz() {
     }, 550)
   }
 
-  const handleEssayBlur = (questionId, value) => {
+  const handleEssayBlurRef = useRef(null)
+  handleEssayBlurRef.current = (questionId, value) => {
     if (essaySaveTimersRef.current[questionId]) {
       clearTimeout(essaySaveTimersRef.current[questionId])
       delete essaySaveTimersRef.current[questionId]
@@ -1857,13 +1924,32 @@ export default function SiswaQuiz() {
     void saveAnswer(questionId, value, 'essay', { revision, flush: true })
   }
 
-  useEffect(() => {
-    if (!isTaking) return undefined
-    const intervalId = window.setInterval(() => {
-      void flushPendingAnswers({ silent: true })
-    }, 5000)
+  const onEssayChange = useCallback((e) => {
+    handleEssayChangeRef.current?.(activeQuestion.id, e.target.value)
+  }, [activeQuestion.id])
 
-    return () => window.clearInterval(intervalId)
+  const onEssayBlur = useCallback((e) => {
+    handleEssayBlurRef.current?.(activeQuestion.id, e.target.value)
+  }, [activeQuestion.id])
+
+  useEffect(() => {
+    if (!isTaking || !selectedQuiz?.id || !activeSubmissionId) return
+    const quizId = selectedQuiz.id
+    const timer = setInterval(async () => {
+      try {
+        const { data } = await supabase.quiz.detail(quizId)
+        const serverDeadline = data?.quiz?.deadline_at
+        if (serverDeadline && typeof serverDeadline === 'string' && serverDeadline.trim()) {
+          setQuizList((prev) => prev.map((q) => {
+            if (q.id === quizId && q.deadline_at !== serverDeadline) {
+              return { ...q, deadline_at: serverDeadline }
+            }
+            return q
+          }))
+        }
+      } catch {}
+    }, 30000)
+    return () => clearInterval(timer)
   }, [isTaking, selectedQuiz?.id, activeSubmissionId])
 
   const buildSubmitAnswersPayload = () => (
@@ -1902,6 +1988,7 @@ export default function SiswaQuiz() {
       setSubmitConfirmOpen(false)
       Object.values(essaySaveTimersRef.current).forEach((timerId) => clearTimeout(timerId))
       essaySaveTimersRef.current = {}
+      await flushPendingAnswers({ silent: true })
       const { data, error } = await supabase.quiz.submit({
         quiz_id: selectedQuiz.id,
         submission_id: sub.id,
@@ -3097,13 +3184,10 @@ export default function SiswaQuiz() {
 
                               {activeQuestionType === 'essay' ? (
                                 <div>
-                                  <textarea
-                                    name="quiz_essay_answer"
-                                    aria-label={`Jawaban esai soal ${activeQuestionIndex + 1}`}
-                                    rows="10"
+                                  <QuizEssayTextarea
                                     value={String(answers[activeQuestion.id] || '')}
-                                    onChange={(e) => handleEssayChange(activeQuestion.id, e.target.value)}
-                                    onBlur={(e) => handleEssayBlur(activeQuestion.id, e.target.value)}
+                                    onChange={onEssayChange}
+                                    onBlur={onEssayBlur}
                                     disabled={answerInteractionLocked}
                                     placeholder="Tulis jawaban esai Anda di sini..."
                                     className={`min-h-[16rem] w-full resize-y rounded-lg border px-4 py-3 text-sm leading-6 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 ${

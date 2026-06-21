@@ -1086,6 +1086,7 @@ export default function APengaturan() {
             tone: 'warning',
             details: [
               'Sistem akan menaikkan siswa aktif satu tingkat: X ke XI, XI ke XII, dan XII menjadi alumni.',
+              'Jika kelas tujuan belum tersedia, sistem akan menyiapkannya otomatis dari pola kelas asal.',
               'Metadata kelas aktif, filter tugas, absensi, jadwal, laporan, rekap, dan storage akan mengikuti periode baru.',
               carryJadwal
                 ? 'Jadwal dan guru pengampu dari periode aktif saat ini akan disalin ke periode baru.'
@@ -1212,6 +1213,9 @@ export default function APengaturan() {
       const rolloverText = rollover
         ? ` Siswa naik: ${rollover.promoted_students || 0}, tidak naik: ${rollover.retained_students || 0}, alumni: ${rollover.alumni_students || 0}.`
         : ''
+      const createdClassText = rollover?.created_target_classes
+        ? ` Kelas tujuan dibuat otomatis: ${rollover.created_target_classes}.`
+        : ''
       const restoredText = data?.period_snapshot_restored
         ? ` Siswa diselaraskan: ${data.student_profile_restores || 0}, di luar periode: ${data.student_profiles_outside_period || 0}.`
         : ''
@@ -1222,7 +1226,7 @@ export default function APengaturan() {
         ? ' Jadwal berhasil disalin.'
         : ''
 
-      pushToast('success', `Tahun ajaran ${tahunAjaran} aktif penuh.${rolloverText}${restoredText}${eskulText}${jadwalText}`, {
+      pushToast('success', `Tahun ajaran ${tahunAjaran} aktif penuh.${rolloverText}${createdClassText}${restoredText}${eskulText}${jadwalText}`, {
         title: 'Kalender akademik diperbarui'
       })
       setCarryEskulMembers(false)
@@ -1686,6 +1690,13 @@ export default function APengaturan() {
   const emailVerified = Boolean(user?.email_confirmed_at || user?.emailVerified || providerState.emailVerified)
   const googleExpectedEmail = user?.email || profile?.email || ''
   const periodYearWillChange = periodForm.tahunAjaran !== persistedPeriodForm.tahunAjaran
+  const persistedPeriodStartYear = Number(String(persistedPeriodForm.tahunAjaran || '').slice(0, 4))
+  const selectedPeriodStartYear = Number(String(periodForm.tahunAjaran || '').slice(0, 4))
+  const periodYearMovesForwardOneStep =
+    periodYearWillChange &&
+    Number.isFinite(persistedPeriodStartYear) &&
+    Number.isFinite(selectedPeriodStartYear) &&
+    selectedPeriodStartYear === persistedPeriodStartYear + 1
   const activeAcademicPeriod = resolveAcademicPeriod({
     tahun_ajaran: periodForm.tahunAjaran,
     semester_aktif: periodForm.semester,
@@ -1701,6 +1712,14 @@ export default function APengaturan() {
   const currentAcademicPeriod = getCurrentAcademicPeriod(browserNow)
   const activePeriodMatchesCalendar =
     activeAcademicPeriod.tahunAjaran === currentAcademicPeriod.tahunAjaran
+
+  useEffect(() => {
+    if (periodYearMovesForwardOneStep || (!carryJadwal && !carryEskulMembers)) return
+
+    setCarryJadwal(false)
+    setCarryEskulMembers(false)
+  }, [carryEskulMembers, carryJadwal, periodYearMovesForwardOneStep])
+
   const academicMonths = activeAcademicPeriod.months?.length
     ? activeAcademicPeriod.months
     : activeAcademicPeriod.academicYearMonths || []
@@ -2161,7 +2180,7 @@ export default function APengaturan() {
                 </div>
               </div>
 
-              {periodYearWillChange && (
+              {periodYearMovesForwardOneStep && (
                 <div className="mt-4 flex flex-col gap-3">
                   <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3">
                     <input

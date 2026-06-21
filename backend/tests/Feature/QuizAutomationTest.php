@@ -81,6 +81,7 @@ class QuizAutomationTest extends TestCase
 
     public function test_submit_quiz_calculates_score_from_question_points(): void
     {
+        config()->set('quiz.async_scoring_enabled', false);
         $tenantId = $this->defaultTenantId();
         [$siswa] = $this->createUserWithProfile($tenantId, 'siswa', 'X-1');
         [$guru] = $this->createUserWithProfile($tenantId, 'guru', 'X-1');
@@ -281,6 +282,7 @@ class QuizAutomationTest extends TestCase
 
     public function test_submit_quiz_with_skala_100_ignores_question_weights(): void
     {
+        config()->set('quiz.async_scoring_enabled', false);
         $tenantId = $this->defaultTenantId();
         [$siswa] = $this->createUserWithProfile($tenantId, 'siswa', 'X-1');
         [$guru] = $this->createUserWithProfile($tenantId, 'guru', 'X-1');

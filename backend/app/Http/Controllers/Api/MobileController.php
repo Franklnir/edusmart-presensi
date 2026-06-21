@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Models\Profile;
 use App\Services\Rfid\RfidIngressService;
+use App\Support\AcademicPeriod;
 use App\Support\Tenancy\TenantDomainService;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
@@ -115,11 +116,13 @@ class MobileController extends ApiController
             return $this->ok([]);
         }
 
-        $rows = $this->tenantQuery('jadwal', $context['tenant_id'])
+        $query = $this->tenantQuery('jadwal', $context['tenant_id'])
             ->where('guru_id', (string) $context['profile']->id)
             ->select($this->existingColumns('jadwal', ['kelas_id', 'mapel', 'guru_nama']))
             ->orderBy('kelas_id')
-            ->orderBy('mapel')
+            ->orderBy('mapel');
+        $this->applyActiveAcademicYearScope($query, 'jadwal', $context['tenant_id']);
+        $rows = $query
             ->get()
             ->unique(fn ($row) => (string) ($row->kelas_id ?? '').'|'.(string) ($row->mapel ?? ''))
             ->values();
@@ -338,12 +341,14 @@ class MobileController extends ApiController
             return $this->ok([]);
         }
 
-        $rows = $this->tenantQuery('jadwal', $context['tenant_id'])
+        $query = $this->tenantQuery('jadwal', $context['tenant_id'])
             ->where('kelas_id', (string) ($context['profile']->kelas ?? ''))
             ->select($this->existingColumns('jadwal', ['id', 'kelas_id', 'hari', 'mapel', 'guru_nama', 'jam_mulai', 'jam_selesai']))
             ->orderBy('hari')
             ->orderBy('jam_mulai')
-            ->limit(80)
+            ->limit(80);
+        $this->applyActiveAcademicYearScope($query, 'jadwal', $context['tenant_id']);
+        $rows = $query
             ->get();
 
         return $this->ok($rows);
@@ -360,11 +365,13 @@ class MobileController extends ApiController
             return $this->ok([]);
         }
 
-        $tasks = $this->tenantQuery('tugas', $context['tenant_id'])
+        $taskQuery = $this->tenantQuery('tugas', $context['tenant_id'])
             ->where('kelas', (string) ($context['profile']->kelas ?? ''))
             ->select($this->existingColumns('tugas', ['id', 'judul', 'mapel', 'deadline', 'created_at']))
             ->orderByDesc('created_at')
-            ->limit(50)
+            ->limit(50);
+        $this->applyActiveAcademicYearScope($taskQuery, 'tugas', $context['tenant_id']);
+        $tasks = $taskQuery
             ->get();
 
         $taskIds = $tasks->pluck('id')->map(fn ($id) => (string) $id)->all();
@@ -669,21 +676,27 @@ class MobileController extends ApiController
             return collect();
         }
 
-        return $this->tenantQuery('jadwal', $tenantId)
+        $query = $this->tenantQuery('jadwal', $tenantId)
             ->where('guru_id', $teacherId)
             ->where('hari', $this->indonesianDayName($date))
             ->select($this->existingColumns('jadwal', ['id', 'kelas_id', 'hari', 'mapel', 'jam_mulai', 'jam_selesai', 'guru_nama']))
-            ->orderBy('jam_mulai')
+            ->orderBy('jam_mulai');
+        $this->applyActiveAcademicYearScope($query, 'jadwal', $tenantId);
+
+        return $query
             ->get();
     }
 
     private function teacherCanAccessClass(string $tenantId, string $teacherId, string $classId): bool
     {
-        if (Schema::hasTable('jadwal') && $this->tenantQuery('jadwal', $tenantId)
-            ->where('guru_id', $teacherId)
-            ->where('kelas_id', $classId)
-            ->exists()) {
-            return true;
+        if (Schema::hasTable('jadwal')) {
+            $scheduleQuery = $this->tenantQuery('jadwal', $tenantId)
+                ->where('guru_id', $teacherId)
+                ->where('kelas_id', $classId);
+            $this->applyActiveAcademicYearScope($scheduleQuery, 'jadwal', $tenantId);
+            if ($scheduleQuery->exists()) {
+                return true;
+            }
         }
 
         return Schema::hasTable('kelas_struktur')
@@ -700,6 +713,7 @@ class MobileController extends ApiController
         }
 
         $query = $this->tenantQuery('tugas', $tenantId)->where('kelas', $kelas);
+        $this->applyActiveAcademicYearScope($query, 'tugas', $tenantId);
         if (Schema::hasColumn('tugas', 'deadline')) {
             $query->where(function ($subQuery) {
                 $subQuery->whereNull('deadline')->orWhere('deadline', '>=', now('Asia/Jakarta'));
@@ -715,11 +729,14 @@ class MobileController extends ApiController
             return 0;
         }
 
-        return (int) $this->tenantQuery('quizzes', $tenantId)
+        $query = $this->tenantQuery('quizzes', $tenantId)
             ->where('kelas_id', $kelas)
             ->where(function ($query) {
                 $query->where('is_live', true)->orWhere('is_active', true);
-            })
+            });
+        $this->applyActiveAcademicYearScope($query, 'quizzes', $tenantId);
+
+        return (int) $query
             ->count();
     }
 
@@ -731,6 +748,7 @@ class MobileController extends ApiController
         }
 
         $query = $this->tenantQuery('absensi', $tenantId)->where('tanggal', $date);
+        $this->applyActiveAcademicYearScope($query, 'absensi', $tenantId);
         if (! empty($classes)) {
             $query->whereIn('kelas', $classes);
         }
@@ -752,10 +770,12 @@ class MobileController extends ApiController
             return $base;
         }
 
-        foreach ($this->tenantQuery('absensi', $tenantId)
+        $query = $this->tenantQuery('absensi', $tenantId)
             ->where('uid', $studentId)
-            ->whereBetween('tanggal', [$start, $end])
-            ->get(['status']) as $row) {
+            ->whereBetween('tanggal', [$start, $end]);
+        $this->applyActiveAcademicYearScope($query, 'absensi', $tenantId);
+
+        foreach ($query->get(['status']) as $row) {
             $key = strtolower((string) ($row->status ?? ''));
             if (array_key_exists($key, $base)) {
                 $base[$key]++;
@@ -795,6 +815,19 @@ class MobileController extends ApiController
             'apiBaseUrl' => $host !== '' ? $this->tenantDomainService->makeUrl($host) : config('app.url'),
             'logoUrl' => $settings?->logo_url ?? null,
         ];
+    }
+
+    private function applyActiveAcademicYearScope($query, string $table, string $tenantId): void
+    {
+        if (! Schema::hasColumn($table, 'tahun_ajaran')) {
+            return;
+        }
+
+        $period = AcademicPeriod::fromSettings($this->tenantSettings($tenantId));
+        $year = AcademicPeriod::normalizeAcademicYear($period['tahun_ajaran'] ?? null);
+        if ($year) {
+            $query->where($table.'.tahun_ajaran', $year);
+        }
     }
 
     private function tenantSettings(string $tenantId): ?object

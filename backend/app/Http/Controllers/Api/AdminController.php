@@ -841,7 +841,6 @@ class AdminController extends ApiController
             ?: AcademicPeriod::current()['semester'];
         $yearChanged = $previousYear !== $tahunAjaran;
         $autoRollover = filter_var($payload['auto_rollover'] ?? false, FILTER_VALIDATE_BOOLEAN);
-        $manualRolloverCompleted = filter_var($payload['manual_rollover_completed'] ?? false, FILTER_VALIDATE_BOOLEAN);
         $carryEskulMembers = filter_var($payload['carry_eskul_members'] ?? false, FILTER_VALIDATE_BOOLEAN);
         $carryJadwal = filter_var($payload['carry_jadwal'] ?? false, FILTER_VALIDATE_BOOLEAN);
 
@@ -856,17 +855,17 @@ class AdminController extends ApiController
             && $previousStartYear > $calendarStartYear
             && $targetStartYear === $calendarStartYear;
         $targetHasClassSnapshot = $yearChanged && $this->hasStudentClassSnapshotsForPeriod($tenantId, $activePeriod);
-        $restoreFromClassSnapshot = $yearChanged && $targetHasClassSnapshot && $manualRolloverCompleted === false;
+        $restoreFromClassSnapshot = $yearChanged && $targetHasClassSnapshot;
         $movingBackward = $yearChanged && $targetStartYear < $previousStartYear;
         $movingForwardOneYear = $yearChanged && $targetStartYear === $previousStartYear + 1;
         $requiresRollover = $yearChanged
             && $restoreFromClassSnapshot === false
             && $isCalendarCorrection === false
-            && $manualRolloverCompleted === false;
+            && $movingForwardOneYear;
         $targetMatchesServerCalendar = $tahunAjaran === $calendarPeriod['tahun_ajaran']
             && $semester === $calendarPeriod['semester'];
 
-        if ($movingBackward && $restoreFromClassSnapshot === false && $manualRolloverCompleted === false && $isCalendarCorrection === false) {
+        if ($movingBackward && $restoreFromClassSnapshot === false && $isCalendarCorrection === false) {
             return $this->deny(
                 'Snapshot kelas siswa untuk periode '.$tahunAjaran.' belum tersedia. Periode tidak diturunkan agar data siswa tidak rusak.',
                 422
@@ -898,7 +897,6 @@ class AdminController extends ApiController
         if (
             $yearChanged
             && $restoreFromClassSnapshot === false
-            && $manualRolloverCompleted === false
             && $movingForwardOneYear === false
             && $isCalendarCorrection === false
         ) {
@@ -906,11 +904,7 @@ class AdminController extends ApiController
         }
 
         if ($requiresRollover && $autoRollover === false) {
-            return $this->deny('Perubahan tahun ajaran harus dijalankan melalui rollover akademik atau Kenaikan Kelas manual.', 409);
-        }
-
-        if ($requiresRollover && $movingForwardOneYear === false) {
-            return $this->deny('Rollover otomatis hanya bisa maju tepat satu tahun ajaran.', 422);
+            return $this->deny('Perubahan tahun ajaran harus dijalankan melalui rollover otomatis dari Pengaturan Akademik.', 409);
         }
 
         try {
@@ -927,7 +921,6 @@ class AdminController extends ApiController
                 $requiresRollover,
                 $restoreFromClassSnapshot,
                 $isCalendarCorrection,
-                $manualRolloverCompleted,
                 $calendarPeriod,
                 $serverNow,
                 $carryEskulMembers,
@@ -941,7 +934,7 @@ class AdminController extends ApiController
                 $studentProfileRestores = 0;
                 $studentProfilesOutsidePeriod = 0;
 
-                if ($yearChanged || $manualRolloverCompleted) {
+                if ($yearChanged) {
                     $previousClassHistorySnapshots = $this->snapshotStudentClassHistoriesForPeriod(
                         $tenantId,
                         [
@@ -972,19 +965,17 @@ class AdminController extends ApiController
                     if ($carryJadwal) {
                         $this->copyJadwalToNewPeriod($tenantId, $previousYear, $tahunAjaran);
                     }
-                } elseif ($yearChanged || $isCalendarCorrection || $manualRolloverCompleted) {
+                } elseif ($yearChanged || $isCalendarCorrection) {
                     $classesSynced = $this->syncClassPeriodMetadata($tenantId, $activePeriod);
                 }
 
-                if ($classesSynced > 0 || $requiresRollover || $restoreFromClassSnapshot || $yearChanged || $manualRolloverCompleted) {
+                if ($classesSynced > 0 || $requiresRollover || $restoreFromClassSnapshot || $yearChanged) {
                     $classHistorySnapshots = $this->snapshotStudentClassHistoriesForPeriod(
                         $tenantId,
                         $activePeriod,
                         $restoreFromClassSnapshot
                             ? 'period_snapshot_restore'
-                            : ($requiresRollover
-                                ? 'auto_rollover'
-                                : ($manualRolloverCompleted ? 'manual_rollover_completed' : 'period_sync'))
+                            : ($requiresRollover ? 'auto_rollover' : 'period_sync')
                     );
                 }
 
@@ -1000,7 +991,6 @@ class AdminController extends ApiController
                     'year_changed' => $yearChanged,
                     'semester_only_change' => $semesterOnlyChange,
                     'calendar_correction' => $isCalendarCorrection,
-                    'manual_rollover_completed' => $manualRolloverCompleted,
                     'period_snapshot_restored' => $restoreFromClassSnapshot,
                     'student_profile_restores' => $studentProfileRestores,
                     'student_profiles_outside_period' => $studentProfilesOutsidePeriod,
@@ -2580,6 +2570,13 @@ class AdminController extends ApiController
             $classesByGradeSuffix[$grade][$suffix] = $info;
         }
 
+        $createdTargetClasses = $this->ensureRolloverTargetClasses(
+            $tenantId,
+            $period,
+            $classInfoById,
+            $classesByGradeSuffix
+        );
+
         $studentRows = DB::table('profiles')
             ->where('tenant_id', $tenantId)
             ->where('role', 'siswa')
@@ -2650,9 +2647,9 @@ class AdminController extends ApiController
             $labels = array_keys($missingTargets);
             sort($labels, SORT_NATURAL);
             throw new \RuntimeException(
-                'Kelas tujuan rollover belum lengkap: '.implode(', ', array_slice($labels, 0, 12)).
+                'Kelas tujuan rollover belum bisa disiapkan otomatis: '.implode(', ', array_slice($labels, 0, 12)).
                 (count($labels) > 12 ? ', ...' : '').
-                '. Buat kelas tujuan dulu atau gunakan Kenaikan Kelas manual.'
+                '. Periksa data kelas aktif sebelum periode disimpan.'
             );
         }
 
@@ -2729,10 +2726,201 @@ class AdminController extends ApiController
             'alumni_students' => count($alumniIds),
             'retained_students' => $retainedStudents,
             'skipped_students' => $skippedStudents,
+            'created_target_classes' => $createdTargetClasses,
             'classes_synced' => $this->syncClassPeriodMetadata($tenantId, $period),
             'related_snapshots_synced' => $snapshotUpdates,
             'eskul_members_copied' => $eskulMembersCopied,
         ];
+    }
+
+    private function ensureRolloverTargetClasses(
+        string $tenantId,
+        array $period,
+        array &$classInfoById,
+        array &$classesByGradeSuffix
+    ): int {
+        if (Schema::hasTable('kelas') === false) {
+            return 0;
+        }
+
+        $targetYear = AcademicPeriod::normalizeAcademicYear($period['tahun_ajaran'] ?? null);
+        $targetSemester = AcademicPeriod::normalizeSemester($period['semester'] ?? null);
+        if ($targetYear === null || $targetSemester === null) {
+            return 0;
+        }
+
+        $targetStartYear = (int) substr($targetYear, 0, 4);
+        $created = 0;
+        $insertedNames = [];
+
+        foreach ($classesByGradeSuffix as $grade => $suffixes) {
+            $nextGrade = $this->nextAcademicGrade($grade);
+            if ($nextGrade === null || $nextGrade === 'ALUMNI') {
+                continue;
+            }
+
+            foreach (array_keys($suffixes) as $suffix) {
+                if (isset($classesByGradeSuffix[$nextGrade][$suffix])) {
+                    continue;
+                }
+
+                $name = trim($nextGrade.' '.$suffix);
+                if ($name === '' || isset($insertedNames[$name])) {
+                    continue;
+                }
+
+                $existing = $this->findClassByNameForRollover($tenantId, $name);
+                if ($existing !== null) {
+                    $this->prepareExistingClassForRollover(
+                        $tenantId,
+                        $existing,
+                        $period,
+                        $nextGrade,
+                        $suffix,
+                        $targetStartYear
+                    );
+
+                    $info = $this->classInfoFromRow($existing, true, $nextGrade, $suffix);
+                    if ($info !== null) {
+                        $classInfoById[$info['id']] = $info;
+                        $classesByGradeSuffix[$info['grade']][$info['suffix']] = $info;
+                    }
+
+                    continue;
+                }
+
+                $classId = $this->resolveRolloverClassId($name);
+                $payload = $this->filterExistingPayload('kelas', [
+                    'id' => $classId,
+                    'tenant_id' => $tenantId,
+                    'nama' => strtoupper($name),
+                    'grade' => $nextGrade,
+                    'suffix' => $suffix,
+                    'angkatan' => $this->cohortYearForGrade($nextGrade, $targetStartYear),
+                    'tahun_ajaran' => $targetYear,
+                    'semester' => $targetSemester,
+                    'is_active' => true,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+
+                if ($payload === [] || ! isset($payload['id'])) {
+                    continue;
+                }
+
+                DB::table('kelas')->insert($payload);
+
+                $info = [
+                    'id' => $classId,
+                    'grade' => $nextGrade,
+                    'suffix' => $suffix,
+                    'label' => strtoupper($name),
+                ];
+                $classInfoById[$classId] = $info;
+                $classesByGradeSuffix[$nextGrade][$suffix] = $info;
+                $insertedNames[$name] = true;
+                $created += 1;
+            }
+        }
+
+        return $created;
+    }
+
+    private function findClassByNameForRollover(string $tenantId, string $name): ?object
+    {
+        if (Schema::hasTable('kelas') === false || Schema::hasColumn('kelas', 'nama') === false) {
+            return null;
+        }
+
+        $query = DB::table('kelas')
+            ->whereRaw('upper(nama) = ?', [strtoupper($name)]);
+        if (Schema::hasColumn('kelas', 'tenant_id')) {
+            $query->where('tenant_id', $tenantId);
+        }
+
+        return $query
+            ->select($this->existingColumns('kelas', [
+                'id', 'nama', 'grade', 'suffix', 'angkatan', 'tahun_ajaran', 'semester', 'is_active',
+            ]))
+            ->first();
+    }
+
+    private function prepareExistingClassForRollover(
+        string $tenantId,
+        object $row,
+        array $period,
+        string $grade,
+        string $suffix,
+        int $targetStartYear
+    ): void {
+        $classId = trim((string) ($row->id ?? ''));
+        if ($classId === '') {
+            return;
+        }
+
+        $payload = $this->filterExistingPayload('kelas', [
+            'grade' => $grade,
+            'suffix' => $suffix,
+            'angkatan' => $this->cohortYearForGrade($grade, $targetStartYear),
+            'tahun_ajaran' => $period['tahun_ajaran'],
+            'semester' => $period['semester'],
+            'is_active' => true,
+            'updated_at' => now(),
+        ]);
+        if ($payload === []) {
+            return;
+        }
+
+        $query = DB::table('kelas')->where('id', $classId);
+        if (Schema::hasColumn('kelas', 'tenant_id')) {
+            $query->where('tenant_id', $tenantId);
+        }
+        $query->update($payload);
+    }
+
+    private function classInfoFromRow(
+        object $row,
+        bool $ignoreActive = false,
+        ?string $gradeOverride = null,
+        ?string $suffixOverride = null
+    ): ?array
+    {
+        if ($ignoreActive === false && $this->isActiveClassRow($row) === false) {
+            return null;
+        }
+
+        $grade = $this->normalizeClassGrade((string) ($gradeOverride ?? '')) ?: $this->classGradeFromRow($row);
+        $suffix = $suffixOverride !== null ? strtoupper(trim($suffixOverride)) : $this->classSuffixFromRow($row, $grade);
+        $id = trim((string) ($row->id ?? ''));
+        if ($id === '' || $grade === '' || $suffix === '') {
+            return null;
+        }
+
+        return [
+            'id' => $id,
+            'grade' => $grade,
+            'suffix' => $suffix,
+            'label' => trim($grade.' '.$suffix),
+        ];
+    }
+
+    private function resolveRolloverClassId(string $name): string
+    {
+        $base = Str::slug($name);
+        $base = trim(substr($base, 0, 80), '-');
+        if ($base === '') {
+            $base = 'kelas';
+        }
+
+        $candidate = $base;
+        $attempt = 1;
+        while (DB::table('kelas')->where('id', $candidate)->exists()) {
+            $attempt += 1;
+            $suffix = '-'.$attempt;
+            $candidate = trim(substr($base, 0, max(1, 80 - strlen($suffix))), '-').$suffix;
+        }
+
+        return $candidate;
     }
 
     private function rolloverExceptionStudentIds(string $tenantId, string $sourceYear, string $targetYear): array

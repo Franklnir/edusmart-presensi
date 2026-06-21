@@ -647,6 +647,7 @@ class QuizController extends ApiController
                 'submission_id' => $submissionId,
                 'question_id' => $questionId,
                 'saved_at' => $now->toISOString(),
+                'deadline_at' => (string) ($quiz->deadline_at ?? ''),
             ],
         ]);
     }
@@ -720,6 +721,7 @@ class QuizController extends ApiController
                 'answers' => $stored['answers'],
                 'saved_count' => count($stored['answers']),
                 'saved_at' => $now->toISOString(),
+                'deadline_at' => (string) ($quiz->deadline_at ?? ''),
             ],
         ]);
     }
@@ -817,6 +819,32 @@ class QuizController extends ApiController
             'event_meta' => $this->encodeJsonOrNull($meta),
             'created_at' => $this->quizNow()->toISOString(),
         ]);
+
+        if ((string) ($submission->status ?? '') !== 'finished') {
+            $quiz = DB::table('quizzes')
+                ->where('id', $quizId)
+                ->where('tenant_id', $tenantId)
+                ->first(['security_mode', 'max_attempts']);
+            if ($quiz && (string) ($quiz->security_mode ?? '') === 'strict' && $quiz->max_attempts > 0) {
+                $violationCount = (int) DB::table('quiz_violation_logs')
+                    ->where('tenant_id', $tenantId)
+                    ->where('quiz_id', $quizId)
+                    ->where('submission_id', $submissionId)
+                    ->where('siswa_id', $request->user()?->id)
+                    ->count();
+                if ($violationCount >= (int) $quiz->max_attempts) {
+                    $now = $this->quizNow();
+                    $finalizeResult = $this->finalizeQuizSubmissionSafely($tenantId, $submission, $now, 'finished');
+
+                    return response()->json(['data' => [
+                        'id' => $logId,
+                        'auto_submitted' => true,
+                        'reason' => 'max_attempts_exceeded',
+                        'result' => $finalizeResult,
+                    ]]);
+                }
+            }
+        }
 
         return response()->json(['data' => ['id' => $logId]]);
     }
@@ -930,6 +958,14 @@ class QuizController extends ApiController
             ->where('id', $quizId)
             ->where('tenant_id', $tenantId)
             ->update($updates);
+
+        if ($activate) {
+            try {
+                $this->contentCache->questions($tenantId, $quizId);
+            } catch (\Throwable) {
+                // Cache warming tidak boleh mengganggu publish.
+            }
+        }
 
         $fresh = DB::table('quizzes')
             ->where('id', $quizId)

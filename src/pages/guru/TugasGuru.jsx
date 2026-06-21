@@ -898,36 +898,74 @@ export default function TugasGuru() {
       if (tugasIds.length > 0) {
         statRequests.push({
           key: 'jawaban',
-          query: applyPeriodFilters(
-            supabase.from('tugas_jawaban').select(TUGAS_JAWABAN_STATS_COLUMNS).in('tugas_id', tugasIds)
-          )
+          query: supabase.from('tugas_jawaban').select(TUGAS_JAWABAN_STATS_COLUMNS).in('tugas_id', tugasIds)
         })
       }
       if (uniqueKelasVariants.length > 0) {
-        statRequests.push({
-          key: 'siswa',
-          query: supabase
-            .from('profiles')
-            .select('id, kelas')
-            .eq('role', 'siswa')
-            .in('kelas', uniqueKelasVariants)
-        })
+        if (isViewingArchivePeriod && period.tahunAjaran) {
+          statRequests.push({
+            key: 'classHistory',
+            query: supabase
+              .from('student_class_histories')
+              .select('student_id, class_id')
+              .in('class_id', uniqueKelasVariants)
+              .eq('tahun_ajaran', period.tahunAjaran)
+              .in('status', ['active', 'nonaktif', 'mutasi'])
+          })
+        } else {
+          statRequests.push({
+            key: 'siswa',
+            query: supabase
+              .from('profiles')
+              .select('id, kelas')
+              .eq('role', 'siswa')
+              .in('kelas', uniqueKelasVariants)
+          })
+        }
       }
 
       const { data: statBatch } = await supabase.batch(statRequests)
 
       const jawabanRes = statBatch?.jawaban || { data: [], error: null }
       const siswaRes = statBatch?.siswa || { data: [], error: null }
+      const classHistoryRes = statBatch?.classHistory || { data: [], error: null }
       if (jawabanRes.error) console.error('Error fetching stats jawaban tugas:', jawabanRes.error)
       if (siswaRes.error) console.error('Error fetching students for stats:', siswaRes.error)
+      if (classHistoryRes.error) console.error('Error fetching class history for stats:', classHistoryRes.error)
 
       const jawabanArr = jawabanRes.data || []
-      const siswaArr = siswaRes.data || []
+      let siswaArr = siswaRes.data || []
+      const classHistoryArr = classHistoryRes.data || []
+      if (isViewingArchivePeriod && uniqueKelasVariants.length > 0 && classHistoryArr.length === 0) {
+        const { data: fallbackSiswa, error: fallbackSiswaError } = await supabase
+          .from('profiles')
+          .select('id, kelas')
+          .eq('role', 'siswa')
+          .in('kelas', uniqueKelasVariants)
+        if (fallbackSiswaError) console.error('Error fetching fallback students for stats:', fallbackSiswaError)
+        else siswaArr = fallbackSiswa || []
+      }
+      const studentCountByClassKey = new Map()
+      if (classHistoryArr.length) {
+        const idsByClass = new Map()
+        classHistoryArr.forEach((row) => {
+          const classKey = normalizeKelasKey(row.class_id)
+          const studentId = String(row.student_id || '').trim()
+          if (!classKey || !studentId) return
+          if (!idsByClass.has(classKey)) idsByClass.set(classKey, new Set())
+          idsByClass.get(classKey).add(studentId)
+        })
+        idsByClass.forEach((ids, classKey) => {
+          studentCountByClassKey.set(classKey, ids.size)
+        })
+      }
 
       const formatted = tugasData.map((tugas) => {
         const kelasKey = normalizeKelasKey(tugas.kelas)
         const siswaKelas = siswaArr.filter((s) => normalizeKelasKey(s.kelas) === kelasKey)
-        const totalSiswa = siswaKelas.length
+        const totalSiswa = studentCountByClassKey.has(kelasKey)
+          ? studentCountByClassKey.get(kelasKey)
+          : siswaKelas.length
 
         const jawabanIni = jawabanArr.filter((j) => j.tugas_id === tugas.id)
         const uniqueByUser = Object.values(
@@ -984,6 +1022,8 @@ export default function TugasGuru() {
     selectedMonths,
     debouncedHistorySearchTerm,
     hasActiveHistoryFilter,
+    isViewingArchivePeriod,
+    period.tahunAjaran,
 	    dateFilterPeriod.endsAt,
 	    dateFilterPeriod.startsAt,
     setLoading,
@@ -1021,7 +1061,6 @@ export default function TugasGuru() {
         .select('id,tugas_id,user_id,nilai,status')
         .in('tugas_id', tugasIds)
         .is('nilai', null)
-      jawabanQuery = applyPeriodFilters(jawabanQuery)
       const { data: jawabanData, error: jawabanError } = await jawabanQuery
 
       if (jawabanError) throw jawabanError

@@ -301,17 +301,16 @@ export default function RapotSiswa() {
           } else {
             siswaQuery = aliases.length === 1 ? siswaQuery.eq('kelas', aliases[0]) : siswaQuery.in('kelas', aliases)
           }
+          let jadwalQuery = supabase
+            .from('jadwal')
+            .select('mapel, kelas_id')
+            .in('kelas_id', aliases)
+          if (tahunPelajaran) jadwalQuery = jadwalQuery.eq('tahun_ajaran', tahunPelajaran)
 
           const batch = await supabase.batch([
             { key: 'rapot', query: rapotQuery },
             { key: 'siswa', query: siswaQuery },
-            {
-              key: 'jadwal',
-              query: supabase
-                .from('jadwal')
-                .select('mapel, kelas_id')
-                .in('kelas_id', aliases)
-            },
+            { key: 'jadwal', query: jadwalQuery },
             {
               key: 'mapelMaster',
               query: supabase

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../../../lib/supabase'
 import {
   getAcademicYearOptions,
@@ -45,8 +45,9 @@ const writeStoredPeriodFilter = (periodFilter, activeAcademicPeriod) => {
 }
 
 export function useAttendanceAcademicPeriod() {
-  const initialAcademicPeriod = withCalendarSemester(resolveAcademicPeriod())
+  const initialAcademicPeriod = useMemo(() => withCalendarSemester(resolveAcademicPeriod()), [])
   const [activeAcademicPeriod, setActiveAcademicPeriod] = useState(initialAcademicPeriod)
+  const activeAcademicPeriodRef = useRef(initialAcademicPeriod)
   const initialFilter = {
     tahunAjaran: initialAcademicPeriod.tahunAjaran,
     semester: ''
@@ -54,6 +55,32 @@ export function useAttendanceAcademicPeriod() {
   const [periodFilter, setPeriodFilter] = useState(() => readStoredPeriodFilter(initialFilter))
 
   useEffect(() => {
+    activeAcademicPeriodRef.current = activeAcademicPeriod
+  }, [activeAcademicPeriod])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const applyResolvedPeriod = (resolved) => {
+      setActiveAcademicPeriod(resolved)
+      setPeriodFilter((prev) => {
+        const normalized = normalizePeriodFilter(prev)
+        const previousActive = activeAcademicPeriodRef.current
+        const followsInitial =
+          normalized.tahunAjaran === initialAcademicPeriod.tahunAjaran
+        const followsPreviousActive =
+          normalized.tahunAjaran === previousActive.tahunAjaran
+        if (normalized.tahunAjaran && !followsInitial && !followsPreviousActive) {
+          return { ...normalized, semester: '' }
+        }
+
+        return {
+          tahunAjaran: resolved.tahunAjaran,
+          semester: ''
+        }
+      })
+    }
+
     const loadAcademicPeriod = async () => {
       try {
         const { data, error } = await supabase
@@ -67,26 +94,29 @@ export function useAttendanceAcademicPeriod() {
           return
         }
 
+        if (cancelled) return
         const resolved = withCalendarSemester(resolveAcademicPeriod(data || {}))
-        setActiveAcademicPeriod(resolved)
-        setPeriodFilter((prev) => {
-          const normalized = normalizePeriodFilter(prev)
-          const stillInitial =
-            normalized.tahunAjaran === initialAcademicPeriod.tahunAjaran
-          if (!stillInitial) return { ...normalized, semester: '' }
-
-          return {
-            tahunAjaran: resolved.tahunAjaran,
-            semester: ''
-          }
-        })
+        applyResolvedPeriod(resolved)
       } catch (error) {
-        console.warn('Gagal memuat periode akademik aktif:', error)
+        if (!cancelled) console.warn('Gagal memuat periode akademik aktif:', error)
       }
     }
 
     loadAcademicPeriod()
-  }, [])
+    const channel = supabase
+      .channel('attendance_academic_period_settings')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, (payload) => {
+        if (cancelled) return
+        const resolved = withCalendarSemester(resolveAcademicPeriod(payload.new || {}))
+        applyResolvedPeriod(resolved)
+      })
+      .subscribe()
+
+    return () => {
+      cancelled = true
+      supabase.removeChannel(channel)
+    }
+  }, [initialAcademicPeriod])
 
   useEffect(() => {
     writeStoredPeriodFilter(periodFilter, activeAcademicPeriod)

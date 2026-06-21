@@ -3,6 +3,7 @@ import React, {
   useState,
   useEffect,
   useCallback,
+  useMemo,
   useRef
 } from 'react'
 import { useSearchParams } from 'react-router-dom'
@@ -10,6 +11,7 @@ import { QrCode } from 'lucide-react'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveFilter'
+import useStudentPeriodClass from '../../hooks/useStudentPeriodClass'
 import Badge from '../../features/attendance/components/AttendanceBadge'
 import CalendarOverlay from '../../features/attendance/components/CalendarOverlay'
 import JadwalCard from '../../features/attendance/components/JadwalCard'
@@ -76,6 +78,19 @@ export default function SAbsensi() {
     pushToast('error', message)
   }, [pushToast])
 
+  const activeProfileClass = profile?.kelas || profile?.kelas_id || ''
+  const periodClass = useStudentPeriodClass({
+    userId,
+    profile,
+    tahunAjaran: periodFilter.tahunAjaran
+  })
+
+  const attendanceProfile = useMemo(() => (
+    profile
+      ? { ...profile, kelas: periodClass || activeProfileClass }
+      : profile
+  ), [activeProfileClass, periodClass, profile])
+
   const {
     currentJadwal,
     currentJadwalIndex,
@@ -99,7 +114,7 @@ export default function SAbsensi() {
     currentMinutes: currentDateTime.minutes,
     mapel,
     periodFilter,
-    profile,
+    profile: attendanceProfile,
     pushLoadErrorToast,
     setIsSubmitting,
     setMapel,
@@ -113,7 +128,7 @@ export default function SAbsensi() {
     loadRingkasDanStatus,
     loadStatistikKehadiran,
     mapel,
-    profile,
+    profile: attendanceProfile,
     tgl,
     userId,
   })
@@ -122,7 +137,7 @@ export default function SAbsensi() {
     academicPeriodPayload,
     isInRfidTimeRange,
     jadwalRef,
-    profile,
+    profile: attendanceProfile,
     pushToast,
     refreshFnsRef,
     setCurrentJadwal,
@@ -159,7 +174,7 @@ export default function SAbsensi() {
     loadRingkasDanStatus,
     loadStatistikKehadiran,
     mapel,
-    profile,
+    profile: attendanceProfile,
     pushToast,
     refreshFnsRef,
     setCurrentJadwal,
@@ -250,7 +265,7 @@ export default function SAbsensi() {
               <div>
                 <h1 className="page-title-heading">Absensi Siswa</h1>
                 <p className="page-title-description">
-                  {profile.kelas} • {profile.nama}
+                  {attendanceProfile?.kelas || '-'} • {profile.nama}
                 </p>
                 <p className="text-[11px] text-slate-500 mt-1">
                   Status kelas ditampilkan sesuai mapel dan tanggal yang dipilih.
@@ -391,9 +406,9 @@ export default function SAbsensi() {
                           onChange={(e) => setMapel(e.target.value)}
                         >
                           <option value="">— Pilih Mapel —</option>
-                          {profile?.kelas && (
+                          {attendanceProfile?.kelas && (
                             <MapelOptions
-                              kelas={profile.kelas}
+                              kelas={attendanceProfile.kelas}
                               tanggal={tgl}
                               periodFilter={periodFilter}
                             />
@@ -520,7 +535,7 @@ export default function SAbsensi() {
                     </div>
 
                     <RingkasanKelasTable
-                      kelas={profile?.kelas}
+                      kelas={attendanceProfile?.kelas}
                       mapel={mapel}
                       tanggal={tgl}
                       selfUserId={userId}
@@ -755,7 +770,7 @@ export default function SAbsensi() {
           mapel={selectedMapelForCalendar}
           jadwalMingguIni={jadwalMingguIni}
           onClose={() => setShowCalendarOverlay(false)}
-          profile={profile}
+          profile={attendanceProfile}
           userId={userId}
           periodFilter={periodFilter}
           academicPeriod={activeAcademicPeriod}

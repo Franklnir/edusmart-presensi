@@ -68,7 +68,7 @@ export function useStudentClassActions({
       (isCrossGrade
         ? `\n\nPERHATIAN:\n` +
         `Ini termasuk pindah tingkatan (grade) dari ${originalGrade} ke ${targetGrade}.\n` +
-        `Pastikan ini memang kenaikan kelas / perbaikan salah kelas.`
+        `Gunakan hanya untuk koreksi data individual. Kenaikan kelas massal berjalan dari pergantian periode akademik.`
         : '')
     )
 

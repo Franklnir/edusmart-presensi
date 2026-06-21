@@ -814,14 +814,18 @@ function AbsensiGuru() {
     }
   })
 
-  const initialAcademicPeriod = resolveAcademicPeriod()
+  const initialAcademicPeriod = useMemo(() => resolveAcademicPeriod(), [])
   const initialPeriodFilter = {
     tahunAjaran: initialAcademicPeriod.tahunAjaran,
     semester: initialAcademicPeriod.semester
   }
   const [activeAcademicPeriod, setActiveAcademicPeriod] = useState(initialAcademicPeriod)
+  const activeAcademicPeriodRef = useRef(initialAcademicPeriod)
   const [periodFilter, setPeriodFilter] = useState(() => readStoredPeriodFilter(initialPeriodFilter))
   const academicYearOptions = useMemo(() => getAcademicYearOptions(activeAcademicPeriod), [activeAcademicPeriod])
+  const isViewingArchivePeriod =
+    periodFilter.tahunAjaran !== activeAcademicPeriod.tahunAjaran ||
+    periodFilter.semester !== activeAcademicPeriod.semester
   const setAcademicYear = (tahunAjaran) => {
     setPeriodFilter((prev) => normalizePeriodFilter({ ...prev, tahunAjaran }))
   }
@@ -834,6 +838,10 @@ function AbsensiGuru() {
       semester: activeAcademicPeriod.semester
     })
   }
+
+  useEffect(() => {
+    activeAcademicPeriodRef.current = activeAcademicPeriod
+  }, [activeAcademicPeriod])
 
   // Data states
   const [jadwalAll, setJadwalAll] = useState([])
@@ -1211,6 +1219,28 @@ function AbsensiGuru() {
   }, [currentDateTime, currentSchedule, tgl, view, absenMode])
 
   useEffect(() => {
+    let cancelled = false
+
+    const applyResolvedPeriod = (resolved) => {
+      setActiveAcademicPeriod(resolved)
+      setPeriodFilter((prev) => {
+        const normalized = normalizePeriodFilter(prev)
+        const previousActive = activeAcademicPeriodRef.current
+        const followsInitial =
+          normalized.tahunAjaran === initialAcademicPeriod.tahunAjaran &&
+          normalized.semester === initialAcademicPeriod.semester
+        const followsPreviousActive =
+          normalized.tahunAjaran === previousActive.tahunAjaran &&
+          normalized.semester === previousActive.semester
+        if (!followsInitial && !followsPreviousActive) return normalized
+
+        return {
+          tahunAjaran: resolved.tahunAjaran,
+          semester: resolved.semester
+        }
+      })
+    }
+
     const loadAcademicPeriod = async () => {
       try {
         const { data, error } = await supabase
@@ -1224,27 +1254,29 @@ function AbsensiGuru() {
           return
         }
 
+        if (cancelled) return
         const resolved = resolveAcademicPeriod(data || {})
-        setActiveAcademicPeriod(resolved)
-        setPeriodFilter((prev) => {
-          const normalized = normalizePeriodFilter(prev)
-          const stillInitial =
-            normalized.tahunAjaran === initialAcademicPeriod.tahunAjaran &&
-            normalized.semester === initialAcademicPeriod.semester
-          if (!stillInitial) return normalized
-
-          return {
-            tahunAjaran: resolved.tahunAjaran,
-            semester: resolved.semester
-          }
-        })
+        applyResolvedPeriod(resolved)
       } catch (error) {
-        console.warn('Gagal memuat periode akademik aktif:', error)
+        if (!cancelled) console.warn('Gagal memuat periode akademik aktif:', error)
       }
     }
 
     loadAcademicPeriod()
-  }, [])
+    const channel = supabase
+      .channel('guru_absensi_academic_period_settings')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, (payload) => {
+        if (cancelled) return
+        const resolved = resolveAcademicPeriod(payload.new || {})
+        applyResolvedPeriod(resolved)
+      })
+      .subscribe()
+
+    return () => {
+      cancelled = true
+      supabase.removeChannel(channel)
+    }
+  }, [initialAcademicPeriod])
 
   useEffect(() => {
     writeStoredPeriodFilter(periodFilter, activeAcademicPeriod)
@@ -1463,12 +1495,12 @@ function AbsensiGuru() {
   }, [activeAcademicPeriod, kelas, jadwalAll, periodFilter.semester])
 
   const canRunAutoAlpha = useMemo(() => {
-    if (!currentSchedule || tgl !== getToday()) return false
+    if (isViewingArchivePeriod || !currentSchedule || tgl !== getToday()) return false
 
     const now = currentDateTime.minutes
     const endTime = toMinutes(currentSchedule.jam_selesai)
     return now > endTime
-  }, [currentSchedule, tgl, currentDateTime])
+  }, [currentSchedule, tgl, currentDateTime, isViewingArchivePeriod])
 
   const academicPeriodPayload = useMemo(() => ({
     tahun_ajaran: periodFilter.tahunAjaran,
@@ -1987,7 +2019,12 @@ function AbsensiGuru() {
     }
 
     if (!canRunAutoAlpha) {
-      pushToast('error', 'Auto Alpha hanya bisa dijalankan setelah jam pelajaran selesai')
+      pushToast(
+        'error',
+        isViewingArchivePeriod
+          ? 'Auto Alpha tidak tersedia saat melihat periode arsip'
+          : 'Auto Alpha hanya bisa dijalankan setelah jam pelajaran selesai'
+      )
       return
     }
 
@@ -2081,6 +2118,7 @@ function AbsensiGuru() {
   /* ===== Enhanced Real-time Auto Alpha ===== */
   useEffect(() => {
     const checkEnhancedAutoAlpha = async () => {
+      if (isViewingArchivePeriod) return
       if (!currentSchedule || !kelas || !currentSchedule.mapel) return
 
       const today = getToday()
@@ -2193,7 +2231,7 @@ function AbsensiGuru() {
 
     const interval = setInterval(checkEnhancedAutoAlpha, 120000)
     return () => clearInterval(interval)
-  }, [academicPeriodPayload, currentSchedule, kelas, tgl, currentDateTime, pushToast, lastAutoAlphaRun, periodFilter.semester, periodFilter.tahunAjaran])
+  }, [academicPeriodPayload, currentSchedule, kelas, tgl, currentDateTime, pushToast, lastAutoAlphaRun, periodFilter.semester, periodFilter.tahunAjaran, isViewingArchivePeriod])
 
   /* ===== Jam Kosong Functions ===== */
   const handleJamKosong = async () => {
@@ -2675,9 +2713,9 @@ function AbsensiGuru() {
       <div className="flex flex-wrap items-center justify-end gap-3">
         <button
           onClick={triggerAutoAlphaManual}
-          disabled={isRunningAutoAlpha || !currentSchedule}
+          disabled={isRunningAutoAlpha || !canRunAutoAlpha}
           className="px-3 py-2 bg-red-500 hover:bg-red-600 text-white text-xs font-bold rounded-2xl disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors flex items-center gap-1 shadow-sm"
-          title="Jalankan Auto Alpha untuk siswa yang belum absen"
+          title={isViewingArchivePeriod ? 'Auto Alpha tidak tersedia saat melihat periode arsip' : 'Jalankan Auto Alpha untuk siswa yang belum absen'}
         >
           {isRunningAutoAlpha ? (
             <>
@@ -3399,4 +3437,3 @@ export default function AbsensiGuruWithErrorBoundary() {
     </ErrorBoundary>
   )
 }
-

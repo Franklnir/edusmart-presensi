@@ -210,6 +210,96 @@ class AcademicPeriodProfileRestoreTest extends TestCase
         ]);
     }
 
+    public function test_auto_rollover_creates_missing_destination_classes_before_promoting_students(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-06-13 09:00:00', 'Asia/Jakarta'));
+
+        $tenantId = $this->defaultTenantId();
+        $admin = $this->createUserWithProfile($tenantId, 'admin', 'admin-rollover-create-class@example.com', 'admin');
+        $student = $this->createUserWithProfile($tenantId, 'siswa', 'student-rollover-create-class@example.com', 'x-b-mipa', [
+            'angkatan' => '2025',
+        ]);
+
+        $this->insertClass($tenantId, 'x-b-mipa', 'X B MIPA', 'X', 'B MIPA', '2025', '2025/2026', 'Genap');
+        $this->insertSettingsPeriod($tenantId, '2025/2026', 'Genap');
+
+        Sanctum::actingAs($admin);
+        $response = $this->postJson('/api/admin/academic-period/apply', $this->periodPayload('2026/2027', 'Ganjil', [
+            'auto_rollover' => true,
+            'calendar_confirmed' => true,
+        ]));
+
+        $response->assertOk()
+            ->assertJsonPath('data.rollover.promoted_students', 1)
+            ->assertJsonPath('data.rollover.alumni_students', 0)
+            ->assertJsonPath('data.rollover.skipped_students', 0)
+            ->assertJsonPath('data.rollover.created_target_classes', 1);
+
+        $this->assertDatabaseHas('kelas', [
+            'tenant_id' => $tenantId,
+            'id' => 'xi-b-mipa',
+            'nama' => 'XI B MIPA',
+            'grade' => 'XI',
+            'suffix' => 'B MIPA',
+            'angkatan' => '2025',
+            'tahun_ajaran' => '2026/2027',
+            'semester' => 'Ganjil',
+            'is_active' => true,
+        ]);
+        $this->assertDatabaseHas('profiles', [
+            'id' => $student->id,
+            'tenant_id' => $tenantId,
+            'kelas' => 'xi-b-mipa',
+            'status' => 'active',
+            'angkatan' => '2025',
+        ]);
+        $this->assertDatabaseHas('student_class_histories', [
+            'tenant_id' => $tenantId,
+            'student_id' => $student->id,
+            'tahun_ajaran' => '2026/2027',
+            'semester' => 'Ganjil',
+            'class_id' => 'xi-b-mipa',
+            'status' => 'active',
+            'source' => 'auto_rollover',
+        ]);
+    }
+
+    public function test_period_change_rejects_legacy_manual_rollover_bypass(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-06-13 09:00:00', 'Asia/Jakarta'));
+
+        $tenantId = $this->defaultTenantId();
+        $admin = $this->createUserWithProfile($tenantId, 'admin', 'admin-manual-bypass@example.com', 'admin');
+        $student = $this->createUserWithProfile($tenantId, 'siswa', 'student-manual-bypass@example.com', 'x-a', [
+            'angkatan' => '2025',
+        ]);
+
+        $this->insertClass($tenantId, 'x-a', 'X A', 'X', 'A', '2025', '2025/2026', 'Genap');
+        $this->insertClass($tenantId, 'xi-a', 'XI A', 'XI', 'A', '2025', '2026/2027', 'Ganjil');
+        $this->insertSettingsPeriod($tenantId, '2025/2026', 'Genap');
+
+        Sanctum::actingAs($admin);
+        $response = $this->postJson('/api/admin/academic-period/apply', $this->periodPayload('2026/2027', 'Ganjil', [
+            'manual_rollover_completed' => true,
+            'calendar_confirmed' => true,
+        ]));
+
+        $response->assertStatus(409)
+            ->assertJsonPath('error', 'Perubahan tahun ajaran harus dijalankan melalui rollover otomatis dari Pengaturan Akademik.');
+
+        $this->assertDatabaseHas('settings', [
+            'tenant_id' => $tenantId,
+            'tahun_ajaran' => '2025/2026',
+            'semester_aktif' => 'Genap',
+        ]);
+        $this->assertDatabaseHas('profiles', [
+            'id' => $student->id,
+            'tenant_id' => $tenantId,
+            'kelas' => 'x-a',
+            'status' => 'active',
+        ]);
+    }
+
     public function test_active_period_roster_repair_previews_and_restores_profiles(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-06-13 09:00:00', 'Asia/Jakarta'));

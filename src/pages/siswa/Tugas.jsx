@@ -16,6 +16,7 @@ import PhotoGalleryModal from '../../components/PhotoGalleryModal'
 import UploadProgressTrain from '../../components/UploadProgressTrain'
 import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveFilter'
 import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
+import useStudentPeriodClass from '../../hooks/useStudentPeriodClass'
 import { parseSupabaseError } from '../../utils/supabaseError'
 import { filterSchedulesForSemester } from '../../utils/schedulePeriodScope'
 import {
@@ -567,7 +568,11 @@ export default function TugasSiswa() {
 	    }))
 	  ), [dateFilterPeriod.months])
 
-  const kelasSiswa = useMemo(() => profile?.kelas || profile?.kelas_id || '', [profile])
+  const kelasSiswa = useStudentPeriodClass({
+    userId: profile?.id || user?.id,
+    profile,
+    tahunAjaran: period.tahunAjaran
+  })
   const selectedKelas = kelasSiswa
 
   const showUploadSuccessNotice = useCallback((title, detailText = '', variant = 'toast') => {
@@ -741,7 +746,6 @@ export default function TugasSiswa() {
         .select(TUGAS_JAWABAN_LIST_COLUMNS)
         .eq('user_id', user.id)
         .in('tugas_id', tugasIds)
-      jawabanQuery = applyPeriodFilters(jawabanQuery)
       const { data: jawabanData, error: jErr } = await jawabanQuery
 
       if (jErr) throw jErr
@@ -873,7 +877,6 @@ export default function TugasSiswa() {
         .eq('tugas_id', tugas.id)
         .eq('user_id', user.id)
         .maybeSingle()
-      jawabanQuery = applyPeriodFilters(jawabanQuery)
       const { data: jawabanData, error: jErr } = await jawabanQuery
 
       if (jErr) throw jErr

@@ -578,7 +578,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
     setTab('kelas')
     openPromotionModal()
     pushToast('info', 'Pilih siswa yang tidak naik kelas. Saat tahun ajaran baru diaktifkan, siswa ini tetap di kelas asal.', {
-      title: 'Pengecualian kenaikan kelas',
+      title: 'Pengecualian rollover periode',
       duration: 7000
     })
     url.searchParams.delete('openPromotion')
@@ -1098,7 +1098,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
     return `${kelasSelected}-${cleanYear}-${cleanScope}-${cleanHari}-${cleanMapel}-${cleanJamMulai}-${cleanJamSelesai}`
   }
 
-  async function persistAcademicPeriod(nextPeriod, { silent = false, manualRolloverCompleted = false } = {}) {
+  async function persistAcademicPeriod(nextPeriod, { silent = false } = {}) {
     const tahunAjaran = normalizeAcademicYear(nextPeriod?.tahunAjaran)
     const semester = normalizeSemester(nextPeriod?.semester)
     const ganjilRange = resolveAcademicPeriod({
@@ -1139,7 +1139,6 @@ export default function AKelas({ initialTab = 'kelas' }) {
       periode_ganjil_selesai: ganjilRange.endsAt,
       periode_genap_mulai: genapRange.startsAt,
       periode_genap_selesai: genapRange.endsAt,
-      manual_rollover_completed: manualRolloverCompleted,
       updated_at: new Date().toISOString()
     }
 
@@ -1288,7 +1287,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
       return mapStudentRows(data?.rows || [])
     } catch (error) {
       console.error('Error loading promotion students:', error)
-      pushToast('error', error?.message || 'Gagal memuat siswa untuk kenaikan kelas')
+      pushToast('error', error?.message || 'Gagal memuat siswa untuk pengecualian rollover')
       return []
     } finally {
       setPromotionStudentsLoading(false)
@@ -1316,7 +1315,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
       if (String(error?.message || '').toLowerCase().includes('academic_rollover_exceptions')) {
         pushToast('warning', 'Tabel pengecualian rollover belum siap. Jalankan migration terbaru di VPS.')
       } else {
-        pushToast('warning', 'Gagal memuat pengecualian kenaikan kelas.')
+        pushToast('warning', 'Gagal memuat pengecualian rollover periode.')
       }
     }
   }
@@ -1419,7 +1418,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
       closePromotionModal()
     } catch (error) {
       console.error('Error saving rollover exceptions:', error)
-      pushToast('error', error.message || 'Gagal menyimpan pengecualian kenaikan kelas')
+      pushToast('error', error.message || 'Gagal menyimpan pengecualian rollover periode')
     } finally {
       setPromotionLoading(false)
     }
@@ -3594,7 +3593,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
                     <div>
                       <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
                         <span className="p-2 bg-indigo-100 text-indigo-700 rounded-lg">⬆️</span>
-                        <span>Pengecualian Kenaikan Kelas</span>
+                        <span>Pengecualian Rollover Periode</span>
                       </h3>
                       <p className="text-sm text-gray-600 mt-1">
                         Pilih siswa yang tidak naik kelas. Rollover otomatis tetap dijalankan dari Pengaturan Akademik.
@@ -3709,7 +3708,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
                           rows={3}
                           value={promotionRetainReason}
                           onChange={(event) => setPromotionRetainReason(event.target.value)}
-                          placeholder="Contoh: Tidak naik kelas berdasarkan keputusan rapat kenaikan kelas."
+                          placeholder="Contoh: Tidak naik kelas berdasarkan keputusan rapat periode."
                         />
                         <p className="mt-1 text-xs text-gray-500">
                           Catatan ini hanya untuk audit rollover. Data tugas, quiz, nilai, dan absensi lama tetap tersimpan.
