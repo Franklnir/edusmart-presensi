@@ -92,6 +92,10 @@ wa.localhost {
 }
 
 {$RFID_MOSQUITTO_PUBLIC_HOST:mqtt.sismu.biz.id} {
+	tls {
+		on_demand
+	}
+
 	import security_headers
 	respond "Not Found" 404
 }

@@ -225,6 +225,7 @@ class TenantDomainManagementTest extends TestCase
         config()->set('tenancy.allow_root_for_super_admin', false);
         config()->set('services.caddy.ask_secret', 'test-secret');
         config()->set('services.caddy.evolution_host', 'wa.edusmart.test');
+        config()->set('rfid.mosquitto.public_host', 'mqtt.edusmart.test');
 
         $superAdmin = $this->createSuperAdmin();
         $tenantId = $this->createTenant('SMA Bali', 'bali');
@@ -244,6 +245,9 @@ class TenantDomainManagementTest extends TestCase
             ->assertNoContent();
 
         $this->get('http://nginx/api/internal/tls/authorize?secret=test-secret&domain=wa.edusmart.test')
+            ->assertNoContent();
+
+        $this->get('http://nginx/api/internal/tls/authorize?secret=test-secret&domain=mqtt.edusmart.test')
             ->assertNoContent();
 
         $this->get('http://nginx/api/internal/tls/authorize?secret=test-secret&domain=asing.edusmart.test')

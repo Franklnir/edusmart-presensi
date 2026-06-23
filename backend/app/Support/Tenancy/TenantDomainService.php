@@ -224,6 +224,11 @@ class TenantDomainService
             return true;
         }
 
+        $mqttHost = $this->normalizeHost((string) config('rfid.mosquitto.public_host', ''));
+        if ($mqttHost !== '' && $normalizedHost === $mqttHost) {
+            return true;
+        }
+
         if ($this->resolveMappedTenant($normalizedHost)) {
             return true;
         }
