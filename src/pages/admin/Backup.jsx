@@ -76,6 +76,20 @@ const DRIVE_STATUS_DEFAULT = {
   }
 }
 
+const BACKUP_DAY_STATUS_STYLES = {
+  backed_up: 'bg-emerald-500 text-white shadow-sm',
+  new_data: 'bg-blue-500 text-white shadow-sm',
+  empty: 'bg-slate-200 text-slate-500',
+  future: 'border border-dashed border-slate-300 bg-slate-50 text-slate-400'
+}
+
+const BACKUP_DAY_STATUS_LABELS = {
+  backed_up: 'Sudah masuk backup',
+  new_data: 'Ada data baru',
+  empty: 'Belum ada data backup',
+  future: 'Tanggal belum berjalan'
+}
+
 const toNumber = (value, fallback = 0) => {
   const num = Number(value)
   return Number.isFinite(num) ? num : fallback
@@ -154,6 +168,39 @@ const buildBaseFileName = (payload, mode) => {
   const tenantSafe = normalizeFilePart(tenantName, 'sekolah')
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')
   return `backup-${tenantSafe}-${modeSafe}-${stamp}`
+}
+
+const formatDateOnly = (value) => {
+  const [year, month, day] = String(value || '').split('-')
+  if (!year || !month || !day) return String(value || '-')
+  return `${day}/${month}/${year}`
+}
+
+const formatDateTime = (value) => {
+  if (!value) return ''
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return ''
+  return parsed.toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })
+}
+
+const backupDayNumber = (day) => {
+  const raw = day?.day_label || day?.day || ''
+  const numeric = Number(raw)
+  if (Number.isFinite(numeric) && numeric > 0) {
+    return String(numeric).padStart(2, '0')
+  }
+  return String(raw || '').slice(0, 2)
+}
+
+const backupDayTitle = (day) => {
+  const status = day?.status || 'empty'
+  const parts = [
+    `${formatDateOnly(day?.date)}: ${day?.status_label || BACKUP_DAY_STATUS_LABELS[status] || status}`
+  ]
+  const latestDataAt = formatDateTime(day?.latest_data_at)
+  if (latestDataAt) parts.push(`Data terakhir: ${latestDataAt}`)
+  if (Number(day?.row_count || 0) > 0) parts.push(`${Number(day.row_count)} data`)
+  return parts.join(' | ')
 }
 
 const summarizeBackupPayload = (payload) => {
@@ -1337,19 +1384,18 @@ export default function BackupAdmin() {
                           <div className="mb-1 text-[9px] font-bold uppercase tracking-wider opacity-60">Status Harian</div>
                           <div className="grid grid-cols-7 gap-1">
                             {month.days.map((day) => {
-                              const dayColor = day.status === 'backed_up' 
-                                ? 'bg-emerald-500 shadow-sm' 
-                                : day.status === 'new_data' 
-                                  ? 'bg-blue-500 shadow-sm' 
-                                  : day.status === 'empty' 
-                                    ? 'bg-slate-200' 
-                                    : 'border border-dashed border-slate-300 bg-slate-50'
+                              const status = day?.status || 'empty'
+                              const dayStyle = BACKUP_DAY_STATUS_STYLES[status] || BACKUP_DAY_STATUS_STYLES.empty
+                              const title = backupDayTitle(day)
                               return (
                                 <div
                                   key={day.date}
-                                  className={`aspect-square rounded-[3px] ${dayColor}`}
-                                  title={`${day.date}: ${day.status}`}
-                                />
+                                  className={`flex aspect-square items-center justify-center rounded-[4px] text-[9px] font-semibold leading-none tabular-nums ${dayStyle}`}
+                                  title={title}
+                                  aria-label={title}
+                                >
+                                  {backupDayNumber(day)}
+                                </div>
                               )
                             })}
                           </div>
