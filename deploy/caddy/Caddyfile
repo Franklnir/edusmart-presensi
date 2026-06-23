@@ -112,7 +112,7 @@ wa.localhost {
 
 	import security_headers
 	encode zstd gzip
-	respond "Forbidden" 403
+	import edusmart_proxy
 }
 
 :443 {
