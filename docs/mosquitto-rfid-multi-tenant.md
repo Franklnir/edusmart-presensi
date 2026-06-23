@@ -27,6 +27,7 @@ RFID_MOSQUITTO_INTERNAL_USE_TLS=false
 RFID_MOSQUITTO_BRIDGE_USERNAME=edusmart_bridge
 RFID_MOSQUITTO_BRIDGE_PASSWORD=GANTI_PASSWORD_PANJANG_RANDOM
 RFID_MOSQUITTO_TOPIC_PREFIX=edusmart
+MOSQUITTO_CERT_SYNC_INTERVAL_SECONDS=300
 ```
 
 Untuk DNS, arahkan `mqtt.sismu.biz.id` ke server yang menjalankan
@@ -35,16 +36,18 @@ Untuk DNS, arahkan `mqtt.sismu.biz.id` ke server yang menjalankan
 ## Deploy
 
 ```bash
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d --no-build mosquitto_init mosquitto mosquitto_reloader backend rfid_bridge
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d --no-build mosquitto_init mosquitto mosquitto_reloader mosquitto_cert_sync backend rfid_bridge caddy
 docker compose --env-file .env.production -f docker-compose.prod.yml exec backend php artisan migrate --force
 docker compose --env-file .env.production -f docker-compose.prod.yml exec backend php artisan rfid:mosquitto-sync
 docker compose --env-file .env.production -f docker-compose.prod.yml restart rfid_bridge
 ```
 
 `mosquitto_init` akan membuat self-signed certificate pertama kali di
-`deploy/mosquitto/generated/certs`. Sketch ESP memakai TLS dengan mode insecure
-verification, sehingga koneksi tetap terenkripsi. Untuk keamanan paling kuat,
-ganti certificate tersebut dengan certificate public CA untuk host MQTT.
+`deploy/mosquitto/generated/certs` sebagai fallback awal. Di production,
+`caddy` menerbitkan sertifikat public CA untuk `RFID_MOSQUITTO_PUBLIC_HOST`,
+lalu `mosquitto_cert_sync` menyalin sertifikat tersebut ke
+`deploy/mosquitto/generated/certs/server.crt` dan `server.key`. Service
+`mosquitto_reloader` akan me-reload broker ketika file sertifikat berubah.
 
 ## Provision Sekolah
 

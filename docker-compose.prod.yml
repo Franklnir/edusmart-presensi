@@ -122,6 +122,65 @@ services:
     networks:
       - internal
 
+  mosquitto_cert_sync:
+    image: alpine:3.20
+    container_name: edusmart-mosquitto-cert-sync
+    restart: unless-stopped
+    depends_on:
+      caddy:
+        condition: service_started
+      mosquitto_init:
+        condition: service_completed_successfully
+    environment:
+      RFID_MOSQUITTO_PUBLIC_HOST: ${RFID_MOSQUITTO_PUBLIC_HOST:-mqtt.sismu.biz.id}
+      MOSQUITTO_CERT_SYNC_INTERVAL_SECONDS: ${MOSQUITTO_CERT_SYNC_INTERVAL_SECONDS:-300}
+    volumes:
+      - caddy_data:/caddy-data:ro
+      - ./deploy/mosquitto/generated:/generated
+    command:
+      - sh
+      - -lc
+      - |
+        set -eu
+        host="$${RFID_MOSQUITTO_PUBLIC_HOST:-mqtt.sismu.biz.id}"
+        interval="$${MOSQUITTO_CERT_SYNC_INTERVAL_SECONDS:-300}"
+
+        sync_once() {
+          cert="$$(find /caddy-data/caddy/certificates -path "*/$${host}/$${host}.crt" -type f 2>/dev/null | sort | head -n 1 || true)"
+          key="$$(find /caddy-data/caddy/certificates -path "*/$${host}/$${host}.key" -type f 2>/dev/null | sort | head -n 1 || true)"
+
+          if [ -z "$$cert" ] || [ -z "$$key" ]; then
+            echo "Waiting for Caddy certificate for $${host}"
+            return 1
+          fi
+
+          mkdir -p /generated/certs
+          updated=0
+          if ! cmp -s "$$cert" /generated/certs/server.crt; then
+            cp "$$cert" /generated/certs/server.crt
+            updated=1
+          fi
+          if ! cmp -s "$$key" /generated/certs/server.key; then
+            cp "$$key" /generated/certs/server.key
+            updated=1
+          fi
+
+          chown -R 82:82 /generated/certs
+          chmod 0750 /generated/certs
+          chmod 0640 /generated/certs/server.crt /generated/certs/server.key
+
+          if [ "$$updated" -eq 1 ]; then
+            echo "Synced Caddy certificate for $${host} to Mosquitto"
+          fi
+        }
+
+        while true; do
+          sync_once || true
+          sleep "$$interval"
+        done
+    networks:
+      - internal
+
   evolution_postgres:
     image: postgres:16-alpine
     container_name: edusmart-evolution-postgres
@@ -817,6 +876,7 @@ services:
       CADDY_APP_HOSTS: ${CADDY_APP_HOSTS:-sismu.biz.id}
       CADDY_ROOT_DOMAIN: ${CADDY_ROOT_DOMAIN:-sismu.biz.id}
       CADDY_HTTPS_PORT_SUFFIX: ${CADDY_HTTPS_PORT_SUFFIX:-}
+      RFID_MOSQUITTO_PUBLIC_HOST: ${RFID_MOSQUITTO_PUBLIC_HOST:-mqtt.sismu.biz.id}
     ports:
       - "${NGINX_HTTP_PORT:-80}:80"
       - "${CADDY_HTTPS_PORT:-443}:443"

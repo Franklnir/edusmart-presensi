@@ -291,10 +291,14 @@ untuk membuat username/password dan ACL topic khusus sekolah tersebut.
 Jalankan/refresh service bridge:
 
 ```bash
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d --no-build mosquitto_init mosquitto mosquitto_reloader backend rfid_bridge
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d --no-build mosquitto_init mosquitto mosquitto_reloader mosquitto_cert_sync backend rfid_bridge caddy
 docker compose --env-file .env.production -f docker-compose.prod.yml exec backend php artisan rfid:mosquitto-sync
 docker compose --env-file .env.production -f docker-compose.prod.yml logs -f rfid_bridge
 ```
+
+`mosquitto_cert_sync` menunggu sertifikat `RFID_MOSQUITTO_PUBLIC_HOST` yang
+dikelola Caddy, lalu menyalinnya ke file sertifikat Mosquitto. Ini membuat port
+`8883` tetap memakai TLS public CA tanpa mengganti file manual setiap renewal.
 
 Detail isolasi topic, ACL, dan provision dari Super Admin ada di `docs/mosquitto-rfid-multi-tenant.md`.
 

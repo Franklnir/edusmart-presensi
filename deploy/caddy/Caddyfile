@@ -91,6 +91,11 @@ wa.localhost {
 	import evolution_proxy
 }
 
+{$RFID_MOSQUITTO_PUBLIC_HOST:mqtt.sismu.biz.id} {
+	import security_headers
+	respond "Not Found" 404
+}
+
 :80 {
 	redir https://{host}{$CADDY_HTTPS_PORT_SUFFIX}{uri} 308
 }

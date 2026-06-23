@@ -126,11 +126,13 @@ RFID_MQTT_TLS_VERIFY_PEER_NAME=true
 RFID_MQTT_TLS_ALLOW_SELF_SIGNED=false
 ```
 
-Jika file cert Mosquitto lama masih self-signed untuk domain lain, regenerasi atau
-ganti dengan certificate untuk `mqtt.sismu.biz.id`, lalu restart:
+Jika file cert Mosquitto lama masih self-signed untuk domain lain, jalankan
+`mosquitto_cert_sync` agar sertifikat public CA yang dikelola Caddy disalin ke
+Mosquitto, lalu restart/reload service terkait:
 
 ```bash
-docker compose --env-file .env.production -f docker-compose.prod.yml restart mosquitto mosquitto_reloader rfid_bridge
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d --no-build caddy mosquitto_cert_sync mosquitto_reloader
+docker compose --env-file .env.production -f docker-compose.prod.yml restart mosquitto rfid_bridge
 ```
 
 Port `8883` sebaiknya hanya dibuka untuk IP perangkat RFID sekolah atau lewat VPN.
