@@ -5,6 +5,7 @@ return [
     'allow_open_http' => filter_var(env('RFID_ALLOW_OPEN_HTTP', env('APP_ENV') !== 'production'), FILTER_VALIDATE_BOOL),
 
     'performance' => [
+        'runtime_cache_enabled' => filter_var(env('RFID_RUNTIME_CACHE_ENABLED', env('APP_ENV') !== 'testing'), FILTER_VALIDATE_BOOL),
         'tenant_cache_ttl_seconds' => (int) env('RFID_TENANT_CACHE_TTL_SECONDS', 300),
         'device_cache_ttl_seconds' => (int) env('RFID_DEVICE_CACHE_TTL_SECONDS', 60),
         'device_auth_cache_ttl_seconds' => (int) env('RFID_DEVICE_AUTH_CACHE_TTL_SECONDS', 300),

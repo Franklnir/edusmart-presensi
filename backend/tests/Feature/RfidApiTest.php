@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -46,6 +47,39 @@ class RfidApiTest extends TestCase
             ->assertJsonPath('mode', 'manual')
             ->assertJsonPath('scan_manual_enabled', true)
             ->assertJsonPath('rfid_aktif', true);
+    }
+
+    public function test_rfid_mode_handles_missing_settings_row_with_safe_default(): void
+    {
+        $this->createTenant('sma-bali-no-settings');
+
+        $response = $this->getJson('/api/rfid/mode?tenant_slug=sma-bali-no-settings');
+
+        $response->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('tenant_slug', 'sma-bali-no-settings')
+            ->assertJsonPath('mode', 'auto')
+            ->assertJsonPath('scan_manual_enabled', false)
+            ->assertJsonPath('rfid_aktif', true);
+    }
+
+    public function test_rfid_mode_repairs_invalid_runtime_tenant_cache(): void
+    {
+        config()->set('rfid.performance.runtime_cache_enabled', true);
+        $tenant = $this->createTenant('sma-cache-bali');
+        Cache::put('rfid:tenant:sma-cache-bali', (object) ['broken' => true], 300);
+
+        $response = $this->getJson('/api/rfid/mode?tenant_slug=sma-cache-bali');
+
+        $response->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('tenant_id', $tenant->id)
+            ->assertJsonPath('tenant_slug', 'sma-cache-bali');
+
+        $cached = Cache::get('rfid:tenant:sma-cache-bali');
+        $this->assertIsArray($cached);
+        $this->assertSame($tenant->id, $cached['id'] ?? null);
+        $this->assertSame('sma-cache-bali', $cached['slug'] ?? null);
     }
 
     public function test_admin_can_update_scan_settings_through_backend_endpoint(): void

@@ -432,6 +432,9 @@ class TenantDomainManagementTest extends TestCase
             ->assertJsonPath('data.rfid_template.mqtt.managed_by_platform', true)
             ->assertJsonPath('data.rfid_template.mqtt.host', 'mqtt.edusmart.test')
             ->assertJsonPath('data.rfid_template.mqtt.use_tls', true)
+            ->assertJsonPath('data.rfid_template.mqtt.tls_verify_peer', true)
+            ->assertJsonPath('data.rfid_template.mqtt.tls_verify_peer_name', true)
+            ->assertJsonPath('data.rfid_template.mqtt.tls_allow_self_signed', false)
             ->assertJsonPath('data.rfid_template.topic_templates.scan', 'edusmart/{tenant}/rfid/{device}/scan')
             ->assertJsonPath('data.rfid_template.topics.scan', 'edusmart/bali/rfid/rfid-template-bali-01/scan')
             ->assertJsonPath('data.mosquitto_sync.synced', true);

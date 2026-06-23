@@ -35,13 +35,18 @@ class MqttBridgeService
 
                 if ($once) {
                     foreach ($contexts as $context) {
-                        $this->publishScopedTenantModes(
-                            $context['client'],
-                            $context['cfg'],
-                            $forcedTenants,
-                            $this->normalizeQos((int) ($context['cfg']['qos'] ?? 1)),
-                            $log
-                        );
+                        try {
+                            $this->publishScopedTenantModes(
+                                $context['client'],
+                                $context['cfg'],
+                                $forcedTenants,
+                                $this->normalizeQos((int) ($context['cfg']['qos'] ?? 1)),
+                                $log
+                            );
+                        } catch (\Throwable $e) {
+                            $tenantSlug = $this->nullableString($context['cfg']['tenant_slug'] ?? null) ?: '*';
+                            $log('warning', sprintf('Publish mode MQTT dilewati [%s]: %s', $tenantSlug, $e->getMessage()));
+                        }
                     }
                     $log('info', 'Bridge selesai dijalankan sekali (--once).');
 
@@ -130,19 +135,27 @@ class MqttBridgeService
 
                 try {
                     $client->loopOnce((float) ($context['started_at'] ?? microtime(true)), false);
-
-                    $interval = max(5, (int) ($cfg['mode_sync_interval_seconds'] ?? config('rfid.mqtt.mode_sync_interval_seconds', 20)));
-                    $now = microtime(true);
-                    if (! ($context['mode_synced'] ?? false) || ($now - (float) ($context['last_mode_sync_at'] ?? 0)) >= $interval) {
-                        $this->publishScopedTenantModes($client, $cfg, $forcedTenants, $qos, $log);
-                        $context['mode_synced'] = true;
-                        $context['last_mode_sync_at'] = $now;
-                    }
                 } catch (\Throwable $e) {
                     $tenantSlug = $this->nullableString($cfg['tenant_slug'] ?? null) ?: '*';
                     $log('error', sprintf('MQTT loop error [%s]: %s', $tenantSlug, $e->getMessage()));
                     $this->disconnectClient($client);
                     unset($contexts[$key]);
+
+                    continue;
+                }
+
+                $interval = max(5, (int) ($cfg['mode_sync_interval_seconds'] ?? config('rfid.mqtt.mode_sync_interval_seconds', 20)));
+                $now = microtime(true);
+                if (! ($context['mode_synced'] ?? false) || ($now - (float) ($context['last_mode_sync_at'] ?? 0)) >= $interval) {
+                    try {
+                        $this->publishScopedTenantModes($client, $cfg, $forcedTenants, $qos, $log);
+                        $context['mode_synced'] = true;
+                        $context['last_mode_sync_at'] = $now;
+                    } catch (\Throwable $e) {
+                        $tenantSlug = $this->nullableString($cfg['tenant_slug'] ?? null) ?: '*';
+                        $log('warning', sprintf('Publish mode MQTT dilewati [%s]: %s', $tenantSlug, $e->getMessage()));
+                        $context['last_mode_sync_at'] = $now;
+                    }
                 }
             }
             unset($context);
@@ -357,7 +370,7 @@ class MqttBridgeService
             false
         );
 
-        $this->publishTenantModeAfterScan($client, $cfg, $tenantSlug, $deviceId, $qos);
+        $this->publishTenantModeAfterScan($client, $cfg, $tenantSlug, $deviceId, $qos, $log);
     }
 
     private function publishTenantModes(
@@ -373,7 +386,27 @@ class MqttBridgeService
         }
     }
 
-    private function publishTenantModeAfterScan(MqttClient $client, array $cfg, string $tenantSlug, string $deviceId, int $qos): void
+    private function publishTenantModeAfterScan(
+        MqttClient $client,
+        array $cfg,
+        string $tenantSlug,
+        string $deviceId,
+        int $qos,
+        callable $log
+    ): void {
+        try {
+            $this->publishTenantModeAfterScanUnsafe($client, $cfg, $tenantSlug, $deviceId, $qos);
+        } catch (\Throwable $e) {
+            $log('warning', sprintf(
+                'Publish mode setelah scan dilewati [%s/%s]: %s',
+                $tenantSlug,
+                $deviceId !== '' ? $deviceId : '-',
+                $e->getMessage()
+            ));
+        }
+    }
+
+    private function publishTenantModeAfterScanUnsafe(MqttClient $client, array $cfg, string $tenantSlug, string $deviceId, int $qos): void
     {
         $throttleSeconds = max(0, (int) config('rfid.performance.mqtt_mode_publish_after_scan_throttle_seconds', 5));
         $cacheKey = $this->contextKey($cfg).'|mode-after-scan|'.$tenantSlug.'|'.$deviceId;

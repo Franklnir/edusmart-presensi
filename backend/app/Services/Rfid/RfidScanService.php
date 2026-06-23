@@ -194,6 +194,7 @@ class RfidScanService
             ->where('tenant_id', $tenant->id)
             ->orderBy('id')
             ->first($settingsColumns);
+        $settings ??= (object) [];
 
         $this->ensureRfidAlwaysActive((string) $tenant->id);
 
@@ -353,20 +354,94 @@ class RfidScanService
 
         $normalized = Str::lower($tenantSlug);
         if ($this->shouldUseRuntimeCache() && array_key_exists($normalized, self::$tenantCache)) {
-            return self::$tenantCache[$normalized];
+            return $this->hydrateTenantCacheValue(self::$tenantCache[$normalized]);
         }
 
         $tenantQuery = fn () => DB::table('tenants')
             ->whereRaw('lower(slug) = ?', [$normalized])
             ->first(['id', 'slug', 'status']);
 
-        $tenant = $this->shouldUseRuntimeCache()
-            ? Cache::remember('rfid:tenant:'.$normalized, $this->performanceTtl('tenant_cache_ttl_seconds', 300), $tenantQuery)
-            : $tenantQuery();
+        if ($this->shouldUseRuntimeCache()) {
+            $cacheKey = 'rfid:tenant:'.$normalized;
+            $cached = Cache::get($cacheKey);
+            $tenantData = $this->normalizeTenantCacheValue($cached);
 
-        self::$tenantCache[$normalized] = $tenant ?: null;
+            if ($tenantData === null && $cached !== null) {
+                Cache::forget($cacheKey);
+            }
 
-        return self::$tenantCache[$normalized];
+            if ($tenantData === null) {
+                $tenantData = $this->tenantRowToCacheValue($tenantQuery());
+                if ($tenantData !== null) {
+                    Cache::put($cacheKey, $tenantData, $this->performanceTtl('tenant_cache_ttl_seconds', 300));
+                }
+            }
+
+            if ($tenantData !== null) {
+                self::$tenantCache[$normalized] = $tenantData;
+            } else {
+                unset(self::$tenantCache[$normalized]);
+            }
+
+            return $this->hydrateTenantCacheValue($tenantData);
+        }
+
+        $tenant = $tenantQuery();
+        $tenantData = $this->tenantRowToCacheValue($tenant);
+        if ($tenantData !== null) {
+            self::$tenantCache[$normalized] = $tenantData;
+        } else {
+            unset(self::$tenantCache[$normalized]);
+        }
+
+        return $tenant ?: null;
+    }
+
+    private function tenantRowToCacheValue(mixed $tenant): ?array
+    {
+        if (! is_object($tenant) || get_class($tenant) === '__PHP_Incomplete_Class') {
+            return null;
+        }
+
+        $id = trim((string) ($tenant->id ?? ''));
+        $slug = trim((string) ($tenant->slug ?? ''));
+        if ($id === '' || $slug === '') {
+            return null;
+        }
+
+        return [
+            'id' => $id,
+            'slug' => $slug,
+            'status' => trim((string) ($tenant->status ?? 'active')) ?: 'active',
+        ];
+    }
+
+    private function normalizeTenantCacheValue(mixed $cached): ?array
+    {
+        if ($cached === null) {
+            return null;
+        }
+
+        if (is_array($cached)) {
+            $id = trim((string) ($cached['id'] ?? ''));
+            $slug = trim((string) ($cached['slug'] ?? ''));
+            if ($id === '' || $slug === '') {
+                return null;
+            }
+
+            return [
+                'id' => $id,
+                'slug' => $slug,
+                'status' => trim((string) ($cached['status'] ?? 'active')) ?: 'active',
+            ];
+        }
+
+        return $this->tenantRowToCacheValue($cached);
+    }
+
+    private function hydrateTenantCacheValue(?array $tenant): ?object
+    {
+        return $tenant !== null ? (object) $tenant : null;
     }
 
     private function settingsHasColumn(string $column): bool
@@ -410,7 +485,7 @@ class RfidScanService
 
     private function shouldUseRuntimeCache(): bool
     {
-        return ! app()->runningUnitTests();
+        return (bool) config('rfid.performance.runtime_cache_enabled', ! app()->runningUnitTests());
     }
 
     private function putRuntimeCache(string $key, mixed $value, int $ttl): void
