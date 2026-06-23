@@ -771,7 +771,7 @@ body.quiz-strict-active img {
   min-height: 1.25rem;
   color: rgb(51 65 85);
   font-size: 0.875rem;
-  font-weight: 700;
+  font-weight: 600;
   line-height: 1.25rem;
 }
 
@@ -1302,7 +1302,7 @@ body.quiz-strict-active img {
   }
 
   .page-title-heading {
-    @apply text-2xl font-extrabold tracking-tight text-slate-950;
+    @apply text-2xl font-semibold tracking-normal text-slate-900;
   }
 
   .page-title-description {

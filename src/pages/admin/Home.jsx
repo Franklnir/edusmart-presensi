@@ -134,14 +134,14 @@ const StatCard = React.memo(({ label, value, icon, color = 'blue' }) => {
   return (
     <div className="group bg-white rounded-2xl border border-slate-100 shadow-card p-5 transition-all duration-200 hover:shadow-card-hover hover:-translate-y-0.5">
       <div className="flex items-center justify-between mb-3">
-        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{label}</p>
+        <p className="text-xs font-medium text-slate-500 uppercase tracking-normal">{label}</p>
         {icon && (
           <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${c.bg} flex items-center justify-center text-white text-base shadow-sm`}>
             {icon}
           </div>
         )}
       </div>
-      <p className="text-3xl font-extrabold text-slate-900 tabular-nums">{value}</p>
+      <p className="text-3xl font-semibold text-slate-900 tabular-nums">{value}</p>
       <div className="mt-3 h-0.5 rounded-full bg-gradient-to-r from-transparent via-slate-100 to-transparent" />
     </div>
   )
@@ -1185,7 +1185,7 @@ export default function AHome() {
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center text-white text-base">📢</div>
                   <div>
-                    <h2 className="text-base font-bold text-white">Kelola Pengumuman</h2>
+                    <h2 className="text-base font-semibold text-white">Kelola Pengumuman</h2>
                     <p className="text-brand-200 text-xs">Untuk guru & siswa</p>
                   </div>
                 </div>
@@ -1256,7 +1256,7 @@ export default function AHome() {
               <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span className="text-base">📋</span>
-                  <h3 className="text-sm font-bold text-slate-800">Daftar Pengumuman</h3>
+                  <h3 className="text-sm font-semibold text-slate-800">Daftar Pengumuman</h3>
                   <span className="text-xs text-slate-400">({pengumumanList.length})</span>
                 </div>
               </div>
@@ -1302,7 +1302,7 @@ export default function AHome() {
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center text-white text-base">⚽</div>
                   <div>
-                    <h2 className="text-base font-bold text-white">Kelola Ekstrakurikuler</h2>
+                    <h2 className="text-base font-semibold text-white">Kelola Ekstrakurikuler</h2>
                     <p className="text-orange-100 text-xs">{eskulList.length} eskul terdaftar</p>
                   </div>
                 </div>
@@ -1331,8 +1331,8 @@ export default function AHome() {
                 <div className="mb-6 rounded-2xl border border-orange-100 bg-gradient-to-r from-orange-50 to-amber-50 p-4">
                   <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
                     <div>
-                      <p className="text-xs font-black uppercase tracking-wide text-orange-700">Aturan Pendaftaran</p>
-                      <h3 className="mt-1 text-base font-extrabold text-slate-900">Batas Ekstrakurikuler per Siswa</h3>
+                      <p className="text-xs font-semibold uppercase tracking-normal text-orange-700">Aturan Pendaftaran</p>
+                      <h3 className="mt-1 text-base font-semibold text-slate-900">Batas Ekstrakurikuler per Siswa</h3>
                     </div>
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                       <input
@@ -1341,13 +1341,13 @@ export default function AHome() {
                         max="99"
                         value={maxEskulPerSiswa}
                         onChange={(event) => setMaxEskulPerSiswa(event.target.value)}
-                        className="h-12 w-full rounded-xl border-2 border-orange-200 bg-white px-4 text-sm font-extrabold text-slate-900 focus:border-orange-400 focus:ring-2 focus:ring-orange-200 sm:w-28"
+                        className="h-12 w-full rounded-xl border-2 border-orange-200 bg-white px-4 text-sm font-medium text-slate-900 focus:border-orange-400 focus:ring-2 focus:ring-orange-200 sm:w-28"
                       />
                       <button
                         type="button"
                         onClick={saveMaxEskulPerSiswa}
                         disabled={savingMaxEskul}
-                        className="h-12 rounded-xl bg-orange-600 px-5 text-sm font-extrabold text-white shadow-sm transition hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="h-12 rounded-xl bg-orange-600 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {savingMaxEskul ? 'Menyimpan...' : 'Simpan'}
                       </button>
@@ -1642,7 +1642,7 @@ export default function AHome() {
                         <span className="text-2xl text-white">👥</span>
                       </div>
                       <div>
-                        <h3 className="text-xl font-bold text-white">
+                        <h3 className="text-xl font-semibold text-white">
                           Anggota • {eskulForm.nama || eskulSel}
                         </h3>
                         <p className="text-emerald-100 mt-1">
@@ -1658,7 +1658,7 @@ export default function AHome() {
                         type="button"
                         onClick={() => setIsAddMemberModalOpen(true)}
                         disabled={isViewingArchivePeriod}
-                        className="rounded-xl bg-white px-4 py-2 text-sm font-extrabold text-emerald-700 shadow-sm transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-emerald-700 shadow-sm transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         + Tambah Anggota
                       </button>
@@ -1672,13 +1672,13 @@ export default function AHome() {
                       <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
                         <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5">
                           <div>
-                            <p className="text-xs font-black uppercase tracking-wide text-emerald-600">Anggota Ekstrakurikuler</p>
-                            <h3 className="mt-1 text-xl font-extrabold text-slate-950">Kelola Anggota</h3>
+                            <p className="text-xs font-semibold uppercase tracking-normal text-emerald-600">Anggota Ekstrakurikuler</p>
+                            <h3 className="mt-1 text-xl font-semibold text-slate-900">Kelola Anggota</h3>
                           </div>
                           <button
                             type="button"
                             onClick={() => setIsAddMemberModalOpen(false)}
-                            className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-bold text-slate-600 transition hover:bg-slate-50"
+                            className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-50"
                           >
                             Tutup
                           </button>
@@ -1700,7 +1700,7 @@ export default function AHome() {
                                 type="button"
                                 onClick={() => setAddMemberMode(value)}
                                 disabled={addMemberLocked}
-                                className={`min-h-[42px] rounded-xl border px-3 text-xs font-bold transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-60 ${
+                                className={`min-h-[42px] rounded-xl border px-3 text-xs font-semibold transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-60 ${
                                   addMemberMode === value
                                     ? 'border-emerald-500 bg-emerald-600 text-white shadow-sm'
                                     : 'border-emerald-200 bg-white text-slate-700 hover:border-emerald-300 hover:bg-emerald-50'
@@ -1713,7 +1713,7 @@ export default function AHome() {
 
                           <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_1fr]">
                             <div className={addMemberMode === 'all' ? 'hidden' : ''}>
-                              <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-slate-500">
+                              <label className="mb-2 block text-xs font-medium uppercase tracking-normal text-slate-500">
                                 Kelas
                               </label>
                               <select
@@ -1731,7 +1731,7 @@ export default function AHome() {
                             </div>
 
                             <div className={addMemberMode === 'single' ? '' : 'hidden'}>
-                              <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-slate-500">
+                              <label className="mb-2 block text-xs font-medium uppercase tracking-normal text-slate-500">
                                 Siswa
                               </label>
                               <select
@@ -1759,7 +1759,7 @@ export default function AHome() {
 
                           <div className="rounded-2xl border border-slate-200 bg-white p-4">
                             <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                              <h4 className="flex items-center gap-3 text-lg font-bold text-gray-900">
+                              <h4 className="flex items-center gap-3 text-lg font-semibold text-gray-900">
                                 <span className="rounded-lg bg-emerald-100 p-2 text-emerald-600">
                                   📊
                                 </span>
@@ -1829,13 +1829,13 @@ export default function AHome() {
                           <button
                             type="button"
                             onClick={() => setIsAddMemberModalOpen(false)}
-                            className="min-h-[44px] rounded-xl border border-slate-200 bg-white px-5 text-sm font-extrabold text-slate-700 transition hover:bg-slate-100"
+                            className="min-h-[44px] rounded-xl border border-slate-200 bg-white px-5 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
                           >
                             Batal
                           </button>
                           <button
                             type="button"
-                            className="min-h-[44px] rounded-xl bg-emerald-600 px-6 text-sm font-extrabold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="min-h-[44px] rounded-xl bg-emerald-600 px-6 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
                             onClick={tambahAnggotaEskul}
                             disabled={
                               addMemberLocked ||

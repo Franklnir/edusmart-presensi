@@ -76,7 +76,7 @@ export default function AcademicPeriodArchiveFilter({
   return (
     <>
       <div className={`sismu-filter-field ${className}`}>
-        <div className="sismu-filter-label uppercase tracking-wide">
+        <div className="sismu-filter-label uppercase tracking-normal">
           {title}
         </div>
         <button
@@ -91,7 +91,7 @@ export default function AcademicPeriodArchiveFilter({
         >
           <div className="flex min-h-0 items-center justify-between gap-3">
             <div className="min-w-0">
-              <div className="truncate text-sm font-bold leading-5 text-slate-900">
+              <div className="truncate text-sm font-semibold leading-5 text-slate-900">
                 {selectedYear || '-'}
               </div>
               <div className="truncate text-[11px] font-medium leading-4 text-slate-500">
@@ -130,7 +130,7 @@ export default function AcademicPeriodArchiveFilter({
                   <CalendarDays className="h-5 w-5" />
                 </div>
                 <div>
-                  <h3 id={dialogTitleId} className="text-base font-extrabold text-slate-900">
+                  <h3 id={dialogTitleId} className="text-base font-semibold text-slate-900">
                     {title}
                   </h3>
                   <p className="mt-1 text-xs leading-5 text-slate-500">
@@ -153,10 +153,10 @@ export default function AcademicPeriodArchiveFilter({
                 <div className="rounded-2xl border border-emerald-100 bg-emerald-50/80 p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <div className="text-[11px] font-bold uppercase tracking-wide text-emerald-700">
+                      <div className="text-[11px] font-semibold uppercase tracking-normal text-emerald-700">
                         Periode Aktif Sekolah
                       </div>
-                      <div className="mt-1 text-sm font-extrabold text-slate-900">
+                      <div className="mt-1 text-sm font-semibold text-slate-900">
                         {activeAcademicPeriod?.tahunAjaran || '-'}
                       </div>
                       <div className="mt-1 text-xs leading-5 text-slate-600">
@@ -171,7 +171,7 @@ export default function AcademicPeriodArchiveFilter({
 
                 <div className="grid grid-cols-1 gap-4">
                   <div>
-                    <label htmlFor={academicYearSelectId} className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">
+                    <label htmlFor={academicYearSelectId} className="mb-1.5 block text-xs font-medium uppercase tracking-normal text-slate-500">
                       Tahun Ajaran
                     </label>
                     <select
@@ -197,7 +197,7 @@ export default function AcademicPeriodArchiveFilter({
                   type="button"
                   onClick={handleUseActivePeriod}
                   disabled={!draftIsArchive}
-                  className="w-full rounded-2xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm font-bold text-indigo-700 transition-all hover:bg-indigo-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+                  className="w-full rounded-2xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm font-semibold text-indigo-700 transition-all hover:bg-indigo-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
                 >
                   Gunakan Periode Aktif
                 </button>
@@ -208,14 +208,14 @@ export default function AcademicPeriodArchiveFilter({
               <button
                 type="button"
                 onClick={() => setIsOpen(false)}
-                className="rounded-2xl px-5 py-3 text-sm font-bold text-slate-600 transition-colors hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                className="rounded-2xl px-5 py-3 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-300"
               >
                 Batal
               </button>
               <button
                 type="button"
                 onClick={handleApply}
-                className="rounded-2xl bg-indigo-600 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-indigo-600/20 transition-colors hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="rounded-2xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-600/20 transition-colors hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
               >
                 Terapkan Periode
               </button>
