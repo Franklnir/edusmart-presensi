@@ -571,6 +571,62 @@ class TenantDomainManagementTest extends TestCase
         ]);
     }
 
+    public function test_super_admin_rfid_device_id_is_normalized_for_mqtt_topics(): void
+    {
+        config()->set('tenancy.root_domain', 'edusmart.test');
+        config()->set('tenancy.admin_subdomain', 'admin');
+        config()->set('tenancy.admin_hosts', []);
+        config()->set('tenancy.allow_root_for_super_admin', false);
+
+        $superAdmin = $this->createSuperAdmin();
+        $tenantId = $this->createTenant('SMA Bali', 'bali');
+
+        $this
+            ->actingAs($superAdmin)
+            ->postJson("http://admin.edusmart.test/api/super/tenants/{$tenantId}/rfid-devices", [
+                'device_id' => 'Gerbang 2 / Utara',
+                'name' => 'Gerbang 2 Utara',
+                'transport' => 'mqtt',
+                'board_type' => 'esp8266',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.data.device_id', 'gerbang-2-utara')
+            ->assertJsonPath('data.data.requested_device_id', 'Gerbang 2 / Utara');
+
+        $this->assertDatabaseHas('rfid_devices', [
+            'tenant_id' => $tenantId,
+            'device_id' => 'gerbang-2-utara',
+        ]);
+    }
+
+    public function test_tenant_mqtt_config_rejects_topic_templates_with_spaces(): void
+    {
+        config()->set('tenancy.root_domain', 'edusmart.test');
+        config()->set('tenancy.admin_subdomain', 'admin');
+        config()->set('tenancy.admin_hosts', []);
+        config()->set('tenancy.allow_root_for_super_admin', false);
+
+        $superAdmin = $this->createSuperAdmin();
+        $tenantId = $this->createTenant('SMA Bali', 'bali');
+
+        $this
+            ->actingAs($superAdmin)
+            ->patchJson("http://admin.edusmart.test/api/super/tenants/{$tenantId}/rfid-mqtt", [
+                'enabled' => true,
+                'host' => 'mqtt.shared.test',
+                'port' => 1883,
+                'username' => 'rfid-user',
+                'password' => 'rfid-secret',
+                'use_tls' => false,
+                'qos' => 1,
+                'scan_topic_template' => 'edusmart/{tenant}/rfid/gerbang 2/scan',
+                'response_topic_template' => 'edusmart/{tenant}/rfid/{device}/response',
+                'mode_topic_template' => 'edusmart/{tenant}/rfid/{device}/mode',
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('error', 'Topik MQTT RFID tidak boleh mengandung spasi. Gunakan minus untuk pemisah, misalnya gerbang-2.');
+    }
+
     public function test_tenant_mqtt_config_rejects_scan_topic_conflict_on_same_host(): void
     {
         config()->set('tenancy.root_domain', 'edusmart.test');

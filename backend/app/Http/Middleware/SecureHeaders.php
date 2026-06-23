@@ -43,7 +43,7 @@ class SecureHeaders
 
         // Apply HSTS only when request is served via HTTPS.
         if ($request->isSecure()) {
-            $response->headers->set('Strict-Transport-Security', 'max-age=31536000');
+            $response->headers->set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
         }
 
         // Authenticated API payloads can contain tenant or profile data, so avoid

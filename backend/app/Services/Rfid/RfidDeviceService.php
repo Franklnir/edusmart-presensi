@@ -96,11 +96,12 @@ class RfidDeviceService
             ];
         }
 
-        $deviceId = trim($deviceId);
+        $requestedDeviceId = trim($deviceId);
+        $deviceId = $this->normalizeDeviceId($requestedDeviceId);
         if ($deviceId === '') {
             return [
                 'success' => false,
-                'message' => 'device_id wajib diisi',
+                'message' => 'device_id wajib diisi dan hanya boleh menghasilkan huruf, angka, titik, underscore, atau minus',
             ];
         }
 
@@ -139,13 +140,30 @@ class RfidDeviceService
 
         return [
             'success' => true,
-            'message' => 'Device RFID berhasil didaftarkan',
+            'message' => $requestedDeviceId !== $deviceId
+                ? 'Device RFID berhasil didaftarkan dengan Device ID aman untuk MQTT'
+                : 'Device RFID berhasil didaftarkan',
             'tenant_slug' => (string) $tenant->slug,
             'device_id' => $deviceId,
+            'requested_device_id' => $requestedDeviceId,
             'device_name' => $this->nullableString($name),
             'transport' => $transport,
             'secret' => $secret,
         ];
+    }
+
+    public function normalizeDeviceId(string $deviceId): string
+    {
+        $normalized = Str::lower(Str::ascii(trim($deviceId)));
+        $normalized = preg_replace('/[^a-z0-9._-]+/', '-', $normalized) ?: '';
+        $normalized = preg_replace('/-+/', '-', $normalized) ?: '';
+        $normalized = trim($normalized, '-');
+
+        if ($normalized === '' || preg_match('/[a-z0-9]/', $normalized) !== 1) {
+            return '';
+        }
+
+        return substr($normalized, 0, 191);
     }
 
     public function findDeviceContext(string $deviceId): ?object

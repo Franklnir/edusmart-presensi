@@ -512,16 +512,27 @@ class TenantBackupService
             }
         }
 
+        $periodActivity = [];
+        if (! empty($months)) {
+            try {
+                $activityStart = Carbon::parse((string) ($months[0]['start_date'] ?? ''), 'Asia/Jakarta')->startOfDay();
+                $activityEnd = Carbon::parse((string) ($months[count($months) - 1]['end_date'] ?? ''), 'Asia/Jakarta')->endOfDay();
+                if ($activityEnd->greaterThan($now)) {
+                    $activityEnd = $now->copy();
+                }
+                if ($activityEnd->greaterThanOrEqualTo($activityStart)) {
+                    $periodActivity = $this->tenantDataActivityByDayCached($tenantId, $activityStart, $activityEnd, $refresh);
+                }
+            } catch (\Throwable $e) {
+                $periodActivity = [];
+            }
+        }
+
         $items = [];
         foreach ($months as $month) {
             $window = $this->monthlyBackupWindow($tenantId, (string) $month['value'], $now);
             $record = $this->monthlyBackupRecord($tenantId, (string) $month['value']);
-            $dailyActivity = $this->tenantDataActivityByDayCached(
-                $tenantId,
-                $window['month_start'],
-                $window['effective_end_at'],
-                $refresh
-            );
+            $dailyActivity = $this->sliceDailyActivity($periodActivity, $window['month_start'], $window['effective_end_at']);
             $latestDataAt = $this->latestDataAtFromDailyActivity($dailyActivity);
             $lastBackupAt = $this->recordUploadedAt($record);
             $needsUpdate = $record && $latestDataAt && $lastBackupAt && $latestDataAt->greaterThan($lastBackupAt);
@@ -1098,6 +1109,28 @@ class TenantBackupService
         return $latest;
     }
 
+    private function sliceDailyActivity(array $dailyActivity, Carbon $startAt, Carbon $endAt): array
+    {
+        if ($endAt->lessThan($startAt)) {
+            return [];
+        }
+
+        $startDate = $startAt->toDateString();
+        $endDate = $endAt->toDateString();
+        $items = [];
+
+        foreach ($dailyActivity as $date => $activity) {
+            $date = (string) $date;
+            if ($date < $startDate || $date > $endDate) {
+                continue;
+            }
+
+            $items[$date] = $activity;
+        }
+
+        return $items;
+    }
+
     private function tenantDataActivityByDayCached(string $tenantId, Carbon $startAt, Carbon $endAt, bool $refresh = false): array
     {
         $cacheKey = implode(':', [
@@ -1130,40 +1163,40 @@ class TenantBackupService
     {
         $activity = [];
         foreach ($this->backupTablesForTenant() as $table) {
-            $columns = $this->tenantDataTrackingColumns($table);
-            if (! $columns) {
+            $dateColumns = $this->tenantDataActivityColumns($table);
+            if (empty($dateColumns)) {
                 continue;
             }
 
-            [$rangeColumn, $timestampColumn] = $columns;
-            try {
-                $wrappedRange = DB::connection()->getQueryGrammar()->wrap($rangeColumn);
-                $wrappedTimestamp = DB::connection()->getQueryGrammar()->wrap($timestampColumn);
-                $dateExpression = 'DATE('.$wrappedRange.')';
-                $rows = DB::table($table)
-                    ->where('tenant_id', $tenantId)
-                    ->where($rangeColumn, '>=', $this->dateColumnValue($rangeColumn, $startAt))
-                    ->where($rangeColumn, '<=', $this->dateColumnValue($rangeColumn, $endAt))
-                    ->selectRaw($dateExpression.' as backup_day, MAX('.$wrappedTimestamp.') as latest_at, COUNT(*) as row_count')
-                    ->groupByRaw($dateExpression)
-                    ->get();
+            foreach ($dateColumns as $dateColumn) {
+                try {
+                    $wrappedDateColumn = DB::connection()->getQueryGrammar()->wrap($dateColumn);
+                    $dateExpression = 'DATE('.$wrappedDateColumn.')';
+                    $rows = DB::table($table)
+                        ->where('tenant_id', $tenantId)
+                        ->where($dateColumn, '>=', $this->backupDateColumnValue($dateColumn, $startAt))
+                        ->where($dateColumn, '<=', $this->backupDateColumnValue($dateColumn, $endAt))
+                        ->selectRaw($dateExpression.' as backup_day, MAX('.$wrappedDateColumn.') as latest_at, COUNT(*) as row_count')
+                        ->groupByRaw($dateExpression)
+                        ->get();
 
-                foreach ($rows as $row) {
-                    $date = $this->normalizeActivityDate($row->backup_day ?? null);
-                    $latestAt = $this->normalizeActivityTimestamp($row->latest_at ?? null);
-                    if (! $date || ! $latestAt) {
-                        continue;
-                    }
+                    foreach ($rows as $row) {
+                        $date = $this->normalizeActivityDate($row->backup_day ?? null);
+                        $latestAt = $this->normalizeActivityTimestamp($row->latest_at ?? null);
+                        if (! $date || ! $latestAt) {
+                            continue;
+                        }
 
-                    $currentLatest = $this->activityLatestAt($activity[$date] ?? null);
-                    $candidate = Carbon::parse($latestAt, 'Asia/Jakarta');
-                    if (! $currentLatest || $candidate->greaterThan($currentLatest)) {
-                        $activity[$date]['latest_at'] = $candidate->toIso8601String();
+                        $currentLatest = $this->activityLatestAt($activity[$date] ?? null);
+                        $candidate = Carbon::parse($latestAt, 'Asia/Jakarta');
+                        if (! $currentLatest || $candidate->greaterThan($currentLatest)) {
+                            $activity[$date]['latest_at'] = $candidate->toIso8601String();
+                        }
+                        $activity[$date]['row_count'] = (int) ($activity[$date]['row_count'] ?? 0) + (int) ($row->row_count ?? 0);
                     }
-                    $activity[$date]['row_count'] = (int) ($activity[$date]['row_count'] ?? 0) + (int) ($row->row_count ?? 0);
+                } catch (\Throwable $e) {
+                    continue;
                 }
-            } catch (\Throwable $e) {
-                continue;
             }
         }
 
@@ -1172,7 +1205,7 @@ class TenantBackupService
         return $activity;
     }
 
-    private function tenantDataTrackingColumns(string $table): ?array
+    private function tenantDataActivityColumns(string $table): array
     {
         if (
             $table === 'users'
@@ -1180,83 +1213,10 @@ class TenantBackupService
             || ! $this->hasTable($table)
             || ! $this->tableHasColumn($table, 'tenant_id')
         ) {
-            return null;
+            return [];
         }
 
-        $timestampColumn = $this->firstExistingColumn($table, $this->tenantDataTimestampCandidates());
-        if (! $timestampColumn) {
-            return null;
-        }
-
-        $rangeColumn = $this->firstExistingColumn($table, $this->tenantDataRangeCandidates($table, $timestampColumn));
-        if (! $rangeColumn) {
-            return null;
-        }
-
-        return [$rangeColumn, $timestampColumn];
-    }
-
-    private function tenantDataTimestampCandidates(): array
-    {
-        return [
-            'updated_at', 'waktu', 'waktu_respon', 'waktu_submit', 'finished_at', 'started_at',
-            'uploaded_at', 'scan_at', 'scanned_at', 'queued_at', 'sent_at', 'failed_at',
-            'requested_at', 'approved_at', 'rejected_at', 'printed_at', 'issued_at',
-            'live_started_at', 'created_at', 'timestamp', 'tanggal',
-        ];
-    }
-
-    private function tenantDataRangeCandidates(string $table, string $timestampColumn): array
-    {
-        if (in_array($table, $this->masterTablesWithoutDateFilter(), true)) {
-            return array_values(array_unique([$timestampColumn, 'updated_at', 'created_at']));
-        }
-
-        $preferred = match ($table) {
-            'absensi',
-            'absensi_ajuan',
-            'absensi_settings',
-            'absensi_eskul',
-            'absensi_scan_temp',
-            'jam_kosong' => ['tanggal'],
-            'rfid_scans',
-            'tugas',
-            'quizzes',
-            'quiz_questions',
-            'quiz_options',
-            'quiz_answers',
-            'quiz_retake_logs',
-            'quiz_violation_logs',
-            'pengumuman',
-            'approval_requests',
-            'import_siswa_histories',
-            'import_siswa_history_items',
-            'import_guru_histories',
-            'import_guru_history_items',
-            'kelas_deleted_histories' => ['created_at'],
-            'tugas_jawaban' => ['waktu_submit', 'created_at'],
-            'quiz_submissions' => ['created_at', 'started_at', 'finished_at'],
-            'certificates' => ['issued_at', 'created_at'],
-            'printed_cards' => ['printed_at', 'created_at'],
-            'storage_files' => ['uploaded_at', 'created_at'],
-            default => [],
-        };
-
-        if (! empty($preferred)) {
-            return array_values(array_unique([...$preferred, $timestampColumn, 'updated_at', 'created_at']));
-        }
-
-        return array_values(array_unique([
-            'tanggal',
-            'created_at',
-            $timestampColumn,
-            'updated_at',
-            'uploaded_at',
-            'issued_at',
-            'printed_at',
-            'waktu_submit',
-            'timestamp',
-        ]));
+        return $this->backupDateColumnsForTable($table);
     }
 
     private function ignoredTenantDataTables(): array
@@ -1269,13 +1229,6 @@ class TenantBackupService
             'user_presence',
             'whatsapp_message_logs',
         ], true);
-    }
-
-    private function dateColumnValue(string $column, Carbon $value): string
-    {
-        return $column === 'tanggal'
-            ? $value->toDateString()
-            : $value->toDateTimeString();
     }
 
     private function normalizeActivityDate(mixed $value): ?string
@@ -1338,29 +1291,29 @@ class TenantBackupService
     {
         $latest = null;
         foreach ($this->backupTablesForTenant() as $table) {
-            $columns = $this->tenantDataTrackingColumns($table);
-            if (! $columns) {
+            $dateColumns = $this->tenantDataActivityColumns($table);
+            if (empty($dateColumns)) {
                 continue;
             }
 
-            [$rangeColumn, $timestampColumn] = $columns;
+            foreach ($dateColumns as $dateColumn) {
+                try {
+                    $value = DB::table($table)
+                        ->where('tenant_id', $tenantId)
+                        ->where($dateColumn, '>=', $this->backupDateColumnValue($dateColumn, $startAt))
+                        ->where($dateColumn, '<=', $this->backupDateColumnValue($dateColumn, $endAt))
+                        ->max($dateColumn);
+                    if (! $value) {
+                        continue;
+                    }
 
-            try {
-                $query = DB::table($table)->where('tenant_id', $tenantId);
-                $query->where($rangeColumn, '>=', $this->dateColumnValue($rangeColumn, $startAt))
-                    ->where($rangeColumn, '<=', $this->dateColumnValue($rangeColumn, $endAt));
-
-                $value = $query->max($timestampColumn);
-                if (! $value) {
+                    $candidate = Carbon::parse($value, 'Asia/Jakarta');
+                    if (! $latest || $candidate->greaterThan($latest)) {
+                        $latest = $candidate;
+                    }
+                } catch (\Throwable $e) {
                     continue;
                 }
-
-                $candidate = Carbon::parse($value, 'Asia/Jakarta');
-                if (! $latest || $candidate->greaterThan($latest)) {
-                    $latest = $candidate;
-                }
-            } catch (\Throwable $e) {
-                continue;
             }
         }
 

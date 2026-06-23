@@ -352,6 +352,68 @@ String configuredTopic(const char* configuredTopic, const String& fallback) {
   return topic.length() > 0 ? topic : fallback;
 }
 
+const char* mqttStateText(int state) {
+  switch (state) {
+    case MQTT_CONNECTION_TIMEOUT:
+      return "connection-timeout";
+    case MQTT_CONNECTION_LOST:
+      return "connection-lost";
+    case MQTT_CONNECT_FAILED:
+      return "connect-failed";
+    case MQTT_DISCONNECTED:
+      return "disconnected";
+    case MQTT_CONNECTED:
+      return "connected";
+    case MQTT_CONNECT_BAD_PROTOCOL:
+      return "bad-protocol";
+    case MQTT_CONNECT_BAD_CLIENT_ID:
+      return "bad-client-id";
+    case MQTT_CONNECT_UNAVAILABLE:
+      return "broker-unavailable";
+    case MQTT_CONNECT_BAD_CREDENTIALS:
+      return "bad-credentials";
+    case MQTT_CONNECT_UNAUTHORIZED:
+      return "unauthorized";
+    default:
+      return "unknown";
+  }
+}
+
+bool isSafeMqttToken(const char* value) {
+  String token(value);
+  token.trim();
+  if (token.length() == 0) {
+    return false;
+  }
+
+  for (unsigned int i = 0; i < token.length(); i++) {
+    char c = token.charAt(i);
+    bool safe =
+      (c >= 'a' && c <= 'z') ||
+      (c >= 'A' && c <= 'Z') ||
+      (c >= '0' && c <= '9') ||
+      c == '-' ||
+      c == '_' ||
+      c == '.';
+
+    if (!safe) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+void printConfigWarnings() {
+  if (!isSafeMqttToken(TENANT_SLUG)) {
+    Serial.println("[CONFIG] TENANT_SLUG tidak aman untuk topic MQTT. Gunakan huruf/angka/minus.");
+  }
+
+  if (!isSafeMqttToken(DEVICE_ID)) {
+    Serial.println("[CONFIG] DEVICE_ID tidak aman untuk topic MQTT. Contoh benar: gerbang-2.");
+  }
+}
+
 bool responseCanClosePending(bool success, bool duplicate, int httpStatus) {
   if (success || duplicate) {
     return true;
@@ -486,7 +548,11 @@ void connectMqttIfNeeded() {
   Serial.printf("[MQTT] Connecting as %s ... ", clientId.c_str());
   bool connected = mqttClient.connect(clientId.c_str(), MQTT_USER, MQTT_PASS);
   if (!connected) {
-    Serial.printf("failed rc=%d\n", mqttClient.state());
+    int state = mqttClient.state();
+    Serial.printf("failed rc=%d (%s)\n", state, mqttStateText(state));
+    if (state == MQTT_CONNECT_BAD_CREDENTIALS || state == MQTT_CONNECT_UNAUTHORIZED) {
+      Serial.println("[MQTT] Cek username/password Mosquitto. Jika password pernah bocor, rotasi dari Super Admin lalu flash ulang.");
+    }
     return;
   }
 
@@ -640,6 +706,7 @@ void setup() {
   Serial.println("\n=== ESP8266 PN532 RFID MQTT-only ===");
   Serial.printf("tenant=%s device=%s firmware=%s\n", TENANT_SLUG, DEVICE_ID, FIRMWARE_VERSION);
   Serial.printf("scan=%s\nresponse=%s\nmode=%s\n", topicScan.c_str(), topicResponse.c_str(), topicMode.c_str());
+  printConfigWarnings();
 
   sfxStartup();
   configureSecureClient();

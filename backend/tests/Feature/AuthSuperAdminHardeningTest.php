@@ -97,8 +97,8 @@ class AuthSuperAdminHardeningTest extends TestCase
                 'email' => 'root@example.com',
             ]);
 
-        $response->assertStatus(400);
-        $response->assertJsonPath('error', 'Reset password untuk akun super admin dinonaktifkan');
+        $response->assertOk();
+        $response->assertJsonPath('data', 'Jika email terdaftar dan memenuhi syarat reset mandiri, kami telah mengirim link reset password.');
     }
 
     public function test_forgot_password_rejects_admin_role(): void
@@ -113,8 +113,8 @@ class AuthSuperAdminHardeningTest extends TestCase
                 'email' => $adminUser->email,
             ]);
 
-        $response->assertStatus(400);
-        $response->assertJsonPath('error', 'Reset password untuk akun admin dinonaktifkan. Hubungi super admin.');
+        $response->assertOk();
+        $response->assertJsonPath('data', 'Jika email terdaftar dan memenuhi syarat reset mandiri, kami telah mengirim link reset password.');
     }
 
     public function test_forgot_password_rejects_unverified_email(): void
@@ -128,8 +128,8 @@ class AuthSuperAdminHardeningTest extends TestCase
                 'email' => $guruUser->email,
             ]);
 
-        $response->assertStatus(400);
-        $response->assertJsonPath('error', 'Email tidak terdaftar. Pastikan email yang Anda masukkan sudah terdaftar.');
+        $response->assertOk();
+        $response->assertJsonPath('data', 'Jika email terdaftar dan memenuhi syarat reset mandiri, kami telah mengirim link reset password.');
     }
 
     public function test_forgot_password_allows_guru_and_siswa_with_verified_email(): void
@@ -195,7 +195,7 @@ class AuthSuperAdminHardeningTest extends TestCase
             ]);
 
         $wrongTenantPassword->assertStatus(401);
-        $wrongTenantPassword->assertJsonPath('error', 'Password tidak sesuai. Periksa kembali password akun Anda.');
+        $wrongTenantPassword->assertJsonPath('error', 'Email/NIS atau password salah.');
     }
 
     public function test_root_domain_cannot_be_used_for_public_auth_login(): void

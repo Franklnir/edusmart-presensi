@@ -70,6 +70,10 @@ trait HasTenantBackupLogic
         } catch (\Throwable $e) {
             $availableTables = $this->getBackupTableOrder();
         }
+        $availableTables = array_values(array_unique(array_map(
+            fn ($tableName) => $this->normalizeBackupTableName((string) $tableName),
+            $availableTables
+        )));
 
         $availableMap = array_fill_keys(array_map('strval', $availableTables), true);
         $excluded = array_fill_keys($this->excludedTenantBackupTables(), true);
@@ -97,6 +101,22 @@ trait HasTenantBackupLogic
         }
 
         return $tables;
+    }
+
+    private function normalizeBackupTableName(string $tableName): string
+    {
+        $tableName = trim($tableName);
+        if ($tableName === '') {
+            return $tableName;
+        }
+
+        if (str_contains($tableName, '.')) {
+            $parts = explode('.', $tableName);
+
+            return trim((string) end($parts));
+        }
+
+        return $tableName;
     }
 
     private function masterTablesWithoutDateFilter(): array
@@ -383,6 +403,87 @@ trait HasTenantBackupLogic
         return null;
     }
 
+    private function backupDateColumnsForTable(string $table): array
+    {
+        if (in_array($table, $this->masterTablesWithoutDateFilter(), true)) {
+            return $this->existingDateColumns($table, ['updated_at', 'created_at']);
+        }
+
+        $candidates = match ($table) {
+            'absensi' => ['tanggal', 'waktu', 'created_at'],
+            'absensi_ajuan' => ['waktu_respon', 'created_at', 'tanggal'],
+            'absensi_settings',
+            'absensi_eskul',
+            'jam_kosong' => ['updated_at', 'created_at', 'tanggal'],
+            'absensi_scan_temp' => ['scan_at', 'created_at', 'tanggal'],
+            'rfid_scans',
+            'pengumuman',
+            'approval_requests',
+            'import_siswa_histories',
+            'import_siswa_history_items',
+            'import_guru_histories',
+            'import_guru_history_items',
+            'kelas_deleted_histories' => ['updated_at', 'created_at'],
+            'tugas',
+            'quizzes',
+            'quiz_questions',
+            'quiz_options',
+            'quiz_answers',
+            'quiz_retake_logs',
+            'quiz_violation_logs' => ['updated_at', 'created_at'],
+            'tugas_jawaban' => ['dinilai_at', 'waktu_submit', 'created_at'],
+            'quiz_submissions' => ['finished_at', 'updated_at', 'started_at', 'created_at'],
+            'certificates' => ['issued_at', 'sent_at', 'created_at', 'updated_at'],
+            'printed_cards' => ['printed_at', 'created_at', 'updated_at'],
+            'storage_files' => ['uploaded_at', 'created_at', 'updated_at'],
+            default => [
+                'updated_at',
+                'created_at',
+                'tanggal',
+                'waktu',
+                'waktu_respon',
+                'waktu_submit',
+                'dinilai_at',
+                'uploaded_at',
+                'scan_at',
+                'scanned_at',
+                'queued_at',
+                'sent_at',
+                'failed_at',
+                'requested_at',
+                'approved_at',
+                'rejected_at',
+                'printed_at',
+                'issued_at',
+                'started_at',
+                'finished_at',
+                'live_started_at',
+                'timestamp',
+            ],
+        };
+
+        return $this->existingDateColumns($table, $candidates);
+    }
+
+    private function existingDateColumns(string $table, array $columns): array
+    {
+        $existing = [];
+        foreach (array_values(array_unique($columns)) as $column) {
+            if (is_string($column) && $column !== '' && $this->tableHasColumn($table, $column)) {
+                $existing[] = $column;
+            }
+        }
+
+        return $existing;
+    }
+
+    private function backupDateColumnValue(string $column, Carbon $value): string
+    {
+        return in_array($column, ['tanggal', 'event_date'], true)
+            ? $value->toDateString()
+            : $value->toDateTimeString();
+    }
+
     private function rowValue($row, string $key)
     {
         if (is_array($row)) {
@@ -505,34 +606,40 @@ trait HasTenantBackupLogic
             return;
         }
 
-        $candidates = array_values(array_unique(array_merge(
+        $candidates = array_values(array_unique(array_filter(array_merge(
             $preferredColumns,
+            $this->backupDateColumnsForTable($table),
             [
                 'tanggal', 'scan_at', 'scanned_at', 'uploaded_at', 'queued_at', 'sent_at', 'failed_at',
                 'requested_at', 'approved_at', 'rejected_at', 'printed_at', 'issued_at',
-                'waktu_submit', 'started_at', 'finished_at', 'live_started_at',
+                'waktu', 'waktu_respon', 'waktu_submit', 'dinilai_at',
+                'started_at', 'finished_at', 'live_started_at',
                 'created_at', 'updated_at', 'timestamp',
             ]
-        )));
+        ), fn ($column) => is_string($column) && $column !== '')));
 
-        $dateColumn = $this->firstExistingColumn($table, $candidates);
-        if (! $dateColumn) {
+        $dateColumns = array_values(array_filter(
+            $candidates,
+            fn (string $column) => $this->tableHasColumn($table, $column)
+        ));
+        if (empty($dateColumns)) {
             return;
         }
 
-        if ($startAt instanceof Carbon) {
-            $startValue = $dateColumn === 'tanggal'
-                ? $startAt->toDateString()
-                : $startAt->toDateTimeString();
-            $query->where($dateColumn, '>=', $startValue);
-        }
+        $query->where(function ($dateQuery) use ($dateColumns, $startAt, $endAt) {
+            foreach ($dateColumns as $index => $dateColumn) {
+                $method = $index === 0 ? 'where' : 'orWhere';
+                $dateQuery->{$method}(function ($columnQuery) use ($dateColumn, $startAt, $endAt) {
+                    if ($startAt instanceof Carbon) {
+                        $columnQuery->where($dateColumn, '>=', $this->backupDateColumnValue($dateColumn, $startAt));
+                    }
 
-        if ($endAt instanceof Carbon) {
-            $endValue = $dateColumn === 'tanggal'
-                ? $endAt->toDateString()
-                : $endAt->toDateTimeString();
-            $query->where($dateColumn, '<=', $endValue);
-        }
+                    if ($endAt instanceof Carbon) {
+                        $columnQuery->where($dateColumn, '<=', $this->backupDateColumnValue($dateColumn, $endAt));
+                    }
+                });
+            }
+        });
     }
 
     private function applyDefaultOrder($query, string $table): void

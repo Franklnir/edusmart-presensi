@@ -199,7 +199,7 @@ const backupDayTitle = (day) => {
   ]
   const latestDataAt = formatDateTime(day?.latest_data_at)
   if (latestDataAt) parts.push(`Data terakhir: ${latestDataAt}`)
-  if (Number(day?.row_count || 0) > 0) parts.push(`${Number(day.row_count)} data`)
+  if (Number(day?.row_count || 0) > 0) parts.push(`${Number(day.row_count)} aktivitas data`)
   return parts.join(' | ')
 }
 

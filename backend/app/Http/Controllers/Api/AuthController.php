@@ -787,8 +787,8 @@ class AuthController extends ApiController
             ]);
 
             return response()->json([
-                'error' => 'Akun belum terdaftar di sekolah ini. Periksa email/NIS atau hubungi admin sekolah.',
-            ], 404);
+                'error' => 'Email/NIS atau password salah.',
+            ], 401);
         }
 
         if (! $loginUser || ! Hash::check($password, (string) $loginUser->password)) {
@@ -805,7 +805,7 @@ class AuthController extends ApiController
                 ]);
 
                 return response()->json([
-                    'error' => 'Password tidak sesuai. Periksa kembali password akun Anda.',
+                    'error' => 'Email/NIS atau password salah.',
                 ], 401);
             }
         }
@@ -829,7 +829,7 @@ class AuthController extends ApiController
                 'host' => $host,
             ]);
 
-            return response()->json(['error' => 'Akun tidak terdaftar di sekolah ini'], 403);
+            return response()->json(['error' => 'Email/NIS atau password salah.'], 401);
         }
 
         if ($profile && $this->isProfileLoginBlocked($profile)) {
@@ -2503,7 +2503,12 @@ class AuthController extends ApiController
         $email = strtolower(trim($payload['email']));
         $eligibility = $this->passwordResetEligibility($email, $this->tenantId($request));
         if (! $eligibility['allowed']) {
-            return response()->json(['error' => $eligibility['message']], 400);
+            $this->logAuthEvent($request, 'forgot_password_suppressed', [
+                'email' => $email,
+                'reason' => $eligibility['reason'] ?? 'not_allowed',
+            ]);
+
+            return response()->json(['data' => $this->passwordResetRequestMessage()]);
         }
 
         try {
@@ -2512,7 +2517,7 @@ class AuthController extends ApiController
             report($e);
         }
 
-        return response()->json(['data' => 'Link reset password telah dikirim ke email Anda.']);
+        return response()->json(['data' => $this->passwordResetRequestMessage()]);
     }
 
     public function resetPassword(Request $request)
@@ -3654,6 +3659,7 @@ class AuthController extends ApiController
             return [
                 'allowed' => false,
                 'message' => 'Reset password untuk akun super admin dinonaktifkan',
+                'reason' => 'reserved_super_admin',
             ];
         }
 
@@ -3666,6 +3672,7 @@ class AuthController extends ApiController
             return [
                 'allowed' => false,
                 'message' => 'Email tidak terdaftar. Pastikan email yang Anda masukkan sudah terdaftar.',
+                'reason' => 'email_not_found',
             ];
         }
 
@@ -3673,6 +3680,7 @@ class AuthController extends ApiController
             return [
                 'allowed' => false,
                 'message' => 'Reset password mandiri untuk email yang dipakai di lebih dari satu sekolah dinonaktifkan. Hubungi admin sekolah.',
+                'reason' => 'email_multiple_tenants',
             ];
         }
 
@@ -3681,6 +3689,7 @@ class AuthController extends ApiController
             return [
                 'allowed' => false,
                 'message' => 'Email tidak terdaftar. Pastikan email yang Anda masukkan sudah terdaftar.',
+                'reason' => 'email_unverified',
             ];
         }
         $userId = (string) ($user->id ?? '');
@@ -3695,6 +3704,7 @@ class AuthController extends ApiController
             return [
                 'allowed' => false,
                 'message' => 'Akun tidak terdaftar di sekolah ini.',
+                'reason' => 'tenant_mismatch',
             ];
         }
 
@@ -3706,6 +3716,7 @@ class AuthController extends ApiController
             return [
                 'allowed' => false,
                 'message' => 'Reset password untuk akun admin dinonaktifkan. Hubungi super admin.',
+                'reason' => 'admin_role',
             ];
         }
 
@@ -3715,6 +3726,11 @@ class AuthController extends ApiController
     private function passwordResetFailureMessage(): string
     {
         return 'Token reset tidak valid, sudah kedaluwarsa, atau akun tidak memenuhi syarat untuk reset mandiri.';
+    }
+
+    private function passwordResetRequestMessage(): string
+    {
+        return 'Jika email terdaftar dan memenuhi syarat reset mandiri, kami telah mengirim link reset password.';
     }
 
     private function isReservedSuperAdminEmail(string $email): bool

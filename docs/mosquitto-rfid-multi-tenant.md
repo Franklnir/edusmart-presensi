@@ -57,4 +57,5 @@ Dari halaman Super Admin > Detail Sekolah > Konfigurasi MQTT RFID Sekolah:
 5. Template Arduino otomatis berisi host, port, credential, dan topic sekolah.
 
 Kalau password tenant bocor, klik `Rotasi Password`, lalu flash ulang device
-dengan template terbaru.
+dengan template terbaru. Pastikan `device_id` alat memakai format aman tanpa
+spasi, misalnya `gerbang-2`; nilai ini menjadi bagian dari ACL/topic MQTT.

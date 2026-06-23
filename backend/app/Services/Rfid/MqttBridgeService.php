@@ -274,7 +274,30 @@ class MqttBridgeService
         }
 
         $topicDeviceId = $this->extractDeviceIdFromTopic($cfg, $topic);
-        $deviceId = trim((string) ($payload['device_id'] ?? $topicDeviceId));
+        $payloadDeviceId = trim((string) ($payload['device_id'] ?? ''));
+        if (
+            $topicDeviceId !== ''
+            && $payloadDeviceId !== ''
+            && ! hash_equals(Str::lower($topicDeviceId), Str::lower($payloadDeviceId))
+        ) {
+            $log('warning', sprintf(
+                'Payload scan MQTT ditolak: device_id payload %s tidak sesuai dengan topic %s.',
+                $payloadDeviceId,
+                $topic
+            ));
+
+            return;
+        }
+
+        $deviceId = $topicDeviceId !== '' ? $topicDeviceId : $payloadDeviceId;
+        if ($deviceId !== '' && ! $this->isSafeMqttTopicSegment($deviceId)) {
+            $log('warning', sprintf(
+                'Payload scan MQTT ditolak: device_id %s tidak aman untuk topic MQTT.',
+                $deviceId
+            ));
+
+            return;
+        }
         $cardUid = trim((string) ($payload['card_uid'] ?? ''));
         $mode = trim((string) ($payload['mode'] ?? ''));
         $eventId = trim((string) ($payload['event_id'] ?? $payload['scan_id'] ?? ''));
@@ -559,6 +582,11 @@ class MqttBridgeService
         );
 
         return $topic !== '' ? $topic : sprintf('edusmart/%s/rfid/response', $tenantSlug);
+    }
+
+    private function isSafeMqttTopicSegment(string $value): bool
+    {
+        return preg_match('/^[A-Za-z0-9._-]{1,191}$/', $value) === 1;
     }
 
     private function deviceTelemetryFromPayload(array $payload, array $defaults = []): array

@@ -456,6 +456,8 @@ class TenantMqttConfigService
             if (str_contains($topic, '+') || str_contains($topic, '#')) {
                 throw new \RuntimeException('Template topik MQTT RFID tidak boleh berisi wildcard + atau #. Gunakan {tenant} dan {device} untuk scope topik.');
             }
+
+            $this->assertWellFormedMqttTopic($topic, false);
         }
     }
 
@@ -734,6 +736,30 @@ class TenantMqttConfigService
         if ($topic === '' || str_contains($topic, '#')) {
             throw new \RuntimeException('Topik ACL Mosquitto tidak boleh kosong dan tidak boleh memakai wildcard #.');
         }
+
+        $this->assertWellFormedMqttTopic($topic, true);
+    }
+
+    private function assertWellFormedMqttTopic(string $topic, bool $allowSingleLevelWildcard): void
+    {
+        if (preg_match('/\s/', $topic)) {
+            throw new \RuntimeException('Topik MQTT RFID tidak boleh mengandung spasi. Gunakan minus untuk pemisah, misalnya gerbang-2.');
+        }
+
+        $segments = explode('/', trim($topic));
+        if (empty($segments)) {
+            throw new \RuntimeException('Topik MQTT RFID tidak valid.');
+        }
+
+        foreach ($segments as $segment) {
+            if ($segment === '') {
+                throw new \RuntimeException('Topik MQTT RFID tidak boleh memiliki segmen kosong atau garis miring ganda.');
+            }
+
+            if (str_contains($segment, '+') && (! $allowSingleLevelWildcard || $segment !== '+')) {
+                throw new \RuntimeException('Wildcard + MQTT hanya boleh dipakai sebagai satu segmen penuh pada ACL.');
+            }
+        }
     }
 
     private function buildMosquittoTenantUsername(string $tenantSlug): string
@@ -755,6 +781,7 @@ class TenantMqttConfigService
     private function normalizeTopicPrefix(string $prefix): string
     {
         $prefix = trim($prefix, "/ \t\n\r\0\x0B");
+        $prefix = preg_replace('/\s+/', '-', $prefix) ?: 'edusmart';
         $prefix = preg_replace('#/+#', '/', $prefix) ?: 'edusmart';
 
         return $prefix !== '' ? $prefix : 'edusmart';

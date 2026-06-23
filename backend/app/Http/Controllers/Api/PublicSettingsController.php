@@ -9,23 +9,13 @@ use Illuminate\Support\Facades\Schema;
 class PublicSettingsController extends ApiController
 {
     private const PUBLIC_COLUMNS = [
-        'id',
         'nama_sekolah',
         'logo_url',
         'logo_path',
-        'alamat',
-        'telepon',
-        'email',
-        'link_instagram',
-        'link_facebook',
-        'link_youtube',
-        'link_tiktok',
         'tahun_ajaran',
         'semester_aktif',
         'periode_mulai',
         'periode_selesai',
-        'registrasi_siswa_aktif',
-        'registrasi_guru_aktif',
     ];
 
     public function show(Request $request)

@@ -42,6 +42,9 @@ class DbSecurityTest extends TestCase
             'tenant_id' => $tenantId,
             'nama_sekolah' => 'Sekolah Aman',
             'email' => 'sekolah@example.com',
+            'telepon' => '+628123456789',
+            'alamat' => 'Jalan Rahasia',
+            'registrasi_siswa_aktif' => true,
             'manual_jam_masuk_mulai' => '07:00:00',
             'manual_jam_masuk_selesai' => '08:00:00',
             'admin_lock_enabled' => true,
@@ -57,6 +60,11 @@ class DbSecurityTest extends TestCase
 
         $this->assertIsArray($row);
         $this->assertSame('Sekolah Aman', $row['nama_sekolah'] ?? null);
+        $this->assertArrayNotHasKey('id', $row);
+        $this->assertArrayNotHasKey('email', $row);
+        $this->assertArrayNotHasKey('telepon', $row);
+        $this->assertArrayNotHasKey('alamat', $row);
+        $this->assertArrayNotHasKey('registrasi_siswa_aktif', $row);
         $this->assertArrayNotHasKey('manual_jam_masuk_mulai', $row);
         $this->assertArrayNotHasKey('manual_jam_masuk_selesai', $row);
         $this->assertArrayNotHasKey('admin_lock_enabled', $row);

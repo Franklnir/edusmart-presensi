@@ -117,6 +117,20 @@ const renderMqttTopicTemplate = (template, tenantSlug = '', deviceId = '{device}
   return String(template || '').replaceAll('{tenant}', slug).replaceAll('{device}', device)
 }
 
+const normalizeRfidDeviceId = (value = '') => {
+  const normalized = String(value || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 191)
+
+  return /[a-z0-9]/.test(normalized) ? normalized : ''
+}
+
 const TENANT_STATUS_OPTIONS = [
   { value: 'active', label: 'Aktif' },
   { value: 'suspended', label: 'Suspended' },
@@ -1538,15 +1552,17 @@ const Tenants = () => {
   const handleAddDeviceSubmit = async (e) => {
     e.preventDefault()
     if (!selectedTenantId) return
-    if (!addDeviceForm.device_id.trim()) {
-      pushToast('error', 'Device ID wajib diisi')
+    const requestedDeviceId = addDeviceForm.device_id.trim()
+    const normalizedDeviceId = normalizeRfidDeviceId(requestedDeviceId)
+    if (!normalizedDeviceId) {
+      pushToast('error', 'Device ID wajib diisi dengan huruf atau angka')
       return
     }
 
     setAddDeviceSaving(true)
     try {
       const payload = {
-        device_id: addDeviceForm.device_id.trim(),
+        device_id: normalizedDeviceId,
         name: addDeviceForm.name.trim() || undefined,
         transport: 'mqtt',
         board_type: addDeviceForm.board_type || 'esp8266',
@@ -1557,7 +1573,12 @@ const Tenants = () => {
       const { error } = await supabase.super.storeTenantRfidDevice(selectedTenantId, payload)
       if (error) throw error
 
-      pushToast('success', 'Alat RFID berhasil ditambahkan')
+      pushToast(
+        'success',
+        requestedDeviceId !== normalizedDeviceId
+          ? `Alat RFID ditambahkan sebagai ${normalizedDeviceId}`
+          : 'Alat RFID berhasil ditambahkan'
+      )
       setShowAddDeviceModal(false)
       setAddDeviceForm({
         device_id: '',
@@ -2623,8 +2644,9 @@ const Tenants = () => {
                         <button
                           type="button"
                           onClick={() => {
+                            const baseSlug = normalizeRfidDeviceId(detailTenantSlug || tenantDetail?.tenant?.name || 'rfid')
                             setAddDeviceForm({
-                              device_id: `edusmart-${Math.random().toString(36).substring(2, 8)}`,
+                              device_id: `${baseSlug || 'rfid'}-${Math.random().toString(36).substring(2, 8)}`,
                               name: '',
                               board_type: 'esp8266',
                               location: '',
@@ -3343,10 +3365,13 @@ const Tenants = () => {
                     type="text"
                     required
                     value={addDeviceForm.device_id}
-                    onChange={(e) => setAddDeviceForm({ ...addDeviceForm, device_id: e.target.value })}
+                    onChange={(e) => setAddDeviceForm({ ...addDeviceForm, device_id: normalizeRfidDeviceId(e.target.value) })}
                     className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
-                    placeholder="edusmart-xxxxx"
+                    placeholder="gerbang-2"
                   />
+                  <p className="text-xs text-slate-500">
+                    Dipakai langsung di topic MQTT. Contoh aman: <code className="rounded bg-slate-100 px-1 font-mono">gerbang-2</code>.
+                  </p>
                 </label>
                 <label className="block space-y-1">
                   <span className="text-sm font-semibold text-slate-700">Nama Alat <span className="font-normal text-slate-400">(opsional)</span></span>

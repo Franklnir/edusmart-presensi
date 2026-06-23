@@ -101,6 +101,9 @@ php artisan rfid:mqtt-bridge --once
 
 ## 3) Registrasi Device
 Device harus didaftarkan dulu supaya backend bisa mengikat `device_id` ke tenant.
+`device_id` otomatis dinormalisasi agar aman untuk topic MQTT: huruf kecil,
+angka, titik, underscore, dan minus. Contoh `Gerbang 2` akan menjadi
+`gerbang-2`.
 
 Contoh:
 
@@ -352,6 +355,7 @@ Sebelum integrasi device dimulai, pastikan:
 - device sudah didaftarkan dengan `rfid:device-register`
 - kelas/siswa/guru/kartu RFID di tenant sudah benar
 - topic publish/subscribe device sesuai template
+- `device_id` di sketch sama persis dengan device terdaftar dan tidak berisi spasi
 - device memakai `event_id` unik
 - ACL broker membatasi device hanya ke topic yang benar
 
@@ -359,6 +363,8 @@ Sebelum integrasi device dimulai, pastikan:
 - untuk MQTT, keamanan utama ada di broker: TLS, username/password, ACL topic
 - secret device tetap bisa dirotasi untuk kebutuhan operasional/legacy HTTP
 - jangan pakai satu username/password broker untuk semua tenant tanpa ACL topic
+- jika password Mosquitto pernah bocor, rotasi password sekolah dari Super Admin,
+  tunggu broker reload, lalu flash ulang semua device dengan template terbaru
 
 ## 14) Catatan Arduino/ESP8266/ESP32
 Project backend ini sudah siap untuk dipasangkan ke sketch device.
