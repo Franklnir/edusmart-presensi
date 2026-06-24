@@ -22,6 +22,7 @@ class MqttBridgeService
     {
         do {
             $contexts = [];
+            $restartReason = 'error';
             try {
                 $configs = $this->tenantMqttConfigService->runtimeConfigs($forcedTenants);
                 if (empty($configs)) {
@@ -53,7 +54,7 @@ class MqttBridgeService
                     return;
                 }
 
-                $this->runContextsLoop($contexts, $forcedTenants, $log);
+                $restartReason = $this->runContextsLoop($contexts, $forcedTenants, $log);
             } catch (\Throwable $e) {
                 $log('error', 'MQTT bridge error: '.$e->getMessage());
             } finally {
@@ -65,7 +66,11 @@ class MqttBridgeService
             }
 
             $delay = max(1, (int) (config('rfid.mqtt.reconnect_delay_seconds', 5)));
-            $log('warning', sprintf('MQTT reconnect dalam %d detik...', $delay));
+            if ($restartReason === 'reload') {
+                $log('info', sprintf('MQTT reload koneksi dalam %d detik...', $delay));
+            } else {
+                $log('warning', sprintf('MQTT reconnect dalam %d detik...', $delay));
+            }
             sleep($delay);
         } while (true);
     }
@@ -116,7 +121,7 @@ class MqttBridgeService
         return $contexts;
     }
 
-    private function runContextsLoop(array &$contexts, array $forcedTenants, callable $log): void
+    private function runContextsLoop(array &$contexts, array $forcedTenants, callable $log): string
     {
         $reloadInterval = max(30, (int) config('rfid.mqtt.config_reload_interval_seconds', 60));
         $lastReloadAt = microtime(true);
@@ -163,13 +168,13 @@ class MqttBridgeService
             if (empty($contexts)) {
                 $log('warning', 'Semua koneksi MQTT RFID terputus.');
 
-                return;
+                return 'disconnected';
             }
 
             if ((microtime(true) - $lastReloadAt) >= $reloadInterval) {
                 $log('info', 'Reload konfigurasi MQTT RFID tenant...');
 
-                return;
+                return 'reload';
             }
 
             usleep(100000);
