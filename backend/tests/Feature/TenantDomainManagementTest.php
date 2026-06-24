@@ -455,6 +455,30 @@ class TenantDomainManagementTest extends TestCase
         $this->assertStringContainsString('user edusmart_bali_rfid', $aclContents);
         $this->assertStringContainsString('topic write edusmart/bali/rfid/+/scan', $aclContents);
         $this->assertStringContainsString('topic read edusmart/bali/rfid/+/response', $aclContents);
+
+        $this->assertDatabaseHas('tenant_mqtt_configs', [
+            'tenant_id' => $tenantId,
+            'provider' => 'mosquitto',
+            'managed_by_platform' => true,
+            'use_tls' => true,
+            'tls_verify_peer' => true,
+            'tls_verify_peer_name' => true,
+            'tls_allow_self_signed' => false,
+        ]);
+
+        DB::table('tenant_mqtt_configs')->where('tenant_id', $tenantId)->update([
+            'tls_verify_peer' => false,
+            'tls_verify_peer_name' => false,
+            'tls_allow_self_signed' => true,
+        ]);
+
+        $this
+            ->actingAs($superAdmin)
+            ->getJson("http://admin.edusmart.test/api/super/tenants/{$tenantId}")
+            ->assertOk()
+            ->assertJsonPath('data.rfid_template.mqtt.tls_verify_peer', true)
+            ->assertJsonPath('data.rfid_template.mqtt.tls_verify_peer_name', true)
+            ->assertJsonPath('data.rfid_template.mqtt.tls_allow_self_signed', false);
     }
 
     public function test_managed_mosquitto_replaces_previous_custom_mqtt_credentials(): void

@@ -189,6 +189,8 @@ class TenantMqttConfigService
             ];
         }
 
+        $this->normalizeManagedMosquittoRows($mosquitto);
+
         $passwordFile = trim((string) ($mosquitto['password_file'] ?? ''));
         $aclFile = trim((string) ($mosquitto['acl_file'] ?? ''));
         if ($passwordFile === '' || $aclFile === '') {
@@ -343,6 +345,20 @@ class TenantMqttConfigService
             $bridgePassword = $includePassword ? trim((string) ($mosquitto['bridge_password'] ?? '')) : '';
         }
 
+        $managedPublicUseTls = (bool) ($mosquitto['public_use_tls'] ?? true);
+        $effectiveUseTls = $provider === 'mosquitto' && $managedByPlatform
+            ? $managedPublicUseTls
+            : (bool) ($row->use_tls ?? true);
+        $effectiveTlsVerifyPeer = $provider === 'mosquitto' && $managedByPlatform
+            ? $managedPublicUseTls
+            : (bool) ($row->tls_verify_peer ?? true);
+        $effectiveTlsVerifyPeerName = $provider === 'mosquitto' && $managedByPlatform
+            ? $managedPublicUseTls
+            : (bool) ($row->tls_verify_peer_name ?? true);
+        $effectiveTlsAllowSelfSigned = $provider === 'mosquitto' && $managedByPlatform
+            ? false
+            : (bool) ($row->tls_allow_self_signed ?? false);
+
         return [
             'source' => 'tenant',
             'tenant_id' => (string) ($row->tenant_id ?? ''),
@@ -365,10 +381,10 @@ class TenantMqttConfigService
             'password_set' => $passwordSet,
             'bridge_username' => $bridgeUsername,
             'bridge_password' => $bridgePassword,
-            'use_tls' => (bool) ($row->use_tls ?? true),
-            'tls_verify_peer' => (bool) ($row->tls_verify_peer ?? true),
-            'tls_verify_peer_name' => (bool) ($row->tls_verify_peer_name ?? true),
-            'tls_allow_self_signed' => (bool) ($row->tls_allow_self_signed ?? false),
+            'use_tls' => $effectiveUseTls,
+            'tls_verify_peer' => $effectiveTlsVerifyPeer,
+            'tls_verify_peer_name' => $effectiveTlsVerifyPeerName,
+            'tls_allow_self_signed' => $effectiveTlsAllowSelfSigned,
             'qos' => (int) ($row->qos ?? 1),
             'client_id_prefix' => trim((string) ($row->client_id_prefix ?? 'edusmart-rfid-bridge')),
             'scan_topic_template' => trim((string) ($row->scan_topic_template ?? 'edusmart/{tenant}/rfid/{device}/scan')),
@@ -660,6 +676,34 @@ class TenantMqttConfigService
         }
 
         $this->atomicWriteFile($path, implode("\n", $lines)."\n", $this->mosquittoFileMode());
+    }
+
+    private function normalizeManagedMosquittoRows(array $mosquitto): void
+    {
+        if (
+            ! $this->hasConfigTable()
+            || ! $this->hasConfigColumn('provider')
+            || ! $this->hasConfigColumn('managed_by_platform')
+        ) {
+            return;
+        }
+
+        $publicUseTls = (bool) ($mosquitto['public_use_tls'] ?? true);
+        $payload = [
+            'use_tls' => $publicUseTls,
+            'tls_verify_peer' => $publicUseTls,
+            'tls_verify_peer_name' => $publicUseTls,
+            'tls_allow_self_signed' => false,
+        ];
+
+        if ($this->hasConfigColumn('updated_at')) {
+            $payload['updated_at'] = now();
+        }
+
+        DB::table('tenant_mqtt_configs')
+            ->where('provider', 'mosquitto')
+            ->where('managed_by_platform', true)
+            ->update($payload);
     }
 
     private function atomicWriteFile(string $path, string $contents, int $mode): void
