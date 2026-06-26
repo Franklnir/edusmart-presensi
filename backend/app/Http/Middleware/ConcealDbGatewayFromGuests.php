@@ -14,6 +14,7 @@ class ConcealDbGatewayFromGuests
         $user = $request->user('sanctum') ?? $request->user();
         if ($user !== null) {
             Auth::setUser($user);
+
             return $next($request);
         }
 
