@@ -9,9 +9,10 @@ ENV_FILE=".env.production"
 TARGET_REF=""
 RESTORE_DB_FILE=""
 SKIP_PRE_BACKUP="false"
-APP_SERVICES=(backend worker scheduler rfid_bridge nginx caddy)
+APP_SERVICES=(backend worker scheduler rfid_bridge nginx caddy mosquitto mosquitto_reloader mosquitto_cert_sync)
 IMAGE_SERVICES=(backend nginx)
 COMPOSE_FILES=()
+MOSQUITTO_CONFIG_CHANGED="false"
 
 usage() {
   cat <<'USAGE'
@@ -94,6 +95,55 @@ compose() {
   done < <(compose_args)
 
   docker compose "${args[@]}" "$@"
+}
+
+git_ref_has_path() {
+  local ref="$1"
+  local path="$2"
+
+  git cat-file -e "$ref:$path" 2>/dev/null
+}
+
+detect_mosquitto_config_change() {
+  local from_ref="$1"
+  local to_ref="$2"
+  local path="deploy/mosquitto/mosquitto.conf"
+
+  if ! git_ref_has_path "$from_ref" "$path" && ! git_ref_has_path "$to_ref" "$path"; then
+    return 1
+  fi
+
+  if ! git_ref_has_path "$from_ref" "$path" || ! git_ref_has_path "$to_ref" "$path"; then
+    return 0
+  fi
+
+  ! git diff --quiet "$from_ref" "$to_ref" -- "$path"
+}
+
+compose_has_service() {
+  local service="$1"
+
+  compose config --services | grep -qx "$service"
+}
+
+recreate_mosquitto_after_config_change() {
+  local services=(mosquitto)
+
+  if [[ "$MOSQUITTO_CONFIG_CHANGED" != "true" ]]; then
+    return 0
+  fi
+
+  if ! compose_has_service mosquitto; then
+    echo "[warn] Config Mosquitto berubah, tetapi service mosquitto tidak ada di compose aktif." >&2
+    return 0
+  fi
+
+  if compose_has_service mosquitto_reloader; then
+    services+=(mosquitto_reloader)
+  fi
+
+  echo "      - recreate Mosquitto karena konfigurasi broker berubah"
+  compose up -d --no-build --force-recreate --no-deps "${services[@]}"
 }
 
 prune_missing_compose_files() {
@@ -209,6 +259,7 @@ if [[ -n "$(git status --porcelain)" ]]; then
   exit 1
 fi
 
+CURRENT_FULL_REF="$(git rev-parse HEAD)"
 CURRENT_REF="$(git rev-parse --short HEAD)"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 BACKUP_DIR="backups"
@@ -217,6 +268,11 @@ PRE_ROLLBACK_BACKUP="${BACKUP_DIR}/pre-rollback-${TIMESTAMP}.sql.gz"
 echo "[1/7] Fetch git refs..."
 git fetch --all --tags --prune
 git rev-parse --verify "$TARGET_REF" >/dev/null
+
+if detect_mosquitto_config_change "$CURRENT_FULL_REF" "$TARGET_REF"; then
+  MOSQUITTO_CONFIG_CHANGED="true"
+  echo "[info] Perubahan konfigurasi Mosquitto terdeteksi; broker akan direcreate setelah rollback service."
+fi
 
 if [[ "$SKIP_PRE_BACKUP" != "true" ]]; then
   echo "[2/7] Membuat backup DB sebelum rollback: $PRE_ROLLBACK_BACKUP"
@@ -241,6 +297,7 @@ compose pull \
   "${IMAGE_SERVICES[@]}"
 compose up -d --no-build \
   "${APP_SERVICES[@]}"
+recreate_mosquitto_after_config_change
 
 if [[ -n "$RESTORE_DB_FILE" ]]; then
   echo "[5/7] Restore database dari: $RESTORE_DB_FILE"

@@ -11,9 +11,9 @@ SKIP_BACKUP="false"
 PULL_IMAGES="true"
 AUTO_ROLLBACK="true"
 RUN_EXTERNAL_SMOKE_CHECK="false"
-APP_SERVICES=(backend worker scheduler rfid_bridge nginx caddy mosquitto_cert_sync)
+APP_SERVICES=(backend worker scheduler rfid_bridge nginx caddy mosquitto mosquitto_reloader mosquitto_cert_sync)
 IMAGE_SERVICES=(backend nginx)
-CORE_HEALTH_SERVICES=(postgres redis backend worker scheduler nginx caddy)
+CORE_HEALTH_SERVICES=(postgres redis backend worker scheduler nginx caddy mosquitto)
 OPTIONAL_APP_SERVICES=()
 OPTIONAL_HEALTH_SERVICES=()
 COMPOSE_FILES=()
@@ -22,6 +22,7 @@ PREV_REF=""
 PREV_BACKEND_IMAGE=""
 PREV_NGINX_IMAGE=""
 PREV_CADDY_IMAGE=""
+MOSQUITTO_CONFIG_CHANGED="false"
 DEPLOY_PHASE="preflight"
 ROLLBACK_RUNNING="false"
 
@@ -270,6 +271,55 @@ compose_service_state() {
   fi
 
   docker inspect --format '{{.State.Status}}' "$container_id" 2>/dev/null || true
+}
+
+git_ref_has_path() {
+  local ref="$1"
+  local path="$2"
+
+  git cat-file -e "$ref:$path" 2>/dev/null
+}
+
+detect_mosquitto_config_change() {
+  local from_ref="$1"
+  local to_ref="$2"
+  local path="deploy/mosquitto/mosquitto.conf"
+
+  if ! git_ref_has_path "$from_ref" "$path" && ! git_ref_has_path "$to_ref" "$path"; then
+    return 1
+  fi
+
+  if ! git_ref_has_path "$from_ref" "$path" || ! git_ref_has_path "$to_ref" "$path"; then
+    return 0
+  fi
+
+  ! git diff --quiet "$from_ref" "$to_ref" -- "$path"
+}
+
+compose_has_service() {
+  local service="$1"
+
+  compose config --services | grep -qx "$service"
+}
+
+recreate_mosquitto_after_config_change() {
+  local services=(mosquitto)
+
+  if [[ "$MOSQUITTO_CONFIG_CHANGED" != "true" ]]; then
+    return 0
+  fi
+
+  if ! compose_has_service mosquitto; then
+    echo "[warn] Config Mosquitto berubah, tetapi service mosquitto tidak ada di compose aktif." >&2
+    return 0
+  fi
+
+  if compose_has_service mosquitto_reloader; then
+    services+=(mosquitto_reloader)
+  fi
+
+  echo "      - recreate Mosquitto karena konfigurasi broker berubah"
+  compose up -d --no-build --force-recreate --no-deps "${services[@]}"
 }
 
 git_status_for_release() {
@@ -632,6 +682,11 @@ validate_compose_files_available
 PREV_FULL_REF="$(git rev-parse HEAD)"
 PREV_REF="$(git rev-parse --short HEAD)"
 
+if detect_mosquitto_config_change "$PREV_FULL_REF" "$TARGET_REF"; then
+  MOSQUITTO_CONFIG_CHANGED="true"
+  echo "[info] Perubahan konfigurasi Mosquitto terdeteksi; broker akan direcreate setelah service utama naik."
+fi
+
 echo "[2/9] Checkout release ref: $TARGET_REF"
 git checkout "$TARGET_REF"
 validate_compose_files_present
@@ -681,6 +736,7 @@ DEPLOY_PHASE="restart_services"
 echo "[5/9] Deploy service tanpa build lokal..."
 compose up -d --no-build \
   "${APP_SERVICES[@]}"
+recreate_mosquitto_after_config_change
 start_optional_services
 
 DEPLOY_PHASE="migrate"
