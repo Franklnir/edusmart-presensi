@@ -14,13 +14,13 @@ class DbSecurityTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_database_gateway_requires_authentication(): void
+    public function test_database_gateway_is_concealed_from_credentialless_guests(): void
     {
         $this->postJson('/api/db', [
             'table' => 'settings',
             'action' => 'select',
             'columns' => '*',
-        ])->assertUnauthorized();
+        ])->assertNotFound();
 
         $this->postJson('/api/db/batch', [
             'requests' => [
@@ -31,7 +31,19 @@ class DbSecurityTest extends TestCase
                     'columns' => '*',
                 ],
             ],
-        ])->assertUnauthorized();
+        ])->assertNotFound();
+    }
+
+    public function test_database_gateway_still_challenges_requests_with_authentication_hint(): void
+    {
+        $this
+            ->withHeader('Authorization', 'Bearer invalid-token')
+            ->postJson('/api/db', [
+                'table' => 'settings',
+                'action' => 'select',
+                'columns' => '*',
+            ])
+            ->assertUnauthorized();
     }
 
     public function test_public_settings_endpoint_is_sanitized(): void

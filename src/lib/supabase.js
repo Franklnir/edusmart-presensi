@@ -1,6 +1,4 @@
 // src/lib/supabase.js
-import { resolveDelegatedAdminFeatureFromPath } from '../constants/adminFeaturePermissions'
-
 /* ===================== API BASE ===================== */
 const getRuntimeHostname = () => {
   if (typeof window === 'undefined') return 'localhost'
@@ -13,6 +11,26 @@ const ADMIN_SUBDOMAIN = String(import.meta.env.VITE_ADMIN_SUBDOMAIN || 'admin26'
 const ROOT_DOMAIN = String(import.meta.env.VITE_ROOT_DOMAIN || '')
   .trim()
   .toLowerCase()
+
+const DELEGATED_ADMIN_FEATURE_PATHS = [
+  ['dashboard', '/guru/admin/home'],
+  ['kelas', '/guru/admin/kelas'],
+  ['jadwal', '/guru/admin/jadwal'],
+  ['struktur-sekolah', '/guru/admin/struktur-sekolah'],
+  ['organisasi', '/guru/admin/organisasi'],
+  ['guru', '/guru/admin/guru'],
+  ['sertifikat', '/guru/admin/sertifikat'],
+  ['siswa', '/guru/admin/siswa'],
+  ['scan-kehadiran', '/guru/admin/scan']
+]
+
+const resolveDelegatedAdminFeatureKeyFromPath = (pathname = '') => {
+  const normalized = String(pathname || '').split('?')[0].split('#')[0]
+  const match = DELEGATED_ADMIN_FEATURE_PATHS.find(([, route]) => (
+    normalized === route || normalized.startsWith(route + '/')
+  ))
+  return match?.[0] || ''
+}
 
 const isLocalApiHost = (host) => {
   const normalized = String(host || '').toLowerCase()
@@ -213,18 +231,10 @@ const cloneApiResult = (value) => {
 
 const isCacheableApiRequest = (path, method, body, options = {}) => {
   if (method === 'GET' || method === 'HEAD') {
-    return options.cache === true || [
-      '/api/admin/dashboard-summary',
-      '/api/admin/students',
-      '/api/admin/academic-summary',
-      '/api/admin/student-options',
-      '/api/admin/teachers',
-      '/api/admin/certificates',
-      '/api/admin/scan-session-summary',
-      '/api/reports/teacher-summary',
-      '/api/quiz/dashboard',
-      '/api/storage/signed'
-    ].some((prefix) => path.startsWith(prefix)) || /^\/api\/quiz\/[^/]+\/detail(?:\?|$)/.test(path)
+    const hasExplicitCacheTtl = Object.prototype.hasOwnProperty.call(options, 'cacheTtlMs') &&
+      Number.isFinite(Number(options.cacheTtlMs)) &&
+      Number(options.cacheTtlMs) > 0
+    return options.cache === true || hasExplicitCacheTtl
   }
 
   return method === 'POST' && (
@@ -233,19 +243,9 @@ const isCacheableApiRequest = (path, method, body, options = {}) => {
   )
 }
 
-const canPersistApiCache = (path, method) => {
+const canPersistApiCache = (_path, method, options = {}) => {
   if (method !== 'GET' && method !== 'HEAD') return false
-  return [
-    '/api/admin/dashboard-summary',
-    '/api/admin/students',
-    '/api/admin/academic-summary',
-    '/api/admin/student-options',
-    '/api/admin/teachers',
-    '/api/admin/certificates',
-    '/api/admin/scan-session-summary',
-    '/api/reports/teacher-summary',
-    '/api/quiz/dashboard',
-  ].some((prefix) => path.startsWith(prefix)) || /^\/api\/quiz\/[^/]+\/detail(?:\?|$)/.test(path)
+  return options.persistCache === true
 }
 
 const getApiCacheStorage = () => {
@@ -354,7 +354,7 @@ const setCachedApiResponse = (key, value, ttlMs) => {
   })
 }
 
-const invalidateDbSelectCache = (table = '') => {
+export const invalidateDbSelectCache = (table = '') => {
   const normalizedTable = String(table || '').trim()
   if (!normalizedTable) {
     apiResponseCache.clear()
@@ -366,7 +366,6 @@ const invalidateDbSelectCache = (table = '') => {
   for (const key of Array.from(apiResponseCache.keys())) {
     if (
       key.includes(tableNeedle) ||
-      key.includes('/api/admin/') ||
       key.includes('/api/reports/') ||
       key.includes('/api/quiz/')
     ) {
@@ -376,7 +375,6 @@ const invalidateDbSelectCache = (table = '') => {
 
   clearPersistedApiCache((key) => (
     key.includes(tableNeedle) ||
-    key.includes('/api/admin/') ||
     key.includes('/api/reports/') ||
     key.includes('/api/quiz/')
   ))
@@ -861,11 +859,11 @@ const runApiFetch = async (path, options = {}) => {
     headers['X-Tenant'] = TENANT_SLUG
   }
 
-  const delegatedFeature = typeof window !== 'undefined'
-    ? resolveDelegatedAdminFeatureFromPath(window.location?.pathname || '')
-    : null
-  if (delegatedFeature?.key) {
-    headers['X-Admin-Feature'] = delegatedFeature.key
+  const delegatedFeatureKey = typeof window !== 'undefined'
+    ? resolveDelegatedAdminFeatureKeyFromPath(window.location?.pathname || '')
+    : ''
+  if (delegatedFeatureKey) {
+    headers['X-Admin-Feature'] = delegatedFeatureKey
   }
 
   const xsrf = getCookie('XSRF-TOKEN')
@@ -1047,7 +1045,7 @@ export const apiFetch = async (path, options = {}) => {
   if (canUseCache) {
     const cached = getCachedApiResponse(dedupeKey)
     if (cached) return cached
-    if (canPersistApiCache(path, method)) {
+    if (canPersistApiCache(path, method, options)) {
       const persisted = getPersistedApiResponse(dedupeKey)
       if (persisted) {
         setCachedApiResponse(dedupeKey, persisted, cacheTtlMs)
@@ -1070,7 +1068,7 @@ export const apiFetch = async (path, options = {}) => {
       const hasBatchErrors = Object.keys(result?.raw?.errors || {}).length > 0
       if (canUseCache && !result?.error && !hasBatchErrors) {
         setCachedApiResponse(dedupeKey, result, cacheTtlMs)
-        if (canPersistApiCache(path, method) && options.persistCache !== false) {
+        if (canPersistApiCache(path, method, options) && options.persistCache !== false) {
           setPersistedApiResponse(dedupeKey, result, cacheTtlMs)
         }
       }
@@ -1347,7 +1345,7 @@ const apiUploadDirectObject = async (upload, file, options = {}) => new Promise(
   xhr.send(file)
 })
 
-const buildQueryString = (params = {}) => {
+export const buildQueryString = (params = {}) => {
   const query = new URLSearchParams()
   Object.entries(params || {}).forEach(([key, value]) => {
     if (value === undefined || value === null || value === '') return
@@ -1378,7 +1376,7 @@ const parseDownloadFilename = (contentDisposition = '', fallback = 'download.bin
   return fallback
 }
 
-const downloadAuthenticatedFile = async (path, fallbackName = 'download.bin') => {
+export const downloadAuthenticatedFile = async (path, fallbackName = 'download.bin') => {
   const headers = {}
   if (TENANT_SLUG) {
     headers['X-Tenant'] = TENANT_SLUG
@@ -2629,882 +2627,6 @@ const auth = {
     return { data: res.raw?.data ?? res.data, error: res.error }
   },
 
-  admin: {
-    async provisionUser(payload = {}) {
-      const res = await apiFetch('/api/admin/users/provision', {
-        method: 'POST',
-        body: payload
-      })
-      if (!res.error) invalidateDbSelectCache()
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async deleteUser(userId) {
-      const res = await apiFetch(`/api/admin/users/${userId}`, { method: 'DELETE' })
-      if (!res.error) invalidateDbSelectCache()
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async updateUserStatus(userId, payload = {}) {
-      const res = await apiFetch(`/api/admin/users/${userId}/status`, {
-        method: 'PATCH',
-        body: payload
-      })
-      if (!res.error) invalidateDbSelectCache()
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async updateTeacherName(userId, nama) {
-      const res = await apiFetch(`/api/admin/teachers/${userId}/name`, {
-        method: 'PATCH',
-        body: { nama }
-      })
-      if (!res.error) invalidateDbSelectCache()
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async updateTeacherProfile(userId, payload = {}) {
-      const res = await apiFetch(`/api/admin/teachers/${userId}/profile`, {
-        method: 'PATCH',
-        body: payload
-      })
-      if (!res.error) invalidateDbSelectCache()
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async dashboardSummary() {
-      const res = await apiFetch('/api/admin/dashboard-summary', {
-        method: 'GET',
-        cacheTtlMs: 60 * 1000,
-        staleKey: 'admin.dashboard-summary',
-        timeoutMs: 15000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async students(params = {}) {
-      const res = await apiFetch(`/api/admin/students${buildQueryString(params)}`, {
-        method: 'GET',
-        cacheTtlMs: 10 * 1000,
-        staleKey: 'admin.students',
-        timeoutMs: 15000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async studentDetail(studentId) {
-      const id = encodeURIComponent(String(studentId || ''))
-      const res = await apiFetch(`/api/admin/students/${id}`, {
-        method: 'GET',
-        cacheTtlMs: 10 * 1000,
-        staleKey: `admin.student-detail.${id}`,
-        timeoutMs: 12000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async academicSummary(params = {}) {
-      const res = await apiFetch(`/api/admin/academic-summary${buildQueryString(params)}`, {
-        method: 'GET',
-        cacheTtlMs: 15 * 1000,
-        staleKey: 'admin.academic-summary',
-        timeoutMs: 15000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async applyAcademicPeriod(payload = {}) {
-      const res = await apiFetch('/api/admin/academic-period/apply', {
-        method: 'POST',
-        body: payload,
-        timeoutMs: 45000
-      })
-      if (!res.error) invalidateDbSelectCache()
-      return { data: res.raw?.data ?? res.data, error: res.error, raw: res.raw }
-    },
-    async restoreAcademicPeriodRoster(payload = {}) {
-      const res = await apiFetch('/api/admin/academic-period/restore-roster', {
-        method: 'POST',
-        body: payload,
-        timeoutMs: 45000
-      })
-      if (!res.error && payload?.apply) invalidateDbSelectCache()
-      return { data: res.raw?.data ?? res.data, error: res.error, raw: res.raw }
-    },
-    async studentOptions(params = {}) {
-      const res = await apiFetch(`/api/admin/student-options${buildQueryString(params)}`, {
-        method: 'GET',
-        cacheTtlMs: 20 * 1000,
-        staleKey: `admin.student-options.${params?.kelas || 'all'}`,
-        timeoutMs: 12000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async teachers(params = {}) {
-      const res = await apiFetch(`/api/admin/teachers${buildQueryString(params)}`, {
-        method: 'GET',
-        cacheTtlMs: 10 * 1000,
-        staleKey: 'admin.teachers',
-        timeoutMs: 15000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async certificates(params = {}) {
-      const res = await apiFetch(`/api/admin/certificates${buildQueryString(params)}`, {
-        method: 'GET',
-        cacheTtlMs: 30 * 1000,
-        staleKey: 'admin.certificates',
-        timeoutMs: 15000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async scanSessionSummary(params = {}) {
-      const res = await apiFetch(`/api/admin/scan-session-summary${buildQueryString(params)}`, {
-        method: 'GET',
-        cacheTtlMs: 10 * 1000,
-        staleKey: 'admin.scan-session-summary',
-        timeoutMs: 12000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async featurePermissions() {
-      const res = await apiFetch('/api/admin/feature-permissions', {
-        method: 'GET',
-        cacheTtlMs: 10 * 1000,
-        staleKey: 'admin.feature-permissions',
-        timeoutMs: 15000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async createFeaturePermission(payload = {}) {
-      const res = await apiFetch('/api/admin/feature-permissions', {
-        method: 'POST',
-        body: payload,
-        cacheTtlMs: 0,
-        timeoutMs: 15000
-      })
-      if (!res.error) invalidateDbSelectCache()
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async updateFeaturePermission(id, payload = {}) {
-      const res = await apiFetch(`/api/admin/feature-permissions/${encodeURIComponent(String(id || ''))}`, {
-        method: 'PATCH',
-        body: payload,
-        cacheTtlMs: 0,
-        timeoutMs: 15000
-      })
-      if (!res.error) invalidateDbSelectCache()
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async deleteFeaturePermission(id) {
-      const res = await apiFetch(`/api/admin/feature-permissions/${encodeURIComponent(String(id || ''))}`, {
-        method: 'DELETE',
-        cacheTtlMs: 0,
-        timeoutMs: 15000
-      })
-      if (!res.error) invalidateDbSelectCache()
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async backup(options = {}) {
-      const params = new URLSearchParams()
-      const mode = String(options?.mode || '').trim()
-      const periodType = String(options?.periodType || options?.period_type || '').trim()
-      const tahunAjaran = String(options?.tahunAjaran || options?.tahun_ajaran || '').trim()
-      const semester = String(options?.semester || '').trim()
-      const startDate = String(options?.startDate || options?.start_date || '').trim()
-      const endDate = String(options?.endDate || options?.end_date || '').trim()
-      const monthsRaw = options?.months
-
-      if (mode) {
-        params.set('mode', mode)
-      }
-
-      if (periodType) {
-        params.set('period_type', periodType)
-      }
-
-      if (Number.isFinite(Number(monthsRaw)) && Number(monthsRaw) > 0) {
-        params.set('months', String(Math.max(1, Math.min(12, Math.trunc(Number(monthsRaw))))))
-      }
-
-      if (tahunAjaran) params.set('tahun_ajaran', tahunAjaran)
-      if (semester) params.set('semester', semester)
-      if (startDate) params.set('start_date', startDate)
-      if (endDate) params.set('end_date', endDate)
-
-      const query = params.toString() ? `?${params.toString()}` : ''
-      const res = await apiFetch(`/api/admin/backup${query}`, { method: 'GET' })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async monitoring() {
-      const res = await apiFetch('/api/admin/monitoring', { method: 'GET' })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async delegatedPermissions() {
-      const res = await apiFetch('/api/guru/admin-permissions', {
-        method: 'GET',
-        cacheTtlMs: 30 * 1000,
-        staleKey: 'guru.admin-permissions',
-        timeoutMs: 12000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async scanSettings() {
-      const res = await apiFetch('/api/admin/scan-settings', { method: 'GET', cacheTtlMs: 0 })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async updateScanSettings(payload = {}) {
-      const res = await apiFetch('/api/admin/scan-settings', {
-        method: 'PATCH',
-        body: payload
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async restoreBackup(payload) {
-      const res = await apiFetch('/api/admin/backup/restore', {
-        method: 'POST',
-        body: payload
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async saveBackupToGoogleDrive(payload = {}) {
-      const res = await apiFetch('/api/admin/backup/google-drive', {
-        method: 'POST',
-        body: payload
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async backupMonthlyStatus(options = {}) {
-      const query = new URLSearchParams()
-      if (options?.refresh) query.set('refresh', '1')
-      const suffix = query.toString() ? `?${query.toString()}` : ''
-      const res = await apiFetch(`/api/admin/backup/monthly-status${suffix}`, {
-        method: 'GET',
-        cacheTtlMs: 10 * 1000,
-        staleKey: 'admin.backup-monthly-status',
-        timeoutMs: 20000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async saveMonthlyBackupToGoogleDrive(payload = {}) {
-      const res = await apiFetch('/api/admin/backup/google-drive/monthly', {
-        method: 'POST',
-        body: payload,
-        cacheTtlMs: 0,
-        timeoutMs: 60000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async autoMonthlyBackupToGoogleDrive(payload = {}) {
-      const res = await apiFetch('/api/admin/backup/google-drive/monthly/auto', {
-        method: 'POST',
-        body: payload,
-        cacheTtlMs: 0,
-        timeoutMs: 180000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async backupMonthlyJobStatus(jobId) {
-      const res = await apiFetch(`/api/admin/backup/google-drive/monthly/jobs/${encodeURIComponent(jobId)}`, {
-        method: 'GET',
-        cacheTtlMs: 0,
-        timeoutMs: 20000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async approvals(params = {}) {
-      const query = new URLSearchParams()
-      Object.entries(params || {}).forEach(([key, value]) => {
-        if (value === undefined || value === null || value === '') return
-        query.set(String(key), String(value))
-      })
-      const suffix = query.toString() ? `?${query.toString()}` : ''
-      const res = await apiFetch(`/api/admin/approvals${suffix}`, { method: 'GET' })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async approveApproval(id, payload = {}) {
-      const res = await apiFetch(`/api/admin/approvals/${id}/approve`, {
-        method: 'POST',
-        body: payload
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async rejectApproval(id, payload = {}) {
-      const res = await apiFetch(`/api/admin/approvals/${id}/reject`, {
-        method: 'POST',
-        body: payload
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async whatsapp() {
-      const res = await apiFetch('/api/admin/whatsapp', { method: 'GET' })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async connectWhatsApp() {
-      const res = await apiFetch('/api/admin/whatsapp/connect', { method: 'POST', body: {} })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async syncWhatsApp() {
-      const res = await apiFetch('/api/admin/whatsapp/sync', { method: 'POST', body: {} })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async logoutWhatsApp() {
-      const res = await apiFetch('/api/admin/whatsapp/logout', { method: 'POST', body: {} })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async updateWhatsAppSettings(payload = {}) {
-      const res = await apiFetch('/api/admin/whatsapp/settings', {
-        method: 'PATCH',
-        body: payload
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async sendWhatsAppTest(payload = {}) {
-      const res = await apiFetch('/api/admin/whatsapp/test', {
-        method: 'POST',
-        body: payload
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async googleDrive(params = {}) {
-      const query = new URLSearchParams()
-      Object.entries(params || {}).forEach(([key, value]) => {
-        if (value === undefined || value === null || value === '') return
-        query.set(String(key), String(value))
-      })
-      const suffix = query.toString() ? `?${query.toString()}` : ''
-      const res = await apiFetch(`/api/admin/google-drive${suffix}`, { method: 'GET' })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async googleDriveFiles(params = {}) {
-      const query = new URLSearchParams()
-      Object.entries(params || {}).forEach(([key, value]) => {
-        if (value === undefined || value === null || value === '') return
-        query.set(String(key), String(value))
-      })
-      const suffix = query.toString() ? `?${query.toString()}` : ''
-      const res = await apiFetch(`/api/admin/google-drive/files${suffix}`, { method: 'GET' })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async googleDriveConnectUrl(payload = {}) {
-      const res = await apiFetch('/api/admin/google-drive/connect-url', {
-        method: 'POST',
-        body: payload
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async syncGoogleDrive(params = {}) {
-      const query = new URLSearchParams()
-      Object.entries(params || {}).forEach(([key, value]) => {
-        if (value === undefined || value === null || value === '') return
-        query.set(String(key), String(value))
-      })
-      const suffix = query.toString() ? `?${query.toString()}` : ''
-      const res = await apiFetch(`/api/admin/google-drive/sync${suffix}`, {
-        method: 'POST',
-        body: {}
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async disconnectGoogleDrive() {
-      const res = await apiFetch('/api/admin/google-drive/disconnect', {
-        method: 'POST',
-        body: {}
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async storageManager(params = {}) {
-      const res = await apiFetch(`/api/admin/storage-manager${buildQueryString(params)}`, {
-        method: 'GET',
-        cacheTtlMs: 10 * 1000,
-        staleKey: 'admin.storage-manager',
-        timeoutMs: 15000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async storageCleanupPreview(payload = {}) {
-      const res = await apiFetch('/api/admin/storage-manager/cleanup/preview', {
-        method: 'POST',
-        body: payload,
-        cacheTtlMs: 0,
-        timeoutMs: 20000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async storageCleanupExecute(payload = {}) {
-      const res = await apiFetch('/api/admin/storage-manager/cleanup/execute', {
-        method: 'POST',
-        body: payload,
-        cacheTtlMs: 0,
-        timeoutMs: 60000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async syncObjectStorage(payload = {}) {
-      const res = await apiFetch('/api/admin/storage-manager/object-storage/sync', {
-        method: 'POST',
-        body: payload,
-        cacheTtlMs: 0,
-        timeoutMs: 120000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async restoreStorageTrash(fileId) {
-      const res = await apiFetch(`/api/admin/storage-manager/trash/${fileId}/restore`, {
-        method: 'POST',
-        body: {},
-        cacheTtlMs: 0,
-        timeoutMs: 20000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    }
-  },
-  super: {
-    async me() {
-      const res = await apiFetch('/api/super/me', { method: 'GET' })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async domains() {
-      const res = await apiFetch('/api/super/domains', { method: 'GET' })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async createAdminDomain(payload = {}) {
-      const res = await apiFetch('/api/super/domains', { method: 'POST', body: payload })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async createTenantDomain(tenantId, payload = {}) {
-      const res = await apiFetch(`/api/super/tenants/${tenantId}/domains`, {
-        method: 'POST',
-        body: payload
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async checkDomain(id) {
-      const res = await apiFetch(`/api/super/domains/${id}/check`, {
-        method: 'POST',
-        body: {}
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async deleteDomain(id) {
-      const res = await apiFetch(`/api/super/domains/${id}`, { method: 'DELETE' })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async tenants() {
-      const res = await apiFetch('/api/super/tenants', { method: 'GET' })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async tenantDetail(id) {
-      const res = await apiFetch(`/api/super/tenants/${id}`, { method: 'GET' })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async tenantBackup(id, options = {}) {
-      const mode = String(options?.mode || '').trim()
-      const monthsRaw = options?.months
-      const params = new URLSearchParams()
-      if (mode) params.set('mode', mode)
-      if (Number.isFinite(Number(monthsRaw)) && Number(monthsRaw) > 0) {
-        params.set('months', String(Math.trunc(Number(monthsRaw))))
-      }
-      const query = params.toString() ? `?${params.toString()}` : ''
-      const res = await apiFetch(`/api/super/tenants/${id}/backup${query}`, { method: 'GET' })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async saveTenantBackupToGoogleDrive(id, payload = {}) {
-      const res = await apiFetch(`/api/super/tenants/${id}/backup/google-drive`, {
-        method: 'POST',
-        body: payload,
-        timeoutMs: 60000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async tenantBackupMonthlyStatus(id, options = {}) {
-      const query = new URLSearchParams()
-      if (options?.refresh) query.set('refresh', '1')
-      const suffix = query.toString() ? `?${query.toString()}` : ''
-      const res = await apiFetch(`/api/super/tenants/${id}/backup/monthly-status${suffix}`, {
-        method: 'GET',
-        cacheTtlMs: 10 * 1000,
-        staleKey: `super.tenant-backup-monthly-status.${id}`,
-        timeoutMs: 20000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async saveTenantMonthlyBackupToGoogleDrive(id, payload = {}) {
-      const res = await apiFetch(`/api/super/tenants/${id}/backup/google-drive/monthly`, {
-        method: 'POST',
-        body: payload,
-        cacheTtlMs: 0,
-        timeoutMs: 60000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async autoTenantMonthlyBackupToGoogleDrive(id, payload = {}) {
-      const res = await apiFetch(`/api/super/tenants/${id}/backup/google-drive/monthly/auto`, {
-        method: 'POST',
-        body: payload,
-        cacheTtlMs: 0,
-        timeoutMs: 180000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async tenantMonthlyBackupJobStatus(id, jobId) {
-      const res = await apiFetch(`/api/super/tenants/${id}/backup/google-drive/monthly/jobs/${encodeURIComponent(jobId)}`, {
-        method: 'GET',
-        cacheTtlMs: 0,
-        timeoutMs: 20000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async restoreTenant(id, payload = {}) {
-      const res = await apiFetch(`/api/super/tenants/${id}/restore`, {
-        method: 'POST',
-        body: payload
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async updateTenantStatus(id, payload = {}) {
-      const res = await apiFetch(`/api/super/tenants/${id}/status`, {
-        method: 'PATCH',
-        body: payload
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async updateTenantRfidMqtt(id, payload = {}) {
-      const res = await apiFetch(`/api/super/tenants/${id}/rfid-mqtt`, {
-        method: 'PATCH',
-        body: payload
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async provisionTenantRfidMosquitto(id, payload = {}) {
-      const res = await apiFetch(`/api/super/tenants/${id}/rfid-mqtt/mosquitto`, {
-        method: 'POST',
-        body: payload
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async tenantRfidDevices(id) {
-      const res = await apiFetch(`/api/super/tenants/${id}/rfid-devices`, {
-        cacheTtlMs: 5000,
-        staleKey: `super.rfid-devices.${id}`
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async storeTenantRfidDevice(id, payload) {
-      const res = await apiFetch(`/api/super/tenants/${id}/rfid-devices`, {
-        method: 'POST',
-        body: payload
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async deleteTenantRfidDevice(id, deviceId) {
-      const encodedDeviceId = encodeURIComponent(String(deviceId || ''))
-      const res = await apiFetch(`/api/super/tenants/${id}/rfid-devices/${encodedDeviceId}`, {
-        method: 'DELETE'
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async createTenant(payload) {
-      const res = await apiFetch('/api/super/tenants', { method: 'POST', body: payload })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async resetTenantAdminPassword(tenantId, userId, payload = {}) {
-      const res = await apiFetch(`/api/super/tenants/${tenantId}/admins/${userId}/reset-password`, {
-        method: 'POST',
-        body: payload
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async setTenantPrimaryAdmin(tenantId, userId) {
-      const res = await apiFetch(`/api/super/tenants/${tenantId}/admins/${userId}/primary`, {
-        method: 'PATCH',
-        body: {}
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async admins() {
-      const res = await apiFetch('/api/super/admins', { method: 'GET' })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async createAdmin(payload) {
-      const res = await apiFetch('/api/super/admins', { method: 'POST', body: payload })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async deleteAdmin(id) {
-      const res = await apiFetch(`/api/super/admins/${id}`, { method: 'DELETE' })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async monitoringOverview() {
-      const res = await apiFetch('/api/super/monitoring', {
-        method: 'GET',
-        cacheTtlMs: 5000,
-        staleKey: 'super.monitoring',
-        timeoutMs: 20000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async serverMonitoring() {
-      const res = await apiFetch('/api/super/monitoring/server', {
-        method: 'GET',
-        cacheTtlMs: 3000,
-        staleKey: 'super.monitoring-server',
-        timeoutMs: 15000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async monitoringLogs(params = {}) {
-      const res = await apiFetch(`/api/super/monitoring/logs${buildQueryString(params)}`, {
-        method: 'GET',
-        cacheTtlMs: 3000,
-        staleKey: `super.monitoring-logs.${JSON.stringify(params || {})}`,
-        timeoutMs: 20000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async monitoringLogDetail(id) {
-      const res = await apiFetch(`/api/super/monitoring/logs/${encodeURIComponent(id)}`, {
-        method: 'GET',
-        cacheTtlMs: 3000,
-        staleKey: `super.monitoring-log.${id}`,
-        timeoutMs: 20000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async storageOverview() {
-      const res = await apiFetch('/api/super/storage', {
-        method: 'GET',
-        cacheTtlMs: 10 * 1000,
-        staleKey: 'super.storage',
-        timeoutMs: 20000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async tenantStorage(id, params = {}) {
-      const res = await apiFetch(`/api/super/tenants/${id}/storage${buildQueryString(params)}`, {
-        method: 'GET',
-        cacheTtlMs: 10 * 1000,
-        staleKey: `super.tenant-storage.${id}`,
-        timeoutMs: 20000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async tenantGoogleDrive(id, params = {}) {
-      const res = await apiFetch(`/api/super/tenants/${id}/google-drive${buildQueryString(params)}`, {
-        method: 'GET',
-        cacheTtlMs: 10 * 1000,
-        staleKey: `super.tenant-google-drive.${id}`,
-        timeoutMs: 20000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async tenantGoogleDriveFiles(id, params = {}) {
-      const res = await apiFetch(`/api/super/tenants/${id}/google-drive/files${buildQueryString(params)}`, {
-        method: 'GET',
-        cacheTtlMs: 10 * 1000,
-        staleKey: `super.tenant-google-drive-files.${id}`,
-        timeoutMs: 20000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async syncTenantGoogleDrive(id, params = {}) {
-      const res = await apiFetch(`/api/super/tenants/${id}/google-drive/sync${buildQueryString(params)}`, {
-        method: 'POST',
-        body: {},
-        cacheTtlMs: 0,
-        timeoutMs: 30000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async updateTenantStorageQuota(id, payload = {}) {
-      const res = await apiFetch(`/api/super/tenants/${id}/storage/quota`, {
-        method: 'PATCH',
-        body: payload,
-        cacheTtlMs: 0
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async syncObjectStorage(payload = {}) {
-      const res = await apiFetch('/api/super/storage/object-storage/sync', {
-        method: 'POST',
-        body: payload,
-        cacheTtlMs: 0,
-        timeoutMs: 180000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async syncTenantObjectStorage(id, payload = {}) {
-      const res = await apiFetch(`/api/super/tenants/${id}/storage/object-storage/sync`, {
-        method: 'POST',
-        body: payload,
-        cacheTtlMs: 0,
-        timeoutMs: 120000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async superStorageCleanupPreview(id, payload = {}) {
-      const res = await apiFetch(`/api/super/tenants/${id}/storage/cleanup/preview`, {
-        method: 'POST',
-        body: payload,
-        cacheTtlMs: 0,
-        timeoutMs: 20000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async superStorageCleanupExecute(id, payload = {}) {
-      const res = await apiFetch(`/api/super/tenants/${id}/storage/cleanup/execute`, {
-        method: 'POST',
-        body: payload,
-        cacheTtlMs: 0,
-        timeoutMs: 60000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async restoreStorageTrash(id, fileId) {
-      const res = await apiFetch(`/api/super/tenants/${id}/storage/trash/${fileId}/restore`, {
-        method: 'POST',
-        body: {},
-        cacheTtlMs: 0,
-        timeoutMs: 20000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async deleteStorageTrash(id, fileId) {
-      const res = await apiFetch(`/api/super/tenants/${id}/storage/trash/${fileId}`, {
-        method: 'DELETE',
-        cacheTtlMs: 0,
-        timeoutMs: 20000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async purgeAllTenantTrash(id) {
-      const res = await apiFetch(`/api/super/tenants/${id}/storage/trash/purge-all`, {
-        method: 'POST',
-        body: {},
-        cacheTtlMs: 0,
-        timeoutMs: 120000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async purgeExpiredStorageTrash() {
-      const res = await apiFetch('/api/super/storage/trash/purge-expired', {
-        method: 'POST',
-        body: {},
-        cacheTtlMs: 0,
-        timeoutMs: 60000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async whatsapp(params = {}) {
-      const res = await apiFetch(`/api/super/whatsapp${buildQueryString(params)}`, {
-        method: 'GET',
-        cacheTtlMs: 10 * 1000,
-        staleKey: `super.whatsapp.${JSON.stringify(params || {})}`,
-        timeoutMs: 20000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async connectWhatsApp() {
-      const res = await apiFetch('/api/super/whatsapp/connect', {
-        method: 'POST',
-        body: {},
-        cacheTtlMs: 0,
-        timeoutMs: 30000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async syncWhatsApp() {
-      const res = await apiFetch('/api/super/whatsapp/sync', {
-        method: 'POST',
-        body: {},
-        cacheTtlMs: 0,
-        timeoutMs: 30000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async logoutWhatsApp() {
-      const res = await apiFetch('/api/super/whatsapp/logout', {
-        method: 'POST',
-        body: {},
-        cacheTtlMs: 0,
-        timeoutMs: 30000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async updateWhatsAppTenantStatus(payload = {}) {
-      const { tenant_id, is_enabled } = payload
-      const res = await apiFetch(`/api/super/whatsapp/tenants/${tenant_id}/status`, {
-        method: 'PATCH',
-        body: { is_enabled },
-        cacheTtlMs: 0,
-        timeoutMs: 30000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async sendWhatsAppTest(payload = {}) {
-      const res = await apiFetch('/api/super/whatsapp/test', {
-        method: 'POST',
-        body: payload,
-        cacheTtlMs: 0,
-        timeoutMs: 30000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async runDailyAlphaWhatsApp(payload = {}) {
-      const res = await apiFetch('/api/super/whatsapp/daily-alpha/run', {
-        method: 'POST',
-        body: payload,
-        cacheTtlMs: 0,
-        timeoutMs: 60000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async retryFailedWhatsApp(payload = {}) {
-      const res = await apiFetch('/api/super/whatsapp/retry-failed', {
-        method: 'POST',
-        body: payload,
-        cacheTtlMs: 0,
-        timeoutMs: 30000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async auditTrail(params = {}) {
-      const query = new URLSearchParams()
-      Object.entries(params || {}).forEach(([key, value]) => {
-        if (value === undefined || value === null || value === '') return
-        query.set(String(key), String(value))
-      })
-      const suffix = query.toString() ? `?${query.toString()}` : ''
-      const res = await apiFetch(`/api/super/audit-trail${suffix}`, { method: 'GET' })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async plugins() {
-      const res = await apiFetch('/api/super/plugins', { method: 'GET' })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async inspectPlugin(formData) {
-      const res = await apiFetch('/api/super/plugins/inspect', {
-        method: 'POST',
-        body: formData
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async installPlugin(payload = {}) {
-      const res = await apiFetch('/api/super/plugins', {
-        method: 'POST',
-        body: payload
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async updatePluginStatus(id, payload = {}) {
-      const res = await apiFetch(`/api/super/plugins/${id}/status`, {
-        method: 'PATCH',
-        body: payload
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async deletePlugin(id, payload = {}) {
-      const res = await apiFetch(`/api/super/plugins/${id}`, {
-        method: 'DELETE',
-        body: payload
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async downloadPlugin(id, fallbackName = 'plugin.zip') {
-      return downloadAuthenticatedFile(`/api/super/plugins/${id}/download`, fallbackName)
-    }
-  },
   quiz: {
     async dashboard(params = {}) {
       const res = await apiFetch(`/api/quiz/dashboard${buildQueryString(params)}`, {
@@ -4180,6 +3302,36 @@ class RealtimeChannel {
   }
 }
 
+
+const createLazyRoleApi = (loader, label) => {
+  let loadedApiPromise = null
+
+  const loadApi = async () => {
+    if (!loadedApiPromise) {
+      loadedApiPromise = loader().then((module) => module.default || module)
+    }
+    return loadedApiPromise
+  }
+
+  return new Proxy({}, {
+    get(_target, property) {
+      if (property === 'then' || typeof property === 'symbol') return undefined
+
+      return async (...args) => {
+        const api = await loadApi()
+        const handler = api?.[property]
+        if (typeof handler !== 'function') {
+          throw new Error(`Endpoint ${label}.${String(property)} tidak tersedia.`)
+        }
+        return handler(...args)
+      }
+    }
+  })
+}
+
+const adminApi = createLazyRoleApi(() => import('./adminApi'), 'admin')
+const superApi = createLazyRoleApi(() => import('./superApi'), 'super')
+
 /* ===================== MAIN CLIENT ===================== */
 export const supabase = {
   from: (table) => new QueryBuilder(table),
@@ -4197,8 +3349,8 @@ export const supabase = {
     }
   },
   auth,
-  admin: auth.admin,
-  super: auth.super,
+  admin: adminApi,
+  super: superApi,
   quiz: auth.quiz,
   reports,
   attendanceQr,
