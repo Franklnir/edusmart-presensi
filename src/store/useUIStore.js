@@ -28,6 +28,12 @@ export const useUIStore = create((set) => ({
     set((state) => {
       const normalizedType = type || 'default'
       const normalizedMessage = String(message || '').trim() || 'Terjadi perubahan status.'
+      
+      // Silence REQUEST_ABORTED errors gracefully so users don't get spammed when navigating fast
+      if (normalizedMessage.includes('Request dibatalkan')) {
+        return state
+      }
+
       const dedupedToasts = state.toasts.filter(
         (toast) => !(toast.type === normalizedType && toast.message === normalizedMessage)
       )
