@@ -76,6 +76,45 @@ read_env_var() {
   ' "$file"
 }
 
+set_env_var() {
+  local key="$1"
+  local value="$2"
+  local file="$3"
+  local tmp
+
+  tmp="$(mktemp)"
+  awk -v key="$key" -v value="$value" '
+    BEGIN { replaced = 0 }
+    {
+      line = $0
+      probe = line
+      sub(/^[[:space:]]+/, "", probe)
+      if (replaced == 0 && index(probe, key "=") == 1) {
+        print key "=" value
+        replaced = 1
+        next
+      }
+      print line
+    }
+    END {
+      if (replaced == 0) {
+        print key "=" value
+      }
+    }
+  ' "$file" >"$tmp"
+  mv "$tmp" "$file"
+}
+
+configure_backup_runtime_env() {
+  set_env_var BACKUP_MONTHLY_AUTO_START_TIME 21:30 "$ENV_FILE"
+  set_env_var BACKUP_NOTIFY_EMAIL_ENABLED true "$ENV_FILE"
+  set_env_var BACKUP_NOTIFY_SUPER_ADMIN true "$ENV_FILE"
+  set_env_var BACKUP_NOTIFY_ON_SUCCESS true "$ENV_FILE"
+  set_env_var BACKUP_NOTIFY_ON_FAILURE true "$ENV_FILE"
+  set_env_var BACKUP_NOTIFY_ON_DRIVE_ATTENTION true "$ENV_FILE"
+  echo "[info] Env backup production disetel: jadwal 21:30 WIB dan email notification aktif."
+}
+
 split_words() {
   local value="$1"
   # shellcheck disable=SC2206
@@ -620,6 +659,8 @@ if [[ ! -f "$ENV_FILE" ]]; then
   echo "Error: env file tidak ditemukan: $ENV_FILE" >&2
   exit 1
 fi
+
+configure_backup_runtime_env
 
 if [[ "${#COMPOSE_FILES[@]}" -eq 0 ]]; then
   ENV_COMPOSE_FILES="${EDUSMART_COMPOSE_FILES:-$(read_env_var EDUSMART_COMPOSE_FILES "$ENV_FILE")}"

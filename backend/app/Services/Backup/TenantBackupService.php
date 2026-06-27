@@ -66,9 +66,9 @@ class TenantBackupService
                 'contains_linked_users' => true,
                 'restore_strategy' => 'id_or_unique_key_upsert',
                 'notes' => [
-                    'Backup berisi seluruh data database tenant dan metadata file storage/Drive, bukan isi file biner.',
+                    'Backup berisi database tenant dan metadata file storage. Isi file biner dari S3/R2/MinIO tidak ikut dibackup.',
                     'Restore mengarah ke tenant target yang dipilih, bukan memindahkan tenant asal.',
-                    'File storage Neva S3 dan Google Drive tetap tersimpan pada provider masing-masing.',
+                    'File storage Neva S3, R2, MinIO, dan Google Drive tetap tersimpan pada provider masing-masing.',
                 ],
             ],
             'tables' => $tables,
@@ -564,7 +564,7 @@ class TenantBackupService
             'schedule' => [
                 'enabled' => true,
                 'timezone' => 'Asia/Jakarta',
-                'runs_at' => (string) config('backup.monthly_auto_start_time', '23:15'),
+                'runs_at' => (string) config('backup.monthly_auto_start_time', '21:30'),
                 'runs_at_label' => $this->monthlyAutoScheduleLabel(),
                 'rule' => 'Scheduler berjalan harian, mengejar bulan yang sudah due/terlewat, dan tenant diproses bertahap agar server dan Google Drive tidak menumpuk.',
                 'mode' => 'full',
@@ -597,7 +597,7 @@ class TenantBackupService
 
     private function monthlyAutoScheduleLabel(): string
     {
-        $start = trim((string) config('backup.monthly_auto_start_time', '23:15')) ?: '23:15';
+        $start = trim((string) config('backup.monthly_auto_start_time', '21:30')) ?: '21:30';
         $spacing = (int) config('backup.monthly_auto_tenant_spacing_minutes', 4);
 
         return 'Setiap hari '.$start.' WIB, catch-up bulanan bertahap tiap '.$spacing.' menit per sekolah';
@@ -647,6 +647,44 @@ class TenantBackupService
             ->map(fn ($value) => (string) $value)
             ->values()
             ->all();
+    }
+
+    public function tenantsEligibleForMonthlyBackupWithDriveRecovery(): array
+    {
+        if (! Schema::hasTable('tenant_google_drive_configs')) {
+            return [];
+        }
+
+        $configs = DB::table('tenant_google_drive_configs')
+            ->where('is_enabled', true)
+            ->whereIn('status', [
+                GoogleDriveService::STATUS_CONNECTED,
+                GoogleDriveService::STATUS_NEEDS_ATTENTION,
+            ])
+            ->whereNotNull('refresh_token')
+            ->get(['tenant_id', 'status']);
+
+        $tenantIds = [];
+        foreach ($configs as $config) {
+            $tenantId = trim((string) ($config->tenant_id ?? ''));
+            if ($tenantId === '') {
+                continue;
+            }
+
+            $status = (string) ($config->status ?? '');
+            if ($status === GoogleDriveService::STATUS_CONNECTED) {
+                $tenantIds[] = $tenantId;
+
+                continue;
+            }
+
+            $recovery = $this->googleDriveService->recoverTenantConnection($tenantId, 'monthly-backup-preflight');
+            if (($recovery['status'] ?? '') === GoogleDriveService::STATUS_CONNECTED && (bool) ($recovery['recovered'] ?? false)) {
+                $tenantIds[] = $tenantId;
+            }
+        }
+
+        return array_values(array_unique($tenantIds));
     }
 
     public function currentMonthKey(): string
@@ -1029,15 +1067,18 @@ class TenantBackupService
             $date = $currentDay->toDateString();
             $activity = is_array($dailyActivity[$date] ?? null) ? $dailyActivity[$date] : null;
             $latestAt = $this->activityLatestAt($activity);
+            $hasActivity = (int) ($activity['row_count'] ?? 0) > 0 || $latestAt !== null;
             $hasNewData = $latestAt && (! $lastBackupAt || $latestAt->greaterThan($lastBackupAt));
             $isCovered = $coverageEnd && $currentDay->lessThanOrEqualTo($coverageEnd->copy()->endOfDay());
 
             if ($currentDay->greaterThan($todayEnd)) {
                 $status = 'future';
-            } elseif ($hasNewData) {
+            } elseif ($hasActivity && $hasNewData) {
                 $status = 'new_data';
-            } elseif ($isCovered) {
+            } elseif ($hasActivity && $isCovered) {
                 $status = 'backed_up';
+            } elseif (! $hasActivity) {
+                $status = 'verified_empty';
             } else {
                 $status = 'empty';
             }
@@ -1048,7 +1089,7 @@ class TenantBackupService
                 'day_label' => str_pad((string) $day, 2, '0', STR_PAD_LEFT),
                 'status' => $status,
                 'status_label' => $this->monthlyDayStatusLabel($status),
-                'has_data' => (bool) $activity,
+                'has_data' => $hasActivity,
                 'row_count' => (int) ($activity['row_count'] ?? 0),
                 'latest_data_at' => optional($latestAt)->toIso8601String(),
                 'is_covered_by_backup' => (bool) $isCovered,
@@ -1075,8 +1116,9 @@ class TenantBackupService
     private function monthlyDayStatusLabel(string $status): string
     {
         return match ($status) {
-            'backed_up' => 'Sudah masuk backup',
+            'backed_up' => 'Sudah dibackup',
             'new_data' => 'Ada data baru',
+            'verified_empty' => 'Tidak ada aktivitas',
             'future' => 'Tanggal belum berjalan',
             default => 'Belum ada data backup',
         };

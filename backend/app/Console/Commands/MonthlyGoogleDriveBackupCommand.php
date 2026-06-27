@@ -29,7 +29,7 @@ class MonthlyGoogleDriveBackupCommand extends Command
 
         $tenantIds = $tenantFilter !== ''
             ? [$tenantFilter]
-            : $tenantBackupService->tenantsEligibleForMonthlyBackup();
+            : $tenantBackupService->tenantsEligibleForMonthlyBackupWithDriveRecovery();
 
         if (empty($tenantIds)) {
             $this->info('Tidak ada tenant dengan Google Drive terhubung.');

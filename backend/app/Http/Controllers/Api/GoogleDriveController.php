@@ -115,6 +115,20 @@ class GoogleDriveController extends ApiController
         ));
     }
 
+    public function recover(Request $request)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->resolveOwnedTenantId($request);
+        if (! $tenantId) {
+            return response()->json(['error' => 'Tenant tidak valid'], 400);
+        }
+
+        return $this->ok($this->googleDriveService->recoverTenantConnection((string) $tenantId, 'admin-recover'));
+    }
+
     public function disconnect(Request $request)
     {
         if (! $this->isAdmin($request)) {

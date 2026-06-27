@@ -435,6 +435,15 @@ const adminApi = {
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
+    async recoverGoogleDrive() {
+      const res = await apiFetch('/api/admin/google-drive/recover', {
+        method: 'POST',
+        body: {},
+        cacheTtlMs: 0,
+        timeoutMs: 30000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
     async disconnectGoogleDrive() {
       const res = await apiFetch('/api/admin/google-drive/disconnect', {
         method: 'POST',

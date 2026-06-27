@@ -254,6 +254,122 @@ class GoogleDriveService
         return $this->publicStatus($tenantId, $config, false, $usageFilters);
     }
 
+    public function recoverTenantConnection(string $tenantId, string $context = 'auto'): array
+    {
+        $tenantId = trim($tenantId);
+        $context = trim($context) !== '' ? trim($context) : 'auto';
+
+        if (! $this->providerConfigured()) {
+            return [
+                'tenant_id' => $tenantId,
+                'status' => self::STATUS_DISCONNECTED,
+                'recovered' => false,
+                'requires_reconnect' => false,
+                'message' => 'Google Drive belum dikonfigurasi di server.',
+                'last_error' => 'Google Drive belum dikonfigurasi di server.',
+            ];
+        }
+
+        if (! $this->tablesReady() || $tenantId === '') {
+            return [
+                'tenant_id' => $tenantId,
+                'status' => self::STATUS_DISCONNECTED,
+                'recovered' => false,
+                'requires_reconnect' => false,
+                'message' => 'Konfigurasi Google Drive tenant tidak tersedia.',
+                'last_error' => null,
+            ];
+        }
+
+        $config = TenantGoogleDriveConfig::query()->where('tenant_id', $tenantId)->first();
+        if (! $config || ! $config->is_enabled) {
+            return [
+                'tenant_id' => $tenantId,
+                'status' => self::STATUS_DISCONNECTED,
+                'recovered' => false,
+                'requires_reconnect' => false,
+                'message' => 'Google Drive sekolah belum tersambung.',
+                'last_error' => null,
+            ];
+        }
+
+        if (trim((string) ($config->refresh_token ?? '')) === '') {
+            $message = 'Refresh token Google Drive tidak tersedia. Sambungkan ulang Google Drive.';
+            $config->fill([
+                'status' => self::STATUS_NEEDS_ATTENTION,
+                'last_checked_at' => now(),
+                'last_error' => $message,
+            ]);
+            $config->save();
+
+            return [
+                'tenant_id' => $tenantId,
+                'status' => self::STATUS_NEEDS_ATTENTION,
+                'recovered' => false,
+                'requires_reconnect' => true,
+                'message' => $message,
+                'last_error' => $message,
+            ];
+        }
+
+        $previousStatus = (string) ($config->status ?? '');
+        $previousError = trim((string) ($config->last_error ?? ''));
+
+        try {
+            $config = $this->ensureSchoolFolder($config);
+            $config = $this->syncQuota($config->fresh());
+            $config->fill([
+                'status' => self::STATUS_CONNECTED,
+                'last_checked_at' => now(),
+                'last_error' => null,
+            ]);
+            $config->save();
+
+            $recovered = $previousStatus !== self::STATUS_CONNECTED || $previousError !== '';
+
+            return [
+                'tenant_id' => $tenantId,
+                'status' => self::STATUS_CONNECTED,
+                'recovered' => $recovered,
+                'requires_reconnect' => false,
+                'message' => $context === 'monthly-backup-preflight'
+                    ? 'Google Drive berhasil dipulihkan sebelum backup otomatis.'
+                    : ($recovered ? 'Google Drive berhasil dipulihkan otomatis.' : 'Google Drive sehat dan berhasil disinkronkan ulang.'),
+                'last_error' => null,
+                'status_payload' => $this->publicStatus($tenantId, $config->fresh(), false),
+            ];
+        } catch (\Throwable $e) {
+            $message = $this->shortError($e->getMessage());
+            $requiresReconnect = $this->requiresGoogleDriveReconnect($message);
+            $config->fill([
+                'status' => self::STATUS_NEEDS_ATTENTION,
+                'last_checked_at' => now(),
+                'last_error' => $requiresReconnect
+                    ? $this->reconnectMessage($message)
+                    : $message,
+            ]);
+            $config->save();
+
+            Log::warning('google_drive_recovery_failed', [
+                'tenant_id' => $tenantId,
+                'context' => $context,
+                'requires_reconnect' => $requiresReconnect,
+                'error' => $message,
+            ]);
+
+            return [
+                'tenant_id' => $tenantId,
+                'status' => self::STATUS_NEEDS_ATTENTION,
+                'recovered' => false,
+                'requires_reconnect' => $requiresReconnect,
+                'message' => $requiresReconnect
+                    ? 'Google Drive perlu disambungkan ulang oleh admin sekolah.'
+                    : 'Google Drive belum berhasil dipulihkan otomatis. Sistem akan mencoba lagi nanti.',
+                'last_error' => (string) $config->last_error,
+            ];
+        }
+    }
+
     public function summaryForTenant(string $tenantId): array
     {
         $tenantId = trim($tenantId);
@@ -2185,6 +2301,32 @@ class GoogleDriveService
         }
 
         return $fallback;
+    }
+
+    private function requiresGoogleDriveReconnect(string $message): bool
+    {
+        $message = Str::lower($message);
+
+        return Str::contains($message, [
+            'invalid_grant',
+            'invalid_client',
+            'access_denied',
+            'revoked',
+            'consent',
+            'refresh token google drive tidak tersedia',
+            'refresh token tidak tersedia',
+            'unauthorized_client',
+        ]);
+    }
+
+    private function reconnectMessage(string $message): string
+    {
+        $message = trim($message);
+        if ($message === '') {
+            return 'Google Drive perlu disambungkan ulang oleh admin sekolah.';
+        }
+
+        return $this->shortError($message.' Sambungkan ulang Google Drive.');
     }
 
     private function shortError(string $message): string

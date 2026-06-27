@@ -99,8 +99,8 @@ class MonthlyGoogleDriveBackupCommandTest extends TestCase
             $this->assertSame('needs_update', $june['status']);
             $this->assertTrue($june['can_backup']);
             $this->assertSame('05', $june['days'][4]['day_label']);
-            $this->assertSame('backed_up', $june['days'][4]['status']);
-            $this->assertSame('empty', $june['days'][9]['status']);
+            $this->assertSame('verified_empty', $june['days'][4]['status']);
+            $this->assertSame('verified_empty', $june['days'][9]['status']);
             $this->assertSame('new_data', $june['days'][18]['status']);
             $this->assertSame('future', $june['days'][23]['status']);
             $this->assertSame('Ada data baru', $june['days'][18]['status_label']);

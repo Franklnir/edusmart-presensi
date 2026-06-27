@@ -38,7 +38,13 @@ Schedule::command('horizon:snapshot')
     ->onOneServer();
 
 Schedule::command('backup:monthly-google-drive')
-    ->dailyAt((string) config('backup.monthly_auto_start_time', '23:15'))
+    ->dailyAt((string) config('backup.monthly_auto_start_time', '21:30'))
+    ->timezone('Asia/Jakarta')
+    ->withoutOverlapping(30)
+    ->onOneServer();
+
+Schedule::command('google-drive:health-check --recover')
+    ->dailyAt('21:15')
     ->timezone('Asia/Jakarta')
     ->withoutOverlapping(30)
     ->onOneServer();
