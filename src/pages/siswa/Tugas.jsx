@@ -8,6 +8,7 @@ import {
   extractObjectPath,
   getSignedUrlForValue
 } from '../../lib/supabase'
+import { useLocalCache } from '../../hooks/useLocalCache'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import FileDropzone from '../../components/FileDropzone'
@@ -508,11 +509,11 @@ export default function TugasSiswa() {
   const requestedTugasId = String(searchParams.get('tugas') || '').trim()
 
   /* ---------- State ---------- */
-  const [tugasList, setTugasList] = useState([])
+  const [tugasList, setTugasList, hasTugasList] = useLocalCache('siswa_tugas_list', [])
   const [selectedMapel, setSelectedMapel] = useState('')
   const [mapelOptions, setMapelOptions] = useState([])
   const [isMapelLoading, setIsMapelLoading] = useState(false)
-  const [isListLoading, setIsListLoading] = useState(false)
+  const [isListLoading, setIsListLoading] = useState(!hasTugasList)
 
   const [timeRange, setTimeRange] = useState(() => (
     requestedTugasId ? 'all' : normalizeTimeRange(searchParams.get('range')) || 'recent'

@@ -9,6 +9,7 @@ import {
   getSignedUrlForValue,
   removeStorageObject
 } from '../../lib/supabase'
+import { useLocalCache } from '../../hooks/useLocalCache'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import FileDropzone from '../../components/FileDropzone'
@@ -518,8 +519,8 @@ export default function TugasGuru() {
   })
 
   /* ---------- State ---------- */
-  const [jadwalAll, setJadwalAll] = useState([])
-  const [kelasList, setKelasList] = useState([])
+  const [jadwalAll, setJadwalAll] = useLocalCache('guru_tugas_jadwalAll', [])
+  const [kelasList, setKelasList] = useLocalCache('guru_tugas_kelasList', [])
 
   // Create form
   const [isCreatePanelOpen, setIsCreatePanelOpen] = useState(false)
@@ -542,7 +543,6 @@ export default function TugasGuru() {
   const [uploadPercent, setUploadPercent] = useState(null)
 
   // History filter
-  const [listTugas, setListTugas] = useState([])
   const [selectedKelasFilter, setSelectedKelasFilter] = useState('')
   const [mapelListFilter, setMapelListFilter] = useState([])
   const [selectedSubject, setSelectedSubject] = useState('')
@@ -626,6 +626,8 @@ export default function TugasGuru() {
 
   // Detail
   const [selectedTugas, setSelectedTugas] = useState(null)
+  const [listTugas, setListTugas, hasListTugas] = useLocalCache('guru_tugas_list', [])
+  const [isLoadingList, setIsLoadingList] = useState(!hasListTugas)
   const [siswaDiKelas, setSiswaDiKelas] = useState([])
   const [jawabanTugas, setJawabanTugas] = useState([])
   const [nilaiInput, setNilaiInput] = useState({})

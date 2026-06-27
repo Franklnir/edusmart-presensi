@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { QUIZ_MEDIA_BUCKET, supabase } from '../../lib/supabase'
 import { startTransition } from 'react'
+import { useLocalCache } from '../../hooks/useLocalCache'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import { formatDateTime } from '../../lib/time'
@@ -104,14 +105,14 @@ export default function GuruQuiz() {
     storageKey: 'edusmart.guru.quiz.periodFilter'
   })
 
-  const [jadwal, setJadwal] = useState([])
-  const [kelasList, setKelasList] = useState([])
+  const [jadwal, setJadwal] = useLocalCache('guru_quiz_jadwal', [])
+  const [kelasList, setKelasList] = useLocalCache('guru_quiz_kelasList', [])
   const [selectedKelas, setSelectedKelas] = useState('')
   const [mapelList, setMapelList] = useState([])
   const [selectedMapel, setSelectedMapel] = useState('')
   const [selectedMonth, setSelectedMonth] = useState('')
 
-  const [quizList, setQuizList] = useState([])
+  const [quizList, setQuizList, hasQuizList] = useLocalCache('guru_quiz_list', [])
   const [quizStatsById, setQuizStatsById] = useState({})
   const [selectedQuizId, setSelectedQuizId] = useState('')
   const [questions, setQuestions] = useState([])

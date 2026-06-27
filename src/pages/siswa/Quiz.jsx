@@ -15,6 +15,7 @@ import {
   ShieldCheck
 } from 'lucide-react'
 import { QUIZ_MEDIA_BUCKET, supabase } from '../../lib/supabase'
+import { useLocalCache } from '../../hooks/useLocalCache'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import { formatDateTime, parseDateTime } from '../../lib/time'
@@ -529,8 +530,9 @@ export default function SiswaQuiz() {
     storageKey: 'edusmart.siswa.quiz.periodFilter'
   })
 
-  const [quizList, setQuizList] = useState([])
-  const [quizLoadDone, setQuizLoadDone] = useState(false)
+  // ================= STATE =================
+  const [quizList, setQuizList, hasQuizList] = useLocalCache('siswa_quiz_list', [])
+  const [quizLoadDone, setQuizLoadDone] = useState(hasQuizList)
   const [mapelList, setMapelList] = useState([])
   const [selectedMapel, setSelectedMapel] = useState('')
   const [selectedMonth, setSelectedMonth] = useState('')
