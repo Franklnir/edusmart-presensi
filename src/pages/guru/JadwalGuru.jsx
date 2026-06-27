@@ -1520,190 +1520,208 @@ export default function JadwalGuru() {
     return map
   }, [siswaList])
 
-  // === LOAD DATA (kelas, siswa, pengumuman, sertifikat, struktur, dll) ===
+  // === LOAD SEMUA DATA DALAM 1 BATCH (PARALEL) ===
   useEffect(() => {
-    const loadAllKelas = async () => {
+    if (!user?.id) return
+
+    const loadAllData = async () => {
       try {
-        const { data, error } = await supabase
+        setIsLoading(true)
+
+        // Siapkan semua query untuk dieksekusi secara paralel
+        const kelasQuery = supabase
           .from('kelas')
-          .select('*')
+          .select('id, nama, tingkat, jurusan, grade, suffix') // Spesifik kolom, jangan select *
           .order('grade')
           .order('suffix')
-        if (error) throw error
-        setKelasList(data || [])
-      } catch (error) {
-        console.error('Error loading kelas:', error)
-      }
-    }
-    loadAllKelas()
-  }, [])
 
-  useEffect(() => {
-    const loadSiswaList = async () => {
-      try {
-        const { data, error } = await supabase
+        const siswaQuery = supabase
           .from('profiles')
           .select('id, nama, email, kelas')
           .eq('role', 'siswa')
           .order('kelas')
           .order('nama')
+          // .limit(1000) // Bisa di-uncomment jika siswa sangat banyak
 
-        if (error) throw error
-        setSiswaList(data?.map(s => ({
-          uid: s.id,
-          nama: s.nama || s.email,
-          kelas: s.kelas || '',
-          email: s.email
-        })) || [])
-      } catch (error) {
-        console.error('Error loading siswa list:', error)
-      }
-    }
-    loadSiswaList()
-  }, [])
-
-  useEffect(() => {
-    const loadPengumuman = async () => {
-      try {
-        const { data, error } = await supabase
+        const pengumumanQuery = supabase
           .from('pengumuman')
-          .select('*')
+          .select('id, judul, isi, type, created_at, created_by')
           .in('target', ['guru', 'semua'])
           .order('created_at', { ascending: false })
           .limit(3)
 
-        if (error) throw error
-        setPengumumanList(data || [])
-      } catch (error) {
-        console.error('Error loading pengumuman:', error)
-      }
-    }
-    loadPengumuman()
-  }, [])
-
-  useEffect(() => {
-    const loadSertifikat = async () => {
-      if (!user?.id) return
-
-      try {
-        setLoading(true)
-        const { data, error } = await supabase
+        const sertifikatQuery = supabase
           .from('certificates')
-          .select('*')
+          .select('id, title, issued_at, file_url, type, points')
           .eq('user_id', user.id)
           .order('issued_at', { ascending: false })
 
-        if (error) throw error
-        const hydrated = await hydrateCertificateFileUrls(data || [])
-        setSertifikatList(hydrated)
-      } catch (error) {
-        console.error('Error loading sertifikat:', error)
-        pushToast('error', 'Gagal memuat data sertifikat')
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    loadSertifikat()
-  }, [user?.id, setLoading, pushToast])
-
-  useEffect(() => {
-    const loadStrukturSekolah = async () => {
-      try {
-        const { data, error } = await supabase
+        const strukturSekolahQuery = supabase
           .from('struktur_sekolah')
-          .select('*')
+          .select('id, jabatan, nama, guru_id')
           .order('jabatan')
 
-        if (error) throw error
-        setStrukturSekolah(data || [])
-      } catch (error) {
-        console.error('Error loading struktur sekolah:', error)
-      }
-    }
-    loadStrukturSekolah()
-  }, [])
-
-  useEffect(() => {
-    if (!user?.id) return
-
-    const fetchData = async () => {
-      try {
-        // Wali Kelas
-        const { data: waliData } = await supabase
+        const waliKelasQuery = supabase
           .from('kelas_struktur')
           .select('kelas_id, wali_guru_id, wali_guru_nama')
           .eq('wali_guru_id', user.id)
-        setWaliKelasSaya(waliData || [])
 
-        // Jadwal
         let jadwalQuery = supabase
           .from('jadwal')
-          .select('*')
+          .select('id, kelas, mapel, hari, jam_mulai, jam_selesai, ruang')
           .eq('guru_id', user.id)
           .order('jam_mulai', { ascending: true })
-	        if (activeAcademicPeriod.tahunAjaran) jadwalQuery = jadwalQuery.eq('tahun_ajaran', activeAcademicPeriod.tahunAjaran)
-	        const { data: jadwalData } = await jadwalQuery
-	        setJadwal(filterSchedulesForSemester(jadwalData || [], activeAcademicPeriod.semester))
-
-        // Ekskul
+        
         let ekskulQuery = supabase
           .from('ekskul')
-          .select('*')
+          .select('id, nama, hari, jam_mulai, jam_selesai, ruang')
           .eq('pembina_guru_id', user.id)
-        if (activeAcademicPeriod.tahunAjaran) ekskulQuery = ekskulQuery.eq('tahun_ajaran', activeAcademicPeriod.tahunAjaran)
 
-        let { data: ekskulData, error: ekskulError } = await ekskulQuery
-        if (ekskulError && /tahun_ajaran|semester/i.test(ekskulError.message || '')) {
-          ; ({ data: ekskulData, error: ekskulError } = await supabase
-            .from('ekskul')
-            .select('*')
-            .eq('pembina_guru_id', user.id))
-        }
-        if (ekskulError) throw ekskulError
-
-        if (ekskulData) {
-          const ekskulWithCount = await Promise.all(ekskulData.map(async (e) => {
-            let countQuery = supabase
-              .from('ekskul_anggota')
-              .select('*', { count: 'exact', head: true })
-              .eq('ekskul_id', e.id)
-            if (activeAcademicPeriod.tahunAjaran) countQuery = countQuery.eq('tahun_ajaran', activeAcademicPeriod.tahunAjaran)
-            const { count } = await countQuery
-            return { ...e, jumlah_anggota: count || 0 }
-          }))
-          setEskulDiampu(ekskulWithCount)
-        }
-
-        // Struktur jabatan saya
-        const { data: jabatanData } = await supabase
-          .from('struktur_sekolah')
-          .select('*')
-          .eq('guru_id', user.id)
-        setStrukturJabatan(jabatanData || [])
-
-        // Organisasi
-        const { data: orgData } = await supabase
+        let orgQuery = supabase
           .from('organisasi')
-          .select('*')
+          .select('id, nama, deskripsi')
           .eq('pembina_guru_id', user.id)
 
-        if (orgData) {
-          const orgWithCount = await Promise.all(orgData.map(async (org) => {
-            const { count } = await supabase
-              .from('organisasi_anggota')
-              .select('*', { count: 'exact', head: true })
-              .eq('organisasi_id', org.id)
-            return { ...org, jumlah_anggota: count || 0 }
-          }))
-          setOrganisasiDiampu(orgWithCount)
+        // Filter academic period untuk jadwal dan ekskul jika ada
+        if (activeAcademicPeriod.tahunAjaran) {
+          jadwalQuery = jadwalQuery.eq('tahun_ajaran', activeAcademicPeriod.tahunAjaran)
+          ekskulQuery = ekskulQuery.eq('tahun_ajaran', activeAcademicPeriod.tahunAjaran)
         }
+
+        // Eksekusi semua query secara paralel menggunakan Promise.all
+        const [
+          { data: kelasData, error: kelasErr },
+          { data: siswaData, error: siswaErr },
+          { data: pengumumanData, error: pengumumanErr },
+          { data: sertifikatData, error: sertifikatErr },
+          { data: strukturSekolahData, error: strukturSekolahErr },
+          { data: waliKelasData, error: waliKelasErr },
+          { data: jadwalData, error: jadwalErr },
+          { data: ekskulDataRes, error: ekskulErr },
+          { data: orgData, error: orgErr },
+        ] = await Promise.all([
+          kelasQuery,
+          siswaQuery,
+          pengumumanQuery,
+          sertifikatQuery,
+          strukturSekolahQuery,
+          waliKelasQuery,
+          jadwalQuery,
+          ekskulQuery,
+          orgQuery
+        ])
+
+        // 1. Set Kelas
+        if (!kelasErr && kelasData) setKelasList(kelasData)
+
+        // 2. Set Siswa
+        if (!siswaErr && siswaData) {
+          setSiswaList(siswaData.map(s => ({
+            uid: s.id,
+            nama: s.nama || s.email,
+            kelas: s.kelas || '',
+            email: s.email
+          })))
+        }
+
+        // 3. Set Pengumuman
+        if (!pengumumanErr && pengumumanData) setPengumumanList(pengumumanData)
+
+        // 4. Set Sertifikat & Hydrate
+        if (!sertifikatErr && sertifikatData) {
+          hydrateCertificateFileUrls(sertifikatData).then(hydrated => {
+            setSertifikatList(hydrated)
+          }).catch(err => {
+            console.error('Error hydrating certificates', err)
+            setSertifikatList(sertifikatData)
+          })
+        }
+
+        // 5. Set Struktur Sekolah & Jabatan
+        if (!strukturSekolahErr && strukturSekolahData) {
+          setStrukturSekolah(strukturSekolahData)
+          // Filter jabatan untuk guru ini
+          setStrukturJabatan(strukturSekolahData.filter(s => s.guru_id === user.id))
+        }
+
+        // 6. Set Wali Kelas
+        if (!waliKelasErr && waliKelasData) setWaliKelasSaya(waliKelasData)
+
+        // 7. Set Jadwal
+        if (!jadwalErr && jadwalData) {
+          setJadwal(filterSchedulesForSemester(jadwalData, activeAcademicPeriod.semester))
+        }
+
+        // 8. Set Ekskul & Organisasi (Tuntaskan N+1 query jumlah anggota!)
+        
+        let finalEkskulData = ekskulDataRes || []
+        // Fallback jika error karena kolom tahun_ajaran tidak ada
+        if (ekskulErr && /tahun_ajaran|semester/i.test(ekskulErr.message || '')) {
+          const { data: fallbackEkskul } = await supabase
+            .from('ekskul')
+            .select('id, nama, hari, jam_mulai, jam_selesai, ruang')
+            .eq('pembina_guru_id', user.id)
+          finalEkskulData = fallbackEkskul || []
+        }
+
+        // MENGATASI N+1 QUERY UNTUK EKSKUL: Lakukan 1 query dengan .in()
+        if (finalEkskulData.length > 0) {
+          const ekskulIds = finalEkskulData.map(e => e.id)
+          let memberQuery = supabase
+            .from('ekskul_anggota')
+            .select('ekskul_id') // Hanya butuh foreign key untuk dihitung
+            .in('ekskul_id', ekskulIds)
+          
+          if (activeAcademicPeriod.tahunAjaran) {
+             memberQuery = memberQuery.eq('tahun_ajaran', activeAcademicPeriod.tahunAjaran)
+          }
+          
+          const { data: members } = await memberQuery
+          
+          // Hitung frekuensi tiap ekskul_id
+          const memberCounts = (members || []).reduce((acc, curr) => {
+            acc[curr.ekskul_id] = (acc[curr.ekskul_id] || 0) + 1
+            return acc
+          }, {})
+
+          setEskulDiampu(finalEkskulData.map(e => ({
+            ...e,
+            jumlah_anggota: memberCounts[e.id] || 0
+          })))
+        } else {
+          setEskulDiampu([])
+        }
+
+        // MENGATASI N+1 QUERY UNTUK ORGANISASI: Lakukan 1 query dengan .in()
+        if (orgData && orgData.length > 0) {
+          const orgIds = orgData.map(o => o.id)
+          const { data: orgMembers } = await supabase
+            .from('organisasi_anggota')
+            .select('organisasi_id')
+            .in('organisasi_id', orgIds)
+
+          const orgMemberCounts = (orgMembers || []).reduce((acc, curr) => {
+            acc[curr.organisasi_id] = (acc[curr.organisasi_id] || 0) + 1
+            return acc
+          }, {})
+
+          setOrganisasiDiampu(orgData.map(o => ({
+            ...o,
+            jumlah_anggota: orgMemberCounts[o.id] || 0
+          })))
+        } else {
+          setOrganisasiDiampu([])
+        }
+
       } catch (error) {
-        console.error('Error fetching user related data:', error)
+        console.error('Error in loadAllData:', error)
+      } finally {
+        setIsLoading(false)
       }
     }
-    fetchData()
-  }, [activeAcademicPeriod.semester, activeAcademicPeriod.tahunAjaran, user?.id])
+
+    loadAllData()
+  }, [user?.id, activeAcademicPeriod.semester, activeAcademicPeriod.tahunAjaran])
 
   const loadSemuaJamKosongHariIni = React.useCallback(async ({ silent = false } = {}) => {
     if (!todayStr) return
