@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { supabase } from '../../lib/supabase'
+import { useLocalCache } from '../../hooks/useLocalCache'
 import { useUIStore } from '../../store/useUIStore'
 import { useAuthStore } from '../../store/useAuthStore'
 import { resolveAcademicPeriod } from '../../utils/academicPeriod'
@@ -187,13 +188,8 @@ export default function AHome() {
     storageKey: 'edusmart.admin.eskul.periodFilter'
   })
 
-  const [isLoading, setIsLoading] = useState(true)
-  const [settingsId, setSettingsId] = useState(null)
-  const [maxEskulPerSiswa, setMaxEskulPerSiswa] = useState(DEFAULT_MAX_ESKUL_PER_SISWA)
-  const [savingMaxEskul, setSavingMaxEskul] = useState(false)
-
   /* --- Statistics --- */
-  const [stats, setStats] = useState({
+  const [stats, setStats, hasStatsCache] = useLocalCache('admin_dashboard_stats', {
     siswa: 0,
     guru: 0,
     admin: 0,
@@ -202,6 +198,11 @@ export default function AHome() {
     pengumuman: 0,
     eskul: 0
   })
+
+  const [isLoading, setIsLoading] = useState(!hasStatsCache)
+  const [settingsId, setSettingsId] = useState(null)
+  const [maxEskulPerSiswa, setMaxEskulPerSiswa] = useState(DEFAULT_MAX_ESKUL_PER_SISWA)
+  const [savingMaxEskul, setSavingMaxEskul] = useState(false)
   const [activeEskulPeriod, setActiveEskulPeriod] = useState(() => resolveAcademicPeriod())
 
   useEffect(() => {
@@ -338,8 +339,8 @@ export default function AHome() {
 
 
   /* --- Data Umum (Guru & Siswa) --- */
-  const [guruList, setGuruList] = useState([])
-  const [siswaList, setSiswaList] = useState([])
+  const [guruList, setGuruList] = useLocalCache('admin_dashboard_guruList', [])
+  const [siswaList, setSiswaList] = useLocalCache('admin_dashboard_siswaList', [])
   const [studentOptionsLoading, setStudentOptionsLoading] = useState(false)
   const [studentOptionsLoaded, setStudentOptionsLoaded] = useState(false)
 
@@ -411,7 +412,7 @@ export default function AHome() {
   }, [siswaList])
 
   /* --- Section 1: Pengumuman --- */
-  const [pengumumanList, setPengumumanList] = useState([])
+  const [pengumumanList, setPengumumanList] = useLocalCache('admin_dashboard_pengumumanList', [])
   const [pForm, setPForm] = useState({
     judul: '',
     keterangan: '',
@@ -526,7 +527,7 @@ export default function AHome() {
   }, [])
 
   /* --- Section 2: Ekstrakurikuler --- */
-  const [eskulList, setEskulList] = useState([])
+  const [eskulList, setEskulList] = useLocalCache('admin_dashboard_eskulList', [])
   const [eskulSel, setEskulSel] = useState('')
   const [eskulForm, setEskulForm] = useState({
     nama: '',
