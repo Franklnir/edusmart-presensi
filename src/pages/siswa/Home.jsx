@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/useAuthStore'
 import { supabase } from '../../lib/supabase'
+import { useLocalCache } from '../../hooks/useLocalCache'
 
 import { useUIStore } from '../../store/useUIStore'
 import { fetchStudentPeriodClass } from '../../hooks/useStudentPeriodClass'
@@ -560,30 +561,30 @@ export default function SHome() {
   /* ============================
    *          STATE
    * ============================ */
-  const [ringkas, setRingkas] = useState({ H: 0, I: 0, A: 0 })
+  const [ringkas, setRingkas, hasRingkas] = useLocalCache('siswa_dashboard_ringkas', { H: 0, I: 0, A: 0 })
   const [statusUser, setStatusUser] = useState('-')
   const [dashboardClass, setDashboardClass] = useState(profileClass)
-  const [tugas, setTugas] = useState([])
-  const [tugasMeta, setTugasMeta] = useState({ pending: 0, overdue: 0 })
+  const [tugas, setTugas] = useLocalCache('siswa_dashboard_tugas', [])
+  const [tugasMeta, setTugasMeta] = useLocalCache('siswa_dashboard_tugasMeta', { pending: 0, overdue: 0 })
   const [isTugasLoading, setIsTugasLoading] = useState(false)
-  const [pengumuman, setPengumuman] = useState([])
-  const [ekskul, setEkskul] = useState([])
-  const [myEskul, setMyEkskul] = useState(new Set())
+  const [pengumuman, setPengumuman] = useLocalCache('siswa_dashboard_pengumuman', [])
+  const [ekskul, setEkskul] = useLocalCache('siswa_dashboard_ekskul', [])
+  const [myEskul, setMyEskul] = useState(new Set())
   const [maxEskulPerStudent, setMaxEskulPerStudent] = useState(DEFAULT_EKSKUL_LIMIT)
-  const [organisasi, setOrganisasi] = useState([])
+  const [organisasi, setOrganisasi] = useLocalCache('siswa_dashboard_organisasi', [])
   const [selectedOrganisasi, setSelectedOrganisasi] = useState(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
 
-  // State untuk sertifikat
-  const [sertifikatList, setSertifikatList] = useState([])
+  // -- States Sertifikat --
+  const [sertifikatList, setSertifikatList] = useLocalCache('siswa_dashboard_sertifikatList', [])
   const [selectedSertifikat, setSelectedSertifikat] = useState(null)
   const [isSertifikatModalOpen, setIsSertifikatModalOpen] = useState(false)
   const [isRiwayatSertifikatModalOpen, setIsRiwayatSertifikatModalOpen] = useState(false)
 
-  // State untuk struktur sekolah
-  const [strukturSekolah, setStrukturSekolah] = useState([])
+  // -- States Struktur & Period --
+  const [strukturSekolah, setStrukturSekolah] = useLocalCache('siswa_dashboard_strukturSekolah', [])
 
-  const [isLoading, setIsLoading] = useState(true)
+  const [isLoading, setIsLoading] = useState(!hasRingkas)
   const tugasLoadSeqRef = useRef(0)
   const activeAcademicPeriodRef = useRef(null)
 
