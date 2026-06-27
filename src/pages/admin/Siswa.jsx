@@ -438,7 +438,7 @@ export default function ASiswa() {
       const params = {
         ...buildStudentRequestParams(1),
         all: true,
-        per_page: 10000
+        per_page: 5000
       }
 
       const data = await queryClient.fetchQuery({

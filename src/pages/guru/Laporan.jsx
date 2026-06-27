@@ -818,9 +818,9 @@ export default function LaporanRekap() {
     try {
       const params = buildTeacherSummaryParams('absensi')
       const data = await queryClient.fetchQuery({
-        queryKey: queryKeys.reports.teacherSummary(params),
+        queryKey: queryKeys.reports.attendanceSummary(params),
         queryFn: async () => {
-          const { data, error } = await supabase.reports.teacherSummary(params)
+          const { data, error } = await supabase.reports.attendanceSummary(params)
           if (error?.code === 'REQUEST_ABORTED') {
             const aborted = new Error('Request aborted')
             aborted.code = 'REQUEST_ABORTED'
@@ -866,9 +866,9 @@ export default function LaporanRekap() {
     try {
       const params = buildTeacherSummaryParams('tugas')
       const data = await queryClient.fetchQuery({
-        queryKey: queryKeys.reports.teacherSummary(params),
+        queryKey: queryKeys.reports.taskSummary(params),
         queryFn: async () => {
-          const { data, error } = await supabase.reports.teacherSummary(params)
+          const { data, error } = await supabase.reports.taskSummary(params)
           if (error?.code === 'REQUEST_ABORTED') {
             const aborted = new Error('Request aborted')
             aborted.code = 'REQUEST_ABORTED'
@@ -913,9 +913,9 @@ export default function LaporanRekap() {
     try {
       const params = buildTeacherSummaryParams('quiz')
       const data = await queryClient.fetchQuery({
-        queryKey: queryKeys.reports.teacherSummary(params),
+        queryKey: queryKeys.reports.quizSummary(params),
         queryFn: async () => {
-          const { data, error } = await supabase.reports.teacherSummary(params)
+          const { data, error } = await supabase.reports.quizSummary(params)
           if (error?.code === 'REQUEST_ABORTED') {
             const aborted = new Error('Request aborted')
             aborted.code = 'REQUEST_ABORTED'

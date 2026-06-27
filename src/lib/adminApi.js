@@ -66,6 +66,16 @@ const adminApi = {
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
+    async importStudents(payload = {}) {
+      const res = await apiFetch('/api/admin/students/import', {
+        method: 'POST',
+        body: payload,
+        cacheTtlMs: 0,
+        timeoutMs: 120000
+      })
+      if (!res.error) invalidateDbSelectCache()
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
     async academicSummary(params = {}) {
       const res = await apiFetch(`/api/admin/academic-summary${buildQueryString(params)}`, {
         method: 'GET',

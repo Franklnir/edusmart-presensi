@@ -490,7 +490,7 @@ class AdminController extends ApiController
 
         $page = max(1, (int) $request->query('page', 1));
         $allRows = filter_var($request->query('all', false), FILTER_VALIDATE_BOOLEAN);
-        $perPage = $allRows ? min(10000, max(1, (int) $request->query('per_page', 10000))) : $this->perPage($request);
+        $perPage = $allRows ? min(5000, max(1, (int) $request->query('per_page', 5000))) : $this->perPage($request);
         $includeContext = filter_var($request->query('include_context', true), FILTER_VALIDATE_BOOLEAN);
         $includeStats = filter_var($request->query('include_stats', true), FILTER_VALIDATE_BOOLEAN);
 
@@ -598,6 +598,172 @@ class AdminController extends ApiController
                 'class_history' => $this->studentClassHistoriesForStudents($tenantId, [$id])[$id] ?? [],
                 'org_member' => $this->studentOrganizationMemberships($tenantId, $id),
                 'osis' => $this->studentOsisMembership($tenantId, $id),
+            ],
+        ]);
+    }
+
+    public function importStudents(Request $request)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        $rows = $request->input('rows', []);
+        if (! is_array($rows) || ! array_is_list($rows)) {
+            return response()->json(['error' => 'rows harus berupa array'], 422);
+        }
+
+        $maxRows = max(100, min(5000, (int) env('STUDENT_IMPORT_MAX_ROWS', 2000)));
+        if (count($rows) > $maxRows) {
+            return response()->json(['error' => "Import maksimal {$maxRows} baris per batch"], 422);
+        }
+
+        $source = strtolower(trim((string) $request->input('source', 'file')));
+        $source = in_array($source, ['file', 'sheet'], true) ? $source : 'file';
+        $clientErrors = $request->input('errors', []);
+        $clientErrors = is_array($clientErrors) ? $clientErrors : [];
+        $now = now();
+        $summary = [
+            'created' => 0,
+            'updated' => 0,
+            'skipped' => 0,
+            'failed' => 0,
+            'errors' => [],
+        ];
+        $historyItems = [];
+
+        foreach ($clientErrors as $error) {
+            if (! is_array($error)) {
+                continue;
+            }
+
+            $this->addStudentImportFailure(
+                $summary,
+                $historyItems,
+                (int) ($error['row'] ?? 0),
+                trim((string) ($error['reason'] ?? 'Validasi gagal')) ?: 'Validasi gagal',
+                [
+                    'kelas' => $error['className'] ?? null,
+                ],
+                $now
+            );
+        }
+
+        $preparedRows = [];
+        $seenNis = [];
+        $seenEmail = [];
+        foreach (array_values($rows) as $index => $row) {
+            $rowNumber = is_array($row) ? (int) ($row['__rowNum'] ?? $row['row'] ?? ($index + 2)) : ($index + 2);
+            if (! is_array($row)) {
+                $this->addStudentImportFailure($summary, $historyItems, $rowNumber, 'Format baris tidak valid', null, $now);
+
+                continue;
+            }
+
+            $normalized = $this->normalizeStudentImportPayloadRow($tenantId, $row, $rowNumber);
+            if (($normalized['error'] ?? '') !== '') {
+                $this->addStudentImportFailure($summary, $historyItems, $rowNumber, $normalized['error'], $row, $now);
+
+                continue;
+            }
+
+            $data = $normalized['data'];
+            $nisKey = strtolower((string) ($data['nis'] ?? ''));
+            $emailKey = strtolower((string) ($data['email'] ?? ''));
+            if ($nisKey !== '' && isset($seenNis[$nisKey])) {
+                $this->addStudentImportFailure($summary, $historyItems, $rowNumber, 'NIS duplikat di file import', $row, $now);
+
+                continue;
+            }
+            if ($emailKey !== '' && isset($seenEmail[$emailKey])) {
+                $this->addStudentImportFailure($summary, $historyItems, $rowNumber, 'Email duplikat di file import', $row, $now);
+
+                continue;
+            }
+
+            if ($nisKey !== '') {
+                $seenNis[$nisKey] = true;
+            }
+            if ($emailKey !== '') {
+                $seenEmail[$emailKey] = true;
+            }
+            $preparedRows[] = $data;
+        }
+
+        $existingProfiles = $this->loadStudentImportExistingProfiles(
+            $tenantId,
+            array_values(array_filter(array_map(fn ($row) => $row['nis'] ?? '', $preparedRows))),
+            array_values(array_filter(array_map(fn ($row) => $row['email'] ?? '', $preparedRows)))
+        );
+        $existingUsersByEmail = $this->loadStudentImportExistingUsers(
+            array_values(array_filter(array_map(fn ($row) => $row['email'] ?? '', $preparedRows)))
+        );
+
+        foreach (array_chunk($preparedRows, 100) as $chunk) {
+            foreach ($chunk as $row) {
+                try {
+                    $result = DB::transaction(fn () => $this->upsertStudentImportRow(
+                        $request,
+                        $tenantId,
+                        $row,
+                        $existingProfiles['by_nis'],
+                        $existingProfiles['by_email'],
+                        $existingUsersByEmail,
+                        $now
+                    ));
+
+                    $status = $result['status'] ?? 'skipped';
+                    if ($status === 'created') {
+                        $summary['created'] += 1;
+                    } elseif ($status === 'updated') {
+                        $summary['updated'] += 1;
+                    } else {
+                        $summary['skipped'] += 1;
+                    }
+
+                    $historyItems[] = [
+                        'profile_id' => $result['profile_id'] ?? null,
+                        'status' => $status,
+                        'created_user' => $status === 'created',
+                        'nis' => $row['nis'] ?: null,
+                        'nama' => $row['nama'] ?: null,
+                        'kelas' => $row['kelas_label'] ?: $row['kelas'],
+                        'error_message' => null,
+                        'imported_at' => $now,
+                    ];
+                } catch (\Throwable $e) {
+                    $this->addStudentImportFailure($summary, $historyItems, (int) ($row['row'] ?? 0), $e->getMessage(), $row, $now);
+                }
+            }
+        }
+
+        $historyId = $this->storeStudentImportHistory(
+            $tenantId,
+            (string) ($request->user()?->id ?? ''),
+            $source,
+            $request->input('file_name'),
+            $request->input('sheet_url'),
+            count($rows) + count($clientErrors),
+            $summary,
+            $historyItems,
+            $now
+        );
+
+        Cache::forget("tenant:{$tenantId}:admin-dashboard-summary:v2");
+        $this->logAudit($request, 'profiles', $historyId ?: 'student-import', 'IMPORT', null, [
+            'summary' => $summary,
+            'history_id' => $historyId,
+        ], $tenantId);
+
+        return response()->json([
+            'data' => [
+                'summary' => array_merge($summary, ['historyId' => $historyId]),
+                'history_id' => $historyId,
             ],
         ]);
     }
@@ -4229,6 +4395,378 @@ class AdminController extends ApiController
             'alumniSiswa' => 0,
             'ketuaKelas' => 0,
         ];
+    }
+
+    private function normalizeStudentImportPayloadRow(string $tenantId, array $row, int $rowNumber): array
+    {
+        $nama = preg_replace('/\s+/', ' ', trim((string) ($row['nama'] ?? ''))) ?? '';
+        if ($nama === '') {
+            return ['error' => 'Nama siswa wajib diisi'];
+        }
+        if (mb_strlen($nama) > 120) {
+            return ['error' => 'Nama siswa terlalu panjang'];
+        }
+
+        $nis = $this->normalizeIdentifierCode($row['nis'] ?? '');
+        $email = strtolower(trim((string) ($row['email'] ?? '')));
+        if ($email !== '' && ! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return ['error' => 'Format email tidak valid'];
+        }
+        if ($nis === '' && $email === '') {
+            return ['error' => 'NIS atau email wajib diisi'];
+        }
+
+        $classResult = $this->resolveStudentImportClass($tenantId, $row['kelas'] ?? $row['kelas_id'] ?? null);
+        if (($classResult['id'] ?? '') === '') {
+            return ['error' => 'Kelas tidak ditemukan'];
+        }
+
+        $status = $this->normalizeStudentImportStatus($row['status'] ?? null);
+        $tanggalLahir = $this->normalizeStudentImportDate($row['tanggal_lahir'] ?? null);
+        $optional = [];
+        foreach (['agama', 'alamat', 'telp', 'no_hp_siswa', 'no_hp_wali'] as $key) {
+            $value = $this->nullableString($row[$key] ?? null);
+            if ($value !== null) {
+                $optional[$key] = $value;
+            }
+        }
+
+        $gender = $this->normalizeGenderValue($row['jk'] ?? null);
+        if ($gender !== null) {
+            $optional['jk'] = $gender;
+        }
+        if ($tanggalLahir !== null) {
+            $optional['tanggal_lahir'] = $tanggalLahir;
+            $optional['usia'] = $this->calculateAgeFromBirthDate($tanggalLahir);
+        }
+
+        $passwordSeed = trim((string) ($row['password'] ?? ''));
+        if ($passwordSeed === '') {
+            $passwordSeed = $this->buildBirthDatePasswordSeed($tanggalLahir) ?: $nis;
+        }
+
+        return [
+            'data' => [
+                'row' => $rowNumber,
+                'nama' => $nama,
+                'nis' => $nis,
+                'email' => $email,
+                'kelas' => $classResult['id'],
+                'kelas_label' => $classResult['label'] ?? $classResult['id'],
+                'status' => $status,
+                'password' => $this->normalizeProvisionPassword($passwordSeed),
+                'optional' => $optional,
+            ],
+        ];
+    }
+
+    private function resolveStudentImportClass(string $tenantId, mixed $value): array
+    {
+        $raw = preg_replace('/\s+/', ' ', trim((string) ($value ?? ''))) ?? '';
+        if ($raw === '') {
+            return ['id' => '', 'label' => ''];
+        }
+
+        if (! Schema::hasTable('kelas')) {
+            return ['id' => $raw, 'label' => $raw];
+        }
+
+        $query = DB::table('kelas')->where(function ($builder) use ($raw) {
+            $builder->where('id', $raw);
+            if (Schema::hasColumn('kelas', 'nama')) {
+                $builder->orWhereRaw('lower(nama) = ?', [strtolower($raw)]);
+            }
+        });
+        if (Schema::hasColumn('kelas', 'tenant_id')) {
+            $query->where('tenant_id', $tenantId);
+        }
+
+        $row = $query->first($this->existingColumns('kelas', ['id', 'nama']));
+        if (! $row) {
+            return ['id' => '', 'label' => ''];
+        }
+
+        return [
+            'id' => (string) ($row->id ?? ''),
+            'label' => (string) (property_exists($row, 'nama') ? ($row->nama ?? $row->id ?? '') : ($row->id ?? '')),
+        ];
+    }
+
+    private function normalizeStudentImportStatus(mixed $value): string
+    {
+        $normalized = strtolower(trim((string) ($value ?? '')));
+        $normalized = str_replace([' ', '-'], '_', $normalized);
+
+        return match ($normalized) {
+            'nonaktif', 'non_aktif', 'inactive', 'disabled' => 'nonaktif',
+            'mutasi', 'pindah' => 'mutasi',
+            'alumni', 'lulus' => 'alumni',
+            default => 'active',
+        };
+    }
+
+    private function normalizeStudentImportDate(mixed $value): ?string
+    {
+        $raw = trim((string) ($value ?? ''));
+        if ($raw === '') {
+            return null;
+        }
+
+        try {
+            return Carbon::parse($raw)->toDateString();
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    private function loadStudentImportExistingProfiles(string $tenantId, array $nisValues, array $emailValues): array
+    {
+        $nisKeys = array_values(array_unique(array_filter(array_map(fn ($value) => strtolower($this->normalizeIdentifierCode($value)), $nisValues))));
+        $emailKeys = array_values(array_unique(array_filter(array_map(fn ($value) => strtolower(trim((string) $value)), $emailValues))));
+        $byNis = [];
+        $byEmail = [];
+
+        if (empty($nisKeys) && empty($emailKeys)) {
+            return ['by_nis' => $byNis, 'by_email' => $byEmail];
+        }
+
+        $rows = Profile::query()
+            ->where('tenant_id', $tenantId)
+            ->where(function ($builder) use ($nisKeys, $emailKeys) {
+                if (! empty($nisKeys)) {
+                    $builder->orWhereIn(DB::raw('lower(nis)'), $nisKeys);
+                }
+                if (! empty($emailKeys)) {
+                    $builder->orWhereIn(DB::raw('lower(email)'), $emailKeys);
+                }
+            })
+            ->get(['id', 'tenant_id', 'email', 'nis', 'nama', 'role', 'created_via', 'must_change_password']);
+
+        foreach ($rows as $row) {
+            $data = (array) $row->getAttributes();
+            $nisKey = strtolower(trim((string) ($data['nis'] ?? '')));
+            $emailKey = strtolower(trim((string) ($data['email'] ?? '')));
+            if ($nisKey !== '') {
+                $byNis[$nisKey] = $data;
+            }
+            if ($emailKey !== '') {
+                $byEmail[$emailKey] = $data;
+            }
+        }
+
+        return ['by_nis' => $byNis, 'by_email' => $byEmail];
+    }
+
+    private function loadStudentImportExistingUsers(array $emailValues): array
+    {
+        $emailKeys = array_values(array_unique(array_filter(array_map(fn ($value) => strtolower(trim((string) $value)), $emailValues))));
+        if (empty($emailKeys)) {
+            return [];
+        }
+
+        return User::query()
+            ->whereIn(DB::raw('lower(email)'), $emailKeys)
+            ->get(['id', 'email'])
+            ->mapWithKeys(fn (User $user) => [strtolower((string) $user->email) => ['id' => (string) $user->id, 'email' => (string) $user->email]])
+            ->all();
+    }
+
+    private function upsertStudentImportRow(
+        Request $request,
+        string $tenantId,
+        array $row,
+        array $profilesByNis,
+        array $profilesByEmail,
+        array $usersByEmail,
+        Carbon $now
+    ): array {
+        $nis = (string) ($row['nis'] ?? '');
+        $email = strtolower(trim((string) ($row['email'] ?? '')));
+        $nisKey = strtolower($nis);
+        $emailKey = $email;
+        $byNis = $nisKey !== '' ? ($profilesByNis[$nisKey] ?? null) : null;
+        $byEmail = $emailKey !== '' ? ($profilesByEmail[$emailKey] ?? null) : null;
+
+        if ($byNis && $byEmail && (string) ($byNis['id'] ?? '') !== (string) ($byEmail['id'] ?? '')) {
+            throw new \RuntimeException('NIS dan email sudah dipakai oleh akun berbeda');
+        }
+
+        $existing = $byNis ?: $byEmail;
+        if ($existing && ! in_array(strtolower((string) ($existing['role'] ?? '')), ['siswa'], true)) {
+            throw new \RuntimeException('NIS/email sudah digunakan untuk role lain');
+        }
+
+        if ($email === '') {
+            $email = $existing ? strtolower((string) ($existing['email'] ?? '')) : $this->buildImportPlaceholderEmail($nis, $tenantId);
+            $emailKey = strtolower($email);
+        }
+
+        $existingUser = $usersByEmail[$emailKey] ?? null;
+        $existingId = $existing ? (string) ($existing['id'] ?? '') : '';
+        if ($existingUser && (string) ($existingUser['id'] ?? '') !== $existingId) {
+            throw new \RuntimeException('Email sudah terdaftar pada akun lain');
+        }
+
+        $profilePayload = [
+            'email' => $email,
+            'nama' => $row['nama'],
+            'role' => 'siswa',
+            'kelas' => $row['kelas'],
+            'status' => $row['status'],
+            'updated_at' => $now,
+        ];
+        if ($nis !== '') {
+            $profilePayload['nis'] = $nis;
+        }
+
+        foreach (($row['optional'] ?? []) as $key => $value) {
+            $profilePayload[$key] = $value;
+        }
+
+        if (Schema::hasColumn('profiles', 'angkatan')) {
+            $profilePayload['angkatan'] = $this->resolveCohortForClass($tenantId, $row['kelas']);
+        }
+
+        if ($existingId !== '') {
+            $profile = Profile::query()
+                ->where('tenant_id', $tenantId)
+                ->where('id', $existingId)
+                ->first();
+            if (! $profile) {
+                throw new \RuntimeException('Profil siswa tidak ditemukan');
+            }
+
+            if (Schema::hasColumn('profiles', 'created_via') && trim((string) ($profile->created_via ?? '')) === '') {
+                $profilePayload['created_via'] = 'import';
+            }
+            if (Schema::hasColumn('profiles', 'created_by') && trim((string) ($profile->created_by ?? '')) === '') {
+                $profilePayload['created_by'] = (string) ($request->user()?->id ?? '');
+            }
+
+            $profile->forceFill($profilePayload)->save();
+
+            $user = User::query()->where('id', $existingId)->first();
+            if ($user) {
+                $user->forceFill([
+                    'name' => $row['nama'],
+                    'email' => $email,
+                ])->save();
+            } else {
+                User::query()->create([
+                    'id' => $existingId,
+                    'name' => $row['nama'],
+                    'email' => $email,
+                    'password' => $row['password'],
+                ]);
+            }
+
+            if (array_key_exists('tanggal_lahir', $profilePayload)) {
+                $this->syncImportedInitialProfilePassword($tenantId, $existingId, $now);
+            }
+
+            return ['status' => 'updated', 'profile_id' => $existingId];
+        }
+
+        $profileId = (string) Str::uuid();
+        User::query()->create([
+            'id' => $profileId,
+            'name' => $row['nama'],
+            'email' => $email,
+            'password' => $row['password'],
+        ]);
+
+        $profilePayload['id'] = $profileId;
+        $profilePayload['tenant_id'] = $tenantId;
+        $profilePayload['must_change_password'] = true;
+        $profilePayload['created_at'] = $now;
+        if (Schema::hasColumn('profiles', 'created_via')) {
+            $profilePayload['created_via'] = 'import';
+        }
+        if (Schema::hasColumn('profiles', 'created_by')) {
+            $profilePayload['created_by'] = (string) ($request->user()?->id ?? '');
+        }
+
+        Profile::query()->create($profilePayload);
+
+        return ['status' => 'created', 'profile_id' => $profileId];
+    }
+
+    private function addStudentImportFailure(array &$summary, array &$historyItems, int $rowNumber, string $reason, ?array $row, Carbon $now): void
+    {
+        $summary['failed'] += 1;
+        $summary['errors'][] = [
+            'row' => $rowNumber,
+            'reason' => $reason,
+        ];
+        $historyItems[] = [
+            'profile_id' => null,
+            'status' => 'failed',
+            'created_user' => false,
+            'nis' => isset($row['nis']) ? $this->normalizeIdentifierCode($row['nis']) : null,
+            'nama' => isset($row['nama']) ? trim((string) $row['nama']) : null,
+            'kelas' => isset($row['kelas']) ? trim((string) $row['kelas']) : ($row['kelas_label'] ?? null),
+            'error_message' => $reason,
+            'imported_at' => $now,
+        ];
+    }
+
+    private function storeStudentImportHistory(
+        string $tenantId,
+        string $adminId,
+        string $source,
+        mixed $fileName,
+        mixed $sheetUrl,
+        int $totalRows,
+        array $summary,
+        array $items,
+        Carbon $now
+    ): ?string {
+        if (! Schema::hasTable('import_siswa_histories') || ! Schema::hasTable('import_siswa_history_items')) {
+            return null;
+        }
+
+        $historyId = (string) Str::uuid();
+        DB::table('import_siswa_histories')->insert([
+            'id' => $historyId,
+            'tenant_id' => $tenantId,
+            'admin_id' => $adminId !== '' ? $adminId : null,
+            'source' => $source,
+            'file_name' => $source === 'file' ? $this->nullableString($fileName) : null,
+            'sheet_url' => $source === 'sheet' ? $this->nullableString($sheetUrl) : null,
+            'status' => 'pending',
+            'total_rows' => $totalRows,
+            'success_rows' => (int) ($summary['created'] + $summary['updated'] + $summary['skipped']),
+            'created_rows' => (int) $summary['created'],
+            'updated_rows' => (int) $summary['updated'],
+            'skipped_rows' => (int) $summary['skipped'],
+            'failed_rows' => (int) $summary['failed'],
+            'saved_at' => null,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        $payload = array_map(fn (array $item) => [
+            'history_id' => $historyId,
+            'tenant_id' => $tenantId,
+            'profile_id' => $item['profile_id'] ?? null,
+            'status' => $item['status'] ?? 'failed',
+            'created_user' => (bool) ($item['created_user'] ?? false),
+            'nis' => $item['nis'] ?? null,
+            'nama' => $item['nama'] ?? null,
+            'kelas' => $item['kelas'] ?? null,
+            'error_message' => $item['error_message'] ?? null,
+            'imported_at' => $item['imported_at'] ?? $now,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ], $items);
+
+        foreach (array_chunk($payload, 500) as $chunk) {
+            if (! empty($chunk)) {
+                DB::table('import_siswa_history_items')->insert($chunk);
+            }
+        }
+
+        return $historyId;
     }
 
     private function filterTeacherRows($teachers, Request $request)

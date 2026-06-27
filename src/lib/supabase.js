@@ -2712,6 +2712,42 @@ const reports = {
       timeoutMs: 20000
     })
     return { data: res.raw?.data ?? res.data, error: res.error }
+  },
+  async attendanceSummary(params = {}) {
+    const res = await apiFetch(`/api/reports/attendance-summary${buildQueryString(params)}`, {
+      method: 'GET',
+      cacheTtlMs: 30 * 1000,
+      staleKey: 'reports.attendance-summary',
+      timeoutMs: 20000
+    })
+    return { data: res.raw?.data ?? res.data, error: res.error }
+  },
+  async taskSummary(params = {}) {
+    const res = await apiFetch(`/api/reports/task-summary${buildQueryString(params)}`, {
+      method: 'GET',
+      cacheTtlMs: 30 * 1000,
+      staleKey: 'reports.task-summary',
+      timeoutMs: 20000
+    })
+    return { data: res.raw?.data ?? res.data, error: res.error }
+  },
+  async quizSummary(params = {}) {
+    const res = await apiFetch(`/api/reports/quiz-summary${buildQueryString(params)}`, {
+      method: 'GET',
+      cacheTtlMs: 30 * 1000,
+      staleKey: 'reports.quiz-summary',
+      timeoutMs: 20000
+    })
+    return { data: res.raw?.data ?? res.data, error: res.error }
+  },
+  async homeroomSummary(params = {}) {
+    const res = await apiFetch(`/api/reports/homeroom-summary${buildQueryString(params)}`, {
+      method: 'GET',
+      cacheTtlMs: 30 * 1000,
+      staleKey: 'reports.homeroom-summary',
+      timeoutMs: 25000
+    })
+    return { data: res.raw?.data ?? res.data, error: res.error }
   }
 }
 

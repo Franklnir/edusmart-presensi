@@ -34,5 +34,9 @@ export const queryKeys = {
   },
   reports: {
     teacherSummary: (params = {}) => ['reports', 'teacher-summary', params],
+    attendanceSummary: (params = {}) => ['reports', 'attendance-summary', params],
+    taskSummary: (params = {}) => ['reports', 'task-summary', params],
+    quizSummary: (params = {}) => ['reports', 'quiz-summary', params],
+    homeroomSummary: (params = {}) => ['reports', 'homeroom-summary', params],
   },
 }

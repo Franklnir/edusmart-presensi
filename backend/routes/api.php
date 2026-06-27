@@ -213,6 +213,10 @@ Route::prefix('tugas')->middleware(['auth:sanctum', 'throttle:api'])->group(func
 
 Route::prefix('reports')->middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::get('/teacher-summary', [ReportController::class, 'teacherSummary']);
+    Route::get('/attendance-summary', [ReportController::class, 'attendanceSummary']);
+    Route::get('/task-summary', [ReportController::class, 'taskSummary']);
+    Route::get('/quiz-summary', [ReportController::class, 'quizSummaryEndpoint']);
+    Route::get('/homeroom-summary', [ReportController::class, 'homeroomSummary']);
 });
 
 Route::prefix('admin')->middleware(['auth:sanctum', 'throttle:api'])->group(function () {
@@ -221,6 +225,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'throttle:api'])->group(func
     Route::get('/dashboard-summary', [AdminController::class, 'dashboardSummary']);
     Route::get('/students', [AdminController::class, 'students']);
     Route::get('/students/{id}', [AdminController::class, 'studentDetail']);
+    Route::post('/students/import', [AdminController::class, 'importStudents']);
     Route::get('/academic-summary', [AdminController::class, 'academicSummary']);
     Route::post('/academic-period/apply', [AdminController::class, 'applyAcademicPeriod']);
     Route::post('/academic-period/restore-roster', [AdminController::class, 'restoreAcademicPeriodRoster']);

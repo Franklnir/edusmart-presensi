@@ -51,6 +51,59 @@ class ReportController extends ApiController
         return response()->json(['data' => $data]);
     }
 
+    public function attendanceSummary(Request $request)
+    {
+        return $this->teacherSummaryForType($request, 'absensi');
+    }
+
+    public function taskSummary(Request $request)
+    {
+        return $this->teacherSummaryForType($request, 'tugas');
+    }
+
+    public function quizSummaryEndpoint(Request $request)
+    {
+        return $this->teacherSummaryForType($request, 'quiz');
+    }
+
+    public function homeroomSummary(Request $request)
+    {
+        if (! $this->isAdmin($request) && ! $this->isGuru($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        $kelas = trim((string) ($request->query('kelas') ?: $request->query('kelas_id', '')));
+        if ($kelas === '') {
+            return response()->json(['error' => 'kelas wajib diisi'], 422);
+        }
+
+        if (! $this->canAccessHomeroom($request, $tenantId, $kelas)) {
+            return $this->deny('Anda tidak memiliki akses laporan wali kelas ini.', 403);
+        }
+
+        $period = $this->resolveReportPeriod($request);
+        if (empty($period['date_strings'])) {
+            return response()->json(['data' => null]);
+        }
+
+        $cacheKey = 'report:homeroom-summary:'.$tenantId.':'.($request->user()?->id ?? 'guest').':'.md5(json_encode($request->query()));
+        $data = Cache::remember($cacheKey, now()->addSeconds(20), fn () => $this->homeroomSummaryData($tenantId, $request, $kelas, $period));
+
+        return response()->json(['data' => $data]);
+    }
+
+    private function teacherSummaryForType(Request $request, string $type)
+    {
+        $request->query->set('type', $type);
+
+        return $this->teacherSummary($request);
+    }
+
     private function absensiSummary(string $tenantId, Request $request, string $kelas, string $mapel, array $period): array
     {
         $rows = $this->tenantQuery('absensi', $tenantId)
@@ -198,6 +251,129 @@ class ReportController extends ApiController
         ];
     }
 
+    private function homeroomSummaryData(string $tenantId, Request $request, string $kelas, array $period): array
+    {
+        $tahunAjaran = trim((string) $request->query('tahun_ajaran', '')) ?: null;
+        $students = $this->studentsForReport($tenantId, $kelas, [], $tahunAjaran);
+        $studentIds = $students
+            ->pluck('id')
+            ->map(fn ($id) => (string) $id)
+            ->filter()
+            ->values()
+            ->all();
+
+        if (empty($studentIds)) {
+            return [
+                'siswa' => [],
+                'totals' => [
+                    'siswa' => 0,
+                    'absensi' => 0,
+                    'tugas' => 0,
+                    'quiz' => 0,
+                ],
+                'periode' => $period['label'],
+            ];
+        }
+
+        $absensiQuery = $this->tenantQuery('absensi', $tenantId)
+            ->select($this->existingColumns('absensi', ['uid', 'status', 'tanggal']))
+            ->where('kelas', $kelas)
+            ->whereBetween('tanggal', [$period['start_date'], $period['end_date']]);
+        $this->applyAcademicFilters($absensiQuery, 'absensi', $request);
+        $absensiRows = $absensiQuery->get();
+
+        $tugasQuery = $this->tenantQuery('tugas', $tenantId)
+            ->select($this->existingColumns('tugas', ['id', 'kelas', 'created_at']))
+            ->where('kelas', $kelas)
+            ->whereBetween('created_at', [$period['start_at'], $period['end_at']]);
+        $this->applyAcademicFilters($tugasQuery, 'tugas', $request);
+        $tugasIds = $tugasQuery->pluck('id')->filter()->values()->all();
+
+        $jawabanRows = empty($tugasIds)
+            ? collect()
+            : $this->tenantQuery('tugas_jawaban', $tenantId)
+                ->select($this->existingColumns('tugas_jawaban', ['tugas_id', 'user_id', 'nilai']))
+                ->whereIn('tugas_id', $tugasIds)
+                ->whereIn('user_id', $studentIds)
+                ->get();
+
+        $quizQuery = $this->tenantQuery('quizzes', $tenantId)
+            ->select($this->existingColumns('quizzes', ['id', 'kelas_id', 'created_at']))
+            ->where('kelas_id', $kelas)
+            ->whereBetween('created_at', [$period['start_at'], $period['end_at']]);
+        $this->applyAcademicFilters($quizQuery, 'quizzes', $request);
+        $quizIds = $quizQuery->pluck('id')->filter()->values()->all();
+
+        $submissionRows = empty($quizIds)
+            ? collect()
+            : $this->tenantQuery('quiz_submissions', $tenantId)
+                ->select($this->existingColumns('quiz_submissions', ['quiz_id', 'siswa_id', 'score']))
+                ->whereIn('quiz_id', $quizIds)
+                ->whereIn('siswa_id', $studentIds)
+                ->get();
+
+        $absensiByStudent = [];
+        foreach ($absensiRows as $row) {
+            $studentId = (string) ($row->uid ?? '');
+            if ($studentId === '') {
+                continue;
+            }
+            $status = $this->normalizeAttendanceStatus($row->status ?? null);
+            $absensiByStudent[$studentId] ??= ['Hadir' => 0, 'Izin' => 0, 'Sakit' => 0, 'Alpha' => 0];
+            if (array_key_exists($status, $absensiByStudent[$studentId])) {
+                $absensiByStudent[$studentId][$status] += 1;
+            }
+        }
+
+        $taskScoresByStudent = [];
+        foreach ($jawabanRows as $row) {
+            $studentId = (string) ($row->user_id ?? '');
+            $score = $this->numericScore($row->nilai ?? null);
+            if ($studentId !== '' && $score !== null) {
+                $taskScoresByStudent[$studentId][] = $score;
+            }
+        }
+
+        $quizScoresByStudent = [];
+        foreach ($submissionRows as $row) {
+            $studentId = (string) ($row->siswa_id ?? '');
+            $score = $this->numericScore($row->score ?? null);
+            if ($studentId !== '' && $score !== null) {
+                $quizScoresByStudent[$studentId][] = $score;
+            }
+        }
+
+        $formatted = $students->map(function ($student) use ($absensiByStudent, $taskScoresByStudent, $quizScoresByStudent) {
+            $studentId = (string) $student->id;
+            $taskAverage = $this->averageScores($taskScoresByStudent[$studentId] ?? []);
+            $quizAverage = $this->averageScores($quizScoresByStudent[$studentId] ?? []);
+            $academicAverage = $this->averageScores(array_values(array_filter([$taskAverage, $quizAverage], fn ($value) => $value !== null)));
+
+            return [
+                'id' => $student->id,
+                'nama' => $student->nama,
+                'nis' => $student->nis,
+                'kelas' => $student->kelas,
+                'absensi' => $absensiByStudent[$studentId] ?? ['Hadir' => 0, 'Izin' => 0, 'Sakit' => 0, 'Alpha' => 0],
+                'rataTugas' => $taskAverage ?? '-',
+                'rataQuiz' => $quizAverage ?? '-',
+                'rataAkademik' => $academicAverage ?? '-',
+                'grade' => $academicAverage === null ? '-' : $this->grade($academicAverage),
+            ];
+        })->values();
+
+        return [
+            'siswa' => $formatted,
+            'totals' => [
+                'siswa' => count($studentIds),
+                'absensi' => $absensiRows->count(),
+                'tugas' => count($tugasIds),
+                'quiz' => count($quizIds),
+            ],
+            'periode' => $period['label'],
+        ];
+    }
+
     private function canAccessClassSubject(Request $request, string $tenantId, string $kelas, string $mapel): bool
     {
         if ($this->isAdmin($request)) {
@@ -227,6 +403,23 @@ class ReportController extends ApiController
                 ->where('kelas_id', $kelas)
                 ->where('wali_guru_id', $guruId)
                 ->exists();
+    }
+
+    private function canAccessHomeroom(Request $request, string $tenantId, string $kelas): bool
+    {
+        if ($this->isAdmin($request)) {
+            return true;
+        }
+
+        $guruId = (string) ($request->user()?->id ?? '');
+        if ($guruId === '' || ! Schema::hasTable('kelas_struktur')) {
+            return false;
+        }
+
+        return $this->tenantQuery('kelas_struktur', $tenantId)
+            ->where('kelas_id', $kelas)
+            ->where('wali_guru_id', $guruId)
+            ->exists();
     }
 
     private function resolveReportPeriod(Request $request): array
@@ -364,6 +557,37 @@ class ReportController extends ApiController
         $average = round(array_sum($values) / count($values), 2);
 
         return ['rataRata' => $average, 'grade' => $this->grade($average)];
+    }
+
+    private function numericScore(mixed $value): ?float
+    {
+        if ($value === null || $value === '' || $value === '-') {
+            return null;
+        }
+
+        return is_numeric($value) ? (float) $value : null;
+    }
+
+    private function averageScores(array $values): ?float
+    {
+        $scores = array_values(array_filter($values, fn ($value) => is_numeric($value)));
+        if (empty($scores)) {
+            return null;
+        }
+
+        return round(array_sum($scores) / count($scores), 2);
+    }
+
+    private function normalizeAttendanceStatus(mixed $status): string
+    {
+        $normalized = strtolower(trim((string) ($status ?? '')));
+
+        return match ($normalized) {
+            'izin' => 'Izin',
+            'sakit' => 'Sakit',
+            'alpha', 'alpa', 'absen' => 'Alpha',
+            default => 'Hadir',
+        };
     }
 
     private function grade(float $score): string

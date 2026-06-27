@@ -10,8 +10,7 @@ import {
   fetchStudentImportHistories,
   fetchStudentImportHistoryItems,
   markStudentImportHistorySaved,
-  persistStudentImportHistory,
-  upsertImportedStudentRow,
+  runStudentImportBatch,
 } from '../services/studentImportService'
 import { getKelasDisplayName } from '../utils/studentFormatters'
 import {
@@ -28,7 +27,6 @@ import {
 
 export function useStudentImport({
   kelasList,
-  userId,
   pushToast,
   requestConfirmation,
   reloadStudents,
@@ -367,143 +365,74 @@ export function useStudentImport({
     }
 
     setImportLoading(true)
-    const summary = {
-      created: 0,
-      updated: 0,
-      skipped: 0,
-      failed: importErrors.length,
-      errors: importErrors.map((error) => ({
-        row: error.row,
-        reason: error.reason,
-      })),
-    }
-    const historyItems = importErrors.map((error) => ({
-      profile_id: null,
-      status: 'failed',
-      created_user: false,
-      nis: null,
-      nama: null,
-      kelas: error.className || null,
-      error_message: error.reason || 'Validasi gagal',
-      imported_at: new Date().toISOString(),
-    }))
     const totalRows = importRows.length
-    let processedRows = 0
-    setImportProgress({
-      phase: 'processing',
-      current: 0,
-      total: totalRows,
-      created: 0,
-      updated: 0,
-      skipped: 0,
-      failed: summary.failed,
-      message: 'Memulai import data siswa...',
-    })
-
-    for (const row of importRows) {
-      try {
-        // eslint-disable-next-line no-await-in-loop
-        const result = await upsertImportedStudentRow(row)
-        if (result?.status === 'created') summary.created += 1
-        else if (result?.status === 'updated') summary.updated += 1
-        else summary.skipped += 1
-
-        historyItems.push({
-          profile_id: result?.profileId || null,
-          status: result?.status || 'skipped',
-          created_user: result?.status === 'created',
-          nis: row.nis || null,
-          nama: row.nama || null,
-          kelas: row.kelas_raw || row.kelas || null,
-          error_message: null,
-          imported_at: new Date().toISOString(),
-        })
-      } catch (error) {
-        summary.failed += 1
-        const reason = error?.message || 'Gagal memproses'
-        summary.errors.push({
-          row: row.__rowNum,
-          reason,
-        })
-        historyItems.push({
-          profile_id: null,
-          status: 'failed',
-          created_user: false,
-          nis: row.nis || null,
-          nama: row.nama || null,
-          kelas: row.kelas_raw || row.kelas || null,
-          error_message: reason,
-          imported_at: new Date().toISOString(),
-        })
-      } finally {
-        processedRows += 1
-        setImportProgress({
-          phase: 'processing',
-          current: processedRows,
-          total: totalRows,
-          created: summary.created,
-          updated: summary.updated,
-          skipped: summary.skipped,
-          failed: summary.failed,
-          message: `Memproses baris ${row.__rowNum}...`,
-        })
-        if (processedRows % 5 === 0) {
-          // eslint-disable-next-line no-await-in-loop
-          await new Promise((resolve) => setTimeout(resolve, 0))
-        }
-      }
-    }
-
-    let historyId = null
     try {
       setImportProgress({
-        phase: 'history',
+        phase: 'processing',
+        current: 0,
+        total: totalRows,
+        created: 0,
+        updated: 0,
+        skipped: 0,
+        failed: importErrors.length,
+        message: 'Mengirim batch import ke server...',
+      })
+
+      const result = await runStudentImportBatch({
+        source: importSource === 'sheet' ? 'sheet' : 'file',
+        file_name: importFile?.name || null,
+        sheet_url: sheetUrl,
+        rows: importRows,
+        errors: importErrors.map((error) => ({
+          row: error.row,
+          reason: error.reason,
+          className: error.className || null,
+        })),
+      })
+
+      const serverSummary = result?.summary || {}
+      const summary = {
+        created: Number(serverSummary.created || 0),
+        updated: Number(serverSummary.updated || 0),
+        skipped: Number(serverSummary.skipped || 0),
+        failed: Number(serverSummary.failed || 0),
+        errors: Array.isArray(serverSummary.errors) ? serverSummary.errors : [],
+        historyId: serverSummary.historyId || result?.history_id || null,
+      }
+
+      setImportSummary(summary)
+      setImportProgress({
+        phase: 'done',
         current: totalRows,
         total: totalRows,
         created: summary.created,
         updated: summary.updated,
         skipped: summary.skipped,
         failed: summary.failed,
-        message: 'Menyimpan riwayat import...',
+        message: 'Import siswa selesai.',
       })
-      historyId = await persistStudentImportHistory({
-        userId,
-        importSource,
-        importFileName: importFile?.name,
-        sheetUrl,
-        totalRows: importRows.length + importErrors.length,
-        summary,
-        itemRows: historyItems,
-      })
+      pushToast('success', `Import siswa selesai: ${summary.created} baru, ${summary.updated} update, ${summary.skipped} lewati, ${summary.failed} gagal.`)
+
+      if (typeof reloadStudents === 'function') {
+        await reloadStudents()
+      }
+
+      if (summary.historyId) {
+        setImportSource('history')
+        await loadImportHistories(summary.historyId)
+      }
     } catch (error) {
-      console.error('Error saving import history:', error)
-      pushToast('warning', `Import selesai, tapi gagal menyimpan riwayat: ${error?.message || 'Unknown error'}`)
-    }
-
-    setImportSummary({
-      ...summary,
-      historyId,
-    })
-    setImportProgress({
-      phase: 'done',
-      current: totalRows,
-      total: totalRows,
-      created: summary.created,
-      updated: summary.updated,
-      skipped: summary.skipped,
-      failed: summary.failed,
-      message: 'Import siswa selesai.',
-    })
-    pushToast('success', `Import siswa selesai: ${summary.created} baru, ${summary.updated} update, ${summary.skipped} lewati, ${summary.failed} gagal.`)
-    setImportLoading(false)
-
-    if (typeof reloadStudents === 'function') {
-      await reloadStudents()
-    }
-
-    if (historyId) {
-      setImportSource('history')
-      await loadImportHistories(historyId)
+      console.error('Error importing students:', error)
+      setImportProgress({
+        phase: 'ready',
+        current: 0,
+        total: totalRows,
+        failed: importErrors.length,
+        message: 'Import gagal. Periksa data lalu coba lagi.',
+      })
+      pushToast('error', error?.message || 'Gagal mengimport siswa')
+    } finally {
+      setImportLoading(false)
     }
   }, [
     availableKelasNames,
@@ -519,7 +448,6 @@ export function useStudentImport({
     requestConfirmation,
     reloadStudents,
     sheetUrl,
-    userId,
   ])
 
   return {

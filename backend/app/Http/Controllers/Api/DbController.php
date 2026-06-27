@@ -219,6 +219,10 @@ class DbController extends ApiController
         $limit = $request->input('limit');
         if ($limit !== null) {
             $limit = min($maxSelectLimit, max(0, (int) $limit));
+        } elseif ($action === 'select') {
+            $defaultSelectLimit = (int) env('DB_DEFAULT_SELECT_LIMIT', 1000);
+            $defaultSelectLimit = max(100, min($maxSelectLimit, $defaultSelectLimit));
+            $limit = $defaultSelectLimit;
         }
 
         $offset = $request->input('offset');

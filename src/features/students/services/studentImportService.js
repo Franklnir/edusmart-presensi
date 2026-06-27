@@ -53,6 +53,12 @@ export async function deleteStudentImportHistoryBatch(historyId) {
   if (deleteHistoryError) throw deleteHistoryError
 }
 
+export async function runStudentImportBatch(payload = {}) {
+  const { data, error } = await supabase.admin.importStudents(payload)
+  if (error) throw error
+  return data || {}
+}
+
 export async function persistStudentImportHistory({
   userId,
   importSource,
